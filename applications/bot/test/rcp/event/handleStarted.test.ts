@@ -9,6 +9,7 @@ import { DiscordREST } from 'dfx/DiscordREST';
 import type { MessageCreateRequest } from 'dfx/types';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { describe, expect, it } from 'vitest';
+import { ChannelReorderSemaphore } from '~/rcp/event/ChannelReorderSemaphore.js';
 import { handleStarted } from '~/rcp/event/handleStarted.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
@@ -154,9 +155,16 @@ const makeRecordingDiscordREST = (
 };
 
 const run = (
-  effect: Effect.Effect<void, any, SyncRpc | DiscordREST>,
+  effect: Effect.Effect<void, any, SyncRpc | DiscordREST | ChannelReorderSemaphore>,
   layers: Layer.Layer<SyncRpc | DiscordREST>,
-) => Effect.runPromise(effect.pipe(Effect.provide(layers)) as Effect.Effect<void, never, never>);
+) =>
+  Effect.runPromise(
+    effect.pipe(Effect.provide(Layer.merge(layers, ChannelReorderSemaphore.Live))) as Effect.Effect<
+      void,
+      never,
+      never
+    >,
+  );
 
 // ---------------------------------------------------------------------------
 // T11.1 — in-place edit + new "Starting now" post both succeed

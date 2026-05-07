@@ -5,6 +5,7 @@ import { Array, Effect, Match, Metric } from 'effect';
 import { syncEventsFailedTotal, syncEventsProcessedTotal } from '~/metrics.js';
 import { POLL_BATCH_SIZE } from '~/rest/utils.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
+import { ChannelReorderSemaphore } from './ChannelReorderSemaphore.js';
 import { handleCancelled } from './handleCancelled.js';
 import { handleCreated } from './handleCreated.js';
 import { handleRsvpReminder } from './handleRsvpReminder.js';
@@ -16,7 +17,7 @@ import { handleUpdated } from './handleUpdated.js';
 
 const action: (
   event: EventRpcEvents.UnprocessedEventSyncEvent,
-) => Effect.Effect<void, unknown, SyncRpc | DiscordREST> =
+) => Effect.Effect<void, unknown, SyncRpc | DiscordREST | ChannelReorderSemaphore> =
   Match.type<EventRpcEvents.UnprocessedEventSyncEvent>().pipe(
     Match.tag('event_created', handleCreated),
     Match.tag('event_updated', handleUpdated),
@@ -32,8 +33,9 @@ const action: (
 const processEvent = Effect.Do.pipe(
   Effect.bind('rpc', () => SyncRpc.asEffect()),
   Effect.bind('discord', () => DiscordREST.asEffect()),
+  Effect.bind('semaphore', () => ChannelReorderSemaphore.asEffect()),
   Effect.map(
-    ({ rpc, discord }) =>
+    ({ rpc, discord, semaphore }) =>
       (event: EventRpcEvents.UnprocessedEventSyncEvent) =>
         action(event).pipe(
           Effect.flatMap(() => rpc['Event/MarkEventProcessed']({ id: event.id })),
@@ -61,6 +63,7 @@ const processEvent = Effect.Do.pipe(
           ),
           Effect.provideService(SyncRpc, rpc),
           Effect.provideService(DiscordREST, discord),
+          Effect.provideService(ChannelReorderSemaphore, semaphore),
           Effect.withSpan(`sync/event/${event._tag}`, {
             attributes: { 'event.id': String(event.id) },
           }),
@@ -72,10 +75,12 @@ export const ProcessorService = Effect.Do.pipe(
   Effect.tap(() => Effect.logInfo('EventSyncService initialized')),
   Effect.bind('rpc', () => SyncRpc.asEffect()),
   Effect.bind('discord', () => DiscordREST.asEffect()),
-  Effect.bind('processEvent', ({ rpc, discord }) =>
+  Effect.bind('semaphore', () => ChannelReorderSemaphore.asEffect()),
+  Effect.bind('processEvent', ({ rpc, discord, semaphore }) =>
     processEvent.pipe(
       Effect.provideService(SyncRpc, rpc),
       Effect.provideService(DiscordREST, discord),
+      Effect.provideService(ChannelReorderSemaphore, semaphore),
     ),
   ),
   Effect.let('processTick', ({ rpc, processEvent }) =>
@@ -93,5 +98,6 @@ export const ProcessorService = Effect.Do.pipe(
     ),
   ),
   Bind.remove('rpc'),
+  Bind.remove('semaphore'),
   Bind.remove('processEvent'),
 );

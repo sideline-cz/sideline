@@ -586,7 +586,19 @@ Channel sync mirrors each Sideline group that has a Discord channel mapping as a
 
 **Polling RPC:** `Event/GetUnprocessedEvents`
 
-**Message recovery:** whenever `reorderChannelMessages` (called from several handlers) attempts to edit an existing Discord message and receives error code 10008 (Unknown Message — the message was deleted while the bot was offline), it falls back to `createMessage` and persists the new message ID via `Event/SaveDiscordMessageId`. This recovery also runs during the startup task described below.
+**Message recovery:** whenever `reorderChannelMessages` attempts to edit an existing Discord message and receives error code 10008 (Unknown Message), it returns `EditOutcome = 'message_gone'`, which causes the item to be treated as part of the suffix that must be recreated. The recreated message is posted with `createMessage` and the new snowflake is persisted via `Event/SaveDiscordMessageId`. This recovery also runs during the startup task described below.
+
+**Concurrency guard:** every call to `reorderChannelMessages` is wrapped in `ChannelReorderSemaphore.withChannelLock(channelId)` (`applications/bot/src/rcp/event/ChannelReorderSemaphore.ts`). This in-process per-channel `Effect.Semaphore` (capacity 1) ensures that two concurrent reorders for the same channel are serialised, preventing interleaved deletes and creates from producing out-of-order messages.
+
+**Channel event cap:** at most `MAX_CHANNEL_EVENTS = 10` event messages are kept per channel. When sorting produces more than 10 entries, the oldest (earliest-past) entries beyond the cap are deleted from Discord before the prefix/suffix algorithm runs. This keeps each channel to a manageable window of recent-past plus soonest-future events.
+
+**Reorder algorithm (`reorderChannelMessages`):**
+
+1. Fetch all event entries for the channel via `Event/GetChannelEvents` and sort them with `sortEntriesForChannel`: past events oldest-first, then a divider message, then future events nearest-first (so the next upcoming event is always the bottom-most — i.e., the most visible — message).
+2. Apply the `MAX_CHANNEL_EVENTS = 10` cap: drop the excess oldest-past entries and delete their Discord messages.
+3. Compute the *longest keepable prefix* `k`: the maximum-length prefix of the sorted item list (events + optional divider) whose snowflakes are already strictly increasing left-to-right and strictly less than every snowflake in the remaining suffix. Items without a stored snowflake (`Option.none()`, used by startup recovery to force recreation) automatically terminate the prefix.
+4. **Kept prefix (indices 0 … k−1):** edit each message in-place. If an edit returns `message_gone` (10008 error), the item and all subsequent items are moved into the recreate phase.
+5. **Recreated suffix (indices effectiveK … end):** delete each old Discord message, then post a new one sequentially (concurrency: 1) so that Discord assigns monotonically increasing snowflakes, which guarantees the messages appear in the correct top-to-bottom order on the next reorder pass.
 
 **Events processed:**
 
@@ -615,7 +627,9 @@ In addition to the three poll loops, the bot runs one-off tasks at startup (afte
 
 **Source file:** `applications/bot/src/rcp/event/recoverDeletedMessages.ts`
 
-On connect, the bot calls `Event/GetChannelsWithStoredMessages` to retrieve every `(discord_channel_id, guild_id)` pair for which at least one event message is currently stored in the database. For each channel it fetches the guild's preferred locale via the Discord REST API (defaults to `en` if the fetch fails), then runs `reorderChannelMessages`. Because `reorderChannelMessages` recovers from Discord 10008 errors by recreating any deleted messages (see "Message recovery" above), this single pass restores all event embeds that were removed from Discord while the bot was offline. Channels are processed with a concurrency of 3. Per-channel failures are logged as warnings and do not abort the remaining channels.
+On connect, the bot calls `Event/GetChannelsWithStoredMessages` to retrieve every `(discord_channel_id, guild_id)` pair for which at least one event message is currently stored in the database. For each channel it fetches the guild's preferred locale via the Discord REST API (defaults to `en` if the fetch fails), then runs `reorderChannelMessages`. Because `reorderChannelMessages` recovers from Discord 10008 errors by recreating any deleted messages (see "Message recovery" above), this single pass restores all event embeds that were removed from Discord while the bot was offline. Channels are processed with a concurrency of 3 (outer loop); per-channel reorders are still serialised by `ChannelReorderSemaphore`. Per-channel failures are logged as warnings and do not abort the remaining channels.
+
+The optional `snowflakeOverrides` parameter on `reorderChannelMessages` (a `ReadonlyMap<eventId, Option<Snowflake>>`) lets callers force specific items into the recreate suffix by passing `Option.none()` for their snowflake. This is used internally when a message is known to be missing, bypassing the prefix-algorithm's keep decision.
 
 ---
 

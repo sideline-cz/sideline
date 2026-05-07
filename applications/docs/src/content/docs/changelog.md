@@ -9,6 +9,7 @@ This page lists user-visible changes to Sideline. For developer-level release no
 
 - If a Discord event embed is deleted while the bot is offline, the bot automatically recreates the missing message the next time it starts up.
 - When an event transitions to "started", the bot now reorders the channel so the started event moves to the top of the past-events section and the next upcoming event becomes the most recent message.
+- Each event channel now shows at most **10 events** at a time (the most-recent past events plus the soonest upcoming events). Older events beyond that limit are removed from the channel automatically.
 
 ## 2026-05 — Claimer shown with Discord handle on training claim board
 

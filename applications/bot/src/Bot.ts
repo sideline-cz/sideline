@@ -21,7 +21,6 @@ const ixProgram = Effect.succeed(commandBuilder).pipe(
 const pollLoop = <E, R>(processTick: Effect.Effect<void, E, R>) =>
   processTick.pipe(Effect.repeat(Schedule.spaced('5 seconds')));
 
-// biome-ignore lint/suspicious/noExplicitAny: dfx's handleDispatch returns Effect<..., any>, cast to specific requirements
 export const program = Effect.Do.pipe(
   Effect.bind('events', () => eventHandlers),
   Effect.bind('roles', () => RoleSyncService.asEffect()),

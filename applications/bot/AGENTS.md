@@ -28,6 +28,9 @@ src/
 │   └── handleRosterChannelCreated.ts — roster channel_created handler
 └── rcp/event/       — Event sync event handlers
     ├── ProcessorService.ts             — Match.tag dispatcher for event sync events
+    ├── ChannelReorderSemaphore.ts      — Per-channel mutex registry (ServiceMap.Service) used to serialise concurrent reorders on the same channel
+    ├── reorderChannelMessages.ts       — Channel reorder algorithm (longest keepable prefix); exports MAX_CHANNEL_EVENTS = 10
+    ├── recoverDeletedMessages.ts       — Startup recovery: bulk listMessages + snowflake overrides → reorderChannelMessages
     ├── handleCreated.ts                — event_created handler
     ├── handleUpdated.ts                — event_updated handler
     ├── handleCancelled.ts              — event_cancelled handler
@@ -180,7 +183,43 @@ The `event_started` handler updates the Discord embed to remove RSVP buttons and
 
 The `training_claim_request` handler posts the initial claim embed to the owner-group channel. The server does not know the resulting Discord channel/message id ahead of time. After `rest.createMessage` succeeds, the handler must call `rpc['Event/SaveClaimDiscordMessageId']({ event_id, channel_id, message_id })` so subsequent `training_claim_update` and `unclaimed_training_reminder` events can locate and edit / link to that message. Always save the id in the same effect chain as the create call (via `Effect.tap`) so a failure to save is logged together with the create.
 
-### Sync Pattern (all types)
+#### Channel Reorder Algorithm (`reorderChannelMessages`)
+
+`reorderChannelMessages(channelId, locale, snowflakeOverrides?)` is the single function responsible for laying out event messages (plus the optional past/future divider) inside a channel in chronological order. Every event handler that changes embed content or list ordering — `handleCreated`, `handleUpdated`, `handleCancelled`, `handleStarted`, `handleRsvpReminder` — calls into it. **Never re-implement reorder logic in a handler.**
+
+**Constraints (must be preserved):**
+
+1. Discord assigns monotonically-increasing snowflake IDs to messages in posting order. The visible order in a channel is therefore the snowflake order. The bot does not reorder messages on Discord — it edits in place where the existing message ID already sits in the correct position, and recreates (delete-old + create-new, sequentially) for the suffix that does not.
+2. **Cap**: at most `MAX_CHANNEL_EVENTS` (= 10) event messages per channel. Older entries beyond the cap are deleted from Discord; their DB rows are left to the server.
+3. **Per-channel serialisation**: the entire body is wrapped in `ChannelReorderSemaphore.withChannelLock(channelId)(...)`. Two reorders for the same channelId never run concurrently; reorders for different channels do run concurrently.
+4. The reorder is internally chunked into:
+   - **kept prefix** — items whose stored snowflake is strictly increasing and whose snowflake is strictly less than every snowflake in the remaining suffix. These are edited in place.
+   - **recreate suffix** — everything from the first non-keepable item onward. Processed sequentially with `concurrency: 1` (delete old, then create new), so newly minted snowflakes are themselves monotonically increasing and end up at the end of the channel.
+5. **Forbidden pattern**: do not zip the items array with a sorted list of existing message IDs and edit each slot. That pattern (the pre-fix implementation) corrupts message IDs across rows when even one item is recreated. The longest-keepable-prefix algorithm in `reorderChannelMessages.ts` is the only correct approach — preserve it.
+
+**`EditOutcome` typed-return convention:**
+
+In-place edit helpers return `type EditOutcome = 'edited' | 'message_gone'`. They MUST NOT self-heal a missing message inline (e.g. by recreating it from inside the edit helper) — that would produce a new snowflake at an arbitrary position in the channel and re-introduce the corruption bug. Instead, on error code `10008` ("Unknown Message"), return `'message_gone'`. The caller (`processKeptPrefix` in `reorderChannelMessages.ts`) treats `'message_gone'` as the boundary at which the kept prefix ends and the recreate suffix begins, so the recreated message lands at the tail of the channel where its new snowflake is guaranteed to be the largest.
+
+When adding new edit-in-place helpers in this file, follow the same contract: return `EditOutcome`, never recreate inline, never swallow `10008` as success.
+
+**Snowflake overrides (`snowflakeOverrides`):**
+
+`snowflakeOverrides: ReadonlyMap<event_id, Option<Snowflake>>` lets a caller force an entry into the recreate suffix by passing `Option.none()` for that `event_id`. Currently used only by `recoverDeletedMessages` (startup recovery): it bulk-fetches `rest.listMessages(channelId, { limit: 100 })` and overrides any DB entry whose `discord_message_id` is absent from the live channel. The override carries a `deleteSnowflake` (the original DB-stored ID) so the recreate path still attempts to delete the stale message before creating its replacement.
+
+#### `ChannelReorderSemaphore` (per-channel lock registry)
+
+`ChannelReorderSemaphore` is a `ServiceMap.Service` Tag (`'bot/ChannelReorderSemaphore'`) wired in `AppLive.SyncLive` via `Layer.provideMerge(ChannelReorderSemaphore.Live)`. It is also threaded through `ProcessorService` so per-event handlers see it in their `R` channel.
+
+| Property | Value |
+|----------|-------|
+| Tag id | `'bot/ChannelReorderSemaphore'` |
+| Live layer | `ChannelReorderSemaphore.Live` |
+| API | `withChannelLock(channelId: string) => <A,E,R>(effect) => Effect<A,E,R>` |
+| Concurrency | One in-flight effect per `channelId`; different channelIds run in parallel |
+| Storage | `Ref<Map<string, Semaphore.Semaphore>>` — lazy, atomic get-or-create via `Ref.modify` |
+
+Use this pattern (and not `Effect.Semaphore.make` at module top-level) whenever a Discord-side resource is identified by an ID and per-resource serialisation is required. Module-level semaphores serialise globally across all IDs and would needlessly block unrelated channels.
 
 1. Bot service polls via `rpc.GetUnprocessed*Events({ limit: 50 })` every 5 seconds
 2. Processes each event (Discord REST calls with exponential retry)

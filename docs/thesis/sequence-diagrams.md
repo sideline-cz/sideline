@@ -393,7 +393,7 @@ sequenceDiagram
 
 ## 7. Event Started (Cron)
 
-The `EventStartCron` runs every minute (`* * * * *`). On each tick it queries for `active` events whose `start_at` timestamp is in the past, atomically transitions each to `started` status, and emits an `event_started` row in the `event_sync_events` outbox. The bot's Event Sync worker picks up the event, edits the Discord embed to the started state (yellow, no RSVP buttons), and then reorders channel messages so the started event moves into the channel's "past" section. If the original Discord message has been deleted (error 10008), the bot recreates it and persists the new message ID. On bot startup a `recoverDeletedMessages` task scans every channel with stored event messages and reruns the reorder, recreating any messages that were deleted while the bot was offline.
+The `EventStartCron` runs every minute (`* * * * *`). On each tick it queries for `active` events whose `start_at` timestamp is in the past, atomically transitions each to `started` status, and emits an `event_started` row in the `event_sync_events` outbox. The bot's Event Sync worker picks up the event, edits the Discord embed to the started state (yellow, no RSVP buttons), and then reorders channel messages so the started event moves into the channel's "past" section. If the original Discord message has been deleted (error 10008), the bot recreates it and persists the new message ID. The reorder applies a cap of `MAX_CHANNEL_EVENTS = 10`: if there are more than 10 events for the channel the oldest past-events beyond the cap are deleted from Discord. Per-channel reorders are serialised by an in-process `ChannelReorderSemaphore`. On bot startup a `recoverDeletedMessages` task scans every channel with stored event messages and reruns the reorder, recreating any messages that were deleted while the bot was offline.
 
 ```mermaid
 sequenceDiagram
@@ -455,9 +455,15 @@ sequenceDiagram
                 Bot->>DB: RPC Event/SaveDiscordMessageId {event_id, channel_id, new_message_id}
             end
 
-            Note over Bot: Reorder channel messages (past/upcoming split)
+            Note over Bot: reorderChannelMessages (serialised per channel via ChannelReorderSemaphore)
             Bot->>DB: RPC Event/GetChannelEvents {channel_id}
-            Bot->>Discord: Edit / recreate each event message in sorted order
+            DB-->>Bot: sorted entries (past oldest-first · divider · future nearest-first)
+            Note over Bot: Apply cap: drop oldest past events beyond MAX_CHANNEL_EVENTS=10
+            Bot->>Discord: DELETE cap-dropped messages (if any)
+            Note over Bot: Prefix algorithm — keep longest strictly-increasing<br/>snowflake prefix; recreate suffix (delete old → post new)
+            Bot->>Discord: PATCH kept-prefix messages (in-place edit)
+            Bot->>Discord: DELETE + POST suffix messages (recreate, concurrency: 1)
+            Bot->>DB: RPC Event/SaveDiscordMessageId for any recreated messages
         end
 
         Bot->>DB: RPC Event/MarkEventProcessed {id}
@@ -467,10 +473,10 @@ sequenceDiagram
     Bot->>DB: RPC Event/GetChannelsWithStoredMessages
     DB-->>Bot: [{discord_channel_id, guild_id}, ...]
 
-    loop For each channel (concurrency: 3)
+    loop For each channel (concurrency: 3, reorder serialised per channel)
         Bot->>Discord: GET /guilds/{guild_id} (preferred locale)
         Discord-->>Bot: Guild {preferred_locale} (or default 'en' on failure)
-        Note over Bot: reorderChannelMessages — edits or recreates<br/>each stored event message; persists new IDs on 10008
+        Note over Bot: reorderChannelMessages — cap-drop, prefix/suffix split;<br/>recreates deleted messages and persists new IDs
     end
 ```
 
