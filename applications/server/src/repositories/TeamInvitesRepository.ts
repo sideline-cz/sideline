@@ -99,7 +99,7 @@ const make = SqlClient.SqlClient.asEffect().pipe(
           ti.created_by  AS ti_created_by,
           ti.created_at  AS ti_created_at,
           ti.expires_at  AS ti_expires_at,
-          ti.group_id    AS ti_group_id,
+          g.id           AS ti_group_id,
           g.name         AS group_name,
           u.username     AS inviter_username,
           u.discord_id   AS inviter_discord_id,
@@ -122,7 +122,7 @@ const make = SqlClient.SqlClient.asEffect().pipe(
           ti.id         AS id,
           ti.code       AS code,
           ti.active     AS active,
-          ti.group_id   AS group_id,
+          g.id          AS group_id,
           g.name        AS group_name,
           u.username    AS inviter_name,
           ti.expires_at AS expires_at,
@@ -130,7 +130,7 @@ const make = SqlClient.SqlClient.asEffect().pipe(
           ti.created_by AS created_by
         FROM team_invites ti
         JOIN users u ON u.id = ti.created_by
-        LEFT JOIN groups g ON g.id = ti.group_id
+        LEFT JOIN groups g ON g.id = ti.group_id AND g.is_archived = false
         WHERE ti.team_id = ${teamId}
         ORDER BY ti.created_at DESC
       `,

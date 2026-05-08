@@ -380,17 +380,14 @@ importers:
 
   packages/template-renderer:
     devDependencies:
-      '@effect/vitest':
-        specifier: '*'
-        version: 0.29.0(effect@4.0.0-beta.40)(vitest@3.2.4)
       tsc-alias:
         specifier: '*'
         version: 1.8.16
       typescript:
-        specifier: '*'
+        specifier: 5.9.3
         version: 5.9.3
       vitest:
-        specifier: '*'
+        specifier: 3.2.4
         version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(@vitest/ui@3.2.4)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
 
 packages:
@@ -847,12 +844,6 @@ packages:
     resolution: {integrity: sha512-xf4iBrZ4uUWUvhX5+R+tHwNU1uQdN2p9b+dwTJHf/KvGFkkoUWE5GR+WzL+ObxgNquZJv1Z7jsavnQ/a7tKQcg==}
     peerDependencies:
       effect: ^4.0.0-beta.40
-
-  '@effect/vitest@0.29.0':
-    resolution: {integrity: sha512-DvWr1aeEcaZ8mtu8hNVb4e3rEYvGEwQSr7wsNrW53t6nKYjkmjRICcvVEsXUhjoCblRHSxRsRV0TOt0+UmcvaQ==}
-    peerDependencies:
-      effect: ^3.21.0
-      vitest: ^3.2.0
 
   '@effect/vitest@4.0.0-beta.40':
     resolution: {integrity: sha512-75LElHTQLlDVAKPB0C8h1w1GG/wrWGB5DosgnSiz4s1PUM5t/5crqaWhl02B41bzCXJ8e1TJW7Mq77ItAaEfRQ==}
@@ -7991,11 +7982,6 @@ snapshots:
       pg-types: 4.1.0
     transitivePeerDependencies:
       - pg-native
-
-  '@effect/vitest@0.29.0(effect@4.0.0-beta.40)(vitest@3.2.4)':
-    dependencies:
-      effect: 4.0.0-beta.40
-      vitest: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(@vitest/ui@3.2.4)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
 
   '@effect/vitest@4.0.0-beta.40(effect@4.0.0-beta.40)(vitest@3.2.4)':
     dependencies:

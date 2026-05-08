@@ -7,7 +7,7 @@
   "description": "Pure template rendering utilities for Sideline (no Effect runtime)",
   "repository": {
     "type": "git",
-    "url": "<PLACEHOLDER>",
+    "url": "git+https://github.com/maxa-ondrej/sideline.git",
     "directory": "packages/template-renderer"
   },
   "exports": {
@@ -23,9 +23,8 @@
     "coverage": "vitest --coverage"
   },
   "devDependencies": {
-    "@effect/vitest": "*",
     "tsc-alias": "*",
-    "typescript": "*",
-    "vitest": "*"
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
   }
 }

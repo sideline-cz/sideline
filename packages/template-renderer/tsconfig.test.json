@@ -8,6 +8,6 @@
     "rootDir": "test",
     "noEmit": true,
     "baseUrl": ".",
-    "paths": { "~/*": ["./src/*", "../src/*"] }
+    "paths": { "~/*": ["./src/*"] }
   }
 }
