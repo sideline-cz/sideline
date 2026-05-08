@@ -30,7 +30,7 @@ joining members are auto-added to that group.
 ## Tasks (implementation order)
 
 1. **Migration** `1746500000_add_invite_groups_and_welcome.ts`
-   - `team_invites.group_id UUID REFERENCES groups(id) ON DELETE CASCADE`
+   - `team_invites.group_id UUID REFERENCES groups(id) ON DELETE SET NULL`
    - `teams.welcome_channel_id TEXT`
    - `teams.system_log_channel_id TEXT`
    - `teams.welcome_message_template TEXT`
@@ -85,7 +85,7 @@ joining members are auto-added to that group.
 |---|----------|
 | 1 | Inviter Discord ID = `invite.created_by` user's Discord ID; surfaced via RPC payload |
 | 2 | `regenerateInvite` kept as alias one release; removal noted in changelog |
-| 3 | `team_invites.group_id` ON DELETE CASCADE (delete invite when group goes; link 404s) |
+| 3 | `team_invites.group_id` ON DELETE SET NULL (group delete clears the link; invite still resolves with no group) |
 | 4 | InviteCache: lazy seed + coalesced REST + replace-on-diff (no thundering herd on bot start) |
 | 5 | Rendering safety: server-side `sanitizeRendered` + bot `allowed_mentions` belt-and-braces |
 | 6 | Group color: `sanitizeHexColor` single source of truth, blurple fallback |

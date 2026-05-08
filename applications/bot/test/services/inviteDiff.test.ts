@@ -1,7 +1,3 @@
-// NOTE: TDD tests written before implementation.
-// The inviteDiff function does not yet exist. Tests will fail with
-// "cannot find module" or similar until Phase 5 implementation.
-
 import { Option } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { inviteDiff } from '~/services/inviteDiff.js';

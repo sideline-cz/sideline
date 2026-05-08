@@ -1,7 +1,3 @@
-// NOTE: TDD tests written before implementation.
-// findByCodeWithContext and listForTeam do not yet exist on TeamInvitesRepository.
-// Some tests will fail until Phase 4 (server) implementation adds these methods.
-
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, GroupModel, Team, User } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option } from 'effect';

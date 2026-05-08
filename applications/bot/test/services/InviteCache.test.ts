@@ -1,12 +1,7 @@
-// NOTE: TDD tests written before implementation.
-// The InviteCache service does not yet exist. Tests will fail with
-// "cannot find module" or similar until Phase 5 implementation.
-
 import { Effect, type Layer, type Option } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { InviteCache } from '~/services/InviteCache.js';
 
-// The service interface that will be implemented in Phase 5
 interface InviteCacheService {
   upsert(guildId: string, code: string, uses: number): Effect.Effect<void>;
   remove(guildId: string, code: string): Effect.Effect<void>;
