@@ -10,6 +10,9 @@ const TeamUpdateInput = Schema.Struct({
   description: Schema.OptionFromNullOr(Schema.String),
   sport: Schema.OptionFromNullOr(Schema.String),
   logo_url: Schema.OptionFromNullOr(Schema.String),
+  welcome_channel_id: Schema.OptionFromNullOr(Schema.String),
+  system_log_channel_id: Schema.OptionFromNullOr(Schema.String),
+  welcome_message_template: Schema.OptionFromNullOr(Schema.String),
 });
 
 const make = Effect.gen(function* () {
@@ -70,6 +73,9 @@ const make = Effect.gen(function* () {
         description = ${input.description},
         sport = ${input.sport},
         logo_url = ${input.logo_url},
+        welcome_channel_id = ${input.welcome_channel_id},
+        system_log_channel_id = ${input.system_log_channel_id},
+        welcome_message_template = ${input.welcome_message_template},
         updated_at = now()
       WHERE id = ${input.id}
       RETURNING *
@@ -82,6 +88,9 @@ const make = Effect.gen(function* () {
     readonly description: Option.Option<string>;
     readonly sport: Option.Option<string>;
     readonly logo_url: Option.Option<string>;
+    readonly welcome_channel_id: Option.Option<string>;
+    readonly system_log_channel_id: Option.Option<string>;
+    readonly welcome_message_template: Option.Option<string>;
   }) =>
     updateTeamQuery(input).pipe(
       catchSqlErrors,

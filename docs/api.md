@@ -322,6 +322,9 @@ Returns the team's public profile information.
 | `sport` | `string \| null` | Yes | Sport or activity type |
 | `logoUrl` | `string \| null` | Yes | URL to team logo |
 | `guildId` | `Snowflake` | No | Linked Discord guild ID |
+| `welcomeChannelId` | `Snowflake \| null` | Yes | Discord channel where the bot posts welcome embeds for new members |
+| `systemLogChannelId` | `Snowflake \| null` | Yes | Private Discord channel where the bot logs every member join |
+| `welcomeMessageTemplate` | `string \| null` | Yes | Template string for the welcome embed description (max 500 characters; supports `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, `{teamName}`) |
 
 **Errors:**
 
@@ -352,6 +355,9 @@ Updates the team's profile information. All fields are optional.
 | `description` | `string \| null` | No | Max 500 characters; null clears the field | Team description |
 | `sport` | `string \| null` | No | Max 50 characters; null clears the field | Sport or activity type |
 | `logoUrl` | `string \| null` | No | Max 2048 characters; null clears the field | URL to team logo |
+| `welcomeChannelId` | `Snowflake \| null` | No | null clears the field | Discord channel for welcome embeds |
+| `systemLogChannelId` | `Snowflake \| null` | No | null clears the field | Private Discord channel for join logs |
+| `welcomeMessageTemplate` | `string \| null` | No | Max 500 characters; null clears the field | Template for welcome embed description |
 
 **Response:** `200 OK` — `TeamInfo` (see `GET /teams/:teamId` for field descriptions)
 
@@ -2784,11 +2790,13 @@ Returns information about an invite code. This endpoint does not require authent
 
 **Response:** `200 OK` — `InviteInfo`
 
-| Field | Type | Description |
-|---|---|---|
-| `teamName` | `string` | Name of the team |
-| `teamId` | `TeamId` | Team ID |
-| `code` | `string` | The invite code |
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `teamName` | `string` | No | Name of the team |
+| `teamId` | `TeamId` | No | Team ID |
+| `code` | `string` | No | The invite code |
+| `groupName` | `string \| null` | Yes | Name of the group the invite targets (null if not group-scoped) |
+| `inviterName` | `string \| null` | Yes | Discord username of the user who created the invite |
 
 **Errors:**
 
@@ -2829,9 +2837,82 @@ Joins a team using an invite code. The authenticated user becomes a new member o
 
 ---
 
-#### `POST /teams/:teamId/invite/regenerate`
+#### `POST /teams/:teamId/invites`
 
-Generates a new invite code for the team (invalidating any previous code).
+Creates a new invite code for the team. Unlike `regenerateInvite`, this endpoint does **not** deactivate existing codes, allowing multiple active invites at the same time (e.g. one per group). Optionally scopes the invite to a group and sets an expiry date.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `team:invite`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `CreateInviteInput`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `groupId` | `GroupId \| null` | No | If set, the new member is auto-added to this group when they join. Must belong to the same team. |
+| `expiresAt` | `Date \| null` | No | Optional UTC expiry timestamp. After this time the invite is inactive. |
+
+**Response:** `200 OK` — `InviteCode`
+
+| Field | Type | Description |
+|---|---|---|
+| `code` | `string` | New invite code |
+| `active` | `boolean` | Always `true` for a newly created code |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `Forbidden` | 403 | Missing `team:invite` permission |
+| `InvalidGroup` | 422 | `groupId` does not exist or belongs to a different team |
+
+---
+
+#### `GET /teams/:teamId/invites`
+
+Lists all invite codes for the team (active and inactive).
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `team:invite`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Response:** `200 OK` — `InviteListItem[]`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | `TeamInviteId` | No | Invite ID |
+| `code` | `string` | No | Invite code |
+| `active` | `boolean` | No | Whether the invite is currently active |
+| `groupId` | `GroupId \| null` | Yes | Target group ID (null if not group-scoped) |
+| `groupName` | `string \| null` | Yes | Target group name |
+| `inviterName` | `string \| null` | Yes | Discord username of the creator |
+| `expiresAt` | `Date \| null` | Yes | Expiry timestamp (null = no expiry) |
+| `createdAt` | `Date` | No | Creation timestamp |
+| `createdBy` | `UserId` | No | ID of the user who created the invite |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `Forbidden` | 403 | Missing `team:invite` permission |
+
+---
+
+#### `POST /teams/:teamId/invite/regenerate` (deprecated)
+
+Generates a new invite code for the team (invalidating any previous code). Prefer `POST /teams/:teamId/invites` for new integrations — this endpoint deactivates all existing codes and sets a fixed 14-day expiry.
+
+**Deprecated:** use `POST /teams/:teamId/invites` instead.
 
 **Auth:** Bearer token (AuthMiddleware)
 **Required Permission:** `team:invite`
@@ -2856,6 +2937,31 @@ Generates a new invite code for the team (invalidating any previous code).
 | Tag | Status | When |
 |---|---|---|
 | `Forbidden` | 403 | Missing `team:invite` permission |
+
+---
+
+#### `POST /teams/:teamId/invites/:inviteId/deactivate`
+
+Deactivates a single invite by ID. The invite remains in the list (for audit purposes) but can no longer be used.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `team:invite`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `inviteId` | `TeamInviteId` (string) | Invite ID |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `Forbidden` | 403 | Missing `team:invite` permission |
+| `InviteNotFound` | 404 | Invite does not exist or belongs to a different team |
 
 ---
 

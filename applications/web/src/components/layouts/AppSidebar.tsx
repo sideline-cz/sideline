@@ -6,6 +6,7 @@ import {
   CalendarDays,
   Dumbbell,
   Home,
+  Link2,
   type LucideIcon,
   Rss,
   Settings,
@@ -80,6 +81,13 @@ function getTeamNavGroups(
           to: '/teams/$teamId/groups',
           params: { teamId },
           requiredPermission: 'group:manage' satisfies Role.Permission,
+        },
+        {
+          title: m.invites_title(),
+          icon: Link2,
+          to: '/teams/$teamId/invites',
+          params: { teamId },
+          requiredPermission: 'team:invite' satisfies Role.Permission,
         },
         {
           title: m.team_rosters(),

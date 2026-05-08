@@ -5,6 +5,7 @@ import * as Discord from 'dfx/types';
 import { Effect, Layer, Option, References } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { eventHandlers } from '~/events/index.js';
+import { InviteCache } from '~/services/InviteCache.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 const makeRecordingGateway = () => {
@@ -67,7 +68,14 @@ const MockDiscordRESTLayer = Layer.succeed(
   }),
 );
 
-const MockLayers = Layer.mergeAll(MockSyncRpcLayer, MockDiscordRESTLayer);
+const MockInviteCacheLayer = Layer.succeed(InviteCache, {
+  upsert: () => Effect.void,
+  remove: () => Effect.void,
+  snapshot: () => Effect.succeed(new Map<string, number>()),
+  diffOnMemberJoin: () => Effect.succeed(Option.none()),
+} as any);
+
+const MockLayers = Layer.mergeAll(MockSyncRpcLayer, MockDiscordRESTLayer, MockInviteCacheLayer);
 
 describe('events', () => {
   it('registers handlers for expected gateway events', async () => {
@@ -90,7 +98,10 @@ describe('events', () => {
     expect(registeredEvents).toContain(Discord.GatewayDispatchEvents.ChannelCreate);
     expect(registeredEvents).toContain(Discord.GatewayDispatchEvents.ChannelDelete);
     expect(registeredEvents).toContain(Discord.GatewayDispatchEvents.ChannelUpdate);
-    expect(registeredEvents).toHaveLength(8);
+    // InviteCreate and InviteDelete added in Phase 5
+    expect(registeredEvents).toContain(Discord.GatewayDispatchEvents.InviteCreate);
+    expect(registeredEvents).toContain(Discord.GatewayDispatchEvents.InviteDelete);
+    expect(registeredEvents).toHaveLength(10);
   });
 
   it('returns the correct number of handler effects', async () => {
@@ -126,7 +137,14 @@ describe('events', () => {
 
       await Effect.runPromise(
         eventHandlers.pipe(
-          Effect.provide(Layer.mergeAll(gatewayLayer, RecordingSyncRpcLayer, MockDiscordRESTLayer)),
+          Effect.provide(
+            Layer.mergeAll(
+              gatewayLayer,
+              RecordingSyncRpcLayer,
+              MockDiscordRESTLayer,
+              MockInviteCacheLayer,
+            ),
+          ),
           Effect.provide(Layer.succeed(References.MinimumLogLevel, 'None')),
         ),
       );
@@ -269,6 +287,152 @@ describe('events', () => {
 
       const upsertCalls = calls.filter((c) => c.method === 'Guild/UpsertChannel');
       expect(upsertCalls).toHaveLength(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Invite cache event handler tests (TDD — added before Phase 5 implementation)
+  // -------------------------------------------------------------------------
+
+  describe('invite cache handlers', () => {
+    /**
+     * Builds a recording InviteCache + recording SyncRpc and runs eventHandlers
+     * with the capturing gateway.
+     */
+    const setupWithInviteCache = async (
+      diffResult: Option.Option<string> = Option.none(),
+      syncRpcReturnValue: unknown = Option.none(),
+    ) => {
+      const inviteCacheCalls: { method: string; args: unknown[] }[] = [];
+      const syncRpcCalls: { method: string; args: unknown }[] = [];
+
+      const RecordingInviteCacheLayer = Layer.succeed(InviteCache, {
+        upsert: (guildId: string, code: string, uses: number) => {
+          inviteCacheCalls.push({ method: 'upsert', args: [guildId, code, uses] });
+          return Effect.void;
+        },
+        remove: (guildId: string, code: string) => {
+          inviteCacheCalls.push({ method: 'remove', args: [guildId, code] });
+          return Effect.void;
+        },
+        snapshot: () => Effect.succeed(new Map<string, number>()),
+        diffOnMemberJoin: (_guildId: string, _fresh: unknown) => {
+          inviteCacheCalls.push({ method: 'diffOnMemberJoin', args: [_guildId, _fresh] });
+          return Effect.succeed(diffResult);
+        },
+      } as any);
+
+      const RecordingSyncRpcLayer = Layer.succeed(
+        SyncRpc,
+        new Proxy({} as any, {
+          get: (_target: unknown, method: string) => (args: unknown) => {
+            syncRpcCalls.push({ method, args });
+            return Effect.succeed(syncRpcReturnValue);
+          },
+        }),
+      );
+
+      const { layer: gatewayLayer, dispatch } = makeCapturingGateway();
+
+      await Effect.runPromise(
+        eventHandlers.pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              gatewayLayer,
+              RecordingSyncRpcLayer,
+              MockDiscordRESTLayer,
+              RecordingInviteCacheLayer,
+            ),
+          ),
+          Effect.provide(Layer.succeed(References.MinimumLogLevel, 'None')),
+        ),
+      );
+
+      return { inviteCacheCalls, syncRpcCalls, dispatch };
+    };
+
+    it('InviteCreate event → InviteCache.upsert called with guildId, code, uses', async () => {
+      const { inviteCacheCalls, dispatch } = await setupWithInviteCache();
+
+      await Effect.runPromise(
+        dispatch(Discord.GatewayDispatchEvents.InviteCreate, {
+          guild_id: '999999999999999999',
+          code: 'INVITE-CODE',
+          uses: 0,
+          channel_id: '111111111111111111',
+        }).pipe(Effect.provide(Layer.succeed(References.MinimumLogLevel, 'None'))),
+      );
+
+      const upsertCalls = inviteCacheCalls.filter((c) => c.method === 'upsert');
+      expect(upsertCalls).toHaveLength(1);
+      expect(upsertCalls[0].args[0]).toBe('999999999999999999');
+      expect(upsertCalls[0].args[1]).toBe('INVITE-CODE');
+    });
+
+    it('InviteDelete event → InviteCache.remove called with guildId, code', async () => {
+      const { inviteCacheCalls, dispatch } = await setupWithInviteCache();
+
+      await Effect.runPromise(
+        dispatch(Discord.GatewayDispatchEvents.InviteDelete, {
+          guild_id: '999999999999999999',
+          code: 'DELETED-CODE',
+          channel_id: '111111111111111111',
+        }).pipe(Effect.provide(Layer.succeed(References.MinimumLogLevel, 'None'))),
+      );
+
+      const removeCalls = inviteCacheCalls.filter((c) => c.method === 'remove');
+      expect(removeCalls).toHaveLength(1);
+      expect(removeCalls[0].args[0]).toBe('999999999999999999');
+      expect(removeCalls[0].args[1]).toBe('DELETED-CODE');
+    });
+
+    it('GuildMemberAdd with cache returning Some(CODE) → RegisterMember called with invite_code: Some(CODE)', async () => {
+      const { syncRpcCalls, dispatch } = await setupWithInviteCache(Option.some('WINNER-CODE'));
+
+      await Effect.runPromise(
+        dispatch(Discord.GatewayDispatchEvents.GuildMemberAdd, {
+          guild_id: '999999999999999999',
+          user: {
+            id: '200000000000000001',
+            username: 'new-member',
+            bot: false,
+            global_name: null,
+            avatar: null,
+          },
+          roles: [],
+          nick: null,
+        }).pipe(Effect.provide(Layer.succeed(References.MinimumLogLevel, 'None'))),
+      );
+
+      const registerCalls = syncRpcCalls.filter((c) => c.method === 'Guild/RegisterMember');
+      expect(registerCalls).toHaveLength(1);
+      const args = registerCalls[0].args as any;
+      expect(Option.isSome(args.invite_code)).toBe(true);
+      expect(Option.getOrNull(args.invite_code)).toBe('WINNER-CODE');
+    });
+
+    it('GuildMemberAdd with cache returning None → RegisterMember called with invite_code: None', async () => {
+      const { syncRpcCalls, dispatch } = await setupWithInviteCache(Option.none());
+
+      await Effect.runPromise(
+        dispatch(Discord.GatewayDispatchEvents.GuildMemberAdd, {
+          guild_id: '999999999999999999',
+          user: {
+            id: '200000000000000002',
+            username: 'new-member-2',
+            bot: false,
+            global_name: null,
+            avatar: null,
+          },
+          roles: [],
+          nick: null,
+        }).pipe(Effect.provide(Layer.succeed(References.MinimumLogLevel, 'None'))),
+      );
+
+      const registerCalls = syncRpcCalls.filter((c) => c.method === 'Guild/RegisterMember');
+      expect(registerCalls).toHaveLength(1);
+      const args = registerCalls[0].args as any;
+      expect(Option.isNone(args.invite_code)).toBe(true);
     });
   });
 });

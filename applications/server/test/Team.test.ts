@@ -65,6 +65,9 @@ const testTeam = {
   created_by: TEST_USER_ID,
   created_at: DateTime.nowUnsafe(),
   updated_at: DateTime.nowUnsafe(),
+  welcome_channel_id: Option.none<Discord.Snowflake>(),
+  system_log_channel_id: Option.none<Discord.Snowflake>(),
+  welcome_message_template: Option.none<string>(),
 };
 
 const memberMembership: MembershipWithRole = {

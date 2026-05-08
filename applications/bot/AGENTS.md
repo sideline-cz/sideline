@@ -14,8 +14,8 @@ src/
 ├── schemas.ts       — Dfx decode schemas (DfxTextChannel, DfxSyncableChannel, DfxGuildMember, DfxUser incl. global_name)
 ├── commands/        — Slash command registry (event/create, event/list, event/overview, makanicko/*)
 ├── interactions/    — Component interaction registry (buttons/selects/modals)
-├── events/          — Gateway event handler registry (guild, member, channel lifecycle)
-├── services/        — Sync services (RoleSyncService, ChannelSyncService)
+├── events/          — Gateway event handler registry (guild, member, invite, channel lifecycle)
+├── services/        — Sync services (RoleSyncService, ChannelSyncService) and welcome helpers (InviteCache, inviteDiff, welcomeRenderer)
 ├── rcp/channel/     — Channel sync event handlers
 │   ├── ProcessorService.ts    — Match.tag dispatcher for channel events
 │   ├── channelUtils.ts        — Shared Discord helpers (deleteRole, deleteChannelAndRole)
@@ -112,6 +112,50 @@ Effect.let('channelCreate', ({ gateway, rpc }) =>
 6. Always catch expected errors (e.g. `RpcClientError`) with `Effect.catchTag` and log them — never let RPC failures crash the handler
 7. Add the handler name to the destructuring in the final `Effect.map` and include it in the returned array
 8. Add an `expect(registeredEvents).toContain(Discord.GatewayDispatchEvents.<Event>)` assertion in `test/events.test.ts` and update the `toHaveLength` count
+
+## Welcome Flow (`GuildMemberAdd` + invite attribution)
+
+The bot attributes a joining member to a specific Sideline invite by diffing Discord's invite-usage counts before and after the member joins. The `Guild/RegisterMember` RPC returns optional welcome metadata that the bot then renders into one or two Discord messages.
+
+### Required Gateway Intent
+
+`DISCORD_GATEWAY_INTENTS` in `src/env.ts` defaults to `Guilds | GuildMembers | GuildInvites`. **`GuildInvites` is required** — without it, Discord does not dispatch `InviteCreate` / `InviteDelete` events and the in-memory invite cache cannot track use counts. Never remove this intent from the default.
+
+### Components
+
+| File | Purpose |
+|------|---------|
+| `src/services/InviteCache.ts` | In-memory `ServiceMap.Service` (`bot/InviteCache`) that holds `Map<guild_id, Map<code, uses>>`. Updated by `InviteCreate` / `InviteDelete` handlers. |
+| `src/services/inviteDiff.ts` | Pure function `inviteDiff(before, after): Option<code>`. Returns `Some(code)` only when exactly one known code's `uses` increased. Returns `None` if the baseline is empty (lazy-seed: first join after bot startup is unattributable) or the winner is ambiguous. Never imports Effect runtime — it is a pure helper. |
+| `src/services/welcomeRenderer.ts` | Pure embed builders `buildWelcomeEmbed` and `buildSystemLogEmbed`. Return `APIEmbed` from `discord-api-types/v10`. No Effect. |
+
+### `InviteCache` API
+
+| Method | Purpose |
+|--------|---------|
+| `upsert(guildId, code, uses)` | Called from `InviteCreate` and to seed entries. |
+| `remove(guildId, code)` | Called from `InviteDelete`. |
+| `snapshot(guildId)` | Read-only access for tests/diagnostics. |
+| `diffOnMemberJoin(guildId, fresh)` | Atomically diffs against the prior snapshot, replaces the snapshot with `fresh`, and returns the matched code (or `None`). Always replaces the snapshot — even if the diff is ambiguous — so subsequent joins remain attributable. |
+
+### `GuildMemberAdd` Pipeline
+
+`src/events/index.ts → guildMemberAdd` performs the following, in order, inside a single `Effect.Do.pipe`:
+
+1. Skip bots (`if (user.bot) return`).
+2. `rest.listGuildInvites(member.guild_id)` to fetch fresh invite usage. Failure is caught (`HttpClientError | RatelimitedResponse | ErrorResponse`) and returns `[]` — the diff will then yield `None` and registration proceeds without an attributed code.
+3. `inviteCache.diffOnMemberJoin(guild_id, fresh)` returns `Option<code>`.
+4. `rpc['Guild/RegisterMember']({ ..., invite_code })` returns `Option<WelcomeMeta>` (see server AGENTS.md). `None` means the guild is not linked to a team — nothing else to do.
+5. On `Some`, render two independent messages concurrently (`Effect.all([...], { concurrency: 'unbounded' })`):
+   - **System log** — sent if `system_log_channel_id` is `Some`. Uses `buildSystemLogEmbed`. Always sent (even when the invite was unattributed) so captains see every join.
+   - **Welcome message** — sent only if both `welcome.welcome_channel_id` and `welcome.welcome_message_rendered` are `Some`. Uses `buildWelcomeEmbed`. Sent with `content: <@member_id>` and `allowed_mentions: { parse: [], users: [member_id, inviter_id?] }` so only the joiner and (optionally) the inviter receive a ping — never `@everyone` or roles.
+
+### Rules When Modifying the Welcome Flow
+
+1. **Never render the welcome template in the bot.** The server renders `welcome_message_template` via `@sideline/template-renderer` and returns `welcome_message_rendered` already substituted and sanitized. The bot must not call `applyTemplate` itself.
+2. **Always pass `allowed_mentions: { parse: [] }` and an explicit `users` allow-list** when sending welcome messages — `sanitizeRendered` neuters `@everyone` / `@here` literals, but the embed `description` could still contain other mention syntax.
+3. **Never add denormalised welcome metadata to the bot.** Channel ids, group color, inviter discord id all come from `Guild/RegisterMember`'s response. The bot must not look these up itself.
+4. **`inviteDiff` and `welcomeRenderer` must remain Effect-free.** They live under `src/services/` for proximity to consumers but follow the pure-function rule of `@sideline/template-renderer`.
 
 ## Discord Sync Architecture
 

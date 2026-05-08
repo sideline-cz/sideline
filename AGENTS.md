@@ -17,7 +17,8 @@ packages/
 ├── domain/    — Core domain models and API contracts     → see packages/domain/AGENTS.md
 ├── effect-lib/— Shared Effect utilities (Bind, Schemas)  → see packages/effect-lib/AGENTS.md
 ├── i18n/      — Translation system (Paraglide.js)        → see packages/i18n/AGENTS.md
-└── migrations/— Database migrations (Effect SQL)         → see packages/migrations/AGENTS.md
+├── migrations/— Database migrations (Effect SQL)         → see packages/migrations/AGENTS.md
+└── template-renderer/ — Pure welcome-template rendering (no Effect) → see packages/template-renderer/AGENTS.md
 ```
 
 Each application follows an **AppLive + run.ts** pattern:
@@ -165,9 +166,10 @@ import { DomainService } from "@sideline/domain"
 ### Path Aliases
 
 ```typescript
-@sideline/bot        → ./applications/bot/src
-@sideline/domain     → ./packages/domain/src
-@sideline/server     → ./applications/server/src
+@sideline/bot                → ./applications/bot/src
+@sideline/domain             → ./packages/domain/src
+@sideline/server             → ./applications/server/src
+@sideline/template-renderer  → ./packages/template-renderer/src
 ```
 
 ## Testing
@@ -584,4 +586,4 @@ The `docs/thesis/` directory contains Mermaid diagrams and documentation for the
 
 ---
 
-**Last Updated**: 2026-05-07
+**Last Updated**: 2026-05-08

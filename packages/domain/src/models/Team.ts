@@ -16,4 +16,7 @@ export class Team extends Model.Class<Team>('Team')({
   created_by: UserId,
   created_at: Model.DateTimeInsertFromDate,
   updated_at: Model.DateTimeUpdateFromDate,
+  welcome_channel_id: Schema.OptionFromNullOr(Snowflake),
+  system_log_channel_id: Schema.OptionFromNullOr(Snowflake),
+  welcome_message_template: Schema.OptionFromNullOr(Schema.String),
 }) {}

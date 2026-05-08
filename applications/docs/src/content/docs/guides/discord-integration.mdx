@@ -13,6 +13,7 @@ Sideline is Discord-first. Once the bot is installed, most day-to-day interactio
 - **Sends reminders** to players who haven't responded.
 - **Syncs roles** — group membership on Sideline is mirrored to Discord roles so channel access matches reality.
 - **Cleans up** old event posts according to your chosen cleanup mode.
+- **Welcomes new members** — when someone joins via an invite, the bot posts a welcome embed and logs the join to a private captain channel.
 
 ## Installing the bot
 
@@ -25,6 +26,8 @@ You link Discord channels to Sideline for specific purposes:
 - **Events channel** — where event posts with RSVP buttons appear (configurable per event type: training, match, tournament, etc.).
 - **Reminders channel** (optional) — where RSVP reminders and event-start announcements are posted. If unset, the bot falls back to the event's owner-group channel.
 - **Late-RSVP channel** (optional) — where the bot posts a notification when a member RSVPs after the reminder has already been sent.
+- **Welcome channel** (optional) — where the bot posts a public welcome embed when a new member joins via an invite.
+- **System log channel** (optional) — a private captain-only channel where the bot logs every join (member, invite code, inviter, group). Keep it visible only to captains and admins.
 
 Change channel links at any time from **Team settings → Discord integration**.
 
@@ -46,6 +49,33 @@ The bot responds to the following slash commands inside your linked Discord serv
 <Aside type="note" title="Where commands show up">
   Slash commands only appear in channels where the bot has permission to reply. If `/events` doesn't autocomplete, check the bot's channel permissions.
 </Aside>
+
+## Welcome message
+
+When a new member joins your Discord server via a Sideline invite, the bot can post a welcome embed to the **welcome channel** you configure in Team settings.
+
+The embed content comes from your **welcome message template**. Write any text and use these placeholders — the bot replaces them with real values at join time:
+
+| Placeholder | Replaced with |
+|---|---|
+| `{memberMention}` | Discord @-mention of the new member (`<@id>`) |
+| `{memberName}` | Display name or Discord username of the new member |
+| `{inviterMention}` | Discord @-mention of whoever created the invite (`<@id>`) |
+| `{inviterName}` | Discord username of the invite creator |
+| `{groupName}` | Name of the group the invite targets (empty string if not group-scoped) |
+| `{teamName}` | Name of your team |
+
+The embed colour matches the group's colour (or the Sideline default blurple if the invite is not group-scoped). The group name appears as a field in the embed.
+
+<Aside type="note" title="Welcome only fires for invite-tracked joins">
+  The bot can only post a welcome and fill in inviter/group details when it successfully identifies which Sideline invite the new member used. If the invite could not be matched (e.g. the member joined through a non-Sideline invite), the welcome message is not sent.
+</Aside>
+
+### System log
+
+Set a **system log channel** to receive a private embed for every join. The log shows the member mention, invite code used, inviter (if known), and group (if the invite was group-scoped). Keep this channel visible only to captains and admins.
+
+---
 
 ## Training claim board
 

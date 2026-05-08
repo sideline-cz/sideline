@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05 — Discord welcome flow and group-targeted invites
+
+- When a new player joins your team's Discord server, the bot can now post a **welcome message** to a channel of your choice and a **system log** (join audit) to a private captain-only channel.
+- The welcome message is fully customisable with a template. Available placeholders: `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, and `{teamName}`.
+- Captains can now create **group-targeted invites** — each invite can be scoped to a group, so new members who use it are automatically added to that group on join.
+- Multiple active invites can now coexist (one per group, for example). Individual invites can be deactivated without affecting the others.
+- The welcome embed uses the group's colour and displays the group name, so new members immediately see where they belong.
+- Configure the welcome channel, system log channel, and welcome message template in **Team settings → Discord integration**.
+
 ## 2026-05 — Bot recovers deleted event messages on startup
 
 - If a Discord event embed is deleted while the bot is offline, the bot automatically recreates the missing message the next time it starts up.

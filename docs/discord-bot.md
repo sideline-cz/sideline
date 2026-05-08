@@ -10,7 +10,7 @@ The bot is built with **dfx**, an Effect-native Discord framework. It connects t
 
 **Localization** is Czech (`cs`) and English (default). Ephemeral messages (visible only to the invoking user) use the user's Discord client language. Permanent guild messages (event embeds, reminders) use the guild's preferred language. The resolution logic is in `applications/bot/src/locale.ts`.
 
-**Gateway intents** required by the bot: `Guilds` and `GuildMembers`.
+**Gateway intents** required by the bot: `Guilds`, `GuildMembers`, and `GuildInvites`.
 
 **Source layout:**
 
@@ -21,6 +21,9 @@ The bot is built with **dfx**, an Effect-native Discord framework. It connects t
 | `applications/bot/src/events/` | Gateway dispatch event handlers |
 | `applications/bot/src/rcp/` | RPC sync worker loops (note: directory is named `rcp`, a typo in the codebase; the intended meaning is `rpc`) |
 | `applications/bot/src/services/SyncRpc.ts` | Typed RPC client service |
+| `applications/bot/src/services/InviteCache.ts` | In-memory per-guild invite usage snapshot used to identify which invite a new member used |
+| `applications/bot/src/services/inviteDiff.ts` | Pure function that diffs a before/after invite usage snapshot to find the winning invite code |
+| `applications/bot/src/services/welcomeRenderer.ts` | Builds the Discord embed payloads for the welcome message and the system log |
 | `applications/bot/src/rest/` | Discord REST helpers (embed builders, permission helpers) |
 
 ---
@@ -459,6 +462,8 @@ Fired when the bot joins a guild, or when Discord sends the initial `GUILD_CREAT
 
 Each step catches errors independently so a failure in channel sync or member reconciliation does not prevent guild registration.
 
+**Note on invite cache:** The `InviteCache` is populated lazily — the first snapshot for a guild is taken at the moment the first `GUILD_MEMBER_ADD` event fires (via `listGuildInvites`). There is no pre-seeding on `GUILD_CREATE`.
+
 ---
 
 ### GUILD_DELETE
@@ -472,6 +477,28 @@ Fired when the bot is removed from a guild, or when the guild becomes unavailabl
 
 ---
 
+### INVITE_CREATE
+
+Fired when a guild invite is created.
+
+**Actions:**
+
+- If `guild_id` is absent (DM invite): skips.
+- Otherwise: calls `InviteCache.upsert(guild_id, code, uses)` to record the invite code and its initial use count in the in-memory snapshot.
+
+---
+
+### INVITE_DELETE
+
+Fired when a guild invite is deleted or expires.
+
+**Actions:**
+
+- If `guild_id` is absent: skips.
+- Otherwise: calls `InviteCache.remove(guild_id, code)` to remove the code from the snapshot so it is not considered as a candidate when the next member joins.
+
+---
+
 ### GUILD_MEMBER_ADD
 
 Fired when a new member joins a guild.
@@ -479,7 +506,20 @@ Fired when a new member joins a guild.
 **Actions:**
 
 - If the new member is a bot: logs and skips.
-- Otherwise: calls `Guild/RegisterMember` RPC with `guild_id`, `discord_id`, `username`, `avatar`, and current `roles`.
+- Otherwise, performs the **invite diff + welcome flow** (see below).
+
+**Invite diff and welcome flow:**
+
+1. Calls `rest.listGuildInvites(guild_id)` to fetch the current invite usage counts. Errors are suppressed — if the REST call fails, an empty list is used and invite tracking is skipped for this join.
+2. Calls `InviteCache.diffOnMemberJoin(guild_id, fresh)` which atomically compares the fresh usage counts against the stored snapshot (via `inviteDiff`) and updates the snapshot. The winning invite code (the one whose use count increased) is returned as `Option<string>`.
+3. Calls `Guild/RegisterMember` RPC with `guild_id`, `discord_id`, `username`, `avatar`, `roles`, `nickname`, `display_name`, and `invite_code` (the matched code or `None`).
+   - The server resolves the invite code to a `group_id` (if the invite was group-targeted), auto-adds the member to that group, renders the welcome message template (substituting `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, `{teamName}`), and returns a `WelcomeMeta` payload.
+4. If `WelcomeMeta` is present:
+   - If `system_log_channel_id` is set: posts a **system log embed** (title "Member joined", fields: member mention + username, invite code, inviter mention, group name) to that channel.
+   - If `welcome_channel_id` and `welcome_message_rendered` are both present: posts a **welcome embed** (rendered message as description, group name field if set, group colour as embed colour, `<@memberId>` as message content) to the welcome channel.
+   - Both posts run concurrently. Errors are logged as warnings and do not abort the handler.
+
+**Source files:** `applications/bot/src/events/index.ts`, `applications/bot/src/services/InviteCache.ts`, `applications/bot/src/services/inviteDiff.ts`, `applications/bot/src/services/welcomeRenderer.ts`
 
 ---
 
@@ -649,7 +689,7 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Guild/UpsertChannel` | Insert or update a single Discord channel row in `discord_channels`; called after the bot auto-creates a channel so the web can display its name |
 | `Guild/DeleteChannel` | Delete a single channel row from `discord_channels` when a Discord channel is deleted |
 | `Guild/ReconcileMembers` | Bulk-sync up to 1000 guild members on startup |
-| `Guild/RegisterMember` | Register a single new member |
+| `Guild/RegisterMember` | Register a single new member; accepts `invite_code: Option<string>` and returns `Option<WelcomeMeta>` (system log channel, optional welcome detail including rendered message, group colour, inviter Discord ID) |
 
 ### Role group (`Role/`)
 

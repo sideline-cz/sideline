@@ -16,6 +16,9 @@ const teamToInfo = (team: Team.Team) =>
     sport: team.sport,
     logoUrl: team.logo_url,
     guildId: team.guild_id,
+    welcomeChannelId: team.welcome_channel_id,
+    systemLogChannelId: team.system_log_channel_id,
+    welcomeMessageTemplate: team.welcome_message_template,
   });
 
 const getTeamOrForbidden = (
@@ -68,6 +71,18 @@ export const TeamApiLive = HttpApiBuilder.group(Api, 'team', (handlers) =>
                 }),
                 logo_url: Option.match(payload.logoUrl, {
                   onNone: () => existing.logo_url,
+                  onSome: (v) => v,
+                }),
+                welcome_channel_id: Option.match(payload.welcomeChannelId, {
+                  onNone: () => existing.welcome_channel_id,
+                  onSome: (v) => v,
+                }),
+                system_log_channel_id: Option.match(payload.systemLogChannelId, {
+                  onNone: () => existing.system_log_channel_id,
+                  onSome: (v) => v,
+                }),
+                welcome_message_template: Option.match(payload.welcomeMessageTemplate, {
+                  onNone: () => existing.welcome_message_template,
                   onSome: (v) => v,
                 }),
               }),

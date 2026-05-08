@@ -1,9 +1,10 @@
 import { DiscordREST } from 'dfx/DiscordREST';
 import { DiscordGateway, InteractionsRegistry } from 'dfx/gateway';
-import { Effect, Layer, References } from 'effect';
+import { Effect, Layer, Option, References } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { Bot } from '~/index.js';
 import { ChannelSyncService, EventSyncService, RoleSyncService } from '~/rcp/index.js';
+import { InviteCache } from '~/services/InviteCache.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 const MockDiscordGatewayLayer = Layer.succeed(DiscordGateway, {
@@ -65,6 +66,13 @@ const MockSyncRpcLayer = Layer.succeed(
   ) as never,
 );
 
+const MockInviteCacheLayer = Layer.succeed(InviteCache, {
+  upsert: () => Effect.void,
+  remove: () => Effect.void,
+  snapshot: () => Effect.succeed(new Map<string, number>()),
+  diffOnMemberJoin: () => Effect.succeed(Option.none()),
+} as never);
+
 describe('Bot', () => {
   it('program composes and starts without error', async () => {
     const TestLayer = Layer.mergeAll(
@@ -75,6 +83,7 @@ describe('Bot', () => {
       MockChannelSyncServiceLayer,
       MockEventSyncServiceLayer,
       MockSyncRpcLayer,
+      MockInviteCacheLayer,
     );
 
     const result = await Effect.runPromise(

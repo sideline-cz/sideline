@@ -19,6 +19,9 @@ const makeInsert = (overrides?: {
   logo_url: Option.none(),
   created_at: undefined,
   updated_at: undefined,
+  welcome_channel_id: Option.none(),
+  system_log_channel_id: Option.none(),
+  welcome_message_template: Option.none(),
   ...overrides,
 });
 
@@ -159,6 +162,9 @@ describe('TeamsRepository', () => {
               description: Option.some('A great team'),
               sport: Option.some('football'),
               logo_url: Option.none(),
+              welcome_channel_id: Option.none(),
+              system_log_channel_id: Option.none(),
+              welcome_message_template: Option.none(),
             }),
           ),
         ),

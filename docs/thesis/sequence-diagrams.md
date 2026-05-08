@@ -531,7 +531,67 @@ sequenceDiagram
 
 ---
 
-## 9. Invite and Join Team
+## 9. Member Onboarding via Group-Targeted Invite
+
+A captain creates a group-targeted invite (e.g. for the "First Team" group) from the web app. The invite link is shared in Discord. A new player clicks the link, completes the Discord OAuth login, and joins the team's Discord guild. The bot detects the join via `GUILD_MEMBER_ADD`, identifies the invite code by diffing usage counts, calls `Guild/RegisterMember` on the server, which resolves the group, auto-adds the member to the group, renders the welcome message, and returns welcome metadata. The bot then posts a public welcome embed to the configured welcome channel and a private system log to the captain-only channel.
+
+```mermaid
+sequenceDiagram
+    participant Captain as Captain (Browser)
+    participant Server as API Server
+    participant DB as PostgreSQL
+    participant NewUser as New Player (Browser/Discord)
+    participant Discord as Discord Gateway
+    participant Bot as Bot Process
+    participant REST as Discord REST
+
+    Captain->>Server: POST /teams/{teamId}/invites<br/>{groupId: "first-team-id", expiresAt: null}
+    Server->>DB: INSERT team_invites {team_id, code, active=true,<br/>group_id="first-team-id", created_by}
+    DB-->>Server: TeamInvite {code}
+    Server-->>Captain: 200 OK — InviteCode {code, active: true}
+
+    Note over Captain: Share /invite/{code} in Discord
+
+    NewUser->>Server: GET /invite/{code}
+    Server->>DB: SELECT team_invites JOIN groups JOIN users (inviter)<br/>WHERE code=? AND active=true
+    DB-->>Server: {team_name, team_id, code, group_name="First Team", inviter_username}
+    Server-->>NewUser: 200 OK — InviteInfo {teamName, code, groupName, inviterName}
+
+    NewUser->>Server: (Login via Discord OAuth — see Diagram 1)
+    Note over NewUser: Now a Discord guild member
+
+    Discord->>Bot: GUILD_MEMBER_ADD {guild_id, user, roles}
+
+    Bot->>REST: GET /guilds/{guild_id}/invites
+    REST-->>Bot: [{code, uses: 1}, ...]
+
+    Note over Bot: InviteCache.diffOnMemberJoin — compare fresh<br/>use counts against stored snapshot; matched code = {code}
+
+    Bot->>Server: RPC Guild/RegisterMember {guild_id, discord_id, username,<br/>avatar, roles, nickname, display_name,<br/>invite_code: some("{code}")}
+
+    Server->>DB: Upsert user; find/create team_member
+    Server->>DB: SELECT * FROM team_invites JOIN groups JOIN users<br/>WHERE code=? AND active=true (findByCodeWithContext)
+    DB-->>Server: {team_id, group_id, group_name, inviter_discord_id, inviter_username, team_name}
+
+    Server->>DB: INSERT group_members {group_id, team_member_id}
+    DB-->>Server: OK
+
+    Note over Server: applyTemplate(welcome_message_template, {<br/>  memberMention: "<@discord_id>",<br/>  memberName: "display_name",<br/>  inviterMention: "<@inviter_discord_id>",<br/>  inviterName: "inviter_username",<br/>  groupName: "First Team",<br/>  teamName: "FC Sideline"<br/>})
+
+    Server-->>Bot: Option<WelcomeMeta> {<br/>  system_log_channel_id: some(...),<br/>  invite_code: some("{code}"),<br/>  welcome: some({<br/>    welcome_channel_id: some(...),<br/>    welcome_message_rendered: some("Welcome..."),<br/>    group_name: some("First Team"),<br/>    group_color_int: some(0x3498db),<br/>    inviter_discord_id: some(...)<br/>  })<br/>}
+
+    par System log (captain-only channel)
+        Bot->>REST: POST /channels/{system_log_channel_id}/messages<br/>embed: {title: "Member joined", fields: [member, invite code, inviter, group]}
+        REST-->>Bot: 204 OK
+    and Welcome message (public channel)
+        Bot->>REST: POST /channels/{welcome_channel_id}/messages<br/>content: "<@memberId>",<br/>embed: {description: rendered, color: 0x3498db,<br/>author: display_name, fields: [{Group: "First Team"}]}
+        REST-->>Bot: 204 OK
+    end
+```
+
+---
+
+## 10. Invite and Join Team (web flow)
 
 An admin generates an invite link (or regenerates one) from the team settings page. The server creates a 12-character alphanumeric code, stores it in `team_invites`, and deactivates any previous codes for that team. A new user visits the invite URL in the browser, which first calls `GET /invite/{code}` to display the team name without authentication. When the user clicks "Accept", the front end redirects through the OAuth login flow (diagram 1), after which the app calls `POST /invite/{code}/join` with the session token. The server validates the code, checks the user is not already a member, resolves the "Player" role ID, inserts the membership, assigns the Player role, and returns a join result.
 

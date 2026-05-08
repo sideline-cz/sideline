@@ -62,6 +62,9 @@ export const mockTeamInfo = {
   sport: 'Football',
   logoUrl: null,
   guildId: '987654321',
+  welcomeChannelId: null,
+  systemLogChannelId: null,
+  welcomeMessageTemplate: null,
 };
 
 export const mockDashboardResponse = {
@@ -291,6 +294,8 @@ export const mockInviteInfo = {
   teamName: 'Test Team',
   teamId: TEAM_ID,
   code: INVITE_CODE,
+  groupName: null,
+  inviterName: null,
 };
 
 export const mockTeamSettings = {

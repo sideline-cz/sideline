@@ -120,10 +120,13 @@ Top-level organisational unit tied one-to-one with a Discord guild.
 | `created_by` | UUID | NOT NULL, FK → `users(id)` | — |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 | `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `welcome_channel_id` | TEXT | — | — |
+| `system_log_channel_id` | TEXT | — | — |
+| `welcome_message_template` | TEXT | — | — |
 
 **Indexes**: `idx_teams_guild_id` on `(guild_id)`
 
-**Notes**: `guild_id` was made NOT NULL and UNIQUE in migration `1741200000`. `description`, `sport`, and `logo_url` were added in migration `1743100000`. Deleting a team cascades to all child tables.
+**Notes**: `guild_id` was made NOT NULL and UNIQUE in migration `1741200000`. `description`, `sport`, and `logo_url` were added in migration `1743100000`. `welcome_channel_id`, `system_log_channel_id`, and `welcome_message_template` were added in migration `1746500000` to support the Discord welcome flow. `welcome_channel_id` is the Discord channel where the bot posts the member welcome embed when a new player joins via an invite; `system_log_channel_id` is a private captain-only channel where the bot logs every join (invite code, inviter, group); `welcome_message_template` is a template string (max 500 characters) supporting the placeholders `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, and `{teamName}`. Deleting a team cascades to all child tables.
 
 ---
 
@@ -150,7 +153,7 @@ Membership record joining a user to a team, carrying per-team profile data.
 
 #### `team_invites`
 
-Invite codes that allow new users to join a specific team.
+Invite codes that allow new users to join a specific team, optionally pre-assigning them to a group.
 
 | Column | Type | Constraints | Default |
 |---|---|---|---|
@@ -161,8 +164,11 @@ Invite codes that allow new users to join a specific team.
 | `created_by` | UUID | NOT NULL, FK → `users(id)` | — |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 | `expires_at` | TIMESTAMPTZ | — | — |
+| `group_id` | UUID | FK → `groups(id)` ON DELETE SET NULL | — |
 
-**Indexes**: `idx_team_invites_code` on `(code)`, `idx_team_invites_team` on `(team_id)`
+**Indexes**: `idx_team_invites_code` on `(code)`, `idx_team_invites_team` on `(team_id)`, `idx_team_invites_group` on `(group_id)`
+
+**Notes**: `group_id` was added in migration `1746500000`. When set, a new member who joins via this invite is automatically added to the specified group. The FK uses `ON DELETE SET NULL` so that deleting a group does not invalidate existing invite codes.
 
 ---
 
@@ -831,6 +837,7 @@ All 45 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1745900000 | `add_event_claim` | Adds `claimed_by UUID FK → team_members(id) ON DELETE SET NULL`, `claim_discord_channel_id TEXT`, `claim_discord_message_id TEXT` to events; adds partial index `idx_events_claimed_by_unclaimed` on `events(team_id) WHERE event_type = 'training' AND status = 'active' AND claimed_by IS NULL`; extends event_sync_events `event_type` CHECK to include `'training_claim_request'`, `'training_claim_update'`, `'unclaimed_training_reminder'`; adds `claimed_by_member_id UUID` to event_sync_events |
 | 1746000000 | `add_event_image_url` | Adds `image_url TEXT` (nullable) to events; adds `event_image_url TEXT` (nullable) to event_sync_events |
 | 1746100000 | `add_event_location_url` | Adds `location_url TEXT` (nullable) to events and event_series; adds `event_location_url TEXT` (nullable) to event_sync_events |
+| 1746500000 | `add_invite_groups_and_welcome` | Adds `group_id UUID REFERENCES groups(id) ON DELETE SET NULL` to team_invites with index `idx_team_invites_group`; adds `welcome_channel_id TEXT`, `system_log_channel_id TEXT`, and `welcome_message_template TEXT` to teams |
 
 ### After Migrations (seed data)
 
