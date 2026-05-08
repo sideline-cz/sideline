@@ -26,9 +26,9 @@ beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runProm
 // ---------------------------------------------------------------------------
 
 interface InviteWithContext {
-  groupName: Option.Option<string>;
+  group_name: Option.Option<string>;
   inviter_username: string;
-  inviter_discord_id: string;
+  inviter_discord_id: Option.Option<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,10 +131,11 @@ describe('TeamInvitesRepository — findByCodeWithContext', () => {
           Effect.sync(() => {
             expect(Option.isSome(found)).toBe(true);
             const ctx = Option.getOrThrow(found);
-            expect(Option.isSome(ctx.groupName)).toBe(true);
-            expect(Option.getOrThrow(ctx.groupName)).toBe('Strikers');
+            expect(Option.isSome(ctx.group_name)).toBe(true);
+            expect(Option.getOrThrow(ctx.group_name)).toBe('Strikers');
             expect(ctx.inviter_username).toBe('inviter-alice');
-            expect(ctx.inviter_discord_id).toBe('100000000000000001');
+            expect(Option.isSome(ctx.inviter_discord_id)).toBe(true);
+            expect(Option.getOrThrow(ctx.inviter_discord_id)).toBe('100000000000000001');
           }),
         ),
         Effect.provide(TestLayer),
@@ -164,7 +165,7 @@ describe('TeamInvitesRepository — findByCodeWithContext', () => {
         Effect.sync(() => {
           expect(Option.isSome(found)).toBe(true);
           const ctx = Option.getOrThrow(found);
-          expect(Option.isNone(ctx.groupName)).toBe(true);
+          expect(Option.isNone(ctx.group_name)).toBe(true);
         }),
       ),
       Effect.provide(TestLayer),
@@ -258,7 +259,7 @@ describe('TeamInvitesRepository — findByCodeWithContext', () => {
             // But findByCodeWithContext hides the archived group name
             expect(Option.isSome(foundCtx)).toBe(true);
             const ctx = Option.getOrThrow(foundCtx);
-            expect(Option.isNone(ctx.groupName)).toBe(true);
+            expect(Option.isNone(ctx.group_name)).toBe(true);
           }),
         ),
         Effect.provide(TestLayer),
