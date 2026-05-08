@@ -76,6 +76,7 @@ export function CreateInviteDialog({
           payload: { groupId, expiresAt },
         }),
       ),
+      Effect.tapError((error) => Effect.logError('createInvite failed', error)),
       Effect.mapError(() => ClientError.make(m.invites_createFailed())),
       run({ success: m.invites_createSuccess() }),
     );
