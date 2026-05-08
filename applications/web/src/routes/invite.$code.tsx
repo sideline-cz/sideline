@@ -3,7 +3,7 @@ import { Effect, Option } from 'effect';
 import React from 'react';
 import { InvitePage } from '~/components/pages/InvitePage';
 import { getLogin, setLastTeamId, setPendingInvite } from '~/lib/auth';
-import { ApiClient, useRun, warnAndCatchAll } from '~/lib/runtime';
+import { ApiClient, ClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
 
 export const Route = createFileRoute('/invite/$code')({
   component: InviteRoute,
@@ -37,13 +37,17 @@ function InviteRoute() {
   const handleSignIn = React.useCallback(() => {
     Effect.runSync(setPendingInvite(code));
     getLogin()
-      .pipe(Effect.option, run())
+      .pipe(
+        Effect.tapError((e) => Effect.logWarning('Failed to generate login URL', e)),
+        Effect.mapError(() => ClientError.make('Failed to generate login URL')),
+        run(),
+      )
       .then((url) => {
         if (Option.isSome(url)) {
-          navigate({ href: url.value.toString() });
+          window.location.href = url.value.toString();
         }
       });
-  }, [code, navigate, run]);
+  }, [code, run]);
 
   return (
     <InvitePage
