@@ -2827,6 +2827,7 @@ Joins a team using an invite code. The authenticated user becomes a new member o
 | `teamId` | `TeamId` | ID of the joined team |
 | `roleNames` | `string[]` | Roles assigned to the new member |
 | `isProfileComplete` | `boolean` | Whether the user's profile is complete |
+| `requiresReauth` | `boolean` | `true` when the user's OAuth token lacks the `guilds.join` scope; the user must re-authenticate before the bot can add them to the Discord server automatically. Discord guild enqueue is skipped when this is `true`. |
 
 **Errors:**
 

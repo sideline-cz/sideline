@@ -79,12 +79,13 @@ OAuth access and refresh tokens, one row per user per provider. Currently only `
 | `provider` | TEXT | NOT NULL | `'discord'` |
 | `access_token` | TEXT | NOT NULL | — |
 | `refresh_token` | TEXT | — | — |
+| `granted_scopes` | TEXT | NOT NULL | `''` |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 | `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
 **Unique**: `(user_id, provider)`
 
-**Notes**: Extracted from `users.discord_access_token` / `users.discord_refresh_token` in migration `1742200000` to allow future OAuth providers.
+**Notes**: Extracted from `users.discord_access_token` / `users.discord_refresh_token` in migration `1742200000` to allow future OAuth providers. `granted_scopes` (added `1746800000`) is the space-separated scope list returned by Discord; empty string for legacy rows that pre-date the column. The auth callback uses it to detect missing `guilds.join` and trigger a one-shot re-authorization loop.
 
 ---
 
@@ -838,6 +839,7 @@ All 45 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1746000000 | `add_event_image_url` | Adds `image_url TEXT` (nullable) to events; adds `event_image_url TEXT` (nullable) to event_sync_events |
 | 1746100000 | `add_event_location_url` | Adds `location_url TEXT` (nullable) to events and event_series; adds `event_location_url TEXT` (nullable) to event_sync_events |
 | 1746500000 | `add_invite_groups_and_welcome` | Adds `group_id UUID REFERENCES groups(id) ON DELETE SET NULL` to team_invites with index `idx_team_invites_group`; adds `welcome_channel_id TEXT`, `system_log_channel_id TEXT`, and `welcome_message_template TEXT` to teams |
+| 1746800000 | `add_oauth_granted_scopes` | Adds `granted_scopes TEXT NOT NULL DEFAULT ''` to oauth_connections; legacy rows backfill to empty string (treated as "scopes unknown" and trigger a re-auth on the next OAuth callback) |
 
 ### After Migrations (seed data)
 

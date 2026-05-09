@@ -67,7 +67,11 @@ const sessionsStore = new Map<string, Auth.UserId>();
 sessionsStore.set('pre-existing-token', TEST_USER_ID);
 
 const mockTokens = (access: string, refresh: string) =>
-  new OAuth2Tokens({ access_token: access, refresh_token: refresh });
+  new OAuth2Tokens({
+    access_token: access,
+    refresh_token: refresh,
+    scope: 'identify guilds guilds.join',
+  });
 
 const MockDiscordOAuthLayer = Layer.succeed(DiscordOAuth, {
   createAuthorizationURL: (_state: string) =>
@@ -383,6 +387,7 @@ const MockOAuthConnectionsRepositoryLayer = Layer.succeed(OAuthConnectionsReposi
   findByUser: () => Effect.succeed(Option.none()),
   findAccessToken: () => Effect.succeed(Option.some({ access_token: 'mock-access-token' })),
   getAccessToken: () => Effect.succeed('mock-access-token'),
+  getGrantedScopes: () => Effect.succeed(Option.some('identify guilds guilds.join')),
 } as any);
 
 const MockICalTokensRepositoryLayer = Layer.succeed(ICalTokensRepository, {
@@ -464,6 +469,7 @@ const TestLayer = ApiLive.pipe(
         listPending: () => Effect.succeed([]),
         markDone: () => Effect.void,
         markFailed: () => Effect.void,
+        requeueFailedForUser: () => Effect.void,
       } as never),
     ),
   ),

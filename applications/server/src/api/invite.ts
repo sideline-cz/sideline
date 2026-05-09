@@ -1,10 +1,11 @@
-import { Auth, Invite } from '@sideline/domain';
+import { Auth, Invite, OAuthConnection } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import { DateTime, Duration, Effect, Option, Schedule } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { requireMembership, requirePermission } from '~/api/permissions.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -27,7 +28,8 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
     Effect.bind('invites', () => TeamInvitesRepository.asEffect()),
     Effect.bind('groups', () => GroupsRepository.asEffect()),
     Effect.bind('pendingGuildJoins', () => PendingGuildJoinsRepository.asEffect()),
-    Effect.map(({ teams, members, invites, groups, pendingGuildJoins }) =>
+    Effect.bind('oauthConnections', () => OAuthConnectionsRepository.asEffect()),
+    Effect.map(({ teams, members, invites, groups, pendingGuildJoins, oauthConnections }) =>
       handlers
         .handle('getInvite', ({ params: { code } }) =>
           invites.findByCodeWithContext(code).pipe(
@@ -93,13 +95,31 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
             Effect.tap(({ membership, playerRole }) =>
               members.assignRole(membership.id, playerRole.id),
             ),
-            Effect.tap(({ user, invite }) => pendingGuildJoins.enqueue(user.id, invite.team_id)),
+            Effect.bind('grantedScopes', ({ user }) =>
+              oauthConnections.getGrantedScopes(user.id, 'discord'),
+            ),
+            Effect.let('requiresReauth', ({ grantedScopes }) =>
+              Option.match(grantedScopes, {
+                onNone: () => true,
+                onSome: (raw) =>
+                  !OAuthConnection.hasScope(raw, OAuthConnection.REQUIRED_DISCORD_SCOPE),
+              }),
+            ),
+            Effect.tap(({ user, invite, requiresReauth }) =>
+              requiresReauth
+                ? Effect.logInfo(
+                    '[invite/join] skipping pending_guild_joins enqueue — user missing guilds.join scope',
+                    { userId: user.id, teamId: invite.team_id },
+                  )
+                : pendingGuildJoins.enqueue(user.id, invite.team_id),
+            ),
             Effect.map(
-              ({ user, invite }) =>
+              ({ user, invite, requiresReauth }) =>
                 new Invite.JoinResult({
                   teamId: invite.team_id,
                   roleNames: ['Player'],
                   isProfileComplete: user.isProfileComplete,
+                  requiresReauth,
                 }),
             ),
             Effect.catchTag('MemberAlreadyExistsError', () =>

@@ -122,6 +122,7 @@ erDiagram
         TEXT provider
         TEXT access_token
         TEXT refresh_token
+        TEXT granted_scopes
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at
     }

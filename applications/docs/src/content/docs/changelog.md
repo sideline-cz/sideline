@@ -5,6 +5,11 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-09 — Automatic Discord server join for returning users
+
+- Fixed: existing users who logged in before the welcome-flow update were not being added to the team's Discord server automatically when accepting a team invite. They will now be auto-joined on next login.
+- If re-authorisation is still needed (for example, the browser session was saved before the fix), the invite page now shows a **"Re-connect Discord"** button. Clicking it re-runs the Discord login and completes the Discord server join without any further action.
+
 ## 2026-05 — Discord welcome flow and group-targeted invites
 
 - When a new player joins your team's Discord server, the bot can now post a **welcome message** to a channel of your choice and a **system log** (join audit) to a private captain-only channel.

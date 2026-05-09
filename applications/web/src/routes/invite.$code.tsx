@@ -56,6 +56,7 @@ function InviteRoute() {
       code={code}
       onJoined={handleJoined}
       onSignIn={handleSignIn}
+      onReauth={handleSignIn}
     />
   );
 }

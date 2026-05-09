@@ -569,7 +569,12 @@ async function setupApiMocks(page: Page) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ teamId: mock.TEAM_ID, roleNames: [], isProfileComplete: true }),
+        body: JSON.stringify({
+          teamId: mock.TEAM_ID,
+          roleNames: [],
+          isProfileComplete: true,
+          requiresReauth: false,
+        }),
       });
     }),
   );

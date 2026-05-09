@@ -18,6 +18,7 @@ export class JoinResult extends Schema.Class<JoinResult>('JoinResult')({
   teamId: TeamId,
   roleNames: Schema.Array(Schema.String),
   isProfileComplete: Schema.Boolean,
+  requiresReauth: Schema.Boolean,
 }) {}
 
 export class InviteCode extends Schema.Class<InviteCode>('InviteCode')({

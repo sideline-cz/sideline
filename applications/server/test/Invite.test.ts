@@ -519,6 +519,7 @@ const MockOAuthConnectionsRepositoryLayer = Layer.succeed(OAuthConnectionsReposi
   findByUser: () => Effect.succeed(Option.none()),
   findAccessToken: () => Effect.succeed(Option.some({ access_token: 'mock-access-token' })),
   getAccessToken: () => Effect.succeed('mock-access-token'),
+  getGrantedScopes: () => Effect.succeed(Option.some('identify guilds guilds.join')),
 } as any);
 
 const MockBotGuildsRepositoryLayer = Layer.succeed(BotGuildsRepository, {
@@ -642,6 +643,7 @@ const TestLayer = ApiLive.pipe(
         listPending: () => Effect.succeed([]),
         markDone: () => Effect.void,
         markFailed: () => Effect.void,
+        requeueFailedForUser: () => Effect.void,
       } as never),
     ),
   ),

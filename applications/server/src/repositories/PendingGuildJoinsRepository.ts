@@ -63,6 +63,15 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  const _requeueFailedForUser = SqlSchema.void({
+    Request: Schema.Struct({ user_id: User.UserId }),
+    execute: (input) => sql`
+      UPDATE pending_guild_joins
+      SET status = 'pending', attempts = 0, last_error = NULL, processed_at = NULL
+      WHERE user_id = ${input.user_id} AND status = 'failed'
+    `,
+  });
+
   const enqueue = (userId: User.UserId, teamId: Team.TeamId) =>
     _enqueue({ user_id: userId, team_id: teamId }).pipe(catchSqlErrors);
 
@@ -72,7 +81,10 @@ const make = Effect.gen(function* () {
 
   const markFailed = (id: string, error: string) => _markFailed({ id, error }).pipe(catchSqlErrors);
 
-  return { enqueue, listPending, markDone, markFailed };
+  const requeueFailedForUser = (userId: User.UserId) =>
+    _requeueFailedForUser({ user_id: userId }).pipe(catchSqlErrors);
+
+  return { enqueue, listPending, markDone, markFailed, requeueFailedForUser };
 });
 
 export class PendingGuildJoinsRepository extends ServiceMap.Service<

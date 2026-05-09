@@ -145,8 +145,8 @@ Use `Effect.acquireRelease` for automatic resource cleanup.
 - **Use `pipe`** for linear transformations and chaining
 - **Always use `Effect.asVoid`** instead of `Effect.map(() => undefined)`
 - **Never cast types** (`as X`) and **never use `any`**
-- **Never use `Schema.optional`** — always use `Schema.optionalWith({ as: 'Option' })` or `Schema.OptionFromNullOr(...)`
-- **Use `Schema.OptionFromNullOr`** for nullable API/DB fields
+- **Never use `Schema.optional`** — always use `Schema.optionalWith({ as: 'Option' })`, `Schema.OptionFromNullOr(...)`, or `Schema.OptionFromOptionalKey(...)`
+- **Use `Schema.OptionFromNullOr`** for nullable API/DB fields; use `Schema.OptionFromOptionalKey` only when the key may be absent from the input and `null` must be rejected (see `packages/domain/AGENTS.md`)
 - **Use branded types** (e.g. `Discord.Snowflake`, `Team.TeamId`) instead of raw `Schema.String` for IDs
 - **Use `Effect.void`** instead of `Effect.succeed(undefined)` or `Effect.unit`
 - **Use Effect `Array` module** instead of native JS array methods in Effect pipelines
@@ -586,4 +586,4 @@ The `docs/thesis/` directory contains Mermaid diagrams and documentation for the
 
 ---
 
-**Last Updated**: 2026-05-08
+**Last Updated**: 2026-05-09

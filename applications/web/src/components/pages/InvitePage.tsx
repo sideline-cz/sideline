@@ -14,17 +14,34 @@ interface InvitePageProps {
   code: string;
   onJoined: (teamId: string, isProfileComplete: boolean) => void;
   onSignIn: () => void;
+  onReauth: () => void;
 }
 
-export function InvitePage({ isAuthenticated, invite, code, onJoined, onSignIn }: InvitePageProps) {
+export function InvitePage({
+  isAuthenticated,
+  invite,
+  code,
+  onJoined,
+  onSignIn,
+  onReauth,
+}: InvitePageProps) {
   const run = useRun();
   const [joining, setJoining] = React.useState(false);
+  const [requiresReauth, setRequiresReauth] = React.useState(false);
 
   const handleJoin = React.useCallback(async () => {
     setJoining(true);
     await ApiClient.asEffect().pipe(
       Effect.flatMap((api) => api.invite.joinViaInvite({ params: { code } })),
-      Effect.tap((result) => Effect.sync(() => onJoined(result.teamId, result.isProfileComplete))),
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          if (result.requiresReauth) {
+            setRequiresReauth(true);
+          } else {
+            onJoined(result.teamId, result.isProfileComplete);
+          }
+        }),
+      ),
       Effect.catchTag('AlreadyMember', () =>
         Effect.fail(ClientError.make(m.invite_errors_alreadyMember())),
       ),
@@ -54,29 +71,42 @@ export function InvitePage({ isAuthenticated, invite, code, onJoined, onSignIn }
                 <Users className='size-6 text-muted-foreground' />
               </div>
             </div>
-            <CardTitle>{m.invite_joinTitle({ teamName: invite.teamName })}</CardTitle>
-            <CardDescription>
-              {m.invite_joinDescription({ teamName: invite.teamName })}
-            </CardDescription>
-            {Option.match(invite.groupName, {
-              onNone: () => null,
-              onSome: (name) => (
-                <p className='text-sm text-muted-foreground'>
-                  {m.invite_willJoinGroup()}: <strong>{name}</strong>
-                </p>
-              ),
-            })}
-            {Option.match(invite.inviterName, {
-              onNone: () => null,
-              onSome: (name) => (
-                <p className='text-sm text-muted-foreground'>
-                  {m.invite_invitedBy()} <strong>{name}</strong>
-                </p>
-              ),
-            })}
+            {requiresReauth ? (
+              <>
+                <CardTitle>{m.invite_reauthTitle()}</CardTitle>
+                <CardDescription>{m.invite_reauthDescription()}</CardDescription>
+              </>
+            ) : (
+              <>
+                <CardTitle>{m.invite_joinTitle({ teamName: invite.teamName })}</CardTitle>
+                <CardDescription>
+                  {m.invite_joinDescription({ teamName: invite.teamName })}
+                </CardDescription>
+                {Option.match(invite.groupName, {
+                  onNone: () => null,
+                  onSome: (name) => (
+                    <p className='text-sm text-muted-foreground'>
+                      {m.invite_willJoinGroup()}: <strong>{name}</strong>
+                    </p>
+                  ),
+                })}
+                {Option.match(invite.inviterName, {
+                  onNone: () => null,
+                  onSome: (name) => (
+                    <p className='text-sm text-muted-foreground'>
+                      {m.invite_invitedBy()} <strong>{name}</strong>
+                    </p>
+                  ),
+                })}
+              </>
+            )}
           </CardHeader>
           <CardContent className='flex justify-center'>
-            {isAuthenticated ? (
+            {requiresReauth ? (
+              <Button onClick={onReauth} className='w-full'>
+                {m.invite_reauthButton()}
+              </Button>
+            ) : isAuthenticated ? (
               <Button onClick={handleJoin} disabled={joining} className='w-full'>
                 {joining ? m.invite_joining() : m.invite_joinButton()}
               </Button>

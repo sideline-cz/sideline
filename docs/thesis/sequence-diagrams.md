@@ -6,7 +6,9 @@ This document provides sequence diagrams for the nine core flows in the Sideline
 
 ## 1. Discord OAuth2 Login Flow
 
-A user initiates login through the web application. The server generates a state token containing a redirect URL, constructs the Discord authorization URL, and redirects the browser to Discord. After the user grants consent, Discord redirects back to the server callback with an authorization code. The server exchanges the code for an access token, fetches the user's Discord profile via the REST API, upserts the user and OAuth connection records in PostgreSQL, and finally creates a 30-day session. The session token is returned to the browser as a query parameter on the redirect.
+A user initiates login through the web application. The server generates a state token containing a redirect URL, constructs the Discord authorization URL, and redirects the browser to Discord. After the user grants consent, Discord redirects back to the server callback with an authorization code. The server exchanges the code for an access token, fetches the user's Discord profile via the REST API, upserts the user and OAuth connection records (including the space-separated `granted_scopes` list) in PostgreSQL, and finally creates a 30-day session. The session token is returned to the browser as a query parameter on the redirect.
+
+If the received token set is missing the `guilds.join` scope (which can happen for users who authenticated before this scope was required), the callback performs a one-shot re-authorisation loop: it redirects the browser back to Discord with a fresh state that carries `scopeRetry=true`. On the second callback the scope is present; the server then re-enqueues any `pending_guild_joins` rows that previously failed for the user and proceeds normally. If the second callback still lacks the scope, the server proceeds without re-enqueuing.
 
 ```mermaid
 sequenceDiagram
@@ -21,8 +23,8 @@ sequenceDiagram
     Server-->>WebApp: 200 OK — callback URL
 
     Browser->>Server: GET /auth/do-login
-    Note over Server: Generate UUID state,<br/>encode {id, redirectUrl} as JSON,<br/>build Discord authorization URL
-    Server-->>Browser: 302 Redirect → discord.com/oauth2/authorize<br/>(scope: identify, state=<encoded>)
+    Note over Server: Generate UUID state,<br/>encode {id, redirectUrl, scopeRetry: none} as JSON,<br/>build Discord authorization URL
+    Server-->>Browser: 302 Redirect → discord.com/oauth2/authorize<br/>(scope: identify guilds guilds.join, state=<encoded>)
 
     Browser->>DiscordAPI: User grants consent
     DiscordAPI-->>Browser: 302 Redirect → /auth/callback?code=...&state=...
@@ -30,7 +32,17 @@ sequenceDiagram
     Browser->>Server: GET /auth/callback?code=CODE&state=STATE
     Note over Server: Decode & validate state JSON
     Server->>DiscordAPI: POST /oauth2/token (exchange code for access token)
-    DiscordAPI-->>Server: {access_token, refresh_token, ...}
+    DiscordAPI-->>Server: {access_token, refresh_token, scope, ...}
+
+    alt guilds.join missing AND scopeRetry not already set
+        Note over Server: One-shot re-auth loop
+        Server-->>Browser: 302 Redirect → discord.com/oauth2/authorize<br/>(fresh state with scopeRetry=true)
+        Browser->>DiscordAPI: User re-authorises
+        DiscordAPI-->>Browser: 302 Redirect → /auth/callback (second call)
+        Browser->>Server: GET /auth/callback (scopeRetry=true in state)
+        Server->>DiscordAPI: POST /oauth2/token
+        DiscordAPI-->>Server: {access_token, refresh_token, scope, ...}
+    end
 
     Server->>DiscordAPI: GET /users/@me (using access token)
     DiscordAPI-->>Server: {id, username, avatar, ...}
@@ -38,8 +50,13 @@ sequenceDiagram
     Server->>DB: UPSERT users ON CONFLICT (discord_id)
     DB-->>Server: User row {id, discord_id, username, ...}
 
-    Server->>DB: UPSERT oauth_connections (user_id, provider='discord', access_token, refresh_token)
+    Server->>DB: UPSERT oauth_connections (user_id, provider='discord',<br/>access_token, refresh_token, granted_scopes)
     DB-->>Server: OK
+
+    opt guilds.join now present AND scopeRetry was set
+        Server->>DB: UPDATE pending_guild_joins SET processed_at=NULL, error=NULL<br/>WHERE user_id=? AND processed_at IS NOT NULL (re-enqueue)
+        DB-->>Server: OK
+    end
 
     Note over Server: Generate session token (UUID),<br/>set expires_at = now + 30 days
     Server->>DB: INSERT sessions {user_id, token, expires_at}
@@ -595,6 +612,8 @@ sequenceDiagram
 
 An admin generates an invite link (or regenerates one) from the team settings page. The server creates a 12-character alphanumeric code, stores it in `team_invites`, and deactivates any previous codes for that team. A new user visits the invite URL in the browser, which first calls `GET /invite/{code}` to display the team name without authentication. When the user clicks "Accept", the front end redirects through the OAuth login flow (diagram 1), after which the app calls `POST /invite/{code}/join` with the session token. The server validates the code, checks the user is not already a member, resolves the "Player" role ID, inserts the membership, assigns the Player role, and returns a join result.
 
+If the user's OAuth token is missing the `guilds.join` scope (a legacy user who authenticated before the scope was added), `joinViaInvite` skips the pending-guild-join enqueue and returns `requiresReauth: true`. The web app then shows a re-authorisation prompt. When the user re-authenticates via Discord (diagram 1), the auth callback detects the newly-granted scope and re-enqueues any failed pending-guild-joins automatically; no further action is required from the user.
+
 ```mermaid
 sequenceDiagram
     participant Admin as Admin (Browser)
@@ -649,6 +668,18 @@ sequenceDiagram
         Server->>DB: INSERT team_member_roles {member_id, role_id=Player.id}
         DB-->>Server: OK
 
-        Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:["Player"],<br/>isProfileComplete}
+        Server->>DB: SELECT granted_scopes FROM oauth_connections<br/>WHERE user_id=? AND provider='discord'
+        DB-->>Server: granted_scopes (string)
+
+        alt guilds.join present in granted_scopes
+            Server->>DB: INSERT pending_guild_joins {user_id, guild_id, team_id}
+            DB-->>Server: OK
+            Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:["Player"],<br/>isProfileComplete, requiresReauth: false}
+        else guilds.join missing (legacy token)
+            Note over Server: Skip enqueue — bot cannot add user to guild
+            Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:["Player"],<br/>isProfileComplete, requiresReauth: true}
+            NewUser->>NewUser: Web app shows re-auth CTA<br/>"Re-connect Discord to finish joining"
+            Note over NewUser: User clicks CTA → OAuth re-auth (Diagram 1)<br/>Callback re-enqueues pending_guild_joins automatically
+        end
     end
 ```
