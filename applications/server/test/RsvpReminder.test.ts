@@ -21,6 +21,7 @@ import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
+import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
@@ -711,14 +712,23 @@ const TestLayer = ApiLive.pipe(
     ),
   ),
   Layer.provide(
-    Layer.succeed(TeamInvitesRepository, {
-      _tag: 'api/TeamInvitesRepository',
-      findByCode: () => Effect.succeed(Option.none()),
-      findByTeam: () => Effect.succeed([]),
-      create: die,
-      deactivateByTeam: () => Effect.void,
-      deactivateByTeamExcept: () => Effect.void,
-    } as any),
+    Layer.merge(
+      Layer.succeed(TeamInvitesRepository, {
+        _tag: 'api/TeamInvitesRepository',
+        findByCode: () => Effect.succeed(Option.none()),
+        findByTeam: () => Effect.succeed([]),
+        create: die,
+        deactivateByTeam: () => Effect.void,
+        deactivateByTeamExcept: () => Effect.void,
+      } as any),
+      Layer.succeed(PendingGuildJoinsRepository, {
+        _tag: 'api/PendingGuildJoinsRepository',
+        enqueue: () => Effect.void,
+        listPending: () => Effect.succeed([]),
+        markDone: () => Effect.void,
+        markFailed: () => Effect.void,
+      } as never),
+    ),
   ),
   Layer.provide(
     Layer.succeed(RolesRepository, {

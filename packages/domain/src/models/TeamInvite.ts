@@ -1,6 +1,7 @@
 import * as Schemas from '@sideline/effect-lib/Schemas';
 import { Schema } from 'effect';
 import { Model } from 'effect/unstable/schema';
+import { GroupId } from '~/models/GroupModel.js';
 import { TeamId } from '~/models/Team.js';
 import { UserId } from '~/models/User.js';
 
@@ -15,4 +16,5 @@ export class TeamInvite extends Model.Class<TeamInvite>('TeamInvite')({
   created_by: UserId,
   created_at: Model.DateTimeInsertFromDate,
   expires_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
+  group_id: Schema.OptionFromNullOr(GroupId),
 }) {}

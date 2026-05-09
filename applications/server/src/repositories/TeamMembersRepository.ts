@@ -248,6 +248,16 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  const reactivateMemberQuery = SqlSchema.findOne({
+    Request: Schema.Struct({ member_id: TeamMember.TeamMemberId }),
+    Result: TeamMember.TeamMember,
+    execute: (input) => sql`
+      UPDATE team_members SET active = true
+      WHERE id = ${input.member_id}
+      RETURNING *
+    `,
+  });
+
   const updateJerseyNumberQuery = SqlSchema.void({
     Request: Schema.Struct({
       member_id: TeamMember.TeamMemberId,
@@ -274,6 +284,9 @@ const make = Effect.gen(function* () {
 
   const deactivateMemberByIds = (teamId: Team.TeamId, memberId: TeamMember.TeamMemberId) =>
     deactivateMemberQuery({ team_id: teamId, member_id: memberId }).pipe(catchSqlErrors);
+
+  const reactivateMember = (memberId: TeamMember.TeamMemberId) =>
+    reactivateMemberQuery({ member_id: memberId }).pipe(catchSqlErrors);
 
   const getPlayerRoleId = (teamId: Team.TeamId) =>
     findPlayerRoleIdQuery(teamId).pipe(catchSqlErrors);
@@ -302,6 +315,7 @@ const make = Effect.gen(function* () {
     findMembershipByIds,
     findRosterMemberByIds,
     deactivateMemberByIds,
+    reactivateMember,
     getPlayerRoleId,
     assignRole,
     unassignRole,

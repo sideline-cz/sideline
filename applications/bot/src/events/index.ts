@@ -5,17 +5,22 @@ import * as DiscordTypes from 'dfx/types';
 import { Array as Arr, Effect, Metric, Option, Schema } from 'effect';
 import { discordEventsTotal } from '~/metrics.js';
 import { DfxGuildMember, DfxSyncableChannel, DfxUser } from '~/schemas.js';
+import { InviteCache } from '~/services/InviteCache.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
+import { buildSystemLogEmbed, buildWelcomeEmbed } from '~/services/welcomeRenderer.js';
 
 const decodeSnowflake = Schema.decodeSync(Discord.Snowflake);
 const decodeSyncableChannel = Schema.decodeUnknownOption(DfxSyncableChannel);
 const decodeGuildMember = Schema.decodeUnknownOption(DfxGuildMember);
 const decodeUser = Schema.decodeUnknownSync(DfxUser);
 
+const DEFAULT_WELCOME_COLOR = 0x5865f2;
+
 export const eventHandlers = Effect.Do.pipe(
   Effect.bind('gateway', () => DiscordGateway.asEffect()),
   Effect.bind('rpc', () => SyncRpc.asEffect()),
   Effect.bind('rest', () => DiscordREST.asEffect()),
+  Effect.bind('inviteCache', () => InviteCache.asEffect()),
   Effect.let('guildCreate', ({ gateway, rpc, rest }) =>
     gateway.handleDispatch(DiscordTypes.GatewayDispatchEvents.GuildCreate, (guild) =>
       Effect.Do.pipe(
@@ -122,9 +127,167 @@ export const eventHandlers = Effect.Do.pipe(
           ),
     ),
   ),
-  Effect.let('guildMemberAdd', ({ gateway, rpc }) =>
+  Effect.let('inviteCreate', ({ gateway, inviteCache }) =>
+    gateway.handleDispatch(
+      DiscordTypes.GatewayDispatchEvents.InviteCreate,
+      ({ guild_id, code, uses }) =>
+        guild_id === undefined ? Effect.void : inviteCache.upsert(guild_id, code, uses ?? 0),
+    ),
+  ),
+  Effect.let('inviteDelete', ({ gateway, inviteCache }) =>
+    gateway.handleDispatch(DiscordTypes.GatewayDispatchEvents.InviteDelete, ({ guild_id, code }) =>
+      guild_id === undefined ? Effect.void : inviteCache.remove(guild_id, code),
+    ),
+  ),
+  Effect.let('guildMemberAdd', ({ gateway, rpc, rest, inviteCache }) =>
     gateway.handleDispatch(DiscordTypes.GatewayDispatchEvents.GuildMemberAdd, (member) => {
       const user = decodeUser(member.user);
+      const memberDisplayName =
+        member.nick ?? Option.getOrElse(user.global_name, () => user.username);
+
+      const fetchInviteUsage = rest.listGuildInvites(member.guild_id).pipe(
+        Effect.map((invites) =>
+          Arr.getSomes(
+            Arr.map(invites, (i) =>
+              i !== null && i.type === 0
+                ? Option.some({ code: i.code, uses: i.uses ?? 0 })
+                : Option.none(),
+            ),
+          ),
+        ),
+        Effect.tapError((e) => Effect.logWarning('listGuildInvites failed', e)),
+        Effect.catchTags({
+          HttpClientError: () => Effect.succeed<ReadonlyArray<{ code: string; uses: number }>>([]),
+          RatelimitedResponse: () =>
+            Effect.succeed<ReadonlyArray<{ code: string; uses: number }>>([]),
+          ErrorResponse: () => Effect.succeed<ReadonlyArray<{ code: string; uses: number }>>([]),
+        }),
+      );
+
+      const sendSystemLog = (
+        systemChannelId: Discord.Snowflake,
+        meta: {
+          readonly invite_code: Option.Option<string>;
+          readonly welcome: Option.Option<{
+            readonly inviter_discord_id: Option.Option<Discord.Snowflake>;
+            readonly group_name: Option.Option<string>;
+          }>;
+        },
+      ) =>
+        rest
+          .createMessage(systemChannelId, {
+            embeds: [
+              buildSystemLogEmbed({
+                username: user.username,
+                memberId: user.id,
+                inviteCode: meta.invite_code,
+                inviterId: Option.flatMap(meta.welcome, (w) => w.inviter_discord_id),
+                groupName: Option.flatMap(meta.welcome, (w) => w.group_name),
+              }),
+            ],
+            allowed_mentions: { parse: [] },
+          })
+          .pipe(
+            Effect.asVoid,
+            Effect.catchTags({
+              HttpClientError: (e) => Effect.logWarning('Failed to send system log message', e),
+              RatelimitedResponse: (e) =>
+                Effect.logWarning('Rate-limited sending system log message', e),
+              ErrorResponse: (e) => Effect.logWarning('Error sending system log message', e),
+            }),
+          );
+
+      const sendWelcome = (
+        welcomeChannelId: Discord.Snowflake,
+        rendered: string,
+        welcome: {
+          readonly group_name: Option.Option<string>;
+          readonly group_color_int: Option.Option<number>;
+          readonly inviter_discord_id: Option.Option<Discord.Snowflake>;
+        },
+      ) =>
+        rest
+          .createMessage(welcomeChannelId, {
+            content: `<@${user.id}>`,
+            embeds: [
+              buildWelcomeEmbed({
+                rendered,
+                groupName: welcome.group_name,
+                colorInt: Option.getOrElse(welcome.group_color_int, () => DEFAULT_WELCOME_COLOR),
+                memberDisplayName,
+              }),
+            ],
+            allowed_mentions: {
+              parse: [],
+              users: [user.id, ...Option.toArray(welcome.inviter_discord_id)],
+            },
+          })
+          .pipe(
+            Effect.asVoid,
+            Effect.catchTags({
+              HttpClientError: (e) => Effect.logWarning('Failed to send welcome message', e),
+              RatelimitedResponse: (e) =>
+                Effect.logWarning('Rate-limited sending welcome message', e),
+              ErrorResponse: (e) => Effect.logWarning('Error sending welcome message', e),
+            }),
+          );
+
+      const handleWelcomeMeta = (meta: {
+        readonly system_log_channel_id: Option.Option<Discord.Snowflake>;
+        readonly invite_code: Option.Option<string>;
+        readonly welcome: Option.Option<{
+          readonly welcome_channel_id: Option.Option<Discord.Snowflake>;
+          readonly welcome_message_rendered: Option.Option<string>;
+          readonly group_name: Option.Option<string>;
+          readonly group_color_int: Option.Option<number>;
+          readonly inviter_discord_id: Option.Option<Discord.Snowflake>;
+        }>;
+      }) => {
+        const systemLog = Option.match(meta.system_log_channel_id, {
+          onNone: () => Effect.void,
+          onSome: (channelId) => sendSystemLog(channelId, meta),
+        });
+        const welcomeMessage = Option.match(
+          Option.all([
+            Option.flatMap(meta.welcome, (w) => w.welcome_channel_id),
+            Option.flatMap(meta.welcome, (w) => w.welcome_message_rendered),
+            meta.welcome,
+          ]),
+          {
+            onNone: () => Effect.void,
+            onSome: ([channelId, rendered, welcome]) => sendWelcome(channelId, rendered, welcome),
+          },
+        );
+        return Effect.all([systemLog, welcomeMessage], { concurrency: 'unbounded' }).pipe(
+          Effect.asVoid,
+        );
+      };
+
+      const registerAndWelcome = Effect.Do.pipe(
+        Effect.bind('invites', () => fetchInviteUsage),
+        Effect.bind('matchedCode', ({ invites }) =>
+          inviteCache.diffOnMemberJoin(member.guild_id, invites),
+        ),
+        Effect.bind('welcomeMeta', ({ matchedCode }) =>
+          rpc['Guild/RegisterMember']({
+            guild_id: decodeSnowflake(member.guild_id),
+            discord_id: user.id,
+            username: user.username,
+            avatar: user.avatar,
+            roles: Arr.map(member.roles, (r) => decodeSnowflake(r)),
+            nickname: Option.fromNullishOr(member.nick ?? null),
+            display_name: user.global_name,
+            invite_code: matchedCode,
+          }),
+        ),
+        Effect.tap(({ welcomeMeta }) =>
+          Option.match(welcomeMeta, {
+            onNone: () => Effect.void,
+            onSome: handleWelcomeMeta,
+          }),
+        ),
+      );
+
       return Effect.Do.pipe(
         Effect.tap(() =>
           Metric.update(
@@ -135,19 +298,7 @@ export const eventHandlers = Effect.Do.pipe(
         Effect.tap(() =>
           Effect.logInfo(`Member joined: ${user.username} in guild ${member.guild_id}`),
         ),
-        Effect.tap(() =>
-          user.bot
-            ? Effect.logInfo('Skipping bot')
-            : rpc['Guild/RegisterMember']({
-                guild_id: decodeSnowflake(member.guild_id),
-                discord_id: user.id,
-                username: user.username,
-                avatar: user.avatar,
-                roles: Arr.map(member.roles, (r) => decodeSnowflake(r)),
-                nickname: Option.fromNullishOr(member.nick ?? null),
-                display_name: user.global_name,
-              }),
-        ),
+        Effect.tap(() => (user.bot ? Effect.logInfo('Skipping bot') : registerAndWelcome)),
         Effect.catchTag('RpcClientError', (error) =>
           Effect.logError(`Failed to register member ${user.username}`, error),
         ),
@@ -300,6 +451,8 @@ export const eventHandlers = Effect.Do.pipe(
     ({
       guildCreate,
       guildDelete,
+      inviteCreate,
+      inviteDelete,
       guildMemberAdd,
       guildMemberRemove,
       guildMemberUpdate,
@@ -309,6 +462,8 @@ export const eventHandlers = Effect.Do.pipe(
     }) => [
       guildCreate,
       guildDelete,
+      inviteCreate,
+      inviteDelete,
       guildMemberAdd,
       guildMemberRemove,
       guildMemberUpdate,

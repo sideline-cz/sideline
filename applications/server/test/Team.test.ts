@@ -21,6 +21,7 @@ import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
+import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
@@ -65,6 +66,9 @@ const testTeam = {
   created_by: TEST_USER_ID,
   created_at: DateTime.nowUnsafe(),
   updated_at: DateTime.nowUnsafe(),
+  welcome_channel_id: Option.none<Discord.Snowflake>(),
+  system_log_channel_id: Option.none<Discord.Snowflake>(),
+  welcome_message_template: Option.none<string>(),
 };
 
 const memberMembership: MembershipWithRole = {
@@ -491,7 +495,18 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(MockRolesRepositoryLayer),
   Layer.provide(MockGroupsRepositoryLayer),
   Layer.provide(MockTrainingTypesRepositoryLayer),
-  Layer.provide(MockTeamInvitesRepositoryLayer),
+  Layer.provide(
+    Layer.merge(
+      MockTeamInvitesRepositoryLayer,
+      Layer.succeed(PendingGuildJoinsRepository, {
+        _tag: 'api/PendingGuildJoinsRepository',
+        enqueue: () => Effect.void,
+        listPending: () => Effect.succeed([]),
+        markDone: () => Effect.void,
+        markFailed: () => Effect.void,
+      } as never),
+    ),
+  ),
   Layer.provide(MockHttpClientLayer),
   Layer.provide(MockAgeCheckServiceLayer),
   Layer.provide(MockAgeThresholdRepositoryLayer),

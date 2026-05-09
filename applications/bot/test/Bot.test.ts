@@ -1,9 +1,15 @@
 import { DiscordREST } from 'dfx/DiscordREST';
 import { DiscordGateway, InteractionsRegistry } from 'dfx/gateway';
-import { Effect, Layer, References } from 'effect';
+import { Effect, Layer, Option, References } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { Bot } from '~/index.js';
-import { ChannelSyncService, EventSyncService, RoleSyncService } from '~/rcp/index.js';
+import {
+  ChannelSyncService,
+  EventSyncService,
+  GuildJoinSyncService,
+  RoleSyncService,
+} from '~/rcp/index.js';
+import { InviteCache } from '~/services/InviteCache.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 const MockDiscordGatewayLayer = Layer.succeed(DiscordGateway, {
@@ -55,6 +61,11 @@ const MockEventSyncServiceLayer = Layer.succeed(EventSyncService, {
   discord: undefined as never,
 } as never);
 
+const MockGuildJoinSyncServiceLayer = Layer.succeed(GuildJoinSyncService, {
+  processTick: Effect.void,
+  discord: undefined as never,
+} as never);
+
 const MockSyncRpcLayer = Layer.succeed(
   SyncRpc,
   new Proxy(
@@ -65,6 +76,13 @@ const MockSyncRpcLayer = Layer.succeed(
   ) as never,
 );
 
+const MockInviteCacheLayer = Layer.succeed(InviteCache, {
+  upsert: () => Effect.void,
+  remove: () => Effect.void,
+  snapshot: () => Effect.succeed(new Map<string, number>()),
+  diffOnMemberJoin: () => Effect.succeed(Option.none()),
+} as never);
+
 describe('Bot', () => {
   it('program composes and starts without error', async () => {
     const TestLayer = Layer.mergeAll(
@@ -74,7 +92,9 @@ describe('Bot', () => {
       MockRoleSyncServiceLayer,
       MockChannelSyncServiceLayer,
       MockEventSyncServiceLayer,
+      MockGuildJoinSyncServiceLayer,
       MockSyncRpcLayer,
+      MockInviteCacheLayer,
     );
 
     const result = await Effect.runPromise(

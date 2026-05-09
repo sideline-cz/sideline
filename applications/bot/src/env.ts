@@ -13,7 +13,10 @@ export const env = createEnv({
     ),
     DISCORD_GATEWAY_INTENTS: Schema.NumberFromString.pipe(
       Schemas.Optional(
-        () => Discord.GatewayIntentBits.Guilds | Discord.GatewayIntentBits.GuildMembers,
+        () =>
+          Discord.GatewayIntentBits.Guilds |
+          Discord.GatewayIntentBits.GuildMembers |
+          Discord.GatewayIntentBits.GuildInvites,
       ),
       Schema.toStandardSchemaV1,
     ),

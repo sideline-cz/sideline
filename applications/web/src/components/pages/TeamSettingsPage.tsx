@@ -1,6 +1,7 @@
 import type { GroupApi, TeamApi, TeamSettingsApi } from '@sideline/domain';
 import { ChannelSyncEvent, Discord } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { applyTemplate, sanitizeRendered } from '@sideline/template-renderer';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import { MessageSquare, Settings, Users } from 'lucide-react';
@@ -118,6 +119,37 @@ export function TeamSettingsPage({
   const [channelFormat, setChannelFormat] = React.useState(settings.discordChannelFormat);
   const [savingSettings, setSavingSettings] = React.useState(false);
 
+  // Welcome settings state
+  const [welcomeChannel, setWelcomeChannel] = React.useState(
+    Option.getOrElse(teamInfo.welcomeChannelId, () => NONE_VALUE),
+  );
+  const [systemLogChannel, setSystemLogChannel] = React.useState(
+    Option.getOrElse(teamInfo.systemLogChannelId, () => NONE_VALUE),
+  );
+  const [welcomeTemplate, setWelcomeTemplate] = React.useState(
+    Option.getOrElse(teamInfo.welcomeMessageTemplate, () => ''),
+  );
+  const [savingWelcome, setSavingWelcome] = React.useState(false);
+
+  const hasWelcomeChanges =
+    welcomeChannel !== Option.getOrElse(teamInfo.welcomeChannelId, () => NONE_VALUE) ||
+    systemLogChannel !== Option.getOrElse(teamInfo.systemLogChannelId, () => NONE_VALUE) ||
+    welcomeTemplate !== Option.getOrElse(teamInfo.welcomeMessageTemplate, () => '');
+
+  const welcomePreview = React.useMemo(() => {
+    if (!welcomeTemplate.trim()) return '';
+    return sanitizeRendered(
+      applyTemplate(welcomeTemplate, {
+        memberMention: '<@123456789>',
+        memberName: 'Alex',
+        inviterMention: '<@987654321>',
+        inviterName: 'Captain',
+        groupName: 'Goalkeepers',
+        teamName: teamInfo.name,
+      }),
+    );
+  }, [welcomeTemplate, teamInfo.name]);
+
   const hasProfileChanges =
     teamName !== teamInfo.name ||
     description !== Option.getOrElse(teamInfo.description, () => '') ||
@@ -168,6 +200,9 @@ export function TeamSettingsPage({
             ),
             sport: Option.some(sport.trim() ? Option.some(sport.trim()) : Option.none()),
             logoUrl: Option.some(logoUrl.trim() ? Option.some(logoUrl.trim()) : Option.none()),
+            welcomeChannelId: Option.none(),
+            systemLogChannelId: Option.none(),
+            welcomeMessageTemplate: Option.none(),
           },
         }),
       ),
@@ -254,6 +289,42 @@ export function TeamSettingsPage({
     run,
     router,
     channelToOption,
+  ]);
+
+  const handleSaveWelcome = React.useCallback(async () => {
+    setSavingWelcome(true);
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.team.updateTeamInfo({
+          params: { teamId: teamInfo.teamId },
+          payload: {
+            name: Option.none(),
+            description: Option.none(),
+            sport: Option.none(),
+            logoUrl: Option.none(),
+            welcomeChannelId: Option.some(channelToOption(welcomeChannel)),
+            systemLogChannelId: Option.some(channelToOption(systemLogChannel)),
+            welcomeMessageTemplate: Option.some(
+              welcomeTemplate.trim() ? Option.some(welcomeTemplate.trim()) : Option.none(),
+            ),
+          },
+        }),
+      ),
+      Effect.mapError(() => ClientError.make(m.teamSettings_welcomeSaveFailed())),
+      run({ success: m.teamSettings_welcomeSaved() }),
+    );
+    setSavingWelcome(false);
+    if (Option.isSome(result)) {
+      router.invalidate();
+    }
+  }, [
+    teamInfo.teamId,
+    welcomeChannel,
+    systemLogChannel,
+    welcomeTemplate,
+    channelToOption,
+    run,
+    router,
   ]);
 
   const channelConfigs = [
@@ -775,6 +846,98 @@ export function TeamSettingsPage({
             <p className='text-sm text-muted-foreground'>{m.teamSettings_unsavedChanges()}</p>
           )}
         </div>
+
+        {/* Welcome Message */}
+        <Card>
+          <CardHeader>
+            <div className='flex items-center gap-2'>
+              <MessageSquare className='size-4 text-muted-foreground' />
+              <CardTitle className='text-base'>{m.teamSettings_welcomeTitle()}</CardTitle>
+            </div>
+            <CardDescription>{m.teamSettings_welcomeDescription()}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className='flex flex-col gap-5'>
+              <div>
+                <label htmlFor='welcome-channel' className='text-sm font-medium mb-1 block'>
+                  {m.teamSettings_welcomeChannel()}
+                </label>
+                <p className='text-xs text-muted-foreground mb-2'>
+                  {m.teamSettings_welcomeChannelHelp()}
+                </p>
+                <SearchableSelect
+                  id='welcome-channel'
+                  value={welcomeChannel}
+                  onValueChange={setWelcomeChannel}
+                  placeholder={m.teamSettings_channelNone()}
+                  pinnedValues={[NONE_VALUE]}
+                  options={[
+                    { value: NONE_VALUE, label: m.teamSettings_channelNone() },
+                    ...discordChannels
+                      .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
+                      .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
+                  ]}
+                />
+              </div>
+              <div>
+                <label htmlFor='system-log-channel' className='text-sm font-medium mb-1 block'>
+                  {m.teamSettings_systemLogChannel()}
+                </label>
+                <p className='text-xs text-muted-foreground mb-2'>
+                  {m.teamSettings_systemLogChannelHelp()}
+                </p>
+                <SearchableSelect
+                  id='system-log-channel'
+                  value={systemLogChannel}
+                  onValueChange={setSystemLogChannel}
+                  placeholder={m.teamSettings_channelNone()}
+                  pinnedValues={[NONE_VALUE]}
+                  options={[
+                    { value: NONE_VALUE, label: m.teamSettings_channelNone() },
+                    ...discordChannels
+                      .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
+                      .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
+                  ]}
+                />
+              </div>
+              <div>
+                <Label htmlFor='welcome-template'>{m.teamSettings_welcomeTemplate()}</Label>
+                <p className='text-xs text-muted-foreground mt-1 mb-2'>
+                  {m.teamSettings_welcomeTemplateHelp()}
+                </p>
+                <Textarea
+                  id='welcome-template'
+                  rows={4}
+                  maxLength={500}
+                  value={welcomeTemplate}
+                  onChange={(e) => setWelcomeTemplate(e.target.value)}
+                  placeholder='Welcome {memberMention} to {teamName}!'
+                />
+              </div>
+              {welcomePreview && (
+                <div>
+                  <p className='text-xs font-medium text-muted-foreground mb-2'>
+                    {m.teamSettings_welcomePreview()}
+                  </p>
+                  <div className='rounded-md border border-border bg-muted/40 px-4 py-3 flex gap-3'>
+                    <div className='w-1 rounded-full bg-[#5865F2] shrink-0' />
+                    <p className='text-sm font-mono whitespace-pre-wrap break-words'>
+                      {welcomePreview}
+                    </p>
+                  </div>
+                </div>
+              )}
+              <div className='flex items-center gap-3'>
+                <Button onClick={handleSaveWelcome} disabled={savingWelcome || !hasWelcomeChanges}>
+                  {savingWelcome ? m.profile_saving() : m.profile_saveChanges()}
+                </Button>
+                {hasWelcomeChanges && (
+                  <p className='text-sm text-muted-foreground'>{m.teamSettings_unsavedChanges()}</p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

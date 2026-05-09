@@ -47,6 +47,8 @@
       "@sideline/migrations/*": ["./packages/migrations/src/*.js"],
       "@sideline/effect-lib": ["./packages/effect-lib/src/index.js"],
       "@sideline/effect-lib/*": ["./packages/effect-lib/src/*.js"],
+      "@sideline/template-renderer": ["./packages/template-renderer/src/index.js"],
+      "@sideline/template-renderer/*": ["./packages/template-renderer/src/*.js"],
       "@sideline/server": ["./applications/server/src/index.js"],
       "@sideline/server/*": ["./applications/server/src/*.js"],
       "@sideline/server/test/*": ["./applications/server/test/*.js"]

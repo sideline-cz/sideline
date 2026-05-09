@@ -1,5 +1,6 @@
+import type { Invite } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
-import { Effect } from 'effect';
+import { Effect, Option } from 'effect';
 import { Users } from 'lucide-react';
 import React from 'react';
 import { LanguageSwitcher } from '~/components/organisms/LanguageSwitcher';
@@ -9,7 +10,7 @@ import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 
 interface InvitePageProps {
   isAuthenticated: boolean;
-  invite: { teamName: string };
+  invite: Invite.InviteInfo;
   code: string;
   onJoined: (teamId: string, isProfileComplete: boolean) => void;
   onSignIn: () => void;
@@ -57,6 +58,22 @@ export function InvitePage({ isAuthenticated, invite, code, onJoined, onSignIn }
             <CardDescription>
               {m.invite_joinDescription({ teamName: invite.teamName })}
             </CardDescription>
+            {Option.match(invite.groupName, {
+              onNone: () => null,
+              onSome: (name) => (
+                <p className='text-sm text-muted-foreground'>
+                  {m.invite_willJoinGroup()}: <strong>{name}</strong>
+                </p>
+              ),
+            })}
+            {Option.match(invite.inviterName, {
+              onNone: () => null,
+              onSome: (name) => (
+                <p className='text-sm text-muted-foreground'>
+                  {m.invite_invitedBy()} <strong>{name}</strong>
+                </p>
+              ),
+            })}
           </CardHeader>
           <CardContent className='flex justify-center'>
             {isAuthenticated ? (

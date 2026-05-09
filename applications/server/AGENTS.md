@@ -101,6 +101,34 @@ The `Guild/UpdateChannelName` RPC updates the `discord_channels` table when the 
 
 The `Guild/UpsertChannel` and `Guild/DeleteChannel` RPCs are called by the bot's gateway event handlers (`ChannelCreate`, `ChannelUpdate`, `ChannelDelete`) to keep the `discord_channels` table in sync with real-time Discord channel changes. `UpsertChannel` inserts or updates a channel row (using `ON CONFLICT DO UPDATE`), and `DeleteChannel` removes a channel row by `guild_id` + `channel_id`.
 
+### `Guild/RegisterMember` and Welcome Metadata
+
+`Guild/RegisterMember` (`src/rpc/guild/index.ts`) is called by the bot's `GuildMemberAdd` handler. It upserts the user, creates or reactivates the team membership, applies role/group mappings, and returns `Option<WelcomeMeta>`. The bot uses the returned metadata to send a system-log message and (optionally) a welcome message — see `applications/bot/AGENTS.md` for the bot side.
+
+The RPC payload includes `invite_code: Option<Snowflake-like string>`. The server resolves welcome metadata as follows:
+
+1. If `findByGuildId(guild_id)` returns `None`, return `Option.none()` — the guild is not linked.
+2. Always populate `system_log_channel_id` from the team row.
+3. If `invite_code` is `Some`, look up the invite via `invites.findByCodeWithContext(code)`. If the invite is missing, expired, or belongs to a different team, log a warning/error and return `noWelcome` (system log only, no welcome embed).
+4. If the invite resolves and the team has `welcome_message_template`, render it with `applyTemplate(template, vars)` then `sanitizeRendered(...)` from `@sideline/template-renderer`. The rendered string goes into `welcome.welcome_message_rendered` — **never send the raw template to the bot**.
+5. If the invite has a `group_id`, add the new member to that group AND fetch the group's color via `groups.findGroupById` → `sanitizeHexColor` to populate `group_color_int`.
+
+The server is the only renderer of welcome templates. The bot receives a fully-substituted, sanitized string and embeds it as-is.
+
+### Invite Endpoints (`src/api/invite.ts`)
+
+| Endpoint | Path | Purpose |
+|----------|------|---------|
+| `getInvite` | `GET /invite/:code` | Public — resolve invite for the join landing page |
+| `joinViaInvite` | `POST /invite/:code/join` | Authenticated — accept invite, create membership |
+| `createInvite` | `POST /teams/:teamId/invites` | Captain — create invite (optionally bound to a `groupId`, optional `expiresAt`) |
+| `listInvitesForTeam` | `GET /teams/:teamId/invites` | Captain — list active and inactive invites for management UI |
+| `regenerateInvite` | `POST /teams/:teamId/invite/regenerate` | **Deprecated** — kept for backwards compat; prefer `createInvite` |
+| `disableInvite` | `DELETE /teams/:teamId/invite` | Captain — deactivate **all** invites for a team |
+| `deactivateInvite` | `POST /teams/:teamId/invites/:inviteId/deactivate` | Captain — deactivate a single invite by id |
+
+All captain-scoped endpoints require `team:invite` permission via `requirePermission(membership, 'team:invite', forbidden)`. The `createInvite` handler validates that `groupId` (if provided) belongs to `teamId` before insertion — fails with `InvalidGroup` otherwise. Invite-code generation retries up to 5 times on unique-constraint collision (`Schedule.recurs(5)` with 100ms delay).
+
 ## Sync Event Pattern
 
 When API handlers create/delete resources that need Discord sync:

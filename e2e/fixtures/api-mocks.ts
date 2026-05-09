@@ -589,6 +589,28 @@ async function setupApiMocks(page: Page) {
     }),
   );
 
+  // Team-scoped invites list / create
+  await page.route(
+    '**/teams/*/invites',
+    apiOnly(async (route) => {
+      if (route.request().method() === 'POST') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(mock.mockCreatedInvite),
+        });
+      } else if (route.request().method() === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(mock.mockInviteList),
+        });
+      } else {
+        await route.fallback();
+      }
+    }),
+  );
+
   // Team info (catch-all for /teams/:teamId)
   await page.route(
     '**/teams/*',

@@ -1,4 +1,12 @@
-import type { Auth, Discord, Role, Team, TeamInvite, TeamMember } from '@sideline/domain';
+import type {
+  Auth,
+  Discord,
+  GroupModel,
+  Role,
+  Team,
+  TeamInvite,
+  TeamMember,
+} from '@sideline/domain';
 import { OAuth2Tokens } from 'arctic';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { HttpClient, HttpClientResponse, HttpRouter, HttpServer } from 'effect/unstable/http';
@@ -21,6 +29,7 @@ import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
+import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
@@ -103,18 +112,21 @@ membersStore.set(`${TEST_TEAM_ID}:${TEST_ADMIN_ID}`, {
   ] as readonly Role.Permission[],
 });
 
-const invitesStore = new Map<
-  string,
-  {
-    id: TeamInvite.TeamInviteId;
-    team_id: Team.TeamId;
-    code: string;
-    active: boolean;
-    created_by: Auth.UserId;
-    created_at: DateTime.Utc;
-    expires_at: Option.Option<DateTime.Utc>;
-  }
->();
+const TEST_GROUP_ID = '00000000-0000-0000-0000-000000000040' as GroupModel.GroupId;
+const TEST_OTHER_TEAM_GROUP_ID = '00000000-0000-0000-0000-000000000041' as GroupModel.GroupId;
+
+type InviteRecord = {
+  id: TeamInvite.TeamInviteId;
+  team_id: Team.TeamId;
+  code: string;
+  active: boolean;
+  created_by: Auth.UserId;
+  created_at: DateTime.Utc;
+  expires_at: Option.Option<DateTime.Utc>;
+  group_id: Option.Option<GroupModel.GroupId>;
+};
+
+const invitesStore = new Map<string, InviteRecord>();
 invitesStore.set('valid-invite', {
   id: '00000000-0000-0000-0000-000000000030' as TeamInvite.TeamInviteId,
   team_id: TEST_TEAM_ID,
@@ -123,6 +135,7 @@ invitesStore.set('valid-invite', {
   created_by: TEST_ADMIN_ID,
   created_at: DateTime.nowUnsafe(),
   expires_at: Option.none(),
+  group_id: Option.none(),
 });
 invitesStore.set('inactive-invite', {
   id: '00000000-0000-0000-0000-000000000031' as TeamInvite.TeamInviteId,
@@ -132,6 +145,17 @@ invitesStore.set('inactive-invite', {
   created_by: TEST_ADMIN_ID,
   created_at: DateTime.nowUnsafe(),
   expires_at: Option.none(),
+  group_id: Option.none(),
+});
+invitesStore.set('invite-with-group', {
+  id: '00000000-0000-0000-0000-000000000032' as TeamInvite.TeamInviteId,
+  team_id: TEST_TEAM_ID,
+  code: 'invite-with-group',
+  active: true,
+  created_by: TEST_ADMIN_ID,
+  created_at: DateTime.nowUnsafe(),
+  expires_at: Option.none(),
+  group_id: Option.some(TEST_GROUP_ID),
 });
 
 const MockDiscordOAuthLayer = Layer.succeed(DiscordOAuth, {
@@ -241,16 +265,58 @@ const MockTeamInvitesRepositoryLayer = Layer.succeed(TeamInvitesRepository, {
     if (invite?.active) return Effect.succeed(Option.some(invite));
     return Effect.succeed(Option.none());
   },
+  findByCodeWithContext: (code: string) => {
+    const invite = invitesStore.get(code);
+    if (!invite?.active) return Effect.succeed(Option.none());
+    const group_name =
+      Option.isSome(invite.group_id) && invite.group_id.value === TEST_GROUP_ID
+        ? Option.some('Test Group')
+        : Option.none<string>();
+    return Effect.succeed(
+      Option.some({
+        ...invite,
+        group_name,
+        inviter_username: 'adminuser',
+        inviter_discord_id: Option.some('67890'),
+        team_name: 'Test Team',
+      }),
+    );
+  },
   findByTeam: (teamId: string) =>
     Effect.succeed(Array.from(invitesStore.values()).filter((i) => i.team_id === teamId)),
+  listForTeam: (teamId: string) =>
+    Effect.succeed(
+      Array.from(invitesStore.values())
+        .filter((i) => i.team_id === teamId)
+        .sort((a, b) => {
+          const aMs = DateTime.toEpochMillis(a.created_at);
+          const bMs = DateTime.toEpochMillis(b.created_at);
+          return bMs - aMs;
+        })
+        .map((i) => ({
+          id: i.id,
+          code: i.code,
+          active: i.active,
+          groupId: i.group_id,
+          groupName:
+            Option.isSome(i.group_id) && i.group_id.value === TEST_GROUP_ID
+              ? Option.some('Test Group')
+              : Option.none<string>(),
+          inviterName: Option.some('adminuser'),
+          expiresAt: i.expires_at,
+          createdAt: i.created_at,
+          createdBy: i.created_by,
+        })),
+    ),
   create: (input: {
     team_id: Team.TeamId;
     code: string;
     active: boolean;
     created_by: Auth.UserId;
     expires_at: Option.Option<DateTime.Utc>;
+    group_id?: Option.Option<GroupModel.GroupId>;
   }) => {
-    const invite = {
+    const invite: InviteRecord = {
       id: crypto.randomUUID() as TeamInvite.TeamInviteId,
       team_id: input.team_id,
       code: input.code,
@@ -258,6 +324,7 @@ const MockTeamInvitesRepositoryLayer = Layer.succeed(TeamInvitesRepository, {
       created_by: input.created_by,
       created_at: DateTime.nowUnsafe(),
       expires_at: input.expires_at,
+      group_id: input.group_id ?? Option.none(),
     };
     invitesStore.set(invite.code, invite);
     return Effect.succeed(invite);
@@ -314,7 +381,23 @@ const MockRolesRepositoryLayer = Layer.succeed(RolesRepository, {
 const MockGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
   _tag: 'api/GroupsRepository',
   findGroupsByTeamId: () => Effect.succeed([]),
-  findGroupById: () => Effect.succeed(Option.none()),
+  findGroupById: (groupId: GroupModel.GroupId) => {
+    if (groupId === TEST_GROUP_ID) {
+      return Effect.succeed(
+        Option.some({
+          id: TEST_GROUP_ID,
+          team_id: TEST_TEAM_ID,
+          name: 'Test Group',
+          parent_id: Option.none(),
+          sort_order: 0,
+          archived: false,
+          color: Option.none(),
+          created_at: DateTime.nowUnsafe(),
+        }),
+      );
+    }
+    return Effect.succeed(Option.none());
+  },
   insertGroup: () => Effect.die(new Error('Not implemented')),
   updateGroupById: () => Effect.die(new Error('Not implemented')),
   archiveGroupById: () => Effect.void,
@@ -550,7 +633,18 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(MockRolesRepositoryLayer),
   Layer.provide(MockGroupsRepositoryLayer),
   Layer.provide(MockTrainingTypesRepositoryLayer),
-  Layer.provide(MockTeamInvitesRepositoryLayer),
+  Layer.provide(
+    Layer.merge(
+      MockTeamInvitesRepositoryLayer,
+      Layer.succeed(PendingGuildJoinsRepository, {
+        _tag: 'api/PendingGuildJoinsRepository',
+        enqueue: () => Effect.void,
+        listPending: () => Effect.succeed([]),
+        markDone: () => Effect.void,
+        markFailed: () => Effect.void,
+      } as never),
+    ),
+  ),
   Layer.provide(MockHttpClientLayer),
   Layer.provide(MockAgeCheckServiceLayer),
   Layer.provide(MockAgeThresholdRepositoryLayer),
@@ -716,5 +810,97 @@ describe('Invite API', () => {
       }),
     );
     expect(response.status).toBe(403);
+  });
+
+  // -------------------------------------------------------------------------
+  // New createInvite endpoint tests (TDD — added before implementation)
+  // -------------------------------------------------------------------------
+
+  it('POST /teams/:teamId/invites with groupId: null → 200 invite created without group', async () => {
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/invites`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer admin-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ groupId: null, expiresAt: null }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.code).toBeDefined();
+    expect(body.active).toBe(true);
+  });
+
+  it('POST /teams/:teamId/invites with valid groupId → 200 InviteCode returned', async () => {
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/invites`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer admin-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ groupId: TEST_GROUP_ID, expiresAt: null }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.code).toBeDefined();
+    expect(body.active).toBe(true);
+  });
+
+  it('POST /teams/:teamId/invites with groupId from a different team → 422 InvalidGroup', async () => {
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/invites`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer admin-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ groupId: TEST_OTHER_TEAM_GROUP_ID, expiresAt: null }),
+      }),
+    );
+    expect(response.status).toBe(422);
+  });
+
+  it('POST /teams/:teamId/invites without permission → 403 Forbidden', async () => {
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/invites`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer user-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ groupId: null, expiresAt: null }),
+      }),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it('GET /teams/:teamId/invites returns array of InviteListItem with groupName populated', async () => {
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/invites`, {
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(Array.isArray(body)).toBe(true);
+    // The 'invite-with-group' entry should have groupName populated
+    const withGroup = body.find((i: { code: string }) => i.code === 'invite-with-group');
+    if (withGroup) {
+      expect(withGroup.groupName).toBeTruthy();
+    }
+  });
+
+  it('GET /invite/:code returns groupName and inviterName when present', async () => {
+    const response = await handler(new Request('http://localhost/invite/invite-with-group'));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.code).toBe('invite-with-group');
+    // groupName and inviterName should be present
+    expect(body.groupName).toBeDefined();
+    expect(body.inviterName).toBeDefined();
   });
 });

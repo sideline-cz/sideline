@@ -66,6 +66,7 @@ erDiagram
     groups ||--o{ events : "scopes"
     groups ||--o{ event_series : "scopes"
     groups o|--o{ groups : "parent of"
+    groups o|--o{ team_invites : "targeted by"
 
     training_types ||--o{ role_training_types : "available to"
     training_types ||--o{ events : "classifies"
@@ -155,6 +156,9 @@ erDiagram
         UUID created_by FK
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at
+        TEXT welcome_channel_id
+        TEXT system_log_channel_id
+        TEXT welcome_message_template
     }
 
     team_members {
@@ -174,6 +178,7 @@ erDiagram
         UUID created_by FK
         TIMESTAMPTZ created_at
         TIMESTAMPTZ expires_at
+        UUID group_id FK
     }
 
     team_settings {
@@ -216,6 +221,7 @@ erDiagram
     teams ||--o{ team_members : "has"
     teams ||--o{ team_invites : "issues"
     teams ||--|{ team_settings : "configures"
+    groups o|--o{ team_invites : "targeted by"
 ```
 
 ---
@@ -648,7 +654,7 @@ erDiagram
 | `ical_tokens` | Long-lived secret token that enables unauthenticated iCal feed access per user. |
 | `teams` | Top-level organisational unit tied one-to-one with a Discord guild. |
 | `team_members` | Membership record joining a user to a team, carrying per-team profile data. |
-| `team_invites` | Invite codes that allow new users to join a specific team. |
+| `team_invites` | Invite codes that allow new users to join a specific team, optionally pre-assigning them to a group. |
 | `team_settings` | One-to-one extension of teams holding configurable operational defaults. |
 | `pending_teams` | Archive of teams that existed before mandatory guild linking was enforced. |
 | `roles` | Named permission bundles defined per team; built-in roles are seeded automatically. |

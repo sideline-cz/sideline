@@ -19,7 +19,9 @@ const make = Effect.Do.pipe(
     ({ client }) =>
       ({
         createAuthorizationURL: (state: string) =>
-          Effect.sync(() => client.createAuthorizationURL(state, null, ['identify', 'guilds'])),
+          Effect.sync(() =>
+            client.createAuthorizationURL(state, null, ['identify', 'guilds', 'guilds.join']),
+          ),
         validateAuthorizationCode: (code: string) =>
           Effect.tryPromise({
             try: () => client.validateAuthorizationCode(code, null),

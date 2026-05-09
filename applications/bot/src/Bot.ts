@@ -6,7 +6,12 @@ import { eventHandlers } from '~/events/index.js';
 import { interactionBuilder } from '~/interactions/index.js';
 import { recoverDeletedMessages } from '~/rcp/event/recoverDeletedMessages.js';
 import type { SyncRpc } from '~/services/SyncRpc.js';
-import { ChannelSyncService, EventSyncService, RoleSyncService } from './index.js';
+import {
+  ChannelSyncService,
+  EventSyncService,
+  GuildJoinSyncService,
+  RoleSyncService,
+} from './index.js';
 
 const ixProgram = Effect.succeed(commandBuilder).pipe(
   Effect.map((cb) => cb.concat(interactionBuilder)),
@@ -26,8 +31,9 @@ export const program = Effect.Do.pipe(
   Effect.bind('roles', () => RoleSyncService.asEffect()),
   Effect.bind('channels', () => ChannelSyncService.asEffect()),
   Effect.bind('eventSync', () => EventSyncService.asEffect()),
+  Effect.bind('guildJoin', () => GuildJoinSyncService.asEffect()),
   Effect.tap(() => Effect.logInfo('Bot connected to Discord')),
-  Effect.andThen(({ events, roles, channels, eventSync }) =>
+  Effect.andThen(({ events, roles, channels, eventSync, guildJoin }) =>
     Effect.all(
       [
         ixProgram,
@@ -35,6 +41,7 @@ export const program = Effect.Do.pipe(
         pollLoop(roles.processTick),
         pollLoop(channels.processTick),
         pollLoop(eventSync.processTick),
+        pollLoop(guildJoin.processTick),
         recoverDeletedMessages,
       ],
       {
@@ -46,5 +53,11 @@ export const program = Effect.Do.pipe(
 ) as Effect.Effect<
   void,
   unknown,
-  DiscordGateway | DiscordREST | SyncRpc | RoleSyncService | ChannelSyncService | EventSyncService
+  | DiscordGateway
+  | DiscordREST
+  | SyncRpc
+  | RoleSyncService
+  | ChannelSyncService
+  | EventSyncService
+  | GuildJoinSyncService
 >;

@@ -1,6 +1,6 @@
 import { Schema } from 'effect';
 import { Rpc, RpcGroup } from 'effect/unstable/rpc';
-import { Discord } from '~/index.js';
+import * as Discord from '~/models/Discord.js';
 
 export const GuildRpcGroup = RpcGroup.make(
   Rpc.make('RegisterGuild', {
@@ -71,6 +71,38 @@ export const GuildRpcGroup = RpcGroup.make(
       roles: Schema.Array(Schema.String),
       nickname: Schema.OptionFromNullOr(Schema.String),
       display_name: Schema.OptionFromNullOr(Schema.String),
+      invite_code: Schema.OptionFromNullOr(Schema.String),
     },
+    success: Schema.OptionFromNullOr(
+      Schema.Struct({
+        system_log_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+        welcome: Schema.OptionFromNullOr(
+          Schema.Struct({
+            welcome_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+            welcome_message_rendered: Schema.OptionFromNullOr(Schema.String),
+            group_name: Schema.OptionFromNullOr(Schema.String),
+            group_color_int: Schema.OptionFromNullOr(Schema.Number),
+            inviter_discord_id: Schema.OptionFromNullOr(Discord.Snowflake),
+          }),
+        ),
+        invite_code: Schema.OptionFromNullOr(Schema.String),
+      }),
+    ),
+  }),
+  Rpc.make('PendingGuildJoins', {
+    success: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.check(Schema.isUUID())),
+        guild_id: Discord.Snowflake,
+        discord_id: Schema.String,
+        access_token: Schema.String,
+      }),
+    ),
+  }),
+  Rpc.make('MarkGuildJoinDone', {
+    payload: { id: Schema.String.pipe(Schema.check(Schema.isUUID())) },
+  }),
+  Rpc.make('MarkGuildJoinFailed', {
+    payload: { id: Schema.String.pipe(Schema.check(Schema.isUUID())), error: Schema.String },
   }),
 ).prefix('Guild/');

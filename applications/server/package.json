@@ -29,6 +29,7 @@
     "@sideline/domain": "workspace:^",
     "@sideline/effect-lib": "workspace:^",
     "@sideline/migrations": "workspace:^",
+    "@sideline/template-renderer": "workspace:^",
     "@t3-oss/env-core": "^0.13.8",
     "arctic": "^3.7.0",
     "dfx": "1.0.11",

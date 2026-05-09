@@ -12,6 +12,9 @@ export class TeamInfo extends Schema.Class<TeamInfo>('TeamInfo')({
   sport: Schema.OptionFromNullOr(Schema.String),
   logoUrl: Schema.OptionFromNullOr(Schema.String),
   guildId: Snowflake,
+  welcomeChannelId: Schema.OptionFromNullOr(Snowflake),
+  systemLogChannelId: Schema.OptionFromNullOr(Snowflake),
+  welcomeMessageTemplate: Schema.OptionFromNullOr(Schema.String),
 }) {}
 
 export const UpdateTeamRequest = Schema.Struct({
@@ -26,6 +29,11 @@ export const UpdateTeamRequest = Schema.Struct({
   ),
   logoUrl: Schema.OptionFromOptional(
     Schema.OptionFromNullOr(Schema.String.pipe(Schema.check(Schema.isMaxLength(2048)))),
+  ),
+  welcomeChannelId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),
+  systemLogChannelId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),
+  welcomeMessageTemplate: Schema.OptionFromOptional(
+    Schema.OptionFromNullOr(Schema.String.pipe(Schema.check(Schema.isMaxLength(500)))),
   ),
 });
 export type UpdateTeamRequest = Schema.Schema.Type<typeof UpdateTeamRequest>;

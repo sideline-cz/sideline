@@ -5,40 +5,43 @@ description: Generate invite links, onboard new players, and revoke access when 
 
 import { Steps, Aside } from '@astrojs/starlight/components';
 
-Invites are how new people join your team. Each invite is a URL that, when opened, signs the user in with Discord and adds them to your roster.
+Invites are how new people join your team. Each invite is a URL that, when opened, signs the user in with Discord and adds them to your roster. You can have multiple active invites at the same time — for example, one invite per group.
 
 ## Generating an invite
 
 <Steps>
 
-1. Open your team → **Roster** → **Invite**.
-2. Pick a **role** — player (default), captain, or admin.
-3. Optionally scope to a **group**.
-4. Optionally set an **expiry** (default: 7 days) and **max uses** (default: 1).
+1. Open your team → **Roster** → **Invites**.
+2. Click **New invite**.
+3. Optionally scope to a **group** — the new member is automatically added to that group on join.
+4. Optionally set an **expiry date**.
 5. Copy the link and share it.
 
 </Steps>
+
+<Aside type="tip" title="Group-targeted invites">
+  Create one invite per group (First Team, Reserves, Juniors…) and share the right link with the right people. Each new member lands in the correct group automatically, and the bot's welcome message fills in the group name.
+</Aside>
 
 ## What the new member sees
 
 <Steps>
 
 1. They click the invite URL.
-2. Sideline prompts them to sign in with Discord.
-3. They complete their profile (real name, optional jersey number).
-4. They land on your team's dashboard with the role and groups from the invite.
+2. Sideline shows the team name, which group they'll join, and who invited them.
+3. They sign in with Discord.
+4. They are added to your team (and the target group if the invite is group-scoped).
 
 </Steps>
 
-## Single-use vs. reusable invites
+## Discord welcome message
 
-- **Single-use** (default): the link becomes invalid after the first successful sign-up. Good for onboarding one specific person.
-- **Reusable**: same link, multiple people. Good for seasonal recruitment drives. Set a high **max uses** or leave it unlimited; always pair with an **expiry** so it doesn't leak forever.
+If you have configured a **welcome channel** and a **welcome message template** in Team settings, the bot posts a welcome embed in that channel when the new member joins the Discord server. The embed uses the invite to fill in the inviter's name and the group name. See [Discord integration](/guides/discord-integration/#welcome-message) for the full placeholder reference.
 
-## Revoking an invite
+## Deactivating an invite
 
-<Aside type="tip" title="Revoke early, revoke often">
-  If an invite leaks or you shared the wrong one, revoke it from **Roster → Invites → history**. Any future attempt to use the link will fail.
+<Aside type="tip" title="Deactivate quickly">
+  If an invite leaks or you shared the wrong one, open **Roster → Invites**, find the invite in the list, and click **Deactivate**. Any future attempt to use that link will fail. Other active invites are not affected.
 </Aside>
 
 ## Removing a member
@@ -47,5 +50,6 @@ That's a separate action — see [Manage your roster](/guides/manage-your-roster
 
 ## See also
 
+- [Discord integration](/guides/discord-integration/#welcome-message) — configure the welcome channel and template.
 - [Manage your roster](/guides/manage-your-roster/).
 - [Quick start for Admins](/quick-start/admins/) — initial team setup.

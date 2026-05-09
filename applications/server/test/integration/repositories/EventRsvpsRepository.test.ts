@@ -57,6 +57,9 @@ const createTeam = (guildId: Discord.Snowflake, createdBy: User.UserId) =>
         logo_url: Option.none(),
         created_at: undefined,
         updated_at: undefined,
+        welcome_channel_id: Option.none(),
+        system_log_channel_id: Option.none(),
+        welcome_message_template: Option.none(),
       }),
     ),
   );

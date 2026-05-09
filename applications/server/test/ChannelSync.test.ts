@@ -29,6 +29,7 @@ import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
+import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
@@ -688,7 +689,18 @@ const TestLayer = ApiLive.pipe(
       MockLeaderboardRepositoryLayer,
     ),
   ),
-  Layer.provide(MockTeamInvitesRepositoryLayer),
+  Layer.provide(
+    Layer.merge(
+      MockTeamInvitesRepositoryLayer,
+      Layer.succeed(PendingGuildJoinsRepository, {
+        _tag: 'api/PendingGuildJoinsRepository',
+        enqueue: () => Effect.void,
+        listPending: () => Effect.succeed([]),
+        markDone: () => Effect.void,
+        markFailed: () => Effect.void,
+      } as never),
+    ),
+  ),
   Layer.provide(MockRolesRepositoryLayer),
   Layer.provide(MockGroupsRepositoryLayer),
   Layer.provide(MockTrainingTypesRepositoryLayer),
@@ -791,7 +803,18 @@ const buildTestLayer = (settingsLayer: Layer.Layer<TeamSettingsRepository>) =>
         MockLeaderboardRepositoryLayer,
       ),
     ),
-    Layer.provide(MockTeamInvitesRepositoryLayer),
+    Layer.provide(
+      Layer.merge(
+        MockTeamInvitesRepositoryLayer,
+        Layer.succeed(PendingGuildJoinsRepository, {
+          _tag: 'api/PendingGuildJoinsRepository',
+          enqueue: () => Effect.void,
+          listPending: () => Effect.succeed([]),
+          markDone: () => Effect.void,
+          markFailed: () => Effect.void,
+        } as never),
+      ),
+    ),
     Layer.provide(MockRolesRepositoryLayer),
     Layer.provide(MockGroupsRepositoryLayer),
     Layer.provide(MockTrainingTypesRepositoryLayer),
