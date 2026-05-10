@@ -7,6 +7,7 @@ import { requireMembership, requirePermission } from '~/api/permissions.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -33,6 +34,7 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
     Effect.bind('teams', () => TeamsRepository.asEffect()),
     Effect.bind('discordChannels', () => DiscordChannelsRepository.asEffect()),
     Effect.bind('teamSettings', () => TeamSettingsRepository.asEffect()),
+    Effect.bind('discordRoles', () => DiscordRolesRepository.asEffect()),
     Effect.map(
       ({
         members,
@@ -44,6 +46,7 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
         teams,
         discordChannels,
         teamSettings,
+        discordRoles,
       }) =>
         handlers
           .handle('listGroups', ({ params: { teamId } }) =>
@@ -932,6 +935,33 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                       ),
                 );
               }),
+            ),
+          )
+          .handle('listDiscordRoles', ({ params: { teamId } }) =>
+            Effect.Do.pipe(
+              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+              Effect.bind('membership', ({ currentUser }) =>
+                requireMembership(members, teamId, currentUser.id, forbidden),
+              ),
+              Effect.tap(({ membership }) =>
+                requirePermission(membership, 'group:manage', forbidden),
+              ),
+              Effect.bind('team', () =>
+                teams.findById(teamId).pipe(Effect.flatMap(Options.toEffect(() => forbidden))),
+              ),
+              Effect.bind('roles', ({ team }) => discordRoles.listByGuild(team.guild_id)),
+              Effect.map(({ roles: roleRows }) =>
+                roleRows.map(
+                  (r) =>
+                    new GroupApi.DiscordRoleInfo({
+                      id: r.id,
+                      name: r.name,
+                      color: r.color,
+                      position: r.position,
+                      managed: r.managed,
+                    }),
+                ),
+              ),
             ),
           ),
     ),

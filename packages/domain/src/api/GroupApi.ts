@@ -91,6 +91,14 @@ export class DiscordChannelInfo extends Schema.Class<DiscordChannelInfo>('Discor
   parentId: Schema.OptionFromNullOr(Snowflake),
 }) {}
 
+export class DiscordRoleInfo extends Schema.Class<DiscordRoleInfo>('DiscordRoleInfo')({
+  id: Snowflake,
+  name: Schema.String,
+  color: Schema.Number,
+  position: Schema.Number,
+  managed: Schema.Boolean,
+}) {}
+
 export class GroupNotFound extends Schema.TaggedErrorClass<GroupNotFound>()('GroupNotFound', {}) {}
 
 export class Forbidden extends Schema.TaggedErrorClass<Forbidden>()('GroupForbidden', {}) {}
@@ -263,6 +271,13 @@ export class GroupApiGroup extends HttpApiGroup.make('group')
   .add(
     HttpApiEndpoint.get('listDiscordChannels', '/teams/:teamId/discord-channels', {
       success: Schema.Array(DiscordChannelInfo),
+      error: Forbidden.pipe(HttpApiSchema.status(403)),
+      params: { teamId: TeamId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.get('listDiscordRoles', '/teams/:teamId/discord-roles', {
+      success: Schema.Array(DiscordRoleInfo),
       error: Forbidden.pipe(HttpApiSchema.status(403)),
       params: { teamId: TeamId },
     }).middleware(AuthMiddleware),

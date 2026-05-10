@@ -8,6 +8,7 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
+import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
@@ -286,6 +287,7 @@ const TestLayer = GuildsRpcLive.pipe(
       MockDiscordChannelsRepository,
       MockDiscordRoleMappingRepository,
       MockDiscordChannelMappingRepository,
+      Layer.succeed(DiscordRolesRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       Layer.succeed(PendingGuildJoinsRepository, {
         _tag: 'api/PendingGuildJoinsRepository',
         enqueue: () => Effect.void,

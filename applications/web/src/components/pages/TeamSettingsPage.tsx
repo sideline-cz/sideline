@@ -3,11 +3,14 @@ import { ChannelSyncEvent, Discord } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { applyTemplate, sanitizeRendered } from '@sideline/template-renderer';
 import { Link, useRouter } from '@tanstack/react-router';
-import { Effect, Option, Schema } from 'effect';
-import { MessageSquare, Settings, Users } from 'lucide-react';
+import { DateTime, Effect, Option, Schema } from 'effect';
+import { AlertTriangle, MessageSquare, Settings, ShieldCheck, Users } from 'lucide-react';
 import React from 'react';
+import { toast } from 'sonner';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
 import { Input } from '~/components/ui/input';
@@ -22,6 +25,8 @@ import {
 import { Separator } from '~/components/ui/separator';
 import { Switch } from '~/components/ui/switch';
 import { Textarea } from '~/components/ui/textarea';
+import { ToggleGroup, ToggleGroupItem } from '~/components/ui/toggle-group';
+import { useFormatDate } from '~/hooks/useFormatDate';
 import { DISCORD_CHANNEL_TYPE_CATEGORY, DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 
@@ -29,6 +34,7 @@ interface TeamSettingsPageProps {
   teamId: string;
   settings: TeamSettingsApi.TeamSettingsInfo;
   discordChannels: ReadonlyArray<GroupApi.DiscordChannelInfo>;
+  discordRoles: ReadonlyArray<GroupApi.DiscordRoleInfo>;
   teamInfo: TeamApi.TeamInfo;
 }
 
@@ -48,10 +54,12 @@ export function TeamSettingsPage({
   teamId,
   settings,
   discordChannels,
+  discordRoles,
   teamInfo,
 }: TeamSettingsPageProps) {
   const run = useRun();
   const router = useRouter();
+  const { formatRelative } = useFormatDate();
 
   // Team profile state
   const [teamName, setTeamName] = React.useState(teamInfo.name);
@@ -131,6 +139,29 @@ export function TeamSettingsPage({
   );
   const [savingWelcome, setSavingWelcome] = React.useState(false);
 
+  // Onboarding settings state
+  const [onboardingRulesChannel, setOnboardingRulesChannel] = React.useState(
+    Option.getOrElse(teamInfo.rulesChannelId, () => NONE_VALUE),
+  );
+  const [onboardingRole, setOnboardingRole] = React.useState(
+    Option.getOrElse(teamInfo.onboardingRulesRoleId, () => NONE_VALUE),
+  );
+  const [onboardingLocale, setOnboardingLocale] = React.useState(teamInfo.onboardingLocale);
+  const [savingOnboarding, setSavingOnboarding] = React.useState(false);
+  const [retryingOnboarding, setRetryingOnboarding] = React.useState(false);
+
+  const hasOnboardingChanges =
+    onboardingRulesChannel !== Option.getOrElse(teamInfo.rulesChannelId, () => NONE_VALUE) ||
+    onboardingRole !== Option.getOrElse(teamInfo.onboardingRulesRoleId, () => NONE_VALUE) ||
+    onboardingLocale !== teamInfo.onboardingLocale;
+
+  const isCommunityEnabled = teamInfo.isCommunityEnabled;
+
+  const filteredDiscordRoles = React.useMemo(
+    () => discordRoles.filter((role) => role.id !== teamInfo.guildId && !role.managed),
+    [discordRoles, teamInfo.guildId],
+  );
+
   const hasWelcomeChanges =
     welcomeChannel !== Option.getOrElse(teamInfo.welcomeChannelId, () => NONE_VALUE) ||
     systemLogChannel !== Option.getOrElse(teamInfo.systemLogChannelId, () => NONE_VALUE) ||
@@ -203,6 +234,9 @@ export function TeamSettingsPage({
             welcomeChannelId: Option.none(),
             systemLogChannelId: Option.none(),
             welcomeMessageTemplate: Option.none(),
+            rulesChannelId: Option.none(),
+            onboardingRulesRoleId: Option.none(),
+            onboardingLocale: Option.none(),
           },
         }),
       ),
@@ -234,7 +268,7 @@ export function TeamSettingsPage({
         api.teamSettings.updateTeamSettings({
           params: { teamId: settings.teamId },
           payload: {
-            eventHorizonDays: parsed,
+            eventHorizonDays: Option.some(parsed),
             minPlayersThreshold: Option.some(parsedThreshold),
             rsvpReminderDaysBefore: Option.some(parsedReminderDaysBefore),
             rsvpReminderTime: Option.some(rsvpReminderTime),
@@ -307,6 +341,9 @@ export function TeamSettingsPage({
             welcomeMessageTemplate: Option.some(
               welcomeTemplate.trim() ? Option.some(welcomeTemplate.trim()) : Option.none(),
             ),
+            rulesChannelId: Option.none(),
+            onboardingRulesRoleId: Option.none(),
+            onboardingLocale: Option.none(),
           },
         }),
       ),
@@ -326,6 +363,61 @@ export function TeamSettingsPage({
     run,
     router,
   ]);
+
+  const handleSaveOnboarding = React.useCallback(async () => {
+    setSavingOnboarding(true);
+    toast(m.teamSettings_onboardingSavedSyncing(), { duration: 3000 });
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.team.updateTeamInfo({
+          params: { teamId: teamInfo.teamId },
+          payload: {
+            name: Option.none(),
+            description: Option.none(),
+            sport: Option.none(),
+            logoUrl: Option.none(),
+            welcomeChannelId: Option.none(),
+            systemLogChannelId: Option.none(),
+            welcomeMessageTemplate: Option.none(),
+            rulesChannelId: Option.some(channelToOption(onboardingRulesChannel)),
+            onboardingRulesRoleId: Option.some(channelToOption(onboardingRole)),
+            onboardingLocale: Option.some(onboardingLocale),
+          },
+        }),
+      ),
+      Effect.mapError(() => ClientError.make(m.teamSettings_welcomeSaveFailed())),
+      run({}),
+    );
+    setSavingOnboarding(false);
+    if (Option.isSome(result)) {
+      router.invalidate();
+    }
+  }, [
+    teamInfo.teamId,
+    onboardingRulesChannel,
+    onboardingRole,
+    onboardingLocale,
+    channelToOption,
+    run,
+    router,
+  ]);
+
+  const handleRetryOnboarding = React.useCallback(async () => {
+    setRetryingOnboarding(true);
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.team.retryOnboardingSync({
+          params: { teamId: teamInfo.teamId },
+        }),
+      ),
+      Effect.mapError(() => ClientError.make(m.teamSettings_welcomeSaveFailed())),
+      run({}),
+    );
+    setRetryingOnboarding(false);
+    if (Option.isSome(result)) {
+      router.invalidate();
+    }
+  }, [teamInfo.teamId, run, router]);
 
   const channelConfigs = [
     {
@@ -938,7 +1030,275 @@ export function TeamSettingsPage({
             </div>
           </CardContent>
         </Card>
+
+        {/* Onboarding */}
+        <OnboardingCard
+          teamInfo={teamInfo}
+          discordChannels={discordChannels}
+          filteredDiscordRoles={filteredDiscordRoles}
+          isCommunityEnabled={isCommunityEnabled}
+          onboardingRulesChannel={onboardingRulesChannel}
+          setOnboardingRulesChannel={setOnboardingRulesChannel}
+          onboardingRole={onboardingRole}
+          setOnboardingRole={setOnboardingRole}
+          onboardingLocale={onboardingLocale}
+          setOnboardingLocale={(v) => setOnboardingLocale(v as 'en' | 'cs')}
+          hasOnboardingChanges={hasOnboardingChanges}
+          savingOnboarding={savingOnboarding}
+          retryingOnboarding={retryingOnboarding}
+          handleSaveOnboarding={handleSaveOnboarding}
+          handleRetryOnboarding={handleRetryOnboarding}
+          formatRelative={formatRelative}
+        />
       </div>
     </div>
+  );
+}
+
+interface OnboardingCardProps {
+  teamInfo: TeamApi.TeamInfo;
+  discordChannels: ReadonlyArray<GroupApi.DiscordChannelInfo>;
+  filteredDiscordRoles: ReadonlyArray<GroupApi.DiscordRoleInfo>;
+  isCommunityEnabled: boolean;
+  onboardingRulesChannel: string;
+  setOnboardingRulesChannel: (v: string) => void;
+  onboardingRole: string;
+  setOnboardingRole: (v: string) => void;
+  onboardingLocale: string;
+  setOnboardingLocale: (v: string) => void;
+  hasOnboardingChanges: boolean;
+  savingOnboarding: boolean;
+  retryingOnboarding: boolean;
+  handleSaveOnboarding: () => void;
+  handleRetryOnboarding: () => void;
+  formatRelative: (date: Date) => string;
+}
+
+function getOnboardingErrorMessage(syncError: string | null): string {
+  if (!syncError) return '';
+  try {
+    const parsed = JSON.parse(syncError) as { code?: string; detail?: string };
+    if (parsed.code === 'role_deleted') return m.teamSettings_onboardingErrorRoleDeleted();
+    if (parsed.code === 'channel_deleted') return m.teamSettings_onboardingErrorChannelDeleted();
+    if (parsed.code === 'community_not_enabled' || parsed.code === 'community_disabled')
+      return m.teamSettings_onboardingErrorCommunityDisabled();
+    const detail = parsed.detail ?? syncError;
+    const firstLine = detail.split('\n').find((l: string) => l.trim()) ?? detail;
+    return m.teamSettings_onboardingErrorGeneric({ message: firstLine });
+  } catch {
+    const firstLine = syncError.split('\n').find((l) => l.trim()) ?? syncError;
+    return m.teamSettings_onboardingErrorGeneric({ message: firstLine });
+  }
+}
+
+function OnboardingCard({
+  teamInfo,
+  discordChannels,
+  filteredDiscordRoles,
+  isCommunityEnabled,
+  onboardingRulesChannel,
+  setOnboardingRulesChannel,
+  onboardingRole,
+  setOnboardingRole,
+  onboardingLocale,
+  setOnboardingLocale,
+  hasOnboardingChanges,
+  savingOnboarding,
+  retryingOnboarding,
+  handleSaveOnboarding,
+  handleRetryOnboarding,
+  formatRelative,
+}: OnboardingCardProps) {
+  const syncStatus = teamInfo.onboardingSyncStatus;
+  const syncedAt = teamInfo.onboardingSyncedAt;
+  const syncError = Option.getOrNull(teamInfo.onboardingSyncError);
+
+  const statusBadge = (() => {
+    if (syncStatus === 'done') {
+      const relTime = Option.isSome(syncedAt)
+        ? formatRelative(new Date(Number(DateTime.toEpochMillis(syncedAt.value))))
+        : '';
+      return (
+        <Badge variant='success'>
+          {m.teamSettings_onboardingStatusSynced()}
+          {relTime ? ` ${relTime}` : ''}
+        </Badge>
+      );
+    }
+    if (syncStatus === 'failed') {
+      return <Badge variant='destructive'>{m.teamSettings_onboardingStatusFailed()}</Badge>;
+    }
+    return <Badge variant='secondary'>{m.teamSettings_onboardingStatusPending()}</Badge>;
+  })();
+
+  const errorMessage = syncStatus === 'failed' ? getOnboardingErrorMessage(syncError) : '';
+
+  const textChannelOptions = [
+    { value: NONE_VALUE, label: m.teamSettings_channelNone() },
+    ...discordChannels
+      .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
+      .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
+  ];
+
+  const roleOptions = [
+    { value: NONE_VALUE, label: m.teamSettings_channelNone() },
+    ...filteredDiscordRoles.map((role) => ({
+      value: role.id,
+      label: `@${role.name}`,
+    })),
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className='flex items-center gap-2'>
+          <ShieldCheck className='size-4 text-muted-foreground' />
+          <CardTitle className='text-base'>{m.teamSettings_onboardingTitle()}</CardTitle>
+        </div>
+        <CardDescription>{m.teamSettings_onboardingDescription()}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className='flex flex-col gap-5'>
+          {/* Community warning — outside fieldset */}
+          {!isCommunityEnabled && (
+            <Alert variant='warning'>
+              <AlertTriangle className='size-4' />
+              <AlertDescription>
+                {m.teamSettings_onboardingCommunityWarning({
+                  learnHow: '',
+                })}{' '}
+                <a
+                  href='https://support.discord.com/hc/en-us/articles/360047132851'
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='underline font-medium'
+                >
+                  Learn how
+                </a>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Status section — outside fieldset */}
+          <output aria-live='polite' aria-atomic='true' className='flex flex-col gap-2'>
+            <div className='flex items-center gap-3'>
+              {statusBadge}
+              {syncStatus === 'failed' && (
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={handleRetryOnboarding}
+                  disabled={retryingOnboarding}
+                  aria-describedby={errorMessage ? 'onboarding-error-message' : undefined}
+                >
+                  {m.teamSettings_onboardingRetry()}
+                </Button>
+              )}
+            </div>
+            {syncStatus === 'failed' && errorMessage && (
+              <div>
+                <p id='onboarding-error-message' className='text-sm text-destructive'>
+                  {errorMessage}
+                </p>
+                {syncError && (
+                  <details className='mt-1'>
+                    <summary className='text-xs text-muted-foreground cursor-pointer'>
+                      Details
+                    </summary>
+                    <pre className='text-xs text-muted-foreground mt-1 whitespace-pre-wrap break-words'>
+                      {syncError}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
+          </output>
+
+          {/* Form fields — inside fieldset */}
+          <fieldset
+            disabled={!isCommunityEnabled}
+            className={!isCommunityEnabled ? 'opacity-60' : ''}
+          >
+            <div className='flex flex-col gap-5'>
+              <div>
+                <label
+                  htmlFor='onboarding-rules-channel'
+                  className='text-sm font-medium mb-1 block'
+                >
+                  {m.teamSettings_onboardingRulesChannel()}
+                </label>
+                <p
+                  id='onboarding-rules-channel-help'
+                  className='text-xs text-muted-foreground mb-2'
+                >
+                  {m.teamSettings_onboardingRulesChannelHelp()}
+                </p>
+                <SearchableSelect
+                  id='onboarding-rules-channel'
+                  value={onboardingRulesChannel}
+                  onValueChange={setOnboardingRulesChannel}
+                  placeholder={m.teamSettings_channelNone()}
+                  pinnedValues={[NONE_VALUE]}
+                  options={textChannelOptions}
+                  aria-describedby='onboarding-rules-channel-help'
+                />
+              </div>
+
+              <div>
+                <label htmlFor='onboarding-role' className='text-sm font-medium mb-1 block'>
+                  {m.teamSettings_onboardingRulesRole()}
+                </label>
+                <p id='onboarding-role-help' className='text-xs text-muted-foreground mb-2'>
+                  {m.teamSettings_onboardingRulesRoleHelp()}
+                </p>
+                <SearchableSelect
+                  id='onboarding-role'
+                  value={onboardingRole}
+                  onValueChange={setOnboardingRole}
+                  placeholder={m.teamSettings_channelNone()}
+                  pinnedValues={[NONE_VALUE]}
+                  options={roleOptions}
+                  aria-describedby='onboarding-role-help'
+                />
+              </div>
+
+              <div>
+                <fieldset>
+                  <legend className='sr-only'>{m.teamSettings_onboardingLocale()}</legend>
+                  <p className='text-sm font-medium mb-1'>{m.teamSettings_onboardingLocale()}</p>
+                  <ToggleGroup
+                    type='single'
+                    value={onboardingLocale}
+                    onValueChange={(val) => {
+                      if (val) setOnboardingLocale(val);
+                    }}
+                    variant='outline'
+                  >
+                    <ToggleGroupItem value='en' aria-label={m.teamSettings_onboardingLocaleEn()}>
+                      {m.teamSettings_onboardingLocaleEn()}
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value='cs' aria-label={m.teamSettings_onboardingLocaleCs()}>
+                      {m.teamSettings_onboardingLocaleCs()}
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </fieldset>
+              </div>
+
+              <div className='flex items-center gap-3'>
+                <Button
+                  onClick={handleSaveOnboarding}
+                  disabled={savingOnboarding || !hasOnboardingChanges || !isCommunityEnabled}
+                >
+                  {savingOnboarding ? m.profile_saving() : m.profile_saveChanges()}
+                </Button>
+                {hasOnboardingChanges && (
+                  <p className='text-sm text-muted-foreground'>{m.teamSettings_unsavedChanges()}</p>
+                )}
+              </div>
+            </div>
+          </fieldset>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

@@ -11,6 +11,7 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
@@ -266,10 +267,17 @@ const MockDiscordChannelMappingRepositoryLayer = Layer.succeed(DiscordChannelMap
 } as any);
 const MockBotGuildsRepositoryLayer = Layer.succeed(BotGuildsRepository, {
   _tag: 'api/BotGuildsRepository',
+  findByGuildId: () => Effect.succeed(Option.none()),
 } as any);
 const MockDiscordChannelsRepositoryLayer = Layer.succeed(DiscordChannelsRepository, {
   _tag: 'api/DiscordChannelsRepository',
 } as any);
+
+const MockDiscordRolesRepositoryLayer = Layer.succeed(
+  DiscordRolesRepository,
+  new Proxy({} as any, { get: () => () => Effect.void }),
+);
+
 const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
   _tag: 'api/EventRsvpsRepository',
 } as any);
@@ -364,7 +372,7 @@ const TestLayer = ApiLive.pipe(
             Layer.merge(MockEventsRepositoryLayer, MockEventRsvpsRepositoryLayer),
             MockBotGuildsRepositoryLayer,
           ),
-          MockDiscordChannelsRepositoryLayer,
+          Layer.merge(MockDiscordChannelsRepositoryLayer, MockDiscordRolesRepositoryLayer),
         ),
         MockEventSeriesRepositoryLayer,
       ),

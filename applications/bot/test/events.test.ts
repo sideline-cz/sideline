@@ -6,6 +6,7 @@ import { Effect, Layer, Option, References } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { eventHandlers } from '~/events/index.js';
 import { InviteCache } from '~/services/InviteCache.js';
+import { OnboardingRoleCache } from '~/services/OnboardingRoleCache.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 const makeRecordingGateway = () => {
@@ -75,7 +76,18 @@ const MockInviteCacheLayer = Layer.succeed(InviteCache, {
   diffOnMemberJoin: () => Effect.succeed(Option.none()),
 } as any);
 
-const MockLayers = Layer.mergeAll(MockSyncRpcLayer, MockDiscordRESTLayer, MockInviteCacheLayer);
+const MockOnboardingRoleCacheLayer = Layer.succeed(OnboardingRoleCache, {
+  get: () => Effect.succeed(Option.none()),
+  set: () => Effect.void,
+  invalidate: () => Effect.void,
+} as any);
+
+const MockLayers = Layer.mergeAll(
+  MockSyncRpcLayer,
+  MockDiscordRESTLayer,
+  MockInviteCacheLayer,
+  MockOnboardingRoleCacheLayer,
+);
 
 describe('events', () => {
   it('registers handlers for expected gateway events', async () => {
@@ -101,7 +113,12 @@ describe('events', () => {
     // InviteCreate and InviteDelete added in Phase 5
     expect(registeredEvents).toContain(Discord.GatewayDispatchEvents.InviteCreate);
     expect(registeredEvents).toContain(Discord.GatewayDispatchEvents.InviteDelete);
-    expect(registeredEvents).toHaveLength(10);
+    // Role events and Ready added in Phase 5
+    expect(registeredEvents).toContain(Discord.GatewayDispatchEvents.Ready);
+    expect(registeredEvents).toContain(Discord.GatewayDispatchEvents.GuildRoleCreate);
+    expect(registeredEvents).toContain(Discord.GatewayDispatchEvents.GuildRoleUpdate);
+    expect(registeredEvents).toContain(Discord.GatewayDispatchEvents.GuildRoleDelete);
+    expect(registeredEvents).toHaveLength(14);
   });
 
   it('returns the correct number of handler effects', async () => {
@@ -143,6 +160,7 @@ describe('events', () => {
               RecordingSyncRpcLayer,
               MockDiscordRESTLayer,
               MockInviteCacheLayer,
+              MockOnboardingRoleCacheLayer,
             ),
           ),
           Effect.provide(Layer.succeed(References.MinimumLogLevel, 'None')),
@@ -342,6 +360,7 @@ describe('events', () => {
               RecordingSyncRpcLayer,
               MockDiscordRESTLayer,
               RecordingInviteCacheLayer,
+              MockOnboardingRoleCacheLayer,
             ),
           ),
           Effect.provide(Layer.succeed(References.MinimumLogLevel, 'None')),

@@ -12,6 +12,7 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
@@ -883,10 +884,16 @@ const TestLayer = ApiLive.pipe(
               findAll: () => Effect.succeed([]),
             } as any),
           ),
-          Layer.succeed(DiscordChannelsRepository, {
-            syncChannels: () => Effect.void,
-            findByGuildId: () => Effect.succeed([]),
-          } as any),
+          Layer.merge(
+            Layer.succeed(DiscordChannelsRepository, {
+              syncChannels: () => Effect.void,
+              findByGuildId: () => Effect.succeed([]),
+            } as any),
+            Layer.succeed(
+              DiscordRolesRepository,
+              new Proxy({} as any, { get: () => () => Effect.void }),
+            ),
+          ),
         ),
         MockTeamSettingsRepositoryLayer,
       ),

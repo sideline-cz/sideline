@@ -1,8 +1,10 @@
+import * as Schemas from '@sideline/effect-lib/Schemas';
 import { Schema } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
 import { Forbidden } from '~/api/EventApi.js';
 import { Snowflake } from '~/models/Discord.js';
+import { OnboardingLocale, OnboardingSyncStatus } from '~/models/Onboarding.js';
 import { TeamId } from '~/models/Team.js';
 
 export class TeamInfo extends Schema.Class<TeamInfo>('TeamInfo')({
@@ -15,6 +17,13 @@ export class TeamInfo extends Schema.Class<TeamInfo>('TeamInfo')({
   welcomeChannelId: Schema.OptionFromNullOr(Snowflake),
   systemLogChannelId: Schema.OptionFromNullOr(Snowflake),
   welcomeMessageTemplate: Schema.OptionFromNullOr(Schema.String),
+  rulesChannelId: Schema.OptionFromNullOr(Snowflake),
+  onboardingRulesRoleId: Schema.OptionFromNullOr(Snowflake),
+  onboardingLocale: OnboardingLocale,
+  onboardingSyncStatus: OnboardingSyncStatus,
+  onboardingSyncedAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
+  onboardingSyncError: Schema.OptionFromNullOr(Schema.String),
+  isCommunityEnabled: Schema.Boolean,
 }) {}
 
 export const UpdateTeamRequest = Schema.Struct({
@@ -35,6 +44,9 @@ export const UpdateTeamRequest = Schema.Struct({
   welcomeMessageTemplate: Schema.OptionFromOptional(
     Schema.OptionFromNullOr(Schema.String.pipe(Schema.check(Schema.isMaxLength(500)))),
   ),
+  rulesChannelId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),
+  onboardingRulesRoleId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),
+  onboardingLocale: Schema.OptionFromOptional(OnboardingLocale),
 });
 export type UpdateTeamRequest = Schema.Schema.Type<typeof UpdateTeamRequest>;
 
@@ -51,6 +63,13 @@ export class TeamApiGroup extends HttpApiGroup.make('team')
       success: TeamInfo,
       error: Forbidden.pipe(HttpApiSchema.status(403)),
       payload: UpdateTeamRequest,
+      params: { teamId: TeamId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post('retryOnboardingSync', '/teams/:teamId/onboarding/retry', {
+      success: TeamInfo,
+      error: Forbidden.pipe(HttpApiSchema.status(403)),
       params: { teamId: TeamId },
     }).middleware(AuthMiddleware),
   ) {}

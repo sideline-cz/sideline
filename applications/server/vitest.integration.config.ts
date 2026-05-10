@@ -6,7 +6,7 @@ export default defineConfig({
     alias: { '~': path.resolve(__dirname, 'src') },
   },
   test: {
-    include: ['test/integration/**/*.test.ts'],
+    include: ['test/integration/**/*.test.ts', 'test/rpc/OnboardingSync.test.ts'],
     globalSetup: ['test/integration/globalSetup.ts'],
     setupFiles: ['test/integration/setupFile.ts'],
     testTimeout: 30_000,

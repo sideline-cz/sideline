@@ -19,6 +19,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/settings')(
         Effect.all({
           settings: api.teamSettings.getTeamSettings({ params: { teamId } }),
           discordChannels: api.group.listDiscordChannels({ params: { teamId } }),
+          discordRoles: api.group.listDiscordRoles({ params: { teamId } }),
           teamInfo: api.team.getTeamInfo({ params: { teamId } }),
         }),
       ),
@@ -30,13 +31,14 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/settings')(
 
 function TeamSettingsRoute() {
   const { teamId: teamIdRaw } = Route.useParams();
-  const { settings, discordChannels, teamInfo } = Route.useLoaderData();
+  const { settings, discordChannels, discordRoles, teamInfo } = Route.useLoaderData();
 
   return (
     <TeamSettingsPage
       teamId={teamIdRaw}
       settings={settings}
       discordChannels={discordChannels}
+      discordRoles={discordRoles}
       teamInfo={teamInfo}
     />
   );

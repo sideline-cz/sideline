@@ -5,6 +5,7 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
+import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
@@ -40,6 +41,7 @@ type WelcomeMeta = {
 export const GuildsRpcLive = Effect.Do.pipe(
   Effect.bind('botGuilds', () => BotGuildsRepository.asEffect()),
   Effect.bind('discordChannels', () => DiscordChannelsRepository.asEffect()),
+  Effect.bind('discordRoles', () => DiscordRolesRepository.asEffect()),
   Effect.bind('teams', () => TeamsRepository.asEffect()),
   Effect.bind('users', () => UsersRepository.asEffect()),
   Effect.bind('members', () => TeamMembersRepository.asEffect()),
@@ -252,10 +254,12 @@ export const GuildsRpcLive = Effect.Do.pipe(
       'Guild/RegisterGuild': ({
         guild_id,
         guild_name,
+        is_community_enabled,
       }: {
         readonly guild_id: Discord.Snowflake;
         readonly guild_name: string;
-      }) => deps.botGuilds.upsert(guild_id, guild_name),
+        readonly is_community_enabled: boolean;
+      }) => deps.botGuilds.upsert(guild_id, guild_name, is_community_enabled),
 
       'Guild/UnregisterGuild': ({ guild_id }: { readonly guild_id: Discord.Snowflake }) =>
         deps.botGuilds.remove(guild_id),
@@ -359,6 +363,127 @@ export const GuildsRpcLive = Effect.Do.pipe(
         readonly id: string;
         readonly error: string;
       }) => deps.pendingGuildJoins.markFailed(id, error),
+
+      'Guild/PendingOnboardingSyncs': ({ limit }: { readonly limit: number }) =>
+        deps.teams.claimPendingOnboardingSyncs(limit),
+
+      'Guild/MarkOnboardingSyncDone': ({
+        team_id,
+        prompt_id,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly prompt_id: Option.Option<Discord.Snowflake>;
+      }) =>
+        deps.teams
+          .markOnboardingSyncDoneIfSyncing(team_id, prompt_id)
+          .pipe(Effect.map((updated) => ({ updated }))),
+
+      'Guild/MarkOnboardingSyncFailed': ({
+        team_id,
+        error_code,
+        error_detail,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly error_code: string;
+        readonly error_detail: string;
+      }) =>
+        deps.teams
+          .markOnboardingSyncFailedIfSyncing(
+            team_id,
+            JSON.stringify({ code: error_code, detail: error_detail }),
+          )
+          .pipe(Effect.map(() => ({ updated: true }))),
+
+      'Guild/RevertOnboardingSync': ({ team_id }: { readonly team_id: Team.TeamId }) =>
+        deps.teams.revertOnboardingSyncIfSyncing(team_id),
+
+      'Guild/MarkOnboardingSyncSkipped': ({ team_id }: { readonly team_id: Team.TeamId }) =>
+        deps.teams.markOnboardingSyncSkippedIfSyncing(team_id),
+
+      'Guild/GetOnboardingRulesRoleId': ({ guild_id }: { readonly guild_id: Discord.Snowflake }) =>
+        deps.teams.getOnboardingRulesRoleIdByGuildId(guild_id),
+
+      'Guild/SyncCommunityFlags': ({
+        guilds,
+      }: {
+        readonly guilds: ReadonlyArray<{
+          readonly guild_id: Discord.Snowflake;
+          readonly is_community_enabled: boolean;
+        }>;
+      }) =>
+        Effect.Do.pipe(
+          Effect.flatMap(() =>
+            deps.botGuilds.bulkUpdateCommunityFlags(
+              Array.map(guilds, (g) => ({
+                guildId: g.guild_id,
+                isCommunityEnabled: g.is_community_enabled,
+              })),
+            ),
+          ),
+          Effect.flatMap(() =>
+            Effect.all(
+              pipe(
+                guilds,
+                Array.filter((g) => g.is_community_enabled),
+                Array.map((g) =>
+                  deps.teams
+                    .flipPendingOnboardingSyncForGuild(g.guild_id)
+                    .pipe(
+                      Effect.catch((error) =>
+                        Effect.logWarning(
+                          `Failed to flip onboarding sync for guild ${g.guild_id}`,
+                          error,
+                        ),
+                      ),
+                    ),
+                ),
+              ),
+              { concurrency: 'unbounded' },
+            ),
+          ),
+          Effect.asVoid,
+        ),
+
+      'Guild/ListGuildRoles': ({ guild_id }: { readonly guild_id: Discord.Snowflake }) =>
+        deps.discordRoles.listByGuild(guild_id),
+
+      'Guild/SyncGuildRoles': ({
+        guild_id,
+        roles,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly roles: ReadonlyArray<{
+          readonly role_id: Discord.Snowflake;
+          readonly name: string;
+          readonly color: number;
+          readonly position: number;
+          readonly managed: boolean;
+        }>;
+      }) => deps.discordRoles.syncForGuild(guild_id, roles),
+
+      'Guild/UpsertGuildRole': ({
+        guild_id,
+        role_id,
+        name,
+        color,
+        position,
+        managed,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly role_id: Discord.Snowflake;
+        readonly name: string;
+        readonly color: number;
+        readonly position: number;
+        readonly managed: boolean;
+      }) => deps.discordRoles.upsert({ guild_id, role_id, name, color, position, managed }),
+
+      'Guild/DeleteGuildRole': ({
+        guild_id,
+        role_id,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly role_id: Discord.Snowflake;
+      }) => deps.discordRoles.delete(guild_id, role_id),
     };
   }),
   (handlers) => GuildRpcGroup.GuildRpcGroup.toLayer(handlers),

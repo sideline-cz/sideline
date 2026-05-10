@@ -6,6 +6,7 @@ import { Api } from '~/api/api.js';
 import { requireMembership, requirePermission } from '~/api/permissions.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
+import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { DEFAULT_CHANNEL_FORMAT, DEFAULT_ROLE_FORMAT } from '~/utils/applyDiscordFormat.js';
 
 const forbidden = new EventApi.Forbidden();
@@ -14,7 +15,8 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
   Effect.Do.pipe(
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('settings', () => TeamSettingsRepository.asEffect()),
-    Effect.map(({ members, settings }) =>
+    Effect.bind('teams', () => TeamsRepository.asEffect()),
+    Effect.map(({ members, settings, teams }) =>
       handlers
         .handle('getTeamSettings', ({ params: { teamId } }) =>
           Effect.Do.pipe(
@@ -87,12 +89,28 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
             ),
             Effect.tap(({ membership }) => requirePermission(membership, 'team:manage', forbidden)),
             Effect.bind('existing', () => settings.findByTeamId(teamId)),
+            Effect.let('prevTrainingChannel', ({ existing }) =>
+              Option.match(existing, {
+                onNone: () => Option.none<string>(),
+                onSome: (s) => s.discord_channel_training,
+              }),
+            ),
+            Effect.let('nextTrainingChannel', ({ existing }) =>
+              Option.match(payload.discordChannelTraining, {
+                onNone: () =>
+                  Option.match(existing, {
+                    onNone: () => Option.none<string>(),
+                    onSome: (s) => s.discord_channel_training,
+                  }),
+                onSome: (v) => v,
+              }),
+            ),
             Effect.bind('result', ({ existing }) =>
               Option.match(existing, {
                 onNone: () =>
                   settings.upsert({
                     teamId,
-                    eventHorizonDays: payload.eventHorizonDays,
+                    eventHorizonDays: Option.getOrElse(payload.eventHorizonDays, () => 30),
                     minPlayersThreshold: Option.getOrElse(payload.minPlayersThreshold, () => 0),
                     rsvpReminderDaysBefore: Option.getOrElse(
                       payload.rsvpReminderDaysBefore,
@@ -135,7 +153,10 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                 onSome: (s) =>
                   settings.upsert({
                     teamId,
-                    eventHorizonDays: payload.eventHorizonDays,
+                    eventHorizonDays: Option.getOrElse(
+                      payload.eventHorizonDays,
+                      () => s.event_horizon_days,
+                    ),
                     minPlayersThreshold: Option.getOrElse(
                       payload.minPlayersThreshold,
                       () => s.min_players_threshold,
@@ -212,6 +233,12 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                   }),
               }),
             ),
+            Effect.tap(({ prevTrainingChannel, nextTrainingChannel }) => {
+              if (Option.getOrNull(prevTrainingChannel) !== Option.getOrNull(nextTrainingChannel)) {
+                return teams.markOnboardingSyncPending(teamId);
+              }
+              return Effect.void;
+            }),
             Effect.map(
               ({ result }) =>
                 new TeamSettingsApi.TeamSettingsInfo({

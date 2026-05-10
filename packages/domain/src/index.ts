@@ -79,6 +79,8 @@ export * as Notification from './models/Notification.js';
 
 export * as OAuthConnection from './models/OAuthConnection.js';
 
+export * as Onboarding from './models/Onboarding.js';
+
 export * as Role from './models/Role.js';
 
 export * as RoleGroup from './models/RoleGroup.js';

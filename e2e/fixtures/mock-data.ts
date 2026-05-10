@@ -65,6 +65,13 @@ export const mockTeamInfo = {
   welcomeChannelId: null,
   systemLogChannelId: null,
   welcomeMessageTemplate: null,
+  rulesChannelId: null,
+  onboardingRulesRoleId: null,
+  onboardingLocale: 'en',
+  onboardingSyncStatus: 'pending',
+  onboardingSyncedAt: null,
+  onboardingSyncError: null,
+  isCommunityEnabled: true,
 };
 
 export const mockDashboardResponse = {

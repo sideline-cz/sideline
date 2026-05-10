@@ -47,7 +47,9 @@ export class TeamSettingsInfo extends Schema.Class<TeamSettingsInfo>('TeamSettin
 }) {}
 
 export const UpdateTeamSettingsRequest = Schema.Struct({
-  eventHorizonDays: Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 365 }))),
+  eventHorizonDays: Schema.OptionFromOptional(
+    Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 365 }))),
+  ),
   minPlayersThreshold: Schema.OptionFromOptional(
     Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 100 }))),
   ),

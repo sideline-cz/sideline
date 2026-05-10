@@ -1,10 +1,16 @@
 import { Schema } from 'effect';
 import { Rpc, RpcGroup } from 'effect/unstable/rpc';
 import * as Discord from '~/models/Discord.js';
+import { OnboardingLocale, OnboardingSyncErrorCode } from '~/models/Onboarding.js';
+import { TeamId } from '~/models/Team.js';
 
 export const GuildRpcGroup = RpcGroup.make(
   Rpc.make('RegisterGuild', {
-    payload: { guild_id: Discord.Snowflake, guild_name: Schema.String },
+    payload: {
+      guild_id: Discord.Snowflake,
+      guild_name: Schema.String,
+      is_community_enabled: Schema.Boolean,
+    },
   }),
   Rpc.make('UnregisterGuild', {
     payload: { guild_id: Discord.Snowflake },
@@ -104,5 +110,99 @@ export const GuildRpcGroup = RpcGroup.make(
   }),
   Rpc.make('MarkGuildJoinFailed', {
     payload: { id: Schema.String.pipe(Schema.check(Schema.isUUID())), error: Schema.String },
+  }),
+  Rpc.make('PendingOnboardingSyncs', {
+    payload: { limit: Schema.Number },
+    success: Schema.Array(
+      Schema.Struct({
+        team_id: TeamId,
+        guild_id: Discord.Snowflake,
+        team_name: Schema.String,
+        onboarding_locale: OnboardingLocale,
+        rules_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+        welcome_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+        training_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+        onboarding_rules_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
+        onboarding_rules_prompt_id: Schema.OptionFromNullOr(Discord.Snowflake),
+        is_community_enabled: Schema.Boolean,
+      }),
+    ),
+  }),
+  Rpc.make('MarkOnboardingSyncDone', {
+    payload: {
+      team_id: TeamId,
+      prompt_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    },
+    success: Schema.Struct({ updated: Schema.Boolean }),
+  }),
+  Rpc.make('MarkOnboardingSyncFailed', {
+    payload: {
+      team_id: TeamId,
+      error_code: OnboardingSyncErrorCode,
+      error_detail: Schema.String,
+    },
+    success: Schema.Struct({ updated: Schema.Boolean }),
+  }),
+  Rpc.make('RevertOnboardingSync', {
+    payload: { team_id: TeamId },
+  }),
+  Rpc.make('MarkOnboardingSyncSkipped', {
+    payload: { team_id: TeamId },
+  }),
+  Rpc.make('GetOnboardingRulesRoleId', {
+    payload: { guild_id: Discord.Snowflake },
+    success: Schema.OptionFromNullOr(Discord.Snowflake),
+  }),
+  Rpc.make('SyncCommunityFlags', {
+    payload: {
+      guilds: Schema.Array(
+        Schema.Struct({
+          guild_id: Discord.Snowflake,
+          is_community_enabled: Schema.Boolean,
+        }),
+      ),
+    },
+  }),
+  Rpc.make('ListGuildRoles', {
+    payload: { guild_id: Discord.Snowflake },
+    success: Schema.Array(
+      Schema.Struct({
+        id: Discord.Snowflake,
+        name: Schema.String,
+        color: Schema.Number,
+        position: Schema.Number,
+        managed: Schema.Boolean,
+      }),
+    ),
+  }),
+  Rpc.make('SyncGuildRoles', {
+    payload: {
+      guild_id: Discord.Snowflake,
+      roles: Schema.Array(
+        Schema.Struct({
+          role_id: Discord.Snowflake,
+          name: Schema.String,
+          color: Schema.Number,
+          position: Schema.Number,
+          managed: Schema.Boolean,
+        }),
+      ),
+    },
+  }),
+  Rpc.make('UpsertGuildRole', {
+    payload: {
+      guild_id: Discord.Snowflake,
+      role_id: Discord.Snowflake,
+      name: Schema.String,
+      color: Schema.Number,
+      position: Schema.Number,
+      managed: Schema.Boolean,
+    },
+  }),
+  Rpc.make('DeleteGuildRole', {
+    payload: {
+      guild_id: Discord.Snowflake,
+      role_id: Discord.Snowflake,
+    },
   }),
 ).prefix('Guild/');

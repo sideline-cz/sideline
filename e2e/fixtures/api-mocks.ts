@@ -370,7 +370,18 @@ async function setupApiMocks(page: Page) {
     }),
   );
 
-  // Groups endpoints (discord-channels before generic groups)
+  // Groups endpoints (discord-channels and discord-roles before generic groups)
+  await page.route(
+    '**/teams/*/discord-roles',
+    apiOnly(async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([]),
+      });
+    }),
+  );
+
   await page.route(
     '**/teams/*/discord-channels',
     apiOnly(async (route) => {
