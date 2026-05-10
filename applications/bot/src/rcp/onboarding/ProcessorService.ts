@@ -41,21 +41,20 @@ const resolveStrings = (
 
 const decodeSnowflake = Schema.decodeSync(Discord.Snowflake);
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object';
+
 const findNewPromptId = (response: unknown, roleId: string): Option.Option<Discord.Snowflake> => {
-  if (response === null || typeof response !== 'object' || !('prompts' in response)) {
-    return Option.none();
-  }
-  const prompts = (response as { prompts?: ReadonlyArray<unknown> }).prompts ?? [];
-  for (const promptUnknown of prompts) {
-    if (promptUnknown === null || typeof promptUnknown !== 'object') continue;
-    const prompt = promptUnknown as {
-      id?: string;
-      options?: ReadonlyArray<{ role_ids?: ReadonlyArray<string> }>;
-    };
-    const options = prompt.options ?? [];
+  if (!isRecord(response) || !Array.isArray(response.prompts)) return Option.none();
+  for (const prompt of response.prompts) {
+    if (!isRecord(prompt)) continue;
+    const options = Array.isArray(prompt.options) ? prompt.options : [];
     for (const opt of options) {
-      if ((opt.role_ids ?? []).includes(roleId)) {
-        return prompt.id !== undefined ? Option.some(decodeSnowflake(prompt.id)) : Option.none();
+      const roleIds = isRecord(opt) && Array.isArray(opt.role_ids) ? opt.role_ids : [];
+      if (roleIds.includes(roleId)) {
+        return typeof prompt.id === 'string'
+          ? Option.some(decodeSnowflake(prompt.id))
+          : Option.none();
       }
     }
   }
@@ -63,27 +62,9 @@ const findNewPromptId = (response: unknown, roleId: string): Option.Option<Disco
 };
 
 const isStalePromptIdError = (error: unknown, promptId: string): boolean => {
-  if (error === null || typeof error !== 'object' || !('_tag' in error)) return false;
-  if ((error as { _tag: unknown })._tag !== 'ErrorResponse') return false;
-  const errors = (error as { errors?: unknown }).errors ?? {};
-  const serialized = JSON.stringify(errors);
+  if (!isRecord(error) || error._tag !== 'ErrorResponse') return false;
+  const serialized = JSON.stringify(error.errors ?? {});
   return serialized.includes('"id"') && serialized.includes(promptId);
-};
-
-const getErrorTag = (error: unknown): string | undefined => {
-  if (error !== null && typeof error === 'object' && '_tag' in error) {
-    const tag = (error as { _tag?: unknown })._tag;
-    return typeof tag === 'string' ? tag : undefined;
-  }
-  return undefined;
-};
-
-const getErrorCode = (error: unknown): number | undefined => {
-  if (error !== null && typeof error === 'object' && 'code' in error) {
-    const code = (error as { code?: unknown }).code;
-    return typeof code === 'number' ? code : undefined;
-  }
-  return undefined;
 };
 
 const makeProcessTeam =
@@ -120,27 +101,23 @@ const makeProcessTeam =
         return discord
           .putGuildsOnboarding(team.guild_id, merged as DfxUpdateGuildOnboardingRequest)
           .pipe(
-            Effect.catch((putError) => {
+            Effect.catchTag('ErrorResponse', (putError) => {
               if (storedPromptId === undefined) return Effect.fail(putError);
               const classified = classifyOnboardingError(putError, team);
               if (classified.code !== 'discord_error') return Effect.fail(putError);
-              if (
-                getErrorTag(putError) === 'ErrorResponse' &&
-                getErrorCode(putError) === 50035 &&
-                isStalePromptIdError(putError, storedPromptId)
-              ) {
-                const strippedTeam = { ...team, onboarding_rules_prompt_id: Option.none<string>() };
-                const { merged: retryMerged } = mergeOnboardingPayload(
-                  current,
-                  strippedTeam,
-                  strings.rulesPrompt,
-                );
-                return discord.putGuildsOnboarding(
-                  team.guild_id,
-                  retryMerged as DfxUpdateGuildOnboardingRequest,
-                );
+              if (putError.code !== 50035 || !isStalePromptIdError(putError, storedPromptId)) {
+                return Effect.fail(putError);
               }
-              return Effect.fail(putError);
+              const strippedTeam = { ...team, onboarding_rules_prompt_id: Option.none<string>() };
+              const { merged: retryMerged } = mergeOnboardingPayload(
+                current,
+                strippedTeam,
+                strings.rulesPrompt,
+              );
+              return discord.putGuildsOnboarding(
+                team.guild_id,
+                retryMerged as DfxUpdateGuildOnboardingRequest,
+              );
             }),
           );
       }),

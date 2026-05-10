@@ -411,38 +411,26 @@ export const GuildsRpcLive = Effect.Do.pipe(
           readonly is_community_enabled: boolean;
         }>;
       }) =>
-        Effect.Do.pipe(
-          Effect.flatMap(() =>
-            deps.botGuilds.bulkUpdateCommunityFlags(
-              Array.map(guilds, (g) => ({
-                guildId: g.guild_id,
-                isCommunityEnabled: g.is_community_enabled,
-              })),
-            ),
-          ),
-          Effect.flatMap(() =>
-            Effect.all(
-              pipe(
-                guilds,
-                Array.filter((g) => g.is_community_enabled),
-                Array.map((g) =>
-                  deps.teams
-                    .flipPendingOnboardingSyncForGuild(g.guild_id)
-                    .pipe(
-                      Effect.catch((error) =>
-                        Effect.logWarning(
-                          `Failed to flip onboarding sync for guild ${g.guild_id}`,
-                          error,
-                        ),
-                      ),
-                    ),
+        deps.botGuilds
+          .bulkUpdateCommunityFlags(
+            Array.map(guilds, (g) => ({
+              guildId: g.guild_id,
+              isCommunityEnabled: g.is_community_enabled,
+            })),
+          )
+          .pipe(
+            Effect.flatMap(() =>
+              Effect.all(
+                pipe(
+                  guilds,
+                  Array.filter((g) => g.is_community_enabled),
+                  Array.map((g) => deps.teams.flipPendingOnboardingSyncForGuild(g.guild_id)),
                 ),
+                { concurrency: 'unbounded' },
               ),
-              { concurrency: 'unbounded' },
             ),
+            Effect.asVoid,
           ),
-          Effect.asVoid,
-        ),
 
       'Guild/ListGuildRoles': ({ guild_id }: { readonly guild_id: Discord.Snowflake }) =>
         deps.discordRoles.listByGuild(guild_id),

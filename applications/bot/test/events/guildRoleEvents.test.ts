@@ -115,7 +115,13 @@ const MockDiscordRESTLayer = Layer.succeed(
 );
 
 const invokeGuildCreate = async (
-  payload: { guild_id: string; id: string; name: string; roles: ReturnType<typeof makeRole>[] },
+  payload: {
+    guild_id: string;
+    id: string;
+    name: string;
+    features: string[];
+    roles: ReturnType<typeof makeRole>[];
+  },
   rpcLayer: Layer.Layer<SyncRpc>,
 ) => {
   const { handleGuildCreate } = await import('~/events/guildCreate.js');

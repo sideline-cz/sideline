@@ -28,23 +28,31 @@ export interface ClassifiedError {
 //   (a) an _errors entry with code UNKNOWN_ROLE / UNKNOWN_CHANNEL, or
 //   (b) an _errors entry text containing our snowflake AND the node is under a role/channel field key.
 
-const isTagged = <T extends string>(error: unknown, tag: T): error is { _tag: T } =>
-  error !== null && typeof error === 'object' && '_tag' in error && error._tag === tag;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object';
 
-const getErrorCode = (entry: unknown): string | undefined => {
-  if (entry !== null && typeof entry === 'object' && 'code' in entry) {
-    const code = (entry as { code?: unknown }).code;
-    return typeof code === 'string' ? code : undefined;
-  }
-  return undefined;
+const isTagged = <T extends string>(
+  error: unknown,
+  tag: T,
+): error is Record<string, unknown> & { _tag: T } =>
+  isRecord(error) && '_tag' in error && error._tag === tag;
+
+const stringProp = (entry: Record<string, unknown>, key: string): string | undefined => {
+  const value = entry[key];
+  return typeof value === 'string' ? value : undefined;
 };
+
+const numberProp = (entry: Record<string, unknown>, key: string): number | undefined => {
+  const value = entry[key];
+  return typeof value === 'number' ? value : undefined;
+};
+
+const getErrorCode = (entry: unknown): string | undefined =>
+  isRecord(entry) ? stringProp(entry, 'code') : undefined;
 
 const getErrorText = (entry: unknown): string => {
   if (typeof entry === 'string') return entry;
-  if (entry !== null && typeof entry === 'object' && 'message' in entry) {
-    const msg = (entry as { message?: unknown }).message;
-    return typeof msg === 'string' ? msg : '';
-  }
+  if (isRecord(entry)) return stringProp(entry, 'message') ?? '';
   return '';
 };
 
@@ -82,17 +90,16 @@ const walkErrors = (
   inRoleField: boolean,
   inChannelField: boolean,
 ): MatchKind => {
-  if (node === null || typeof node !== 'object') return 'none';
-  const obj: Record<string, unknown> = node as Record<string, unknown>;
+  if (!isRecord(node)) return 'none';
 
-  if ('_errors' in obj && Array.isArray(obj._errors)) {
-    return checkLeaf(obj._errors, roleId, channelId, inRoleField, inChannelField);
+  if (Array.isArray(node._errors)) {
+    return checkLeaf(node._errors, roleId, channelId, inRoleField, inChannelField);
   }
 
-  for (const key of Object.keys(obj)) {
+  for (const [key, value] of Object.entries(node)) {
     const nowInRole = inRoleField || ROLE_FIELD_KEYS.has(key);
     const nowInChannel = inChannelField || CHANNEL_FIELD_KEYS.has(key);
-    const result = walkErrors(obj[key], roleId, channelId, nowInRole, nowInChannel);
+    const result = walkErrors(value, roleId, channelId, nowInRole, nowInChannel);
     if (result !== 'none') return result;
   }
   return 'none';
@@ -100,8 +107,7 @@ const walkErrors = (
 
 export const classifyOnboardingError = (error: unknown, team: TeamContext): ClassifiedError => {
   if (isTagged(error, 'RatelimitedResponse')) {
-    const r = error as { message?: string; retry_after?: number };
-    const retry_after = typeof r.retry_after === 'number' ? r.retry_after : undefined;
+    const retry_after = numberProp(error, 'retry_after');
     return {
       code: 'rate_limited',
       detail: `Rate limited. retry_after=${retry_after ?? 'unknown'}`,
@@ -118,9 +124,8 @@ export const classifyOnboardingError = (error: unknown, team: TeamContext): Clas
   }
 
   if (isTagged(error, 'ErrorResponse')) {
-    const e = error as { code?: number; message?: string; errors?: unknown };
-    const code = e.code ?? 0;
-    const message = e.message ?? '';
+    const code = numberProp(error, 'code') ?? 0;
+    const message = stringProp(error, 'message') ?? '';
 
     if (code === 50013 || message.toLowerCase().includes('community')) {
       return {
@@ -133,7 +138,7 @@ export const classifyOnboardingError = (error: unknown, team: TeamContext): Clas
       const roleId = Option.getOrUndefined(team.onboarding_rules_role_id);
       const channelId = Option.getOrUndefined(team.rules_channel_id);
 
-      const match = walkErrors(e.errors, roleId, channelId, false, false);
+      const match = walkErrors(error.errors, roleId, channelId, false, false);
       if (match === 'role') {
         return {
           code: 'role_deleted',
