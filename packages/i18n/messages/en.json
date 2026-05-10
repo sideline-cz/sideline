@@ -821,7 +821,7 @@
   "invite_invitedBy": "Invited by",
   "invite_willJoinGroup": "You'll join",
   "bot_onboarding_welcomeScreen_description": "Welcome to {teamName}! Read the rules, say hi, and check the training channel.",
-  "bot_onboarding_welcomeScreen_channels_rules": "Read the rules — required to access the rest of the server",
+  "bot_onboarding_welcomeScreen_channels_rules": "Read the rules to unlock the rest of the server",
   "bot_onboarding_welcomeScreen_channels_welcome": "Say hello and meet your teammates",
   "bot_onboarding_welcomeScreen_channels_training": "Find upcoming trainings and RSVP",
   "bot_onboarding_rulesPrompt_title": "Read the rules",

@@ -1113,9 +1113,19 @@ function OnboardingCard({
   handleRetryOnboarding,
   formatRelative,
 }: OnboardingCardProps) {
+  const router = useRouter();
   const syncStatus = teamInfo.onboardingSyncStatus;
   const syncedAt = teamInfo.onboardingSyncedAt;
   const syncError = Option.getOrNull(teamInfo.onboardingSyncError);
+
+  // Auto-poll the loader while the sync is in flight so the badge updates without a manual refresh.
+  React.useEffect(() => {
+    if (syncStatus !== 'pending' && syncStatus !== 'syncing') return;
+    const interval = setInterval(() => {
+      router.invalidate();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [syncStatus, router]);
 
   const statusBadge = (() => {
     if (syncStatus === 'done') {

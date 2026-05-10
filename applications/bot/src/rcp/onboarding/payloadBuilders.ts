@@ -70,6 +70,9 @@ export interface MergeResult {
 }
 
 const MAX_DESC_LEN = 140;
+const MAX_CHANNEL_DESC_LEN = 50;
+
+const truncate = (s: string, max: number) => (s.length > max ? s.slice(0, max) : s);
 
 export const buildWelcomeScreenPayload = (
   team: OnboardingTeamView,
@@ -80,7 +83,7 @@ export const buildWelcomeScreenPayload = (
   if (Option.isSome(team.rules_channel_id)) {
     channels.push({
       channel_id: team.rules_channel_id.value,
-      description: strings.channels_rules,
+      description: truncate(strings.channels_rules, MAX_CHANNEL_DESC_LEN),
       emoji_name: '📜',
     });
   }
@@ -88,7 +91,7 @@ export const buildWelcomeScreenPayload = (
   if (Option.isSome(team.welcome_channel_id)) {
     channels.push({
       channel_id: team.welcome_channel_id.value,
-      description: strings.channels_welcome,
+      description: truncate(strings.channels_welcome, MAX_CHANNEL_DESC_LEN),
       emoji_name: '👋',
     });
   }
@@ -96,7 +99,7 @@ export const buildWelcomeScreenPayload = (
   if (Option.isSome(team.training_channel_id)) {
     channels.push({
       channel_id: team.training_channel_id.value,
-      description: strings.channels_training,
+      description: truncate(strings.channels_training, MAX_CHANNEL_DESC_LEN),
       emoji_name: '🏃',
     });
   }
