@@ -191,6 +191,7 @@ describe('GuildRole event handlers', () => {
         guild_id: GUILD_ID,
         id: GUILD_ID,
         name: 'Test Guild',
+        features: [],
         roles: [roleA, roleB],
       },
       rpcLayer,
