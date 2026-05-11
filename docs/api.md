@@ -2828,6 +2828,7 @@ Joins a team using an invite code. The authenticated user becomes a new member o
 | `roleNames` | `string[]` | Roles assigned to the new member |
 | `isProfileComplete` | `boolean` | Whether the user's profile is complete |
 | `requiresReauth` | `boolean` | `true` when the user's OAuth token lacks the `guilds.join` scope; the user must re-authenticate before the bot can add them to the Discord server automatically. Discord guild enqueue is skipped when this is `true`. |
+| `acceptanceId` | `InviteAcceptanceId \| null` | ID of the newly created `invite_acceptances` row. `null` when the user is already a member (handled by the `AlreadyMember` error path). The web app polls `GET /invite/acceptances/:acceptanceId` to obtain the per-acceptance Discord invite URL once the bot has generated it. |
 
 **Errors:**
 
@@ -2835,6 +2836,34 @@ Joins a team using an invite code. The authenticated user becomes a new member o
 |---|---|---|
 | `InviteNotFound` | 404 | Invite code does not exist or is disabled |
 | `AlreadyMember` | 409 | User is already a member of this team |
+
+---
+
+#### `GET /invite/acceptances/:acceptanceId`
+
+Polls the status of a single invite acceptance. The web app calls this endpoint repeatedly (≤ 1s cadence) after `POST /invite/:code/join` returns an `acceptanceId` to obtain the Discord invite URL as soon as the bot generates it.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `acceptanceId` | `InviteAcceptanceId` | The acceptance ID returned by `POST /invite/:code/join` |
+
+**Response:** `200 OK` — `JoinStatus`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `acceptanceId` | `InviteAcceptanceId` | No | The acceptance ID |
+| `discordInviteUrl` | `string \| null` | Yes | Full Discord invite URL (e.g. `https://discord.gg/<code>`). `null` while the bot is still generating the invite. |
+| `errorCode` | `InviteGeneratorErrorCode \| null` | Yes | Set when the bot could not generate the Discord invite (e.g. `missing_welcome_channel`, `discord_api_error`). `null` on success or while pending. |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `InviteNotFound` | 404 | No acceptance row found for the given ID |
 
 ---
 
@@ -2900,6 +2929,8 @@ Lists all invite codes for the team (active and inactive).
 | `expiresAt` | `Date \| null` | Yes | Expiry timestamp (null = no expiry) |
 | `createdAt` | `Date` | No | Creation timestamp |
 | `createdBy` | `UserId` | No | ID of the user who created the invite |
+
+**Note:** The `discordCode` field that previously appeared on `InviteListItem` has been removed. Discord invite codes are now tracked per acceptance (one per member who clicks "Accept"), not per invite link.
 
 **Errors:**
 

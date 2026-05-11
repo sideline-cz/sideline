@@ -38,14 +38,6 @@ export function TeamInvitesPage({
     });
   }, []);
 
-  const handleCopyDiscord = React.useCallback((discordCode: string) => {
-    const link = `https://discord.gg/${discordCode}`;
-    navigator.clipboard.writeText(link).then(() => {
-      setCopied(discordCode);
-      setTimeout(() => setCopied(null), 2000);
-    });
-  }, []);
-
   const handleDisable = React.useCallback(
     async (inviteId: Invite.InviteListItem['id']) => {
       if (!window.confirm(m.invites_disableConfirm())) return;
@@ -147,32 +139,6 @@ export function TeamInvitesPage({
                   </td>
                   <td className='py-2 px-3'>
                     <div className='flex gap-1 items-center justify-end'>
-                      {Option.match(invite.discordCode, {
-                        onNone: () =>
-                          invite.active ? (
-                            <span className='text-xs text-muted-foreground'>
-                              {m.teamInvites_discordUrlGenerating()}
-                            </span>
-                          ) : null,
-                        onSome: (discordCode) => (
-                          <>
-                            <Button
-                              variant='ghost'
-                              size='icon'
-                              onClick={() => handleCopyDiscord(discordCode)}
-                              title={m.teamInvites_copyDiscordUrl()}
-                            >
-                              <Copy className='size-4' />
-                              <span className='sr-only'>{m.teamInvites_copyDiscordUrl()}</span>
-                            </Button>
-                            {copied === discordCode && (
-                              <span className='text-xs text-muted-foreground'>
-                                {m.invites_linkCopied()}
-                              </span>
-                            )}
-                          </>
-                        ),
-                      })}
                       <Button
                         variant='ghost'
                         size='icon'

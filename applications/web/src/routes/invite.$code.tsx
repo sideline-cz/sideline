@@ -1,8 +1,9 @@
+import type { Invite } from '@sideline/domain';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { Effect, Option } from 'effect';
 import React from 'react';
 import { InvitePage } from '~/components/pages/InvitePage';
-import { getLogin, setLastTeamId, setPendingInvite } from '~/lib/auth';
+import { getLogin, setLastTeamId, setPendingDiscordJoin, setPendingInvite } from '~/lib/auth';
 import { ApiClient, ClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
 
 export const Route = createFileRoute('/invite/$code')({
@@ -23,10 +24,19 @@ function InviteRoute() {
   const run = useRun();
 
   const handleJoined = React.useCallback(
-    (teamId: string, isProfileComplete: boolean) => {
-      Effect.runSync(setLastTeamId(teamId));
-      if (isProfileComplete) {
-        navigate({ to: '/teams/$teamId', params: { teamId } });
+    (result: Invite.JoinResult) => {
+      Effect.runSync(setLastTeamId(result.teamId));
+      if (Option.isSome(result.acceptanceId)) {
+        Effect.runFork(
+          setPendingDiscordJoin({
+            acceptanceId: result.acceptanceId.value,
+            teamId: result.teamId,
+            ts: Date.now(),
+          }),
+        );
+      }
+      if (result.isProfileComplete) {
+        navigate({ to: '/teams/$teamId', params: { teamId: result.teamId } });
       } else {
         navigate({ to: '/profile/complete' });
       }

@@ -71,6 +71,8 @@ export * as GroupModel from './models/GroupModel.js';
 
 export * as ICalToken from './models/ICalToken.js';
 
+export * as InviteAcceptance from './models/InviteAcceptance.js';
+
 export * as Leaderboard from './models/Leaderboard.js';
 
 export * as MemberRole from './models/MemberRole.js';

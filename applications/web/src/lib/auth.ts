@@ -2,13 +2,17 @@ import { Effect } from 'effect';
 import { client } from '~/lib/client';
 
 export {
+  clearPendingDiscordJoin,
   clearPendingInvite,
   finishLogin,
   getLastTeamId,
+  getPendingDiscordJoin,
   getPendingInvite,
   getToken,
   logout,
+  type PendingDiscordJoin,
   setLastTeamId,
+  setPendingDiscordJoin,
   setPendingInvite,
 } from '~/lib/token';
 

@@ -28,6 +28,9 @@ const ixProgram = Effect.succeed(commandBuilder).pipe(
 const pollLoop = <E, R>(processTick: Effect.Effect<void, E, R>) =>
   processTick.pipe(Effect.repeat(Schedule.spaced('5 seconds')));
 
+const fastPollLoop = <E, R>(processTick: Effect.Effect<void, E, R>) =>
+  processTick.pipe(Effect.repeat(Schedule.spaced('1 seconds')));
+
 export const program = Effect.Do.pipe(
   Effect.bind('events', () => eventHandlers),
   Effect.bind('roles', () => RoleSyncService.asEffect()),
@@ -46,7 +49,7 @@ export const program = Effect.Do.pipe(
         pollLoop(channels.processTick),
         pollLoop(eventSync.processTick),
         pollLoop(guildJoin.processTick),
-        pollLoop(inviteGenerator.processTick),
+        fastPollLoop(inviteGenerator.processTick),
         pollLoop(onboarding.processTick),
         recoverDeletedMessages,
       ],

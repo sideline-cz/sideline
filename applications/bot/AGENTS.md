@@ -265,10 +265,40 @@ When adding new edit-in-place helpers in this file, follow the same contract: re
 
 Use this pattern (and not `Effect.Semaphore.make` at module top-level) whenever a Discord-side resource is identified by an ID and per-resource serialisation is required. Module-level semaphores serialise globally across all IDs and would needlessly block unrelated channels.
 
-1. Bot service polls via `rpc.GetUnprocessed*Events({ limit: 50 })` every 5 seconds
+1. Bot service polls via `rpc.GetUnprocessed*Events({ limit: 50 })` every 5 seconds (the standard `pollLoop` helper in `src/Bot.ts`, `Schedule.spaced('5 seconds')`)
 2. Processes each event (Discord REST calls with exponential retry)
 3. Marks events as processed or failed
 4. Mapping tables track the Discord resource ID for each domain entity
+
+### Poll-Loop Cadences (`src/Bot.ts`)
+
+Two distinct schedules wrap processor `processTick` effects:
+
+| Helper | Cadence | Schedule | Used by |
+|--------|---------|----------|---------|
+| `pollLoop` | 5s | `Schedule.spaced('5 seconds')` | `roles.processTick`, `channels.processTick`, `eventSync.processTick`, `guildJoin.processTick`, `onboarding.processTick` |
+| `fastPollLoop` | 1s | `Schedule.spaced('1 seconds')` | `inviteGenerator.processTick` only |
+
+Rules:
+
+1. **`fastPollLoop` is reserved for the invite generator.** The web client begins polling `GET /invite/acceptances/:acceptanceId` immediately after a user accepts an invite; the 1s cadence keeps the wait between accept and the "Open Discord server" CTA under ~2s.
+2. **Never promote other services to `fastPollLoop`** without explicit justification — every additional 1s loop multiplies idle RPC load.
+3. **Never demote `inviteGenerator` back to `pollLoop`** — the user-visible latency on `InvitePage` depends on this cadence.
+
+### Invite Generator (`src/rcp/inviteGenerator/ProcessorService.ts`)
+
+The invite generator mints one single-use Discord invite per **acceptance** (not per `team_invites` row). Each tick:
+
+1. Calls `rpc['Invite/PendingAcceptances']({ limit: 20 })` to fetch acceptances with `discord_code IS NULL AND discord_code_error_code IS NULL` (server filters by `welcome_channel_id IS NOT NULL` and `bot_guilds.is_community_enabled = true`).
+2. For each `PendingAcceptance { acceptance_id, guild_id, welcome_channel_id }`, calls `discord.createChannelInvite(welcome_channel_id, { max_age: 86400, max_uses: 1, unique: true, temporary: false })`.
+3. On success: `rpc['Invite/SetAcceptanceDiscordCode']({ acceptance_id, discord_code })`.
+4. On failure: classifies the error and calls `rpc['Invite/MarkAcceptanceFailed']({ acceptance_id, error_code, error_detail })`.
+
+Rules:
+
+1. **`max_uses` must be `1` and `max_age` must be `86400` (24h).** Reusable or longer-lived codes break the per-acceptance attribution model — the `Guild/RegisterMember` welcome lookup uses `invite_acceptances.discord_code` to find the single user the code was minted for.
+2. **The acceptance id is the only identifier passed in `Invite/*` RPC payloads.** The old `invite_id`-keyed RPCs (`Invite/PendingDiscordCodes`, `Invite/SetDiscordCode`, `Invite/MarkDiscordCodeFailed`) no longer exist. Never reintroduce them.
+3. **Processing concurrency is `1`.** The `Effect.all(..., { concurrency: 1 })` serialisation prevents Discord rate-limit storms when many acceptances queue up.
 
 ### Adding a New Sync Type
 

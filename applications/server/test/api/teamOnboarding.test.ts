@@ -31,6 +31,7 @@ import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsReposit
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
+import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
@@ -401,6 +402,7 @@ const MockNoopLayers = Layer.mergeAll(
   noopMockLayer(RolesRepository),
   noopMockLayer(GroupsRepository),
   noopMockLayer(TeamInvitesRepository),
+  noopMockLayer(InviteAcceptancesRepository),
   MockPendingGuildJoinsLayer,
   noopMockLayer(TrainingTypesRepository),
   noopMockLayer(RostersRepository),

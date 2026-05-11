@@ -1,4 +1,10 @@
-import { type Discord, GuildRpcGroup, type Team, type TeamMember } from '@sideline/domain';
+import {
+  type Discord,
+  type GroupModel,
+  GuildRpcGroup,
+  type Team,
+  type TeamMember,
+} from '@sideline/domain';
 import { applyTemplate, sanitizeHexColor, sanitizeRendered } from '@sideline/template-renderer';
 import { Array, Effect, Option, pipe } from 'effect';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
@@ -7,8 +13,8 @@ import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsReposit
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
-import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
@@ -48,7 +54,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
   Effect.bind('roleMappings', () => DiscordRoleMappingRepository.asEffect()),
   Effect.bind('channelMappings', () => DiscordChannelMappingRepository.asEffect()),
   Effect.bind('groups', () => GroupsRepository.asEffect()),
-  Effect.bind('invites', () => TeamInvitesRepository.asEffect()),
+  Effect.bind('acceptances', () => InviteAcceptancesRepository.asEffect()),
   Effect.bind('pendingGuildJoins', () => PendingGuildJoinsRepository.asEffect()),
   Effect.map((deps) => {
     const setupNewMember = (
@@ -118,73 +124,94 @@ export const GuildsRpcLive = Effect.Do.pipe(
         welcome: Option.none(),
         invite_code: payload.invite_code,
       };
+      type Ctx = {
+        readonly team_id: Team.TeamId;
+        readonly group_id: Option.Option<GroupModel.GroupId>;
+        readonly group_name: Option.Option<string>;
+        readonly inviter_username: string;
+        readonly inviter_discord_id: Option.Option<Discord.Snowflake>;
+        readonly team_name: string;
+      };
+      const buildWelcome = (ctx: Ctx): Effect.Effect<WelcomeMeta> => {
+        if (ctx.team_id !== team.id) {
+          return Effect.logError(
+            `RegisterMember: invite team_id ${ctx.team_id} !== team ${team.id}`,
+          ).pipe(Effect.as(noWelcome));
+        }
+        const renderedMessage = Option.map(team.welcome_message_template, (template) =>
+          sanitizeRendered(
+            applyTemplate(template, {
+              memberMention: `<@${payload.discord_id}>`,
+              memberName: Option.getOrElse(payload.display_name, () => payload.username),
+              inviterMention: Option.match(ctx.inviter_discord_id, {
+                onNone: () => '',
+                onSome: (id) => `<@${id}>`,
+              }),
+              inviterName: ctx.inviter_username,
+              groupName: Option.getOrElse(ctx.group_name, () => ''),
+              teamName: ctx.team_name,
+            }),
+          ),
+        );
+        const fetchGroupColor = Option.match(ctx.group_id, {
+          onNone: () => Effect.succeed(Option.none<number>()),
+          onSome: (groupId) =>
+            deps.groups
+              .findGroupById(groupId)
+              .pipe(
+                Effect.map(
+                  Option.flatMap((g) =>
+                    Option.fromNullishOr(sanitizeHexColor(Option.getOrNull(g.color))),
+                  ),
+                ),
+              ),
+        });
+        return Effect.Do.pipe(
+          Effect.tap(() =>
+            Option.match(ctx.group_id, {
+              onNone: () => Effect.void,
+              onSome: (groupId) => deps.groups.addMemberById(groupId, newMember.id),
+            }),
+          ),
+          Effect.bind('group_color_int', () => fetchGroupColor),
+          Effect.map(
+            ({ group_color_int }): WelcomeMeta => ({
+              system_log_channel_id: team.system_log_channel_id,
+              invite_code: payload.invite_code,
+              welcome: Option.some<WelcomeDetail>({
+                welcome_channel_id: team.welcome_channel_id,
+                welcome_message_rendered: renderedMessage,
+                group_name: ctx.group_name,
+                group_color_int,
+                inviter_discord_id: ctx.inviter_discord_id,
+              }),
+            }),
+          ),
+        );
+      };
+      // Fallback used when the bot couldn't identify the consumed invite code
+      // (Discord auto-deletes max_uses:1 invites on consumption, breaking diff matching).
+      const fallbackByUserAndGuild = deps.acceptances
+        .findRecentByUserAndGuildWithContext(payload.discord_id, payload.guild_id)
+        .pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => Effect.succeed(noWelcome),
+              onSome: buildWelcome,
+            }),
+          ),
+        );
       return Option.match(payload.invite_code, {
-        onNone: () => Effect.succeed(noWelcome),
+        onNone: () => fallbackByUserAndGuild,
         onSome: (code) =>
-          deps.invites.findByCodeWithContext(code).pipe(
+          deps.acceptances.findByDiscordCodeWithContext(code).pipe(
             Effect.flatMap(
               Option.match({
                 onNone: () =>
                   Effect.logWarning(
-                    `RegisterMember: invite code ${code} not found or expired`,
-                  ).pipe(Effect.as(noWelcome)),
-                onSome: (ctx) => {
-                  if (ctx.team_id !== team.id) {
-                    return Effect.logError(
-                      `RegisterMember: invite team_id ${ctx.team_id} !== team ${team.id}`,
-                    ).pipe(Effect.as(noWelcome));
-                  }
-                  const renderedMessage = Option.map(team.welcome_message_template, (template) =>
-                    sanitizeRendered(
-                      applyTemplate(template, {
-                        memberMention: `<@${payload.discord_id}>`,
-                        memberName: Option.getOrElse(payload.display_name, () => payload.username),
-                        inviterMention: Option.match(ctx.inviter_discord_id, {
-                          onNone: () => '',
-                          onSome: (id) => `<@${id}>`,
-                        }),
-                        inviterName: ctx.inviter_username,
-                        groupName: Option.getOrElse(ctx.group_name, () => ''),
-                        teamName: ctx.team_name,
-                      }),
-                    ),
-                  );
-                  const fetchGroupColor = Option.match(ctx.group_id, {
-                    onNone: () => Effect.succeed(Option.none<number>()),
-                    onSome: (groupId) =>
-                      deps.groups
-                        .findGroupById(groupId)
-                        .pipe(
-                          Effect.map(
-                            Option.flatMap((g) =>
-                              Option.fromNullishOr(sanitizeHexColor(Option.getOrNull(g.color))),
-                            ),
-                          ),
-                        ),
-                  });
-                  return Effect.Do.pipe(
-                    Effect.tap(() =>
-                      Option.match(ctx.group_id, {
-                        onNone: () => Effect.void,
-                        onSome: (groupId) => deps.groups.addMemberById(groupId, newMember.id),
-                      }),
-                    ),
-                    Effect.bind('group_color_int', () => fetchGroupColor),
-                    Effect.map(
-                      ({ group_color_int }): WelcomeMeta => ({
-                        system_log_channel_id: team.system_log_channel_id,
-                        invite_code: payload.invite_code,
-                        welcome: Option.some<WelcomeDetail>({
-                          welcome_channel_id: team.welcome_channel_id,
-                          welcome_message_rendered: renderedMessage,
-                          group_name: ctx.group_name,
-                          group_color_int,
-                          inviter_discord_id: ctx.inviter_discord_id,
-                        }),
-                      }),
-                    ),
-                  );
-                },
+                    `RegisterMember: invite code ${code} not found or expired; trying recency fallback`,
+                  ).pipe(Effect.andThen(fallbackByUserAndGuild)),
+                onSome: buildWelcome,
               }),
             ),
           ),

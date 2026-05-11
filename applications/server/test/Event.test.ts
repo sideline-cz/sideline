@@ -19,6 +19,7 @@ import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsReposit
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
+import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
@@ -967,13 +968,18 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(
     Layer.merge(
       MockTeamInvitesRepositoryLayer,
-      Layer.succeed(PendingGuildJoinsRepository, {
-        _tag: 'api/PendingGuildJoinsRepository',
-        enqueue: () => Effect.void,
-        listPending: () => Effect.succeed([]),
-        markDone: () => Effect.void,
-        markFailed: () => Effect.void,
-      } as never),
+      Layer.merge(
+        Layer.succeed(PendingGuildJoinsRepository, {
+          _tag: 'api/PendingGuildJoinsRepository',
+          enqueue: () => Effect.void,
+          listPending: () => Effect.succeed([]),
+          markDone: () => Effect.void,
+          markFailed: () => Effect.void,
+        } as never),
+        Layer.succeed(InviteAcceptancesRepository, {
+          _tag: 'api/InviteAcceptancesRepository',
+        } as never),
+      ),
     ),
   ),
   Layer.provide(MockRolesRepositoryLayer),

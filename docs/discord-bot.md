@@ -512,8 +512,8 @@ Fired when a new member joins a guild.
 
 1. Calls `rest.listGuildInvites(guild_id)` to fetch the current invite usage counts. Errors are suppressed — if the REST call fails, an empty list is used and invite tracking is skipped for this join.
 2. Calls `InviteCache.diffOnMemberJoin(guild_id, fresh)` which atomically compares the fresh usage counts against the stored snapshot (via `inviteDiff`) and updates the snapshot. The winning invite code (the one whose use count increased) is returned as `Option<string>`.
-3. Calls `Guild/RegisterMember` RPC with `guild_id`, `discord_id`, `username`, `avatar`, `roles`, `nickname`, `display_name`, and `invite_code` (the matched code or `None`).
-   - The server resolves the invite code to a `group_id` (if the invite was group-targeted), auto-adds the member to that group, renders the welcome message template (substituting `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, `{teamName}`), and returns a `WelcomeMeta` payload.
+3. Calls `Guild/RegisterMember` RPC with `guild_id`, `discord_id`, `username`, `avatar`, `roles`, `nickname`, `display_name`, and `invite_code` (the matched Discord code or `None`).
+   - The server looks up the matched Discord code in `invite_acceptances.discord_code` (via `InviteAcceptancesRepository.findByDiscordCodeWithContext`) to resolve the originating `team_invite`, its `group_id`, and the inviter. It auto-adds the member to that group, renders the welcome message template (substituting `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, `{teamName}`), and returns a `WelcomeMeta` payload.
 4. If `WelcomeMeta` is present:
    - If `system_log_channel_id` is set: posts a **system log embed** (title "Member joined", fields: member mention + username, invite code, inviter mention, group name) to that channel.
    - If `welcome_channel_id` and `welcome_message_rendered` are both present: posts a **welcome embed** (rendered message as description, group name field if set, group colour as embed colour, `<@memberId>` as message content) to the welcome channel.
@@ -565,9 +565,9 @@ Calls `Guild/UpsertChannel` RPC to update the channel's name and metadata in the
 
 ## RPC Sync Workers
 
-Three background worker loops run continuously inside the bot process. Each worker polls the server for unprocessed outbox events, processes them sequentially, and marks each as processed or failed. All three loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`) and fetch up to **50 events per poll** (`POLL_BATCH_SIZE = 50`).
+Four background worker loops run continuously inside the bot process. Three of them (Role Sync, Channel Sync, Event Sync) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those three loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`) and fetch up to **50 events per poll** (`POLL_BATCH_SIZE = 50`). The fourth (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation.
 
-These workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, and `event_sync_events`; the bot drains those queues.
+The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, and `event_sync_events`; the bot drains those queues.
 
 > **Note on directory name:** The source files for these workers live under `applications/bot/src/rcp/`. This is a typo in the codebase; the intended name is `rpc`. The import paths and class names (`RoleSyncService`, `ChannelSyncService`, `EventSyncService`) all reflect the intended `rpc` meaning.
 
@@ -659,6 +659,30 @@ Channel sync mirrors each Sideline group that has a Discord channel mapping as a
 
 ---
 
+### Invite Generator Worker
+
+**Service class:** `ProcessorService` (`applications/bot/src/rcp/inviteGenerator/ProcessorService.ts`)
+
+**Polling RPC:** `Invite/PendingAcceptances`
+
+**Polling interval:** 1 second (`fastPollLoop` in `Bot.ts`, distinct from the 5-second `pollLoop` used by the three outbox workers).
+
+When a user accepts a Sideline invite link (clicks "Accept" on `/invite/{code}`), the server creates an `invite_acceptances` row and returns its ID to the web app. The invite generator picks up pending rows (those with `discord_code IS NULL AND discord_code_error_code IS NULL`) and calls `discord.createChannelInvite` on the team's `welcome_channel_id` with `max_uses: 1`, `max_age: 86400` (24 hours), and `unique: true` — a single-use link tied to this specific acceptance. On success it calls `Invite/SetAcceptanceDiscordCode` to store the code. On failure it calls `Invite/MarkAcceptanceFailed` to record the error code and detail.
+
+The web app polls `GET /invite/acceptances/:acceptanceId` to obtain the Discord invite URL as soon as it is written, then redirects the user to `https://discord.gg/<code>`.
+
+**Invite group RPCs used:**
+
+| RPC | Payload | Purpose |
+|-----|---------|---------|
+| `Invite/PendingAcceptances` | `{ limit: number }` | Fetch pending acceptance rows (up to `limit`); returns `acceptance_id`, `guild_id`, `welcome_channel_id` |
+| `Invite/SetAcceptanceDiscordCode` | `{ acceptance_id, discord_code }` | Store the generated Discord invite code on the acceptance row |
+| `Invite/MarkAcceptanceFailed` | `{ acceptance_id, error_code, error_detail }` | Record the error when Discord invite creation fails |
+
+The `GUILD_MEMBER_ADD` handler resolves welcome metadata by looking up `invite_acceptances.discord_code` (via `InviteAcceptancesRepository.findByDiscordCodeWithContext`) rather than `team_invites.discord_code` as before.
+
+---
+
 ## Startup Tasks
 
 In addition to the three poll loops, the bot runs one-off tasks at startup (after the gateway connection is established). These tasks are composed alongside the poll loops with `concurrency: 'unbounded'` in `Bot.ts`.
@@ -689,7 +713,7 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Guild/UpsertChannel` | Insert or update a single Discord channel row in `discord_channels`; called after the bot auto-creates a channel so the web can display its name |
 | `Guild/DeleteChannel` | Delete a single channel row from `discord_channels` when a Discord channel is deleted |
 | `Guild/ReconcileMembers` | Bulk-sync up to 1000 guild members on startup |
-| `Guild/RegisterMember` | Register a single new member; accepts `invite_code: Option<string>` and returns `Option<WelcomeMeta>` (system log channel, optional welcome detail including rendered message, group colour, inviter Discord ID) |
+| `Guild/RegisterMember` | Register a single new member; accepts `invite_code: Option<string>` (the Discord code matched by the invite diff) and returns `Option<WelcomeMeta>` (system log channel, optional welcome detail including rendered message, group colour, inviter Discord ID). The server resolves the invite code via `invite_acceptances.discord_code` (not `team_invites.discord_code`) to look up the team, group, and inviter. |
 
 ### Role group (`Role/`)
 
@@ -741,6 +765,14 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Event/SaveClaimDiscordMessageId` | Persist the Discord channel and message IDs for the claim-board message after posting |
 | `Event/GetClaimInfo` | Fetch current claim state (`EventClaimInfo`) for a training; returns `None` if the event does not exist |
 | `Event/GetChannelsWithStoredMessages` | Fetch all `(discord_channel_id, guild_id)` pairs for which at least one event message ID is stored; used by the `recoverDeletedMessages` startup task |
+
+### Invite group (`Invite/`)
+
+| Method | Purpose |
+|--------|---------|
+| `Invite/PendingAcceptances` | Fetch pending `invite_acceptances` rows that need a Discord invite generated (1-second cadence) |
+| `Invite/SetAcceptanceDiscordCode` | Store the generated single-use Discord invite code on the acceptance row |
+| `Invite/MarkAcceptanceFailed` | Record the error code and detail when Discord invite creation fails |
 
 ### Activity group (`Activity/`)
 

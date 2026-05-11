@@ -5,6 +5,7 @@ import { KeyValueStore } from 'effect/unstable/persistence';
 const TOKEN = 'api-token';
 const PENDING_INVITE = 'pending-invite';
 const LAST_TEAM = 'last-team-id';
+const PENDING_DISCORD_JOIN = 'pending-discord-join';
 
 const kvLayer = BrowserKeyValueStore.layerLocalStorage;
 
@@ -48,3 +49,34 @@ export const clearPendingInvite = remove(PENDING_INVITE);
 export const getLastTeamId = get(LAST_TEAM);
 
 export const setLastTeamId = (teamId: string) => set(LAST_TEAM, teamId);
+
+export interface PendingDiscordJoin {
+  readonly acceptanceId: string;
+  readonly teamId: string;
+  readonly ts: number;
+}
+
+export const setPendingDiscordJoin = (entry: PendingDiscordJoin) =>
+  set(PENDING_DISCORD_JOIN, JSON.stringify(entry));
+
+export const getPendingDiscordJoin = get(PENDING_DISCORD_JOIN).pipe(
+  Effect.map(
+    Option.flatMap((raw) => {
+      try {
+        const parsed = JSON.parse(raw) as PendingDiscordJoin;
+        if (
+          typeof parsed.acceptanceId === 'string' &&
+          typeof parsed.teamId === 'string' &&
+          typeof parsed.ts === 'number'
+        ) {
+          return Option.some(parsed);
+        }
+        return Option.none<PendingDiscordJoin>();
+      } catch {
+        return Option.none<PendingDiscordJoin>();
+      }
+    }),
+  ),
+);
+
+export const clearPendingDiscordJoin = remove(PENDING_DISCORD_JOIN);

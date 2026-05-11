@@ -27,6 +27,7 @@ import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsReposit
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
+import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
@@ -125,7 +126,6 @@ type InviteRecord = {
   created_at: DateTime.Utc;
   expires_at: Option.Option<DateTime.Utc>;
   group_id: Option.Option<GroupModel.GroupId>;
-  discord_code: Option.Option<string>;
 };
 
 const invitesStore = new Map<string, InviteRecord>();
@@ -138,7 +138,6 @@ invitesStore.set('valid-invite', {
   created_at: DateTime.nowUnsafe(),
   expires_at: Option.none(),
   group_id: Option.none(),
-  discord_code: Option.none(),
 });
 invitesStore.set('inactive-invite', {
   id: '00000000-0000-0000-0000-000000000031' as TeamInvite.TeamInviteId,
@@ -149,7 +148,6 @@ invitesStore.set('inactive-invite', {
   created_at: DateTime.nowUnsafe(),
   expires_at: Option.none(),
   group_id: Option.none(),
-  discord_code: Option.none(),
 });
 invitesStore.set('invite-with-group', {
   id: '00000000-0000-0000-0000-000000000032' as TeamInvite.TeamInviteId,
@@ -160,7 +158,6 @@ invitesStore.set('invite-with-group', {
   created_at: DateTime.nowUnsafe(),
   expires_at: Option.none(),
   group_id: Option.some(TEST_GROUP_ID),
-  discord_code: Option.none(),
 });
 
 const MockDiscordOAuthLayer = Layer.succeed(DiscordOAuth, {
@@ -311,7 +308,6 @@ const MockTeamInvitesRepositoryLayer = Layer.succeed(TeamInvitesRepository, {
           expiresAt: i.expires_at,
           createdAt: i.created_at,
           createdBy: i.created_by,
-          discordCode: i.discord_code,
         })),
     ),
   create: (input: {
@@ -321,7 +317,6 @@ const MockTeamInvitesRepositoryLayer = Layer.succeed(TeamInvitesRepository, {
     created_by: Auth.UserId;
     expires_at: Option.Option<DateTime.Utc>;
     group_id?: Option.Option<GroupModel.GroupId>;
-    discord_code?: Option.Option<string>;
   }) => {
     const invite: InviteRecord = {
       id: crypto.randomUUID() as TeamInvite.TeamInviteId,
@@ -332,7 +327,6 @@ const MockTeamInvitesRepositoryLayer = Layer.succeed(TeamInvitesRepository, {
       created_at: DateTime.nowUnsafe(),
       expires_at: input.expires_at,
       group_id: input.group_id ?? Option.none(),
-      discord_code: input.discord_code ?? Option.none(),
     };
     invitesStore.set(invite.code, invite);
     return Effect.succeed(invite);
@@ -651,14 +645,35 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(
     Layer.merge(
       MockTeamInvitesRepositoryLayer,
-      Layer.succeed(PendingGuildJoinsRepository, {
-        _tag: 'api/PendingGuildJoinsRepository',
-        enqueue: () => Effect.void,
-        listPending: () => Effect.succeed([]),
-        markDone: () => Effect.void,
-        markFailed: () => Effect.void,
-        requeueFailedForUser: () => Effect.void,
-      } as never),
+      Layer.merge(
+        Layer.succeed(PendingGuildJoinsRepository, {
+          _tag: 'api/PendingGuildJoinsRepository',
+          enqueue: () => Effect.void,
+          listPending: () => Effect.succeed([]),
+          markDone: () => Effect.void,
+          markFailed: () => Effect.void,
+          requeueFailedForUser: () => Effect.void,
+        } as never),
+        Layer.succeed(InviteAcceptancesRepository, {
+          _tag: 'api/InviteAcceptancesRepository',
+          create: ({ team_invite_id, user_id }: { team_invite_id: string; user_id: string }) =>
+            Effect.succeed({
+              id: `${team_invite_id}:${user_id}`,
+              team_invite_id,
+              user_id,
+              discord_code: Option.none(),
+              discord_code_error_code: Option.none(),
+              discord_code_error_detail: Option.none(),
+              created_at: DateTime.nowUnsafe(),
+              generated_at: Option.none(),
+            }),
+          findById: () => Effect.succeed(Option.none()),
+          findPending: () => Effect.succeed([]),
+          setDiscordCode: () => Effect.void,
+          markFailed: () => Effect.void,
+          findByDiscordCodeWithContext: () => Effect.succeed(Option.none()),
+        } as never),
+      ),
     ),
   ),
   Layer.provide(MockHttpClientLayer),
