@@ -132,8 +132,8 @@ test.describe('Onboarding Settings Card', () => {
       timeout: 15000,
     });
 
-    // Locale toggle group (EN / CS)
-    await expect(page.getByRole('group').filter({ hasText: /en/i })).toBeVisible({
+    // Locale toggle group (EN / CS) — scope by the fieldset's accessible name (its <legend>).
+    await expect(page.getByRole('group', { name: /onboarding language/i })).toBeVisible({
       timeout: 15000,
     });
 
@@ -165,8 +165,8 @@ test.describe('Onboarding Settings Card', () => {
     // @everyone must NOT appear in the dropdown
     await expect(page.getByText('@everyone')).not.toBeVisible({ timeout: 5000 });
 
-    // Non-managed roles SHOULD appear
-    await expect(page.getByText('Players').or(page.getByText('Coaches'))).toBeVisible({
+    // Non-managed roles SHOULD appear in the listbox options.
+    await expect(page.getByRole('option', { name: /^@(Players|Coaches)$/ }).first()).toBeVisible({
       timeout: 5000,
     });
   });
@@ -175,6 +175,9 @@ test.describe('Onboarding Settings Card', () => {
     page,
   }) => {
     let capturedPatchBody: unknown = null;
+    // Track sync status across requests so that the GET after the post-save
+    // router.invalidate() reflects the new 'pending' status (mirroring production).
+    let currentStatus: 'done' | 'pending' = 'done';
 
     await page.route('**/teams/*/discord-channels', async (route) => {
       await route.fulfill({
@@ -202,10 +205,13 @@ test.describe('Onboarding Settings Card', () => {
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            body: JSON.stringify(mockTeamInfoWithOnboarding({ onboardingSyncStatus: 'done' })),
+            body: JSON.stringify(
+              mockTeamInfoWithOnboarding({ onboardingSyncStatus: currentStatus }),
+            ),
           });
         } else if (method === 'PATCH') {
           capturedPatchBody = JSON.parse(route.request().postData() ?? '{}');
+          currentStatus = 'pending';
           await route.fulfill({
             status: 200,
             contentType: 'application/json',
@@ -230,11 +236,12 @@ test.describe('Onboarding Settings Card', () => {
     // Open the rules channel select and pick the 'training' channel (id 666666666666666666)
     const rulesChannelSelect = page.getByLabel(/rules channel/i).first();
     await rulesChannelSelect.click();
-    // Pick a DIFFERENT channel from the current one ('222...' → 'training' / '666...')
-    const trainingOption = page.getByText('training').first();
+    // Pick a DIFFERENT channel from the current one ('222...' → 'training' / '666...').
+    // Match the listbox option by role to avoid the unrelated "Default channel: Training" label.
+    const trainingOption = page.getByRole('option', { name: /# training/i });
     await trainingOption.click();
 
-    // Click save button for the onboarding section
+    // Click save button for the onboarding section (last save button in DOM order).
     const saveButton = page.locator('button').filter({ hasText: /save/i }).last();
     await saveButton.click();
 
@@ -244,10 +251,8 @@ test.describe('Onboarding Settings Card', () => {
     expect(body).not.toBeNull();
     expect((body as Record<string, unknown>).rulesChannelId).toBe('666666666666666666');
 
-    // Status badge should update to "Pending sync" (optimistic or after invalidation)
-    await expect(page.getByText(/pending sync/i).or(page.getByText(/pending/i))).toBeVisible({
-      timeout: 10000,
-    });
+    // Status badge should update to "Pending sync" (after invalidation/refetch).
+    await expect(page.getByText(/pending sync/i)).toBeVisible({ timeout: 10000 });
 
     // Toast notification — use project's toast locator (Sonner or shadcn toast)
     await expect(
@@ -319,10 +324,10 @@ test.describe('Onboarding Settings Card', () => {
 
     await page.goto(SETTINGS_URL);
 
-    // Should show error copy for role_deleted
-    await expect(
-      page.getByText(/role no longer exists/i).or(page.getByText(/configured.*role/i)),
-    ).toBeVisible({ timeout: 30000 });
+    // Should show error copy for role_deleted (target the user-facing <p>, not the debug <pre>).
+    const errorMessage = page.locator('#onboarding-error-message');
+    await expect(errorMessage).toBeVisible({ timeout: 30000 });
+    await expect(errorMessage).toHaveText(/role no longer exists/i);
 
     // Retry button should be visible
     const retryButton = page.getByRole('button', { name: /retry/i });
