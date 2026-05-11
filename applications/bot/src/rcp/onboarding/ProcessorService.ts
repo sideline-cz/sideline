@@ -2,6 +2,7 @@ import { type Discord, Team } from '@sideline/domain';
 import { Bind } from '@sideline/effect-lib';
 import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
+import type { UpdateGuildOnboardingRequest as DfxUpdateGuildOnboardingRequest } from 'dfx/DiscordREST/Generated';
 import { Array, Effect, Metric, Option, Schema, type ServiceMap } from 'effect';
 import { OnboardingRoleCache } from '../../services/OnboardingRoleCache.js';
 import { SyncRpc, type SyncRpcClient } from '../../services/SyncRpc.js';
@@ -57,11 +58,32 @@ const makeProcessTeam =
     const strings = resolveStrings(team.onboarding_locale, team.team_name);
     const welcomePayload = buildWelcomeScreenPayload(team, strings.welcome);
 
-    const syncDiscord = Option.isNone(welcomePayload)
-      ? Effect.succeed(Option.none<Discord.Snowflake>())
-      : discord
-          .updateGuildWelcomeScreen(team.guild_id, welcomePayload.value)
-          .pipe(Effect.as(Option.none<Discord.Snowflake>()));
+    // Always disable Discord onboarding so new members see the welcome screen instead
+    // of the role-gated onboarding flow. We send only { enabled: false } — Discord
+    // doesn't require the rest of the payload when disabling, and skipping the
+    // prompts/channels fields avoids the validation errors those impose.
+    const disableOnboarding = discord
+      .putGuildsOnboarding(team.guild_id, { enabled: false } as DfxUpdateGuildOnboardingRequest)
+      .pipe(
+        Effect.catchTag('ErrorResponse', (error) =>
+          // If Discord rejects (e.g. onboarding was never enabled or the guild lacks
+          // Community), log and continue to the welcome-screen patch — the welcome
+          // screen still works without the disable call.
+          Effect.logWarning(
+            `Disabling onboarding failed for guild ${team.guild_id}; continuing with welcome screen`,
+            error,
+          ),
+        ),
+      );
+
+    const patchWelcomeScreen = Option.isNone(welcomePayload)
+      ? Effect.void
+      : discord.updateGuildWelcomeScreen(team.guild_id, welcomePayload.value).pipe(Effect.asVoid);
+
+    const syncDiscord = disableOnboarding.pipe(
+      Effect.flatMap(() => patchWelcomeScreen),
+      Effect.as(Option.none<Discord.Snowflake>()),
+    );
 
     return syncDiscord.pipe(
       Effect.flatMap(() =>

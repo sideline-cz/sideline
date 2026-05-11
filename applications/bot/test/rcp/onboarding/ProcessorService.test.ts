@@ -255,18 +255,19 @@ describe('OnboardingProcessorService', () => {
     expect(restCalls.updateGuildWelcomeScreen).toHaveLength(0);
   });
 
-  it('single team success path → welcome screen patched, MarkOnboardingSyncDone called; onboarding endpoint untouched', async () => {
+  it('single team success path → onboarding disabled (PUT enabled:false), welcome screen patched, MarkOnboardingSyncDone called', async () => {
     const { calls: rpcCalls, layer: rpcLayer } = makeRpc([makePendingSync()]);
     const { calls: restCalls, layer: restLayer } = makeRest();
     const { layer: cacheLayer } = makeLiveCache();
 
     await runProcessTick(rpcLayer, restLayer, cacheLayer);
 
-    // We only push the welcome screen now. Onboarding is left as the captain configured
-    // it (Discord doesn't expose a Server Guide write endpoint, and onboarding's role
-    // gate isn't the model we want).
+    // We disable onboarding (so the welcome screen surfaces to new members) and then
+    // patch the welcome screen. We never GET onboarding — the disable PUT is minimal
+    // and idempotent.
     expect(restCalls.getGuildsOnboarding).toHaveLength(0);
-    expect(restCalls.putGuildsOnboarding).toHaveLength(0);
+    expect(restCalls.putGuildsOnboarding).toHaveLength(1);
+    expect((restCalls.putGuildsOnboarding[0] as any).payload).toEqual({ enabled: false });
     expect(restCalls.updateGuildWelcomeScreen).toHaveLength(1);
     expect(rpcCalls.MarkOnboardingSyncDone).toHaveLength(1);
     const doneCall = rpcCalls.MarkOnboardingSyncDone[0] as any;
