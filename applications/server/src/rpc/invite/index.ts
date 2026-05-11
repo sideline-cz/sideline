@@ -1,34 +1,44 @@
-import { InviteRpcGroup, type Onboarding, type TeamInvite } from '@sideline/domain';
+import { type InviteAcceptance, InviteRpcGroup, type Onboarding } from '@sideline/domain';
 import { Effect } from 'effect';
-import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
+import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 
 export const InvitesRpcLive = Effect.Do.pipe(
-  Effect.bind('invites', () => TeamInvitesRepository.asEffect()),
-  Effect.map(({ invites }) => ({
-    'Invite/PendingDiscordCodes': ({ limit }: { readonly limit: number }) =>
-      invites.findPendingDiscordCodes(limit),
+  Effect.bind('acceptances', () => InviteAcceptancesRepository.asEffect()),
+  Effect.map(({ acceptances }) => ({
+    'Invite/PendingAcceptances': ({ limit }: { readonly limit: number }) =>
+      acceptances.findPending(limit),
 
-    'Invite/SetDiscordCode': ({
-      invite_id,
+    'Invite/SetAcceptanceDiscordCode': ({
+      acceptance_id,
       discord_code,
     }: {
-      readonly invite_id: TeamInvite.TeamInviteId;
+      readonly acceptance_id: InviteAcceptance.InviteAcceptanceId;
       readonly discord_code: string;
-    }) => invites.setDiscordCode({ inviteId: invite_id, discordCode: discord_code }),
+    }) => acceptances.setDiscordCode({ acceptanceId: acceptance_id, discordCode: discord_code }),
 
-    'Invite/MarkDiscordCodeFailed': ({
-      invite_id,
+    'Invite/MarkAcceptanceFailed': ({
+      acceptance_id,
       error_code,
       error_detail,
     }: {
-      readonly invite_id: TeamInvite.TeamInviteId;
+      readonly acceptance_id: InviteAcceptance.InviteAcceptanceId;
       readonly error_code: Onboarding.InviteGeneratorErrorCode;
       readonly error_detail: string;
     }) =>
-      Effect.logWarning(`Invite ${invite_id} Discord code generation failed`, {
-        error_code,
-        error_detail,
-      }),
+      acceptances
+        .markFailed({
+          acceptanceId: acceptance_id,
+          errorCode: error_code,
+          errorDetail: error_detail,
+        })
+        .pipe(
+          Effect.tap(() =>
+            Effect.logWarning(`Invite acceptance ${acceptance_id} Discord code generation failed`, {
+              error_code,
+              error_detail,
+            }),
+          ),
+        ),
   })),
   (handlers) => InviteRpcGroup.InviteRpcGroup.toLayer(handlers),
 );

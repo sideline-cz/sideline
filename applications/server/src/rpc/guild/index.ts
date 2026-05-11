@@ -7,8 +7,8 @@ import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsReposit
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
-import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
@@ -48,7 +48,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
   Effect.bind('roleMappings', () => DiscordRoleMappingRepository.asEffect()),
   Effect.bind('channelMappings', () => DiscordChannelMappingRepository.asEffect()),
   Effect.bind('groups', () => GroupsRepository.asEffect()),
-  Effect.bind('invites', () => TeamInvitesRepository.asEffect()),
+  Effect.bind('acceptances', () => InviteAcceptancesRepository.asEffect()),
   Effect.bind('pendingGuildJoins', () => PendingGuildJoinsRepository.asEffect()),
   Effect.map((deps) => {
     const setupNewMember = (
@@ -121,7 +121,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
       return Option.match(payload.invite_code, {
         onNone: () => Effect.succeed(noWelcome),
         onSome: (code) =>
-          deps.invites.findByCodeWithContext(code).pipe(
+          deps.acceptances.findByDiscordCodeWithContext(code).pipe(
             Effect.flatMap(
               Option.match({
                 onNone: () =>

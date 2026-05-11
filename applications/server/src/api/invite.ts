@@ -5,6 +5,7 @@ import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { requireMembership, requirePermission } from '~/api/permissions.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -23,9 +24,10 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
   Effect.Do.pipe(
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('invites', () => TeamInvitesRepository.asEffect()),
+    Effect.bind('acceptances', () => InviteAcceptancesRepository.asEffect()),
     Effect.bind('groups', () => GroupsRepository.asEffect()),
     Effect.bind('oauthConnections', () => OAuthConnectionsRepository.asEffect()),
-    Effect.map(({ members, invites, groups, oauthConnections }) =>
+    Effect.map(({ members, invites, acceptances, groups, oauthConnections }) =>
       handlers
         .handle('getInvite', ({ params: { code } }) =>
           invites.findByCodeWithContext(code).pipe(
@@ -101,17 +103,17 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                   !OAuthConnection.hasScope(raw, OAuthConnection.REQUIRED_DISCORD_SCOPE),
               }),
             ),
+            Effect.bind('acceptance', ({ user, invite }) =>
+              acceptances.create({ team_invite_id: invite.id, user_id: user.id }),
+            ),
             Effect.map(
-              ({ user, invite, requiresReauth }) =>
+              ({ user, invite, requiresReauth, acceptance }) =>
                 new Invite.JoinResult({
                   teamId: invite.team_id,
                   roleNames: ['Player'],
                   isProfileComplete: user.isProfileComplete,
                   requiresReauth,
-                  discordInviteUrl: Option.map(
-                    invite.discord_code,
-                    (c) => `https://discord.gg/${c}`,
-                  ),
+                  acceptanceId: Option.some(acceptance.id),
                 }),
             ),
             Effect.catchTag('MemberAlreadyExistsError', () =>
@@ -120,6 +122,24 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
             Effect.catchTag(
               'NoSuchElementError',
               LogicError.withMessage(() => 'Failed joining via invite — no row returned'),
+            ),
+          ),
+        )
+        .handle('getJoinStatus', ({ params: { acceptanceId } }) =>
+          acceptances.findById(acceptanceId).pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () => Effect.fail(new Invite.InviteNotFound()),
+                onSome: Effect.succeed,
+              }),
+            ),
+            Effect.map(
+              (acc) =>
+                new Invite.JoinStatus({
+                  acceptanceId: acc.id,
+                  discordInviteUrl: Option.map(acc.discord_code, (c) => `https://discord.gg/${c}`),
+                  errorCode: acc.discord_code_error_code,
+                }),
             ),
           ),
         )
@@ -157,7 +177,6 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                   expires_at: Option.map(payload.expiresAt, DateTime.fromDateUnsafe),
                   group_id: payload.groupId,
                   created_at: undefined,
-                  discord_code: Option.none(),
                 }),
               ).pipe(
                 Effect.retry(
@@ -199,7 +218,6 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                     expiresAt: Option.map(item.expiresAt, DateTime.toDate),
                     createdAt: DateTime.toDate(item.createdAt),
                     createdBy: item.createdBy,
-                    discordCode: item.discordCode,
                   }),
               ),
             ),
@@ -224,7 +242,6 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                   ),
                   group_id: Option.none(),
                   created_at: undefined,
-                  discord_code: Option.none(),
                 }),
               ).pipe(
                 Effect.retry(

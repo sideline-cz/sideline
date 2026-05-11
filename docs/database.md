@@ -169,7 +169,31 @@ Invite codes that allow new users to join a specific team, optionally pre-assign
 
 **Indexes**: `idx_team_invites_code` on `(code)`, `idx_team_invites_team` on `(team_id)`, `idx_team_invites_group` on `(group_id)`
 
-**Notes**: `group_id` was added in migration `1746500000`. When set, a new member who joins via this invite is automatically added to the specified group. The FK uses `ON DELETE SET NULL` so that deleting a group does not invalidate existing invite codes.
+**Notes**: `group_id` was added in migration `1746500000`. When set, a new member who joins via this invite is automatically added to the specified group. The FK uses `ON DELETE SET NULL` so that deleting a group does not invalidate existing invite codes. A `discord_code` column existed briefly (added during the welcome-flow feature, dropped in migration `1747300000`) — Discord invite codes are now tracked per acceptance in `invite_acceptances` rather than per invite link.
+
+---
+
+#### `invite_acceptances`
+
+One row is created for each individual accept action (each click of "Accept" on `/invite/{code}`). The bot reads pending rows and generates a fresh, single-use Discord invite code per acceptance within ~1 second.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_invite_id` | UUID | NOT NULL, FK → `team_invites(id)` ON DELETE CASCADE | — |
+| `user_id` | UUID | NOT NULL, FK → `users(id)` ON DELETE CASCADE | — |
+| `discord_code` | TEXT | — | — |
+| `discord_code_error_code` | TEXT | — | — |
+| `discord_code_error_detail` | TEXT | — | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `generated_at` | TIMESTAMPTZ | — | — |
+
+**Indexes**:
+- `idx_invite_acceptances_discord_code` — unique partial index on `(discord_code) WHERE discord_code IS NOT NULL`. Ensures each Discord code is linked to at most one acceptance; also used by `Guild/RegisterMember` to resolve welcome metadata.
+- `idx_invite_acceptances_pending` — partial index on `(created_at) WHERE discord_code IS NULL AND discord_code_error_code IS NULL`. Efficient lookup of rows that still need a Discord invite generated.
+- `idx_invite_acceptances_team_invite_id` — index on `(team_invite_id)`.
+
+**Notes**: Added in migration `1747300000`. `discord_code` is populated by the bot's invite generator (~1s cadence). `discord_code_error_code` and `discord_code_error_detail` are set when the bot cannot create the Discord invite (e.g. missing welcome channel, Discord API error). `generated_at` is set when `discord_code` or an error code is written. The Discord invites created here have `max_uses: 1`, `max_age: 86400` (24 hours), and `unique: true` — each is a single-use, short-lived link tied to one specific acceptance.
 
 ---
 
@@ -779,7 +803,7 @@ In-app alert records scoped to a specific team and user.
 
 ## Migration History
 
-All 45 migration files in `packages/migrations/src/before/` plus 1 after-migration.
+All 46 migration files in `packages/migrations/src/before/` plus 1 after-migration.
 
 ### Before Migrations (schema changes)
 
@@ -840,6 +864,7 @@ All 45 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1746100000 | `add_event_location_url` | Adds `location_url TEXT` (nullable) to events and event_series; adds `event_location_url TEXT` (nullable) to event_sync_events |
 | 1746500000 | `add_invite_groups_and_welcome` | Adds `group_id UUID REFERENCES groups(id) ON DELETE SET NULL` to team_invites with index `idx_team_invites_group`; adds `welcome_channel_id TEXT`, `system_log_channel_id TEXT`, and `welcome_message_template TEXT` to teams |
 | 1746800000 | `add_oauth_granted_scopes` | Adds `granted_scopes TEXT NOT NULL DEFAULT ''` to oauth_connections; legacy rows backfill to empty string (treated as "scopes unknown" and trigger a re-auth on the next OAuth callback) |
+| 1747300000 | `invite_acceptances` | Creates `invite_acceptances` table (id, team_invite_id FK, user_id FK, discord_code, discord_code_error_code, discord_code_error_detail, created_at, generated_at); adds unique partial index on `(discord_code) WHERE discord_code IS NOT NULL`, pending partial index on `(created_at) WHERE discord_code IS NULL AND discord_code_error_code IS NULL`, and index on `(team_invite_id)`; drops `idx_team_invites_discord_code`, `idx_team_invites_pending_discord_code`, and `team_invites.discord_code` column |
 
 ### After Migrations (seed data)
 
@@ -869,7 +894,7 @@ The server inserts rows when the relevant domain action occurs. The bot polls `W
 
 ### Cascading Deletes
 
-Team deletion cascades to all child tables (team_members, team_invites, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, and activity_logs.
+Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, and activity_logs. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
 
 Role deletion uses `ON DELETE RESTRICT` on `member_roles` to prevent accidentally orphaning members. FK references from `role_sync_events.role_id` and `channel_sync_events.group_id` are stored as plain UUID (no FK constraint) so audit rows are retained after the referenced entity is deleted.
 

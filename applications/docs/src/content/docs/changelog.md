@@ -5,6 +5,12 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-11 — Personalised Discord invites per acceptance
+
+- Each member who clicks "Accept" on an invite link now receives their own unique, single-use Discord invite. The invite is generated within about a second and the browser redirects them directly to the server.
+- The Discord invite is valid for 24 hours and can only be used once, so it cannot be forwarded or reused.
+- Captains share only the `/invite/{code}` web link — there is no longer a separate "Copy Discord link" button on the invite management page.
+
 ## 2026-05-09 — Automatic Discord server join for returning users
 
 - Fixed: existing users who logged in before the welcome-flow update were not being added to the team's Discord server automatically when accepting a team invite. They will now be auto-joined on next login.

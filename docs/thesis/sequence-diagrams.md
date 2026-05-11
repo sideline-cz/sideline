@@ -550,7 +550,7 @@ sequenceDiagram
 
 ## 9. Member Onboarding via Group-Targeted Invite
 
-A captain creates a group-targeted invite (e.g. for the "First Team" group) from the web app. The invite link is shared in Discord. A new player clicks the link, completes the Discord OAuth login, and joins the team's Discord guild. The bot detects the join via `GUILD_MEMBER_ADD`, identifies the invite code by diffing usage counts, calls `Guild/RegisterMember` on the server, which resolves the group, auto-adds the member to the group, renders the welcome message, and returns welcome metadata. The bot then posts a public welcome embed to the configured welcome channel and a private system log to the captain-only channel.
+A captain creates a group-targeted invite (e.g. for the "First Team" group) from the web app. The captain shares only the `/invite/{code}` web link. A new player clicks it, completes the Discord OAuth login, and clicks "Accept". The server creates an `invite_acceptances` row and returns an `acceptanceId`. The bot's invite generator picks up the pending row (~1 s), creates a single-use Discord invite for the welcome channel, and writes the code back. The web app polls `GET /invite/acceptances/:acceptanceId` and redirects the user to `https://discord.gg/{discord_code}` as soon as the URL is available. The user joins the Discord server; the bot detects `GUILD_MEMBER_ADD`, identifies the code via the invite diff, calls `Guild/RegisterMember` — which now resolves via `invite_acceptances.discord_code` — auto-adds the member to the group, renders the welcome message, and posts the welcome embed and system log.
 
 ```mermaid
 sequenceDiagram
@@ -567,7 +567,7 @@ sequenceDiagram
     DB-->>Server: TeamInvite {code}
     Server-->>Captain: 200 OK — InviteCode {code, active: true}
 
-    Note over Captain: Share /invite/{code} in Discord
+    Note over Captain: Share /invite/{code} (web URL only)
 
     NewUser->>Server: GET /invite/{code}
     Server->>DB: SELECT team_invites JOIN groups JOIN users (inviter)<br/>WHERE code=? AND active=true
@@ -575,19 +575,50 @@ sequenceDiagram
     Server-->>NewUser: 200 OK — InviteInfo {teamName, code, groupName, inviterName}
 
     NewUser->>Server: (Login via Discord OAuth — see Diagram 1)
+
+    NewUser->>Server: POST /invite/{code}/join<br/>Authorization: Bearer <token>
+    Server->>DB: INSERT invite_acceptances {team_invite_id, user_id}
+    DB-->>Server: InviteAcceptance {id: acceptance_id}
+    Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:["Player"],<br/>isProfileComplete, requiresReauth: false,<br/>acceptanceId: some(acceptance_id)}
+
+    loop Poll every ~1 s until discord_code appears
+        NewUser->>Server: GET /invite/acceptances/{acceptance_id}
+        Server->>DB: SELECT * FROM invite_acceptances WHERE id=?
+        DB-->>Server: {discord_code: null, ...} (pending)
+        Server-->>NewUser: 200 OK — JoinStatus {acceptanceId, discordInviteUrl: null, errorCode: null}
+    end
+
+    Bot->>Server: RPC Invite/PendingAcceptances {limit: 20}
+    Server->>DB: SELECT ia.id, t.guild_id, t.welcome_channel_id<br/>FROM invite_acceptances ia JOIN team_invites ti JOIN teams t<br/>WHERE ia.discord_code IS NULL AND ia.discord_code_error_code IS NULL
+    DB-->>Server: [{acceptance_id, guild_id, welcome_channel_id}]
+    Server-->>Bot: [{acceptance_id, guild_id, welcome_channel_id}]
+
+    Bot->>REST: POST /channels/{welcome_channel_id}/invites<br/>{max_uses: 1, max_age: 86400, unique: true}
+    REST-->>Bot: {code: "{discord_code}"}
+
+    Bot->>Server: RPC Invite/SetAcceptanceDiscordCode<br/>{acceptance_id, discord_code: "{discord_code}"}
+    Server->>DB: UPDATE invite_acceptances SET discord_code=?, generated_at=now()
+    DB-->>Server: OK
+
+    NewUser->>Server: GET /invite/acceptances/{acceptance_id}
+    Server->>DB: SELECT * FROM invite_acceptances WHERE id=?
+    DB-->>Server: {discord_code: "{discord_code}", ...}
+    Server-->>NewUser: 200 OK — JoinStatus {discordInviteUrl: "https://discord.gg/{discord_code}"}
+
+    Note over NewUser: Browser redirects to https://discord.gg/{discord_code}
     Note over NewUser: Now a Discord guild member
 
     Discord->>Bot: GUILD_MEMBER_ADD {guild_id, user, roles}
 
     Bot->>REST: GET /guilds/{guild_id}/invites
-    REST-->>Bot: [{code, uses: 1}, ...]
+    REST-->>Bot: [{code: "{discord_code}", uses: 1}, ...]
 
-    Note over Bot: InviteCache.diffOnMemberJoin — compare fresh<br/>use counts against stored snapshot; matched code = {code}
+    Note over Bot: InviteCache.diffOnMemberJoin — matched code = {discord_code}
 
-    Bot->>Server: RPC Guild/RegisterMember {guild_id, discord_id, username,<br/>avatar, roles, nickname, display_name,<br/>invite_code: some("{code}")}
+    Bot->>Server: RPC Guild/RegisterMember {guild_id, discord_id, username,<br/>avatar, roles, nickname, display_name,<br/>invite_code: some("{discord_code}")}
 
     Server->>DB: Upsert user; find/create team_member
-    Server->>DB: SELECT * FROM team_invites JOIN groups JOIN users<br/>WHERE code=? AND active=true (findByCodeWithContext)
+    Server->>DB: SELECT ti.*, groups.*, users.* FROM invite_acceptances ia<br/>JOIN team_invites ti JOIN groups JOIN users<br/>WHERE ia.discord_code=? (findByDiscordCodeWithContext)
     DB-->>Server: {team_id, group_id, group_name, inviter_discord_id, inviter_username, team_name}
 
     Server->>DB: INSERT group_members {group_id, team_member_id}
@@ -595,7 +626,7 @@ sequenceDiagram
 
     Note over Server: applyTemplate(welcome_message_template, {<br/>  memberMention: "<@discord_id>",<br/>  memberName: "display_name",<br/>  inviterMention: "<@inviter_discord_id>",<br/>  inviterName: "inviter_username",<br/>  groupName: "First Team",<br/>  teamName: "FC Sideline"<br/>})
 
-    Server-->>Bot: Option<WelcomeMeta> {<br/>  system_log_channel_id: some(...),<br/>  invite_code: some("{code}"),<br/>  welcome: some({<br/>    welcome_channel_id: some(...),<br/>    welcome_message_rendered: some("Welcome..."),<br/>    group_name: some("First Team"),<br/>    group_color_int: some(0x3498db),<br/>    inviter_discord_id: some(...)<br/>  })<br/>}
+    Server-->>Bot: Option<WelcomeMeta> {<br/>  system_log_channel_id: some(...),<br/>  invite_code: some("{discord_code}"),<br/>  welcome: some({<br/>    welcome_channel_id: some(...),<br/>    welcome_message_rendered: some("Welcome..."),<br/>    group_name: some("First Team"),<br/>    group_color_int: some(0x3498db),<br/>    inviter_discord_id: some(...)<br/>  })<br/>}
 
     par System log (captain-only channel)
         Bot->>REST: POST /channels/{system_log_channel_id}/messages<br/>embed: {title: "Member joined", fields: [member, invite code, inviter, group]}
@@ -610,7 +641,7 @@ sequenceDiagram
 
 ## 10. Invite and Join Team (web flow)
 
-An admin generates an invite link (or regenerates one) from the team settings page. The server creates a 12-character alphanumeric code, stores it in `team_invites`, and deactivates any previous codes for that team. A new user visits the invite URL in the browser, which first calls `GET /invite/{code}` to display the team name without authentication. When the user clicks "Accept", the front end redirects through the OAuth login flow (diagram 1), after which the app calls `POST /invite/{code}/join` with the session token. The server validates the code, checks the user is not already a member, resolves the "Player" role ID, inserts the membership, assigns the Player role, and returns a join result.
+An admin generates an invite link (or regenerates one) from the team settings page. The server creates a 12-character alphanumeric code, stores it in `team_invites`, and deactivates any previous codes for that team. A new user visits the invite URL in the browser, which first calls `GET /invite/{code}` to display the team name without authentication. When the user clicks "Accept", the front end redirects through the OAuth login flow (diagram 1), after which the app calls `POST /invite/{code}/join` with the session token. The server validates the code, checks the user is not already a member, resolves the "Player" role ID, inserts the membership, assigns the Player role, creates an `invite_acceptances` row, and returns a `JoinResult` containing the acceptance ID. The web app polls `GET /invite/acceptances/:acceptanceId` until the bot writes the single-use Discord invite code (typically within 1 second), then redirects to `https://discord.gg/{discord_code}`.
 
 If the user's OAuth token is missing the `guilds.join` scope (a legacy user who authenticated before the scope was added), `joinViaInvite` skips the pending-guild-join enqueue and returns `requiresReauth: true`. The web app then shows a re-authorisation prompt. When the user re-authenticates via Discord (diagram 1), the auth callback detects the newly-granted scope and re-enqueues any failed pending-guild-joins automatically; no further action is required from the user.
 
@@ -620,6 +651,7 @@ sequenceDiagram
     participant NewUser as New User (Browser)
     participant Server as API Server
     participant DB as PostgreSQL
+    participant Bot as Bot Process
 
     Admin->>Server: POST /teams/{teamId}/invite/regenerate<br/>Authorization: Bearer <token>
     Note over Server: Verify team:invite permission
@@ -671,15 +703,27 @@ sequenceDiagram
         Server->>DB: SELECT granted_scopes FROM oauth_connections<br/>WHERE user_id=? AND provider='discord'
         DB-->>Server: granted_scopes (string)
 
+        Server->>DB: INSERT invite_acceptances {team_invite_id, user_id}
+        DB-->>Server: InviteAcceptance {id: acceptance_id}
+
         alt guilds.join present in granted_scopes
             Server->>DB: INSERT pending_guild_joins {user_id, guild_id, team_id}
             DB-->>Server: OK
-            Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:["Player"],<br/>isProfileComplete, requiresReauth: false}
+            Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:["Player"],<br/>isProfileComplete, requiresReauth: false,<br/>acceptanceId: some(acceptance_id)}
         else guilds.join missing (legacy token)
             Note over Server: Skip enqueue — bot cannot add user to guild
-            Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:["Player"],<br/>isProfileComplete, requiresReauth: true}
+            Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:["Player"],<br/>isProfileComplete, requiresReauth: true,<br/>acceptanceId: some(acceptance_id)}
             NewUser->>NewUser: Web app shows re-auth CTA<br/>"Re-connect Discord to finish joining"
             Note over NewUser: User clicks CTA → OAuth re-auth (Diagram 1)<br/>Callback re-enqueues pending_guild_joins automatically
         end
+
+        loop Poll ~1 s until discordInviteUrl is set
+            NewUser->>Server: GET /invite/acceptances/{acceptance_id}
+            Server->>DB: SELECT * FROM invite_acceptances WHERE id=?
+            DB-->>Server: InviteAcceptance row
+            Server-->>NewUser: 200 OK — JoinStatus {acceptanceId, discordInviteUrl, errorCode}
+        end
+
+        Note over NewUser: discordInviteUrl set → browser redirects to https://discord.gg/{code}<br/>(Bot generated a 1-use, 24-hour Discord invite via Invite/PendingAcceptances loop)
     end
 ```

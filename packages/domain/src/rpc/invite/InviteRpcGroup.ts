@@ -1,29 +1,29 @@
 import { Schema } from 'effect';
 import { Rpc, RpcGroup } from 'effect/unstable/rpc';
 import * as Discord from '~/models/Discord.js';
+import { InviteAcceptanceId } from '~/models/InviteAcceptance.js';
 import { InviteGeneratorErrorCode } from '~/models/Onboarding.js';
-import { TeamInviteId } from '~/models/TeamInvite.js';
 
 export const InviteRpcGroup = RpcGroup.make(
-  Rpc.make('PendingDiscordCodes', {
+  Rpc.make('PendingAcceptances', {
     payload: { limit: Schema.Number },
     success: Schema.Array(
       Schema.Struct({
-        invite_id: TeamInviteId,
+        acceptance_id: InviteAcceptanceId,
         guild_id: Discord.Snowflake,
         welcome_channel_id: Discord.Snowflake,
       }),
     ),
   }),
-  Rpc.make('SetDiscordCode', {
+  Rpc.make('SetAcceptanceDiscordCode', {
     payload: {
-      invite_id: TeamInviteId,
+      acceptance_id: InviteAcceptanceId,
       discord_code: Schema.String,
     },
   }),
-  Rpc.make('MarkDiscordCodeFailed', {
+  Rpc.make('MarkAcceptanceFailed', {
     payload: {
-      invite_id: TeamInviteId,
+      acceptance_id: InviteAcceptanceId,
       error_code: InviteGeneratorErrorCode,
       error_detail: Schema.String,
     },

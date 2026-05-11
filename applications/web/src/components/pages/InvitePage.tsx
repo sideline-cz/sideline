@@ -29,6 +29,10 @@ export function InvitePage({
   const [joining, setJoining] = React.useState(false);
   const [requiresReauth, setRequiresReauth] = React.useState(false);
   const [joinResult, setJoinResult] = React.useState<Invite.JoinResult | null>(null);
+  const [discordInviteUrl, setDiscordInviteUrl] = React.useState<Option.Option<string>>(
+    Option.none(),
+  );
+  const [discordInviteFailed, setDiscordInviteFailed] = React.useState(false);
 
   const handleJoin = React.useCallback(async () => {
     setJoining(true);
@@ -60,6 +64,40 @@ export function InvitePage({
     onJoined(joinResult.teamId, joinResult.isProfileComplete);
   }, [joinResult, onJoined]);
 
+  const acceptanceId = joinResult !== null ? joinResult.acceptanceId : Option.none();
+
+  React.useEffect(() => {
+    if (Option.isNone(acceptanceId)) return;
+    if (Option.isSome(discordInviteUrl) || discordInviteFailed) return;
+
+    let cancelled = false;
+    const accId = acceptanceId.value;
+
+    const poll = () =>
+      ApiClient.asEffect().pipe(
+        Effect.flatMap((api) => api.invite.getJoinStatus({ params: { acceptanceId: accId } })),
+        Effect.tap((status) =>
+          Effect.sync(() => {
+            if (cancelled) return;
+            if (Option.isSome(status.discordInviteUrl)) {
+              setDiscordInviteUrl(status.discordInviteUrl);
+            } else if (Option.isSome(status.errorCode)) {
+              setDiscordInviteFailed(true);
+            }
+          }),
+        ),
+        Effect.mapError(() => ClientError.make('')),
+        run(),
+      );
+
+    void poll();
+    const interval = window.setInterval(poll, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [acceptanceId, discordInviteUrl, discordInviteFailed, run]);
+
   return (
     <div className='flex min-h-screen flex-col'>
       <header className='flex items-center justify-between px-6 py-4 border-b'>
@@ -78,24 +116,24 @@ export function InvitePage({
               </div>
             </div>
             {joinResult !== null ? (
-              Option.match(joinResult.discordInviteUrl, {
-                onNone: () => (
-                  <>
-                    <CardTitle>{m.invite_preparingDiscordInviteTitle()}</CardTitle>
-                    <CardDescription>
-                      {m.invite_preparingDiscordInviteDescription()}
-                    </CardDescription>
-                  </>
-                ),
-                onSome: () => (
-                  <>
-                    <CardTitle>{m.invite_joinDiscordTitle()}</CardTitle>
-                    <CardDescription>
-                      {m.invite_joinDiscordDescription({ teamName: invite.teamName })}
-                    </CardDescription>
-                  </>
-                ),
-              })
+              Option.isSome(discordInviteUrl) ? (
+                <>
+                  <CardTitle>{m.invite_joinDiscordTitle()}</CardTitle>
+                  <CardDescription>
+                    {m.invite_joinDiscordDescription({ teamName: invite.teamName })}
+                  </CardDescription>
+                </>
+              ) : discordInviteFailed ? (
+                <>
+                  <CardTitle>{m.invite_discordInviteFailedTitle()}</CardTitle>
+                  <CardDescription>{m.invite_discordInviteFailedDescription()}</CardDescription>
+                </>
+              ) : (
+                <>
+                  <CardTitle>{m.invite_preparingDiscordInviteTitle()}</CardTitle>
+                  <CardDescription>{m.invite_preparingDiscordInviteDescription()}</CardDescription>
+                </>
+              )
             ) : requiresReauth ? (
               <>
                 <CardTitle>{m.invite_reauthTitle()}</CardTitle>
@@ -128,23 +166,25 @@ export function InvitePage({
           </CardHeader>
           <CardContent className='flex flex-col gap-2'>
             {joinResult !== null ? (
-              Option.match(joinResult.discordInviteUrl, {
-                onNone: () => (
-                  <Button onClick={handleContinue} className='w-full'>
+              Option.isSome(discordInviteUrl) ? (
+                <>
+                  <a
+                    href={discordInviteUrl.value}
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    className='w-full'
+                  >
+                    <Button className='w-full'>{m.invite_joinDiscordButton()}</Button>
+                  </a>
+                  <Button variant='ghost' onClick={handleContinue} className='w-full'>
                     {m.invite_joinButton()}
                   </Button>
-                ),
-                onSome: (url) => (
-                  <>
-                    <a href={url} target='_blank' rel='noopener noreferrer' className='w-full'>
-                      <Button className='w-full'>{m.invite_joinDiscordButton()}</Button>
-                    </a>
-                    <Button variant='ghost' onClick={handleContinue} className='w-full'>
-                      {m.invite_joinButton()}
-                    </Button>
-                  </>
-                ),
-              })
+                </>
+              ) : (
+                <Button onClick={handleContinue} className='w-full'>
+                  {m.invite_joinButton()}
+                </Button>
+              )
             ) : requiresReauth ? (
               <Button onClick={onReauth} className='w-full'>
                 {m.invite_reauthButton()}

@@ -2,6 +2,8 @@ import { Schema } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
 import { GroupId } from '~/models/GroupModel.js';
+import { InviteAcceptanceId } from '~/models/InviteAcceptance.js';
+import { InviteGeneratorErrorCode } from '~/models/Onboarding.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamInviteId } from '~/models/TeamInvite.js';
 import { UserId } from '~/models/User.js';
@@ -19,7 +21,13 @@ export class JoinResult extends Schema.Class<JoinResult>('JoinResult')({
   roleNames: Schema.Array(Schema.String),
   isProfileComplete: Schema.Boolean,
   requiresReauth: Schema.Boolean,
+  acceptanceId: Schema.OptionFromNullOr(InviteAcceptanceId),
+}) {}
+
+export class JoinStatus extends Schema.Class<JoinStatus>('JoinStatus')({
+  acceptanceId: InviteAcceptanceId,
   discordInviteUrl: Schema.OptionFromNullOr(Schema.String),
+  errorCode: Schema.OptionFromNullOr(InviteGeneratorErrorCode),
 }) {}
 
 export class InviteCode extends Schema.Class<InviteCode>('InviteCode')({
@@ -43,7 +51,6 @@ export class InviteListItem extends Schema.Class<InviteListItem>('InviteListItem
   expiresAt: Schema.OptionFromNullOr(Schema.Date),
   createdAt: Schema.Date,
   createdBy: UserId,
-  discordCode: Schema.OptionFromNullOr(Schema.String),
 }) {}
 
 export class InviteNotFound extends Schema.TaggedErrorClass<InviteNotFound>()(
@@ -73,6 +80,13 @@ export class InviteApiGroup extends HttpApiGroup.make('invite')
         AlreadyMember.pipe(HttpApiSchema.status(409)),
       ],
       params: { code: Schema.String },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.get('getJoinStatus', '/invite/acceptances/:acceptanceId', {
+      success: JoinStatus,
+      error: InviteNotFound.pipe(HttpApiSchema.status(404)),
+      params: { acceptanceId: InviteAcceptanceId },
     }).middleware(AuthMiddleware),
   )
   .add(

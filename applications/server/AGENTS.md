@@ -105,24 +105,44 @@ The `Guild/UpsertChannel` and `Guild/DeleteChannel` RPCs are called by the bot's
 
 `Guild/RegisterMember` (`src/rpc/guild/index.ts`) is called by the bot's `GuildMemberAdd` handler. It upserts the user, creates or reactivates the team membership, applies role/group mappings, and returns `Option<WelcomeMeta>`. The bot uses the returned metadata to send a system-log message and (optionally) a welcome message — see `applications/bot/AGENTS.md` for the bot side.
 
-The RPC payload includes `invite_code: Option<Snowflake-like string>`. The server resolves welcome metadata as follows:
+The RPC payload includes `invite_code: Option<Snowflake-like string>` — this is the **Discord** invite code captured by the bot's invite-diff (one-use code minted per acceptance; see "Per-Acceptance Discord Invites" below), **not** the Sideline `team_invites.code`. The server resolves welcome metadata as follows:
 
 1. If `findByGuildId(guild_id)` returns `None`, return `Option.none()` — the guild is not linked.
 2. Always populate `system_log_channel_id` from the team row.
-3. If `invite_code` is `Some`, look up the invite via `invites.findByCodeWithContext(code)`. If the invite is missing, expired, or belongs to a different team, log a warning/error and return `noWelcome` (system log only, no welcome embed).
-4. If the invite resolves and the team has `welcome_message_template`, render it with `applyTemplate(template, vars)` then `sanitizeRendered(...)` from `@sideline/template-renderer`. The rendered string goes into `welcome.welcome_message_rendered` — **never send the raw template to the bot**.
-5. If the invite has a `group_id`, add the new member to that group AND fetch the group's color via `groups.findGroupById` → `sanitizeHexColor` to populate `group_color_int`.
+3. If `invite_code` is `Some`, look up the consumed acceptance via `acceptances.findByDiscordCodeWithContext(code)` (joins `invite_acceptances → team_invites → users → teams → groups`). If no acceptance row matches the Discord code (or its parent `team_invites` row is inactive/expired), log a warning/error and return `noWelcome` (system log only, no welcome embed). **Never** fall back to `TeamInvitesRepository.findByCodeWithContext` here — `team_invites` no longer has a `discord_code` column.
+4. If the lookup resolves and the team has `welcome_message_template`, render it with `applyTemplate(template, vars)` then `sanitizeRendered(...)` from `@sideline/template-renderer`. The rendered string goes into `welcome.welcome_message_rendered` — **never send the raw template to the bot**.
+5. If the parent invite has a `group_id`, add the new member to that group AND fetch the group's color via `groups.findGroupById` → `sanitizeHexColor` to populate `group_color_int`.
 
 The server is the only renderer of welcome templates. The bot receives a fully-substituted, sanitized string and embeds it as-is.
+
+### Per-Acceptance Discord Invites
+
+Each time a user clicks "Accept" on `/invite/{code}`, the server inserts an `invite_acceptances` row (FK to `team_invites`, FK to `users`) and returns its id to the client. The Discord invite is generated **per acceptance**, not per `team_invites` row, so each acceptance produces a distinct `max_uses: 1, max_age: 24h` Discord invite that is bound to that single recipient.
+
+| Column on `invite_acceptances` | Purpose |
+|--------------------------------|---------|
+| `id` | Acceptance UUID returned to the web client and used by `getJoinStatus`. |
+| `team_invite_id` | FK to the underlying `team_invites` row (the captain-created code). |
+| `user_id` | FK to the accepting user. |
+| `discord_code` | One-use Discord invite code minted by the bot's `Invite/SetAcceptanceDiscordCode` RPC. `NULL` until generated. Unique partial index. |
+| `discord_code_error_code` / `discord_code_error_detail` | Populated by `Invite/MarkAcceptanceFailed` when the bot cannot mint an invite. |
+| `created_at` / `generated_at` | Insert time / mint time. |
+
+Rules:
+
+1. **`team_invites.discord_code` no longer exists.** Never add a column-level Discord code to `team_invites` again — minted codes always live on `invite_acceptances`.
+2. **`InviteAcceptancesRepository` owns all Discord-code helpers** (`findPending`, `setDiscordCode`, `markFailed`, `findByDiscordCodeWithContext`). `TeamInvitesRepository` must not regain these methods.
+3. The `Guild/RegisterMember` Discord-code lookup, the invite-generator poll, and the `getJoinStatus` API all read from `invite_acceptances`. There is no other source of truth for a minted Discord code.
 
 ### Invite Endpoints (`src/api/invite.ts`)
 
 | Endpoint | Path | Purpose |
 |----------|------|---------|
 | `getInvite` | `GET /invite/:code` | Public — resolve invite for the join landing page |
-| `joinViaInvite` | `POST /invite/:code/join` | Authenticated — accept invite, create membership |
-| `createInvite` | `POST /teams/:teamId/invites` | Captain — create invite (optionally bound to a `groupId`, optional `expiresAt`) |
-| `listInvitesForTeam` | `GET /teams/:teamId/invites` | Captain — list active and inactive invites for management UI |
+| `joinViaInvite` | `POST /invite/:code/join` | Authenticated — accept invite, create membership, insert `invite_acceptances` row, return `JoinResult { teamId, roleNames, isProfileComplete, requiresReauth, acceptanceId: Option<InviteAcceptanceId> }`. **Never returns a `discordInviteUrl`** — the bot mints the Discord invite asynchronously and the client must poll `getJoinStatus`. |
+| `getJoinStatus` | `GET /invite/acceptances/:acceptanceId` | Authenticated — poll the acceptance row; returns `JoinStatus { acceptanceId, discordInviteUrl: Option<string>, errorCode: Option<InviteGeneratorErrorCode> }`. The web polls this every 1.5s after a successful join until either `discordInviteUrl` or `errorCode` becomes `Some`. |
+| `createInvite` | `POST /teams/:teamId/invites` | Captain — create invite (optionally bound to a `groupId`, optional `expiresAt`). Does NOT mint any Discord code — codes are minted per acceptance, not per `team_invites` row. |
+| `listInvitesForTeam` | `GET /teams/:teamId/invites` | Captain — list active and inactive invites for management UI. The returned `InviteListItem` has no `discordCode` field; captains share only the `/invite/{code}` Sideline link. |
 | `regenerateInvite` | `POST /teams/:teamId/invite/regenerate` | **Deprecated** — kept for backwards compat; prefer `createInvite` |
 | `disableInvite` | `DELETE /teams/:teamId/invite` | Captain — deactivate **all** invites for a team |
 | `deactivateInvite` | `POST /teams/:teamId/invites/:inviteId/deactivate` | Captain — deactivate a single invite by id |

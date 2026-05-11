@@ -31,11 +31,16 @@ Invites are how new people join your team. Each invite is a URL that, when opene
 2. Sideline shows the team name, which group they'll join, and who invited them.
 3. They sign in with Discord.
 4. They are added to your team (and the target group if the invite is group-scoped).
+5. The page briefly shows a **"Preparing your Discord invite…"** state while the bot generates a personalised, single-use Discord invite link. Within about a second, the browser redirects them straight to the Discord server.
 
 </Steps>
 
 <Aside type="note" title="Re-connect Discord prompt">
   If a member signed in to Sideline before group-targeted invites were introduced, the invite page may show a **"Re-connect Discord"** button instead of completing immediately. The member should click it — Sideline re-requests the necessary permission and finishes the Discord server join automatically. This is a one-time step.
+</Aside>
+
+<Aside type="note" title="How the Discord link works">
+  Each member who clicks "Accept" receives their own unique Discord invite link. The link is valid for 24 hours and can be used once. There is no shared Discord server link for captains to copy — share only the `/invite/{code}` web URL with your players.
 </Aside>
 
 ## Discord welcome message

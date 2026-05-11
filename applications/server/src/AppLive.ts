@@ -23,6 +23,7 @@ import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsReposit
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
+import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
@@ -67,6 +68,7 @@ const Repositories = Layer.mergeAll(
   GroupsRepository.Default,
   TrainingTypesRepository.Default,
   TeamInvitesRepository.Default,
+  InviteAcceptancesRepository.Default,
   AgeThresholdRepository.Default,
   NotificationsRepository.Default,
   RoleSyncEventsRepository.Default,

@@ -10,6 +10,7 @@ import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsReposit
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -247,6 +248,25 @@ const MockTeamInvitesRepository = Layer.succeed(TeamInvitesRepository, {
   deactivateById: () => Effect.succeed(Option.none()),
 } as any);
 
+const MockInviteAcceptancesRepository = Layer.succeed(InviteAcceptancesRepository, {
+  _tag: 'api/InviteAcceptancesRepository',
+  findByDiscordCodeWithContext: (code: string) => {
+    const ctx = inviteContexts.get(code);
+    if (!ctx || !ctx.active) return Effect.succeed(Option.none());
+    return Effect.succeed(
+      Option.some({
+        ...ctx,
+        inviter_username: 'inviter-user',
+      }),
+    );
+  },
+  create: () => Effect.die(new Error('Not implemented')),
+  findById: () => Effect.succeed(Option.none()),
+  findPending: () => Effect.succeed([]),
+  setDiscordCode: () => Effect.void,
+  markFailed: () => Effect.void,
+} as any);
+
 const MockBotGuildsRepository = Layer.succeed(BotGuildsRepository, {
   upsert: () => Effect.void,
   remove: () => Effect.void,
@@ -283,6 +303,7 @@ const TestLayer = GuildsRpcLive.pipe(
       MockTeamMembersRepository,
       MockGroupsRepository,
       MockTeamInvitesRepository,
+      MockInviteAcceptancesRepository,
       MockBotGuildsRepository,
       MockDiscordChannelsRepository,
       MockDiscordRoleMappingRepository,
