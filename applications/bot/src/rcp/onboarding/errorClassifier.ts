@@ -60,7 +60,12 @@ const getErrorText = (entry: unknown): string => {
 };
 
 const ROLE_FIELD_KEYS = new Set(['role_ids', 'roles']);
-const CHANNEL_FIELD_KEYS = new Set(['channel_ids', 'channels', 'default_channel_ids']);
+const CHANNEL_FIELD_KEYS = new Set([
+  'channel_ids',
+  'channels',
+  'default_channel_ids',
+  'welcome_channels',
+]);
 const ROLE_ERROR_CODES = new Set(['UNKNOWN_ROLE', 'INVALID_ROLE']);
 const CHANNEL_ERROR_CODES = new Set(['UNKNOWN_CHANNEL', 'INVALID_CHANNEL']);
 

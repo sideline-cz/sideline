@@ -1,57 +1,32 @@
-import { Discord, Team } from '@sideline/domain';
+import { type Discord, Team } from '@sideline/domain';
 import { Bind } from '@sideline/effect-lib';
 import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
-import type { UpdateGuildOnboardingRequest as DfxUpdateGuildOnboardingRequest } from 'dfx/DiscordREST/Generated';
 import { Array, Effect, Metric, Option, Schema, type ServiceMap } from 'effect';
 import { OnboardingRoleCache } from '../../services/OnboardingRoleCache.js';
 import { SyncRpc, type SyncRpcClient } from '../../services/SyncRpc.js';
 import { classifyOnboardingError } from './errorClassifier.js';
-import type { OnboardingTeamView, RulesPromptStrings } from './payloadBuilders.js';
-import { mergeOnboardingPayload } from './payloadBuilders.js';
+import type { OnboardingTeamView, WelcomeScreenStrings } from './payloadBuilders.js';
+import { buildWelcomeScreenPayload } from './payloadBuilders.js';
 
 const onboardingSyncTotal = Metric.counter('onboarding_sync_total', {
   description: 'Total onboarding sync operations',
   incremental: true,
 });
 
-const resolveStrings = (locale: 'en' | 'cs'): { rulesPrompt: RulesPromptStrings } => {
+const resolveStrings = (
+  locale: 'en' | 'cs',
+  teamName: string,
+): { welcome: WelcomeScreenStrings } => {
   const opts = { locale };
   return {
-    rulesPrompt: {
-      title: m.bot_onboarding_rulesPrompt_title({}, opts),
-      optionTitle: m.bot_onboarding_rulesPrompt_option_title({}, opts),
-      optionDescription: m.bot_onboarding_rulesPrompt_option_description({}, opts),
+    welcome: {
+      description: m.bot_onboarding_welcomeScreen_description({ teamName }, opts),
+      channels_rules: m.bot_onboarding_welcomeScreen_channels_rules({}, opts),
+      channels_welcome: m.bot_onboarding_welcomeScreen_channels_welcome({}, opts),
+      channels_training: m.bot_onboarding_welcomeScreen_channels_training({}, opts),
     },
   };
-};
-
-const decodeSnowflake = Schema.decodeSync(Discord.Snowflake);
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object';
-
-const findNewPromptId = (response: unknown, roleId: string): Option.Option<Discord.Snowflake> => {
-  if (!isRecord(response) || !Array.isArray(response.prompts)) return Option.none();
-  for (const prompt of response.prompts) {
-    if (!isRecord(prompt)) continue;
-    const options = Array.isArray(prompt.options) ? prompt.options : [];
-    for (const opt of options) {
-      const roleIds = isRecord(opt) && Array.isArray(opt.role_ids) ? opt.role_ids : [];
-      if (roleIds.includes(roleId)) {
-        return typeof prompt.id === 'string'
-          ? Option.some(decodeSnowflake(prompt.id))
-          : Option.none();
-      }
-    }
-  }
-  return Option.none();
-};
-
-const isStalePromptIdError = (error: unknown, promptId: string): boolean => {
-  if (!isRecord(error) || error._tag !== 'ErrorResponse') return false;
-  const serialized = JSON.stringify(error.errors ?? {});
-  return serialized.includes('"id"') && serialized.includes(promptId);
 };
 
 const makeProcessTeam =
@@ -78,48 +53,21 @@ const makeProcessTeam =
       );
     }
 
-    const strings = resolveStrings(team.onboarding_locale);
-    const storedPromptId = Option.getOrUndefined(team.onboarding_rules_prompt_id);
+    const strings = resolveStrings(team.onboarding_locale, team.team_name);
+    const welcomePayload = buildWelcomeScreenPayload(team, strings.welcome);
 
-    const syncDiscord = discord.getGuildsOnboarding(team.guild_id).pipe(
-      Effect.flatMap((current) => {
-        const { merged } = mergeOnboardingPayload(current, team, strings.rulesPrompt);
-        return discord
-          .putGuildsOnboarding(team.guild_id, merged as DfxUpdateGuildOnboardingRequest)
-          .pipe(
-            Effect.catchTag('ErrorResponse', (putError) => {
-              if (storedPromptId === undefined) return Effect.fail(putError);
-              const classified = classifyOnboardingError(putError, team);
-              if (classified.code !== 'discord_error') return Effect.fail(putError);
-              if (putError.code !== 50035 || !isStalePromptIdError(putError, storedPromptId)) {
-                return Effect.fail(putError);
-              }
-              const strippedTeam = { ...team, onboarding_rules_prompt_id: Option.none<string>() };
-              const { merged: retryMerged } = mergeOnboardingPayload(
-                current,
-                strippedTeam,
-                strings.rulesPrompt,
-              );
-              return discord.putGuildsOnboarding(
-                team.guild_id,
-                retryMerged as DfxUpdateGuildOnboardingRequest,
-              );
-            }),
-          );
-      }),
-      Effect.flatMap((putResponse) => {
-        // Once onboarding is enabled, Discord shows the onboarding flow to new members
-        // instead of the welcome screen. The welcome-screen endpoint is still readable
-        // (and used for invite previews) but writes here would only surface duplicate
-        // permission errors. The Server Guide / Home Settings has no write API in dfx,
-        // so the captain configures it via Discord directly.
-        const newPromptId = Option.isSome(team.onboarding_rules_role_id)
-          ? findNewPromptId(putResponse, team.onboarding_rules_role_id.value)
-          : Option.none<Discord.Snowflake>();
-        return Effect.succeed(newPromptId);
-      }),
-      Effect.flatMap((newPromptId) =>
-        rpc['Guild/MarkOnboardingSyncDone']({ team_id: teamId, prompt_id: newPromptId }).pipe(
+    const syncDiscord = Option.isNone(welcomePayload)
+      ? Effect.succeed(Option.none<Discord.Snowflake>())
+      : discord
+          .updateGuildWelcomeScreen(team.guild_id, welcomePayload.value)
+          .pipe(Effect.as(Option.none<Discord.Snowflake>()));
+
+    return syncDiscord.pipe(
+      Effect.flatMap(() =>
+        rpc['Guild/MarkOnboardingSyncDone']({
+          team_id: teamId,
+          prompt_id: Option.none<Discord.Snowflake>(),
+        }).pipe(
           Effect.flatMap(({ updated }) => {
             if (!updated) {
               return Effect.logInfo(
@@ -139,9 +87,6 @@ const makeProcessTeam =
           }),
         ),
       ),
-    );
-
-    return syncDiscord.pipe(
       Effect.catch((error) => {
         const classified = classifyOnboardingError(error, team);
         return cache.invalidate(team.guild_id).pipe(

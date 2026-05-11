@@ -254,23 +254,24 @@ describe('OnboardingProcessorService', () => {
     expect(restCalls.updateGuildWelcomeScreen).toHaveLength(0);
   });
 
-  it('single team success path → GET, PUT, MarkOnboardingSyncDone called; welcome screen is NOT patched (onboarding replaces it)', async () => {
+  it('single team success path → welcome screen patched, MarkOnboardingSyncDone called; onboarding endpoint untouched', async () => {
     const { calls: rpcCalls, layer: rpcLayer } = makeRpc([makePendingSync()]);
     const { calls: restCalls, layer: restLayer } = makeRest();
     const { layer: cacheLayer } = makeLiveCache();
 
     await runProcessTick(rpcLayer, restLayer, cacheLayer);
 
-    expect(restCalls.getGuildsOnboarding).toHaveLength(1);
-    expect(restCalls.putGuildsOnboarding).toHaveLength(1);
-    // Welcome screen is no longer patched — once onboarding is enabled, Discord shows
-    // the onboarding flow to new members instead. Server Guide / Home Settings has no
-    // write API in dfx so the captain configures it via Discord directly.
-    expect(restCalls.updateGuildWelcomeScreen).toHaveLength(0);
+    // We only push the welcome screen now. Onboarding is left as the captain configured
+    // it (Discord doesn't expose a Server Guide write endpoint, and onboarding's role
+    // gate isn't the model we want).
+    expect(restCalls.getGuildsOnboarding).toHaveLength(0);
+    expect(restCalls.putGuildsOnboarding).toHaveLength(0);
+    expect(restCalls.updateGuildWelcomeScreen).toHaveLength(1);
     expect(rpcCalls.MarkOnboardingSyncDone).toHaveLength(1);
     const doneCall = rpcCalls.MarkOnboardingSyncDone[0] as any;
     expect(doneCall.team_id).toBe(TEAM_ID);
-    expect(Option.isSome(doneCall.prompt_id)).toBe(true);
+    // prompt_id is always None now (we don't author a Discord prompt anymore).
+    expect(Option.isNone(doneCall.prompt_id)).toBe(true);
   });
 
   it('community feature off (is_community_enabled=false) → only MarkOnboardingSyncSkipped called, no Discord REST', async () => {
@@ -292,36 +293,7 @@ describe('OnboardingProcessorService', () => {
     expect(cacheCalls.invalidate).toContain(GUILD_ID);
   });
 
-  it('role_deleted error → MarkOnboardingSyncFailed with code=role_deleted', async () => {
-    const { calls: rpcCalls, layer: rpcLayer } = makeRpc([
-      makePendingSync({ onboarding_rules_role_id: Option.some(ROLE_ID) }),
-    ]);
-    const roleDeletedError = {
-      _tag: 'ErrorResponse',
-      code: 50035,
-      message: 'Invalid Form Body',
-      errors: {
-        prompts: {
-          '0': {
-            options: { '0': { role_ids: { '0': { _errors: [`Invalid role: ${ROLE_ID}`] } } } },
-          },
-        },
-      },
-    };
-    const { layer: restLayer } = makeRest({
-      putGuildsOnboarding: () => Effect.fail(roleDeletedError),
-    });
-    const { layer: cacheLayer } = makeLiveCache();
-
-    await runProcessTick(rpcLayer, restLayer, cacheLayer);
-
-    expect(rpcCalls.MarkOnboardingSyncFailed).toHaveLength(1);
-    const failCall = rpcCalls.MarkOnboardingSyncFailed[0] as any;
-    expect(failCall.error_code).toBe('role_deleted');
-    expect(failCall.team_id).toBe(TEAM_ID);
-  });
-
-  it('channel_deleted error → MarkOnboardingSyncFailed with code=channel_deleted', async () => {
+  it('channel_deleted error from welcome-screen PATCH → MarkOnboardingSyncFailed with code=channel_deleted', async () => {
     const { calls: rpcCalls, layer: rpcLayer } = makeRpc([
       makePendingSync({ rules_channel_id: Option.some(RULES_CHANNEL_ID) }),
     ]);
@@ -330,11 +302,11 @@ describe('OnboardingProcessorService', () => {
       code: 50035,
       message: 'Invalid Form Body',
       errors: {
-        default_channel_ids: { '0': { _errors: [`Invalid channel: ${RULES_CHANNEL_ID}`] } },
+        welcome_channels: { '0': { _errors: [`Invalid channel: ${RULES_CHANNEL_ID}`] } },
       },
     };
     const { layer: restLayer } = makeRest({
-      putGuildsOnboarding: () => Effect.fail(channelDeletedError),
+      updateGuildWelcomeScreen: () => Effect.fail(channelDeletedError),
     });
     const { layer: cacheLayer } = makeLiveCache();
 
@@ -345,8 +317,7 @@ describe('OnboardingProcessorService', () => {
     expect(failCall.error_code).toBe('channel_deleted');
   });
 
-  it('RatelimitedResponse → MarkOnboardingSyncFailed with code=rate_limited', async () => {
-    // Plan §9 ProcessorService case 5
+  it('RatelimitedResponse from welcome-screen PATCH → MarkOnboardingSyncFailed with code=rate_limited', async () => {
     const { calls: rpcCalls, layer: rpcLayer } = makeRpc([makePendingSync()]);
     const rateLimitedError = {
       _tag: 'RatelimitedResponse',
@@ -355,7 +326,7 @@ describe('OnboardingProcessorService', () => {
       global: false,
     };
     const { layer: restLayer } = makeRest({
-      putGuildsOnboarding: () => Effect.fail(rateLimitedError),
+      updateGuildWelcomeScreen: () => Effect.fail(rateLimitedError),
     });
     const { layer: cacheLayer } = makeLiveCache();
 
@@ -396,37 +367,6 @@ describe('OnboardingProcessorService', () => {
     );
     const valueAfter = await Effect.runPromise(getEffect.pipe(Effect.provide(cacheLayer)));
     expect(Option.isNone(valueAfter as Option.Option<string>)).toBe(true);
-  });
-
-  it('stale prompt id retry: first PUT fails referencing stale id, retry with stripped id succeeds → 2 PUT calls, MarkSyncDone once', async () => {
-    const STALE_PROMPT_ID = 'stale-prompt-111';
-    const { calls: rpcCalls, layer: rpcLayer } = makeRpc([
-      makePendingSync({ onboarding_rules_prompt_id: Option.some(STALE_PROMPT_ID) }),
-    ]);
-    let putCount = 0;
-    const { calls: restCalls, layer: restLayer } = makeRest({
-      putGuildsOnboarding: (guildId: any, payload: any) => {
-        restCalls.putGuildsOnboarding.push({ guildId, payload });
-        putCount++;
-        if (putCount === 1) {
-          return Effect.fail({
-            _tag: 'ErrorResponse',
-            code: 50035,
-            message: 'Invalid Form Body',
-            errors: {
-              prompts: { '0': { id: { _errors: [`Unknown prompt: ${STALE_PROMPT_ID}`] } } },
-            },
-          });
-        }
-        return Effect.succeed(makeOnboardingResponse([], NEW_PROMPT_ID));
-      },
-    });
-    const { layer: cacheLayer } = makeLiveCache();
-
-    await runProcessTick(rpcLayer, restLayer, cacheLayer);
-
-    expect(restCalls.putGuildsOnboarding).toHaveLength(2);
-    expect(rpcCalls.MarkOnboardingSyncDone).toHaveLength(1);
   });
 
   it('MarkSyncDone returns updated:false (captain re-saved mid-sync) → no MarkFailed, no success metric, cache NOT invalidated', async () => {
