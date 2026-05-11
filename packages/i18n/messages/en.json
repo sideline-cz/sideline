@@ -815,6 +815,7 @@
   "teamSettings_onboardingErrorCommunityDisabled": "Discord Community features are no longer enabled in this server.",
   "teamSettings_onboardingErrorRequirementsNotMet": "Discord refused to enable onboarding because your server doesn't meet the requirements yet. Make sure Community is enabled and your server has at least 7 channels that @everyone can see, then retry.",
   "teamSettings_onboardingErrorDefaultChannelPrivate": "One of the channels featured in your Discord onboarding (welcome screen or default channels) isn't viewable by @everyone. Open Discord → Server Settings → Onboarding and make sure every featured channel grants View Channel to @everyone, then retry.",
+  "teamSettings_onboardingErrorTooManyPrompts": "Your Discord onboarding already has the maximum of 5 prompts. Remove one in Discord → Server Settings → Onboarding to make room for the Sideline rules prompt, then retry.",
   "teamSettings_onboardingErrorGeneric": "Couldn't sync to Discord: {message}",
   "teamSettings_onboardingNoRoles": "No Discord roles available yet. Create one in your Discord server first.",
   "teamSettings_onboardingNoChannels": "No Discord channels available yet. Create one in your Discord server first.",

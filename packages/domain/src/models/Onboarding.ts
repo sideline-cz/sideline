@@ -10,6 +10,7 @@ export const OnboardingSyncErrorCode = Schema.Literals([
   'community_not_enabled',
   'requirements_not_met',
   'default_channel_private',
+  'too_many_prompts',
   'role_deleted',
   'channel_deleted',
   'rate_limited',

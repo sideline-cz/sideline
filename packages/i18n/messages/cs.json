@@ -815,6 +815,7 @@
   "teamSettings_onboardingErrorCommunityDisabled": "Discord Community funkce už nejsou v tomto serveru zapnuté.",
   "teamSettings_onboardingErrorRequirementsNotMet": "Discord odmítl zapnout onboarding, protože server zatím nesplňuje požadavky. Zapni Community funkce a ujisti se, že server má alespoň 7 kanálů viditelných pro @everyone, pak zkus znovu.",
   "teamSettings_onboardingErrorDefaultChannelPrivate": "Některý z kanálů zobrazených v Discord onboardingu (uvítací obrazovka nebo výchozí kanály) není viditelný pro @everyone. Otevři Discord → Nastavení serveru → Onboarding a zajisti, že každý zobrazený kanál dává View Channel pro @everyone, pak zkus znovu.",
+  "teamSettings_onboardingErrorTooManyPrompts": "Discord onboarding už má maximální počet 5 otázek. Odstraň jednu v Discord → Nastavení serveru → Onboarding, aby se vešla Sideline otázka s pravidly, pak zkus znovu.",
   "teamSettings_onboardingErrorGeneric": "Synchronizace s Discordem selhala: {message}",
   "teamSettings_onboardingNoRoles": "Zatím žádné Discord role. Nejdřív si vytvoř roli v Discord serveru.",
   "teamSettings_onboardingNoChannels": "Zatím žádné Discord kanály. Nejdřív si vytvoř kanál v Discord serveru.",

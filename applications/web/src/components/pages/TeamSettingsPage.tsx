@@ -1124,6 +1124,7 @@ function getOnboardingErrorMessage(syncError: string | null): string {
       return m.teamSettings_onboardingErrorRequirementsNotMet();
     if (parsed.code === 'default_channel_private')
       return m.teamSettings_onboardingErrorDefaultChannelPrivate();
+    if (parsed.code === 'too_many_prompts') return m.teamSettings_onboardingErrorTooManyPrompts();
     return m.teamSettings_onboardingErrorGeneric({
       message: extractGenericDetail(parsed.detail ?? syncError),
     });

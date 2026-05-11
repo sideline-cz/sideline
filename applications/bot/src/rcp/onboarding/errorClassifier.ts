@@ -11,6 +11,7 @@ export type OnboardingErrorCode =
   | 'community_not_enabled'
   | 'requirements_not_met'
   | 'default_channel_private'
+  | 'too_many_prompts'
   | 'rate_limited'
   | 'discord_error'
   | 'network_error';
@@ -154,6 +155,12 @@ export const classifyOnboardingError = (error: unknown, team: TeamContext): Clas
       ) {
         return {
           code: 'default_channel_private',
+          detail: `Discord error 50035: ${message}`,
+        };
+      }
+      if (serialized.includes('TOO_MANY_ONBOARDING_PROMPTS')) {
+        return {
+          code: 'too_many_prompts',
           detail: `Discord error 50035: ${message}`,
         };
       }

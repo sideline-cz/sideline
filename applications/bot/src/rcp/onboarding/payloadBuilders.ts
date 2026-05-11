@@ -179,9 +179,16 @@ export const mergeOnboardingPayload = <
         }
       : undefined;
 
+  // Discord caps onboarding at 5 prompts. If preserving every captain-authored prompt
+  // plus ours would exceed the cap, keep ours (it's the load-bearing one) and trim the
+  // oldest captain prompts to make room.
+  const MAX_PROMPTS = 5;
+  const truncatedOtherPrompts: ReadonlyArray<P> = sidelinePrompt
+    ? otherPrompts.slice(0, MAX_PROMPTS - 1)
+    : otherPrompts.slice(0, MAX_PROMPTS);
   const prompts: ReadonlyArray<OnboardingPrompt | P> = sidelinePrompt
-    ? [...otherPrompts, sidelinePrompt]
-    : otherPrompts;
+    ? [...truncatedOtherPrompts, sidelinePrompt]
+    : truncatedOtherPrompts;
 
   // Discord requires every channel in default_channel_ids to be viewable by @everyone.
   // The rules channel is private by design (the rules prompt is the gate that grants
