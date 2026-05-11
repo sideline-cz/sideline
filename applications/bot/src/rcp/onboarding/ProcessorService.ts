@@ -7,30 +7,17 @@ import { Array, Effect, Metric, Option, Schema, type ServiceMap } from 'effect';
 import { OnboardingRoleCache } from '../../services/OnboardingRoleCache.js';
 import { SyncRpc, type SyncRpcClient } from '../../services/SyncRpc.js';
 import { classifyOnboardingError } from './errorClassifier.js';
-import type {
-  OnboardingTeamView,
-  RulesPromptStrings,
-  WelcomeScreenStrings,
-} from './payloadBuilders.js';
-import { buildWelcomeScreenPayload, mergeOnboardingPayload } from './payloadBuilders.js';
+import type { OnboardingTeamView, RulesPromptStrings } from './payloadBuilders.js';
+import { mergeOnboardingPayload } from './payloadBuilders.js';
 
 const onboardingSyncTotal = Metric.counter('onboarding_sync_total', {
   description: 'Total onboarding sync operations',
   incremental: true,
 });
 
-const resolveStrings = (
-  locale: 'en' | 'cs',
-  teamName: string,
-): { welcome: WelcomeScreenStrings; rulesPrompt: RulesPromptStrings } => {
+const resolveStrings = (locale: 'en' | 'cs'): { rulesPrompt: RulesPromptStrings } => {
   const opts = { locale };
   return {
-    welcome: {
-      description: m.bot_onboarding_welcomeScreen_description({ teamName }, opts),
-      channels_rules: m.bot_onboarding_welcomeScreen_channels_rules({}, opts),
-      channels_welcome: m.bot_onboarding_welcomeScreen_channels_welcome({}, opts),
-      channels_training: m.bot_onboarding_welcomeScreen_channels_training({}, opts),
-    },
     rulesPrompt: {
       title: m.bot_onboarding_rulesPrompt_title({}, opts),
       optionTitle: m.bot_onboarding_rulesPrompt_option_title({}, opts),
@@ -91,8 +78,7 @@ const makeProcessTeam =
       );
     }
 
-    const strings = resolveStrings(team.onboarding_locale, team.team_name);
-    const welcomePayload = buildWelcomeScreenPayload(team, strings.welcome);
+    const strings = resolveStrings(team.onboarding_locale);
     const storedPromptId = Option.getOrUndefined(team.onboarding_rules_prompt_id);
 
     const syncDiscord = discord.getGuildsOnboarding(team.guild_id).pipe(
@@ -122,15 +108,15 @@ const makeProcessTeam =
           );
       }),
       Effect.flatMap((putResponse) => {
+        // Once onboarding is enabled, Discord shows the onboarding flow to new members
+        // instead of the welcome screen. The welcome-screen endpoint is still readable
+        // (and used for invite previews) but writes here would only surface duplicate
+        // permission errors. The Server Guide / Home Settings has no write API in dfx,
+        // so the captain configures it via Discord directly.
         const newPromptId = Option.isSome(team.onboarding_rules_role_id)
           ? findNewPromptId(putResponse, team.onboarding_rules_role_id.value)
           : Option.none<Discord.Snowflake>();
-
-        return Option.isNone(welcomePayload)
-          ? Effect.succeed(newPromptId)
-          : discord
-              .updateGuildWelcomeScreen(team.guild_id, welcomePayload.value)
-              .pipe(Effect.as(newPromptId));
+        return Effect.succeed(newPromptId);
       }),
       Effect.flatMap((newPromptId) =>
         rpc['Guild/MarkOnboardingSyncDone']({ team_id: teamId, prompt_id: newPromptId }).pipe(

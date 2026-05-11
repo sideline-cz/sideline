@@ -254,7 +254,7 @@ describe('OnboardingProcessorService', () => {
     expect(restCalls.updateGuildWelcomeScreen).toHaveLength(0);
   });
 
-  it('single team success path → GET, PUT, updateWelcomeScreen, MarkOnboardingSyncDone called in order', async () => {
+  it('single team success path → GET, PUT, MarkOnboardingSyncDone called; welcome screen is NOT patched (onboarding replaces it)', async () => {
     const { calls: rpcCalls, layer: rpcLayer } = makeRpc([makePendingSync()]);
     const { calls: restCalls, layer: restLayer } = makeRest();
     const { layer: cacheLayer } = makeLiveCache();
@@ -263,7 +263,10 @@ describe('OnboardingProcessorService', () => {
 
     expect(restCalls.getGuildsOnboarding).toHaveLength(1);
     expect(restCalls.putGuildsOnboarding).toHaveLength(1);
-    expect(restCalls.updateGuildWelcomeScreen).toHaveLength(1);
+    // Welcome screen is no longer patched — once onboarding is enabled, Discord shows
+    // the onboarding flow to new members instead. Server Guide / Home Settings has no
+    // write API in dfx so the captain configures it via Discord directly.
+    expect(restCalls.updateGuildWelcomeScreen).toHaveLength(0);
     expect(rpcCalls.MarkOnboardingSyncDone).toHaveLength(1);
     const doneCall = rpcCalls.MarkOnboardingSyncDone[0] as any;
     expect(doneCall.team_id).toBe(TEAM_ID);
