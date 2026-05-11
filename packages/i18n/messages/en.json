@@ -825,7 +825,7 @@
   "bot_onboarding_welcomeScreen_channels_rules": "Read the rules to unlock the rest of the server",
   "bot_onboarding_welcomeScreen_channels_welcome": "Say hello and meet your teammates",
   "bot_onboarding_welcomeScreen_channels_training": "Find upcoming trainings and RSVP",
-  "bot_onboarding_welcomeScreen_channels_overview": "Browse team events and RSVP from one place.",
+  "bot_onboarding_welcomeScreen_channels_overview": "Browse team events and RSVP from one place",
   "bot_onboarding_rulesPrompt_title": "Read the rules",
   "bot_onboarding_rulesPrompt_option_title": "I've read the rules",
   "bot_onboarding_rulesPrompt_option_description": "Acknowledge the team rules to unlock the server"
