@@ -93,19 +93,19 @@ export const buildWelcomeScreenPayload = (
     });
   }
 
-  if (Option.isSome(team.training_channel_id)) {
-    channels.push({
-      channel_id: team.training_channel_id.value,
-      description: truncate(strings.channels_training, MAX_CHANNEL_DESC_LEN),
-      emoji_name: '🏃',
-    });
-  }
-
   if (Option.isSome(team.overview_channel_id)) {
     channels.push({
       channel_id: team.overview_channel_id.value,
       description: truncate(strings.channels_overview, MAX_CHANNEL_DESC_LEN),
       emoji_name: '📅',
+    });
+  }
+
+  if (Option.isSome(team.training_channel_id)) {
+    channels.push({
+      channel_id: team.training_channel_id.value,
+      description: truncate(strings.channels_training, MAX_CHANNEL_DESC_LEN),
+      emoji_name: '🏃',
     });
   }
 
