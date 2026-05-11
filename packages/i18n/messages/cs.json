@@ -824,7 +824,7 @@
   "bot_onboarding_welcomeScreen_description": "Vítej v týmu {teamName}! Přečti si pravidla, pozdrav v uvítacím kanálu a podívej se do tréninkového kanálu.",
   "bot_onboarding_welcomeScreen_channels_rules": "Přečti si pravidla pro odemčení serveru.",
   "bot_onboarding_welcomeScreen_channels_welcome": "Pozdrav a poznej své spoluhráče.",
-  "bot_onboarding_welcomeScreen_channels_training": "Aktuální tréninky.",
+  "bot_onboarding_welcomeScreen_channels_training": "Aktuální tréninky",
   "bot_onboarding_welcomeScreen_channels_overview": "Docházkovník",
   "bot_onboarding_rulesPrompt_title": "Přečti si pravidla",
   "bot_onboarding_rulesPrompt_option_title": "Pravidla jsem si přečetl/a",
