@@ -7,6 +7,7 @@ import {
   ChannelSyncService,
   EventSyncService,
   GuildJoinSyncService,
+  InviteGeneratorService,
   OnboardingSyncService,
   RoleSyncService,
 } from '~/rcp/index.js';
@@ -73,6 +74,11 @@ const MockOnboardingSyncServiceLayer = Layer.succeed(OnboardingSyncService, {
   discord: undefined as never,
 } as never);
 
+const MockInviteGeneratorServiceLayer = Layer.succeed(InviteGeneratorService, {
+  processTick: Effect.void,
+  discord: undefined as never,
+} as never);
+
 const MockOnboardingRoleCacheLayer = Layer.succeed(OnboardingRoleCache, {
   get: () => Effect.succeed(Option.none()),
   set: () => Effect.void,
@@ -106,6 +112,7 @@ describe('Bot', () => {
       MockChannelSyncServiceLayer,
       MockEventSyncServiceLayer,
       MockGuildJoinSyncServiceLayer,
+      MockInviteGeneratorServiceLayer,
       MockOnboardingSyncServiceLayer,
       MockOnboardingRoleCacheLayer,
       MockSyncRpcLayer,

@@ -6,6 +6,7 @@ import {
   ChannelSyncService,
   EventSyncService,
   GuildJoinSyncService,
+  InviteGeneratorService,
   OnboardingSyncService,
   RoleSyncService,
 } from '~/rcp/index.js';
@@ -18,6 +19,7 @@ const SyncLive = Layer.mergeAll(
   ChannelSyncService.Default,
   EventSyncService.Default,
   GuildJoinSyncService.Default,
+  InviteGeneratorService.Default,
   OnboardingSyncService.Default,
 ).pipe(
   Layer.provideMerge(ChannelReorderSemaphore.Live),

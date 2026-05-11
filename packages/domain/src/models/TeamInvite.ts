@@ -17,4 +17,5 @@ export class TeamInvite extends Model.Class<TeamInvite>('TeamInvite')({
   created_at: Model.DateTimeInsertFromDate,
   expires_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   group_id: Schema.OptionFromNullOr(GroupId),
+  discord_code: Schema.OptionFromNullOr(Schema.String),
 }) {}

@@ -31,7 +31,19 @@ class InviteListRow extends Schema.Class<InviteListRow>('InviteListRow')({
   expires_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   created_at: Schemas.DateTimeFromDate,
   created_by: User.UserId,
+  discord_code: Schema.OptionFromNullOr(Schema.String),
 }) {}
+
+class PendingDiscordCodeRow extends Schema.Class<PendingDiscordCodeRow>('PendingDiscordCodeRow')({
+  invite_id: TeamInvite.TeamInviteId,
+  guild_id: Discord.Snowflake,
+  welcome_channel_id: Discord.Snowflake,
+}) {}
+
+const SetDiscordCodeInput = Schema.Struct({
+  inviteId: TeamInvite.TeamInviteId,
+  discordCode: Schema.String,
+});
 
 const DeactivateByTeamExceptInput = Schema.Struct({
   teamId: Schema.String,
@@ -50,6 +62,18 @@ const make = SqlClient.SqlClient.asEffect().pipe(
       Result: TeamInvite.TeamInvite,
       execute: (code) =>
         sql`SELECT * FROM team_invites WHERE code = ${code} AND active = true AND (expires_at IS NULL OR expires_at > now())`,
+    });
+
+    const findByDiscordCodeOrCode = SqlSchema.findOneOption({
+      Request: Schema.String,
+      Result: TeamInvite.TeamInvite,
+      execute: (code) => sql`
+        SELECT * FROM team_invites
+        WHERE (discord_code = ${code} OR code = ${code})
+          AND active = true
+          AND (expires_at IS NULL OR expires_at > now())
+        LIMIT 1
+      `,
     });
 
     const findByTeam = SqlSchema.findAll({
@@ -108,9 +132,40 @@ const make = SqlClient.SqlClient.asEffect().pipe(
         JOIN users u ON u.id = ti.created_by
         JOIN teams t ON t.id = ti.team_id
         LEFT JOIN groups g ON g.id = ti.group_id AND g.is_archived = false
-        WHERE ti.code = ${code}
+        WHERE (ti.discord_code = ${code} OR ti.code = ${code})
           AND ti.active = true
           AND (ti.expires_at IS NULL OR ti.expires_at > now())
+        LIMIT 1
+      `,
+    });
+
+    const findPendingDiscordCodes = SqlSchema.findAll({
+      Request: Schema.Number,
+      Result: PendingDiscordCodeRow,
+      execute: (limit) => sql`
+        SELECT
+          ti.id              AS invite_id,
+          t.guild_id         AS guild_id,
+          t.welcome_channel_id AS welcome_channel_id
+        FROM team_invites ti
+        JOIN teams t      ON t.id = ti.team_id
+        JOIN bot_guilds b ON b.guild_id = t.guild_id
+        WHERE ti.discord_code IS NULL
+          AND ti.active = true
+          AND (ti.expires_at IS NULL OR ti.expires_at > now())
+          AND t.welcome_channel_id IS NOT NULL
+          AND b.is_community_enabled = true
+        ORDER BY ti.created_at ASC
+        LIMIT ${limit}
+      `,
+    });
+
+    const setDiscordCode = SqlSchema.void({
+      Request: SetDiscordCodeInput,
+      execute: ({ inviteId, discordCode }) => sql`
+        UPDATE team_invites
+        SET discord_code = ${discordCode}
+        WHERE id = ${inviteId}
       `,
     });
 
@@ -119,15 +174,16 @@ const make = SqlClient.SqlClient.asEffect().pipe(
       Result: InviteListRow,
       execute: (teamId) => sql`
         SELECT
-          ti.id         AS id,
-          ti.code       AS code,
-          ti.active     AS active,
-          g.id          AS group_id,
-          g.name        AS group_name,
-          u.username    AS inviter_name,
-          ti.expires_at AS expires_at,
-          ti.created_at AS created_at,
-          ti.created_by AS created_by
+          ti.id            AS id,
+          ti.code          AS code,
+          ti.active        AS active,
+          g.id             AS group_id,
+          g.name           AS group_name,
+          u.username       AS inviter_name,
+          ti.expires_at    AS expires_at,
+          ti.created_at    AS created_at,
+          ti.created_by    AS created_by,
+          ti.discord_code  AS discord_code
         FROM team_invites ti
         JOIN users u ON u.id = ti.created_by
         LEFT JOIN groups g ON g.id = ti.group_id AND g.is_archived = false
@@ -138,6 +194,7 @@ const make = SqlClient.SqlClient.asEffect().pipe(
 
     return {
       findByCode: (code: string) => findByCode(code).pipe(catchSqlErrors),
+      findByDiscordCodeOrCode: (code: string) => findByDiscordCodeOrCode(code).pipe(catchSqlErrors),
       findByTeam: (teamId: string) => findByTeam(teamId).pipe(catchSqlErrors),
       create: (input: typeof TeamInvite.TeamInvite.insert.Type) =>
         create(input).pipe(catchSqlErrors),
@@ -166,6 +223,10 @@ const make = SqlClient.SqlClient.asEffect().pipe(
           ),
           catchSqlErrors,
         ),
+      findPendingDiscordCodes: (limit: number) =>
+        findPendingDiscordCodes(limit).pipe(catchSqlErrors),
+      setDiscordCode: (input: typeof SetDiscordCodeInput.Type) =>
+        setDiscordCode(input).pipe(catchSqlErrors),
       listForTeam: (teamId: string) =>
         listForTeam(teamId).pipe(
           Effect.map((rows) =>
@@ -179,6 +240,7 @@ const make = SqlClient.SqlClient.asEffect().pipe(
               expiresAt: row.expires_at,
               createdAt: row.created_at,
               createdBy: row.created_by,
+              discordCode: row.discord_code,
             })),
           ),
           catchSqlErrors,

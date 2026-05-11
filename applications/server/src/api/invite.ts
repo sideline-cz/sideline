@@ -6,10 +6,8 @@ import { Api } from '~/api/api.js';
 import { requireMembership, requirePermission } from '~/api/permissions.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
-import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
-import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 
 const INVITE_CODE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 const INVITE_CODE_LENGTH = 12;
@@ -23,13 +21,11 @@ const forbidden = new Invite.Forbidden();
 
 export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
   Effect.Do.pipe(
-    Effect.bind('teams', () => TeamsRepository.asEffect()),
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('invites', () => TeamInvitesRepository.asEffect()),
     Effect.bind('groups', () => GroupsRepository.asEffect()),
-    Effect.bind('pendingGuildJoins', () => PendingGuildJoinsRepository.asEffect()),
     Effect.bind('oauthConnections', () => OAuthConnectionsRepository.asEffect()),
-    Effect.map(({ teams, members, invites, groups, pendingGuildJoins, oauthConnections }) =>
+    Effect.map(({ members, invites, groups, oauthConnections }) =>
       handlers
         .handle('getInvite', ({ params: { code } }) =>
           invites.findByCodeWithContext(code).pipe(
@@ -105,14 +101,6 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                   !OAuthConnection.hasScope(raw, OAuthConnection.REQUIRED_DISCORD_SCOPE),
               }),
             ),
-            Effect.tap(({ user, invite, requiresReauth }) =>
-              requiresReauth
-                ? Effect.logInfo(
-                    '[invite/join] skipping pending_guild_joins enqueue — user missing guilds.join scope',
-                    { userId: user.id, teamId: invite.team_id },
-                  )
-                : pendingGuildJoins.enqueue(user.id, invite.team_id),
-            ),
             Effect.map(
               ({ user, invite, requiresReauth }) =>
                 new Invite.JoinResult({
@@ -120,6 +108,10 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                   roleNames: ['Player'],
                   isProfileComplete: user.isProfileComplete,
                   requiresReauth,
+                  discordInviteUrl: Option.map(
+                    invite.discord_code,
+                    (c) => `https://discord.gg/${c}`,
+                  ),
                 }),
             ),
             Effect.catchTag('MemberAlreadyExistsError', () =>
@@ -165,6 +157,7 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                   expires_at: Option.map(payload.expiresAt, DateTime.fromDateUnsafe),
                   group_id: payload.groupId,
                   created_at: undefined,
+                  discord_code: Option.none(),
                 }),
               ).pipe(
                 Effect.retry(
@@ -206,6 +199,7 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                     expiresAt: Option.map(item.expiresAt, DateTime.toDate),
                     createdAt: DateTime.toDate(item.createdAt),
                     createdBy: item.createdBy,
+                    discordCode: item.discordCode,
                   }),
               ),
             ),
@@ -230,6 +224,7 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                   ),
                   group_id: Option.none(),
                   created_at: undefined,
+                  discord_code: Option.none(),
                 }),
               ).pipe(
                 Effect.retry(

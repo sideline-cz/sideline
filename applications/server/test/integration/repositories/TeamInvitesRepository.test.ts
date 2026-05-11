@@ -95,6 +95,7 @@ const createInvite = (
         created_at: undefined,
         expires_at: expiresAt,
         group_id: groupId,
+        discord_code: Option.none(),
       }),
     ),
   );
@@ -193,6 +194,7 @@ describe('TeamInvitesRepository — findByCodeWithContext', () => {
               created_at: undefined,
               expires_at: Option.some(DateTime.fromDateUnsafe(new Date('2000-01-01T00:00:00Z'))),
               group_id: Option.none(),
+              discord_code: Option.none(),
             }),
           ),
         ),

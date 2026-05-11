@@ -3,6 +3,7 @@ import { ActivityRpcLive } from './activity/index.js';
 import { ChannelsRpcLive } from './channel/index.js';
 import { EventsRpcLive } from './event/index.js';
 import { GuildsRpcLive } from './guild/index.js';
+import { InvitesRpcLive } from './invite/index.js';
 import { RolesRpcLive } from './role/index.js';
 
 export const SyncRpcsLive = Layer.mergeAll(
@@ -11,4 +12,5 @@ export const SyncRpcsLive = Layer.mergeAll(
   GuildsRpcLive,
   EventsRpcLive,
   ActivityRpcLive,
+  InvitesRpcLive,
 );

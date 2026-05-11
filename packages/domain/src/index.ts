@@ -113,6 +113,7 @@ export * as EventRpcEvents from './rpc/event/EventRpcEvents.js';
 export * as EventRpcGroup from './rpc/event/EventRpcGroup.js';
 export * as EventRpcModels from './rpc/event/EventRpcModels.js';
 export * as GuildRpcGroup from './rpc/guild/GuildRpcGroup.js';
+export * as InviteRpcGroup from './rpc/invite/InviteRpcGroup.js';
 export * as RoleRpcEvents from './rpc/role/RoleRpcEvents.js';
 export * as RoleRpcGroup from './rpc/role/RoleRpcGroup.js';
 export * as RoleRpcModels from './rpc/role/RoleRpcModels.js';

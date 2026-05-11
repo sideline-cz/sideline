@@ -19,3 +19,15 @@ export const OnboardingSyncErrorCode = Schema.Literals([
   'unknown',
 ]);
 export type OnboardingSyncErrorCode = typeof OnboardingSyncErrorCode.Type;
+
+export const InviteGeneratorErrorCode = Schema.Literals([
+  'welcome_channel_missing',
+  'welcome_channel_deleted',
+  'bot_missing_perms',
+  'community_not_enabled',
+  'rate_limited',
+  'discord_error',
+  'network_error',
+  'unknown',
+]);
+export type InviteGeneratorErrorCode = typeof InviteGeneratorErrorCode.Type;

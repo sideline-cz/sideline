@@ -19,6 +19,7 @@ export class JoinResult extends Schema.Class<JoinResult>('JoinResult')({
   roleNames: Schema.Array(Schema.String),
   isProfileComplete: Schema.Boolean,
   requiresReauth: Schema.Boolean,
+  discordInviteUrl: Schema.OptionFromNullOr(Schema.String),
 }) {}
 
 export class InviteCode extends Schema.Class<InviteCode>('InviteCode')({
@@ -42,6 +43,7 @@ export class InviteListItem extends Schema.Class<InviteListItem>('InviteListItem
   expiresAt: Schema.OptionFromNullOr(Schema.Date),
   createdAt: Schema.Date,
   createdBy: UserId,
+  discordCode: Schema.OptionFromNullOr(Schema.String),
 }) {}
 
 export class InviteNotFound extends Schema.TaggedErrorClass<InviteNotFound>()(

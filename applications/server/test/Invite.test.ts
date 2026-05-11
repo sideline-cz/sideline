@@ -125,6 +125,7 @@ type InviteRecord = {
   created_at: DateTime.Utc;
   expires_at: Option.Option<DateTime.Utc>;
   group_id: Option.Option<GroupModel.GroupId>;
+  discord_code: Option.Option<string>;
 };
 
 const invitesStore = new Map<string, InviteRecord>();
@@ -137,6 +138,7 @@ invitesStore.set('valid-invite', {
   created_at: DateTime.nowUnsafe(),
   expires_at: Option.none(),
   group_id: Option.none(),
+  discord_code: Option.none(),
 });
 invitesStore.set('inactive-invite', {
   id: '00000000-0000-0000-0000-000000000031' as TeamInvite.TeamInviteId,
@@ -147,6 +149,7 @@ invitesStore.set('inactive-invite', {
   created_at: DateTime.nowUnsafe(),
   expires_at: Option.none(),
   group_id: Option.none(),
+  discord_code: Option.none(),
 });
 invitesStore.set('invite-with-group', {
   id: '00000000-0000-0000-0000-000000000032' as TeamInvite.TeamInviteId,
@@ -157,6 +160,7 @@ invitesStore.set('invite-with-group', {
   created_at: DateTime.nowUnsafe(),
   expires_at: Option.none(),
   group_id: Option.some(TEST_GROUP_ID),
+  discord_code: Option.none(),
 });
 
 const MockDiscordOAuthLayer = Layer.succeed(DiscordOAuth, {
@@ -307,6 +311,7 @@ const MockTeamInvitesRepositoryLayer = Layer.succeed(TeamInvitesRepository, {
           expiresAt: i.expires_at,
           createdAt: i.created_at,
           createdBy: i.created_by,
+          discordCode: i.discord_code,
         })),
     ),
   create: (input: {
@@ -316,6 +321,7 @@ const MockTeamInvitesRepositoryLayer = Layer.succeed(TeamInvitesRepository, {
     created_by: Auth.UserId;
     expires_at: Option.Option<DateTime.Utc>;
     group_id?: Option.Option<GroupModel.GroupId>;
+    discord_code?: Option.Option<string>;
   }) => {
     const invite: InviteRecord = {
       id: crypto.randomUUID() as TeamInvite.TeamInviteId,
@@ -326,6 +332,7 @@ const MockTeamInvitesRepositoryLayer = Layer.succeed(TeamInvitesRepository, {
       created_at: DateTime.nowUnsafe(),
       expires_at: input.expires_at,
       group_id: input.group_id ?? Option.none(),
+      discord_code: input.discord_code ?? Option.none(),
     };
     invitesStore.set(invite.code, invite);
     return Effect.succeed(invite);

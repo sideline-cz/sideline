@@ -28,6 +28,7 @@ export function InvitePage({
   const run = useRun();
   const [joining, setJoining] = React.useState(false);
   const [requiresReauth, setRequiresReauth] = React.useState(false);
+  const [joinResult, setJoinResult] = React.useState<Invite.JoinResult | null>(null);
 
   const handleJoin = React.useCallback(async () => {
     setJoining(true);
@@ -38,7 +39,7 @@ export function InvitePage({
           if (result.requiresReauth) {
             setRequiresReauth(true);
           } else {
-            onJoined(result.teamId, result.isProfileComplete);
+            setJoinResult(result);
           }
         }),
       ),
@@ -52,7 +53,12 @@ export function InvitePage({
       run({ success: m.invite_teamJoined() }),
     );
     setJoining(false);
-  }, [code, run, onJoined]);
+  }, [code, run]);
+
+  const handleContinue = React.useCallback(() => {
+    if (joinResult === null) return;
+    onJoined(joinResult.teamId, joinResult.isProfileComplete);
+  }, [joinResult, onJoined]);
 
   return (
     <div className='flex min-h-screen flex-col'>
@@ -71,7 +77,26 @@ export function InvitePage({
                 <Users className='size-6 text-muted-foreground' />
               </div>
             </div>
-            {requiresReauth ? (
+            {joinResult !== null ? (
+              Option.match(joinResult.discordInviteUrl, {
+                onNone: () => (
+                  <>
+                    <CardTitle>{m.invite_preparingDiscordInviteTitle()}</CardTitle>
+                    <CardDescription>
+                      {m.invite_preparingDiscordInviteDescription()}
+                    </CardDescription>
+                  </>
+                ),
+                onSome: () => (
+                  <>
+                    <CardTitle>{m.invite_joinDiscordTitle()}</CardTitle>
+                    <CardDescription>
+                      {m.invite_joinDiscordDescription({ teamName: invite.teamName })}
+                    </CardDescription>
+                  </>
+                ),
+              })
+            ) : requiresReauth ? (
               <>
                 <CardTitle>{m.invite_reauthTitle()}</CardTitle>
                 <CardDescription>{m.invite_reauthDescription()}</CardDescription>
@@ -101,8 +126,26 @@ export function InvitePage({
               </>
             )}
           </CardHeader>
-          <CardContent className='flex justify-center'>
-            {requiresReauth ? (
+          <CardContent className='flex flex-col gap-2'>
+            {joinResult !== null ? (
+              Option.match(joinResult.discordInviteUrl, {
+                onNone: () => (
+                  <Button onClick={handleContinue} className='w-full'>
+                    {m.invite_joinButton()}
+                  </Button>
+                ),
+                onSome: (url) => (
+                  <>
+                    <a href={url} target='_blank' rel='noopener noreferrer' className='w-full'>
+                      <Button className='w-full'>{m.invite_joinDiscordButton()}</Button>
+                    </a>
+                    <Button variant='ghost' onClick={handleContinue} className='w-full'>
+                      {m.invite_joinButton()}
+                    </Button>
+                  </>
+                ),
+              })
+            ) : requiresReauth ? (
               <Button onClick={onReauth} className='w-full'>
                 {m.invite_reauthButton()}
               </Button>
