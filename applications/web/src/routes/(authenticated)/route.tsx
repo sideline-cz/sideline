@@ -1,7 +1,6 @@
 import type { Auth } from '@sideline/domain';
 import { createFileRoute, Outlet, redirect } from '@tanstack/react-router';
 import { Effect, Option } from 'effect';
-import { PendingDiscordJoinBanner } from '~/components/organisms/PendingDiscordJoinBanner';
 import { ApiClient, warnAndCatchAll } from '~/lib/runtime';
 
 export const Route = createFileRoute('/(authenticated)')({
@@ -28,10 +27,5 @@ export const Route = createFileRoute('/(authenticated)')({
 });
 
 function AuthenticatedLayoutRoute() {
-  return (
-    <>
-      <PendingDiscordJoinBanner />
-      <Outlet />
-    </>
-  );
+  return <Outlet />;
 }
