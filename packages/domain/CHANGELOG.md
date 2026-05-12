@@ -1,5 +1,11 @@
 # @sideline/domain
 
+## 0.17.2
+
+### Patch Changes
+
+- [`9d26a29`](https://github.com/maxa-ondrej/sideline/commit/9d26a29e899e57cc85b89aeed06415959ee0a631) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Tolerate missing `is_community_enabled` in the `Guild/RegisterGuild` RPC payload by defaulting the key to `false` during decode. Prevents the server from erroring with `Missing key at ["is_community_enabled"]` when a stale pre-0.12.0 bot replica is still calling `RegisterGuild` mid-deploy. Once the upgraded bot boots, `Guild/SyncCommunityFlags` (fired on `READY`) overwrites the default with the real value from Discord's `guild.features`.
+
 ## 0.17.1
 
 ### Patch Changes
