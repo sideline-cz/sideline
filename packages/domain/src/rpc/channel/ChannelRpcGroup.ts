@@ -15,6 +15,9 @@ export const ChannelRpcGroup = RpcGroup.make(
   Rpc.make('MarkEventFailed', {
     payload: { id: ChannelSyncEvent.ChannelSyncEventId, error: Schema.String },
   }),
+  Rpc.make('MarkEventPermanentlyFailed', {
+    payload: { id: ChannelSyncEvent.ChannelSyncEventId, error: Schema.String },
+  }),
   // Group mappings
   Rpc.make('GetMapping', {
     payload: { team_id: Team.TeamId, group_id: GroupModel.GroupId },
@@ -26,6 +29,20 @@ export const ChannelRpcGroup = RpcGroup.make(
       group_id: GroupModel.GroupId,
       discord_channel_id: Discord.Snowflake,
       discord_role_id: Discord.Snowflake,
+    },
+  }),
+  Rpc.make('UpsertMappingRoleOnly', {
+    payload: {
+      team_id: Team.TeamId,
+      group_id: GroupModel.GroupId,
+      discord_role_id: Discord.Snowflake,
+    },
+  }),
+  Rpc.make('UpsertGroupChannel', {
+    payload: {
+      team_id: Team.TeamId,
+      group_id: GroupModel.GroupId,
+      discord_channel_id: Discord.Snowflake,
     },
   }),
   Rpc.make('DeleteMapping', {

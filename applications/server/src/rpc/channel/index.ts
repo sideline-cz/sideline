@@ -27,7 +27,7 @@ const toChannelMapping = (m: {
   readonly entity_type: ChannelSyncEvent.ChannelSyncEntityType;
   readonly group_id: Option.Option<GroupModel.GroupId>;
   readonly roster_id: Option.Option<RosterModel.RosterId>;
-  readonly discord_channel_id: Discord.Snowflake;
+  readonly discord_channel_id: Option.Option<Discord.Snowflake>;
   readonly discord_role_id: Option.Option<Discord.Snowflake>;
 }) =>
   new ChannelRpcModels.ChannelMapping({
@@ -91,6 +91,18 @@ export const ChannelsRpcLive = Effect.Do.pipe(
       }) =>
         syncEvents.markFailed(id, error),
   ),
+  Effect.let(
+    'Channel/MarkEventPermanentlyFailed',
+    ({ syncEvents }) =>
+      ({
+        id,
+        error,
+      }: {
+        readonly id: ChannelSyncEvent.ChannelSyncEventId;
+        readonly error: string;
+      }) =>
+        syncEvents.markPermanentlyFailed(id, error),
+  ),
   // Group mapping RPCs
   Effect.let(
     'Channel/GetMapping',
@@ -119,6 +131,34 @@ export const ChannelsRpcLive = Effect.Do.pipe(
         readonly discord_role_id: Discord.Snowflake;
       }) =>
         mappings.insert(team_id, group_id, discord_channel_id, discord_role_id),
+  ),
+  Effect.let(
+    'Channel/UpsertMappingRoleOnly',
+    ({ mappings }) =>
+      ({
+        team_id,
+        group_id,
+        discord_role_id,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly group_id: GroupModel.GroupId;
+        readonly discord_role_id: Discord.Snowflake;
+      }) =>
+        mappings.insertRoleOnly(team_id, group_id, discord_role_id),
+  ),
+  Effect.let(
+    'Channel/UpsertGroupChannel',
+    ({ mappings }) =>
+      ({
+        team_id,
+        group_id,
+        discord_channel_id,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly group_id: GroupModel.GroupId;
+        readonly discord_channel_id: Discord.Snowflake;
+      }) =>
+        mappings.upsertGroupChannel(team_id, group_id, discord_channel_id),
   ),
   Effect.let(
     'Channel/DeleteMapping',

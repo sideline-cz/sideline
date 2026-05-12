@@ -354,7 +354,7 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
         new RosterEntry({
           member_id: member.id,
           user_id: member.user_id,
-          discord_id: user.discord_id,
+          discord_id: user.discord_id as Discord.Snowflake,
           role_names: member.role_names,
           permissions: member.permissions,
           name: user.name,

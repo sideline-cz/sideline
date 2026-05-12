@@ -219,6 +219,7 @@ const MockChannelSyncEventsRepositoryLayer = Layer.succeed(ChannelSyncEventsRepo
   findUnprocessed: () => Effect.succeed([]),
   markProcessed: () => Effect.void,
   markFailed: () => Effect.void,
+  markPermanentlyFailed: () => Effect.void,
   hasUnprocessedForGroups: () => Effect.succeed([]),
   hasUnprocessedForRosters: () => Effect.succeed([]),
 } as any);
@@ -385,7 +386,7 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
         new RosterEntry({
           member_id: member.id,
           user_id: member.user_id,
-          discord_id: user.discord_id,
+          discord_id: user.discord_id as Discord.Snowflake,
           role_names: member.role_names,
           permissions: member.permissions,
           name: user.name,
@@ -529,7 +530,7 @@ const MockRoleSyncEventsRepositoryLayer = Layer.succeed(RoleSyncEventsRepository
 
 const channelMappingsStore = new Map<
   string,
-  { discord_channel_id: string; discord_role_id: Option.Option<string> }
+  { discord_channel_id: Option.Option<string>; discord_role_id: Option.Option<string> }
 >();
 
 const MockDiscordChannelMappingRepositoryLayer = Layer.succeed(DiscordChannelMappingRepository, {
@@ -552,16 +553,34 @@ const MockDiscordChannelMappingRepositoryLayer = Layer.succeed(DiscordChannelMap
   findByRosterId: () => Effect.succeed(Option.none()),
   insert: (_teamId: string, groupId: string, channelId: string, roleId: string) => {
     channelMappingsStore.set(groupId, {
-      discord_channel_id: channelId,
+      discord_channel_id: Option.some(channelId),
       discord_role_id: Option.some(roleId),
     });
     return Effect.void;
   },
-  insertWithoutRole: (_teamId: string, groupId: string, channelId: string) => {
+  insertRoleOnly: (_teamId: string, groupId: string, roleId: string) => {
     channelMappingsStore.set(groupId, {
-      discord_channel_id: channelId,
-      discord_role_id: Option.none(),
+      discord_channel_id: Option.none(),
+      discord_role_id: Option.some(roleId),
     });
+    return Effect.void;
+  },
+  upsertGroupChannel: (_teamId: string, groupId: string, channelId: string) => {
+    const existing = channelMappingsStore.get(groupId);
+    channelMappingsStore.set(groupId, {
+      discord_channel_id: Option.some(channelId),
+      discord_role_id: existing?.discord_role_id ?? Option.none(),
+    });
+    return Effect.void;
+  },
+  clearGroupChannel: (_teamId: string, groupId: string) => {
+    const existing = channelMappingsStore.get(groupId);
+    if (existing) {
+      channelMappingsStore.set(groupId, {
+        discord_channel_id: Option.none(),
+        discord_role_id: existing.discord_role_id,
+      });
+    }
     return Effect.void;
   },
   insertRoster: () => Effect.void,
@@ -930,7 +949,7 @@ describe('Channel Sync Events', () => {
 
       // Set up a channel mapping so the delete emits a channel_deleted event
       channelMappingsStore.set(created.groupId, {
-        discord_channel_id: '999888777',
+        discord_channel_id: Option.some('999888777'),
         discord_role_id: Option.some('111222333'),
       });
       channelSyncEventCalls.length = 0;
@@ -998,7 +1017,7 @@ describe('Channel Sync Events', () => {
 
       // Set up a channel mapping
       channelMappingsStore.set(created.groupId, {
-        discord_channel_id: '999888777',
+        discord_channel_id: Option.some('999888777'),
         discord_role_id: Option.some('111222333'),
       });
       channelSyncEventCalls.length = 0;
@@ -1019,8 +1038,8 @@ describe('Channel Sync Events', () => {
         groupName: 'ToArchive',
       });
 
-      // Verify the channel mapping was deleted
-      expect(channelMappingsStore.has(created.groupId)).toBe(false);
+      // Verify the channel mapping was NOT deleted inline (bot owns the delete via Channel/DeleteMapping RPC)
+      expect(channelMappingsStore.has(created.groupId)).toBe(true);
     });
   });
 
@@ -1196,7 +1215,7 @@ describe('Channel Sync Events', () => {
         channelSyncEventCalls.length = 0;
       });
 
-      it('does not emit channel_created', async () => {
+      it('emits channel_created with no discordChannelName (role-only)', async () => {
         const response = await settingsHandler(
           new Request(`http://localhost/teams/${TEST_TEAM_ID}/groups`, {
             method: 'POST',
@@ -1213,7 +1232,9 @@ describe('Channel Sync Events', () => {
           }),
         );
         expect(response.status).toBe(201);
-        expect(channelSyncEventCalls).toHaveLength(0);
+        expect(channelSyncEventCalls).toHaveLength(1);
+        expect(channelSyncEventCalls[0]?.eventType).toBe('channel_created');
+        expect(channelSyncEventCalls[0]?.discordChannelName).toBeUndefined();
       });
     });
 

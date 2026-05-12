@@ -5,6 +5,7 @@ import { Link, useNavigate, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import { Loader2 } from 'lucide-react';
 import React from 'react';
+import { toast } from 'sonner';
 
 import { ColorPicker } from '~/components/atoms/ColorPicker.js';
 import { DiscordChannelLink } from '~/components/atoms/DiscordChannelLink.js';
@@ -58,6 +59,7 @@ export function GroupDetailPage({
   const [parentGroupId, setParentGroupId] = React.useState<string>(
     Option.getOrElse(groupDetail.parentId, () => '__root__'),
   );
+  const [syncingRoleMembers, setSyncingRoleMembers] = React.useState(false);
 
   React.useEffect(() => {
     if (!groupDetail.discordChannelProvisioning) return;
@@ -259,6 +261,36 @@ export function GroupDetailPage({
     }
   }, [teamIdBranded, groupIdBranded, run, router]);
 
+  const handleSyncRoleMembers = React.useCallback(async () => {
+    setSyncingRoleMembers(true);
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.group.syncRoleMembers({
+          params: { teamId: teamIdBranded, groupId: groupIdBranded },
+        }),
+      ),
+      Effect.mapError(() => ClientError.make(m.group_syncRoleMembersFailed())),
+      run({}),
+    );
+    if (Option.isSome(result)) {
+      toast.success(
+        m.group_syncRoleMembersQueued({
+          addedCount: result.value.addedCount,
+          removedCount: result.value.removedCount,
+          skippedCount: result.value.skippedCount,
+        }),
+      );
+    }
+    setSyncingRoleMembers(false);
+  }, [teamIdBranded, groupIdBranded, run]);
+
+  const linkedChannel = Option.flatMap(channelMapping, (mapping) =>
+    Option.map(mapping.discordChannelId, (channelId) => ({
+      channelId,
+      channelName: mapping.discordChannelName,
+    })),
+  );
+
   return (
     <div>
       <header className='mb-8'>
@@ -390,29 +422,32 @@ export function GroupDetailPage({
                   {m.discord_channelProvisioningHint()}
                 </p>
               </div>
-            ) : Option.isSome(channelMapping) ? (
-              <div className='flex items-center justify-between'>
-                {Option.isSome(guildId) ? (
-                  <DiscordChannelLink
-                    guildId={guildId.value}
-                    channelId={channelMapping.value.discordChannelId}
-                    channelName={Option.getOrElse(
-                      channelMapping.value.discordChannelName,
-                      () => channelMapping.value.discordChannelId,
-                    )}
-                  />
-                ) : (
-                  <span className='text-sm font-medium'>
-                    #{' '}
-                    {Option.getOrElse(
-                      channelMapping.value.discordChannelName,
-                      () => channelMapping.value.discordChannelId,
-                    )}
-                  </span>
-                )}
-                <Button variant='outline' size='sm' onClick={handleUnlinkChannel}>
-                  {m.group_unlinkChannel()}
-                </Button>
+            ) : Option.isSome(linkedChannel) ? (
+              <div className='flex flex-col gap-3'>
+                <div className='flex items-center justify-between'>
+                  {Option.isSome(guildId) ? (
+                    <DiscordChannelLink
+                      guildId={guildId.value}
+                      channelId={linkedChannel.value.channelId}
+                      channelName={Option.getOrElse(
+                        linkedChannel.value.channelName,
+                        () => linkedChannel.value.channelId,
+                      )}
+                    />
+                  ) : (
+                    <span className='text-sm font-medium'>
+                      #{' '}
+                      {Option.getOrElse(
+                        linkedChannel.value.channelName,
+                        () => linkedChannel.value.channelId,
+                      )}
+                    </span>
+                  )}
+                  <Button variant='outline' size='sm' onClick={handleUnlinkChannel}>
+                    {m.group_unlinkChannel()}
+                  </Button>
+                </div>
+                <p className='text-xs text-muted-foreground'>{m.group_unlinkChannelHelp()}</p>
               </div>
             ) : (
               <div className='flex flex-col gap-4'>
@@ -447,6 +482,26 @@ export function GroupDetailPage({
                 </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Discord Role */}
+        <Card className='max-w-md'>
+          <CardHeader>
+            <CardTitle className='text-base'>{m.group_syncRoleMembers()}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className='text-xs text-muted-foreground mb-3'>{m.group_syncRoleMembersHelp()}</p>
+            <Button variant='outline' onClick={handleSyncRoleMembers} disabled={syncingRoleMembers}>
+              {syncingRoleMembers ? (
+                <>
+                  <Loader2 className='mr-2 size-4 animate-spin' />
+                  {m.group_syncRoleMembers()}
+                </>
+              ) : (
+                m.group_syncRoleMembers()
+              )}
+            </Button>
           </CardContent>
         </Card>
 

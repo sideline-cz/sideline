@@ -133,6 +133,13 @@ const make = Effect.gen(function* () {
   const markEventFailed = SqlSchema.void({
     Request: MarkFailedInput,
     execute: (input) => sql`
+      UPDATE channel_sync_events SET error = ${input.error} WHERE id = ${input.id}
+    `,
+  });
+
+  const markEventPermanentlyFailed = SqlSchema.void({
+    Request: MarkFailedInput,
+    execute: (input) => sql`
       UPDATE channel_sync_events SET processed_at = now(), error = ${input.error} WHERE id = ${input.id}
     `,
   });
@@ -207,13 +214,13 @@ const make = Effect.gen(function* () {
     teamId: Team.TeamId,
     groupId: GroupModel.GroupId,
     groupName: string,
-    discordChannelId: Discord.Snowflake,
+    discordChannelId: Option.Option<Discord.Snowflake>,
     discordRoleId: Option.Option<Discord.Snowflake>,
   ) =>
     _emitIfGuildLinked(teamId, 'channel_deleted', 'group', {
       groupId: Option.some(groupId),
       groupName: Option.some(groupName),
-      existingChannelId: Option.some(discordChannelId),
+      existingChannelId: discordChannelId,
       discordRoleId,
     });
 
@@ -230,6 +237,48 @@ const make = Effect.gen(function* () {
       teamMemberId: Option.some(teamMemberId),
       discordUserId: Option.some(discordUserId),
     });
+
+  type GroupMemberBatchEntry = {
+    groupId: GroupModel.GroupId;
+    groupName: string;
+    teamMemberId: TeamMember.TeamMemberId;
+    discordUserId: Discord.Snowflake;
+  };
+
+  const _emitGroupMembersBatch = (
+    eventType: 'member_added' | 'member_removed',
+    input: { teamId: Team.TeamId; entries: ReadonlyArray<GroupMemberBatchEntry> },
+  ) => {
+    if (input.entries.length === 0) return Effect.void;
+    return lookupGuildId(input.teamId).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: ({ guild_id }) =>
+            sql`
+              INSERT INTO channel_sync_events (team_id, guild_id, event_type, entity_type, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, existing_channel_id, discord_role_id, archive_category_id, discord_channel_name, discord_role_name, discord_role_color)
+              VALUES ${sql.join(',')(
+                input.entries.map(
+                  (e) =>
+                    sql`(${input.teamId}, ${guild_id}, ${eventType}, ${'group'}, ${e.groupId}, ${e.groupName}, ${e.teamMemberId}, ${e.discordUserId}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null})`,
+                ),
+              )}
+            `.pipe(Effect.asVoid),
+        }),
+      ),
+      catchSqlErrors,
+    );
+  };
+
+  const emitMembersAddedBatch = (input: {
+    teamId: Team.TeamId;
+    entries: ReadonlyArray<GroupMemberBatchEntry>;
+  }) => _emitGroupMembersBatch('member_added', input);
+
+  const emitMembersRemovedBatch = (input: {
+    teamId: Team.TeamId;
+    entries: ReadonlyArray<GroupMemberBatchEntry>;
+  }) => _emitGroupMembersBatch('member_removed', input);
 
   const emitRosterMemberAdded = (
     teamId: Team.TeamId,
@@ -296,13 +345,13 @@ const make = Effect.gen(function* () {
     teamId: Team.TeamId,
     rosterId: RosterModel.RosterId,
     rosterName: string,
-    discordChannelId: Discord.Snowflake,
+    discordChannelId: Option.Option<Discord.Snowflake>,
     discordRoleId: Option.Option<Discord.Snowflake>,
   ) =>
     _emitIfGuildLinked(teamId, 'channel_deleted', 'roster', {
       rosterId: Option.some(rosterId),
       rosterName: Option.some(rosterName),
-      existingChannelId: Option.some(discordChannelId),
+      existingChannelId: discordChannelId,
       discordRoleId,
     });
 
@@ -310,14 +359,14 @@ const make = Effect.gen(function* () {
     teamId: Team.TeamId,
     groupId: GroupModel.GroupId,
     groupName: string,
-    discordChannelId: Discord.Snowflake,
+    discordChannelId: Option.Option<Discord.Snowflake>,
     discordRoleId: Option.Option<Discord.Snowflake>,
     archiveCategoryId: Discord.Snowflake,
   ) =>
     _emitIfGuildLinked(teamId, 'channel_archived', 'group', {
       groupId: Option.some(groupId),
       groupName: Option.some(groupName),
-      existingChannelId: Option.some(discordChannelId),
+      existingChannelId: discordChannelId,
       discordRoleId,
       archiveCategoryId: Option.some(archiveCategoryId),
     });
@@ -326,14 +375,14 @@ const make = Effect.gen(function* () {
     teamId: Team.TeamId,
     rosterId: RosterModel.RosterId,
     rosterName: string,
-    discordChannelId: Discord.Snowflake,
+    discordChannelId: Option.Option<Discord.Snowflake>,
     discordRoleId: Option.Option<Discord.Snowflake>,
     archiveCategoryId: Discord.Snowflake,
   ) =>
     _emitIfGuildLinked(teamId, 'channel_archived', 'roster', {
       rosterId: Option.some(rosterId),
       rosterName: Option.some(rosterName),
-      existingChannelId: Option.some(discordChannelId),
+      existingChannelId: discordChannelId,
       discordRoleId,
       archiveCategoryId: Option.some(archiveCategoryId),
     });
@@ -342,13 +391,13 @@ const make = Effect.gen(function* () {
     teamId: Team.TeamId,
     groupId: GroupModel.GroupId,
     groupName: string,
-    discordChannelId: Discord.Snowflake,
+    discordChannelId: Option.Option<Discord.Snowflake>,
     discordRoleId: Option.Option<Discord.Snowflake>,
   ) =>
     _emitIfGuildLinked(teamId, 'channel_detached', 'group', {
       groupId: Option.some(groupId),
       groupName: Option.some(groupName),
-      existingChannelId: Option.some(discordChannelId),
+      existingChannelId: discordChannelId,
       discordRoleId,
     });
 
@@ -356,29 +405,29 @@ const make = Effect.gen(function* () {
     teamId: Team.TeamId,
     rosterId: RosterModel.RosterId,
     rosterName: string,
-    discordChannelId: Discord.Snowflake,
+    discordChannelId: Option.Option<Discord.Snowflake>,
     discordRoleId: Option.Option<Discord.Snowflake>,
   ) =>
     _emitIfGuildLinked(teamId, 'channel_detached', 'roster', {
       rosterId: Option.some(rosterId),
       rosterName: Option.some(rosterName),
-      existingChannelId: Option.some(discordChannelId),
+      existingChannelId: discordChannelId,
       discordRoleId,
     });
 
   const emitGroupChannelUpdated = (
     teamId: Team.TeamId,
     groupId: GroupModel.GroupId,
-    discordChannelId: Discord.Snowflake,
-    discordRoleId: Discord.Snowflake,
+    discordChannelId: Option.Option<Discord.Snowflake>,
+    discordRoleId: Option.Option<Discord.Snowflake>,
     discordChannelName: string,
     discordRoleName: string,
     discordRoleColor: Option.Option<number>,
   ) =>
     _emitIfGuildLinked(teamId, 'channel_updated', 'group', {
       groupId: Option.some(groupId),
-      existingChannelId: Option.some(discordChannelId),
-      discordRoleId: Option.some(discordRoleId),
+      existingChannelId: discordChannelId,
+      discordRoleId,
       discordChannelName: Option.some(discordChannelName),
       discordRoleName: Option.some(discordRoleName),
       discordRoleColor,
@@ -387,16 +436,16 @@ const make = Effect.gen(function* () {
   const emitRosterChannelUpdated = (
     teamId: Team.TeamId,
     rosterId: RosterModel.RosterId,
-    discordChannelId: Discord.Snowflake,
-    discordRoleId: Discord.Snowflake,
+    discordChannelId: Option.Option<Discord.Snowflake>,
+    discordRoleId: Option.Option<Discord.Snowflake>,
     discordChannelName: string,
     discordRoleName: string,
     discordRoleColor: Option.Option<number>,
   ) =>
     _emitIfGuildLinked(teamId, 'channel_updated', 'roster', {
       rosterId: Option.some(rosterId),
-      existingChannelId: Option.some(discordChannelId),
-      discordRoleId: Option.some(discordRoleId),
+      existingChannelId: discordChannelId,
+      discordRoleId,
       discordChannelName: Option.some(discordChannelName),
       discordRoleName: Option.some(discordRoleName),
       discordRoleColor,
@@ -409,6 +458,9 @@ const make = Effect.gen(function* () {
 
   const markFailed = (id: ChannelSyncEvent.ChannelSyncEventId, error: string) =>
     markEventFailed({ id, error }).pipe(catchSqlErrors);
+
+  const markPermanentlyFailed = (id: ChannelSyncEvent.ChannelSyncEventId, error: string) =>
+    markEventPermanentlyFailed({ id, error }).pipe(catchSqlErrors);
 
   const hasUnprocessedForGroups = (groupIds: ReadonlyArray<GroupModel.GroupId>) => {
     if (groupIds.length === 0) return Effect.succeed([] as GroupModel.GroupId[]);
@@ -430,6 +482,8 @@ const make = Effect.gen(function* () {
     emitChannelCreated,
     emitChannelDeleted,
     emitMemberAdded,
+    emitMembersAddedBatch,
+    emitMembersRemovedBatch,
     emitRosterMemberAdded,
     emitMemberRemoved,
     emitRosterMemberRemoved,
@@ -444,6 +498,7 @@ const make = Effect.gen(function* () {
     findUnprocessed,
     markProcessed,
     markFailed,
+    markPermanentlyFailed,
     hasUnprocessedForGroups,
     hasUnprocessedForRosters,
   };

@@ -34,6 +34,7 @@ export const emitTrainingClaimRequestIfApplicable = (args: {
       return mappings.findByGroupId(args.teamId, args.ownerGroupId.value).pipe(
         Effect.flatMap((mapping) => {
           if (mapping._tag === 'None') return Effect.void;
+          if (mapping.value.discord_channel_id._tag === 'None') return Effect.void;
           return syncEvents.emitTrainingClaimRequest(
             args.teamId,
             args.eventId,
@@ -42,7 +43,7 @@ export const emitTrainingClaimRequestIfApplicable = (args: {
             args.endAt,
             args.location,
             args.description,
-            mapping.value.discord_channel_id,
+            mapping.value.discord_channel_id.value,
             mapping.value.discord_role_id,
             args.locationUrl ?? Option.none(),
           );

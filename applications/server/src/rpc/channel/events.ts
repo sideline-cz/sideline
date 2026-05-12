@@ -15,12 +15,15 @@ export class EventPropertyMissing extends Data.TaggedError('EventPropertyMissing
 
   log = () => Effect.logError(this.errorMessage());
 
-  markFailed = () =>
+  markPermanentlyFailed = () =>
     ChannelSyncEventsRepository.asEffect().pipe(
-      Effect.flatMap((repository) => repository.markFailed(this.id, this.errorMessage())),
+      Effect.flatMap((repository) =>
+        repository.markPermanentlyFailed(this.id, this.errorMessage()),
+      ),
     );
 
-  static handle = (e: EventPropertyMissing) => e.log().pipe(Effect.tap(() => e.markFailed()));
+  static handle = (e: EventPropertyMissing) =>
+    e.log().pipe(Effect.tap(() => e.markPermanentlyFailed()));
 }
 
 const nullable = <
@@ -58,7 +61,7 @@ const channelCreatedFromSql = (r: EventRow) =>
               group_id,
               group_name,
               existing_channel_id: r.existing_channel_id,
-              discord_channel_name: Option.getOrElse(r.discord_channel_name, () => group_name),
+              discord_channel_name: r.discord_channel_name,
               discord_role_name: Option.getOrElse(r.discord_role_name, () => group_name),
               discord_role_color: r.discord_role_color,
             }),
@@ -93,15 +96,14 @@ const channelDeletedFromSql = (r: EventRow) =>
     Match.when('group', () =>
       Effect.Do.pipe(
         Effect.bind('group_id', () => nullable(r, 'group_id')),
-        Effect.bind('discord_channel_id', () => nullable(r, 'existing_channel_id')),
         Effect.map(
-          ({ group_id, discord_channel_id }) =>
+          ({ group_id }) =>
             new ChannelRpcEvents.GroupChannelDeletedEvent({
               id: r.id,
               team_id: r.team_id,
               guild_id: r.guild_id,
               group_id,
-              discord_channel_id,
+              discord_channel_id: r.existing_channel_id,
               discord_role_id: r.discord_role_id,
             }),
         ),
@@ -218,16 +220,15 @@ const channelArchivedFromSql = (r: EventRow) =>
     Match.when('group', () =>
       Effect.Do.pipe(
         Effect.bind('group_id', () => nullable(r, 'group_id')),
-        Effect.bind('discord_channel_id', () => nullable(r, 'existing_channel_id')),
         Effect.bind('archive_category_id', () => nullable(r, 'archive_category_id')),
         Effect.map(
-          ({ group_id, discord_channel_id, archive_category_id }) =>
+          ({ group_id, archive_category_id }) =>
             new ChannelRpcEvents.GroupChannelArchivedEvent({
               id: r.id,
               team_id: r.team_id,
               guild_id: r.guild_id,
               group_id,
-              discord_channel_id,
+              discord_channel_id: r.existing_channel_id,
               discord_role_id: r.discord_role_id,
               archive_category_id,
             }),
@@ -261,15 +262,14 @@ const channelDetachedFromSql = (r: EventRow) =>
     Match.when('group', () =>
       Effect.Do.pipe(
         Effect.bind('group_id', () => nullable(r, 'group_id')),
-        Effect.bind('discord_channel_id', () => nullable(r, 'existing_channel_id')),
         Effect.map(
-          ({ group_id, discord_channel_id }) =>
+          ({ group_id }) =>
             new ChannelRpcEvents.GroupChannelDetachedEvent({
               id: r.id,
               team_id: r.team_id,
               guild_id: r.guild_id,
               group_id,
-              discord_channel_id,
+              discord_channel_id: r.existing_channel_id,
               discord_role_id: r.discord_role_id,
             }),
         ),
@@ -300,25 +300,17 @@ const channelUpdatedFromSql = (r: EventRow) =>
     Match.when('group', () =>
       Effect.Do.pipe(
         Effect.bind('group_id', () => nullable(r, 'group_id')),
-        Effect.bind('discord_channel_id', () => nullable(r, 'existing_channel_id')),
-        Effect.bind('discord_role_id', () => nullable(r, 'discord_role_id')),
         Effect.bind('discord_channel_name', () => nullable(r, 'discord_channel_name')),
         Effect.bind('discord_role_name', () => nullable(r, 'discord_role_name')),
         Effect.map(
-          ({
-            group_id,
-            discord_channel_id,
-            discord_role_id,
-            discord_channel_name,
-            discord_role_name,
-          }) =>
+          ({ group_id, discord_channel_name, discord_role_name }) =>
             new ChannelRpcEvents.GroupChannelUpdatedEvent({
               id: r.id,
               team_id: r.team_id,
               guild_id: r.guild_id,
               group_id,
-              discord_channel_id,
-              discord_role_id,
+              discord_channel_id: r.existing_channel_id,
+              discord_role_id: r.discord_role_id,
               discord_channel_name,
               discord_role_name,
               discord_role_color: r.discord_role_color,

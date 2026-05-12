@@ -54,7 +54,7 @@ let emittedClaimRequests: EmittedClaimRequest[];
 
 // Controls whether the owner group has a Discord channel mapping
 let ownerGroupChannelMapping: Option.Option<{
-  discord_channel_id: Discord.Snowflake;
+  discord_channel_id: Option.Option<Discord.Snowflake>;
   discord_role_id: Option.Option<Discord.Snowflake>;
 }>;
 
@@ -62,7 +62,7 @@ const resetStores = () => {
   emittedEventCreated = [];
   emittedClaimRequests = [];
   ownerGroupChannelMapping = Option.some({
-    discord_channel_id: OWNER_CHANNEL_ID,
+    discord_channel_id: Option.some(OWNER_CHANNEL_ID),
     discord_role_id: Option.some(OWNER_ROLE_ID),
   });
 };
@@ -294,7 +294,6 @@ const makeMockDiscordChannelMappingRepository = () =>
       return Effect.succeed(Option.none());
     },
     insert: () => Effect.void,
-    insertWithoutRole: () => Effect.void,
     deleteByGroupId: () => Effect.void,
     findAllByTeamId: () => Effect.succeed([]),
     findAllByTeam: () => Effect.succeed([]),

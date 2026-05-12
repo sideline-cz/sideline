@@ -65,7 +65,10 @@ let markedReminderSent: Event.EventId[];
 let emittedReminders: EmittedReminder[];
 let channelMappings: Map<
   string,
-  { discord_channel_id: Discord.Snowflake; discord_role_id: Option.Option<Discord.Snowflake> }
+  {
+    discord_channel_id: Option.Option<Discord.Snowflake>;
+    discord_role_id: Option.Option<Discord.Snowflake>;
+  }
 >;
 
 const resetStores = () => {
@@ -155,7 +158,6 @@ const makeMockChannelMappingRepository = () =>
       return Effect.succeed(mapping ? Option.some(mapping) : Option.none());
     },
     insert: () => Effect.void,
-    insertWithoutRole: () => Effect.void,
     deleteByGroupId: () => Effect.void,
     findAllByTeamId: () => Effect.succeed([]),
     findAllByTeam: () => Effect.succeed([]),
@@ -311,7 +313,7 @@ describe('rsvpReminderCronEffect', () => {
     ];
     // Also set up a mapping so we know it wasn't used
     channelMappings.set(`${TEAM_ID}:${GROUP_ID_A}`, {
-      discord_channel_id: CHANNEL_OWNER,
+      discord_channel_id: Option.some(CHANNEL_OWNER),
       discord_role_id: Option.none(),
     });
 
@@ -340,7 +342,7 @@ describe('rsvpReminderCronEffect', () => {
       }),
     ];
     channelMappings.set(`${TEAM_ID}:${GROUP_ID_A}`, {
-      discord_channel_id: CHANNEL_OWNER,
+      discord_channel_id: Option.some(CHANNEL_OWNER),
       discord_role_id: Option.none(),
     });
 
@@ -433,7 +435,7 @@ describe('rsvpReminderCronEffect', () => {
       }),
     ];
     channelMappings.set(`${TEAM_ID}:${GROUP_ID_A}`, {
-      discord_channel_id: CHANNEL_OWNER,
+      discord_channel_id: Option.some(CHANNEL_OWNER),
       discord_role_id: Option.none(),
     });
 
@@ -457,7 +459,7 @@ describe('rsvpReminderCronEffect', () => {
       }),
     ];
     channelMappings.set(`${TEAM_ID}:${GROUP_ID_A}`, {
-      discord_channel_id: CHANNEL_OWNER,
+      discord_channel_id: Option.some(CHANNEL_OWNER),
       discord_role_id: Option.some(ROLE_ID),
     });
 
@@ -648,7 +650,7 @@ describe('rsvpReminderCronEffect — unclaimed_training_reminder', () => {
         claim_discord_message_id: Option.some(CLAIM_MESSAGE_ID),
       });
       channelMappings.set(`${TEAM_ID}:${GROUP_ID_A}`, {
-        discord_channel_id: CHANNEL_OWNER,
+        discord_channel_id: Option.some(CHANNEL_OWNER),
         discord_role_id: Option.none(),
       });
       eventsNeedingReminder = [event as any];
@@ -679,7 +681,7 @@ describe('rsvpReminderCronEffect — unclaimed_training_reminder', () => {
       claim_discord_message_id: Option.some(CLAIM_MESSAGE_ID),
     });
     channelMappings.set(`${TEAM_ID}:${GROUP_ID_A}`, {
-      discord_channel_id: CHANNEL_OWNER,
+      discord_channel_id: Option.some(CHANNEL_OWNER),
       discord_role_id: Option.none(),
     });
     eventsNeedingReminder = [event as any];

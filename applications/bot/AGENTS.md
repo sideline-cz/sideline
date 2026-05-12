@@ -17,15 +17,21 @@ src/
 ├── events/          — Gateway event handler registry (guild, member, invite, channel lifecycle)
 ├── services/        — Sync services (RoleSyncService, ChannelSyncService) and welcome helpers (InviteCache, inviteDiff, welcomeRenderer)
 ├── rcp/channel/     — Channel sync event handlers
-│   ├── ProcessorService.ts    — Match.tag dispatcher for channel events
+│   ├── ProcessorService.ts    — Match.tag dispatcher for channel events; classifies failures as transient vs permanent
 │   ├── channelUtils.ts        — Shared Discord helpers (deleteRole, deleteChannelAndRole)
-│   ├── handleCreated.ts       — channel_created handler
-│   ├── handleUpdated.ts       — channel_updated handler (rename channel + role, update role color)
+│   ├── handleCreated.ts       — channel_created handler (channel-only, role-only, or both)
+│   ├── handleUpdated.ts       — channel_updated handler (rename channel + role, update role color); each side optional
 │   ├── handleDeleted.ts       — channel_deleted handler
 │   ├── handleArchived.ts      — channel_archived handler (archive or fallback to delete)
-│   ├── handleMemberAdded.ts   — member_added handler
+│   ├── handleDetached.ts      — channel_detached handler (removes role permission overwrite; keeps channel + role)
+│   ├── handleMemberAdded.ts   — member_added handler (lazily creates role + permission overwrite when mapping has channel but no role)
 │   ├── handleMemberRemoved.ts — member_removed handler
 │   └── handleRosterChannelCreated.ts — roster channel_created handler
+└── rest/channels/   — Discord REST helpers for channel/role lifecycle
+    ├── createChannelWithRole.ts — Create both channel + role + permission overwrite (used when event carries both names)
+    ├── createChannelOnly.ts     — Create hidden channel; persist channel id via `Channel/UpsertGroupChannel` BEFORE creating role
+    ├── createRoleOnly.ts        — Create role only; no channel, no permission overwrite
+    └── createRoleForChannel.ts  — Create role + apply permission overwrite for an existing channel
 └── rcp/event/       — Event sync event handlers
     ├── ProcessorService.ts             — Match.tag dispatcher for event sync events
     ├── ChannelReorderSemaphore.ts      — Per-channel mutex registry (ServiceMap.Service) used to serialise concurrent reorders on the same channel
@@ -185,30 +191,77 @@ Syncs groups to private Discord text channels with per-user permission overwrite
 
 Event types: `channel_created`, `channel_updated`, `channel_deleted`, `channel_archived`, `channel_detached`, `member_added`, `member_removed`
 
-**Name fields on `channel_created` and `channel_updated` events**: The server pre-formats Discord names using team settings. Events carry separate `discord_channel_name` (for the Discord channel) and `discord_role_name` (for the Discord role). Bot handlers must use these fields instead of deriving names from `group_name` or `roster_name`. Exception: `member_added` handlers may fall back to `group_name` since the channel is normally already created by the `channel_created` event with the correct format. The `ensureMapping` and `createDiscordChannelAndRole` functions accept separate `channelName` and `roleName` parameters.
+**Name fields on `channel_created` and `channel_updated` events**: The server pre-formats Discord names using team settings. Events carry separate `discord_channel_name` (`Option<string>`; `None` means "do not create a channel, role-only mapping") and `discord_role_name` (`string`, always present). Bot handlers must use these fields instead of deriving names from `group_name`/`roster_name`. `member_added` is the only handler permitted to fall back to `group_name` when lazily provisioning a role for an existing channel-only mapping.
 
-**Color field on `channel_created` and `channel_updated` events**: Events carry `discord_role_color` as `Option<number>` (Discord integer color). The server converts hex colors (e.g. `#FF0000`) to Discord integers before emitting. Bot handlers pass this value to `createRoleForChannel` or `updateGuildRole` as the `color` parameter.
+**Color field on `channel_created` and `channel_updated` events**: Events carry `discord_role_color` as `Option<number>` (Discord integer color). The server converts hex colors (e.g. `#FF0000`) to Discord integers before emitting. Bot handlers pass this value to `createRoleForChannel`, `createRoleOnly`, or `updateGuildRole` as the `color` parameter.
+
+#### Channel ↔ Role Decoupling
+
+A group's Discord presence is one of: **channel + role** (both created), **role only** (no Discord channel), or **channel only** (transient — only seen mid-provision after `Channel/UpsertGroupChannel` fires but before role creation, or after detach). `discord_channel_mappings.discord_channel_id` and `discord_role_id` are independently nullable; the DB enforces `discord_channel_id IS NOT NULL OR discord_role_id IS NOT NULL`. Every event payload now carries both ids as `Option<Snowflake>`.
+
+Server-owned vs. bot-owned mapping writes:
+
+| Caller | RPC | Semantics |
+|--------|-----|-----------|
+| Server (HTTP API) | `Channel/UpsertMapping` | Insert/update both ids. |
+| Bot (`handleCreated` channel+role path) | `Channel/UpsertMapping` | Sets both ids after channel + role are created. |
+| Bot (`handleCreated` channel-only path) | `Channel/UpsertGroupChannel` THEN `Channel/UpsertMapping` | Persist channel id BEFORE role creation, then update both after role. |
+| Bot (`handleCreated` role-only / `handleMemberAdded` lazy role) | `Channel/UpsertMappingRoleOnly` | Sets only `discord_role_id`, leaves channel id untouched. |
+| Server (detach / archive) | `Channel/UpsertGroupChannel` cleared via `clearGroupChannel` repository method | Server clears `discord_channel_id`; the mapping row stays so the role survives. |
+| Bot (`handleDeleted` only) | `Channel/DeleteMapping` | Deletes the entire mapping row. Never call this from `handleArchived` or `handleDetached`. |
+
+Rules:
+
+1. **`handleCreated`** dispatches on `(existing_channel_id, discord_channel_name)`:
+   - `existing_channel_id = Some` → use `createRoleForChannel` against the existing channel, then `Channel/UpsertMapping` with both ids.
+   - `existing_channel_id = None` AND `discord_channel_name = Some` → call `createChannelOnly`, then immediately `Channel/UpsertGroupChannel` (persist channel id), then `createRoleForChannel`, then `Channel/UpsertMapping`. The intermediate upsert prevents orphan Discord channels if role creation fails and the event retries.
+   - `existing_channel_id = None` AND `discord_channel_name = None` → call `createRoleOnly`, then `Channel/UpsertMappingRoleOnly`. No channel is created.
+2. **`handleMemberAdded`** must NEVER call `createGuildChannel`. It reads the mapping via `Channel/GetMapping` and:
+   - mapping `None` → `createRoleOnly` + `Channel/UpsertMappingRoleOnly` + `addGuildMemberRole`.
+   - mapping has `discord_role_id = Some` → `addGuildMemberRole` only.
+   - mapping has `discord_channel_id = Some, discord_role_id = None` → `createRoleForChannel` against the existing channel + `Channel/UpsertMapping` + `addGuildMemberRole`.
+3. **`handleUpdated`** processes each side independently: `Option.match` on `discord_role_id` (update role name + color) and on `discord_channel_id` (rename channel + call `Guild/UpdateChannelName`). If both are `None`, log a warning and no-op — never throw.
+4. **`handleDeleted`** deletes the channel (if `discord_channel_id = Some`) and the role (if `discord_role_id = Some`) independently, then calls `Channel/DeleteMapping`. This is the only path that removes the mapping row.
+5. **`handleArchived`** moves the channel to the archive category if `discord_channel_id = Some`; on failure falls back to deleting only the channel (`Option.none()` for role). It does NOT delete the role, does NOT call `Channel/DeleteMapping` — the server has already cleared `discord_channel_id` via `clearGroupChannel` before emitting.
+6. **`handleDetached`** deletes the role's permission overwrite from the channel when both ids are `Some`; otherwise no-op. It does NOT delete the role, does NOT delete the channel, does NOT call `Channel/DeleteMapping` — the server has already cleared `discord_channel_id`.
+7. **Never re-introduce `ensureMapping`.** The helper was removed; provisioning is split across `createChannelOnly` / `createRoleOnly` / `createRoleForChannel` / `createChannelWithRole`, each with a narrow contract. Splitting prevents racy fat-upserts that would nullify the unrelated column.
+
+#### Channel Sync Event Failure Classification
+
+`ProcessorService.processEvent` wraps each handler in `Effect.catch` and routes failures via `isPermanentError(error)`:
+
+| Trigger | RPC called | Effect on DB row |
+|---------|------------|------------------|
+| `error._tag === 'ErrorResponse'` with HTTP `403` or `404` | `Channel/MarkEventPermanentlyFailed` | `processed_at = now(), error = <msg>` — row stops polling. |
+| `error._tag === 'ErrorResponse'` with Discord JSON code `50013` (Missing Perms) or `10000–10999` (Unknown resource) | `Channel/MarkEventPermanentlyFailed` | as above |
+| `error._tag === 'ParseError'` or `'SchemaError'` | `Channel/MarkEventPermanentlyFailed` | as above |
+| All other errors | `Channel/MarkEventFailed` | `error = <msg>` only — row stays unprocessed and is retried on next poll. |
+
+Rules:
+
+1. **Never delete a `channel_sync_events` row on failure.** Both RPCs only UPDATE — the row is kept for audit/observability.
+2. **Never set `processed_at` on a transient failure.** Transient = handler should be re-tried next tick; only `MarkEventFailed` is correct.
+3. **`EventPropertyMissing` (server-side decode failure in `events.ts`) always routes to `markPermanentlyFailed`.** Missing required identity fields cannot heal on retry.
+4. **Do NOT add `error.message.includes('…')` checks to `isPermanentError`.** Classification is by `_tag` + structured fields only — string matching is fragile across dfx versions.
 
 #### Channel Update
 
 When a group or roster name/emoji/color changes, the server emits `channel_updated`. The bot handler in `src/rcp/channel/handleUpdated.ts`:
 
-1. Updates the Discord role via `updateGuildRole` (name + color)
-2. Updates the Discord channel via `updateChannel` (name)
-3. Calls `rpc['Guild/UpdateChannelName']` to sync the new channel name back to the `discord_channels` table on the server
+1. If `discord_role_id = Some` — update the Discord role via `updateGuildRole` (name + color).
+2. If `discord_channel_id = Some` — update the Discord channel via `updateChannel` (name) and call `rpc['Guild/UpdateChannelName']` to sync the new channel name back to the server's `discord_channels` table.
+3. If both are `None` — log a warning and return `Effect.void`.
 
-Both `handleGroupChannelUpdated` and `handleRosterChannelUpdated` delegate to the same shared logic.
+`handleGroupChannelUpdated` and `handleRosterChannelUpdated` are sibling functions in the same file. Do not collapse them back into a single shared `handleChannelUpdated` — they differ in which RPCs they target and which mapping table is consulted.
 
 #### Channel Archival
 
-When a team has `discord_archive_category_id` set, deleting a group or deactivating a roster emits `channel_archived` instead of `channel_deleted`. The bot handler in `src/rcp/channel/handleArchived.ts`:
+When a team has `discord_archive_category_id` set, deleting a group or deactivating a roster emits `channel_archived` instead of `channel_deleted`. The server clears `discord_channel_mappings.discord_channel_id` via `channelMappings.clearGroupChannel` **before** emitting. The bot handler in `src/rcp/channel/handleArchived.ts`:
 
-1. Moves the Discord channel to the archive category via `updateChannel({ parent_id })`
-2. Deletes the permission overwrite for the channel role
-3. Deletes the Discord role
-4. On any failure, falls back to full channel+role deletion (same as `channel_deleted`)
-
-Each handler (`handleGroupArchived`, `handleRosterArchived`) follows this pattern and then calls the appropriate RPC to clean up mappings.
+1. If `discord_channel_id = None` — no-op.
+2. If `discord_channel_id = Some` — move the channel to the archive category via `updateChannel({ parent_id })`. On failure, fall back to `deleteChannelAndRole(guild_id, channelId, Option.none())` (channel only — never the role).
+3. On success, delete the role's permission overwrite for the archive channel.
+4. Never call `Channel/DeleteMapping` — the mapping row stays so the (now role-only) presence is preserved.
 
 ### Event Sync (events → Discord messages)
 

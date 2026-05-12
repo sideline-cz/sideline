@@ -14,6 +14,6 @@ export class ChannelMapping extends Schema.Class<ChannelMapping>('ChannelMapping
   entity_type: ChannelSyncEvent.ChannelSyncEntityType,
   group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   roster_id: Schema.OptionFromNullOr(RosterModel.RosterId),
-  discord_channel_id: Discord.Snowflake,
+  discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
 }) {}

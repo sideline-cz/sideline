@@ -35,6 +35,27 @@ const action: (
     Match.exhaustive,
   );
 
+/**
+ * Returns true for errors that are permanent (i.e. retrying will not help):
+ * - Discord 403 (missing permissions) or 404 (unknown resource)
+ * - Any structural error (_tag: 'ParseError' / 'SchemaError')
+ */
+const isPermanentError = (error: unknown): boolean => {
+  if (error === null || typeof error !== 'object') return false;
+  const e = error as Record<string, unknown>;
+  // Discord 403 (Missing Permissions) or 404 (Unknown Resource) are permanent
+  if (e._tag === 'ErrorResponse') {
+    const httpStatus = typeof e.status === 'number' ? e.status : 0;
+    if (httpStatus === 403 || httpStatus === 404) return true;
+    // Discord JSON error codes 10xxx = Unknown resource, 50013 = Missing Perms
+    const code = typeof e.code === 'number' ? e.code : 0;
+    if (code === 50013 || (code >= 10000 && code < 11000)) return true;
+  }
+  // Schema/parse errors are permanent
+  if (e._tag === 'ParseError' || e._tag === 'SchemaError') return true;
+  return false;
+};
+
 const processEvent = Effect.Do.pipe(
   Effect.bind('rpc', () => SyncRpc.asEffect()),
   Effect.bind('discord', () => DiscordREST.asEffect()),
@@ -53,7 +74,13 @@ const processEvent = Effect.Do.pipe(
             ),
           ),
           Effect.catch((error) =>
-            rpc['Channel/MarkEventFailed']({ id: event.id, error: String(error) }).pipe(
+            (isPermanentError(error)
+              ? rpc['Channel/MarkEventPermanentlyFailed']({
+                  id: event.id,
+                  error: String(error),
+                })
+              : rpc['Channel/MarkEventFailed']({ id: event.id, error: String(error) })
+            ).pipe(
               Effect.tap(() =>
                 Effect.logWarning(`Failed to process channel sync event ${event.id}`, error),
               ),

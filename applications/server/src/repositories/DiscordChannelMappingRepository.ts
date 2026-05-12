@@ -16,7 +16,7 @@ class MappingRow extends Schema.Class<MappingRow>('MappingRow')({
   entity_type: ChannelSyncEvent.ChannelSyncEntityType,
   group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   roster_id: Schema.OptionFromNullOr(RosterModel.RosterId),
-  discord_channel_id: Discord.Snowflake,
+  discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
 }) {}
 
@@ -37,10 +37,21 @@ const InsertGroupInput = Schema.Struct({
   discord_role_id: Discord.Snowflake,
 });
 
-const InsertGroupWithoutRoleInput = Schema.Struct({
+const InsertRoleOnlyInput = Schema.Struct({
+  team_id: Team.TeamId,
+  group_id: GroupModel.GroupId,
+  discord_role_id: Discord.Snowflake,
+});
+
+const UpsertGroupChannelInput = Schema.Struct({
   team_id: Team.TeamId,
   group_id: GroupModel.GroupId,
   discord_channel_id: Discord.Snowflake,
+});
+
+const ClearGroupChannelInput = Schema.Struct({
+  team_id: Team.TeamId,
+  group_id: GroupModel.GroupId,
 });
 
 const InsertRosterInput = Schema.Struct({
@@ -93,13 +104,32 @@ const make = Effect.gen(function* () {
     `,
   });
 
-  const _upsertGroupWithoutRole = SqlSchema.void({
-    Request: InsertGroupWithoutRoleInput,
+  const insertRoleOnlyMapping = SqlSchema.void({
+    Request: InsertRoleOnlyInput,
+    execute: (input) => sql`
+      INSERT INTO discord_channel_mappings (team_id, entity_type, group_id, discord_role_id)
+      VALUES (${input.team_id}, 'group', ${input.group_id}, ${input.discord_role_id})
+      ON CONFLICT (team_id, group_id) WHERE group_id IS NOT NULL
+      DO UPDATE SET discord_role_id = excluded.discord_role_id
+    `,
+  });
+
+  const upsertGroupChannelMapping = SqlSchema.void({
+    Request: UpsertGroupChannelInput,
     execute: (input) => sql`
       INSERT INTO discord_channel_mappings (team_id, entity_type, group_id, discord_channel_id)
       VALUES (${input.team_id}, 'group', ${input.group_id}, ${input.discord_channel_id})
       ON CONFLICT (team_id, group_id) WHERE group_id IS NOT NULL
-      DO UPDATE SET discord_channel_id = ${input.discord_channel_id}, discord_role_id = NULL
+      DO UPDATE SET discord_channel_id = excluded.discord_channel_id
+    `,
+  });
+
+  const clearGroupChannelMapping = SqlSchema.void({
+    Request: ClearGroupChannelInput,
+    execute: (input) => sql`
+      UPDATE discord_channel_mappings
+      SET discord_channel_id = NULL
+      WHERE team_id = ${input.team_id} AND group_id = ${input.group_id}
     `,
   });
 
@@ -155,15 +185,32 @@ const make = Effect.gen(function* () {
       discord_role_id: discordRoleId,
     }).pipe(catchSqlErrors);
 
-  const insertWithoutRole = (
+  const insertRoleOnly = (
+    teamId: Team.TeamId,
+    groupId: GroupModel.GroupId,
+    discordRoleId: Discord.Snowflake,
+  ) =>
+    insertRoleOnlyMapping({
+      team_id: teamId,
+      group_id: groupId,
+      discord_role_id: discordRoleId,
+    }).pipe(catchSqlErrors);
+
+  const upsertGroupChannel = (
     teamId: Team.TeamId,
     groupId: GroupModel.GroupId,
     discordChannelId: Discord.Snowflake,
   ) =>
-    _upsertGroupWithoutRole({
+    upsertGroupChannelMapping({
       team_id: teamId,
       group_id: groupId,
       discord_channel_id: discordChannelId,
+    }).pipe(catchSqlErrors);
+
+  const clearGroupChannel = (teamId: Team.TeamId, groupId: GroupModel.GroupId) =>
+    clearGroupChannelMapping({
+      team_id: teamId,
+      group_id: groupId,
     }).pipe(catchSqlErrors);
 
   const deleteByGroupId = (teamId: Team.TeamId, groupId: GroupModel.GroupId) =>
@@ -193,7 +240,9 @@ const make = Effect.gen(function* () {
   return {
     findByGroupId,
     insert,
-    insertWithoutRole,
+    insertRoleOnly,
+    upsertGroupChannel,
+    clearGroupChannel,
     deleteByGroupId,
     findByRosterId,
     insertRoster,

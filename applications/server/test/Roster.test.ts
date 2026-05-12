@@ -148,7 +148,7 @@ const buildRosterEntry = (
   return new RosterEntry({
     member_id: memberId,
     user_id: userId,
-    discord_id: user.discord_id,
+    discord_id: user.discord_id as Discord.Snowflake,
     role_names: roleNames,
     permissions: permissions,
     name: user.name,

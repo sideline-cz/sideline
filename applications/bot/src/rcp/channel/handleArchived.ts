@@ -43,27 +43,22 @@ const moveToArchive = (discordChannelId: Discord.Snowflake, archiveCategoryId: D
 
 export const handleGroupArchived = (event: ChannelRpcEvents.GroupChannelArchivedEvent) =>
   Effect.Do.pipe(
-    Effect.bind('rpc', () => SyncRpc.asEffect()),
     Effect.tap(() =>
-      moveToArchive(event.discord_channel_id, event.archive_category_id).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning(
-            `Failed to move group channel ${event.discord_channel_id} to archive, falling back to deletion`,
-            error,
-          ).pipe(
-            Effect.tap(() =>
-              deleteChannelAndRole(event.guild_id, event.discord_channel_id, event.discord_role_id),
+      Option.match(event.discord_channel_id, {
+        onNone: () => Effect.void,
+        onSome: (channelId) =>
+          moveToArchive(channelId, event.archive_category_id).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning(
+                `Failed to move group channel ${channelId} to archive, falling back to deletion`,
+                error,
+              ).pipe(
+                Effect.tap(() => deleteChannelAndRole(event.guild_id, channelId, Option.none())),
+              ),
             ),
+            Effect.tap(() => deletePermissionOverwrite(channelId, event.discord_role_id)),
           ),
-        ),
-        Effect.tap(() =>
-          deletePermissionOverwrite(event.discord_channel_id, event.discord_role_id),
-        ),
-        Effect.tap(() => deleteRole(event.guild_id, event.discord_role_id)),
-      ),
-    ),
-    Effect.tap(({ rpc }) =>
-      rpc['Channel/DeleteMapping']({ team_id: event.team_id, group_id: event.group_id }),
+      }),
     ),
     Effect.asVoid,
   );

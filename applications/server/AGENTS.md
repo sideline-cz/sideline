@@ -157,6 +157,45 @@ When API handlers create/delete resources that need Discord sync:
 2. Call `repo.emitIfGuildLinked(teamId, eventType, ...)` — looks up `guild_id` from `teams` table; if linked, inserts event row; if not, no-op
 3. Wrap emission in `Effect.catchAllDefect(() => Effect.void)` so sync failures never break the primary operation. Use `Effect.catchAllDefect` (not `Effect.catchAll`) because repository methods convert SQL/parse errors to defects via `catchSqlErrors`. Always log before catching with `Effect.tapDefect`
 
+### Channel Sync Event Lifecycle (Server side)
+
+`channel_sync_events` is a poll-driven outbox. Each event has two terminal states besides "processed":
+
+| Repository method | RPC alias | SQL effect | When the bot calls it |
+|-------------------|-----------|------------|----------------------|
+| `markProcessed` | `Channel/MarkEventProcessed` | `SET processed_at = now()` | Handler succeeded. |
+| `markFailed` | `Channel/MarkEventFailed` | `SET error = $1` (leaves `processed_at` NULL) | Transient failure — row is retried on next poll. |
+| `markPermanentlyFailed` | `Channel/MarkEventPermanentlyFailed` | `SET processed_at = now(), error = $1` | Permanent failure (Discord 403/404, `ParseError`, missing payload field) — row stops being polled. |
+
+Rules:
+
+1. **Never delete `channel_sync_events` rows on failure** — the row is kept for audit. Both failure paths only UPDATE.
+2. **The transient/permanent decision lives in the bot** (`isPermanentError` in `ProcessorService.ts`). Do NOT add server-side error classification — the server exposes both RPCs and the bot picks.
+3. **Server-side decode failures** (`EventPropertyMissing` in `src/rpc/channel/events.ts`) always call `markPermanentlyFailed` — missing payload fields are not transient.
+4. When adding a new failure-classification rule, update the bot's `isPermanentError` and `applications/bot/AGENTS.md`, not the server.
+
+### Channel ↔ Role Decoupling on `discord_channel_mappings`
+
+`discord_channel_mappings.discord_channel_id` is **nullable**. The migration `1747600000_decouple_channel_role.ts` drops `NOT NULL` and adds CHECK `discord_channel_id IS NOT NULL OR discord_role_id IS NOT NULL` plus a partial unique index on `(team_id, discord_channel_id) WHERE discord_channel_id IS NOT NULL`. Every domain schema that references this column uses `Schema.OptionFromNullOr(Discord.Snowflake)`.
+
+`DiscordChannelMappingRepository` exposes **narrow** mutation methods. Each method touches exactly the columns its name implies — never use a fat upsert that nullifies unrelated columns:
+
+| Method | Columns written | Used by |
+|--------|----------------|---------|
+| `insert(teamId, groupId, channelId, roleId)` | sets both ids | server (legacy paths still creating both atomically) |
+| `insertRoleOnly(teamId, groupId, roleId)` | sets `discord_role_id`; `discord_channel_id` stays as-is | RPC `Channel/UpsertMappingRoleOnly` (bot calls during role-only provisioning) |
+| `upsertGroupChannel(teamId, groupId, channelId)` | sets `discord_channel_id`; `discord_role_id` stays as-is | RPC `Channel/UpsertGroupChannel` (bot calls BEFORE creating role) AND server's manual "link existing channel" handler |
+| `clearGroupChannel(teamId, groupId)` | sets `discord_channel_id = NULL`; `discord_role_id` stays as-is | Server's detach/archive paths, BEFORE emitting `channel_detached` / `channel_archived` |
+| `deleteByGroupId(teamId, groupId)` | deletes the row | Server `Channel/DeleteMapping`; bot calls this only from `handleDeleted` |
+
+Rules:
+
+1. **Server owns clearing the channel id.** When detaching or archiving a group, the API handler calls `channelMappings.clearGroupChannel(teamId, groupId)` synchronously, then emits the event. The bot must never write `NULL` to `discord_channel_id` itself.
+2. **Bot owns deleting the row.** Only the `channel_deleted` event triggers `Channel/DeleteMapping`. `channel_detached` and `channel_archived` keep the mapping (with cleared channel id) so the surviving role still resolves.
+3. **`emitChannel{Deleted,Archived,Detached,Updated}` accept `discordChannelId: Option<Snowflake>` and `discordRoleId: Option<Snowflake>`.** Do not wrap the channel id in `Option.some(...)` at call sites — pass the mapping field through unchanged.
+4. **`emitChannelCreated` accepts `discordChannelName?: string`.** Pass `undefined` when the group is configured for role-only provisioning (`settings.create_discord_channel_on_group = false`); the wire field decodes to `Option<string>` on the bot side and triggers the role-only branch in `handleCreated`.
+5. **When checking "is this channel already linked?"** (e.g. in `LinkChannelToGroup`), filter mappings with `Option.isSome(m.discord_channel_id) && m.discord_channel_id.value === payload.discordChannelId`. The mapping may exist with `discord_channel_id = None` for a role-only group — that is not a conflict.
+
 ### Resolving identity fields on outbox reads
 
 `*_sync_events` outbox tables (e.g. `event_sync_events`) are written once at emit-time and read once before being marked processed. When a sync event payload needs additional identity fields beyond the foreign-key id stored at emit-time (e.g. the claimer's `discord_id`, `nickname`, `display_name`, `username`), resolve them via `LEFT JOIN` inside the `findUnprocessed*Events` SELECT — **never** add new denormalised columns to the outbox table.

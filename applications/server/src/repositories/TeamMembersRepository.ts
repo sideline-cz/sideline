@@ -1,4 +1,4 @@
-import { Role, Team, TeamMember, User } from '@sideline/domain';
+import { Discord, Role, Team, TeamMember, User } from '@sideline/domain';
 import { Schemas, SqlErrors } from '@sideline/effect-lib';
 import { Effect, Layer, type Option, pipe, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -36,7 +36,7 @@ export class MembershipWithRole extends Schema.Class<MembershipWithRole>('Member
 export class RosterEntry extends Schema.Class<RosterEntry>('RosterEntry')({
   member_id: TeamMember.TeamMemberId,
   user_id: User.UserId,
-  discord_id: Schema.String,
+  discord_id: Discord.Snowflake,
   role_names: Schemas.ArrayFromSplitString(),
   permissions: pipe(Schemas.ArrayFromSplitString(), Schema.decodeTo(Schema.Array(Role.Permission))),
   name: Schema.OptionFromNullOr(Schema.String),

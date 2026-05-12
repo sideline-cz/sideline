@@ -600,23 +600,28 @@ The outbox workers implement the bot's side of the outbox pattern: the server in
 
 **Polling RPC:** `Channel/GetUnprocessedEvents`
 
-Channel sync mirrors each Sideline group that has a Discord channel mapping as a Discord text channel. It also creates and manages a corresponding Discord role used to control channel visibility.
+Channel sync manages Discord channels and roles for Sideline groups. The Discord role (which gates channel access) and the Discord channel are now independent: a group always gets a role, but a channel is only created when explicitly requested. This means a mapping row can exist with a `discord_role_id` but no `discord_channel_id`.
 
 **Events processed:**
 
 | Event tag | Handler file | Discord action |
 |-----------|-------------|----------------|
-| `channel_created` | `handleCreated.ts` | Ensures a Discord channel (and associated role) exists for the group; calls `ensureMapping` which creates the channel+role if absent and upserts the mapping via `Channel/UpsertMapping` |
-| `channel_updated` | `handleUpdated.ts` | Updates the existing Discord role name and colour, and the Discord channel name, to reflect the latest group/roster name, emoji, and colour settings; then calls `Guild/UpdateChannelName` RPC to write the new name back to the server's `discord_channels` cache |
-| `channel_deleted` | `handleDeleted.ts` | Looks up the mapping via `Channel/GetMapping`, deletes the associated Discord role (if present) and the Discord channel via REST, then removes the mapping via `Channel/DeleteMapping` |
-| `channel_archived` | `handleArchived.ts` | Moves the Discord channel to the configured archive category via REST (`updateChannel`); falls back to full channel deletion if the move fails. On success, removes the channel's permission overwrite for the associated role, deletes the Discord role (if present), then removes the mapping. |
-| `channel_detached` | `handleDetached.ts` | Deletes the associated Discord role (if present) and removes the mapping, but leaves the Discord channel untouched. Used when the cleanup mode is `nothing`. |
-| `channel_member_added` | `handleMemberAdded.ts` | Ensures the mapping exists (`ensureMapping`), then adds the channel's Discord role to the guild member via REST |
+| `group_channel_created` | `handleCreated.ts` | Three branches: (1) `existing_channel_id` is set — links to that channel and creates a role via `createRoleForChannel`, then calls `Channel/UpsertMapping`; (2) `discord_channel_name` is set — creates the channel via `createChannelOnly`, persists the channel ID immediately via `Channel/UpsertGroupChannel`, then creates the role via `createRoleForChannel`, and finally calls `Channel/UpsertMapping`; (3) neither is set — creates a role only via `createRoleOnly` and calls `Channel/UpsertMappingRoleOnly`. |
+| `roster_channel_created` | `handleRosterChannelCreated.ts` | Ensures a Discord channel and role exist for the roster; upserts the mapping via `Channel/UpsertRosterMapping`. |
+| `channel_updated` | `handleUpdated.ts` | Updates the existing Discord role name and colour, and (if present) the Discord channel name, to reflect the latest group/roster name, emoji, and colour settings; then calls `Guild/UpdateChannelName` RPC to write the new name back to the server's `discord_channels` cache |
+| `channel_deleted` | `handleDeleted.ts` | Looks up the mapping via `Channel/GetMapping`, deletes the associated Discord role (if present) and the Discord channel (if present) via REST, then removes the mapping via `Channel/DeleteMapping` |
+| `channel_archived` | `handleArchived.ts` | If a channel is present: moves it to the configured archive category via REST; falls back to deletion if the move fails. Removes the channel's permission overwrite for the associated role. The Discord role is NOT deleted. |
+| `channel_detached` | `handleDetached.ts` | If both a channel and role ID are present, removes the channel's permission overwrite for the role in Discord, leaving the channel and role otherwise intact. Used when cleanup mode is `nothing`. |
+| `group_member_added` | `handleMemberAdded.ts` | Resolves the group's Discord role, creating one if absent (role-only via `createRoleOnly`, or paired with an existing channel via `createRoleForChannel`), then assigns it to the guild member via REST. Never creates a Discord channel. |
+| `roster_member_added` | `handleRosterMemberAdded.ts` | Looks up the roster's Discord role via `Channel/GetRosterMapping`; assigns it to the guild member if found; silently skips if no mapping or role exists. |
 | `channel_member_removed` | `handleMemberRemoved.ts` | Looks up the mapping via `Channel/GetMapping`, then removes the channel's Discord role from the guild member via REST |
 
 **Lifecycle RPCs:**
 - `Channel/MarkEventProcessed`
-- `Channel/MarkEventFailed`
+- `Channel/MarkEventFailed` — records transient failures; leaves `processed_at` null so the event is retried on the next poll.
+- `Channel/MarkEventPermanentlyFailed` — records permanent failures (Discord 403/404, parse errors); sets `processed_at` so the event is never retried (poison-pill prevention).
+
+**Permanent vs transient failure classification** (`ProcessorService.ts`): Discord `ErrorResponse` with HTTP status 403 or 404, or Discord JSON error codes 10xxx (Unknown Resource) and 50013 (Missing Permissions), and any `ParseError`/`SchemaError` are classified as permanent. All other errors are transient and will be retried.
 
 ---
 
@@ -732,10 +737,17 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 |--------|---------|
 | `Channel/GetUnprocessedEvents` | Poll for pending channel outbox events |
 | `Channel/MarkEventProcessed` | Acknowledge successful processing |
-| `Channel/MarkEventFailed` | Record a processing failure |
+| `Channel/MarkEventFailed` | Record a transient failure (event will be retried) |
+| `Channel/MarkEventPermanentlyFailed` | Record a permanent failure (event is poisoned; `processed_at` is set to prevent retries) |
 | `Channel/GetMapping` | Look up the Discord channel/role IDs for a group |
-| `Channel/UpsertMapping` | Save or update the Discord channel+role mapping |
+| `Channel/UpsertMapping` | Save or update the Discord channel+role mapping (both IDs required) |
+| `Channel/UpsertMappingRoleOnly` | Save or update a role-only mapping (no channel ID) for a group |
+| `Channel/UpsertGroupChannel` | Write a `discord_channel_id` onto an existing group mapping (used mid-flight during `group_channel_created` to persist the channel before role creation, preventing orphan channels on retry) |
 | `Channel/DeleteMapping` | Remove the mapping when a group channel is deleted |
+| `Channel/GetRosterMapping` | Look up the Discord channel/role IDs for a roster |
+| `Channel/UpsertRosterMapping` | Save or update the Discord channel+role mapping for a roster |
+| `Channel/DeleteRosterMapping` | Remove the mapping when a roster channel is deleted |
+| `Channel/UpdateRosterChannel` | Update the `discord_channel_id` on a roster's Sideline record |
 
 ### Event group (`Event/`)
 

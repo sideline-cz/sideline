@@ -406,7 +406,11 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                           .findAllByTeam(teamId)
                           .pipe(
                             Effect.flatMap((mappings) =>
-                              mappings.some((m) => m.discord_channel_id === channelId)
+                              mappings.some(
+                                (m) =>
+                                  Option.isSome(m.discord_channel_id) &&
+                                  m.discord_channel_id.value === channelId,
+                              )
                                 ? Effect.fail(new Roster.ChannelAlreadyLinked())
                                 : Effect.void,
                             ),
@@ -624,7 +628,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                               teamId,
                               rosterId,
                               mapping.discord_channel_id,
-                              discordRoleId,
+                              Option.some(discordRoleId),
                               channelName,
                               roleName,
                               discordRoleColor,

@@ -1,11 +1,13 @@
-import type { ChannelRpcEvents, Discord as DiscordSchemas } from '@sideline/domain';
+import type { ChannelRpcEvents } from '@sideline/domain';
 import { Effect, Option } from 'effect';
+import { createChannelOnly } from '~/rest/channels/createChannelOnly.js';
 import { createRoleForChannel } from '~/rest/channels/createRoleForChannel.js';
-import { ensureMapping } from '~/rest/channels/ensureMapping.js';
+import { createRoleOnly } from '~/rest/channels/createRoleOnly.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 export const handleCreated = (event: ChannelRpcEvents.GroupChannelCreatedEvent) => {
   const roleColor = Option.getOrUndefined(event.discord_role_color);
+
   return Option.match(event.existing_channel_id, {
     onSome: (channelId) =>
       Effect.Do.pipe(
@@ -17,8 +19,8 @@ export const handleCreated = (event: ChannelRpcEvents.GroupChannelCreatedEvent) 
           rpc['Channel/UpsertMapping']({
             team_id: event.team_id,
             group_id: event.group_id,
-            discord_channel_id: result.discord_channel_id as DiscordSchemas.Snowflake,
-            discord_role_id: result.discord_role_id as DiscordSchemas.Snowflake,
+            discord_channel_id: result.discord_channel_id,
+            discord_role_id: result.discord_role_id,
           }),
         ),
         Effect.tap(({ result }) =>
@@ -29,20 +31,62 @@ export const handleCreated = (event: ChannelRpcEvents.GroupChannelCreatedEvent) 
         Effect.asVoid,
       ),
     onNone: () =>
-      ensureMapping(
-        event.team_id,
-        event.group_id,
-        event.guild_id,
-        event.discord_channel_name,
-        event.discord_role_name,
-        roleColor,
-      ).pipe(
-        Effect.tap(({ discord_channel_id }) =>
-          Effect.logInfo(
-            `Synced group_channel_created (new): group ${event.group_id} → Discord channel ${discord_channel_id} in guild ${event.guild_id}`,
+      Option.match(event.discord_channel_name, {
+        onSome: (channelName) =>
+          Effect.Do.pipe(
+            Effect.bind('rpc', () => SyncRpc.asEffect()),
+            Effect.bind('channelResult', () => createChannelOnly(event.guild_id, channelName)),
+            // Persist the channel ID immediately before role creation to avoid orphan channels on retry
+            Effect.tap(({ channelResult, rpc }) =>
+              rpc['Channel/UpsertGroupChannel']({
+                team_id: event.team_id,
+                group_id: event.group_id,
+                discord_channel_id: channelResult.discord_channel_id,
+              }),
+            ),
+            Effect.bind('roleResult', ({ channelResult }) =>
+              createRoleForChannel(
+                event.guild_id,
+                channelResult.discord_channel_id,
+                event.discord_role_name,
+                roleColor,
+              ),
+            ),
+            Effect.tap(({ roleResult, rpc }) =>
+              rpc['Channel/UpsertMapping']({
+                team_id: event.team_id,
+                group_id: event.group_id,
+                discord_channel_id: roleResult.discord_channel_id,
+                discord_role_id: roleResult.discord_role_id,
+              }),
+            ),
+            Effect.tap(({ roleResult }) =>
+              Effect.logInfo(
+                `Synced group_channel_created (new): group ${event.group_id} → Discord channel ${roleResult.discord_channel_id} in guild ${event.guild_id}`,
+              ),
+            ),
+            Effect.asVoid,
           ),
-        ),
-        Effect.asVoid,
-      ),
+        onNone: () =>
+          Effect.Do.pipe(
+            Effect.bind('rpc', () => SyncRpc.asEffect()),
+            Effect.bind('roleResult', () =>
+              createRoleOnly(event.guild_id, event.discord_role_name, roleColor),
+            ),
+            Effect.tap(({ roleResult, rpc }) =>
+              rpc['Channel/UpsertMappingRoleOnly']({
+                team_id: event.team_id,
+                group_id: event.group_id,
+                discord_role_id: roleResult.discord_role_id,
+              }),
+            ),
+            Effect.tap(({ roleResult }) =>
+              Effect.logInfo(
+                `Synced group_channel_created (role-only): group ${event.group_id} → Discord role ${roleResult.discord_role_id} in guild ${event.guild_id}`,
+              ),
+            ),
+            Effect.asVoid,
+          ),
+      }),
   });
 };

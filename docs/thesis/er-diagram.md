@@ -444,7 +444,7 @@ erDiagram
 
 ### Discord Integration
 
-This domain bridges the application to a Discord bot. `bot_guilds` tracks which Discord servers the bot has joined. `discord_channels` caches the channel list for each guild. `discord_role_mappings` and `discord_channel_mappings` link application roles and groups to their Discord counterparts. The three sync-event tables (`role_sync_events`, `channel_sync_events`, `event_sync_events`) are outbox tables consumed by the bot worker to propagate state changes to Discord. `channel_event_dividers` tracks the single divider message posted in each event channel to visually separate past events from upcoming ones.
+This domain bridges the application to a Discord bot. `bot_guilds` tracks which Discord servers the bot has joined. `discord_channels` caches the channel list for each guild. `discord_role_mappings` and `discord_channel_mappings` link application roles and groups to their Discord counterparts. In `discord_channel_mappings`, the `discord_channel_id` column is nullable — a group always receives a Discord role, but a Discord channel is only created when explicitly requested (via the `create_discord_channel_on_group` team setting or a manual "Create channel" action). The three sync-event tables (`role_sync_events`, `channel_sync_events`, `event_sync_events`) are outbox tables consumed by the bot worker to propagate state changes to Discord. `channel_event_dividers` tracks the single divider message posted in each event channel to visually separate past events from upcoming ones.
 
 ```mermaid
 erDiagram
@@ -482,7 +482,7 @@ erDiagram
         TEXT entity_type
         UUID group_id FK
         UUID roster_id FK
-        TEXT discord_channel_id
+        TEXT discord_channel_id "nullable"
         TEXT discord_role_id
         TIMESTAMPTZ created_at
     }
@@ -694,7 +694,7 @@ erDiagram
 | `bot_guilds` | Registry of Discord servers where the Sideline bot is installed. |
 | `discord_channels` | Cached channel list fetched from Discord for each bot guild. |
 | `discord_role_mappings` | Links an application role to its corresponding Discord role. |
-| `discord_channel_mappings` | Links an application group to its corresponding Discord channel. |
+| `discord_channel_mappings` | Links an application group or roster to its corresponding Discord channel and/or role; the channel is optional (a mapping may be role-only). |
 | `role_sync_events` | Outbox records driving role-assignment changes in Discord. |
 | `channel_sync_events` | Outbox records driving channel-membership changes in Discord. |
 | `event_sync_events` | Outbox records driving event announcements and updates in Discord. |

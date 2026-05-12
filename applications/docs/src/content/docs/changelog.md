@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-12 — Group Discord role and channel are now independent
+
+- A Discord **role** is now always created for a group (when the group is first provisioned or when a member is first added). The role exists independently of any channel.
+- A Discord **channel** is only created when you explicitly request it — via the **Create channel** button on the group detail page, or by enabling the "create Discord channel on group" team setting.
+- **Unlinking a channel no longer removes the Discord role.** Members keep their role assignment; you can link a new channel later and they will automatically regain access.
+- The group detail page now shows a **Create channel** button when a mapping exists but has no channel yet, making it easy to add a channel to a previously role-only group.
+- Permanent errors (Discord permission denied, deleted resource) are now distinguished from transient errors: they are marked as permanently failed and not retried, preventing repeated failed attempts from blocking the sync queue.
+
 ## 2026-05-12 — Gender-based automatic group assignment
 
 - Automatic group rules can now include a **gender** condition in addition to (or instead of) an age range. Members are only moved into the group when all criteria on a rule match (AND semantics).

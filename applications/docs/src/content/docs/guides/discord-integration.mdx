@@ -91,11 +91,18 @@ If no one has claimed a training by the time the regular RSVP reminder fires, th
   Only members (including coaches in sub-groups) of the training's **owner group** can claim or release a training. The Claim button silently rejects everyone else.
 </Aside>
 
-## Role sync
+## Group channels and roles
 
-If you enable **group → role sync**, Sideline keeps a Discord role matching each group. When you add someone to the "first team" group, they get the "first team" Discord role — which can then gate channel access.
+Each group in Sideline gets a **Discord role** automatically — this happens when the group is first created or the first time a member is added to it. The role is what controls who can see the group's channel.
 
-Turn it off if your Discord roles are managed separately.
+A **Discord channel** is separate and only created when you explicitly request it. You have two options on the group's detail page:
+
+- **Create channel** — the bot creates a hidden text channel and links the group's existing role to it, so only group members can see it.
+- **Link existing channel** — pick a channel already in your Discord server; the bot creates and attaches the role to it.
+
+When you unlink a channel (via the **Disconnect** button), the channel is removed from Discord (or archived/left alone, depending on your cleanup mode setting), but the group's Discord **role is kept**. This means members retain their role assignment and it can be linked to a new channel later without losing the membership data.
+
+Deleting a group removes both the channel and the role.
 
 ## Cleanup modes
 

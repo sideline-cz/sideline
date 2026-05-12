@@ -295,11 +295,10 @@ const MockDiscordChannelMappingRepositoryLayer = Layer.succeed(DiscordChannelMap
   findByGroupId: (_teamId: Team.TeamId, _groupId: GroupModel.GroupId) =>
     Effect.succeed(
       Option.map(groupChannelMapping, (channelId) => ({
-        discord_channel_id: channelId,
+        discord_channel_id: Option.some(channelId),
       })),
     ),
   insert: () => Effect.die(new Error('Not implemented')),
-  insertWithoutRole: () => Effect.die(new Error('Not implemented')),
   deleteByGroupId: () => Effect.die(new Error('Not implemented')),
   findByRosterId: () => Effect.die(new Error('Not implemented')),
   insertRoster: () => Effect.die(new Error('Not implemented')),

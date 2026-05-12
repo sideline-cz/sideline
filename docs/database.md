@@ -577,7 +577,7 @@ Links an application role to its corresponding Discord role in a guild.
 
 #### `discord_channel_mappings`
 
-Links a group or roster to its corresponding Discord channel and role for permission syncing.
+Links a group or roster to its corresponding Discord channel and/or role for permission syncing.
 
 | Column | Type | Constraints | Default |
 |---|---|---|---|
@@ -586,13 +586,15 @@ Links a group or roster to its corresponding Discord channel and role for permis
 | `entity_type` | TEXT | NOT NULL | `'group'` |
 | `group_id` | UUID | — | — |
 | `roster_id` | UUID | — | — |
-| `discord_channel_id` | TEXT | NOT NULL | — |
+| `discord_channel_id` | TEXT | — | — |
 | `discord_role_id` | TEXT | — | — |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
-**Unique**: `(team_id, group_id) WHERE group_id IS NOT NULL`, `(team_id, roster_id) WHERE roster_id IS NOT NULL`, `(team_id, discord_channel_id)`
+**Unique**: `(team_id, group_id) WHERE group_id IS NOT NULL`, `(team_id, roster_id) WHERE roster_id IS NOT NULL`, `(team_id, discord_channel_id) WHERE discord_channel_id IS NOT NULL`
 
-**Notes**: `entity_type` is `'group'` or `'roster'`. Exactly one of `group_id` or `roster_id` is set.
+**Check constraint**: `discord_channel_mappings_at_least_one` — `discord_channel_id IS NOT NULL OR discord_role_id IS NOT NULL`
+
+**Notes**: `entity_type` is `'group'` or `'roster'`. Exactly one of `group_id` or `roster_id` is set. `discord_channel_id` is nullable — a mapping may represent a role-only provisioning (no channel) when `create_discord_channel_on_group` is `false` or before a channel is explicitly created. At least one of `discord_channel_id` or `discord_role_id` must be non-null. Added migration `1747600000_decouple_channel_role`.
 
 ---
 
@@ -649,7 +651,7 @@ Outbox table driving channel-membership changes in Discord. Polled by the bot's 
 
 **Indexes**: `idx_channel_sync_events_unprocessed` — partial index on `(created_at) WHERE processed_at IS NULL`
 
-**Notes**: `entity_type` is `'group'` or `'roster'`. For group events, `group_id`/`group_name` are set; for roster events, `roster_id`/`roster_name` are set. `existing_channel_id` and `discord_role_id` hold the Discord channel and role IDs for delete, archive, detach, and update events. `discord_channel_name` and `discord_role_name` carry the pre-formatted names the bot should use when creating or updating the channel and role; they are derived from the team's `discord_channel_format` and `discord_role_format` templates at the time the event is enqueued. `discord_role_color` carries the group/roster colour as a Discord integer (converted from the hex colour) for `channel_created` and `channel_updated` events. `archive_category_id` is set for `channel_archived` events and holds the Discord category to move the channel into. `channel_detached` events represent the `'nothing'` cleanup mode: the channel is kept in Discord but the role and mapping are removed.
+**Notes**: `entity_type` is `'group'` or `'roster'`. For group events, `group_id`/`group_name` are set; for roster events, `roster_id`/`roster_name` are set. `existing_channel_id` and `discord_role_id` hold the Discord channel and role IDs for delete, archive, detach, and update events. `discord_channel_name` and `discord_role_name` carry the pre-formatted names the bot should use when creating or updating the channel and role; they are derived from the team's `discord_channel_format` and `discord_role_format` templates at the time the event is enqueued. `discord_role_color` carries the group/roster colour as a Discord integer (converted from the hex colour) for `channel_created` and `channel_updated` events. `archive_category_id` is set for `channel_archived` events and holds the Discord category to move the channel into. `channel_detached` events represent the `'nothing'` cleanup mode: the channel is kept in Discord but the permission overwrite and mapping are updated. For `group_channel_created` events, `discord_channel_name` is nullable — a null value means role-only provisioning (no channel is created). Permanent processing failures (Discord 403/404, parse errors) set both `processed_at` and `error`, preventing the event from being retried; transient failures set only `error` and leave `processed_at` null so the event is retried on the next poll.
 
 ---
 
@@ -810,7 +812,7 @@ In-app alert records scoped to a specific team and user.
 
 ## Migration History
 
-All 47 migration files in `packages/migrations/src/before/` plus 1 after-migration.
+All 48 migration files in `packages/migrations/src/before/` plus 1 after-migration.
 
 ### Before Migrations (schema changes)
 
@@ -874,6 +876,7 @@ All 47 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1747300000 | `invite_acceptances` | Creates `invite_acceptances` table (id, team_invite_id FK, user_id FK, discord_code, discord_code_error_code, discord_code_error_detail, created_at, generated_at); adds unique partial index on `(discord_code) WHERE discord_code IS NOT NULL`, pending partial index on `(created_at) WHERE discord_code IS NULL AND discord_code_error_code IS NULL`, and index on `(team_invite_id)`; drops `idx_team_invites_discord_code`, `idx_team_invites_pending_discord_code`, and `team_invites.discord_code` column |
 | 1747400000 | `add_gender_to_age_thresholds` | Adds `gender TEXT` column to `age_threshold_rules`; adds CHECK constraint `age_threshold_rules_gender_check (gender IN ('male','female','other'))`; deletes any existing rows where all criteria are NULL; adds CHECK constraint `age_threshold_rules_nonempty_criteria (min_age IS NOT NULL OR max_age IS NOT NULL OR gender IS NOT NULL)`; drops the old `UNIQUE (team_id, group_id)` constraint and replaces it with `UNIQUE NULLS NOT DISTINCT (team_id, group_id, min_age, max_age, gender)` |
 | 1747500000 | `add_required_group_to_age_thresholds` | Adds `required_group_id UUID REFERENCES groups(id) ON DELETE CASCADE` (nullable) to `age_threshold_rules`; adds CHECK constraint `age_threshold_rules_required_not_self (required_group_id IS NULL OR required_group_id <> group_id)`; widens `age_threshold_rules_nonempty_criteria` to include `required_group_id IS NOT NULL`; drops and recreates the unique constraint as `UNIQUE NULLS NOT DISTINCT (team_id, group_id, min_age, max_age, gender, required_group_id)` |
+| 1747600000 | `decouple_channel_role` | Makes `discord_channel_mappings.discord_channel_id` nullable (drops NOT NULL); adds CHECK constraint `discord_channel_mappings_at_least_one (discord_channel_id IS NOT NULL OR discord_role_id IS NOT NULL)`; creates partial unique index `discord_channel_mappings_team_channel ON (team_id, discord_channel_id) WHERE discord_channel_id IS NOT NULL` (replaces the old unconditional unique on the same column pair) |
 
 ### After Migrations (seed data)
 

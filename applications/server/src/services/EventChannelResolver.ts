@@ -87,7 +87,7 @@ export const resolveOwnerGroupChannel = (
     onSome: (groupId) =>
       DiscordChannelMappingRepository.asEffect().pipe(
         Effect.flatMap((mappings) => mappings.findByGroupId(teamId, groupId)),
-        Effect.map((opt) => Option.map(opt, (m) => m.discord_channel_id)),
+        Effect.map((opt) => Option.flatMap(opt, (m) => m.discord_channel_id)),
       ),
   });
 

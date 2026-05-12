@@ -63,18 +63,22 @@ export const rsvpReminderCronEffect = Effect.Do.pipe(
                               `RsvpReminderCron: no owner channel for unclaimed training ${event.event_id}, skipping unclaimed reminder`,
                             ),
                           onSome: (m) =>
-                            syncRepo.emitUnclaimedTrainingReminder(
-                              event.team_id,
-                              event.event_id,
-                              event.title,
-                              event.start_at,
-                              Option.none(),
-                              Option.none(),
-                              m.discord_channel_id,
-                              m.discord_role_id,
-                              event.claim_discord_channel_id,
-                              event.claim_discord_message_id,
-                            ),
+                            Option.match(m.discord_channel_id, {
+                              onNone: () => Effect.void,
+                              onSome: (channelId) =>
+                                syncRepo.emitUnclaimedTrainingReminder(
+                                  event.team_id,
+                                  event.event_id,
+                                  event.title,
+                                  event.start_at,
+                                  Option.none(),
+                                  Option.none(),
+                                  channelId,
+                                  m.discord_role_id,
+                                  event.claim_discord_channel_id,
+                                  event.claim_discord_message_id,
+                                ),
+                            }),
                         }),
                       ),
                       Effect.tapDefect((e) =>

@@ -1,36 +1,77 @@
-import type { ChannelRpcEvents, Discord } from '@sideline/domain';
+import type { ChannelRpcEvents } from '@sideline/domain';
 import { DiscordREST } from 'dfx';
-import { Effect } from 'effect';
-import { ensureMapping } from '~/rest/channels/ensureMapping.js';
+import { Effect, Option } from 'effect';
+import { createRoleForChannel } from '~/rest/channels/createRoleForChannel.js';
+import { createRoleOnly } from '~/rest/channels/createRoleOnly.js';
 import { retryPolicy } from '~/rest/utils.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 export const handleMemberAdded = (event: ChannelRpcEvents.GroupMemberAddedEvent) =>
   Effect.Do.pipe(
+    Effect.bind('rpc', () => SyncRpc.asEffect()),
     Effect.bind('rest', () => DiscordREST.asEffect()),
-    Effect.bind('mapping', () =>
-      // Note: Using raw group_name as fallback channel/role name. In the normal flow, the channel
-      // is already created by channel_created with the correct format applied.
-      ensureMapping(
-        event.team_id,
-        event.group_id,
-        event.guild_id,
-        event.group_name,
-        event.group_name,
-      ),
+    Effect.bind('cached', ({ rpc }) =>
+      rpc['Channel/GetMapping']({ team_id: event.team_id, group_id: event.group_id }),
     ),
-    Effect.tap(({ rest, mapping }) =>
+    Effect.bind('roleId', ({ rpc, cached }) =>
+      Option.match(cached, {
+        onSome: (mapping) =>
+          Option.match(mapping.discord_role_id, {
+            onSome: (roleId) => Effect.succeed(roleId),
+            onNone: () =>
+              Effect.flatMap(Effect.fromOption(mapping.discord_channel_id), (channelId) =>
+                Effect.Do.pipe(
+                  Effect.bind('result', () =>
+                    createRoleForChannel(event.guild_id, channelId, event.group_name),
+                  ),
+                  Effect.tap(({ result }) =>
+                    rpc['Channel/UpsertMapping']({
+                      team_id: event.team_id,
+                      group_id: event.group_id,
+                      discord_channel_id: result.discord_channel_id,
+                      discord_role_id: result.discord_role_id,
+                    }),
+                  ),
+                  Effect.map(({ result }) => result.discord_role_id),
+                ),
+              ).pipe(
+                Effect.catchTag('NoSuchElementError', () =>
+                  Effect.Do.pipe(
+                    Effect.bind('result', () => createRoleOnly(event.guild_id, event.group_name)),
+                    Effect.tap(({ result }) =>
+                      rpc['Channel/UpsertMappingRoleOnly']({
+                        team_id: event.team_id,
+                        group_id: event.group_id,
+                        discord_role_id: result.discord_role_id,
+                      }),
+                    ),
+                    Effect.map(({ result }) => result.discord_role_id),
+                  ),
+                ),
+              ),
+          }),
+        onNone: () =>
+          Effect.Do.pipe(
+            Effect.bind('result', () => createRoleOnly(event.guild_id, event.group_name)),
+            Effect.tap(({ result }) =>
+              rpc['Channel/UpsertMappingRoleOnly']({
+                team_id: event.team_id,
+                group_id: event.group_id,
+                discord_role_id: result.discord_role_id,
+              }),
+            ),
+            Effect.map(({ result }) => result.discord_role_id),
+          ),
+      }),
+    ),
+    Effect.tap(({ rest, roleId }) =>
       rest
-        .addGuildMemberRole(
-          event.guild_id,
-          event.discord_user_id,
-          mapping.discord_role_id as Discord.Snowflake,
-        )
+        .addGuildMemberRole(event.guild_id, event.discord_user_id, roleId)
         .pipe(Effect.retry(retryPolicy)),
     ),
-    Effect.tap(({ mapping }) =>
+    Effect.tap(({ roleId }) =>
       Effect.logInfo(
-        `Assigned role ${mapping.discord_role_id} to user ${event.discord_user_id} in guild ${event.guild_id}`,
+        `Assigned role ${roleId} to user ${event.discord_user_id} in guild ${event.guild_id}`,
       ),
     ),
     Effect.asVoid,

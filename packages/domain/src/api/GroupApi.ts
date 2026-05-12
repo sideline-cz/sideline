@@ -74,7 +74,7 @@ export const MoveGroupRequest = Schema.Struct({
 export type MoveGroupRequest = Schema.Schema.Type<typeof MoveGroupRequest>;
 
 export class ChannelMappingInfo extends Schema.Class<ChannelMappingInfo>('ChannelMappingInfo')({
-  discordChannelId: Snowflake,
+  discordChannelId: Schema.OptionFromNullOr(Snowflake),
   discordChannelName: Schema.OptionFromNullOr(Schema.String),
   discordRoleId: Schema.OptionFromNullOr(Snowflake),
 }) {}
@@ -97,6 +97,14 @@ export class DiscordRoleInfo extends Schema.Class<DiscordRoleInfo>('DiscordRoleI
   color: Schema.Number,
   position: Schema.Number,
   managed: Schema.Boolean,
+}) {}
+
+export class SyncRoleMembersResult extends Schema.Class<SyncRoleMembersResult>(
+  'SyncRoleMembersResult',
+)({
+  addedCount: Schema.Number,
+  removedCount: Schema.Number,
+  skippedCount: Schema.Number,
 }) {}
 
 export class GroupNotFound extends Schema.TaggedErrorClass<GroupNotFound>()('GroupNotFound', {}) {}
@@ -261,6 +269,16 @@ export class GroupApiGroup extends HttpApiGroup.make('group')
   .add(
     HttpApiEndpoint.post('createChannel', '/teams/:teamId/groups/:groupId/create-channel', {
       success: Schema.Void.pipe(HttpApiSchema.status(201)),
+      error: [
+        Forbidden.pipe(HttpApiSchema.status(403)),
+        GroupNotFound.pipe(HttpApiSchema.status(404)),
+      ],
+      params: { teamId: TeamId, groupId: GroupId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post('syncRoleMembers', '/teams/:teamId/groups/:groupId/sync-role-members', {
+      success: SyncRoleMembersResult,
       error: [
         Forbidden.pipe(HttpApiSchema.status(403)),
         GroupNotFound.pipe(HttpApiSchema.status(404)),

@@ -1,4 +1,4 @@
-import { GroupModel, Role, Team, TeamMember } from '@sideline/domain';
+import { Discord, GroupModel, Role, Team, TeamMember } from '@sideline/domain';
 import { SqlErrors } from '@sideline/effect-lib';
 import { Effect, Layer, type Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -67,6 +67,13 @@ const MoveGroupInput = Schema.Struct({
 
 class DescendantMemberRow extends Schema.Class<DescendantMemberRow>('DescendantMemberRow')({
   team_member_id: TeamMember.TeamMemberId,
+}) {}
+
+class GroupMemberWithDiscordRow extends Schema.Class<GroupMemberWithDiscordRow>(
+  'GroupMemberWithDiscordRow',
+)({
+  team_member_id: TeamMember.TeamMemberId,
+  discord_user_id: Schema.NullOr(Discord.Snowflake),
 }) {}
 
 const make = Effect.gen(function* () {
@@ -234,6 +241,18 @@ const make = Effect.gen(function* () {
           `,
   });
 
+  const findMembersWithDiscordId = SqlSchema.findAll({
+    Request: GroupModel.GroupId,
+    Result: GroupMemberWithDiscordRow,
+    execute: (groupId) => sql`
+            SELECT gm.team_member_id, u.discord_id AS discord_user_id
+            FROM group_members gm
+            JOIN team_members tm ON tm.id = gm.team_member_id
+            JOIN users u ON u.id = tm.user_id
+            WHERE gm.group_id = ${groupId}
+          `,
+  });
+
   const findGroupsByTeamId = (teamId: Team.TeamId) => findByTeamId(teamId).pipe(catchSqlErrors);
 
   const findGroupById = (groupId: GroupModel.GroupId) => findById(groupId).pipe(catchSqlErrors);
@@ -301,6 +320,17 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  const findMembersWithDiscordIdByGroupId = (groupId: GroupModel.GroupId) =>
+    findMembersWithDiscordId(groupId).pipe(
+      Effect.map((rows) =>
+        rows.map((r) => ({
+          teamMemberId: r.team_member_id,
+          discordUserId: r.discord_user_id,
+        })),
+      ),
+      catchSqlErrors,
+    );
+
   return {
     findGroupsByTeamId,
     findGroupById,
@@ -317,6 +347,7 @@ const make = Effect.gen(function* () {
     getAncestorIds,
     getAncestors,
     getDescendantMemberIds,
+    findMembersWithDiscordIdByGroupId,
   };
 });
 

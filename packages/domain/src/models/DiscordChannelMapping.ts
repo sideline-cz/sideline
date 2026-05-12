@@ -16,7 +16,7 @@ export class DiscordChannelMapping extends Model.Class<DiscordChannelMapping>(
   entity_type: ChannelSyncEntityType,
   group_id: Schema.OptionFromNullOr(GroupId),
   roster_id: Schema.OptionFromNullOr(RosterId),
-  discord_channel_id: Schema.String,
+  discord_channel_id: Schema.OptionFromNullOr(Schema.String),
   discord_role_id: Schema.OptionFromNullOr(Schema.String),
   created_at: Model.DateTimeInsertFromDate,
 }) {}
