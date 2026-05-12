@@ -2400,7 +2400,7 @@ At least one of `minAge`, `maxAge`, `gender`, or `requiredGroupId` must be provi
 | `AgeThresholdEmptyCriteria` | 400 | All criteria are absent (minAge, maxAge, gender, and requiredGroupId all omitted) |
 | `AgeThresholdSelfRequired` | 400 | `requiredGroupId` equals `groupId` (a rule cannot require its own target group) |
 | `AgeThresholdForbidden` | 403 | Missing `team:manage` permission |
-| `GroupNotFound` | 404 | Target group (`groupId`) or required group (`requiredGroupId`) does not exist or belongs to a different team |
+| `AgeThresholdGroupNotFound` | 404 | Target group (`groupId`) or required group (`requiredGroupId`) does not exist or belongs to a different team |
 | `AgeThresholdAlreadyExists` | 409 | A rule with the same group and criteria tuple already exists |
 
 ---
@@ -2428,7 +2428,7 @@ Updates an automatic group rule's criteria.
 | `gender` | `'male' \| 'female' \| 'other'` | No | New gender filter; omit (or send `undefined`) for any gender |
 | `requiredGroupId` | `GroupId` | No | New required pre-existing group; omit (or send `undefined`) for no group requirement |
 
-Any subset of fields may be provided — all fields are optional and the request is accepted as long as at least one criterion is non-null / present after the update. A field that is omitted keeps its current value (partial PATCH semantics).
+Any subset of fields may be provided — all fields are optional and the request is accepted as long as at least one criterion is non-null / present in the updated rule. **Note:** the handler currently treats an omitted key as `Option.none` and overwrites the corresponding column with NULL, so omitting a key clears that criterion rather than leaving it unchanged. Resend the existing value to preserve it. (A future change may switch to merge-on-write semantics; tracked as a follow-up.)
 
 **Response:** `200 OK` — `AgeThresholdInfo`
 
@@ -2440,7 +2440,7 @@ Any subset of fields may be provided — all fields are optional and the request
 | `AgeThresholdSelfRequired` | 400 | `requiredGroupId` equals the rule's target `groupId` |
 | `AgeThresholdForbidden` | 403 | Missing `team:manage` permission |
 | `AgeThresholdRuleNotFound` | 404 | Rule does not exist |
-| `GroupNotFound` | 404 | `requiredGroupId` does not exist or belongs to a different team |
+| `AgeThresholdGroupNotFound` | 404 | `requiredGroupId` does not exist or belongs to a different team |
 | `AgeThresholdAlreadyExists` | 409 | A rule with the same group and criteria tuple already exists |
 
 ---
@@ -3291,7 +3291,8 @@ The following table consolidates all error tags across all API groups.
 | `RosterNotFound` | 404 | Roster | Roster does not exist |
 | `RoleNotFound` | 404 | Role | Role does not exist |
 | `MemberNotFound` | 404 | Role | Team member does not exist |
-| `GroupNotFound` | 404 | Group, Age Threshold | Group does not exist or (for Age Threshold) belongs to a different team |
+| `GroupNotFound` | 404 | Group | Group does not exist |
+| `AgeThresholdGroupNotFound` | 404 | Age Threshold | Target group (`groupId`) or required group (`requiredGroupId`) does not exist or belongs to a different team |
 | `GroupMemberNotFound` | 404 | Group | Member not found in the group context |
 | `EventNotFound` | 404 | Event | Event does not exist |
 | `EventRsvpEventNotFound` | 404 | Event RSVP | Event does not exist |

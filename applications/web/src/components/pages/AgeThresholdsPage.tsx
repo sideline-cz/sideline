@@ -152,7 +152,12 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
         AgeThresholdSelfRequired: () =>
           Effect.fail(ClientError.make(m.ageThreshold_selfReferenceError())),
       }),
-      Effect.mapError(() => ClientError.make(m.ageThreshold_createFailed())),
+      // Only map *unhandled* errors to the generic toast — leave ClientErrors thrown
+      // by the catchTags above intact so users see the specific message.
+      Effect.catchIf(
+        (e): e is Exclude<typeof e, ClientError> => (e as { _tag?: string })._tag !== 'ClientError',
+        () => Effect.fail(ClientError.make(m.ageThreshold_createFailed())),
+      ),
       run({ success: m.ageThreshold_created() }),
     );
     if (Option.isSome(result)) {

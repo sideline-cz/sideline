@@ -135,7 +135,7 @@ const commitChanges = (
     Array.map(
       Effect.tap((change) =>
         Effect.logInfo(
-          `${change.memberId} was automatically ${change.action} the "${change.groupName}" group based on automatic group rules.`,
+          `${change.memberId} was automatically ${change.action === 'added' ? 'added to' : 'removed from'} the "${change.groupName}" group based on automatic group rules.`,
         ),
       ),
     ),

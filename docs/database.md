@@ -359,7 +359,7 @@ Many-to-many junction associating roles with groups, restricting role visibility
 
 #### `age_threshold_rules`
 
-Rules that automatically assign team members to a group based on automatic group criteria (age range and/or gender). Evaluated by the `AgeCheckCron` (daily at 2:00 AM).
+Rules that automatically assign team members to a group based on automatic group criteria (age range, gender, and/or required pre-existing group membership — any combination, AND semantics). Evaluated by the `AgeCheckCron` (daily at 2:00 AM).
 
 | Column | Type | Constraints | Default |
 |---|---|---|---|
