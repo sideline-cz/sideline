@@ -3,7 +3,6 @@ import * as m from '@sideline/i18n/messages';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 import {
   Calendar,
-  CalendarDays,
   Dumbbell,
   Home,
   Link2,
@@ -15,6 +14,7 @@ import {
   UserCog,
   Users,
   UsersRound,
+  Wand2,
 } from 'lucide-react';
 import { NavUser } from '~/components/layouts/NavUser';
 import { TeamSwitcher } from '~/components/layouts/TeamSwitcher';
@@ -117,7 +117,7 @@ function getTeamNavGroups(
         },
         {
           title: m.team_ageThresholds(),
-          icon: CalendarDays,
+          icon: Wand2,
           to: '/teams/$teamId/age-thresholds',
           params: { teamId },
           requiredPermission: 'group:manage' satisfies Role.Permission,

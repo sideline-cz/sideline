@@ -5,6 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-12 — Gender-based automatic group assignment
+
+- Automatic group rules can now include a **gender** condition in addition to (or instead of) an age range. Members are only moved into the group when all criteria on a rule match (AND semantics).
+- A rule must now have at least one criterion set — rules with no age bounds and no gender are rejected.
+- The same group can have multiple rules with different criteria (e.g. a "Under-18 Male" rule and an "Under-18 Female" rule for the same group).
+- The **Automatic Groups** settings page now has a Gender column and a gender selector in the create-rule form.
+- Rules can now include a **Required group** condition: only members who are already in the specified group will be auto-assigned. This lets you combine group eligibility with age or gender criteria.
+- A rule cannot require its own target group — the form and the API both reject this configuration.
+- The settings page label has been renamed from "Age Thresholds" to "Automatic groups" (route URL and i18n key names are unchanged).
+
 ## 2026-05-11 — Personalised Discord invites per acceptance
 
 - Each member who clicks "Accept" on an invite link now receives their own unique, single-use Discord invite. The invite is generated within about a second and the browser redirects them directly to the server.

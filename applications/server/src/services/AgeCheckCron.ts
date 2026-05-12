@@ -13,7 +13,7 @@ const cronEffect = Effect.Do.pipe(
     Effect.all(
       teamIds.map((teamId) =>
         ageCheck
-          .evaluate(teamId as Parameters<typeof ageCheck.evaluate>[0], today)
+          .evaluate(teamId, today)
           .pipe(
             Effect.tap((changes) =>
               changes.length > 0

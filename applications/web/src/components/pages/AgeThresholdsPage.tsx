@@ -1,9 +1,10 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { AgeThresholdApi, GroupApi } from '@sideline/domain';
-import { AgeThresholdRule, GroupModel, Team } from '@sideline/domain';
+import { AgeThresholdRule, GroupModel, Team, User } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema, SchemaGetter } from 'effect';
+import { Info } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 
@@ -18,6 +19,14 @@ import {
   FormMessage,
 } from '~/components/ui/form';
 import { Input } from '~/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '~/components/ui/select';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/components/ui/tooltip';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 
 const OptionalNumber = Schema.String.pipe(
@@ -31,8 +40,42 @@ const OptionalNumber = Schema.String.pipe(
   }),
 );
 
+type GenderFormValue = 'any' | User.Gender;
+
+const OptionalGender = Schema.Literals(['any', 'male', 'female', 'other']).pipe(
+  Schema.decodeTo(Schema.Option(User.Gender), {
+    decode: SchemaGetter.transform((s: GenderFormValue) =>
+      s === 'any' ? Option.none<User.Gender>() : Option.some(s),
+    ),
+    encode: SchemaGetter.transform(
+      Option.match<GenderFormValue, User.Gender>({
+        onNone: () => 'any' as const,
+        onSome: (g) => g,
+      }),
+    ),
+  }),
+);
+
+type RequiredGroupIdFormValue = '' | GroupModel.GroupId;
+
+// Decode: string (form value) → Option<string> (encoded form of Option<GroupId>)
+// Encode: Option<string> → string (form value)
+// Then Schema.Option(GroupModel.GroupId) decodes Option<string> → Option<GroupId>
+const OptionalGroupId = Schema.String.pipe(
+  Schema.decodeTo(Schema.Option(GroupModel.GroupId), {
+    decode: SchemaGetter.transform(
+      (s: string): Option.Option<string> => (s === '' ? Option.none() : Option.some(s)),
+    ),
+    encode: SchemaGetter.transform(
+      Option.match<string, string>({ onNone: () => '', onSome: (g) => g }),
+    ),
+  }),
+);
+
 const CreateThresholdSchema = Schema.Struct({
   groupId: GroupModel.GroupId,
+  requiredGroupId: OptionalGroupId,
+  gender: OptionalGender,
   minAge: OptionalNumber,
   maxAge: OptionalNumber,
 });
@@ -54,14 +97,44 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
   >([]);
   const [evaluating, setEvaluating] = React.useState(false);
 
-  const usedGroupIds = new Set(rules.map((r) => r.groupId));
-  const availableGroups = groups.filter((g) => !usedGroupIds.has(g.groupId));
-
   const form = useForm({
     resolver: standardSchemaResolver(Schema.toStandardSchemaV1(CreateThresholdSchema)),
     mode: 'onChange',
-    defaultValues: { groupId: '', minAge: '', maxAge: '' },
+    defaultValues: {
+      groupId: '',
+      requiredGroupId: '' as RequiredGroupIdFormValue,
+      gender: 'any' as GenderFormValue,
+      minAge: '',
+      maxAge: '',
+    },
   });
+
+  const watchedGroupId = form.watch('groupId');
+  const watchedRequiredGroupId = form.watch('requiredGroupId');
+  const watchedGender = form.watch('gender');
+  const watchedMinAge = form.watch('minAge');
+  const watchedMaxAge = form.watch('maxAge');
+  const isAllBlank =
+    watchedGender === 'any' &&
+    watchedMinAge === '' &&
+    watchedMaxAge === '' &&
+    watchedRequiredGroupId === '';
+
+  const isSelfReference =
+    watchedGroupId !== '' &&
+    watchedRequiredGroupId !== '' &&
+    watchedGroupId === watchedRequiredGroupId;
+
+  React.useEffect(() => {
+    if (isSelfReference) {
+      form.setError('requiredGroupId', {
+        type: 'selfReference',
+        message: m.ageThreshold_selfReferenceError(),
+      });
+    } else if (form.formState.errors.requiredGroupId?.type === 'selfReference') {
+      form.clearErrors('requiredGroupId');
+    }
+  }, [isSelfReference, form]);
 
   const onSubmit = async (values: CreateThresholdValues) => {
     const result = await ApiClient.asEffect().pipe(
@@ -71,7 +144,20 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
           payload: values,
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.ageThreshold_createFailed())),
+      Effect.catchTags({
+        AgeThresholdEmptyCriteria: () =>
+          Effect.fail(ClientError.make(m.ageThreshold_emptyCriteria())),
+        AgeThresholdAlreadyExists: () =>
+          Effect.fail(ClientError.make(m.ageThreshold_alreadyExists())),
+        AgeThresholdSelfRequired: () =>
+          Effect.fail(ClientError.make(m.ageThreshold_selfReferenceError())),
+      }),
+      // Only map *unhandled* errors to the generic toast — leave ClientErrors thrown
+      // by the catchTags above intact so users see the specific message.
+      Effect.catchIf(
+        (e): e is Exclude<typeof e, ClientError> => (e as { _tag?: string })._tag !== 'ClientError',
+        () => Effect.fail(ClientError.make(m.ageThreshold_createFailed())),
+      ),
       run({ success: m.ageThreshold_created() }),
     );
     if (Option.isSome(result)) {
@@ -131,6 +217,16 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
     return m.ageThreshold_anyAge();
   };
 
+  const formatGender = (gender: Option.Option<User.Gender>) =>
+    Option.match(gender, {
+      onNone: () => '—',
+      onSome: (g) => {
+        if (g === 'male') return m.ageThreshold_genderMale();
+        if (g === 'female') return m.ageThreshold_genderFemale();
+        return m.ageThreshold_genderOther();
+      },
+    });
+
   return (
     <div>
       <header className='mb-8'>
@@ -140,28 +236,71 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
           </Link>
         </Button>
         <h1 className='text-2xl font-bold'>{m.ageThreshold_title()}</h1>
+        <p className='text-muted-foreground mt-1'>{m.ageThreshold_subtitle()}</p>
       </header>
 
       <Form {...form}>
         <form
           onSubmit={form.handleSubmit(onSubmit)}
-          className='flex flex-col gap-4 mb-6 sm:flex-row sm:items-end sm:max-w-lg'
+          className='flex flex-col gap-4 mb-6 sm:flex-row sm:flex-wrap sm:items-end sm:max-w-3xl'
         >
           <FormField
             {...form.register('groupId')}
             render={({ field }) => (
-              <FormItem className='flex-1'>
+              <FormItem className='flex-1 min-w-[12rem]'>
                 <FormLabel>{m.group_groupName()}</FormLabel>
                 <FormControl>
                   <SearchableSelect
                     value={field.value}
                     onValueChange={field.onChange}
                     placeholder={m.ageThreshold_selectGroup()}
-                    options={availableGroups.map((group) => ({
+                    options={groups.map((group) => ({
                       value: group.groupId,
                       label: group.name,
                     }))}
                   />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            {...form.register('requiredGroupId')}
+            render={({ field }) => (
+              <FormItem className='flex-1 min-w-[12rem]'>
+                <FormLabel>{m.ageThreshold_requiredGroup()}</FormLabel>
+                <FormControl>
+                  <SearchableSelect
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    placeholder={m.ageThreshold_requiredGroupAny()}
+                    options={[
+                      { value: '', label: m.ageThreshold_requiredGroupAny() },
+                      ...groups.map((g) => ({ value: g.groupId, label: g.name })),
+                    ]}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            {...form.register('gender')}
+            render={({ field }) => (
+              <FormItem className='w-32'>
+                <FormLabel>{m.ageThreshold_gender()}</FormLabel>
+                <FormControl>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger className='w-32'>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value='any'>{m.ageThreshold_genderAny()}</SelectItem>
+                      <SelectItem value='male'>{m.ageThreshold_genderMale()}</SelectItem>
+                      <SelectItem value='female'>{m.ageThreshold_genderFemale()}</SelectItem>
+                      <SelectItem value='other'>{m.ageThreshold_genderOther()}</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -201,37 +340,99 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
               )}
             />
           </div>
-          <Button type='submit' disabled={form.formState.isSubmitting}>
+          <Button
+            type='submit'
+            disabled={form.formState.isSubmitting || isAllBlank || isSelfReference}
+          >
             {m.ageThreshold_create()}
           </Button>
         </form>
+        <p className='text-sm text-muted-foreground'>{m.ageThreshold_andSemantics()}</p>
       </Form>
 
       {rules.length === 0 ? (
         <p className='text-muted-foreground'>{m.ageThreshold_noRules()}</p>
       ) : (
-        <table className='w-full mb-6'>
-          <thead>
-            <tr className='border-b'>
-              <th className='py-2 px-4 text-left'>{m.group_groupName()}</th>
-              <th className='py-2 px-4 text-left'>{m.ageThreshold_ageRange()}</th>
-              <th className='py-2 px-4' />
-            </tr>
-          </thead>
-          <tbody>
-            {rules.map((rule) => (
-              <tr key={rule.ruleId} className='border-b'>
-                <td className='py-2 px-4 font-medium'>{rule.groupName}</td>
-                <td className='py-2 px-4'>{formatAgeRange(rule.minAge, rule.maxAge)}</td>
-                <td className='py-2 px-4'>
-                  <Button variant='outline' size='sm' onClick={() => handleDelete(rule.ruleId)}>
-                    {m.ageThreshold_delete()}
-                  </Button>
-                </td>
+        <div className='overflow-x-auto'>
+          <table className='w-full mb-6'>
+            <thead>
+              <tr className='border-b'>
+                <th className='py-2 px-4 text-left'>{m.group_groupName()}</th>
+                <th className='py-2 px-4 text-left'>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button type='button' className='flex items-center gap-1 cursor-default'>
+                          {m.ageThreshold_requiredGroup()}
+                          <Info className='h-3 w-3' />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>{m.ageThreshold_requiredGroupHeaderTooltip()}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </th>
+                <th className='py-2 px-4 text-left'>{m.ageThreshold_gender()}</th>
+                <th className='py-2 px-4 text-left'>{m.ageThreshold_ageRange()}</th>
+                <th className='py-2 px-4' />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rules.map((rule) => {
+                const requiredGroupIdValue = Option.getOrNull(rule.requiredGroupId);
+                const requiredGroupName = requiredGroupIdValue
+                  ? (groups.find((g) => g.groupId === requiredGroupIdValue)?.name ?? '—')
+                  : '—';
+                return (
+                  <tr key={rule.ruleId} className='border-b'>
+                    <td className='py-2 px-4 font-medium'>{rule.groupName}</td>
+                    <td className='py-2 px-4'>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button type='button' className='cursor-default'>
+                              {requiredGroupIdValue ? requiredGroupName : '—'}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {Option.isSome(rule.requiredGroupId)
+                              ? m.ageThreshold_requiredGroupTooltipSpecific({
+                                  group: requiredGroupName,
+                                })
+                              : m.ageThreshold_requiredGroupTooltipAny()}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </td>
+                    <td className='py-2 px-4'>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button type='button' className='cursor-default'>
+                              {formatGender(rule.gender)}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {Option.isSome(rule.gender)
+                              ? m.ageThreshold_genderTooltipSpecific({
+                                  gender: formatGender(rule.gender),
+                                })
+                              : m.ageThreshold_genderTooltipAny()}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </td>
+                    <td className='py-2 px-4'>{formatAgeRange(rule.minAge, rule.maxAge)}</td>
+                    <td className='py-2 px-4'>
+                      <Button variant='outline' size='sm' onClick={() => handleDelete(rule.ruleId)}>
+                        {m.ageThreshold_delete()}
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <div className='flex flex-col gap-4'>

@@ -814,7 +814,7 @@ const TestLayer = ApiLive.pipe(
       findAllTeamsWithRules: () => Effect.succeed([]),
       getAllTeamsWithRules: () => Effect.succeed([]),
       findMembersWithBirthYears: () => Effect.succeed([]),
-      getMembersWithBirthYears: () => Effect.succeed([]),
+      getMembersForAutoAssignment: () => Effect.succeed([]),
     } as any),
   ),
   Layer.provide(

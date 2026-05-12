@@ -141,7 +141,11 @@ Use `Effect.acquireRelease` for automatic resource cleanup.
 
 ## Code Style
 
-- **Never use `Effect.gen(function* () {`** — instead use `Effect.Do.pipe(...)` with `Effect.bind` / `Effect.let` / `Effect.tap`
+- **Avoid `Effect.gen(function* () {`** in regular effect pipelines — use `Effect.Do.pipe(...)` with `Effect.bind` / `Effect.let` / `Effect.tap` instead. Two narrow exceptions where `Effect.gen` is the documented convention:
+  1. **`Effect.Service` / `Effect.Tag` constructor bodies** named `const make = Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; ... return { ... }; })` — the entire `applications/server/src/repositories/` directory follows this shape (see `AgeThresholdRepository.ts`, `RolesRepository.ts`, etc.). Keep new repositories/services consistent with this pattern.
+  2. **Test bodies** passed to `it.effect(...)` — see the Testing section below.
+
+  Everywhere else (API handlers, cron jobs, helpers, RPC handlers), use `Effect.Do.pipe(...)`.
 - **Use `pipe`** for linear transformations and chaining
 - **Always use `Effect.asVoid`** instead of `Effect.map(() => undefined)`
 - **Never cast types** (`as X`) and **never use `any`**
@@ -586,4 +590,4 @@ The `docs/thesis/` directory contains Mermaid diagrams and documentation for the
 
 ---
 
-**Last Updated**: 2026-05-11
+**Last Updated**: 2026-05-12

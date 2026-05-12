@@ -61,6 +61,7 @@ erDiagram
 
     groups ||--o{ group_members : "contains"
     groups ||--o{ age_threshold_rules : "triggers"
+    groups o|--o{ age_threshold_rules : "requires"
     groups ||--o{ discord_channel_mappings : "linked via"
     groups ||--o{ role_groups : "receives"
     groups ||--o{ training_types : "owns"
@@ -278,7 +279,7 @@ erDiagram
 
 ### Groups
 
-`groups` are hierarchical sub-divisions of a team (e.g. age brackets, skill tiers). They support self-referential parent/child nesting via `parent_id`. `group_members` links team members to groups. `age_threshold_rules` define automatic age-based group assignment boundaries. `role_groups` associates roles with groups, restricting which roles are visible or applicable within a group context.
+`groups` are hierarchical sub-divisions of a team (e.g. age brackets, skill tiers). They support self-referential parent/child nesting via `parent_id`. `group_members` links team members to groups. `age_threshold_rules` define automatic group assignment criteria (age range, gender, required pre-existing group membership, or any combination); all criteria on a rule must match simultaneously (AND semantics). `role_groups` associates roles with groups, restricting which roles are visible or applicable within a group context.
 
 ```mermaid
 erDiagram
@@ -304,6 +305,8 @@ erDiagram
         UUID group_id FK
         INTEGER min_age
         INTEGER max_age
+        TEXT gender
+        UUID required_group_id FK
         TIMESTAMPTZ created_at
     }
 
@@ -316,6 +319,7 @@ erDiagram
     groups o|--o{ groups : "parent of"
     groups ||--o{ group_members : "contains"
     groups ||--o{ age_threshold_rules : "triggers"
+    groups o|--o{ age_threshold_rules : "requires"
     groups ||--o{ role_groups : "receives"
     team_members ||--o{ group_members : "belongs to"
     roles ||--o{ role_groups : "assigned to"
@@ -680,7 +684,7 @@ erDiagram
 | `member_roles` | Many-to-many junction assigning roles to team members. |
 | `groups` | Hierarchical sub-divisions of a team (e.g. age brackets, skill tiers). |
 | `group_members` | Many-to-many junction placing team members in groups. |
-| `age_threshold_rules` | Rules that automatically assign members to a group based on age range. |
+| `age_threshold_rules` | Rules that automatically assign members to a group based on automatic group criteria (age range, gender, required pre-existing group membership, or any combination). |
 | `role_groups` | Many-to-many junction associating roles with groups. |
 | `training_types` | Named categories for training activities, optionally restricted by group and role. |
 | `role_training_types` | Many-to-many junction controlling which roles can access a training type. |

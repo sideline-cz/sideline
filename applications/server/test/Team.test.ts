@@ -322,7 +322,7 @@ const MockAgeThresholdRepositoryLayer = Layer.succeed(AgeThresholdRepository, {
   updateRuleById: () => Effect.die(new Error('Not implemented')),
   deleteRuleById: () => Effect.void,
   getAllTeamsWithRules: () => Effect.succeed([]),
-  getMembersWithBirthYears: () => Effect.succeed([]),
+  getMembersForAutoAssignment: () => Effect.succeed([]),
 } as any);
 
 const MockNotificationsRepositoryLayer = Layer.succeed(NotificationsRepository, {

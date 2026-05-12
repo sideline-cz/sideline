@@ -73,3 +73,16 @@ export default Effect.flatMap(SqlClient.SqlClient, (sql) =>
 ```
 
 Always use the exact constraint name. Check the original migration that created the constraint for the name.
+
+### Unique Constraints with Nullable Columns
+
+The deployed PostgreSQL major version is 17 (see `applications/server/test/integration/globalSetup.ts`), so PostgreSQL 15+ syntax is available. When a composite `UNIQUE` constraint contains nullable columns and you want `NULL` values to collide (i.e. treat `NULL` as a regular distinct value for uniqueness), use `UNIQUE NULLS NOT DISTINCT`:
+
+```typescript
+Effect.tap(
+  () =>
+    sql`ALTER TABLE age_threshold_rules ADD CONSTRAINT age_threshold_rules_team_group_criteria_unique UNIQUE NULLS NOT DISTINCT (team_id, group_id, min_age, max_age, gender)`,
+),
+```
+
+Without `NULLS NOT DISTINCT`, two rows that differ only by `NULL` values in the constrained columns would both be accepted — usually not what you want when the `NULL`s represent "any" / "no filter" semantics.

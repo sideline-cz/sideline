@@ -10,7 +10,7 @@ import { Array, Data, Effect, Layer, Option, pipe, ServiceMap } from 'effect';
 import {
   AgeThresholdRepository,
   type AgeThresholdWithGroupName,
-  type MemberWithBirthDate,
+  type MemberForAutoAssignment,
 } from '~/repositories/AgeThresholdRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -46,7 +46,7 @@ const computeAge = (birthDateStr: string, now: Date): number => {
 const detectChanges = (
   today: Date,
   rules: readonly AgeThresholdWithGroupName[],
-  teamMembers: readonly MemberWithBirthDate[],
+  teamMembers: readonly MemberForAutoAssignment[],
 ) =>
   pipe(
     teamMembers,
@@ -56,20 +56,37 @@ const detectChanges = (
         member,
       })),
     ),
-    Array.let('age', ({ member }) => computeAge(member.birth_date, today)),
-    Array.let('minOk', ({ age, rule }) =>
-      rule.min_age.pipe(
-        Option.filter((minAge) => age < minAge),
-        Option.isNone,
-      ),
+    Array.let('age', ({ member }) => Option.map(member.birth_date, (bd) => computeAge(bd, today))),
+    Array.let('ageOk', ({ age, rule }) => {
+      // A bound is "satisfied" when either the rule omits it, or the member has an
+      // age that meets it. Crucially, a rule WITH a bound and a member WITHOUT an
+      // age must fail — `Option.exists` returns false on `None`, giving us that.
+      const minOk = Option.match(rule.min_age, {
+        onNone: () => true,
+        onSome: (mn) => Option.exists(age, (a) => a >= mn),
+      });
+      const maxOk = Option.match(rule.max_age, {
+        onNone: () => true,
+        onSome: (mx) => Option.exists(age, (a) => a <= mx),
+      });
+      return minOk && maxOk;
+    }),
+    Array.let('genderOk', ({ rule, member }) =>
+      Option.match(rule.gender, {
+        onNone: () => true,
+        onSome: (g) => Option.exists(member.gender, (mg) => mg === g),
+      }),
     ),
-    Array.let('maxOk', ({ age, rule }) =>
-      rule.max_age.pipe(
-        Option.filter((maxAge) => age > maxAge),
-        Option.isNone,
-      ),
+    Array.let('requiredGroupOk', ({ rule, member }) =>
+      Option.match(rule.required_group_id, {
+        onNone: () => true,
+        onSome: (gid) => Array.contains(member.group_ids, gid),
+      }),
     ),
-    Array.let('shouldBeInGroup', ({ minOk, maxOk }) => minOk && maxOk),
+    Array.let(
+      'shouldBeInGroup',
+      ({ ageOk, genderOk, requiredGroupOk }) => ageOk && genderOk && requiredGroupOk,
+    ),
     Array.let('isInGroup', ({ member, rule }) => Array.contains(member.group_ids, rule.group_id)),
     Array.filter(({ shouldBeInGroup, isInGroup }) => shouldBeInGroup !== isInGroup),
     Array.let('displayName', ({ member }) =>
@@ -118,7 +135,7 @@ const commitChanges = (
     Array.map(
       Effect.tap((change) =>
         Effect.logInfo(
-          `${change.memberId} was automatically ${change.action} the "${change.groupName}" group based on age threshold.`,
+          `${change.memberId} was automatically ${change.action === 'added' ? 'added to' : 'removed from'} the "${change.groupName}" group based on automatic group rules.`,
         ),
       ),
     ),
@@ -137,7 +154,7 @@ const notifyAdmins = (
   notifications: ServiceMap.Service.Shape<typeof NotificationsRepository>,
   teamId: Team.TeamId,
   changes: readonly Change[],
-  teamMembers: readonly MemberWithBirthDate[],
+  teamMembers: readonly MemberForAutoAssignment[],
 ) =>
   Effect.succeed(
     pipe(
@@ -156,14 +173,14 @@ const notifyAdmins = (
                 userId,
                 type: 'age_group_added' as const,
                 title: `Added to group "${change.groupName}"`,
-                body: `${change.memberName} was automatically added to the "${change.groupName}" group based on age threshold.`,
+                body: `${change.memberName} was automatically added to the "${change.groupName}" group based on automatic group rules.`,
               }
             : {
                 teamId,
                 userId,
                 type: 'age_group_removed' as const,
                 title: `Removed from group "${change.groupName}"`,
-                body: `${change.memberName} was automatically removed from the "${change.groupName}" group based on age threshold.`,
+                body: `${change.memberName} was automatically removed from the "${change.groupName}" group based on automatic group rules.`,
               },
         ),
       ),
@@ -182,7 +199,7 @@ const evaluateTeam =
   (teamId: Team.TeamId, today: Date) =>
     Effect.Do.pipe(
       Effect.bind('rules', () => thresholds.findRulesByTeamId(teamId)),
-      Effect.bind('teamMembers', () => thresholds.getMembersWithBirthDates(teamId)),
+      Effect.bind('teamMembers', () => thresholds.getMembersForAutoAssignment(teamId)),
       Effect.let('changes', ({ rules, teamMembers }) => detectChanges(today, rules, teamMembers)),
       Effect.tap(({ changes }) =>
         Array.isArrayEmpty(changes) ? Effect.fail(new NoChanges({ count: 0 })) : Effect.void,
@@ -201,14 +218,14 @@ const evaluateTeam =
                   change.userId,
                   'age_group_added',
                   `Added to group "${change.groupName}"`,
-                  `You have been added to the "${change.groupName}" group.`,
+                  `You have been added to the "${change.groupName}" group based on automatic group rules.`,
                 )
               : notifications.insert(
                   teamId,
                   change.userId,
                   'age_group_removed',
                   `Removed from group "${change.groupName}"`,
-                  `You have been removed from the "${change.groupName}" group.`,
+                  `You have been removed from the "${change.groupName}" group based on automatic group rules.`,
                 ),
           ),
           Effect.all,

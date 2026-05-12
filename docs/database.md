@@ -359,7 +359,7 @@ Many-to-many junction associating roles with groups, restricting role visibility
 
 #### `age_threshold_rules`
 
-Rules that automatically assign team members to a group based on their age range. Evaluated by the `AgeCheckCron` (daily at 2:00 AM).
+Rules that automatically assign team members to a group based on automatic group criteria (age range, gender, and/or required pre-existing group membership — any combination, AND semantics). Evaluated by the `AgeCheckCron` (daily at 2:00 AM).
 
 | Column | Type | Constraints | Default |
 |---|---|---|---|
@@ -368,13 +368,20 @@ Rules that automatically assign team members to a group based on their age range
 | `group_id` | UUID | NOT NULL, FK → `groups(id)` ON DELETE CASCADE | — |
 | `min_age` | INTEGER | — | — |
 | `max_age` | INTEGER | — | — |
+| `gender` | TEXT | CHECK (`gender IN ('male','female','other')`) | — |
+| `required_group_id` | UUID | FK → `groups(id)` ON DELETE CASCADE | — |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
-**Unique**: `(team_id, group_id)`
+**Check constraints**:
+- `age_threshold_rules_gender_check`: `gender IS NULL OR gender IN ('male','female','other')`
+- `age_threshold_rules_nonempty_criteria`: `min_age IS NOT NULL OR max_age IS NOT NULL OR gender IS NOT NULL OR required_group_id IS NOT NULL`
+- `age_threshold_rules_required_not_self`: `required_group_id IS NULL OR required_group_id <> group_id`
+
+**Unique**: `UNIQUE NULLS NOT DISTINCT (team_id, group_id, min_age, max_age, gender, required_group_id)` — allows the same group to have multiple rules as long as the full criteria tuple differs.
 
 **Indexes**: `idx_age_threshold_rules_team` on `(team_id)`
 
-**Notes**: Originally used `role_id` as the target; reworked to use `group_id` in migration `1741100000`.
+**Notes**: Originally used `role_id` as the target; reworked to use `group_id` in migration `1741100000`. Gender criterion and composite unique constraint added in migration `1747400000`. `required_group_id` added in migration `1747500000`; when set, only members who are already in that group qualify for the rule. The FK uses `ON DELETE CASCADE`, so deleting a group also deletes any rules that reference it as a required group.
 
 ---
 
@@ -803,7 +810,7 @@ In-app alert records scoped to a specific team and user.
 
 ## Migration History
 
-All 46 migration files in `packages/migrations/src/before/` plus 1 after-migration.
+All 47 migration files in `packages/migrations/src/before/` plus 1 after-migration.
 
 ### Before Migrations (schema changes)
 
@@ -865,6 +872,8 @@ All 46 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1746500000 | `add_invite_groups_and_welcome` | Adds `group_id UUID REFERENCES groups(id) ON DELETE SET NULL` to team_invites with index `idx_team_invites_group`; adds `welcome_channel_id TEXT`, `system_log_channel_id TEXT`, and `welcome_message_template TEXT` to teams |
 | 1746800000 | `add_oauth_granted_scopes` | Adds `granted_scopes TEXT NOT NULL DEFAULT ''` to oauth_connections; legacy rows backfill to empty string (treated as "scopes unknown" and trigger a re-auth on the next OAuth callback) |
 | 1747300000 | `invite_acceptances` | Creates `invite_acceptances` table (id, team_invite_id FK, user_id FK, discord_code, discord_code_error_code, discord_code_error_detail, created_at, generated_at); adds unique partial index on `(discord_code) WHERE discord_code IS NOT NULL`, pending partial index on `(created_at) WHERE discord_code IS NULL AND discord_code_error_code IS NULL`, and index on `(team_invite_id)`; drops `idx_team_invites_discord_code`, `idx_team_invites_pending_discord_code`, and `team_invites.discord_code` column |
+| 1747400000 | `add_gender_to_age_thresholds` | Adds `gender TEXT` column to `age_threshold_rules`; adds CHECK constraint `age_threshold_rules_gender_check (gender IN ('male','female','other'))`; deletes any existing rows where all criteria are NULL; adds CHECK constraint `age_threshold_rules_nonempty_criteria (min_age IS NOT NULL OR max_age IS NOT NULL OR gender IS NOT NULL)`; drops the old `UNIQUE (team_id, group_id)` constraint and replaces it with `UNIQUE NULLS NOT DISTINCT (team_id, group_id, min_age, max_age, gender)` |
+| 1747500000 | `add_required_group_to_age_thresholds` | Adds `required_group_id UUID REFERENCES groups(id) ON DELETE CASCADE` (nullable) to `age_threshold_rules`; adds CHECK constraint `age_threshold_rules_required_not_self (required_group_id IS NULL OR required_group_id <> group_id)`; widens `age_threshold_rules_nonempty_criteria` to include `required_group_id IS NOT NULL`; drops and recreates the unique constraint as `UNIQUE NULLS NOT DISTINCT (team_id, group_id, min_age, max_age, gender, required_group_id)` |
 
 ### After Migrations (seed data)
 
