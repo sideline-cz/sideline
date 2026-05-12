@@ -565,9 +565,9 @@ Calls `Guild/UpsertChannel` RPC to update the channel's name and metadata in the
 
 ## RPC Sync Workers
 
-Four background worker loops run continuously inside the bot process. Three of them (Role Sync, Channel Sync, Event Sync) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those three loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`) and fetch up to **50 events per poll** (`POLL_BATCH_SIZE = 50`). The fourth (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation.
+Five background worker loops run continuously inside the bot process. Four of them (Role Sync, Channel Sync, Event Sync, Achievement Sync) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those four loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`) and fetch up to **50 events per poll** (`POLL_BATCH_SIZE = 50`). The fifth (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation.
 
-The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, and `event_sync_events`; the bot drains those queues.
+The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, `event_sync_events`, and `achievement_sync_events`; the bot drains those queues.
 
 > **Note on directory name:** The source files for these workers live under `applications/bot/src/rcp/`. This is a typo in the codebase; the intended name is `rpc`. The import paths and class names (`RoleSyncService`, `ChannelSyncService`, `EventSyncService`) all reflect the intended `rpc` meaning.
 
@@ -688,6 +688,28 @@ The `GUILD_MEMBER_ADD` handler resolves welcome metadata by looking up `invite_a
 
 ---
 
+### Achievement Sync Worker
+
+**Service class:** `AchievementSyncService` (`applications/bot/src/rcp/achievement/index.ts`)
+
+**Polling RPC:** `Achievement/GetUnprocessedEvents`
+
+**Polling interval:** 5 seconds (`pollLoop` in `Bot.ts`).
+
+The server's `AchievementEvaluator` service inserts a row into `achievement_sync_events` whenever a team member earns a new achievement (triggered after any activity is logged via the REST API or the `/makanicko log` bot command). The Achievement Sync worker drains this outbox.
+
+**Events processed:**
+
+| Event tag | Handler file | Discord action |
+|-----------|-------------|----------------|
+| `achievement_earned` | `handleAchievementEarned.ts` | (1) If `discord_role_id` is present (resolved from `achievement_role_mappings`), grants that Discord role to the member via REST — silently skips on 404 (role deleted). (2) If `welcome_channel_id` is present (from `teams.welcome_channel_id`), posts a congratulatory embed in that channel @-mentioning the member; if a role was granted, the embed also @-mentions the role. Silently skips the embed on 404 (channel deleted). Either action is optional; if neither is configured the event is still marked processed. |
+
+**Lifecycle RPCs:**
+- `Achievement/MarkEventProcessed` — called after each successful event.
+- `Achievement/MarkEventFailed` — called on error; records the error string and sets `processed_at`, preventing retries (permanent failure semantics, same as `channel_sync_events`).
+
+---
+
 ## Startup Tasks
 
 In addition to the three poll loops, the bot runs one-off tasks at startup (after the gateway connection is established). These tasks are composed alongside the poll loops with `concurrency: 'unbounded'` in `Bot.ts`.
@@ -793,6 +815,16 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Activity/LogActivity` | Log a physical activity (from `/makanicko log`) |
 | `Activity/GetStats` | Fetch personal stats and streaks (from `/makanicko stats`) |
 | `Activity/GetLeaderboard` | Fetch team leaderboard (from `/makanicko leaderboard`) |
+
+### Achievement group (`Achievement/`)
+
+| Method | Purpose |
+|--------|---------|
+| `Achievement/GetUnprocessedEvents` | Poll for pending achievement outbox events |
+| `Achievement/MarkEventProcessed` | Acknowledge successful processing |
+| `Achievement/MarkEventFailed` | Record a processing failure (sets `processed_at`; event is not retried) |
+| `Achievement/GetRoleMapping` | Look up the Discord role ID mapped to an achievement slug for a team |
+| `Achievement/UpsertRoleMapping` | Save or update the Discord role ID mapping for a (team, achievement slug) pair |
 
 ---
 

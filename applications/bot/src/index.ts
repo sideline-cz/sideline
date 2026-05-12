@@ -4,6 +4,7 @@ export { commandBuilder } from '~/commands/index.js';
 export { eventHandlers } from '~/events/index.js';
 export { interactionBuilder } from '~/interactions/index.js';
 export {
+  AchievementSyncService,
   ChannelSyncService,
   EventSyncService,
   GuildJoinSyncService,

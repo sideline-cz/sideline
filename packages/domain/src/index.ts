@@ -45,6 +45,10 @@ export * as TeamSettingsApi from './api/TeamSettingsApi.js';
 
 export * as TrainingTypeApi from './api/TrainingTypeApi.js';
 
+export * as Achievement from './models/Achievement.js';
+
+export * as AchievementSyncEvent from './models/AchievementSyncEvent.js';
+
 export * as ActivityLog from './models/ActivityLog.js';
 
 export * as ActivityStats from './models/ActivityStats.js';
@@ -60,6 +64,8 @@ export * as Discord from './models/Discord.js';
 export * as DiscordChannelMapping from './models/DiscordChannelMapping.js';
 
 export * as DiscordRoleMapping from './models/DiscordRoleMapping.js';
+
+export * as EarnedAchievement from './models/EarnedAchievement.js';
 
 export * as Event from './models/Event.js';
 
@@ -106,6 +112,8 @@ export * as TeamSettings from './models/TeamSettings.js';
 export * as TrainingType from './models/TrainingType.js';
 
 export * as User from './models/User.js';
+export * as AchievementRpcEvents from './rpc/achievement/AchievementRpcEvents.js';
+export * as AchievementRpcGroup from './rpc/achievement/AchievementRpcGroup.js';
 export * as ActivityRpcGroup from './rpc/activity/ActivityRpcGroup.js';
 export * as ActivityRpcModels from './rpc/activity/ActivityRpcModels.js';
 export * as ChannelRpcEvents from './rpc/channel/ChannelRpcEvents.js';

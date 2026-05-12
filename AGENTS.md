@@ -135,6 +135,8 @@ Typed errors automatically merge into unions. Handle specific errors with `Effec
 
 5. **`Effect.either` is NOT exported** in the Effect 4 beta used by this repo. To convert a per-item failure into a successful `Exit` (e.g. for batch error isolation), use `Effect.exit` — it captures both typed errors and defects.
 
+6. **`Effect.catchAllCause` does NOT exist** in the Effect 4 beta used by this repo. To handle a `Cause` (both typed failures and defects) — typically for "log everything, swallow, don't break the caller" — use `Effect.catchCause((cause) => Effect.logWarning('Context', cause))`. This is the correct pattern for **best-effort side effects** that must never fail their caller (e.g. firing achievement evaluation from an activity-log handler, emitting sync events alongside a primary write). Always log the `cause` before swallowing — never `Effect.catchCause(() => Effect.void)`.
+
 ### Resource Management
 
 Use `Effect.acquireRelease` for automatic resource cleanup.
@@ -590,4 +592,4 @@ The `docs/thesis/` directory contains Mermaid diagrams and documentation for the
 
 ---
 
-**Last Updated**: 2026-05-12 (decouple Discord channel from role: bot/server AGENTS.md)
+**Last Updated**: 2026-05-13 (achievement system: code-defined catalog pattern, INSERT column-list footgun, `Effect.catchCause` rule)

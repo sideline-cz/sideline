@@ -4,6 +4,7 @@ import { Effect, Layer, Option, References } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { Bot } from '~/index.js';
 import {
+  AchievementSyncService,
   ChannelSyncService,
   EventSyncService,
   GuildJoinSyncService,
@@ -79,6 +80,10 @@ const MockInviteGeneratorServiceLayer = Layer.succeed(InviteGeneratorService, {
   discord: undefined as never,
 } as never);
 
+const MockAchievementSyncServiceLayer = Layer.succeed(AchievementSyncService, {
+  processTick: Effect.void,
+} as never);
+
 const MockOnboardingRoleCacheLayer = Layer.succeed(OnboardingRoleCache, {
   get: () => Effect.succeed(Option.none()),
   set: () => Effect.void,
@@ -114,6 +119,7 @@ describe('Bot', () => {
       MockGuildJoinSyncServiceLayer,
       MockInviteGeneratorServiceLayer,
       MockOnboardingSyncServiceLayer,
+      MockAchievementSyncServiceLayer,
       MockOnboardingRoleCacheLayer,
       MockSyncRpcLayer,
       MockInviteCacheLayer,

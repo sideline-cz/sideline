@@ -7,6 +7,8 @@ import { Api } from '~/api/api.js';
 import { ApiLive } from '~/api/index.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
 import { RpcObservability, RpcObservabilityLive } from '~/middleware/RpcObservability.js';
+import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
+import { AchievementSyncEventsRepository } from '~/repositories/AchievementSyncEventsRepository.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js';
@@ -17,6 +19,7 @@ import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMa
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
+import { EarnedAchievementsRepository } from '~/repositories/EarnedAchievementsRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
@@ -38,6 +41,7 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { env } from './env.js';
@@ -89,6 +93,9 @@ const Repositories = Layer.mergeAll(
   ActivityTypesRepository.Default,
   LeaderboardRepository.Default,
   PendingGuildJoinsRepository.Default,
+  EarnedAchievementsRepository.Default,
+  AchievementRoleMappingsRepository.Default,
+  AchievementSyncEventsRepository.Default,
 );
 
 const AppLayer = Layer.mergeAll(
@@ -102,6 +109,7 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   HttpServer.withLogAddress,
   Layer.provide(AuthMiddlewareLive),
   Layer.provide(AgeCheckService.Default),
+  Layer.provide(AchievementEvaluator.Default),
   Layer.provide(Repositories),
   Layer.provide(DiscordOAuth.Default),
   Layer.provide(FetchHttpClient.layer),

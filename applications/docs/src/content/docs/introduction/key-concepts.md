@@ -41,6 +41,10 @@ A category for events — "training", "match", "tournament", "friendly", "other"
 
 Optional rule on a team that hides events from players below a cutoff age. Useful for junior/senior splits.
 
+## Achievement
+
+A milestone badge earned automatically when a member's activity stats cross a threshold (for example: first logged activity, 7-day streak, 50 total sessions). Each achievement is awarded once. Some achievements grant a Discord role if a team admin has configured a role mapping. See the [Activity tracking guide](/guides/activity-tracking/) for the full list.
+
 ## Invite
 
 A link captains share so new people can join the team. Expires after first use (by default) and can be scoped to a specific group or role.

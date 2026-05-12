@@ -191,7 +191,7 @@ For the bot, `AppLive` composes:
 
 - `HealthServerLive` — lightweight HTTP health-check server
 - `DiscordIxLive` — dfx Gateway connection (WebSocket to Discord)
-- `SyncLive` — `RoleSyncService`, `ChannelSyncService`, `EventSyncService` (all backed by `SyncRpc` which calls the server over RPC)
+- `SyncLive` — `RoleSyncService`, `ChannelSyncService`, `EventSyncService`, `AchievementSyncService` (all backed by `SyncRpc` which calls the server over RPC)
 
 ### `run.ts` — deployment entrypoint
 
@@ -204,3 +204,45 @@ For the bot, `AppLive` composes:
 - `Runtime.runMain(...)` from `@sideline/effect-lib` — sets up structured logging, the OpenTelemetry telemetry layer (`makeTelemetryLayer`), and calls `NodeRuntime.runMain`
 
 The clean separation means `AppLive` never imports `node:http`, never reads environment variables directly, and never starts the runtime — all of that is the exclusive responsibility of `run.ts`.
+
+---
+
+## 7. Achievement System Flow
+
+The achievement system follows the same outbox pattern as role, channel, and event sync.
+
+**Server side — `AchievementEvaluator` service:**
+
+After any activity is logged (via the REST `ActivityLog` API handler or the RPC `Activity/LogActivity` handler), the server calls `AchievementEvaluator.evaluate(memberId)`. The evaluator:
+
+1. Loads the member's full activity log and computes stats (`ActivityStats.calculateStats`).
+2. Compares the computed stats against the catalogue of 11 achievement definitions in `packages/domain/src/models/Achievement.ts`.
+3. For each newly qualifying achievement that has not yet been recorded, inserts a row into `earned_achievements` (idempotent — `ON CONFLICT DO NOTHING`).
+4. For each newly inserted row, emits a row into `achievement_sync_events` (omitted if the team has no `guild_id`).
+
+Evaluation errors are caught and logged as warnings — they never abort the activity-log mutation.
+
+**Bot side — `AchievementSyncService` processor:**
+
+The bot's Achievement Sync worker polls `Achievement/GetUnprocessedEvents` every 5 seconds. For each `achievement_earned` event it:
+
+1. Looks up the optional Discord role from `achievement_role_mappings` (resolved at SELECT time in the RPC query, alongside the member's `discord_user_id` and the team's `welcome_channel_id`).
+2. If a role ID is present, grants it to the guild member via `REST.addGuildMemberRole`.
+3. If a `welcome_channel_id` is set, posts a congratulatory embed in that channel @-mentioning the member (and the role, if granted).
+4. Marks the event processed via `Achievement/MarkEventProcessed` (or failed via `Achievement/MarkEventFailed` — failed events are not retried).
+
+**Achievement catalogue** (from `Achievement.ACHIEVEMENTS`):
+
+| Slug | Trigger | Grants Discord role? |
+|---|---|---|
+| `first_activity` | 1 activity logged | No |
+| `ten_activities` | 10 activities logged | No |
+| `fifty_activities` | 50 activities logged | Yes |
+| `hundred_activities` | 100 activities logged | Yes |
+| `streak_3` | 3-day longest streak | No |
+| `streak_7` | 7-day longest streak | Yes |
+| `streak_30` | 30-day longest streak | Yes |
+| `duration_600` | 600 total minutes logged | No |
+| `duration_3000` | 3000 total minutes logged | Yes |
+| `gym_25` | 25 gym activities logged | No |
+| `running_25` | 25 running activities logged | No |

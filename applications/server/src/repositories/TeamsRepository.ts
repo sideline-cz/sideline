@@ -47,8 +47,8 @@ const make = Effect.gen(function* () {
     Request: Team.Team.insert,
     Result: Team.Team,
     execute: (input) => sql`
-      INSERT INTO teams (name, guild_id, description, sport, logo_url, created_by)
-      VALUES (${input.name}, ${input.guild_id}, ${input.description}, ${input.sport}, ${input.logo_url}, ${input.created_by})
+      INSERT INTO teams (name, guild_id, description, sport, logo_url, created_by, welcome_channel_id)
+      VALUES (${input.name}, ${input.guild_id}, ${input.description}, ${input.sport}, ${input.logo_url}, ${input.created_by}, ${input.welcome_channel_id})
       RETURNING *
     `,
   });

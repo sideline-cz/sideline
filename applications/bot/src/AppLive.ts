@@ -3,6 +3,7 @@ import { Layer } from 'effect';
 import { HealthServerLive } from '~/HealthServerLive.js';
 import { ChannelReorderSemaphore } from '~/rcp/event/ChannelReorderSemaphore.js';
 import {
+  AchievementSyncService,
   ChannelSyncService,
   EventSyncService,
   GuildJoinSyncService,
@@ -15,6 +16,7 @@ import { OnboardingRoleCache } from '~/services/OnboardingRoleCache.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 const SyncLive = Layer.mergeAll(
+  AchievementSyncService.Default,
   RoleSyncService.Default,
   ChannelSyncService.Default,
   EventSyncService.Default,

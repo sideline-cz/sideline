@@ -93,6 +93,25 @@ When adding a new URL-bearing field:
 
 Do NOT replace the IPv4/IPv6 patterns with a synchronous DNS lookup — domain schemas must remain pure (no I/O). The patterns block IP-literal URLs at the schema layer; defence-in-depth (e.g. egress filtering, DNS rebinding mitigation) is the consuming service's responsibility.
 
+## Code-Defined Catalogs
+
+Some domain enumerations ship as a **code-defined catalog** in `src/models/` rather than as DB-seeded rows. Use this pattern when every entry needs structured per-entry metadata (predicates, flags, thresholds) that is consumed identically by server, bot, and web, and the list is small + change-controlled (PR-only, not user-editable at runtime).
+
+Reference implementations:
+
+| Catalog | File | Per-entry metadata | Consumers |
+|---------|------|-------------------|-----------|
+| `ActivityTypeSlug` | `src/models/ActivityType.ts` | none — just `Schema.Literals` enum | server, web |
+| `ACHIEVEMENTS` | `src/models/Achievement.ts` | `slug`, `grantsDiscordRole: boolean`, `isEarned: (input) => boolean` predicate | server (`AchievementEvaluator`), bot (sync handler), web (grid) |
+
+Rules:
+
+1. **Slug schema is the source of truth.** Export a `Schema.Literals([...])` (e.g. `AchievementSlug`) and derive the catalog array's `slug` field type from it. The literal union is what crosses the wire / appears in DB rows; the catalog array adds local-only metadata.
+2. **Catalog entries are pure.** Predicates (`isEarned`, etc.) take a plain readonly input record and return a boolean — no Effect, no I/O, no `Map` mutation. The domain package has no I/O dependencies; the catalog runs in every consumer.
+3. **Expose a `*_BY_SLUG: ReadonlyMap` derived from the array** so consumers do not re-`find()` on every lookup. Build it once at module load: `new Map(ARRAY.map((a) => [a.slug, a]))`.
+4. **i18n keys are derived, not stored.** Export pure key-builder functions (`i18nTitleKey(slug)`, `i18nDescriptionKey(slug)`) that return the message key string. The catalog never embeds translated text — i18n keys live in `@sideline/i18n/messages/*.json`.
+5. **When adding an entry**: append to the `Schema.Literals([...])` AND to the `ACHIEVEMENTS` array (or equivalent) in the same PR, then add i18n keys for `title`/`description` in `cs.json` and `en.json`. Never gate entries behind feature flags inside the catalog — keep the array statically enumerable.
+
 ## RPC Folder Import Rule
 
 Files under `src/rpc/**` must import models from their concrete paths (e.g. `import * as Discord from '~/models/Discord.js'`), **not** via the barrel `~/index.js`. The barrel re-exports both `models/*` and `rpc/*`, and rpc files transitively pulled in through the barrel before their model dependencies finish initialising — at runtime this surfaces as `Cannot read properties of undefined (reading 'ast')` when a `Schema.TaggedClass` or `RpcGroup.make` references e.g. `Team.TeamId`. Always import models directly inside `src/rpc/**`.

@@ -1,5 +1,6 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type {
+  Achievement,
   ActivityLog,
   ActivityLogApi,
   ActivityStatsApi,
@@ -13,6 +14,7 @@ import { Option, Schema } from 'effect';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import { AchievementsGridI18n } from '~/components/organisms/AchievementsGrid.js';
 import { ActivityLogList } from '~/components/organisms/ActivityLogList';
 import { ActivityStatsCard } from '~/components/organisms/ActivityStatsCard';
 import { Button } from '~/components/ui/button';
@@ -62,6 +64,7 @@ interface PlayerDetailPageProps {
   canManageRoles: boolean;
   availableRoles: ReadonlyArray<RoleApi.RoleInfo>;
   activityStats: ActivityStatsApi.ActivityStatsResponse;
+  achievements: ReadonlyArray<{ slug: Achievement.AchievementSlug; earned_at: string }>;
   isOwnProfile: boolean;
   activityLogs: ActivityLogApi.ActivityLogListResponse;
   activityTypes: ReadonlyArray<ActivityTypeOption>;
@@ -91,6 +94,7 @@ export function PlayerDetailPage({
   canManageRoles,
   availableRoles,
   activityStats,
+  achievements,
   isOwnProfile,
   activityLogs,
   activityTypes,
@@ -219,6 +223,12 @@ export function PlayerDetailPage({
         availableRoles={availableRoles}
         onAssignRole={onAssignRole}
         onUnassignRole={onUnassignRole}
+      />
+      <AchievementsGridI18n
+        earnedAchievements={achievements.map((a) => ({
+          achievement_slug: a.slug,
+          earned_at: new Date(a.earned_at),
+        }))}
       />
       <ActivityStatsCard stats={activityStats} />
       <ActivityLogList

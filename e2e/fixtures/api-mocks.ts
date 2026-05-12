@@ -220,6 +220,7 @@ async function setupApiMocks(page: Page) {
           totalActivities: 42,
           totalDurationMinutes: 1260,
           counts: [],
+          achievements: [],
         }),
       });
     }),

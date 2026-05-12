@@ -167,6 +167,7 @@ function MakanickoRoute() {
     currentStreak: 0,
     longestStreak: 0,
     counts: [],
+    achievements: [],
   };
 
   return (

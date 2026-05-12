@@ -276,6 +276,14 @@ const make = Effect.gen(function* () {
       sql`SELECT id FROM roles WHERE team_id = ${teamId} AND name = 'Player' AND is_built_in = true`,
   });
 
+  const findByIdQuery = SqlSchema.findOneOption({
+    Request: TeamMember.TeamMemberId,
+    Result: TeamMember.TeamMember,
+    execute: (id) => sql`SELECT * FROM team_members WHERE id = ${id}`,
+  });
+
+  const findById = (id: TeamMember.TeamMemberId) => findByIdQuery(id).pipe(catchSqlErrors);
+
   const findMembershipByIds = (teamId: Team.TeamId, userId: User.UserId) =>
     findMembershipQuery({ team_id: teamId, user_id: userId }).pipe(catchSqlErrors);
 
@@ -309,6 +317,7 @@ const make = Effect.gen(function* () {
 
   return {
     addMember,
+    findById,
     findByTeam,
     findByUser,
     findRosterByTeam,

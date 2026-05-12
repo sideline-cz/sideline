@@ -129,6 +129,8 @@ Top-level organisational unit tied one-to-one with a Discord guild.
 
 **Notes**: `guild_id` was made NOT NULL and UNIQUE in migration `1741200000`. `description`, `sport`, and `logo_url` were added in migration `1743100000`. `welcome_channel_id`, `system_log_channel_id`, and `welcome_message_template` were added in migration `1746500000` to support the Discord welcome flow. `welcome_channel_id` is the Discord channel where the bot posts the member welcome embed when a new player joins via an invite; `system_log_channel_id` is a private captain-only channel where the bot logs every join (invite code, inviter, group); `welcome_message_template` is a template string (max 500 characters) supporting the placeholders `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, and `{teamName}`. Deleting a team cascades to all child tables.
 
+**INSERT fix**: The `TeamsRepository` `insert` statement was updated (alongside the achievement feature) to include `welcome_channel_id` in the explicit column list so that value is persisted at team-creation time.
+
 ---
 
 #### `team_members`
@@ -701,6 +703,63 @@ Stores the Discord message ID of the "divider" message posted in an event channe
 
 ---
 
+#### `earned_achievements`
+
+Records which achievements a team member has earned. Used by the API to return earned achievements in activity stats responses and by the `AchievementEvaluator` service to avoid re-awarding the same achievement.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE CASCADE | — |
+| `achievement_slug` | TEXT | NOT NULL | — |
+| `earned_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(team_member_id, achievement_slug)` — each achievement can be earned at most once per member.
+
+**Indexes**: `idx_earned_achievements_member` on `(team_member_id)`
+
+**Notes**: Added in migration `1778716800_create_achievements`. `achievement_slug` is one of the fixed values defined in `packages/domain/src/models/Achievement.ts`: `first_activity`, `ten_activities`, `fifty_activities`, `hundred_activities`, `streak_3`, `streak_7`, `streak_30`, `duration_600`, `duration_3000`, `gym_25`, `running_25`.
+
+---
+
+#### `achievement_role_mappings`
+
+Maps an achievement slug to a Discord role that is granted to team members when they earn the achievement. Configured per team.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `achievement_slug` | TEXT | NOT NULL | — |
+| `discord_role_id` | TEXT | NOT NULL | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Primary Key**: `(team_id, achievement_slug)` — one Discord role per achievement per team.
+
+**Notes**: Added in migration `1778716800_create_achievements`. When a member earns an achievement that has a mapping, the bot grants the specified Discord role to that member. If no mapping exists for the slug, no role is granted (but the achievement is still recorded in `earned_achievements`).
+
+---
+
+#### `achievement_sync_events`
+
+Outbox table driving achievement notifications in Discord. Polled by the bot's Achievement Sync worker. Each row represents one achievement-earned event for a specific team member.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `guild_id` | TEXT | NOT NULL | — |
+| `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE CASCADE | — |
+| `achievement_slug` | TEXT | NOT NULL | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `processed_at` | TIMESTAMPTZ | — | — |
+| `error` | TEXT | — | — |
+
+**Indexes**: `idx_achievement_sync_unprocessed` — partial index on `(created_at) WHERE processed_at IS NULL`
+
+**Notes**: Added in migration `1778716800_create_achievements`. The bot's Achievement Sync worker polls `WHERE processed_at IS NULL ORDER BY created_at`, then for each event: optionally grants a Discord role (if an `achievement_role_mappings` row exists) and optionally posts a congratulatory embed to the team's `welcome_channel_id`. Both actions are resolved at SELECT time by joining to `teams`, `team_members`, `users`, and `achievement_role_mappings`. After successful processing, `processed_at` is set. Failures set `processed_at` and `error` — failed events are not automatically retried (same poison-pill prevention as `channel_sync_events`).
+
+---
+
 ### 8. Activity Tracking
 
 #### `activity_types`
@@ -812,7 +871,7 @@ In-app alert records scoped to a specific team and user.
 
 ## Migration History
 
-All 48 migration files in `packages/migrations/src/before/` plus 1 after-migration.
+All 49 migration files in `packages/migrations/src/before/` plus 1 after-migration.
 
 ### Before Migrations (schema changes)
 
@@ -877,6 +936,7 @@ All 48 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1747400000 | `add_gender_to_age_thresholds` | Adds `gender TEXT` column to `age_threshold_rules`; adds CHECK constraint `age_threshold_rules_gender_check (gender IN ('male','female','other'))`; deletes any existing rows where all criteria are NULL; adds CHECK constraint `age_threshold_rules_nonempty_criteria (min_age IS NOT NULL OR max_age IS NOT NULL OR gender IS NOT NULL)`; drops the old `UNIQUE (team_id, group_id)` constraint and replaces it with `UNIQUE NULLS NOT DISTINCT (team_id, group_id, min_age, max_age, gender)` |
 | 1747500000 | `add_required_group_to_age_thresholds` | Adds `required_group_id UUID REFERENCES groups(id) ON DELETE CASCADE` (nullable) to `age_threshold_rules`; adds CHECK constraint `age_threshold_rules_required_not_self (required_group_id IS NULL OR required_group_id <> group_id)`; widens `age_threshold_rules_nonempty_criteria` to include `required_group_id IS NOT NULL`; drops and recreates the unique constraint as `UNIQUE NULLS NOT DISTINCT (team_id, group_id, min_age, max_age, gender, required_group_id)` |
 | 1747600000 | `decouple_channel_role` | Makes `discord_channel_mappings.discord_channel_id` nullable (drops NOT NULL); adds CHECK constraint `discord_channel_mappings_at_least_one (discord_channel_id IS NOT NULL OR discord_role_id IS NOT NULL)`; creates partial unique index `discord_channel_mappings_team_channel ON (team_id, discord_channel_id) WHERE discord_channel_id IS NOT NULL` (replaces the old unconditional unique on the same column pair) |
+| 1778716800 | `create_achievements` | Creates `earned_achievements` (id, team_member_id FK CASCADE, achievement_slug, earned_at; unique on (team_member_id, achievement_slug)); creates `achievement_role_mappings` (team_id FK CASCADE, achievement_slug, discord_role_id; PK on (team_id, achievement_slug)); creates `achievement_sync_events` (id, team_id FK CASCADE, guild_id, team_member_id FK CASCADE, achievement_slug, created_at, processed_at, error); adds partial index `idx_achievement_sync_unprocessed` on `achievement_sync_events(created_at) WHERE processed_at IS NULL` |
 
 ### After Migrations (seed data)
 
@@ -897,6 +957,7 @@ Three tables act as outbox queues for bot-server communication:
 | `role_sync_events` | Role Sync | `role_created`, `role_deleted`, `role_assigned`, `role_unassigned` |
 | `channel_sync_events` | Channel Sync | `channel_created`, `channel_updated`, `channel_deleted`, `channel_archived`, `channel_detached`, `member_added`, `member_removed` |
 | `event_sync_events` | Event Sync | `event_created`, `event_updated`, `event_cancelled`, `rsvp_reminder`, `event_started`, `training_claim_request`, `training_claim_update`, `unclaimed_training_reminder` |
+| `achievement_sync_events` | Achievement Sync | `achievement_earned` |
 
 The server inserts rows when the relevant domain action occurs. The bot polls `WHERE processed_at IS NULL ORDER BY created_at` and updates `processed_at` (and optionally `error`) when processing is complete. Partial indexes on `(created_at) WHERE processed_at IS NULL` make these polls efficient. Event data is denormalised into snapshot columns so that the bot's message content remains accurate even if the source row is subsequently modified.
 
@@ -906,7 +967,7 @@ The server inserts rows when the relevant domain action occurs. The bot polls `W
 
 ### Cascading Deletes
 
-Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, and activity_logs. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
+Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, and achievement_sync_events. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
 
 Role deletion uses `ON DELETE RESTRICT` on `member_roles` to prevent accidentally orphaning members. FK references from `role_sync_events.role_id` and `channel_sync_events.group_id` are stored as plain UUID (no FK constraint) so audit rows are retained after the referenced entity is deleted.
 

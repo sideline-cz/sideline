@@ -1,0 +1,69 @@
+---
+title: Activity tracking and achievements
+description: How to log physical activity, view your stats, and earn achievements that unlock Discord roles.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Sideline lets every team member log personal physical activity — gym sessions, runs, stretches — and tracks progress over time. Consistent effort unlocks **achievements**, some of which grant a special Discord role on your team's server.
+
+## Logging activity
+
+You can log activity in two ways:
+
+- **From Discord:** use the `/makanicko log` slash command. Choose an activity type and optionally provide a duration and a note.
+- **From the web app:** open your member profile → **Activity** tab → **Log activity**.
+
+Each log entry records the activity type, the date, an optional duration in minutes, and an optional free-text note.
+
+<Aside type="note" title="Available activity types">
+  The global built-in types are **Gym**, **Running**, and **Stretching**. Your team may add custom types visible in the web app. The `/makanicko log` command currently supports the three built-in types only.
+</Aside>
+
+## Viewing stats
+
+Run `/makanicko stats` in Discord or open your member profile in the web app to see:
+
+- **Current streak** — consecutive days with at least one logged activity.
+- **Longest streak** — the best streak you have ever achieved.
+- **Total activities** and **total duration**.
+- A per-type breakdown of activity counts.
+- Your earned achievements.
+
+## Achievements
+
+Achievements are milestone badges earned automatically when your activity stats hit a threshold. Each achievement is awarded once and cannot be lost.
+
+| Achievement | Unlocked when |
+|---|---|
+| First activity | You log your first activity |
+| Ten activities | You reach 10 logged activities |
+| Fifty activities ⭐ | You reach 50 logged activities |
+| Hundred activities ⭐ | You reach 100 logged activities |
+| 3-day streak | Your longest streak reaches 3 days |
+| 7-day streak ⭐ | Your longest streak reaches 7 days |
+| 30-day streak ⭐ | Your longest streak reaches 30 days |
+| 600 minutes | Your total logged duration reaches 600 minutes |
+| 3000 minutes ⭐ | Your total logged duration reaches 3000 minutes |
+| Gym 25 | You log 25 gym sessions |
+| Running 25 | You log 25 running sessions |
+
+Achievements marked ⭐ **can grant a Discord role** if your team admin has configured a role mapping for them.
+
+## Discord role rewards
+
+When you earn an achievement marked ⭐, the bot automatically checks whether a Discord role has been configured for that achievement in your team. If one has, the bot:
+
+1. Grants the Discord role to your account on the team's server.
+2. Posts a congratulatory message in the team's welcome channel (if one is set) tagging you and the role.
+
+If no role mapping or no welcome channel is configured, the achievement is still recorded — you just won't see a Discord announcement.
+
+<Aside type="note" title="Admins: configuring achievement role rewards">
+  Go to **Team settings → Achievements** (or use the `Achievement/UpsertRoleMapping` RPC if you are integrating programmatically) to link each achievement slug to a Discord role in your server.
+</Aside>
+
+## See also
+
+- [Discord integration](/guides/discord-integration/) — for the `/makanicko` commands reference.
+- [Activity stats API](/api/overview/) — the `GET /teams/:teamId/members/:memberId/activity-stats` endpoint returns earned achievements alongside stat fields.

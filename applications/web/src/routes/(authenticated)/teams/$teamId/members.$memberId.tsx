@@ -212,6 +212,7 @@ function MemberDetailRoute() {
       canManageRoles={canManageRoles}
       availableRoles={roles}
       activityStats={activityStats}
+      achievements={activityStats.achievements}
       isOwnProfile={activityLogs.isOwnProfile}
       activityLogs={new ActivityLogApi.ActivityLogListResponse({ logs: activityLogs.logs })}
       activityTypes={activityTypes}

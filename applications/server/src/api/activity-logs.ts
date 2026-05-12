@@ -1,18 +1,20 @@
 import { ActivityLogApi, Auth } from '@sideline/domain';
-import { DateTime, Effect } from 'effect';
+import { DateTime, Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { requireMembership } from '~/api/permissions.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
 
 export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (handlers) =>
   Effect.Do.pipe(
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('activityLogs', () => ActivityLogsRepository.asEffect()),
     Effect.bind('activityTypes', () => ActivityTypesRepository.asEffect()),
-    Effect.map(({ members, activityLogs, activityTypes }) =>
+    Effect.bind('evaluatorOpt', () => Effect.serviceOption(AchievementEvaluator)),
+    Effect.map(({ members, activityLogs, activityTypes, evaluatorOpt }) =>
       handlers
         .handle('listLogs', ({ params: { teamId, memberId } }) =>
           Effect.Do.pipe(
@@ -69,6 +71,19 @@ export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (hand
                 source: 'manual',
               }),
             ),
+            Effect.tap(() =>
+              Option.match(evaluatorOpt, {
+                onNone: () => Effect.void,
+                onSome: (ev) =>
+                  ev
+                    .evaluate(memberId)
+                    .pipe(
+                      Effect.catchCause((cause) =>
+                        Effect.logWarning('Achievement evaluation failed', cause),
+                      ),
+                    ),
+              }),
+            ),
             Effect.map(
               (inserted) =>
                 new ActivityLogApi.ActivityLogEntry({
@@ -102,6 +117,19 @@ export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (hand
                 activity_type_id: payload.activityTypeId,
                 duration_minutes: payload.durationMinutes,
                 note: payload.note,
+              }),
+            ),
+            Effect.tap(() =>
+              Option.match(evaluatorOpt, {
+                onNone: () => Effect.void,
+                onSome: (ev) =>
+                  ev
+                    .evaluate(memberId)
+                    .pipe(
+                      Effect.catchCause((cause) =>
+                        Effect.logWarning('Achievement evaluation failed', cause),
+                      ),
+                    ),
               }),
             ),
             Effect.map(

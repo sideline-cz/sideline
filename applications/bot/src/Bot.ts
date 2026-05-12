@@ -7,6 +7,7 @@ import { interactionBuilder } from '~/interactions/index.js';
 import { recoverDeletedMessages } from '~/rcp/event/recoverDeletedMessages.js';
 import type { SyncRpc } from '~/services/SyncRpc.js';
 import {
+  AchievementSyncService,
   ChannelSyncService,
   EventSyncService,
   GuildJoinSyncService,
@@ -39,24 +40,36 @@ export const program = Effect.Do.pipe(
   Effect.bind('guildJoin', () => GuildJoinSyncService.asEffect()),
   Effect.bind('inviteGenerator', () => InviteGeneratorService.asEffect()),
   Effect.bind('onboarding', () => OnboardingSyncService.asEffect()),
+  Effect.bind('achievements', () => AchievementSyncService.asEffect()),
   Effect.tap(() => Effect.logInfo('Bot connected to Discord')),
-  Effect.andThen(({ events, roles, channels, eventSync, guildJoin, inviteGenerator, onboarding }) =>
-    Effect.all(
-      [
-        ixProgram,
-        ...events,
-        pollLoop(roles.processTick),
-        pollLoop(channels.processTick),
-        pollLoop(eventSync.processTick),
-        pollLoop(guildJoin.processTick),
-        fastPollLoop(inviteGenerator.processTick),
-        pollLoop(onboarding.processTick),
-        recoverDeletedMessages,
-      ],
-      {
-        concurrency: 'unbounded',
-      },
-    ),
+  Effect.andThen(
+    ({
+      events,
+      roles,
+      channels,
+      eventSync,
+      guildJoin,
+      inviteGenerator,
+      onboarding,
+      achievements,
+    }) =>
+      Effect.all(
+        [
+          ixProgram,
+          ...events,
+          pollLoop(roles.processTick),
+          pollLoop(channels.processTick),
+          pollLoop(eventSync.processTick),
+          pollLoop(guildJoin.processTick),
+          fastPollLoop(inviteGenerator.processTick),
+          pollLoop(onboarding.processTick),
+          pollLoop(achievements.processTick),
+          recoverDeletedMessages,
+        ],
+        {
+          concurrency: 'unbounded',
+        },
+      ),
   ),
   Effect.asVoid,
 ) as Effect.Effect<
@@ -71,4 +84,5 @@ export const program = Effect.Do.pipe(
   | GuildJoinSyncService
   | InviteGeneratorService
   | OnboardingSyncService
+  | AchievementSyncService
 >;

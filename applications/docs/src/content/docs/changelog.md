@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-13 — Achievement system
+
+- Members now earn **achievements** automatically as they log physical activity. Milestones include first activity, activity count milestones (10, 50, 100), streak lengths (3, 7, 30 days), total duration milestones (600 and 3000 minutes), and per-type counts (25 gym sessions, 25 runs).
+- Achievements marked with a star ⭐ can be linked to a Discord role. When a member earns one of these achievements, the bot automatically grants the configured role on your team's Discord server.
+- The bot also posts a congratulatory embed in your team's **welcome channel** (if one is configured), tagging the member and the newly granted role.
+- The `GET /teams/:teamId/members/:memberId/activity-stats` API endpoint now includes an `achievements` array listing each earned achievement and the time it was earned.
+- The `/makanicko stats` Discord command continues to show streak and count stats; the web app member profile shows the full achievement list.
+- Admins can configure which Discord roles are granted for achievement milestones in **Team settings → Achievements**.
+
 ## 2026-05-12 — Group Discord role and channel are now independent
 
 - A Discord **role** is now always created for a group (when the group is first provisioned or when a member is first added). The role exists independently of any channel.

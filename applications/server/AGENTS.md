@@ -307,6 +307,19 @@ Effect.all(
 
 Use `Effect.exit` (not `Effect.either`) — `Effect.either` is not exported in the Effect 4 beta used by this repo, and `Effect.exit` additionally catches defects.
 
+## Hand-written INSERT / UPDATE Column Lists
+
+`SqlSchema.findOne({ Request: Model.insert, ... })` validates the **input shape**, but the column list and `VALUES (...)` tuple inside the raw `sql\`INSERT INTO ... \`` template are hand-written. The schema does **not** cross-check that every field on the `insert` variant appears in the SQL — fields present on the schema but absent from the column list are silently dropped at write time and the query still succeeds (returning the row with the DB default / NULL for the missing column).
+
+This footgun bit `TeamsRepository.insert` once already: `welcome_channel_id` was added to `Team.Team.insert` and the API handler, but the column list still read `(name, guild_id, description, sport, logo_url, created_by)` — every team created post-migration had `welcome_channel_id = NULL` despite the caller passing a value. Fix: extend both the column list and `VALUES` tuple in the same edit.
+
+Rules when adding a new column to a `Model.Class` that is INSERTed via hand-written SQL:
+
+1. **Grep for every hand-written `INSERT INTO <table>` in `src/repositories/`** and add the new column to both the column list and the `VALUES (...)` tuple. `SqlSchema` does not catch the mismatch.
+2. **Do the same for hand-written `UPDATE <table> SET ...`** statements that take a typed `Request` schema. A new field on the request schema is not auto-applied to the SET clause.
+3. **Prefer `Model.makeRepository(...)` `insert` / `update`** when the operation maps 1:1 to the model — it derives the column list from the schema and cannot drift. Use hand-written SQL only when the operation needs JOINs, `ON CONFLICT`, `RETURNING` of computed columns, or partial column updates.
+4. **Add an integration test that round-trips the new field** through the repository — read the inserted row back and assert the new column equals the input. This is the only mechanism that catches the silent-drop bug.
+
 ## Postgres Type Conventions
 
 - **`TIME` columns** — node-postgres returns `'HH:MM:SS'`. If consumers expect `'HH:MM'`, normalize on read with `TO_CHAR(col, 'HH24:MI') AS col` in both `SELECT` and `RETURNING` clauses (see `TeamSettingsRepository._findByTeam`).

@@ -2716,6 +2716,7 @@ Returns aggregated activity statistics for a specific member.
 | `totalActivities` | `integer` | Total number of logged activities |
 | `totalDurationMinutes` | `integer` | Total duration across all logged activities |
 | `counts` | `{ activityTypeId: string, activityTypeName: string, count: integer }[]` | Per-activity-type breakdown |
+| `achievements` | `{ slug: AchievementSlug, earned_at: string }[]` | Achievements the member has earned, ordered by `earned_at` ascending. `slug` is one of the fixed values defined in `Achievement.AchievementSlug`; `earned_at` is an ISO 8601 timestamp string. Empty array when no achievements have been earned yet. |
 
 **Errors:**
 

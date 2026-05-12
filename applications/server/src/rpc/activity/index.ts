@@ -13,6 +13,7 @@ import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
 
 export const ActivityRpcLive = Effect.Do.pipe(
   Effect.bind('teams', () => TeamsRepository.asEffect()),
@@ -21,9 +22,10 @@ export const ActivityRpcLive = Effect.Do.pipe(
   Effect.bind('activityLogs', () => ActivityLogsRepository.asEffect()),
   Effect.bind('activityTypes', () => ActivityTypesRepository.asEffect()),
   Effect.bind('leaderboardRepo', () => LeaderboardRepository.asEffect()),
+  Effect.bind('evaluatorOpt', () => Effect.serviceOption(AchievementEvaluator)),
   Effect.let(
     'Activity/LogActivity',
-    ({ teams, users, members, activityLogs, activityTypes }) =>
+    ({ teams, users, members, activityLogs, activityTypes, evaluatorOpt }) =>
       ({
         guild_id,
         discord_user_id,
@@ -80,7 +82,7 @@ export const ActivityRpcLive = Effect.Do.pipe(
                 ),
               ),
           ),
-          Effect.flatMap(({ member, activityType }) =>
+          Effect.bind('inserted', ({ member, activityType }) =>
             activityLogs.insert({
               team_member_id: member.id,
               activity_type_id: activityType.id,
@@ -90,8 +92,21 @@ export const ActivityRpcLive = Effect.Do.pipe(
               source: 'manual',
             }),
           ),
+          Effect.tap(({ member }) =>
+            Option.match(evaluatorOpt, {
+              onNone: () => Effect.void,
+              onSome: (ev) =>
+                ev
+                  .evaluate(member.id)
+                  .pipe(
+                    Effect.catchCause((cause) =>
+                      Effect.logWarning('Achievement evaluation failed', cause),
+                    ),
+                  ),
+            }),
+          ),
           Effect.map(
-            (inserted) =>
+            ({ inserted }) =>
               new ActivityRpcModels.LogActivityResult({
                 id: inserted.id,
                 activity_type_id: inserted.activity_type_id,
@@ -271,5 +286,6 @@ export const ActivityRpcLive = Effect.Do.pipe(
   Bind.remove('activityLogs'),
   Bind.remove('activityTypes'),
   Bind.remove('leaderboardRepo'),
+  Bind.remove('evaluatorOpt'),
   (handlers) => ActivityRpcGroup.ActivityRpcGroup.toLayer(handlers),
 );
