@@ -4,6 +4,8 @@ import { Discord } from '~/index.js';
 import {
   ActivityGuildNotFound,
   ActivityMemberNotFound,
+  ActivityTypeChoice,
+  ActivityTypeNotFound,
   GetLeaderboardResult,
   GetStatsResult,
   LogActivityResult,
@@ -21,7 +23,7 @@ export const ActivityRpcGroup = RpcGroup.make(
       note: Schema.OptionFromNullOr(Schema.String),
     },
     success: LogActivityResult,
-    error: Schema.Union([ActivityMemberNotFound, ActivityGuildNotFound]),
+    error: Schema.Union([ActivityMemberNotFound, ActivityGuildNotFound, ActivityTypeNotFound]),
   }),
   Rpc.make('GetStats', {
     payload: {
@@ -39,5 +41,10 @@ export const ActivityRpcGroup = RpcGroup.make(
     },
     success: GetLeaderboardResult,
     error: Schema.Union([ActivityMemberNotFound, ActivityGuildNotFound]),
+  }),
+  Rpc.make('GetActivityTypesByGuild', {
+    payload: { guild_id: Discord.Snowflake },
+    success: Schema.Array(ActivityTypeChoice),
+    error: ActivityGuildNotFound,
   }),
 ).prefix('Activity/');

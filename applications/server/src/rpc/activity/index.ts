@@ -2,11 +2,12 @@ import {
   ActivityRpcGroup,
   ActivityRpcModels,
   ActivityStats,
+  ActivityType,
   type Discord,
   Leaderboard,
 } from '@sideline/domain';
 import { Bind, Options } from '@sideline/effect-lib';
-import { DateTime, Effect, Option } from 'effect';
+import { DateTime, Effect, Option, Schema } from 'effect';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
@@ -14,6 +15,8 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const ActivityRpcLive = Effect.Do.pipe(
   Effect.bind('teams', () => TeamsRepository.asEffect()),
@@ -72,16 +75,28 @@ export const ActivityRpcLive = Effect.Do.pipe(
               ? Effect.void
               : Effect.fail(new ActivityRpcModels.ActivityMemberNotFound()),
           ),
-          // Resolve activity type slug (e.g. 'gym') to UUID; bot validates slug client-side
-          Effect.bind('activityType', () =>
-            activityTypes
+          // Resolve activity type: UUID → findByIdScoped (tenant isolation); slug → findBySlug
+          Effect.bind('activityType', ({ team }) => {
+            if (UUID_REGEX.test(activity_type)) {
+              return activityTypes
+                .findByIdScoped(
+                  Schema.decodeSync(ActivityType.ActivityTypeId)(activity_type),
+                  team.id,
+                )
+                .pipe(
+                  Effect.flatMap(
+                    Options.toEffect(() => new ActivityRpcModels.ActivityTypeNotFound()),
+                  ),
+                );
+            }
+            return activityTypes
               .findBySlug(activity_type)
               .pipe(
                 Effect.flatMap(
-                  Options.toEffect(() => new ActivityRpcModels.ActivityMemberNotFound()),
+                  Options.toEffect(() => new ActivityRpcModels.ActivityTypeNotFound()),
                 ),
-              ),
-          ),
+              );
+          }),
           Effect.bind('inserted', ({ member, activityType }) =>
             activityLogs.insert({
               team_member_id: member.id,
@@ -278,6 +293,37 @@ export const ActivityRpcLive = Effect.Do.pipe(
               requesting_user_entry: requestingUserEntry,
             });
           }),
+        ),
+  ),
+  Effect.let(
+    'Activity/GetActivityTypesByGuild',
+    ({ teams, activityTypes }) =>
+      ({ guild_id }: { readonly guild_id: Discord.Snowflake }) =>
+        Effect.Do.pipe(
+          Effect.bind('team', () =>
+            teams
+              .findByGuildId(guild_id)
+              .pipe(
+                Effect.flatMap(
+                  Options.toEffect(() => new ActivityRpcModels.ActivityGuildNotFound()),
+                ),
+              ),
+          ),
+          Effect.bind('types', ({ team }) => activityTypes.findByTeamId(team.id)),
+          Effect.map(({ types }) =>
+            types
+              .filter((t) => Option.getOrNull(t.slug) !== 'training')
+              .map(
+                (t) =>
+                  new ActivityRpcModels.ActivityTypeChoice({
+                    id: t.id,
+                    name: t.name,
+                    slug: t.slug,
+                    emoji: Option.map(t.emoji, (e) => e as string),
+                    isGlobal: Option.isNone(t.team_id),
+                  }),
+              ),
+          ),
         ),
   ),
   Bind.remove('teams'),

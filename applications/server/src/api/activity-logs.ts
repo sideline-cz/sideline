@@ -37,6 +37,7 @@ export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (hand
                         id: l.id,
                         activityTypeId: l.activity_type_id,
                         activityTypeName: l.activity_type_name,
+                        activityTypeEmoji: l.activity_type_emoji,
                         loggedAt: l.logged_at,
                         durationMinutes: l.duration_minutes,
                         note: l.note,
@@ -90,6 +91,7 @@ export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (hand
                   id: inserted.id,
                   activityTypeId: inserted.activity_type_id,
                   activityTypeName: inserted.activity_type_name,
+                  activityTypeEmoji: inserted.activity_type_emoji,
                   loggedAt: inserted.logged_at,
                   durationMinutes: payload.durationMinutes,
                   note: payload.note,
@@ -138,6 +140,7 @@ export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (hand
                   id: updated.id,
                   activityTypeId: updated.activity_type_id,
                   activityTypeName: updated.activity_type_name,
+                  activityTypeEmoji: updated.activity_type_emoji,
                   loggedAt: updated.logged_at,
                   durationMinutes: updated.duration_minutes,
                   note: updated.note,
@@ -162,28 +165,6 @@ export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (hand
             ),
             Effect.flatMap(() => activityLogs.delete(logId, memberId)),
             Effect.asVoid,
-          ),
-        )
-        .handle('listActivityTypes', ({ params: { teamId } }) =>
-          Effect.Do.pipe(
-            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
-            Effect.tap(({ currentUser }) =>
-              requireMembership(members, teamId, currentUser.id, new ActivityLogApi.Forbidden()),
-            ),
-            Effect.flatMap(() => activityTypes.findByTeamId(teamId)),
-            Effect.map(
-              (types) =>
-                new ActivityLogApi.ActivityTypeListResponse({
-                  activityTypes: types.map(
-                    (t) =>
-                      new ActivityLogApi.ActivityTypeEntry({
-                        id: t.id,
-                        name: t.name,
-                        slug: t.slug,
-                      }),
-                  ),
-                }),
-            ),
           ),
         ),
     ),

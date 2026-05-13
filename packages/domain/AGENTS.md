@@ -124,6 +124,26 @@ Rules:
 4. **Server reads overrides once per evaluation** via a repository method like `findOverridesByTeam(teamId) => Effect<ReadonlyMap<Slug, number>>` and threads the map through the evaluator. Do not call the override resolver inside a hot per-member loop without first hoisting the `Map` lookup out of the loop.
 5. **Deleting an override row is the way to "reset to default"** — never store the default value in the override table as a sentinel. The override repository exposes a `deleteOverride(teamId, slug)` method for this.
 
+## HTTP API Error Tag Conventions
+
+When defining `HttpApiGroup` endpoints in `src/api/*.ts`, follow these tag conventions so handlers and clients can branch on a stable, semantic set of errors:
+
+| Class name pattern | HTTP status | When to use |
+|--------------------|-------------|-------------|
+| `<Resource>Forbidden` (tag `'<Resource>Forbidden'`) | 403 | Caller lacks the required permission on the team. Always required on any captain-/admin-scoped endpoint. |
+| `<Resource>Protected` (tag `'<Resource>Protected'`) | 422 | The target row is **immutable by class** (e.g. a built-in / global row in a team-scoped resource). Distinct from `Forbidden` — the caller may have permission, but this specific row cannot be mutated. |
+| `<Resource>NotFound` (tag `'<Resource>NotFound'`) | 404 | Row does not exist OR exists but is not visible to this team. Never include the resource id in the payload — the absence of the row is the only signal. |
+| `<Resource>NameAlreadyTaken` (tag `'<Resource>NameAlreadyTaken'`, payload `{ name: Schema.String }`) | 409 | Unique-name constraint hit. Payload carries the conflicting name so the client can render a field-level error. |
+| `<Resource>Has<Children>` (tag e.g. `'ActivityTypeHasLogs'`, payload `{ usageCount: Schema.Number }`) | 409 | Delete blocked by referential integrity. Payload carries the count so the client can render "in use by N items". |
+
+Reference: `packages/domain/src/api/ActivityTypeApi.ts` defines all five tags.
+
+Rules:
+
+1. **The tag string must include the resource prefix.** Use `'ActivityTypeForbidden'`, not bare `'Forbidden'` — the tag must be unique across all `HttpApiGroup` definitions so the client's `Effect.catchTag` can disambiguate without import gymnastics. The `class` name (`Forbidden`) may stay short within the file because it is namespaced by its module.
+2. **Never reuse `Forbidden` for an immutable-row error.** A 403 means "you cannot do this action"; a 422 `Protected` means "this row cannot be the target of this action". Collapsing them prevents the web UI from rendering the right message ("permission denied" vs "built-in row, cannot edit").
+3. **Tag classes are payload-bearing where it improves error UX.** `NameAlreadyTaken` carries the name (so the form field error reads "'gym' is already used"); `HasLogs` carries the count (so the dialog reads "Cannot delete — 12 logs reference this type"). Empty payloads (`{}`) are correct for purely categorical errors (`Forbidden`, `Protected`, `NotFound`).
+
 ## RPC Folder Import Rule
 
 Files under `src/rpc/**` must import models from their concrete paths (e.g. `import * as Discord from '~/models/Discord.js'`), **not** via the barrel `~/index.js`. The barrel re-exports both `models/*` and `rpc/*`, and rpc files transitively pulled in through the barrel before their model dependencies finish initialising — at runtime this surfaces as `Cannot read properties of undefined (reading 'ast')` when a `Schema.TaggedClass` or `RpcGroup.make` references e.g. `Team.TeamId`. Always import models directly inside `src/rpc/**`.

@@ -2,6 +2,7 @@ import { Schema } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
 import { ActivityLogId, ActivitySource } from '~/models/ActivityLog.js';
+import * as ActivityType from '~/models/ActivityType.js';
 import { ActivityTypeId } from '~/models/ActivityType.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
@@ -10,6 +11,7 @@ export class ActivityLogEntry extends Schema.Class<ActivityLogEntry>('ActivityLo
   id: ActivityLogId,
   activityTypeId: ActivityTypeId,
   activityTypeName: Schema.String,
+  activityTypeEmoji: Schema.OptionFromNullOr(ActivityType.ActivityTypeEmoji),
   loggedAt: Schema.String,
   durationMinutes: Schema.OptionFromNullOr(Schema.Int),
   note: Schema.OptionFromNullOr(Schema.String),
@@ -41,18 +43,6 @@ export const UpdateActivityLogRequest = Schema.Struct({
   note: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schema.String)),
 });
 export type UpdateActivityLogRequest = Schema.Schema.Type<typeof UpdateActivityLogRequest>;
-
-export class ActivityTypeEntry extends Schema.Class<ActivityTypeEntry>('ActivityTypeEntry')({
-  id: ActivityTypeId,
-  name: Schema.String,
-  slug: Schema.OptionFromNullOr(Schema.String),
-}) {}
-
-export class ActivityTypeListResponse extends Schema.Class<ActivityTypeListResponse>(
-  'ActivityTypeListResponse',
-)({
-  activityTypes: Schema.Array(ActivityTypeEntry),
-}) {}
 
 export class MemberNotFound extends Schema.TaggedErrorClass<MemberNotFound>()(
   'ActivityLogMemberNotFound',
@@ -127,11 +117,4 @@ export class ActivityLogApiGroup extends HttpApiGroup.make('activityLog')
         params: { teamId: TeamId, memberId: TeamMemberId, logId: ActivityLogId },
       },
     ).middleware(AuthMiddleware),
-  )
-  .add(
-    HttpApiEndpoint.get('listActivityTypes', '/teams/:teamId/activity-types', {
-      success: ActivityTypeListResponse,
-      error: Forbidden.pipe(HttpApiSchema.status(403)),
-      params: { teamId: TeamId },
-    }).middleware(AuthMiddleware),
   ) {}

@@ -17,7 +17,22 @@ You can log activity in two ways:
 Each log entry records the activity type, the date, an optional duration in minutes, and an optional free-text note.
 
 <Aside type="note" title="Available activity types">
-  The global built-in types are **Gym**, **Running**, and **Stretching**. Your team may add custom types visible in the web app. The `/makanicko log` command currently supports the three built-in types only.
+  The four global built-in types are **Gym**, **Running**, **Stretching**, and **Training**. Your team admin may define additional custom types. All types (built-in and custom) appear in the web app's activity log form and as autocomplete choices in the `/makanicko log` command.
+</Aside>
+
+## Managing activity types (admins)
+
+Team admins can define custom activity types in addition to the four global built-ins.
+
+Go to **Team → Activity types** in the web app to:
+
+- **View** all activity types available to your team, including built-ins and any custom ones you have created.
+- **Create** a new type by entering a name (unique within your team, max 50 characters) and, optionally, an emoji and a short description.
+- **Edit** the name, emoji, or description of a custom type. Global built-in types cannot be edited.
+- **Delete** a custom type that has not been used in any activity log yet. Built-in types and types with existing log entries cannot be deleted.
+
+<Aside type="note" title="Usage count">
+  Each type shows a usage count — the number of log entries recorded against it. Use this to decide whether it is safe to delete a type you no longer need.
 </Aside>
 
 ## Viewing stats

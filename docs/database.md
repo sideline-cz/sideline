@@ -859,7 +859,7 @@ Outbox table for the Weekly Summary bot worker. Each Sunday at 20:00 local team 
 
 #### `activity_types`
 
-Catalogue of activity kinds. Global built-ins have `team_id = NULL`; teams may add their own.
+Catalogue of activity kinds. Global built-ins have `team_id = NULL`; teams may add their own custom types via the Activity Type API.
 
 | Column | Type | Constraints | Default |
 |---|---|---|---|
@@ -867,18 +867,21 @@ Catalogue of activity kinds. Global built-ins have `team_id = NULL`; teams may a
 | `team_id` | UUID | FK → `teams(id)` ON DELETE CASCADE | — |
 | `name` | TEXT | NOT NULL | — |
 | `slug` | TEXT | — | — |
+| `emoji` | TEXT | — | — |
+| `description` | TEXT | — | — |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
-**Unique**: `idx_activity_types_global_slug` — partial unique index on `(slug) WHERE team_id IS NULL`; `idx_activity_types_team_name` — partial unique index on `(team_id, name) WHERE team_id IS NOT NULL`
+**Unique**: `idx_activity_types_global_slug` — partial unique index on `(slug) WHERE team_id IS NULL`; `idx_activity_types_global_lower_name` — partial unique index on `(LOWER(name)) WHERE team_id IS NULL`; `idx_activity_types_team_lower_name` — partial unique index on `(team_id, LOWER(name)) WHERE team_id IS NOT NULL`
 
-**Global built-ins** (seeded by after-migration `1739630400_init`):
+**Global built-ins** (seeded by after-migration `1739630400_init`; emojis backfilled by migration `1781000000`):
 
-| slug | name |
-|---|---|
-| `gym` | Gym |
-| `running` | Run |
-| `stretching` | Stretch |
-| `training` | Training |
+| slug | name | emoji |
+|---|---|---|
+| `gym` | Gym | 🏋️ |
+| `running` | Run | 🏃 |
+| `stretching` | Stretch | 🧘 |
+| `training` | Training | ⚽ |
 
 ---
 
@@ -1034,6 +1037,7 @@ All 50 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1778716800 | `create_achievements` | Creates `earned_achievements` (id, team_member_id FK CASCADE, achievement_slug, earned_at; unique on (team_member_id, achievement_slug)); creates `achievement_role_mappings` (team_id FK CASCADE, achievement_slug, discord_role_id; PK on (team_id, achievement_slug)); creates `achievement_sync_events` (id, team_id FK CASCADE, guild_id, team_member_id FK CASCADE, achievement_slug, created_at, processed_at, error); adds partial index `idx_achievement_sync_unprocessed` on `achievement_sync_events(created_at) WHERE processed_at IS NULL` |
 | 1779000000 | `achievement_admin` | Creates `achievement_settings` (team_id FK CASCADE, achievement_slug, threshold_override INTEGER, updated_at; PK on (team_id, achievement_slug)); creates `custom_achievements` (id PK, team_id FK CASCADE, name, description, emoji, rule_kind, threshold CHECK > 0, activity_type_slug, discord_role_id, created_at, updated_at; UNIQUE (team_id, name)); adds index `idx_custom_achievements_team`; creates `discord_role_provision_events` (id PK, team_id FK CASCADE, guild_id, kind, ref_id, desired_name, attempts DEFAULT 0, created_at, processed_at, error; UNIQUE (team_id, kind, ref_id)); adds partial index `idx_drpe_unprocessed` on `discord_role_provision_events(created_at) WHERE processed_at IS NULL` |
 | 1780000000 | `weekly_summary` | Adds `weekly_summary_channel_id TEXT` to `team_settings`; creates `weekly_summary_sync_events` (id PK, team_id FK CASCADE, week_start TIMESTAMPTZ, week_end TIMESTAMPTZ, channel_id TEXT, payload JSONB DEFAULT '{}', attempts INT DEFAULT 0, last_error TEXT, created_at, processed_at, delivered_at; UNIQUE (team_id, week_start)); adds partial indexes `idx_wsse_pending` and `idx_wsse_delivered` |
+| 1781000000 | `activity_type_metadata` | Adds `emoji TEXT`, `description TEXT`, and `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()` to `activity_types`; backfills emoji for the four global built-ins (🏋️ gym, 🏃 running, 🧘 stretching, ⚽ training); creates unique index `idx_activity_types_global_lower_name` on `(LOWER(name)) WHERE team_id IS NULL`; creates unique index `idx_activity_types_team_lower_name` on `(team_id, LOWER(name)) WHERE team_id IS NOT NULL` |
 
 ### After Migrations (seed data)
 

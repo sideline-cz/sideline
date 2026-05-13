@@ -571,7 +571,7 @@ erDiagram
 
 ### Activity Tracking & Achievements
 
-`activity_logs` record individual physical activity sessions for a team member. `activity_types` defines the catalogue of activity kinds — a set of global built-in slugs (gym, running, stretching, training) plus optional team-specific custom types. `earned_achievements` record milestones unlocked by a member (e.g. first activity, 7-day streak). `achievement_role_mappings` optionally tie each achievement to a Discord role that is granted when the achievement is earned. `achievement_sync_events` is the outbox table the bot drains to grant Discord roles and post congratulatory embeds. `achievement_settings` stores per-team threshold overrides for built-in achievements. `custom_achievements` holds team-defined achievements with fully configurable rules and thresholds. `discord_role_provision_events` is the outbox table the bot's Role Provision worker drains to auto-create Discord roles for achievements.
+`activity_logs` record individual physical activity sessions for a team member. `activity_types` defines the catalogue of activity kinds — four global built-in slugs (gym, running, stretching, training) plus optional team-specific custom types created by team admins. Each type carries an optional single-grapheme emoji and a short description. `earned_achievements` record milestones unlocked by a member (e.g. first activity, 7-day streak). `achievement_role_mappings` optionally tie each achievement to a Discord role that is granted when the achievement is earned. `achievement_sync_events` is the outbox table the bot drains to grant Discord roles and post congratulatory embeds. `achievement_settings` stores per-team threshold overrides for built-in achievements. `custom_achievements` holds team-defined achievements with fully configurable rules and thresholds. `discord_role_provision_events` is the outbox table the bot's Role Provision worker drains to auto-create Discord roles for achievements.
 
 ```mermaid
 erDiagram
@@ -580,7 +580,10 @@ erDiagram
         UUID team_id FK "nullable - NULL means global"
         TEXT name
         TEXT slug
+        TEXT emoji
+        TEXT description
         TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
     }
 
     activity_logs {
@@ -798,7 +801,7 @@ erDiagram
 | `channel_sync_events` | Outbox records driving channel-membership changes in Discord. |
 | `event_sync_events` | Outbox records driving event announcements and updates in Discord. |
 | `channel_event_dividers` | Tracks the divider message ID posted in each event channel to separate past from upcoming events. |
-| `activity_types` | Catalogue of activity kinds; global built-ins plus optional team-specific custom types. |
+| `activity_types` | Catalogue of activity kinds; four global built-ins (gym, running, stretching, training) plus optional team-specific custom types. Each type carries an optional emoji and description. |
 | `activity_logs` | Individual physical activity session records belonging to a team member. |
 | `earned_achievements` | Records which achievements a team member has earned; each achievement is earned at most once per member. |
 | `achievement_role_mappings` | Maps an achievement slug to the Discord role that should be granted when a team member earns it. |

@@ -19,6 +19,8 @@ const permissionLabels: Record<Role.Permission, () => string> = {
   'member:remove': m.role_perm_memberRemove,
   'role:view': m.role_perm_roleView,
   'role:manage': m.role_perm_roleManage,
+  'activity-type:create': m.role_perm_activityTypeCreate,
+  'activity-type:delete': m.role_perm_activityTypeDelete,
   'training-type:create': m.role_perm_trainingTypeCreate,
   'training-type:delete': m.role_perm_trainingTypeDelete,
   'event:create': m.role_perm_eventCreate,

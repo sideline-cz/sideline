@@ -27,7 +27,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$me
               Effect.succeed({ isOwnProfile: false as boolean, logs: [] as const }),
             ),
           ),
-          activityTypes: api.activityLog.listActivityTypes({ params: { teamId } }),
+          activityTypes: api.activityType.listActivityTypes({ params: { teamId } }),
         }),
       ),
       warnAndCatchAll,

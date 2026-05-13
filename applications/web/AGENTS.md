@@ -453,6 +453,25 @@ The locale mapping lives in `src/lib/date-locale.ts` (`getDateFnsLocale()`). Whe
 
 `LanguageSwitcher` organism uses `LocaleSelect` molecule (Shadcn Select wrapper). Accepts `isAuthenticated` prop — when `true`, persists to server.
 
+## Admin Page Layouts: Single-Page-With-Dialog vs List+Detail Routes
+
+When building captain-/admin-facing CRUD for a small entity, pick exactly one of these two layouts. Do not mix them.
+
+| Layout | When to use | Reference implementation |
+|--------|-------------|--------------------------|
+| **Single-page-with-dialog** | Entity has ≤4 user-editable fields, no nested resources, no per-row sub-pages. Create and edit share the same form. | `ActivityTypesPage` (`components/pages/ActivityTypesPage.tsx` at `/teams/:teamId/activity-types`), `AchievementsAdminPage` |
+| **List + detail routes** | Entity has >4 fields, nested resources (e.g. role → role members), or per-row tabs/sub-pages. | Roles (`roles.index.tsx` + `roles.$roleId.tsx`), Rosters, Groups, Events |
+
+### Single-Page-With-Dialog Rules
+
+1. **One route file, one page component.** All CRUD lives in `/teams/:teamId/<resource>` — no `.$id.tsx` sibling. Route file is flat (not `.index.tsx`) since there are no sub-routes.
+2. **Inline `<Dialog>` for create AND edit.** A single `<ResourceFormDialog>` component handles both: `editing?: ResourceInfo` prop is `undefined` for create, `Some` for edit. The form `defaultValues` and the submit handler branch on `isEditing = editing !== undefined`.
+3. **Page owns dialog open state.** Use three React state slots: `createOpen: boolean`, `editTarget: ResourceInfo | null`, optional `cannotDeleteTarget: ResourceInfo | null` for referential-integrity blocked deletes. Reset with `setEditTarget(null)` / `setCreateOpen(false)`.
+4. **Reset form on `open` change.** Inside the dialog component, `React.useEffect(() => { if (open) form.reset({...defaults}) }, [open, editing, form])` — re-opening with a different `editing` row must re-seed the form.
+5. **Render built-in/protected rows read-only.** Mark rows with `Option.isSome(row.slug)` (or equivalent "built-in" flag) and disable Edit/Delete `<Button>`s on them with `title={m.<resource>_protected()}`. The 422 `Protected` HTTP error is the server-side defence; the disabled button is the UX-side prevention.
+6. **Handle 409 `HasLogs` (or equivalent referential-integrity error) with a dedicated `CannotDeleteDialog`.** After the `Effect.mapError` branch detects the tag, stash the offending row + count in state and render a second dialog offering "Rename instead" — never just toast the error.
+7. **`router.invalidate()` after every successful mutation.** The page reads via the route loader; mutations must not optimistically update local state.
+
 ## Shared Utility Modules (`src/lib/`)
 
 Reusable label maps and option builders live in `src/lib/`. Always import from these files instead of duplicating inline.

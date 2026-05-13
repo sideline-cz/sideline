@@ -75,6 +75,8 @@ const ADMIN_PERMISSIONS: readonly Role.Permission[] = [
   'member:remove',
   'role:view',
   'role:manage',
+  'activity-type:create',
+  'activity-type:delete',
   'training-type:create',
   'training-type:delete',
   'event:create',

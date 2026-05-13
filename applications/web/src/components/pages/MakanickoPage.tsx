@@ -20,7 +20,11 @@ interface MakanickoPageProps {
   currentUserId: string;
   activityStats: ActivityStatsApi.ActivityStatsResponse;
   activityLogs: ReadonlyArray<ActivityLogApi.ActivityLogEntry>;
-  activityTypes: ReadonlyArray<{ id: ActivityType.ActivityTypeId; name: string }>;
+  activityTypes: ReadonlyArray<{
+    id: ActivityType.ActivityTypeId;
+    name: string;
+    emoji: Option.Option<string>;
+  }>;
   onCreateLog: (input: {
     activityTypeId: ActivityType.ActivityTypeId;
     durationMinutes: Option.Option<number>;

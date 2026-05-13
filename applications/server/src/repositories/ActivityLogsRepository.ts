@@ -26,6 +26,7 @@ class InsertResult extends Schema.Class<InsertResult>('InsertResult')({
   id: ActivityLog.ActivityLogId,
   activity_type_id: ActivityType.ActivityTypeId,
   activity_type_name: Schema.String,
+  activity_type_emoji: Schema.OptionFromNullOr(ActivityType.ActivityTypeEmoji),
   logged_at: Schema.String,
   source: ActivityLog.ActivitySource,
 }) {}
@@ -35,6 +36,7 @@ class LogRow extends Schema.Class<LogRow>('LogRow')({
   team_member_id: TeamMember.TeamMemberId,
   activity_type_id: ActivityType.ActivityTypeId,
   activity_type_name: Schema.String,
+  activity_type_emoji: Schema.OptionFromNullOr(ActivityType.ActivityTypeEmoji),
   logged_at: Schema.String,
   duration_minutes: Schema.OptionFromNullOr(Schema.Int),
   note: Schema.OptionFromNullOr(Schema.String),
@@ -77,6 +79,7 @@ const make = Effect.gen(function* () {
       )
       RETURNING id, activity_type_id,
         (SELECT name FROM activity_types WHERE id = activity_type_id) AS activity_type_name,
+        (SELECT emoji FROM activity_types WHERE id = activity_type_id) AS activity_type_emoji,
         logged_at::text, source
     `,
   });
@@ -102,6 +105,7 @@ const make = Effect.gen(function* () {
     Result: LogRow,
     execute: (teamMemberId) => sql`
       SELECT al.id, al.team_member_id, al.activity_type_id, at.name AS activity_type_name,
+             at.emoji AS activity_type_emoji,
              al.logged_at::text AS logged_at, al.duration_minutes, al.note, al.source
       FROM activity_logs al
       JOIN activity_types at ON at.id = al.activity_type_id
@@ -116,6 +120,7 @@ const make = Effect.gen(function* () {
     Result: LogRow,
     execute: (input) => sql`
       SELECT al.id, al.team_member_id, al.activity_type_id, at.name AS activity_type_name,
+             at.emoji AS activity_type_emoji,
              al.logged_at::text AS logged_at, al.duration_minutes, al.note, al.source
       FROM activity_logs al
       JOIN activity_types at ON at.id = al.activity_type_id
@@ -137,6 +142,7 @@ const make = Effect.gen(function* () {
         AND team_member_id = ${input.team_member_id}
       RETURNING id, team_member_id, activity_type_id,
         (SELECT name FROM activity_types WHERE id = activity_type_id) AS activity_type_name,
+        (SELECT emoji FROM activity_types WHERE id = activity_type_id) AS activity_type_emoji,
         logged_at::text AS logged_at, duration_minutes, note, source
     `,
   });
