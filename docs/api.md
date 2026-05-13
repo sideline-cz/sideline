@@ -28,6 +28,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Notification](#17-notification)
    - [iCal](#18-ical)
    - [Achievement](#19-achievement)
+   - [Weekly Summary](#20-weekly-summary)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -3387,6 +3388,99 @@ Deletes a custom achievement. Any `earned_achievements` rows referencing this ac
 
 ---
 
+### 20. Weekly Summary
+
+**Source:** `packages/domain/src/api/WeeklySummaryApi.ts`
+
+Returns a weekly activity summary for the authenticated member and, optionally, for the whole team. All members can retrieve their own player summary; the team-level summary is only included when `includeTeam=true` is requested **and** the caller holds the `roster:manage` permission.
+
+---
+
+#### `GET /teams/:teamId/weekly-summary`
+
+Returns the weekly activity summary for the authenticated team member. By default returns data for the current ISO week; pass `week` to retrieve a historical week.
+
+**Auth:** Bearer token (AuthMiddleware) — caller must be a member of `teamId`
+
+**Path parameters:** `teamId`
+
+**Query parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `week` | `string` (`YYYY-Www`) | No | ISO week identifier, e.g. `2026-W20`. Defaults to the current week in the team's configured timezone. |
+| `includeTeam` | `"true"` \| `"false"` | No | When `true`, and the caller has `roster:manage`, also returns the team-level breakdown. Defaults to `false`. |
+
+**Response:** `200 OK` — `WeeklySummaryResponse`
+
+`WeeklySummaryResponse`:
+
+| Field | Type | Description |
+|---|---|---|
+| `week` | `WeekRange` | The ISO week the summary covers. |
+| `player` | `PlayerWeeklySummary \| null` | The authenticated member's personal summary. `null` if the member has no activity data for the week. |
+| `team` | `TeamWeeklySummary \| null` | Team-level summary. `null` when `includeTeam` is `false` or the caller lacks `roster:manage`. |
+
+`WeekRange`:
+
+| Field | Type | Description |
+|---|---|---|
+| `startAt` | `DateTime` | Monday 00:00:00 of the week in UTC. |
+| `endAt` | `DateTime` | Sunday 23:59:59.999 of the week in UTC. |
+| `isoYear` | `integer` | ISO year (may differ from the calendar year for week 1 / week 52–53 boundary weeks). |
+| `isoWeek` | `integer` | ISO week number (1–53). |
+
+`PlayerWeeklySummary`:
+
+| Field | Type | Description |
+|---|---|---|
+| `teamMemberId` | `UUID` | The member's ID. |
+| `totalActivities` | `integer` | Number of activities logged during the week. |
+| `totalDurationMinutes` | `integer` | Total logged duration in minutes for the week. |
+| `activitiesByType` | `ActivityTypeBreakdown[]` | Per-activity-type counts for the week. |
+| `currentStreak` | `integer` | Current consecutive-day activity streak (all-time, not week-scoped). |
+| `longestStreak` | `integer` | Longest consecutive-day streak ever achieved by the member. |
+| `previousWeekActivities` | `integer` | Number of activities the member logged in the immediately preceding ISO week. |
+| `newAchievements` | `{ slug, earnedAt }[]` | Achievements earned during this week. |
+
+`ActivityTypeBreakdown`:
+
+| Field | Type | Description |
+|---|---|---|
+| `activityTypeId` | `UUID` | Activity type ID. |
+| `activityTypeName` | `string` | Display name of the activity type. |
+| `count` | `integer` | Number of activities of this type logged during the week. |
+
+`TeamWeeklySummary`:
+
+| Field | Type | Description |
+|---|---|---|
+| `totalActivities` | `integer` | Total activity logs across the entire team for the week. |
+| `totalDurationMinutes` | `integer` | Summed duration across all team members for the week. |
+| `activeMemberCount` | `integer` | Number of team members who logged at least one activity during the week. |
+| `totalMemberCount` | `integer` | Total number of team members at the time of the request. |
+| `topContributors` | `TopContributor[]` | Members ranked by activity count (descending). |
+| `newAchievementsCount` | `integer` | Total achievements earned by any team member during the week. |
+| `previousWeekActivities` | `integer` | Team-total activity count for the preceding ISO week. |
+
+`TopContributor`:
+
+| Field | Type | Description |
+|---|---|---|
+| `teamMemberId` | `UUID` | The member's ID. |
+| `displayName` | `string` | The member's display name. |
+| `totalActivities` | `integer` | Their activity count for the week. |
+| `totalDurationMinutes` | `integer` | Their total logged duration for the week. |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `WeeklySummaryForbidden` | 403 | Caller is not a member of the team |
+| `WeeklySummaryNotFound` | 404 | The `week` parameter is syntactically invalid |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -3496,6 +3590,18 @@ Drains the `discord_role_provision_events` outbox. When an admin selects `auto_c
 
 `UnprocessedRoleProvisionEvent` fields: `id`, `team_id`, `guild_id`, `kind` (`"builtin_achievement" | "custom_achievement"`), `ref_id` (slug or UUID), `desired_name` (role name to create/find).
 
+#### WeeklySummary
+
+Drains the `weekly_summary_sync_events` outbox. Each Sunday at 20:00 local team time the server cron inserts one row per team; the bot's Weekly Summary worker picks it up, builds the embed, posts it to the configured Discord channel, and marks the event delivered.
+
+| Method | Payload / Returns | Description |
+|---|---|---|
+| `WeeklySummary/GetUnprocessedEvents` | — → `UnprocessedWeeklySummaryEvent[]` | Polls for outbox events that have not yet been delivered |
+| `WeeklySummary/MarkEventProcessed` | `id`, `deliveredAt` | Marks an event as successfully delivered; records the delivery timestamp |
+| `WeeklySummary/MarkEventFailed` | `id`, `error` | Records a delivery failure and increments the attempt counter |
+
+`UnprocessedWeeklySummaryEvent` fields: `id`, `team_id`, `channel_id` (Discord channel snowflake), `week_start`, `week_end`, `payload` (encoded `WeeklySummaryDigest` JSON).
+
 ---
 
 ## Error Reference
@@ -3556,3 +3662,5 @@ The following table consolidates all error tags across all API groups.
 | `InvalidThreshold` | 400 | Achievement | Threshold value is zero or negative |
 | `InvalidCustomRule` | 400 | Achievement | Invalid `ruleKind`/`activityTypeSlug` combination (e.g. `activity_type_count` without a slug) |
 | `NoGuildLinked` | 400 | Achievement | `auto_create` role mapping requested but the team has no linked Discord guild |
+| `WeeklySummaryForbidden` | 403 | Weekly Summary | Caller is not a member of the team |
+| `WeeklySummaryNotFound` | 404 | Weekly Summary | The `week` query parameter is syntactically invalid |

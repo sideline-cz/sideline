@@ -18,6 +18,7 @@ import {
   TeamApi,
   TeamSettingsApi,
   TrainingTypeApi,
+  WeeklySummaryApi,
 } from '@sideline/domain';
 import { HttpApi } from 'effect/unstable/httpapi';
 import { env } from '~/env.js';
@@ -42,4 +43,5 @@ export const Api = HttpApi.make('api')
   .add(TeamApi.TeamApiGroup)
   .add(TeamSettingsApi.TeamSettingsApiGroup)
   .add(TrainingTypeApi.TrainingTypeApiGroup)
+  .add(WeeklySummaryApi.WeeklySummaryApiGroup)
   .prefix(env.API_PREFIX as '/${string}');

@@ -47,6 +47,8 @@ export * as TeamSettingsApi from './api/TeamSettingsApi.js';
 
 export * as TrainingTypeApi from './api/TrainingTypeApi.js';
 
+export * as WeeklySummaryApi from './api/WeeklySummaryApi.js';
+
 export * as Achievement from './models/Achievement.js';
 
 export * as AchievementSyncEvent from './models/AchievementSyncEvent.js';
@@ -116,6 +118,12 @@ export * as TeamSettings from './models/TeamSettings.js';
 export * as TrainingType from './models/TrainingType.js';
 
 export * as User from './models/User.js';
+
+/**
+ * Shared payload schema for the weekly_summary_sync_events queue.
+ * The cron encodes this; the bot handler decodes it.
+ */
+export * as WeeklySummary from './models/WeeklySummary.js';
 export * as AchievementRpcEvents from './rpc/achievement/AchievementRpcEvents.js';
 export * as AchievementRpcGroup from './rpc/achievement/AchievementRpcGroup.js';
 export * as ActivityRpcGroup from './rpc/activity/ActivityRpcGroup.js';
@@ -133,3 +141,7 @@ export * as RoleRpcGroup from './rpc/role/RoleRpcGroup.js';
 export * as RoleRpcModels from './rpc/role/RoleRpcModels.js';
 export * as RoleProvisionRpcGroup from './rpc/roleProvision/RoleProvisionRpcGroup.js';
 export * as SyncRpcs from './rpc/SyncRpcs.js';
+
+export * as WeeklySummaryRpcEvents from './rpc/weeklySummary/WeeklySummaryRpcEvents.js';
+
+export * as WeeklySummaryRpcGroup from './rpc/weeklySummary/WeeklySummaryRpcGroup.js';

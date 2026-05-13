@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-13 — Weekly makáníčko summary in Discord
+
+- Every Sunday at 20:00 in your team's configured timezone, the bot posts a **weekly activity summary embed** to a Discord channel of your choice.
+- The embed shows the team's total activities and total logged duration for the week, the number of active members, a leaderboard of top contributors (with their activity count and duration), the number of new achievements earned, and a comparison with the previous week.
+- Captains can configure the summary channel in **Team settings → Discord integration** by setting the **Weekly summary channel** field.
+- When no channel is set the cron skips the team — enabling the feature is opt-in.
+- Members can view their own personal weekly summary (activities by type, streak info, new achievements) at **Workout → Weekly summary** in the web app. Captains also see the full team breakdown on the same page.
+
 ## 2026-05-13 — Achievement management for admins
 
 - Captains can now manage achievements from the **Team → Achievements** page in the web app.

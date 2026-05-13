@@ -11,6 +11,7 @@ import {
   OnboardingSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
+  WeeklySummarySyncService,
 } from '~/rcp/index.js';
 import { InviteCache } from '~/services/InviteCache.js';
 import { OnboardingRoleCache } from '~/services/OnboardingRoleCache.js';
@@ -25,6 +26,7 @@ const SyncLive = Layer.mergeAll(
   GuildJoinSyncService.Default,
   InviteGeneratorService.Default,
   OnboardingSyncService.Default,
+  WeeklySummarySyncService.Default,
 ).pipe(
   Layer.provideMerge(ChannelReorderSemaphore.Live),
   Layer.provideMerge(InviteCache.Default),

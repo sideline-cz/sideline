@@ -67,6 +67,24 @@ If no role mapping or no welcome channel is configured, the achievement is still
   - **Link a Discord role** to any achievement. Choose an existing role by ID, or select **Auto-create** to have the bot find or create a role with the achievement's name automatically.
 </Aside>
 
+## Weekly summary
+
+Every Sunday at 20:00 in your team's configured timezone, the bot posts a **weekly activity summary** embed to a Discord channel configured by your captain.
+
+The embed includes:
+
+- Total activities and total logged duration for the week.
+- Number of active members (those who logged at least one activity).
+- A leaderboard of top contributors with their activity count and duration.
+- New achievements earned by any team member during the week.
+- A comparison with the previous week's activity total.
+
+You can also view your personal weekly summary any time in the web app at **Workout → Weekly summary**. The page shows your own activity breakdown by type, current and longest streaks, new achievements, and a comparison with the previous week. If you are a captain, the page also shows the full team breakdown.
+
+<Aside type="note" title="Captains: enabling the weekly summary">
+  Go to **Team settings → Discord integration** and set the **Weekly summary channel** field to the Discord channel where the embed should be posted. When no channel is set the summary is not sent.
+</Aside>
+
 ## See also
 
 - [Discord integration](/guides/discord-integration/) — for the `/makanicko` commands reference.

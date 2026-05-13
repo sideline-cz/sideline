@@ -6,6 +6,7 @@ import { InviteGeneratorService } from './inviteGenerator/index.js';
 import { OnboardingSyncService } from './onboarding/index.js';
 import { RoleSyncService } from './role/index.js';
 import { RoleProvisionSyncService } from './roleProvision/index.js';
+import { WeeklySummarySyncService } from './weeklySummary/index.js';
 
 export {
   AchievementSyncService,
@@ -16,4 +17,5 @@ export {
   OnboardingSyncService,
   RoleSyncService,
   RoleProvisionSyncService,
+  WeeklySummarySyncService,
 };

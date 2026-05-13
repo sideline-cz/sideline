@@ -27,6 +27,13 @@ class TeamSettingsRow extends Schema.Class<TeamSettingsRow>('TeamSettingsRow')({
   discord_channel_cleanup_on_roster_deactivate: ChannelSyncEvent.ChannelCleanupMode,
   discord_role_format: Schema.String,
   discord_channel_format: Schema.String,
+  weekly_summary_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+}) {}
+
+class WeeklySummaryTeamRow extends Schema.Class<WeeklySummaryTeamRow>('WeeklySummaryTeamRow')({
+  team_id: Team.TeamId,
+  timezone: Schema.String,
+  weekly_summary_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
 }) {}
 
 const TeamSettingsUpsertInput = Schema.Struct({
@@ -51,6 +58,7 @@ const TeamSettingsUpsertInput = Schema.Struct({
   discord_channel_cleanup_on_roster_deactivate: ChannelSyncEvent.ChannelCleanupMode,
   discord_role_format: Schema.String,
   discord_channel_format: Schema.String,
+  weekly_summary_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
 });
 
 class EventNeedingReminder extends Schema.Class<EventNeedingReminder>('EventNeedingReminder')({
@@ -89,9 +97,20 @@ const make = Effect.gen(function* () {
              discord_channel_cleanup_on_group_delete,
              discord_channel_cleanup_on_roster_deactivate,
              discord_role_format,
-             discord_channel_format
+             discord_channel_format,
+             weekly_summary_channel_id
       FROM team_settings
       WHERE team_id = ${teamId}
+    `,
+  });
+
+  const _findAllWithWeeklySummaryChannel = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: WeeklySummaryTeamRow,
+    execute: () => sql`
+      SELECT team_id, timezone, weekly_summary_channel_id
+      FROM team_settings
+      WHERE weekly_summary_channel_id IS NOT NULL
     `,
   });
 
@@ -112,7 +131,8 @@ const make = Effect.gen(function* () {
                                  discord_channel_cleanup_on_group_delete,
                                  discord_channel_cleanup_on_roster_deactivate,
                                  discord_role_format,
-                                 discord_channel_format)
+                                 discord_channel_format,
+                                 weekly_summary_channel_id)
       VALUES (${input.team_id}, ${input.event_horizon_days},
               ${input.min_players_threshold},
               ${input.rsvp_reminder_days_before}, ${input.rsvp_reminder_time},
@@ -126,7 +146,8 @@ const make = Effect.gen(function* () {
               ${input.discord_channel_cleanup_on_group_delete},
               ${input.discord_channel_cleanup_on_roster_deactivate},
               ${input.discord_role_format},
-              ${input.discord_channel_format})
+              ${input.discord_channel_format},
+              ${input.weekly_summary_channel_id})
       ON CONFLICT (team_id) DO UPDATE SET
         event_horizon_days = ${input.event_horizon_days},
         min_players_threshold = ${input.min_players_threshold},
@@ -148,6 +169,7 @@ const make = Effect.gen(function* () {
         discord_channel_cleanup_on_roster_deactivate = ${input.discord_channel_cleanup_on_roster_deactivate},
         discord_role_format = ${input.discord_role_format},
         discord_channel_format = ${input.discord_channel_format},
+        weekly_summary_channel_id = ${input.weekly_summary_channel_id},
         updated_at = now()
       RETURNING team_id, event_horizon_days,
                 min_players_threshold,
@@ -162,7 +184,8 @@ const make = Effect.gen(function* () {
                 discord_channel_cleanup_on_group_delete,
                 discord_channel_cleanup_on_roster_deactivate,
                 discord_role_format,
-                discord_channel_format
+                discord_channel_format,
+                weekly_summary_channel_id
     `,
   });
 
@@ -224,6 +247,7 @@ const make = Effect.gen(function* () {
     discordChannelCleanupOnRosterDeactivate = 'delete' as ChannelSyncEvent.ChannelCleanupMode,
     discordRoleFormat = DEFAULT_ROLE_FORMAT,
     discordChannelFormat = DEFAULT_CHANNEL_FORMAT,
+    weeklySummaryChannelId = Option.none<Discord.Snowflake>(),
   }: {
     teamId: Team.TeamId;
     eventHorizonDays: number;
@@ -246,6 +270,7 @@ const make = Effect.gen(function* () {
     discordChannelCleanupOnRosterDeactivate?: ChannelSyncEvent.ChannelCleanupMode;
     discordRoleFormat?: string;
     discordChannelFormat?: string;
+    weeklySummaryChannelId?: Option.Option<Discord.Snowflake>;
   }) =>
     _upsertSettings({
       team_id: teamId,
@@ -269,6 +294,7 @@ const make = Effect.gen(function* () {
       discord_channel_cleanup_on_roster_deactivate: discordChannelCleanupOnRosterDeactivate,
       discord_role_format: discordRoleFormat,
       discord_channel_format: discordChannelFormat,
+      weekly_summary_channel_id: weeklySummaryChannelId,
     }).pipe(catchSqlErrors);
 
   const getHorizonDays = (teamId: Team.TeamId) =>
@@ -288,6 +314,9 @@ const make = Effect.gen(function* () {
 
   const findEventsNeedingReminder = () => findEventsNeedingReminderAt(new Date());
 
+  const findAllWithWeeklySummaryChannel = () =>
+    _findAllWithWeeklySummaryChannel(undefined as unknown as undefined).pipe(catchSqlErrors);
+
   return {
     findByTeamId,
     upsert,
@@ -295,6 +324,7 @@ const make = Effect.gen(function* () {
     findLateRsvpChannelId,
     findEventsNeedingReminder,
     findEventsNeedingReminderAt,
+    findAllWithWeeklySummaryChannel,
   };
 });
 
