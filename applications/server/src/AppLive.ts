@@ -44,6 +44,10 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import {
+  WeeklySummaryRepository,
+  WeeklySummarySyncEventsRepository,
+} from '~/repositories/WeeklySummaryRepository.js';
 import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
@@ -103,6 +107,8 @@ const Repositories = Layer.mergeAll(
   AchievementSettingsRepository.Default,
   CustomAchievementsRepository.Default,
   DiscordRoleProvisionEventsRepository.Default,
+  WeeklySummaryRepository.Default,
+  WeeklySummarySyncEventsRepository.Default,
 );
 
 const AppLayer = Layer.mergeAll(

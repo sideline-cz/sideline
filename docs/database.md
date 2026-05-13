@@ -226,10 +226,11 @@ One-to-one extension of `teams` holding configurable operational defaults.
 | `discord_channel_cleanup_on_roster_deactivate` | TEXT | NOT NULL | `'delete'` |
 | `discord_role_format` | TEXT | NOT NULL | `'{emoji} {name}'` |
 | `discord_channel_format` | TEXT | NOT NULL | `'{emoji}│{name}'` |
+| `weekly_summary_channel_id` | TEXT | — | — |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 | `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
-**Notes**: Created in migration `1741600000`. RSVP reminder columns (`min_players_threshold` and `rsvp_reminder_hours`) added in `1742500000`. Discord channel columns added in `1742100000`. `create_discord_channel_on_roster` added in `1743500000`. `discord_archive_category_id` added in `1743600000`. `discord_channel_cleanup_on_group_delete` and `discord_channel_cleanup_on_roster_deactivate` added in `1743600000`. `discord_role_format` and `discord_channel_format` added in `1743700000`. `discord_channel_late_rsvp` added in `1743900000`. `rsvp_reminder_days_before`, `rsvp_reminder_time`, `reminders_channel_id`, and `timezone` added in `1745800000` (`rsvp_reminder_v2`); `rsvp_reminder_hours` was dropped in the same migration with data migrated to `rsvp_reminder_days_before`. `rsvp_reminder_days_before` specifies how many days before the event the reminder fires (0 disables reminders). `rsvp_reminder_time` is the time-of-day (in the team's `timezone`) at which the reminder fires; the cron matches within a 5-minute window. `reminders_channel_id` is the Discord channel where RSVP reminders and event-start announcements are posted; when `NULL` the bot falls back to the event owner-group's channel. `timezone` is a valid IANA timezone string (default `'Europe/Prague'`). The `discord_channel_*` columns hold Discord channel IDs for the bot to post event announcements by event type; `discord_channel_late_rsvp` is the channel where the bot posts a notification when a member submits or changes their RSVP after the reminder was sent. `create_discord_channel_on_group` and `create_discord_channel_on_roster` control whether the bot automatically creates Discord channels when a group or roster is created. `discord_archive_category_id` is the Discord category channel ID to move channels into when `archive` mode is active. `discord_channel_cleanup_on_group_delete` and `discord_channel_cleanup_on_roster_deactivate` each accept one of three values: `'nothing'` (keep the channel, delete only the role and mapping), `'delete'` (delete the channel and role), or `'archive'` (move the channel to `discord_archive_category_id`). `discord_role_format` and `discord_channel_format` are template strings used to format Discord role and channel names respectively; they must contain `{name}` and may contain `{emoji}`.
+**Notes**: Created in migration `1741600000`. RSVP reminder columns (`min_players_threshold` and `rsvp_reminder_hours`) added in `1742500000`. Discord channel columns added in `1742100000`. `create_discord_channel_on_roster` added in `1743500000`. `discord_archive_category_id` added in `1743600000`. `discord_channel_cleanup_on_group_delete` and `discord_channel_cleanup_on_roster_deactivate` added in `1743600000`. `discord_role_format` and `discord_channel_format` added in `1743700000`. `discord_channel_late_rsvp` added in `1743900000`. `rsvp_reminder_days_before`, `rsvp_reminder_time`, `reminders_channel_id`, and `timezone` added in `1745800000` (`rsvp_reminder_v2`); `rsvp_reminder_hours` was dropped in the same migration with data migrated to `rsvp_reminder_days_before`. `weekly_summary_channel_id` added in `1780000000` (`weekly_summary`). `rsvp_reminder_days_before` specifies how many days before the event the reminder fires (0 disables reminders). `rsvp_reminder_time` is the time-of-day (in the team's `timezone`) at which the reminder fires; the cron matches within a 5-minute window. `reminders_channel_id` is the Discord channel where RSVP reminders and event-start announcements are posted; when `NULL` the bot falls back to the event owner-group's channel. `timezone` is a valid IANA timezone string (default `'Europe/Prague'`). The `discord_channel_*` columns hold Discord channel IDs for the bot to post event announcements by event type; `discord_channel_late_rsvp` is the channel where the bot posts a notification when a member submits or changes their RSVP after the reminder was sent. `create_discord_channel_on_group` and `create_discord_channel_on_roster` control whether the bot automatically creates Discord channels when a group or roster is created. `discord_archive_category_id` is the Discord category channel ID to move channels into when `archive` mode is active. `discord_channel_cleanup_on_group_delete` and `discord_channel_cleanup_on_roster_deactivate` each accept one of three values: `'nothing'` (keep the channel, delete only the role and mapping), `'delete'` (delete the channel and role), or `'archive'` (move the channel to `discord_archive_category_id`). `discord_role_format` and `discord_channel_format` are template strings used to format Discord role and channel names respectively; they must contain `{name}` and may contain `{emoji}`. `weekly_summary_channel_id` is the Discord channel where the bot posts the weekly summary embed each Sunday at 20:00 local team time; when `NULL` the cron skips the team.
 
 ---
 
@@ -828,6 +829,32 @@ Outbox table for the bot's Role Provision worker. When an admin chooses `auto_cr
 
 ---
 
+#### `weekly_summary_sync_events`
+
+Outbox table for the Weekly Summary bot worker. Each Sunday at 20:00 local team time the `WeeklySummaryCron` inserts one row per team that has a `weekly_summary_channel_id` configured. The bot drains the table by building the Discord embed, posting it to the channel, and marking the row as delivered.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `week_start` | TIMESTAMPTZ | NOT NULL | — |
+| `week_end` | TIMESTAMPTZ | NOT NULL | — |
+| `channel_id` | TEXT | NOT NULL | — |
+| `payload` | JSONB | NOT NULL | `'{}'` |
+| `attempts` | INT | NOT NULL | `0` |
+| `last_error` | TEXT | — | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `processed_at` | TIMESTAMPTZ | — | — |
+| `delivered_at` | TIMESTAMPTZ | — | — |
+
+**Unique**: `(team_id, week_start)` — one pending event per team per week; duplicate cron ticks are silently ignored at the database layer.
+
+**Indexes**: `idx_wsse_pending` — partial index on `(team_id, week_start) WHERE processed_at IS NULL`; `idx_wsse_delivered` — partial index on `(team_id, week_start) WHERE delivered_at IS NOT NULL`.
+
+**Notes**: Added in migration `1780000000_weekly_summary`. `payload` contains the encoded `WeeklySummaryDigest` (team-level summary and week range). `processed_at` is set when the bot first picks up the event; `delivered_at` is set after the Discord message is successfully posted. The `UNIQUE (team_id, week_start)` constraint together with `ON CONFLICT DO NOTHING` in the cron makes the insert idempotent.
+
+---
+
 ### 8. Activity Tracking
 
 #### `activity_types`
@@ -939,7 +966,7 @@ In-app alert records scoped to a specific team and user.
 
 ## Migration History
 
-All 49 migration files in `packages/migrations/src/before/` plus 1 after-migration.
+All 50 migration files in `packages/migrations/src/before/` plus 1 after-migration.
 
 ### Before Migrations (schema changes)
 
@@ -1006,6 +1033,7 @@ All 49 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1747600000 | `decouple_channel_role` | Makes `discord_channel_mappings.discord_channel_id` nullable (drops NOT NULL); adds CHECK constraint `discord_channel_mappings_at_least_one (discord_channel_id IS NOT NULL OR discord_role_id IS NOT NULL)`; creates partial unique index `discord_channel_mappings_team_channel ON (team_id, discord_channel_id) WHERE discord_channel_id IS NOT NULL` (replaces the old unconditional unique on the same column pair) |
 | 1778716800 | `create_achievements` | Creates `earned_achievements` (id, team_member_id FK CASCADE, achievement_slug, earned_at; unique on (team_member_id, achievement_slug)); creates `achievement_role_mappings` (team_id FK CASCADE, achievement_slug, discord_role_id; PK on (team_id, achievement_slug)); creates `achievement_sync_events` (id, team_id FK CASCADE, guild_id, team_member_id FK CASCADE, achievement_slug, created_at, processed_at, error); adds partial index `idx_achievement_sync_unprocessed` on `achievement_sync_events(created_at) WHERE processed_at IS NULL` |
 | 1779000000 | `achievement_admin` | Creates `achievement_settings` (team_id FK CASCADE, achievement_slug, threshold_override INTEGER, updated_at; PK on (team_id, achievement_slug)); creates `custom_achievements` (id PK, team_id FK CASCADE, name, description, emoji, rule_kind, threshold CHECK > 0, activity_type_slug, discord_role_id, created_at, updated_at; UNIQUE (team_id, name)); adds index `idx_custom_achievements_team`; creates `discord_role_provision_events` (id PK, team_id FK CASCADE, guild_id, kind, ref_id, desired_name, attempts DEFAULT 0, created_at, processed_at, error; UNIQUE (team_id, kind, ref_id)); adds partial index `idx_drpe_unprocessed` on `discord_role_provision_events(created_at) WHERE processed_at IS NULL` |
+| 1780000000 | `weekly_summary` | Adds `weekly_summary_channel_id TEXT` to `team_settings`; creates `weekly_summary_sync_events` (id PK, team_id FK CASCADE, week_start TIMESTAMPTZ, week_end TIMESTAMPTZ, channel_id TEXT, payload JSONB DEFAULT '{}', attempts INT DEFAULT 0, last_error TEXT, created_at, processed_at, delivered_at; UNIQUE (team_id, week_start)); adds partial indexes `idx_wsse_pending` and `idx_wsse_delivered` |
 
 ### After Migrations (seed data)
 

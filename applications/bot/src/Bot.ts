@@ -15,6 +15,7 @@ import {
   OnboardingSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
+  WeeklySummarySyncService,
 } from './index.js';
 
 const ixProgram = Effect.succeed(commandBuilder).pipe(
@@ -43,6 +44,7 @@ export const program = Effect.Do.pipe(
   Effect.bind('onboarding', () => OnboardingSyncService.asEffect()),
   Effect.bind('achievements', () => AchievementSyncService.asEffect()),
   Effect.bind('roleProvision', () => RoleProvisionSyncService.asEffect()),
+  Effect.bind('weeklySummary', () => WeeklySummarySyncService.asEffect()),
   Effect.tap(() => Effect.logInfo('Bot connected to Discord')),
   Effect.andThen(
     ({
@@ -55,6 +57,7 @@ export const program = Effect.Do.pipe(
       onboarding,
       achievements,
       roleProvision,
+      weeklySummary,
     }) =>
       Effect.all(
         [
@@ -68,6 +71,7 @@ export const program = Effect.Do.pipe(
           pollLoop(onboarding.processTick),
           pollLoop(achievements.processTick),
           pollLoop(roleProvision.processTick),
+          pollLoop(weeklySummary.processTick),
           recoverDeletedMessages,
         ],
         {
@@ -90,4 +94,5 @@ export const program = Effect.Do.pipe(
   | OnboardingSyncService
   | AchievementSyncService
   | RoleProvisionSyncService
+  | WeeklySummarySyncService
 >;

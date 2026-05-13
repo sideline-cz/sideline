@@ -293,6 +293,7 @@ Cron jobs are long-running Effects that repeat on a schedule. Each cron is defin
 | `RsvpReminderCron` | `src/services/RsvpReminderCron.ts` | every minute | Send RSVP reminder sync events |
 | `TrainingAutoLogCron` | `src/services/TrainingAutoLogCron.ts` | every 5 minutes | Auto-log ended trainings |
 | `EventStartCron` | `src/services/EventStartCron.ts` | every minute | Mark active events as `started` when `start_at <= NOW()`, emit `event_started` sync events |
+| `WeeklySummaryCron` | `src/services/WeeklySummaryCron.ts` | every minute (gated to Sun 20:00 in team timezone) | Build a per-team weekly digest and insert one `weekly_summary_sync_events` row per team-week |
 
 ### Pattern
 
@@ -334,6 +335,53 @@ Effect.all(
 ```
 
 Use `Effect.exit` (not `Effect.either`) — `Effect.either` is not exported in the Effect 4 beta used by this repo, and `Effect.exit` additionally catches defects.
+
+### Timezone-Aware Firing Time
+
+A cron whose business rule is "fire on a specific local time per team" (e.g. "Sunday 20:00 in `team_settings.timezone`") has two valid gating strategies. Pick one per cron; do not mix them.
+
+| Strategy | When to use | Reference |
+|----------|-------------|-----------|
+| **SQL-side** (`AT TIME ZONE ts.timezone` inside the `WHERE` clause) | The cron's trigger is **per-row** and the row already lives in a table joined to `team_settings`. The query returns only rows whose owning team is currently inside the firing window. | `RsvpReminderCron` → `TeamSettingsRepository.findEventsNeedingReminder` |
+| **TS-side** (`Intl.DateTimeFormat` over each team's IANA timezone, inside the cron's per-team loop) | The cron's trigger is **per-team** (one row per team per cycle), so there is no per-row JOIN to gate in SQL. The cron loads `team_settings` for every team that opted in, then short-circuits per team when the local time does not match. | `WeeklySummaryCron.isSunday20InTimezone` |
+
+Rules for the TS-side variant:
+
+1. **Wire the cron at `Schedule.cron('* * * * *')` (every minute)** and gate inside the per-team `Effect.tap`. Do not try to encode a weekly cron pattern — DST and per-team timezones make a single CRON expression incorrect.
+2. **Define the gate as a pure helper** (signature `(nowMs: number, timezone: string) => boolean`) that calls `new Intl.DateTimeFormat('en-CA', { timeZone, weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })` and reads `weekday`/`hour`/`minute` from `formatToParts(...)`. Keep it module-local — do not export.
+3. **The gate's hour/minute comparison must be exact** (`hour === 20 && minute === 0`) and the second must be range-checked (`second <= 59`) so a one-minute-cadence cron fires exactly once per team-week. Do not use `hour >= 20` — that fires every minute for the next four hours.
+4. **Wrap the `Intl.DateTimeFormat` call in `try { ... } catch { return false }`** — an unknown IANA zone in `team_settings.timezone` is a misconfiguration, not a cron failure. The bad team is skipped silently this cycle.
+5. **Skip via `Effect.fail(new SkipTeam(...))`** (a module-local `Data.TaggedError`) and `Effect.catchTag('SkipTeam', () => Effect.void)` at the per-team boundary. Do not use `Effect.when` — the gate is one of several short-circuit filters and the tagged-skip pattern keeps the chain readable.
+
+## Outbox With Opaque JSONB Payload
+
+Most `*_sync_events` tables expand the payload into named columns on the row (e.g. `event_sync_events.title`, `event_sync_events.start_at`) and decode them via the row schema. This is the right default — the SQL planner can index/filter on individual fields, and bot handlers receive typed RPC events.
+
+When the payload is a **rendered presentation artefact** that the consumer treats as opaque (e.g. a digest object built by the server and posted verbatim to Discord by the bot), an alternative is valid: store the payload as a single `payload JSONB NOT NULL DEFAULT '{}'` column and validate it against a **shared `Schema.Class` defined once in `packages/domain/`** (e.g. `WeeklySummary.WeeklySummaryDigest`).
+
+Rules:
+
+1. **The shared payload schema lives in `packages/domain/src/models/`** and is exported from `packages/domain/src/index.ts`. Both processes import the same symbol — there is no second source of truth.
+2. **Server encodes once on emit** with `Schema.encodeSync(SharedSchema)(value)` and inserts the result via `${JSON.stringify(payload)}::jsonb`. Do not pass the un-encoded class instance to the SQL bind — `jsonb` requires a JSON string.
+3. **Bot decodes once on consume** with `Schema.decodeUnknownEffect(SharedSchema)(event.payload)` inside the handler. Decode failures must be mapped to a real error (not swallowed) so the outbox retries / exhausts via the standard `attempts`-counted path. See `applications/bot/src/rcp/weeklySummary/handleWeeklySummaryReady.ts`.
+4. **The RPC event schema uses `payload: Schema.Unknown`** (e.g. `WeeklySummaryRpcEvents.WeeklySummaryReadyEvent`). Do not duplicate the digest's fields on the RPC event — the consumer must always decode against the shared schema to get typed access.
+5. **Never read individual payload fields in SQL** (`payload->>'foo'`). The opaque-payload contract is "the row is a delivery envelope; the body is the consumer's concern". If a field needs to be queried, promote it to a real column on the outbox table.
+
+### `delivered_at` Separate From `processed_at`
+
+When the outbox represents a one-shot delivery (post a message to Discord; no follow-up state) and the operator must distinguish "we stopped retrying" from "the message actually reached the user", add a `delivered_at TIMESTAMPTZ` column alongside `processed_at`:
+
+| Column | Set by | Meaning |
+|--------|--------|---------|
+| `processed_at` | `markProcessed` (success) **and** `markFailed` (when `attempts + 1 >= maxAttempts`) | Row no longer eligible for polling. |
+| `delivered_at` | `markProcessed` only, with `Option<DateTime.Utc>` from the bot's success-time | The Discord call actually succeeded. `NULL` after max-attempts exhaustion. |
+
+Rules:
+
+1. **`processed_at IS NOT NULL AND delivered_at IS NULL`** is the audit signal for "we gave up after N retries". Operators query this to detect persistently broken teams/channels.
+2. **Add a partial index `WHERE delivered_at IS NOT NULL`** (see `idx_wsse_delivered`) when callers need to answer "did team X get its digest for week Y?" — this is the predicate of the `hasDeliveredSummaryForWeek` query.
+3. **The `markProcessed` RPC payload carries `deliveredAt: DateTime.Utc`** (set by the bot to `DateTime.nowUnsafe()` immediately after the Discord call returns). Do not let the server fill it in — only the bot knows whether delivery succeeded.
+4. Only use this pattern when "delivered" has a clear, single meaning. For multi-stage outboxes (e.g. channel sync, which emits, creates, then later updates) keep the existing two-RPC / `attempts`-counted patterns documented above.
 
 ## Hand-written INSERT / UPDATE Column Lists
 

@@ -7,6 +7,7 @@ import { GuildRpcGroup } from './guild/GuildRpcGroup.js';
 import { InviteRpcGroup } from './invite/InviteRpcGroup.js';
 import { RoleRpcGroup } from './role/RoleRpcGroup.js';
 import { RoleProvisionRpcGroup } from './roleProvision/RoleProvisionRpcGroup.js';
+import { WeeklySummaryRpcGroup } from './weeklySummary/WeeklySummaryRpcGroup.js';
 
 export class SyncRpcs extends RpcGroup.make().merge(
   RoleRpcGroup,
@@ -17,4 +18,5 @@ export class SyncRpcs extends RpcGroup.make().merge(
   InviteRpcGroup,
   AchievementRpcGroup,
   RoleProvisionRpcGroup,
+  WeeklySummaryRpcGroup,
 ) {}

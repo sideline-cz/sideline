@@ -7,6 +7,7 @@ import { GuildsRpcLive } from './guild/index.js';
 import { InvitesRpcLive } from './invite/index.js';
 import { RolesRpcLive } from './role/index.js';
 import { RoleProvisionRpcLive } from './roleProvision/index.js';
+import { WeeklySummaryRpcLive } from './weeklySummary/index.js';
 
 export const SyncRpcsLive = Layer.mergeAll(
   RolesRpcLive,
@@ -17,4 +18,5 @@ export const SyncRpcsLive = Layer.mergeAll(
   InvitesRpcLive,
   AchievementRpcLive,
   RoleProvisionRpcLive,
+  WeeklySummaryRpcLive,
 );

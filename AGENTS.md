@@ -592,4 +592,4 @@ The `docs/thesis/` directory contains Mermaid diagrams and documentation for the
 
 ---
 
-**Last Updated**: 2026-05-13 (achievement admin: per-team catalog overrides, `attempts`-counted outbox retry, migration timestamp-monotonicity rule)
+**Last Updated**: 2026-05-13 (weekly summary: TS-side `Intl.DateTimeFormat` cron gating, opaque-JSONB outbox payload with shared `Schema.Class`, `delivered_at` separate from `processed_at`)

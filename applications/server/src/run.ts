@@ -20,12 +20,17 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
+import {
+  WeeklySummaryRepository,
+  WeeklySummarySyncEventsRepository,
+} from '~/repositories/WeeklySummaryRepository.js';
 import { AgeCheckCron } from '~/services/AgeCheckCron.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { EventHorizonCron } from '~/services/EventHorizonCron.js';
 import { EventStartCron } from '~/services/EventStartCron.js';
 import { RsvpReminderCron } from '~/services/RsvpReminderCron.js';
 import { TrainingAutoLogCron } from '~/services/TrainingAutoLogCron.js';
+import { WeeklySummaryCron } from '~/services/WeeklySummaryCron.js';
 
 const BasePg: Config.Wrap<PgClient.PgClientConfig> = {
   host: Config.succeed(env.DATABASE_HOST),
@@ -129,12 +134,34 @@ const StartCron = EventStartCron.asEffect().pipe(
   Effect.provide(EventStartRepositoriesLive.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg)))),
 );
 
+const WeeklySummaryRepositoriesLive = Layer.mergeAll(
+  TeamSettingsRepository.Default,
+  WeeklySummaryRepository.Default,
+  WeeklySummarySyncEventsRepository.Default,
+);
+
+const WeeklySummaryCronEffect = WeeklySummaryCron.asEffect().pipe(
+  Effect.provide(
+    WeeklySummaryRepositoriesLive.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
+  ),
+);
+
 Effect.Do.pipe(
   Effect.tap(() => (env.DATABASE_MAIN !== env.DATABASE_NAME ? CreateDb : Effect.void)),
   Effect.tap(() => MigrateBefore),
   Effect.andThen(() =>
     Effect.all(
-      [App, Health, MigrateAfter, Cron, HorizonCron, ReminderCron, AutoLogCron, StartCron],
+      [
+        App,
+        Health,
+        MigrateAfter,
+        Cron,
+        HorizonCron,
+        ReminderCron,
+        AutoLogCron,
+        StartCron,
+        WeeklySummaryCronEffect,
+      ],
       {
         concurrency: 8,
       },

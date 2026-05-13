@@ -106,6 +106,7 @@ Build stages:
    - `EventStartCron`
    - `RsvpReminderCron`
    - `TrainingAutoLogCron`
+   - `WeeklySummaryCron`
 
 The `Runtime.runMain` wrapper configures the OpenTelemetry telemetry layer before starting.
 
@@ -113,7 +114,7 @@ The `Runtime.runMain` wrapper configures the OpenTelemetry telemetry layer befor
 
 ### 2.3 Bot
 
-**Purpose:** Discord bot. Connects to the Discord gateway, registers slash commands, handles interactions, and runs three long-polling sync worker loops that poll the server RPC endpoint to process role, channel, and event sync events.
+**Purpose:** Discord bot. Connects to the Discord gateway, registers slash commands, handles interactions, and runs long-polling sync worker loops that poll the server RPC endpoint to process role, channel, event, achievement, role-provision, and weekly-summary sync events.
 
 **Dockerfile:** `applications/bot/Dockerfile`
 
@@ -256,6 +257,7 @@ Source files: `applications/server/src/services/*Cron.ts`
 | `RsvpReminderCron` | `* * * * *` (every minute) | Finds events that need an RSVP reminder (as configured in team settings) and emits `event_sync_events` rows of type `rsvp_reminder` for the bot to process. Marks the event reminder as sent. |
 | `AgeCheckCron` | `0 2 * * *` (daily at 02:00 UTC) | Evaluates age threshold rules for every team that has them configured, and automatically moves members between groups based on their age. |
 | `TrainingAutoLogCron` | `*/5 * * * *` (every 5 minutes) | Finds ended training events that haven't been auto-logged yet. For each event, inserts an `activity_logs` row for every member who RSVP'd "yes". Ignores duplicate-key violations (idempotent). |
+| `WeeklySummaryCron` | `* * * * *` (every minute) | Checks all teams that have a `weekly_summary_channel_id` configured. For each team whose current local time is Sunday 20:00, builds a `WeeklySummaryDigest` and inserts a `weekly_summary_sync_events` row (ON CONFLICT DO NOTHING ensures idempotency). The bot's Weekly Summary worker drains the outbox and posts the embed to the configured Discord channel. Instrumented with the `weekly-summary` metric label. |
 
 ---
 

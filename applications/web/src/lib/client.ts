@@ -18,6 +18,7 @@ import {
   TeamApi,
   TeamSettingsApi,
   TrainingTypeApi,
+  WeeklySummaryApi,
 } from '@sideline/domain';
 import { Effect, Option, ServiceMap } from 'effect';
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http';
@@ -51,7 +52,8 @@ class ClientApi extends HttpApi.make('api')
   .add(ICalApi.ICalApiGroup)
   .add(TeamApi.TeamApiGroup)
   .add(TeamSettingsApi.TeamSettingsApiGroup)
-  .add(TrainingTypeApi.TrainingTypeApiGroup) {}
+  .add(TrainingTypeApi.TrainingTypeApiGroup)
+  .add(WeeklySummaryApi.WeeklySummaryApiGroup) {}
 
 export const client = ClientConfig.asEffect().pipe(
   Effect.flatMap(({ baseUrl }) =>
