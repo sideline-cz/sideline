@@ -174,6 +174,34 @@ Rules:
 3. **Server-side decode failures** (`EventPropertyMissing` in `src/rpc/channel/events.ts`) always call `markPermanentlyFailed` — missing payload fields are not transient.
 4. When adding a new failure-classification rule, update the bot's `isPermanentError` and `applications/bot/AGENTS.md`, not the server.
 
+### Outbox Failure Modes: Two-RPC Classification vs `attempts`-Counted Retry
+
+There are two server-side patterns for failure handling on a `*_sync_events` / `*_provision_events` outbox table. Pick one per table; do not mix them.
+
+| Pattern | When to use | Schema cost | Permanent-stop trigger |
+|---------|-------------|-------------|------------------------|
+| **Two-RPC classification** (`markFailed` + `markPermanentlyFailed`) | Failure modes are classifiable up-front (HTTP 403/404, Discord JSON code 50013, `ParseError` → permanent; everything else → transient). Used by `channel_sync_events`. | One column (`error TEXT`). | Bot calls `markPermanentlyFailed` explicitly when `isPermanentError(error)` returns `true`. |
+| **`attempts`-counted retry** (`markFailed` only, with `attempts INT NOT NULL DEFAULT 0`) | Failure modes are not reliably classifiable (best-effort Discord REST work where transient/permanent looks identical), so the safe contract is "retry N times then give up". Used by `discord_role_provision_events`. | Two columns (`error TEXT`, `attempts INT NOT NULL DEFAULT 0`). | The SQL sets `processed_at` automatically once `attempts + 1 >= maxAttempts`. |
+
+The canonical `attempts`-counted UPDATE (see `DiscordRoleProvisionEventsRepository.markAttemptFailed`):
+
+```sql
+UPDATE <table>
+SET
+  attempts = attempts + 1,
+  error = ${input.error},
+  processed_at = CASE WHEN attempts + 1 >= ${input.maxAttempts} THEN now() ELSE NULL END
+WHERE id = ${input.id}
+```
+
+Rules when adding an `attempts`-counted outbox:
+
+1. **Add the `attempts INT NOT NULL DEFAULT 0` column in the same migration** that creates the outbox table — do not introduce it later, because in-flight rows would compute `NULL + 1 = NULL` and silently get stuck.
+2. **Define `MAX_ATTEMPTS` as a module-level constant in the repository** (not as an RPC payload field) so the bot cannot widen the retry budget. Pass the constant into the SQL via the `Request` schema's `maxAttempts: Schema.Number` field as shown above — this keeps the value bound through `SqlSchema.void` while still being internal to the server.
+3. **The bot calls one RPC (`MarkFailed`) on any failure** — no `MarkPermanentlyFailed` RPC exists for this table. The server's `CASE WHEN` decides whether the row stops polling.
+4. **`supersede(teamId, kind, refId)` is the manual escape hatch.** When the user takes an action that invalidates a still-pending outbox row (e.g. changing the role mapping before the bot has provisioned the previous one), the API handler calls `supersede` to UPDATE `processed_at = now(), error = 'superseded_by_user'` for any unprocessed row matching the natural key. Do not delete the row — keep it for audit.
+5. **The natural key (`team_id, kind, ref_id`) is `UNIQUE`** with `ON CONFLICT DO NOTHING` on enqueue, so re-enqueueing the same operation while a row is still pending is a no-op. The `supersede` path is the only way to retire a pending row before it processes.
+
 ### Channel ↔ Role Decoupling on `discord_channel_mappings`
 
 `discord_channel_mappings.discord_channel_id` is **nullable**. The migration `1747600000_decouple_channel_role.ts` drops `NOT NULL` and adds CHECK `discord_channel_id IS NOT NULL OR discord_role_id IS NOT NULL` plus a partial unique index on `(team_id, discord_channel_id) WHERE discord_channel_id IS NOT NULL`. Every domain schema that references this column uses `Schema.OptionFromNullOr(Discord.Snowflake)`.

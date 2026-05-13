@@ -10,6 +10,7 @@ import {
   GuildJoinSyncService,
   InviteGeneratorService,
   OnboardingSyncService,
+  RoleProvisionSyncService,
   RoleSyncService,
 } from '~/rcp/index.js';
 import { InviteCache } from '~/services/InviteCache.js';
@@ -84,6 +85,10 @@ const MockAchievementSyncServiceLayer = Layer.succeed(AchievementSyncService, {
   processTick: Effect.void,
 } as never);
 
+const MockRoleProvisionSyncServiceLayer = Layer.succeed(RoleProvisionSyncService, {
+  processTick: Effect.void,
+} as never);
+
 const MockOnboardingRoleCacheLayer = Layer.succeed(OnboardingRoleCache, {
   get: () => Effect.succeed(Option.none()),
   set: () => Effect.void,
@@ -120,6 +125,7 @@ describe('Bot', () => {
       MockInviteGeneratorServiceLayer,
       MockOnboardingSyncServiceLayer,
       MockAchievementSyncServiceLayer,
+      MockRoleProvisionSyncServiceLayer,
       MockOnboardingRoleCacheLayer,
       MockSyncRpcLayer,
       MockInviteCacheLayer,

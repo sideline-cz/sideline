@@ -1,5 +1,6 @@
 import { Schema } from 'effect';
 import type * as ActivityStats from './ActivityStats.js';
+import type { CustomRuleKind } from './CustomAchievement.js';
 
 export const AchievementSlug = Schema.Literals([
   'first_activity',
@@ -24,56 +25,76 @@ export interface AchievementEvaluationInput {
 export interface AchievementCatalogEntry {
   readonly slug: AchievementSlug;
   readonly grantsDiscordRole: boolean;
-  readonly isEarned: (input: AchievementEvaluationInput) => boolean;
+  readonly defaultThreshold: number;
+  readonly isEarned: (input: AchievementEvaluationInput, threshold: number) => boolean;
 }
 
 export const ACHIEVEMENTS: ReadonlyArray<AchievementCatalogEntry> = [
   {
     slug: 'first_activity',
     grantsDiscordRole: false,
-    isEarned: ({ stats }) => stats.totalActivities >= 1,
+    defaultThreshold: 1,
+    isEarned: ({ stats }, threshold) => stats.totalActivities >= threshold,
   },
   {
     slug: 'ten_activities',
     grantsDiscordRole: false,
-    isEarned: ({ stats }) => stats.totalActivities >= 10,
+    defaultThreshold: 10,
+    isEarned: ({ stats }, threshold) => stats.totalActivities >= threshold,
   },
   {
     slug: 'fifty_activities',
     grantsDiscordRole: true,
-    isEarned: ({ stats }) => stats.totalActivities >= 50,
+    defaultThreshold: 50,
+    isEarned: ({ stats }, threshold) => stats.totalActivities >= threshold,
   },
   {
     slug: 'hundred_activities',
     grantsDiscordRole: true,
-    isEarned: ({ stats }) => stats.totalActivities >= 100,
+    defaultThreshold: 100,
+    isEarned: ({ stats }, threshold) => stats.totalActivities >= threshold,
   },
-  { slug: 'streak_3', grantsDiscordRole: false, isEarned: ({ stats }) => stats.longestStreak >= 3 },
-  { slug: 'streak_7', grantsDiscordRole: true, isEarned: ({ stats }) => stats.longestStreak >= 7 },
+  {
+    slug: 'streak_3',
+    grantsDiscordRole: false,
+    defaultThreshold: 3,
+    isEarned: ({ stats }, threshold) => stats.longestStreak >= threshold,
+  },
+  {
+    slug: 'streak_7',
+    grantsDiscordRole: true,
+    defaultThreshold: 7,
+    isEarned: ({ stats }, threshold) => stats.longestStreak >= threshold,
+  },
   {
     slug: 'streak_30',
     grantsDiscordRole: true,
-    isEarned: ({ stats }) => stats.longestStreak >= 30,
+    defaultThreshold: 30,
+    isEarned: ({ stats }, threshold) => stats.longestStreak >= threshold,
   },
   {
     slug: 'duration_600',
     grantsDiscordRole: false,
-    isEarned: ({ stats }) => stats.totalDurationMinutes >= 600,
+    defaultThreshold: 600,
+    isEarned: ({ stats }, threshold) => stats.totalDurationMinutes >= threshold,
   },
   {
     slug: 'duration_3000',
     grantsDiscordRole: true,
-    isEarned: ({ stats }) => stats.totalDurationMinutes >= 3000,
+    defaultThreshold: 3000,
+    isEarned: ({ stats }, threshold) => stats.totalDurationMinutes >= threshold,
   },
   {
     slug: 'gym_25',
     grantsDiscordRole: false,
-    isEarned: ({ countsBySlug }) => (countsBySlug.get('gym') ?? 0) >= 25,
+    defaultThreshold: 25,
+    isEarned: ({ countsBySlug }, threshold) => (countsBySlug.get('gym') ?? 0) >= threshold,
   },
   {
     slug: 'running_25',
     grantsDiscordRole: false,
-    isEarned: ({ countsBySlug }) => (countsBySlug.get('running') ?? 0) >= 25,
+    defaultThreshold: 25,
+    isEarned: ({ countsBySlug }, threshold) => (countsBySlug.get('running') ?? 0) >= threshold,
   },
 ];
 
@@ -81,6 +102,47 @@ export const ACHIEVEMENTS_BY_SLUG: ReadonlyMap<AchievementSlug, AchievementCatal
   ACHIEVEMENTS.map((a) => [a.slug, a]),
 );
 
+export const effectiveThreshold = (
+  slug: AchievementSlug,
+  overrides: ReadonlyMap<AchievementSlug, number>,
+): number => {
+  const entry = ACHIEVEMENTS_BY_SLUG.get(slug);
+  if (entry === undefined) {
+    return 0;
+  }
+  return overrides.get(slug) ?? entry.defaultThreshold;
+};
+
 export const i18nTitleKey = (slug: AchievementSlug) => `achievement_${slug}_title` as const;
 export const i18nDescriptionKey = (slug: AchievementSlug) =>
   `achievement_${slug}_description` as const;
+
+export const BUILT_IN_ENGLISH_NAMES: Readonly<Record<AchievementSlug, string>> = {
+  first_activity: 'First Steps',
+  ten_activities: 'Getting Started',
+  fifty_activities: 'Dedicated',
+  hundred_activities: 'Centurion',
+  streak_3: 'On Fire',
+  streak_7: 'Week Warrior',
+  streak_30: 'Unstoppable',
+  duration_600: '10-Hour Club',
+  duration_3000: '50-Hour Club',
+  gym_25: 'Gym Rat',
+  running_25: 'Road Runner',
+};
+
+const BUILT_IN_RULE_KINDS: Readonly<Record<AchievementSlug, CustomRuleKind>> = {
+  first_activity: 'total_activities',
+  ten_activities: 'total_activities',
+  fifty_activities: 'total_activities',
+  hundred_activities: 'total_activities',
+  streak_3: 'longest_streak',
+  streak_7: 'longest_streak',
+  streak_30: 'longest_streak',
+  duration_600: 'total_duration',
+  duration_3000: 'total_duration',
+  gym_25: 'activity_type_count',
+  running_25: 'activity_type_count',
+};
+
+export const builtInRuleKind = (slug: AchievementSlug): CustomRuleKind => BUILT_IN_RULE_KINDS[slug];

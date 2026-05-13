@@ -129,6 +129,13 @@ function getTeamNavGroups(
           params: { teamId },
         },
         {
+          title: m.achievement_admin_navTitle(),
+          icon: Trophy,
+          to: '/teams/$teamId/achievements',
+          params: { teamId },
+          requiredPermission: 'team:manage' satisfies Role.Permission,
+        },
+        {
           title: m.team_settings(),
           icon: Settings,
           to: '/teams/$teamId/settings',

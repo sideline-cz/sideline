@@ -5,6 +5,7 @@ import { GuildJoinSyncService } from './guildJoin/index.js';
 import { InviteGeneratorService } from './inviteGenerator/index.js';
 import { OnboardingSyncService } from './onboarding/index.js';
 import { RoleSyncService } from './role/index.js';
+import { RoleProvisionSyncService } from './roleProvision/index.js';
 
 export {
   AchievementSyncService,
@@ -14,4 +15,5 @@ export {
   InviteGeneratorService,
   OnboardingSyncService,
   RoleSyncService,
+  RoleProvisionSyncService,
 };

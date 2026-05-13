@@ -760,6 +760,74 @@ Outbox table driving achievement notifications in Discord. Polled by the bot's A
 
 ---
 
+#### `achievement_settings`
+
+Per-team threshold overrides for built-in achievements. A row exists only when the team has changed a threshold from its default. When no row exists for a `(team_id, achievement_slug)` pair the default threshold from the catalogue is used.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `achievement_slug` | TEXT | NOT NULL | — |
+| `threshold_override` | INTEGER | — | — |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Primary Key**: `(team_id, achievement_slug)` — one override per achievement per team.
+
+**Notes**: Added in migration `1779000000_achievement_admin`. `threshold_override` may be NULL (the row is kept but the override is treated as cleared); the server uses `COALESCE(threshold_override, default_threshold)` when evaluating achievements.
+
+---
+
+#### `custom_achievements`
+
+Team-defined custom achievement definitions. Unlike built-in achievements (which are hard-coded in the domain catalogue), these are fully user-configured.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `name` | TEXT | NOT NULL | — |
+| `description` | TEXT | NOT NULL | — |
+| `emoji` | TEXT | — | — |
+| `rule_kind` | TEXT | NOT NULL | — |
+| `threshold` | INTEGER | NOT NULL, CHECK (`threshold > 0`) | — |
+| `activity_type_slug` | TEXT | — | — |
+| `discord_role_id` | TEXT | — | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(team_id, name)` — achievement names must be unique within a team.
+
+**Indexes**: `idx_custom_achievements_team` on `(team_id)`.
+
+**Notes**: Added in migration `1779000000_achievement_admin`. `rule_kind` is one of `total_activities`, `longest_streak`, `total_duration`, `activity_type_count`. `activity_type_slug` is required when `rule_kind = 'activity_type_count'`. `discord_role_id` is the Discord role ID to grant when the achievement is earned; it may be populated directly or by the bot's Role Provision worker after an `auto_create` request.
+
+---
+
+#### `discord_role_provision_events`
+
+Outbox table for the bot's Role Provision worker. When an admin chooses `auto_create` for an achievement's Discord role mapping, the server inserts a row here. The bot picks it up, finds or creates a Discord role with `desired_name` in the guild, and writes the resulting role ID back via the `Achievement/UpsertBuiltInRoleMapping` or `Achievement/UpsertCustomRoleMapping` RPC before marking the event processed.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `guild_id` | TEXT | NOT NULL | — |
+| `kind` | TEXT | NOT NULL | — |
+| `ref_id` | TEXT | NOT NULL | — |
+| `desired_name` | TEXT | NOT NULL | — |
+| `attempts` | INT | NOT NULL | `0` |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `processed_at` | TIMESTAMPTZ | — | — |
+| `error` | TEXT | — | — |
+
+**Unique**: `(team_id, kind, ref_id)` — one pending event per achievement per team.
+
+**Indexes**: `idx_drpe_unprocessed` — partial index on `(created_at) WHERE processed_at IS NULL`.
+
+**Notes**: Added in migration `1779000000_achievement_admin`. `kind` is one of `builtin_achievement` or `custom_achievement`. `ref_id` is the `AchievementSlug` (for built-in) or `CustomAchievementId` UUID (for custom). The worker uses `desired_name` to first search existing guild roles by name (reusing a same-named role if found), and only calls Discord's create-role endpoint when no match is found.
+
+---
+
 ### 8. Activity Tracking
 
 #### `activity_types`
@@ -937,6 +1005,7 @@ All 49 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1747500000 | `add_required_group_to_age_thresholds` | Adds `required_group_id UUID REFERENCES groups(id) ON DELETE CASCADE` (nullable) to `age_threshold_rules`; adds CHECK constraint `age_threshold_rules_required_not_self (required_group_id IS NULL OR required_group_id <> group_id)`; widens `age_threshold_rules_nonempty_criteria` to include `required_group_id IS NOT NULL`; drops and recreates the unique constraint as `UNIQUE NULLS NOT DISTINCT (team_id, group_id, min_age, max_age, gender, required_group_id)` |
 | 1747600000 | `decouple_channel_role` | Makes `discord_channel_mappings.discord_channel_id` nullable (drops NOT NULL); adds CHECK constraint `discord_channel_mappings_at_least_one (discord_channel_id IS NOT NULL OR discord_role_id IS NOT NULL)`; creates partial unique index `discord_channel_mappings_team_channel ON (team_id, discord_channel_id) WHERE discord_channel_id IS NOT NULL` (replaces the old unconditional unique on the same column pair) |
 | 1778716800 | `create_achievements` | Creates `earned_achievements` (id, team_member_id FK CASCADE, achievement_slug, earned_at; unique on (team_member_id, achievement_slug)); creates `achievement_role_mappings` (team_id FK CASCADE, achievement_slug, discord_role_id; PK on (team_id, achievement_slug)); creates `achievement_sync_events` (id, team_id FK CASCADE, guild_id, team_member_id FK CASCADE, achievement_slug, created_at, processed_at, error); adds partial index `idx_achievement_sync_unprocessed` on `achievement_sync_events(created_at) WHERE processed_at IS NULL` |
+| 1779000000 | `achievement_admin` | Creates `achievement_settings` (team_id FK CASCADE, achievement_slug, threshold_override INTEGER, updated_at; PK on (team_id, achievement_slug)); creates `custom_achievements` (id PK, team_id FK CASCADE, name, description, emoji, rule_kind, threshold CHECK > 0, activity_type_slug, discord_role_id, created_at, updated_at; UNIQUE (team_id, name)); adds index `idx_custom_achievements_team`; creates `discord_role_provision_events` (id PK, team_id FK CASCADE, guild_id, kind, ref_id, desired_name, attempts DEFAULT 0, created_at, processed_at, error; UNIQUE (team_id, kind, ref_id)); adds partial index `idx_drpe_unprocessed` on `discord_role_provision_events(created_at) WHERE processed_at IS NULL` |
 
 ### After Migrations (seed data)
 
@@ -958,6 +1027,7 @@ Three tables act as outbox queues for bot-server communication:
 | `channel_sync_events` | Channel Sync | `channel_created`, `channel_updated`, `channel_deleted`, `channel_archived`, `channel_detached`, `member_added`, `member_removed` |
 | `event_sync_events` | Event Sync | `event_created`, `event_updated`, `event_cancelled`, `rsvp_reminder`, `event_started`, `training_claim_request`, `training_claim_update`, `unclaimed_training_reminder` |
 | `achievement_sync_events` | Achievement Sync | `achievement_earned` |
+| `discord_role_provision_events` | Role Provision | `builtin_achievement`, `custom_achievement` |
 
 The server inserts rows when the relevant domain action occurs. The bot polls `WHERE processed_at IS NULL ORDER BY created_at` and updates `processed_at` (and optionally `error`) when processing is complete. Partial indexes on `(created_at) WHERE processed_at IS NULL` make these polls efficient. Event data is denormalised into snapshot columns so that the bot's message content remains accurate even if the source row is subsequently modified.
 
@@ -967,7 +1037,7 @@ The server inserts rows when the relevant domain action occurs. The bot polls `W
 
 ### Cascading Deletes
 
-Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, and achievement_sync_events. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
+Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, and achievement_sync_events. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
 
 Role deletion uses `ON DELETE RESTRICT` on `member_roles` to prevent accidentally orphaning members. FK references from `role_sync_events.role_id` and `channel_sync_events.group_id` are stored as plain UUID (no FK constraint) so audit rows are retained after the referenced entity is deleted.
 

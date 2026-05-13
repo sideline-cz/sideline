@@ -1,5 +1,7 @@
 export * as ApiGroup from './ApiGroup.js';
 
+export * as AchievementApi from './api/AchievementApi.js';
+
 export * as ActivityLogApi from './api/ActivityLogApi.js';
 
 export * as ActivityStatsApi from './api/ActivityStatsApi.js';
@@ -58,6 +60,8 @@ export * as ActivityType from './models/ActivityType.js';
 export * as AgeThresholdRule from './models/AgeThresholdRule.js';
 
 export * as ChannelSyncEvent from './models/ChannelSyncEvent.js';
+
+export * as CustomAchievement from './models/CustomAchievement.js';
 
 export * as Discord from './models/Discord.js';
 
@@ -127,4 +131,5 @@ export * as InviteRpcGroup from './rpc/invite/InviteRpcGroup.js';
 export * as RoleRpcEvents from './rpc/role/RoleRpcEvents.js';
 export * as RoleRpcGroup from './rpc/role/RoleRpcGroup.js';
 export * as RoleRpcModels from './rpc/role/RoleRpcModels.js';
+export * as RoleProvisionRpcGroup from './rpc/roleProvision/RoleProvisionRpcGroup.js';
 export * as SyncRpcs from './rpc/SyncRpcs.js';

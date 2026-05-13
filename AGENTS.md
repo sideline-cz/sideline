@@ -592,4 +592,4 @@ The `docs/thesis/` directory contains Mermaid diagrams and documentation for the
 
 ---
 
-**Last Updated**: 2026-05-13 (achievement system: code-defined catalog pattern, INSERT column-list footgun, `Effect.catchCause` rule)
+**Last Updated**: 2026-05-13 (achievement admin: per-team catalog overrides, `attempts`-counted outbox retry, migration timestamp-monotonicity rule)

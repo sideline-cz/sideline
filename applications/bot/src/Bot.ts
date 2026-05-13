@@ -13,6 +13,7 @@ import {
   GuildJoinSyncService,
   InviteGeneratorService,
   OnboardingSyncService,
+  RoleProvisionSyncService,
   RoleSyncService,
 } from './index.js';
 
@@ -41,6 +42,7 @@ export const program = Effect.Do.pipe(
   Effect.bind('inviteGenerator', () => InviteGeneratorService.asEffect()),
   Effect.bind('onboarding', () => OnboardingSyncService.asEffect()),
   Effect.bind('achievements', () => AchievementSyncService.asEffect()),
+  Effect.bind('roleProvision', () => RoleProvisionSyncService.asEffect()),
   Effect.tap(() => Effect.logInfo('Bot connected to Discord')),
   Effect.andThen(
     ({
@@ -52,6 +54,7 @@ export const program = Effect.Do.pipe(
       inviteGenerator,
       onboarding,
       achievements,
+      roleProvision,
     }) =>
       Effect.all(
         [
@@ -64,6 +67,7 @@ export const program = Effect.Do.pipe(
           fastPollLoop(inviteGenerator.processTick),
           pollLoop(onboarding.processTick),
           pollLoop(achievements.processTick),
+          pollLoop(roleProvision.processTick),
           recoverDeletedMessages,
         ],
         {
@@ -85,4 +89,5 @@ export const program = Effect.Do.pipe(
   | InviteGeneratorService
   | OnboardingSyncService
   | AchievementSyncService
+  | RoleProvisionSyncService
 >;
