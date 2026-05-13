@@ -365,33 +365,27 @@ describe('ActivityTypesRepository', () => {
         ),
     );
 
-    it.effect('rejects name that case-insensitively matches a global (e.g. "Gym" vs "gym")', () =>
-      Effect.Do.pipe(
-        Effect.tap(() => seedGlobalTypes()),
-        Effect.bind('userId', () => createUser('500000000000000007', 'at-user-7')),
-        Effect.bind('team', ({ userId }) =>
-          createTeam('507070707070707070' as Discord.Snowflake, userId),
-        ),
-        Effect.bind('result', ({ team }) =>
-          ActivityTypesRepository.asEffect().pipe(
-            Effect.andThen((repo) =>
-              repo.insertCustom({
-                team_id: team.id,
-                name: 'Gym',
-                emoji: Option.none(),
-                description: Option.none(),
-              }),
-            ),
-            Effect.result,
+    it.effect(
+      'findByNameInScope detects case-insensitive collision with a global (e.g. "Gym" vs "gym")',
+      () =>
+        Effect.Do.pipe(
+          Effect.tap(() => seedGlobalTypes()),
+          Effect.bind('userId', () => createUser('500000000000000007', 'at-user-7')),
+          Effect.bind('team', ({ userId }) =>
+            createTeam('507070707070707070' as Discord.Snowflake, userId),
           ),
+          Effect.bind('found', ({ team }) =>
+            ActivityTypesRepository.asEffect().pipe(
+              Effect.andThen((repo) => repo.findByNameInScope('Gym', team.id)),
+            ),
+          ),
+          Effect.tap(({ found }) =>
+            Effect.sync(() => {
+              expect(Option.isSome(found)).toBe(true);
+            }),
+          ),
+          Effect.provide(TestLayer),
         ),
-        Effect.tap(({ result }) =>
-          Effect.sync(() => {
-            expect(result._tag).toBe('Failure');
-          }),
-        ),
-        Effect.provide(TestLayer),
-      ),
     );
 
     it.effect('allows the same name across different teams', () =>

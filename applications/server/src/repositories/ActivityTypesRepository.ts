@@ -79,10 +79,11 @@ const make = Effect.gen(function* () {
              COALESCE(c.cnt, 0)::int AS "usageCount"
       FROM activity_types t
       LEFT JOIN (
-        SELECT activity_type_id, COUNT(*)::int AS cnt
-        FROM activity_logs
-        WHERE team_id = ${teamId}
-        GROUP BY activity_type_id
+        SELECT al.activity_type_id, COUNT(*)::int AS cnt
+        FROM activity_logs al
+        JOIN team_members tm ON tm.id = al.team_member_id
+        WHERE tm.team_id = ${teamId}
+        GROUP BY al.activity_type_id
       ) c ON c.activity_type_id = t.id
       WHERE t.team_id IS NULL OR t.team_id = ${teamId}
       ORDER BY (t.team_id IS NULL) DESC, LOWER(t.name) ASC
@@ -141,7 +142,10 @@ const make = Effect.gen(function* () {
     Request: ScopedRequest,
     Result: Schema.Struct({ count: Schema.Int }),
     execute: (input) =>
-      sql`SELECT COUNT(*)::int AS count FROM activity_logs WHERE activity_type_id = ${input.id} AND team_id = ${input.team_id}`,
+      sql`SELECT COUNT(*)::int AS count
+          FROM activity_logs al
+          JOIN team_members tm ON tm.id = al.team_member_id
+          WHERE al.activity_type_id = ${input.id} AND tm.team_id = ${input.team_id}`,
   });
 
   const findBySlug = (slug: string) => findBySlugQuery(slug).pipe(catchSqlErrors);
