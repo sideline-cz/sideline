@@ -191,7 +191,7 @@ For the bot, `AppLive` composes:
 
 - `HealthServerLive` — lightweight HTTP health-check server
 - `DiscordIxLive` — dfx Gateway connection (WebSocket to Discord)
-- `SyncLive` — `RoleSyncService`, `ChannelSyncService`, `EventSyncService`, `AchievementSyncService` (all backed by `SyncRpc` which calls the server over RPC)
+- `SyncLive` — `RoleSyncService`, `ChannelSyncService`, `EventSyncService`, `AchievementSyncService`, `RoleProvisionSyncService` (all backed by `SyncRpc` which calls the server over RPC)
 
 ### `run.ts` — deployment entrypoint
 
@@ -209,14 +209,16 @@ The clean separation means `AppLive` never imports `node:http`, never reads envi
 
 ## 7. Achievement System Flow
 
-The achievement system follows the same outbox pattern as role, channel, and event sync.
+The achievement system has two concerns: evaluating and recording earned achievements (the original outbox flow), and managing achievement configuration (the new admin flow).
+
+### 7a. Evaluation flow
 
 **Server side — `AchievementEvaluator` service:**
 
 After any activity is logged (via the REST `ActivityLog` API handler or the RPC `Activity/LogActivity` handler), the server calls `AchievementEvaluator.evaluate(memberId)`. The evaluator:
 
 1. Loads the member's full activity log and computes stats (`ActivityStats.calculateStats`).
-2. Compares the computed stats against the catalogue of 11 achievement definitions in `packages/domain/src/models/Achievement.ts`.
+2. Compares the computed stats against the catalogue of 11 built-in achievement definitions in `packages/domain/src/models/Achievement.ts`, applying any per-team threshold overrides from `achievement_settings`, plus any custom achievements defined in `custom_achievements`.
 3. For each newly qualifying achievement that has not yet been recorded, inserts a row into `earned_achievements` (idempotent — `ON CONFLICT DO NOTHING`).
 4. For each newly inserted row, emits a row into `achievement_sync_events` (omitted if the team has no `guild_id`).
 
@@ -231,18 +233,41 @@ The bot's Achievement Sync worker polls `Achievement/GetUnprocessedEvents` every
 3. If a `welcome_channel_id` is set, posts a congratulatory embed in that channel @-mentioning the member (and the role, if granted).
 4. Marks the event processed via `Achievement/MarkEventProcessed` (or failed via `Achievement/MarkEventFailed` — failed events are not retried).
 
-**Achievement catalogue** (from `Achievement.ACHIEVEMENTS`):
+### 7b. Admin management flow
 
-| Slug | Trigger | Grants Discord role? |
-|---|---|---|
-| `first_activity` | 1 activity logged | No |
-| `ten_activities` | 10 activities logged | No |
-| `fifty_activities` | 50 activities logged | Yes |
-| `hundred_activities` | 100 activities logged | Yes |
-| `streak_3` | 3-day longest streak | No |
-| `streak_7` | 7-day longest streak | Yes |
-| `streak_30` | 30-day longest streak | Yes |
-| `duration_600` | 600 total minutes logged | No |
-| `duration_3000` | 3000 total minutes logged | Yes |
-| `gym_25` | 25 gym activities logged | No |
-| `running_25` | 25 running activities logged | No |
+Team captains manage achievements through the web admin page at `/teams/:teamId/achievements` or the `Achievement` API group. Three areas of management are supported:
+
+**Threshold overrides:** Admins can change the qualifying threshold for any built-in achievement. The override is stored in `achievement_settings`. The `AchievementPreview` service supports a "preview" endpoint that calculates how many current members would qualify and which already-earned achievements would be retroactively lost at a candidate threshold.
+
+**Custom achievements:** Admins can create fully custom achievements via `POST /teams/:teamId/achievements/custom`. Each custom achievement specifies a `rule_kind` (`total_activities`, `longest_streak`, `total_duration`, or `activity_type_count`), a `threshold`, and an optional `activityTypeSlug` (required for `activity_type_count`). Custom achievements are stored in `custom_achievements` and are evaluated by `AchievementEvaluator` alongside built-in achievements.
+
+**Discord role mapping:** For any achievement (built-in or custom), admins can:
+- Link an existing Discord role by ID (`source: "existing"`).
+- Remove the mapping (`source: "none"`).
+- Request auto-creation (`source: "auto_create"`), which inserts a row in `discord_role_provision_events`.
+
+**Bot side — `RoleProvisionSyncService` processor:**
+
+The bot's Role Provision worker polls `RoleProvision/GetUnprocessedEvents` every 5 seconds. For each pending provision event it:
+
+1. Lists all existing roles in the guild via Discord REST.
+2. Searches for an existing role whose name exactly matches `desired_name` (reuse semantics).
+3. If no match is found, creates a new Discord role with that name.
+4. Writes the resulting role ID back via `Achievement/UpsertBuiltInRoleMapping` (for `kind = "builtin_achievement"`) or `Achievement/UpsertCustomRoleMapping` (for `kind = "custom_achievement"`).
+5. Marks the event processed via `RoleProvision/MarkProcessed`.
+
+### Achievement catalogue (from `Achievement.ACHIEVEMENTS`)
+
+| Slug | Default trigger | Default threshold | Rule kind |
+|---|---|---|---|
+| `first_activity` | 1 activity logged | 1 | `total_activities` |
+| `ten_activities` | 10 activities logged | 10 | `total_activities` |
+| `fifty_activities` | 50 activities logged | 50 | `total_activities` |
+| `hundred_activities` | 100 activities logged | 100 | `total_activities` |
+| `streak_3` | 3-day longest streak | 3 | `longest_streak` |
+| `streak_7` | 7-day longest streak | 7 | `longest_streak` |
+| `streak_30` | 30-day longest streak | 30 | `longest_streak` |
+| `duration_600` | 600 total minutes logged | 600 | `total_duration` |
+| `duration_3000` | 3000 total minutes logged | 3000 | `total_duration` |
+| `gym_25` | 25 gym activities logged | 25 | `activity_type_count` |
+| `running_25` | 25 running activities logged | 25 | `activity_type_count` |

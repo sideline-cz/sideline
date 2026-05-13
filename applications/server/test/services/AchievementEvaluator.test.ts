@@ -2,10 +2,16 @@
 // They reference AchievementEvaluator, EarnedAchievementsRepository, and
 // AchievementSyncEventsRepository which do NOT exist yet.
 // Tests will FAIL until the developer implements those server-side services.
+//
+// Tests #8 and #9 (threshold override behaviour) were added in TDD mode for
+// the manage-achievements story. They will FAIL until AchievementEvaluator.ts
+// is wired to read AchievementSettingsRepository overrides.
 
 import { afterEach, beforeEach, describe, expect, it } from '@effect/vitest';
 import type { Achievement, TeamMember } from '@sideline/domain';
 import { Effect, Layer, Option } from 'effect';
+// This import will fail until AchievementSettingsRepository is implemented:
+import { AchievementSettingsRepository } from '~/repositories/AchievementSettingsRepository.js';
 import { AchievementSyncEventsRepository } from '~/repositories/AchievementSyncEventsRepository.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { EarnedAchievementsRepository } from '~/repositories/EarnedAchievementsRepository.js';
@@ -123,12 +129,33 @@ const makeTeamMembersRepositoryLayer = () =>
     findMemberByUserId: () => Effect.succeed(Option.none()),
   } as any);
 
+// In-memory store for per-team achievement threshold overrides (tests #8 & #9)
+let achievementSettingsOverrides: Map<string, number>;
+
+const resetSettingsStore = () => {
+  achievementSettingsOverrides = new Map();
+};
+
+const makeAchievementSettingsRepositoryLayer = () =>
+  Layer.succeed(AchievementSettingsRepository, {
+    findOverridesByTeam: (_teamId: string) => Effect.succeed(new Map(achievementSettingsOverrides)),
+    upsertOverride: (_teamId: string, slug: string, threshold: number) => {
+      achievementSettingsOverrides.set(slug, threshold);
+      return Effect.void;
+    },
+    deleteOverride: (_teamId: string, slug: string) => {
+      achievementSettingsOverrides.delete(slug);
+      return Effect.void;
+    },
+  } as any);
+
 const makeTestLayer = () =>
   Layer.mergeAll(
     makeActivityLogsRepositoryLayer(),
     makeEarnedAchievementsRepositoryLayer(),
     makeAchievementSyncEventsRepositoryLayer(),
     makeTeamMembersRepositoryLayer(),
+    makeAchievementSettingsRepositoryLayer(),
     AchievementEvaluator.Default,
   );
 
@@ -138,10 +165,12 @@ const makeTestLayer = () =>
 
 beforeEach(() => {
   resetStores();
+  resetSettingsStore();
 });
 
 afterEach(() => {
   resetStores();
+  resetSettingsStore();
 });
 
 // ---------------------------------------------------------------------------
@@ -254,6 +283,7 @@ describe('AchievementEvaluator.evaluate', () => {
         makeEarnedAchievementsRepositoryLayer(),
         makeAchievementSyncEventsRepositoryLayer(),
         makeTeamMembersRepositoryLayer(),
+        makeAchievementSettingsRepositoryLayer(),
         AchievementEvaluator.Default,
       );
 
@@ -285,4 +315,49 @@ describe('AchievementEvaluator.evaluate', () => {
       Effect.provide(makeTestLayer()),
     );
   });
+
+  // Test #8 — default behaviour unchanged when no override exists
+  // Given: member with totalActivities=10, no achievement_settings row for team
+  // Expected: ten_activities IS earned (default threshold 10 still applies)
+  it.effect(
+    '#8 default threshold used when no override — totalActivities=10 earns ten_activities',
+    () => {
+      mockTotalActivities = 10;
+      // achievementSettingsOverrides is empty (reset in beforeEach)
+      return AchievementEvaluator.asEffect().pipe(
+        Effect.andThen((svc) => svc.evaluate(MEMBER_ID)),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            const emittedSlugs = syncEventEmitCalls.map((c) => c.slug);
+            // ten_activities default threshold is 10; totalActivities=10 should earn it
+            expect(emittedSlugs).toContain('ten_activities');
+          }),
+        ),
+        Effect.provide(makeTestLayer()),
+      );
+    },
+  );
+
+  // Test #9 — per-team override applied
+  // Given: member with totalActivities=20, team has threshold_override=25 for ten_activities
+  // Expected: ten_activities is NOT earned because 20 < 25 (override raises threshold)
+  it.effect(
+    '#9 per-team override applied — totalActivities=20 does NOT earn ten_activities when override=25',
+    () => {
+      mockTotalActivities = 20;
+      // Set per-team override that raises threshold above member's activity count
+      achievementSettingsOverrides.set('ten_activities', 25);
+      return AchievementEvaluator.asEffect().pipe(
+        Effect.andThen((svc) => svc.evaluate(MEMBER_ID)),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            const emittedSlugs = syncEventEmitCalls.map((c) => c.slug);
+            // Override of 25 means 20 activities is NOT enough
+            expect(emittedSlugs).not.toContain('ten_activities');
+          }),
+        ),
+        Effect.provide(makeTestLayer()),
+      );
+    },
+  );
 });

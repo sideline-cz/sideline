@@ -5,13 +5,17 @@ import { HttpClient, HttpClientResponse, HttpRouter, HttpServer } from 'effect/u
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ApiLive } from '~/api/index.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
+import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
+import { AchievementSettingsRepository } from '~/repositories/AchievementSettingsRepository.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
+import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordRoleProvisionEventsRepository } from '~/repositories/DiscordRoleProvisionEventsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
@@ -35,6 +39,7 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 
@@ -696,6 +701,37 @@ const MockActivityTypesRepositoryLayer = Layer.succeed(ActivityTypesRepository, 
   findById: () => Effect.succeed(Option.none()),
 } as any);
 
+const MockAchievementAdminLayers = Layer.mergeAll(
+  Layer.succeed(AchievementRoleMappingsRepository, {
+    findAllByTeam: () => Effect.succeed([]),
+    upsert: () => Effect.void,
+    delete: () => Effect.void,
+  } as any),
+  Layer.succeed(AchievementSettingsRepository, {
+    findOverridesByTeam: () => Effect.succeed(new Map()),
+    upsertOverride: () => Effect.void,
+    deleteOverride: () => Effect.void,
+  } as any),
+  Layer.succeed(CustomAchievementsRepository, {
+    findByTeam: () => Effect.succeed([]),
+    findById: () => Effect.succeed(Option.none()),
+    insert: () => Effect.die(new Error('Not implemented')),
+    update: () => Effect.die(new Error('Not implemented')),
+    delete: () => Effect.void,
+    setRoleMapping: () => Effect.void,
+  } as any),
+  Layer.succeed(DiscordRoleProvisionEventsRepository, {
+    enqueue: () => Effect.void,
+    findUnprocessed: () => Effect.succeed([]),
+    markProcessed: () => Effect.void,
+    markFailed: () => Effect.void,
+  } as any),
+  Layer.succeed(AchievementPreview, {
+    preview: () =>
+      Effect.succeed({ qualifyingCount: 0, removedMembers: [], botCanManageRoles: true }),
+  } as any),
+);
+
 const TestLayer = ApiLive.pipe(
   Layer.provideMerge(AuthMiddlewareLive),
   Layer.provideMerge(HttpServer.layerServices),
@@ -818,30 +854,30 @@ const TestLayer = ApiLive.pipe(
     } as any),
   ),
   Layer.provide(
-    Layer.succeed(NotificationsRepository, {
-      findByUserId: () => Effect.succeed([]),
-      findByUser: () => Effect.succeed([]),
-      insertOne: die,
-      insert: die,
-      insertBulk: () => Effect.void,
-      markOneAsRead: () => Effect.void,
-      markAsRead: () => Effect.void,
-      markAllRead: () => Effect.void,
-      markAllAsRead: () => Effect.void,
-      findOneById: () => Effect.succeed(Option.none()),
-      findById: () => Effect.succeed(Option.none()),
-    } as any),
-  ),
-  Layer.provide(
-    Layer.succeed(RoleSyncEventsRepository, {
-      emitRoleCreated: () => Effect.void,
-      emitRoleDeleted: () => Effect.void,
-      emitRoleAssigned: () => Effect.void,
-      emitRoleUnassigned: () => Effect.void,
-      findUnprocessed: () => Effect.succeed([]),
-      markProcessed: () => Effect.void,
-      markFailed: () => Effect.void,
-    } as any),
+    Layer.merge(
+      Layer.succeed(NotificationsRepository, {
+        findByUserId: () => Effect.succeed([]),
+        findByUser: () => Effect.succeed([]),
+        insertOne: die,
+        insert: die,
+        insertBulk: () => Effect.void,
+        markOneAsRead: () => Effect.void,
+        markAsRead: () => Effect.void,
+        markAllRead: () => Effect.void,
+        markAllAsRead: () => Effect.void,
+        findOneById: () => Effect.succeed(Option.none()),
+        findById: () => Effect.succeed(Option.none()),
+      } as any),
+      Layer.succeed(RoleSyncEventsRepository, {
+        emitRoleCreated: () => Effect.void,
+        emitRoleDeleted: () => Effect.void,
+        emitRoleAssigned: () => Effect.void,
+        emitRoleUnassigned: () => Effect.void,
+        findUnprocessed: () => Effect.succeed([]),
+        markProcessed: () => Effect.void,
+        markFailed: () => Effect.void,
+      } as any),
+    ),
   ),
   Layer.provide(
     Layer.merge(
@@ -929,6 +965,7 @@ const TestLayer = ApiLive.pipe(
       ),
     ),
   ),
+  Layer.provide(MockAchievementAdminLayers),
 );
 
 let handler: (...args: any) => Promise<Response>;

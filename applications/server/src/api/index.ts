@@ -1,5 +1,6 @@
 import { Layer } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
+import { AchievementApiLive } from '~/api/achievement.js';
 import { ActivityLogApiLive } from '~/api/activity-logs.js';
 import { ActivityStatsApiLive } from '~/api/activity-stats.js';
 import { AgeThresholdApiLive } from '~/api/age-threshold.js';
@@ -21,6 +22,7 @@ import { TeamSettingsApiLive } from '~/api/team-settings.js';
 import { TrainingTypeApiLive } from '~/api/training-type.js';
 
 export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.json' }).pipe(
+  Layer.provide(AchievementApiLive),
   Layer.provide(ActivityLogApiLive),
   Layer.provide(ActivityStatsApiLive),
   Layer.provide(DashboardApiLive),

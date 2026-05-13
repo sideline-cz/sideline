@@ -1,6 +1,7 @@
 import { Achievement, ActivityStats, type TeamMember } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import { Effect, Layer, Option, ServiceMap } from 'effect';
+import { AchievementSettingsRepository } from '~/repositories/AchievementSettingsRepository.js';
 import { AchievementSyncEventsRepository } from '~/repositories/AchievementSyncEventsRepository.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { EarnedAchievementsRepository } from '~/repositories/EarnedAchievementsRepository.js';
@@ -12,15 +13,19 @@ const evaluate = (teamMemberId: TeamMember.TeamMemberId) =>
     Effect.bind('earned', () => EarnedAchievementsRepository.asEffect()),
     Effect.bind('syncEvents', () => AchievementSyncEventsRepository.asEffect()),
     Effect.bind('teamMembers', () => TeamMembersRepository.asEffect()),
+    Effect.bind('achievementSettings', () => AchievementSettingsRepository.asEffect()),
     Effect.bind('member', ({ teamMembers }) =>
       teamMembers.findById(teamMemberId).pipe(
-        Effect.flatMap((opt) =>
-          Option.match(opt, {
+        Effect.flatMap(
+          Option.match({
             onNone: () => LogicError.die('Member not found in AchievementEvaluator'),
             onSome: Effect.succeed,
           }),
         ),
       ),
+    ),
+    Effect.bind('overrides', ({ achievementSettings, member }) =>
+      achievementSettings.findOverridesByTeam(member.team_id),
     ),
     Effect.bind('rows', ({ activityLogs }) => activityLogs.findByTeamMember(teamMemberId)),
     Effect.let('stats', ({ rows }) =>
@@ -32,10 +37,12 @@ const evaluate = (teamMemberId: TeamMember.TeamMemberId) =>
       ({ countsRows }) => new Map(countsRows.map((r) => [r.slug, r.count])),
     ),
     Effect.bind('alreadyEarned', ({ earned }) => earned.findEarnedSlugs(teamMemberId)),
-    Effect.let('newlyEarned', ({ stats, countsBySlug, alreadyEarned }) =>
-      Achievement.ACHIEVEMENTS.filter(
-        (a) => !alreadyEarned.has(a.slug) && a.isEarned({ stats, countsBySlug }),
-      ),
+    Effect.let('newlyEarned', ({ stats, countsBySlug, alreadyEarned, overrides }) =>
+      Achievement.ACHIEVEMENTS.filter((a) => {
+        if (alreadyEarned.has(a.slug)) return false;
+        const threshold = Achievement.effectiveThreshold(a.slug, overrides);
+        return a.isEarned({ stats, countsBySlug }, threshold);
+      }),
     ),
     Effect.tap(({ earned, syncEvents, member, newlyEarned }) =>
       Effect.forEach(

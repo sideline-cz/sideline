@@ -2,6 +2,7 @@ import { Schema } from 'effect';
 import { Rpc, RpcGroup } from 'effect/unstable/rpc';
 import * as Achievement from '../../models/Achievement.js';
 import * as AchievementSyncEvent from '../../models/AchievementSyncEvent.js';
+import * as CustomAchievement from '../../models/CustomAchievement.js';
 import * as Discord from '../../models/Discord.js';
 import * as Team from '../../models/Team.js';
 import { UnprocessedAchievementEvent } from './AchievementRpcEvents.js';
@@ -25,6 +26,20 @@ export const AchievementRpcGroup = RpcGroup.make(
     payload: {
       team_id: Team.TeamId,
       achievement_slug: Achievement.AchievementSlug,
+      discord_role_id: Discord.Snowflake,
+    },
+  }),
+  Rpc.make('UpsertBuiltInRoleMapping', {
+    payload: {
+      team_id: Team.TeamId,
+      achievement_slug: Achievement.AchievementSlug,
+      discord_role_id: Discord.Snowflake,
+    },
+  }),
+  Rpc.make('UpsertCustomRoleMapping', {
+    payload: {
+      team_id: Team.TeamId,
+      custom_achievement_id: CustomAchievement.CustomAchievementId,
       discord_role_id: Discord.Snowflake,
     },
   }),

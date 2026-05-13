@@ -1,4 +1,5 @@
 import {
+  AchievementApi,
   ActivityLogApi,
   ActivityStatsApi,
   AgeThresholdApi,
@@ -32,6 +33,7 @@ export class ClientConfig extends ServiceMap.Service<ClientConfig, ClientConfigS
 ) {}
 
 class ClientApi extends HttpApi.make('api')
+  .add(AchievementApi.AchievementApiGroup)
   .add(ActivityLogApi.ActivityLogApiGroup)
   .add(ActivityStatsApi.ActivityStatsApiGroup)
   .add(AgeThresholdApi.AgeThresholdApiGroup)

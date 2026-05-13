@@ -1,4 +1,5 @@
 import {
+  AchievementApi,
   ActivityLogApi,
   ActivityStatsApi,
   AgeThresholdApi,
@@ -22,6 +23,7 @@ import { HttpApi } from 'effect/unstable/httpapi';
 import { env } from '~/env.js';
 
 export const Api = HttpApi.make('api')
+  .add(AchievementApi.AchievementApiGroup)
   .add(ActivityLogApi.ActivityLogApiGroup)
   .add(ActivityStatsApi.ActivityStatsApiGroup)
   .add(LeaderboardApi.LeaderboardApiGroup)

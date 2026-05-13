@@ -9,6 +9,7 @@ import {
   GuildJoinSyncService,
   InviteGeneratorService,
   OnboardingSyncService,
+  RoleProvisionSyncService,
   RoleSyncService,
 } from '~/rcp/index.js';
 import { InviteCache } from '~/services/InviteCache.js';
@@ -18,6 +19,7 @@ import { SyncRpc } from '~/services/SyncRpc.js';
 const SyncLive = Layer.mergeAll(
   AchievementSyncService.Default,
   RoleSyncService.Default,
+  RoleProvisionSyncService.Default,
   ChannelSyncService.Default,
   EventSyncService.Default,
   GuildJoinSyncService.Default,

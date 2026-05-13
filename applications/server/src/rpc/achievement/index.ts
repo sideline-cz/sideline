@@ -2,18 +2,21 @@ import {
   type Achievement,
   AchievementRpcGroup,
   type AchievementSyncEvent,
+  type CustomAchievement,
   type Discord,
   type Team,
 } from '@sideline/domain';
 import { Bind } from '@sideline/effect-lib';
-import { Array, Effect, flow, Result } from 'effect';
+import { Array, Effect, flow, Option, Result } from 'effect';
 import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
 import { AchievementSyncEventsRepository } from '~/repositories/AchievementSyncEventsRepository.js';
+import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { constructEvent, EventPropertyMissing } from './events.js';
 
 export const AchievementRpcLive = Effect.Do.pipe(
   Effect.bind('syncEvents', () => AchievementSyncEventsRepository.asEffect()),
   Effect.bind('roleMappings', () => AchievementRoleMappingsRepository.asEffect()),
+  Effect.bind('customs', () => CustomAchievementsRepository.asEffect()),
   Effect.let(
     'Achievement/GetUnprocessedEvents',
     ({ syncEvents }) =>
@@ -83,7 +86,36 @@ export const AchievementRpcLive = Effect.Do.pipe(
       }) =>
         roleMappings.upsert(team_id, achievement_slug, discord_role_id),
   ),
+  Effect.let(
+    'Achievement/UpsertBuiltInRoleMapping',
+    ({ roleMappings }) =>
+      ({
+        team_id,
+        achievement_slug,
+        discord_role_id,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly achievement_slug: Achievement.AchievementSlug;
+        readonly discord_role_id: Discord.Snowflake;
+      }) =>
+        roleMappings.upsert(team_id, achievement_slug, discord_role_id),
+  ),
+  Effect.let(
+    'Achievement/UpsertCustomRoleMapping',
+    ({ customs }) =>
+      ({
+        team_id,
+        custom_achievement_id,
+        discord_role_id,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly custom_achievement_id: CustomAchievement.CustomAchievementId;
+        readonly discord_role_id: Discord.Snowflake;
+      }) =>
+        customs.setRoleMapping(team_id, custom_achievement_id, Option.some(discord_role_id)),
+  ),
   Bind.remove('syncEvents'),
   Bind.remove('roleMappings'),
+  Bind.remove('customs'),
   (handlers) => AchievementRpcGroup.AchievementRpcGroup.toLayer(handlers),
 );

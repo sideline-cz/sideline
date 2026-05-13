@@ -112,6 +112,18 @@ Rules:
 4. **i18n keys are derived, not stored.** Export pure key-builder functions (`i18nTitleKey(slug)`, `i18nDescriptionKey(slug)`) that return the message key string. The catalog never embeds translated text — i18n keys live in `@sideline/i18n/messages/*.json`.
 5. **When adding an entry**: append to the `Schema.Literals([...])` AND to the `ACHIEVEMENTS` array (or equivalent) in the same PR, then add i18n keys for `title`/`description` in `cs.json` and `en.json`. Never gate entries behind feature flags inside the catalog — keep the array statically enumerable.
 
+### Per-Team Overrides for Code-Defined Catalogs
+
+When a code-defined catalog entry carries a numeric or scalar threshold that captains must be able to tune per team (e.g. "100 activities to earn Centurion" → some teams want 50), keep the **catalog entry's `defaultThreshold` static in code** and store per-team overrides in a dedicated `<catalog>_settings` table. Reference implementation: `achievement_settings (team_id, achievement_slug, threshold_override)` overrides `ACHIEVEMENTS[*].defaultThreshold`.
+
+Rules:
+
+1. **Override table is keyed by `(team_id, <slug>)`** with `PRIMARY KEY (team_id, <slug>)` so a missing row means "use the catalog default" — never insert a row whose value equals the default just to be explicit.
+2. **The catalog still ships the default.** The override table is read into a `ReadonlyMap<Slug, number>` and consumed via a pure resolver: `effectiveThreshold(slug, overrides): number` returns `overrides.get(slug) ?? catalogEntry.defaultThreshold`. Never mutate the catalog entry to apply an override.
+3. **Resolver lives in the domain catalog file** (`packages/domain/src/models/<Catalog>.ts`), not in the server repository — so server, bot, and web all import the same `effectiveThreshold` and cannot drift.
+4. **Server reads overrides once per evaluation** via a repository method like `findOverridesByTeam(teamId) => Effect<ReadonlyMap<Slug, number>>` and threads the map through the evaluator. Do not call the override resolver inside a hot per-member loop without first hoisting the `Map` lookup out of the loop.
+5. **Deleting an override row is the way to "reset to default"** — never store the default value in the override table as a sentinel. The override repository exposes a `deleteOverride(teamId, slug)` method for this.
+
 ## RPC Folder Import Rule
 
 Files under `src/rpc/**` must import models from their concrete paths (e.g. `import * as Discord from '~/models/Discord.js'`), **not** via the barrel `~/index.js`. The barrel re-exports both `models/*` and `rpc/*`, and rpc files transitively pulled in through the barrel before their model dependencies finish initialising — at runtime this surfaces as `Cannot read properties of undefined (reading 'ast')` when a `Schema.TaggedClass` or `RpcGroup.make` references e.g. `Team.TeamId`. Always import models directly inside `src/rpc/**`.

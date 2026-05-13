@@ -5,6 +5,13 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-13 — Achievement management for admins
+
+- Captains can now manage achievements from the **Team → Achievements** page in the web app.
+- **Adjust thresholds** for any of the 11 built-in achievements. A preview shows how many members would qualify at the new threshold before you save.
+- **Create custom achievements** with a name, description, rule type (total activities, longest streak, total duration, or per-activity-type count), and threshold. Custom achievements are evaluated automatically alongside built-in ones every time a member logs an activity.
+- **Link Discord roles** to any achievement (built-in or custom). Pick an existing Discord role by ID, or choose **Auto-create** — the bot will find a role with the achievement's name in your server or create one if it doesn't exist yet.
+
 ## 2026-05-13 — Achievement system
 
 - Members now earn **achievements** automatically as they log physical activity. Milestones include first activity, activity count milestones (10, 50, 100), streak lengths (3, 7, 30 days), total duration milestones (600 and 3000 minutes), and per-type counts (25 gym sessions, 25 runs).

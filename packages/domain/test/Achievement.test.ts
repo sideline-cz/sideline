@@ -1,8 +1,10 @@
 import { describe, expect, it } from '@effect/vitest';
+import { Effect, Schema } from 'effect';
 import type { AchievementEvaluationInput } from '~/models/Achievement.js';
 import {
   ACHIEVEMENTS,
   ACHIEVEMENTS_BY_SLUG,
+  AchievementSlug,
   i18nDescriptionKey,
   i18nTitleKey,
 } from '~/models/Achievement.js';
@@ -37,11 +39,11 @@ describe('Achievement: first_activity', () => {
   const entry = ACHIEVEMENTS_BY_SLUG.get('first_activity')!;
 
   it('isEarned returns true when totalActivities=1', () => {
-    expect(entry.isEarned(makeInput({ totalActivities: 1 }))).toBe(true);
+    expect(entry.isEarned(makeInput({ totalActivities: 1 }), entry.defaultThreshold)).toBe(true);
   });
 
   it('isEarned returns false when totalActivities=0', () => {
-    expect(entry.isEarned(makeInput({ totalActivities: 0 }))).toBe(false);
+    expect(entry.isEarned(makeInput({ totalActivities: 0 }), entry.defaultThreshold)).toBe(false);
   });
 });
 
@@ -53,11 +55,11 @@ describe('Achievement: ten_activities', () => {
   const entry = ACHIEVEMENTS_BY_SLUG.get('ten_activities')!;
 
   it('isEarned returns true at boundary totalActivities=10', () => {
-    expect(entry.isEarned(makeInput({ totalActivities: 10 }))).toBe(true);
+    expect(entry.isEarned(makeInput({ totalActivities: 10 }), entry.defaultThreshold)).toBe(true);
   });
 
   it('isEarned returns false at totalActivities=9', () => {
-    expect(entry.isEarned(makeInput({ totalActivities: 9 }))).toBe(false);
+    expect(entry.isEarned(makeInput({ totalActivities: 9 }), entry.defaultThreshold)).toBe(false);
   });
 });
 
@@ -69,11 +71,11 @@ describe('Achievement: fifty_activities', () => {
   const entry = ACHIEVEMENTS_BY_SLUG.get('fifty_activities')!;
 
   it('isEarned returns true at boundary totalActivities=50', () => {
-    expect(entry.isEarned(makeInput({ totalActivities: 50 }))).toBe(true);
+    expect(entry.isEarned(makeInput({ totalActivities: 50 }), entry.defaultThreshold)).toBe(true);
   });
 
   it('isEarned returns false at totalActivities=49', () => {
-    expect(entry.isEarned(makeInput({ totalActivities: 49 }))).toBe(false);
+    expect(entry.isEarned(makeInput({ totalActivities: 49 }), entry.defaultThreshold)).toBe(false);
   });
 });
 
@@ -85,11 +87,11 @@ describe('Achievement: hundred_activities', () => {
   const entry = ACHIEVEMENTS_BY_SLUG.get('hundred_activities')!;
 
   it('isEarned returns true at boundary totalActivities=100', () => {
-    expect(entry.isEarned(makeInput({ totalActivities: 100 }))).toBe(true);
+    expect(entry.isEarned(makeInput({ totalActivities: 100 }), entry.defaultThreshold)).toBe(true);
   });
 
   it('isEarned returns false at totalActivities=99', () => {
-    expect(entry.isEarned(makeInput({ totalActivities: 99 }))).toBe(false);
+    expect(entry.isEarned(makeInput({ totalActivities: 99 }), entry.defaultThreshold)).toBe(false);
   });
 });
 
@@ -101,11 +103,13 @@ describe('Achievement: streak_3', () => {
   const entry = ACHIEVEMENTS_BY_SLUG.get('streak_3')!;
 
   it('isEarned returns true when longestStreak=3 and currentStreak=0 (broken streak still counts)', () => {
-    expect(entry.isEarned(makeInput({ longestStreak: 3, currentStreak: 0 }))).toBe(true);
+    expect(
+      entry.isEarned(makeInput({ longestStreak: 3, currentStreak: 0 }), entry.defaultThreshold),
+    ).toBe(true);
   });
 
   it('isEarned returns false when longestStreak=2', () => {
-    expect(entry.isEarned(makeInput({ longestStreak: 2 }))).toBe(false);
+    expect(entry.isEarned(makeInput({ longestStreak: 2 }), entry.defaultThreshold)).toBe(false);
   });
 });
 
@@ -117,11 +121,11 @@ describe('Achievement: streak_7', () => {
   const entry = ACHIEVEMENTS_BY_SLUG.get('streak_7')!;
 
   it('isEarned returns true at boundary longestStreak=7', () => {
-    expect(entry.isEarned(makeInput({ longestStreak: 7 }))).toBe(true);
+    expect(entry.isEarned(makeInput({ longestStreak: 7 }), entry.defaultThreshold)).toBe(true);
   });
 
   it('isEarned returns false at longestStreak=6', () => {
-    expect(entry.isEarned(makeInput({ longestStreak: 6 }))).toBe(false);
+    expect(entry.isEarned(makeInput({ longestStreak: 6 }), entry.defaultThreshold)).toBe(false);
   });
 });
 
@@ -133,11 +137,11 @@ describe('Achievement: streak_30', () => {
   const entry = ACHIEVEMENTS_BY_SLUG.get('streak_30')!;
 
   it('isEarned returns true at boundary longestStreak=30', () => {
-    expect(entry.isEarned(makeInput({ longestStreak: 30 }))).toBe(true);
+    expect(entry.isEarned(makeInput({ longestStreak: 30 }), entry.defaultThreshold)).toBe(true);
   });
 
   it('isEarned returns false at longestStreak=29', () => {
-    expect(entry.isEarned(makeInput({ longestStreak: 29 }))).toBe(false);
+    expect(entry.isEarned(makeInput({ longestStreak: 29 }), entry.defaultThreshold)).toBe(false);
   });
 });
 
@@ -149,11 +153,15 @@ describe('Achievement: duration_600', () => {
   const entry = ACHIEVEMENTS_BY_SLUG.get('duration_600')!;
 
   it('isEarned returns true at boundary totalDurationMinutes=600', () => {
-    expect(entry.isEarned(makeInput({ totalDurationMinutes: 600 }))).toBe(true);
+    expect(entry.isEarned(makeInput({ totalDurationMinutes: 600 }), entry.defaultThreshold)).toBe(
+      true,
+    );
   });
 
   it('isEarned returns false at totalDurationMinutes=599', () => {
-    expect(entry.isEarned(makeInput({ totalDurationMinutes: 599 }))).toBe(false);
+    expect(entry.isEarned(makeInput({ totalDurationMinutes: 599 }), entry.defaultThreshold)).toBe(
+      false,
+    );
   });
 });
 
@@ -165,11 +173,15 @@ describe('Achievement: duration_3000', () => {
   const entry = ACHIEVEMENTS_BY_SLUG.get('duration_3000')!;
 
   it('isEarned returns true at boundary totalDurationMinutes=3000', () => {
-    expect(entry.isEarned(makeInput({ totalDurationMinutes: 3000 }))).toBe(true);
+    expect(entry.isEarned(makeInput({ totalDurationMinutes: 3000 }), entry.defaultThreshold)).toBe(
+      true,
+    );
   });
 
   it('isEarned returns false at totalDurationMinutes=2999', () => {
-    expect(entry.isEarned(makeInput({ totalDurationMinutes: 2999 }))).toBe(false);
+    expect(entry.isEarned(makeInput({ totalDurationMinutes: 2999 }), entry.defaultThreshold)).toBe(
+      false,
+    );
   });
 });
 
@@ -181,15 +193,21 @@ describe('Achievement: gym_25', () => {
   const entry = ACHIEVEMENTS_BY_SLUG.get('gym_25')!;
 
   it('isEarned returns true when countsBySlug has gym=25', () => {
-    expect(entry.isEarned(makeInput({}, new Map([['gym', 25]])))).toBe(true);
+    expect(entry.isEarned(makeInput({}, new Map([['gym', 25]])), entry.defaultThreshold)).toBe(
+      true,
+    );
   });
 
   it('isEarned returns false when countsBySlug has gym=24', () => {
-    expect(entry.isEarned(makeInput({}, new Map([['gym', 24]])))).toBe(false);
+    expect(entry.isEarned(makeInput({}, new Map([['gym', 24]])), entry.defaultThreshold)).toBe(
+      false,
+    );
   });
 
   it('isEarned returns false when only running=100 (no gym entry)', () => {
-    expect(entry.isEarned(makeInput({}, new Map([['running', 100]])))).toBe(false);
+    expect(entry.isEarned(makeInput({}, new Map([['running', 100]])), entry.defaultThreshold)).toBe(
+      false,
+    );
   });
 });
 
@@ -201,11 +219,15 @@ describe('Achievement: running_25', () => {
   const entry = ACHIEVEMENTS_BY_SLUG.get('running_25')!;
 
   it('isEarned returns true when countsBySlug has running=25', () => {
-    expect(entry.isEarned(makeInput({}, new Map([['running', 25]])))).toBe(true);
+    expect(entry.isEarned(makeInput({}, new Map([['running', 25]])), entry.defaultThreshold)).toBe(
+      true,
+    );
   });
 
   it('isEarned returns false when countsBySlug has running=24', () => {
-    expect(entry.isEarned(makeInput({}, new Map([['running', 24]])))).toBe(false);
+    expect(entry.isEarned(makeInput({}, new Map([['running', 24]])), entry.defaultThreshold)).toBe(
+      false,
+    );
   });
 });
 
@@ -286,4 +308,24 @@ describe('grantsDiscordRole', () => {
   it('running_25 does NOT grant discord role', () => {
     expect(ACHIEVEMENTS_BY_SLUG.get('running_25')?.grantsDiscordRole).toBe(false);
   });
+});
+
+// ---------------------------------------------------------------------------
+// AchievementSlug — closed literal (regression for catalog-refactor)
+// ---------------------------------------------------------------------------
+
+describe('AchievementSlug', () => {
+  it.effect(
+    'rejects unknown slugs (closed literal preserved after threshold-parameter refactor)',
+    () =>
+      Schema.decodeUnknownEffect(AchievementSlug)('made_up_slug').pipe(
+        Effect.flip,
+        Effect.tap((err) =>
+          Effect.sync(() => {
+            // SchemaError means decoding failed — the slug is not in the literal union
+            expect(err._tag).toBe('SchemaError');
+          }),
+        ),
+      ),
+  );
 });

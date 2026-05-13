@@ -27,13 +27,17 @@ import { HttpClient, HttpClientResponse, HttpRouter, HttpServer } from 'effect/u
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { ApiLive } from '~/api/index.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
+import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
+import { AchievementSettingsRepository } from '~/repositories/AchievementSettingsRepository.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
+import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { DiscordRoleProvisionEventsRepository } from '~/repositories/DiscordRoleProvisionEventsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
@@ -57,6 +61,7 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 
@@ -807,6 +812,37 @@ const MockActivityTypesRepositoryLayer = Layer.succeed(ActivityTypesRepository, 
   findById: () => Effect.succeed(Option.none()),
 } as any);
 
+const MockAchievementAdminLayers = Layer.mergeAll(
+  Layer.succeed(AchievementRoleMappingsRepository, {
+    findAllByTeam: () => Effect.succeed([]),
+    upsert: () => Effect.void,
+    delete: () => Effect.void,
+  } as any),
+  Layer.succeed(AchievementSettingsRepository, {
+    findOverridesByTeam: () => Effect.succeed(new Map()),
+    upsertOverride: () => Effect.void,
+    deleteOverride: () => Effect.void,
+  } as any),
+  Layer.succeed(CustomAchievementsRepository, {
+    findByTeam: () => Effect.succeed([]),
+    findById: () => Effect.succeed(Option.none()),
+    insert: () => Effect.die(new Error('Not implemented')),
+    update: () => Effect.die(new Error('Not implemented')),
+    delete: () => Effect.void,
+    setRoleMapping: () => Effect.void,
+  } as any),
+  Layer.succeed(DiscordRoleProvisionEventsRepository, {
+    enqueue: () => Effect.void,
+    findUnprocessed: () => Effect.succeed([]),
+    markProcessed: () => Effect.void,
+    markFailed: () => Effect.void,
+  } as any),
+  Layer.succeed(AchievementPreview, {
+    preview: () =>
+      Effect.succeed({ qualifyingCount: 0, removedMembers: [], botCanManageRoles: true }),
+  } as any),
+);
+
 // ---------------------------------------------------------------------------
 // makeTeamSettingsRow helper
 // ---------------------------------------------------------------------------
@@ -890,8 +926,7 @@ const buildTestLayer = (
     Layer.provide(MockHttpClientLayer),
     Layer.provide(MockAgeCheckServiceLayer),
     Layer.provide(MockAgeThresholdRepositoryLayer),
-    Layer.provide(MockNotificationsRepositoryLayer),
-    Layer.provide(MockRoleSyncEventsRepositoryLayer),
+    Layer.provide(Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer)),
     Layer.provide(
       Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
     ),
@@ -914,6 +949,7 @@ const buildTestLayer = (
         MockOAuthConnectionsRepositoryLayer,
       ),
     ),
+    Layer.provide(MockAchievementAdminLayers),
   );
 
 const makeSettingsLayer = (findByTeamId: () => Effect.Effect<Option.Option<unknown>>) =>
@@ -1111,8 +1147,9 @@ describe('B2 — createGroup emits channel_created regardless of create_discord_
       Layer.provide(MockHttpClientLayer),
       Layer.provide(MockAgeCheckServiceLayer),
       Layer.provide(MockAgeThresholdRepositoryLayer),
-      Layer.provide(MockNotificationsRepositoryLayer),
-      Layer.provide(MockRoleSyncEventsRepositoryLayer),
+      Layer.provide(
+        Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer),
+      ),
       Layer.provide(Layer.merge(orderRecordingLayer, MockEventSyncEventsRepositoryLayer)),
       Layer.provide(Layer.merge(orderRecordingMappingLayer, MockICalTokensRepositoryLayer)),
       Layer.provide(
@@ -1133,6 +1170,7 @@ describe('B2 — createGroup emits channel_created regardless of create_discord_
           MockOAuthConnectionsRepositoryLayer,
         ),
       ),
+      Layer.provide(MockAchievementAdminLayers),
     );
 
     const _app = HttpRouter.toWebHandler(customLayer);

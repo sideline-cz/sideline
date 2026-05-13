@@ -25,6 +25,16 @@ Example: `1740970000_create_role_sync.ts`
 - Add appropriate indexes for frequently queried columns
 - Foreign keys should have `ON DELETE` behavior specified
 
+### Timestamp ID Must Be Strictly Greater Than the Highest Already-Applied ID
+
+The migration runner records applied ids in `migrations_*` and re-applies only ids strictly greater than the highest recorded id. A new migration with a timestamp lower than (or equal to) any already-applied id is **silently skipped in every environment where the higher id has already run** (CI preview DBs, staging, production). The file appears merged but the schema never changes.
+
+Rules when adding a new migration file:
+
+1. **Run `ls -1 packages/migrations/src/before/ | sort | tail -1`** before choosing a filename. The new timestamp must be strictly greater than that last entry. Do not pick a "round" number from the past (e.g. `1747700000`) when the latest applied id is already `1778716800` — pick something like `1779000000` (greater than every existing id, rounded up from `Date.now() / 1000` is fine).
+2. **Never renumber an existing migration** to fix this — the old timestamp is already recorded as applied in preview/staging DBs, so renaming the file orphans the recorded row. Add a new migration with a strictly-greater timestamp instead.
+3. This rule applies to both `src/before/` and any future migration directories — the runner uses one monotonically-increasing id sequence per directory.
+
 ### Adding Columns to Existing Tables
 
 Use `ALTER TABLE ... ADD COLUMN` with separate statements per column. Chain statements with `Effect.tap`:

@@ -43,6 +43,9 @@ erDiagram
     teams ||--o{ rosters : "manages"
     teams ||--o{ achievement_role_mappings : "configures"
     teams ||--o{ achievement_sync_events : "logs"
+    teams ||--o{ achievement_settings : "overrides"
+    teams ||--o{ custom_achievements : "defines"
+    teams ||--o{ discord_role_provision_events : "queues"
 
     bot_guilds ||--o{ discord_channels : "hosts"
 
@@ -567,7 +570,7 @@ erDiagram
 
 ### Activity Tracking & Achievements
 
-`activity_logs` record individual physical activity sessions for a team member. `activity_types` defines the catalogue of activity kinds — a set of global built-in slugs (gym, running, stretching, training) plus optional team-specific custom types. `earned_achievements` record milestones unlocked by a member (e.g. first activity, 7-day streak). `achievement_role_mappings` optionally tie each achievement to a Discord role that is granted when the achievement is earned. `achievement_sync_events` is the outbox table the bot drains to grant Discord roles and post congratulatory embeds.
+`activity_logs` record individual physical activity sessions for a team member. `activity_types` defines the catalogue of activity kinds — a set of global built-in slugs (gym, running, stretching, training) plus optional team-specific custom types. `earned_achievements` record milestones unlocked by a member (e.g. first activity, 7-day streak). `achievement_role_mappings` optionally tie each achievement to a Discord role that is granted when the achievement is earned. `achievement_sync_events` is the outbox table the bot drains to grant Discord roles and post congratulatory embeds. `achievement_settings` stores per-team threshold overrides for built-in achievements. `custom_achievements` holds team-defined achievements with fully configurable rules and thresholds. `discord_role_provision_events` is the outbox table the bot's Role Provision worker drains to auto-create Discord roles for achievements.
 
 ```mermaid
 erDiagram
@@ -615,9 +618,46 @@ erDiagram
         TEXT error
     }
 
+    achievement_settings {
+        UUID team_id FK
+        TEXT achievement_slug
+        INTEGER threshold_override
+        TIMESTAMPTZ updated_at
+    }
+
+    custom_achievements {
+        UUID id PK
+        UUID team_id FK
+        TEXT name
+        TEXT description
+        TEXT emoji
+        TEXT rule_kind
+        INTEGER threshold
+        TEXT activity_type_slug
+        TEXT discord_role_id
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    discord_role_provision_events {
+        UUID id PK
+        UUID team_id FK
+        TEXT guild_id
+        TEXT kind
+        TEXT ref_id
+        TEXT desired_name
+        INT attempts
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ processed_at
+        TEXT error
+    }
+
     teams o|--o{ activity_types : "extends"
     teams ||--o{ achievement_role_mappings : "configures"
     teams ||--o{ achievement_sync_events : "logs"
+    teams ||--o{ achievement_settings : "overrides"
+    teams ||--o{ custom_achievements : "defines"
+    teams ||--o{ discord_role_provision_events : "queues"
     activity_types ||--o{ activity_logs : "categorises"
     team_members ||--o{ activity_logs : "records"
     team_members ||--o{ earned_achievements : "earns"
@@ -737,6 +777,9 @@ erDiagram
 | `earned_achievements` | Records which achievements a team member has earned; each achievement is earned at most once per member. |
 | `achievement_role_mappings` | Maps an achievement slug to the Discord role that should be granted when a team member earns it. |
 | `achievement_sync_events` | Outbox records driving achievement Discord notifications (role grants and congratulatory embeds) in the bot. |
+| `achievement_settings` | Per-team threshold overrides for built-in achievements; a row exists only when the team has changed a threshold from its default. |
+| `custom_achievements` | Team-defined achievements with configurable names, descriptions, rule kinds, thresholds, and optional Discord role grants. |
+| `discord_role_provision_events` | Outbox records for the bot's Role Provision worker to auto-create Discord roles for achievement mappings. |
 | `rosters` | Named match-day squad lists managed per team. |
 | `roster_members` | Many-to-many junction placing team members on a roster. |
 | `notifications` | In-app alert records scoped to a team and user, with read/unread tracking. |

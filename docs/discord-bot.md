@@ -565,9 +565,9 @@ Calls `Guild/UpsertChannel` RPC to update the channel's name and metadata in the
 
 ## RPC Sync Workers
 
-Five background worker loops run continuously inside the bot process. Four of them (Role Sync, Channel Sync, Event Sync, Achievement Sync) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those four loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`) and fetch up to **50 events per poll** (`POLL_BATCH_SIZE = 50`). The fifth (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation.
+Six background worker loops run continuously inside the bot process. Five of them (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those five loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`) and fetch up to **50 events per poll** (`POLL_BATCH_SIZE = 50`). The sixth (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation.
 
-The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, `event_sync_events`, and `achievement_sync_events`; the bot drains those queues.
+The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, `event_sync_events`, `achievement_sync_events`, and `discord_role_provision_events`; the bot drains those queues.
 
 > **Note on directory name:** The source files for these workers live under `applications/bot/src/rcp/`. This is a typo in the codebase; the intended name is `rpc`. The import paths and class names (`RoleSyncService`, `ChannelSyncService`, `EventSyncService`) all reflect the intended `rpc` meaning.
 
@@ -710,6 +710,33 @@ The server's `AchievementEvaluator` service inserts a row into `achievement_sync
 
 ---
 
+### Role Provision Worker
+
+**Service class:** `RoleProvisionSyncService` (`applications/bot/src/rcp/roleProvision/ProcessorService.ts`)
+
+**Polling RPC:** `RoleProvision/GetUnprocessedEvents`
+
+**Polling interval:** 5 seconds (`pollLoop` in `Bot.ts`).
+
+The Role Provision worker drains the `discord_role_provision_events` outbox. When a team admin selects **Auto-create** for an achievement's Discord role mapping, the server inserts a row in `discord_role_provision_events` with `desired_name` set to the achievement's display name. The worker processes each event as follows:
+
+1. Calls `discord.listGuildRoles` for the event's `guild_id`.
+2. Searches for an existing role whose name exactly matches `desired_name`.
+3. If found, uses that role's ID (reuse semantics — avoids duplicate roles for the same achievement).
+4. If not found, calls `discord.createGuildRole` with `{ name: desired_name }`.
+5. Writes the resolved role ID back to the server:
+   - `kind = "builtin_achievement"` → calls `Achievement/UpsertBuiltInRoleMapping` with `(team_id, achievement_slug, discord_role_id)`.
+   - `kind = "custom_achievement"` → calls `Achievement/UpsertCustomRoleMapping` with `(team_id, custom_achievement_id, discord_role_id)`.
+6. Marks the event processed via `RoleProvision/MarkProcessed`.
+
+Failures are recorded via `RoleProvision/MarkFailed` (sets `processed_at`) and are not automatically retried.
+
+**Lifecycle RPCs:**
+- `RoleProvision/MarkProcessed` — called after each successful provision.
+- `RoleProvision/MarkFailed` — called on error; records the error string and sets `processed_at`.
+
+---
+
 ## Startup Tasks
 
 In addition to the three poll loops, the bot runs one-off tasks at startup (after the gateway connection is established). These tasks are composed alongside the poll loops with `concurrency: 'unbounded'` in `Bot.ts`.
@@ -824,7 +851,17 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Achievement/MarkEventProcessed` | Acknowledge successful processing |
 | `Achievement/MarkEventFailed` | Record a processing failure (sets `processed_at`; event is not retried) |
 | `Achievement/GetRoleMapping` | Look up the Discord role ID mapped to an achievement slug for a team |
-| `Achievement/UpsertRoleMapping` | Save or update the Discord role ID mapping for a (team, achievement slug) pair |
+| `Achievement/UpsertRoleMapping` | Save or update the Discord role ID mapping for a (team, achievement slug) pair (legacy) |
+| `Achievement/UpsertBuiltInRoleMapping` | Save or update the role mapping for a built-in achievement after auto-provisioning |
+| `Achievement/UpsertCustomRoleMapping` | Save or update the role mapping for a custom achievement after auto-provisioning |
+
+### RoleProvision group (`RoleProvision/`)
+
+| Method | Purpose |
+|--------|---------|
+| `RoleProvision/GetUnprocessedEvents` | Poll for pending `discord_role_provision_events` outbox rows |
+| `RoleProvision/MarkProcessed` | Acknowledge a successful Discord role provision |
+| `RoleProvision/MarkFailed` | Record a provision failure (sets `processed_at`; event is not retried) |
 
 ---
 
