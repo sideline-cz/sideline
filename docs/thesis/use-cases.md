@@ -378,7 +378,7 @@ flowchart LR
 
 ### 3.6 Activity Tracking
 
-Activity tracking records physical activities for individual members. Each log entry is associated with an activity type (identified by a slug such as `gym`, `run`) and an optional duration in minutes. The leaderboard ranks members by total activity count, total duration, and streak metrics over a configurable time frame. Admins manage the available activity types via training types; the bot can auto-log attendance as activities after events conclude.
+Activity tracking records physical activities for individual members. Each log entry is associated with an activity type (identified by a slug such as `gym`, `running`) and an optional duration in minutes. The leaderboard ranks members by total activity count, total duration, and streak metrics over a configurable time frame. Admins can define custom team-specific activity types in addition to the four global built-ins; the bot can auto-log attendance as activities after events conclude.
 
 ```mermaid
 flowchart LR
@@ -393,7 +393,7 @@ flowchart LR
         UC_CREATE_LOG["Log Activity\n(POST /teams/:teamId/members/:memberId/activity-logs)\nactivityTypeId · durationMinutes · note"]
         UC_UPDATE_LOG["Update Activity Log\n(PATCH /teams/:teamId/members/:memberId/activity-logs/:logId)\nnot allowed on auto-sourced entries"]
         UC_DELETE_LOG["Delete Activity Log\n(POST /teams/:teamId/members/:memberId/activity-logs/:logId/delete)\nnot allowed on auto-sourced entries"]
-        UC_LIST_TYPES["List Activity Types\n(GET /teams/:teamId/activity-types)"]
+        UC_LIST_TYPES["List Activity Types\n(GET /teams/:teamId/activity-types)\nreturns canAdmin flag"]
     end
 
     subgraph STATS["Stats & Leaderboard"]
@@ -401,11 +401,11 @@ flowchart LR
         UC_LEADERBOARD["View Leaderboard\n(GET /teams/:teamId/leaderboard)\nfilter: timeframe · activityTypeId"]
     end
 
-    subgraph TT["Training Types (Admin)"]
-        UC_LIST_TT["List Training Types\n(GET /teams/:teamId/training-types)"]
-        UC_CREATE_TT["Create Training Type\n(POST /teams/:teamId/training-types)\nrequires: training-type:create"]
-        UC_UPDATE_TT["Update Training Type\n(PATCH /teams/:teamId/training-types/:trainingTypeId)"]
-        UC_DELETE_TT["Delete Training Type\n(DELETE /teams/:teamId/training-types/:trainingTypeId)\nrequires: training-type:delete"]
+    subgraph AT["Activity Types (Admin)"]
+        UC_GET_TYPE["Get Activity Type\n(GET /teams/:teamId/activity-types/:activityTypeId)"]
+        UC_CREATE_TYPE["Create Activity Type\n(POST /teams/:teamId/activity-types)\nname · emoji · description"]
+        UC_UPDATE_TYPE["Update Activity Type\n(PATCH /teams/:teamId/activity-types/:activityTypeId)\nnot allowed on global built-ins"]
+        UC_DELETE_TYPE["Delete Activity Type\n(DELETE /teams/:teamId/activity-types/:activityTypeId)\nnot allowed on built-ins or types with logs"]
     end
 
     PL --> UC_LIST_LOGS
@@ -416,10 +416,10 @@ flowchart LR
     PL --> UC_MY_STATS
     PL --> UC_LEADERBOARD
 
-    CP --> UC_LIST_TT
-    AD --> UC_CREATE_TT
-    AD --> UC_UPDATE_TT
-    AD --> UC_DELETE_TT
+    AD --> UC_GET_TYPE
+    AD --> UC_CREATE_TYPE
+    AD --> UC_UPDATE_TYPE
+    AD --> UC_DELETE_TYPE
 
     BOT --> UC_CREATE_LOG
     SYS --> UC_CREATE_LOG

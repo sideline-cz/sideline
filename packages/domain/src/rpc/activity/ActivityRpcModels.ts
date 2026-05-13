@@ -1,5 +1,6 @@
 import { Schema } from 'effect';
 import { ActivityLogId } from '~/models/ActivityLog.js';
+import { ActivityTypeId } from '~/models/ActivityType.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 
 export class LogActivityResult extends Schema.Class<LogActivityResult>('LogActivityResult')({
@@ -51,3 +52,16 @@ export class GetLeaderboardResult extends Schema.Class<GetLeaderboardResult>(
   requesting_user_rank: Schema.OptionFromNullOr(Schema.Int),
   requesting_user_entry: Schema.OptionFromNullOr(LeaderboardEntryResult),
 }) {}
+
+export class ActivityTypeChoice extends Schema.Class<ActivityTypeChoice>('ActivityTypeChoice')({
+  id: ActivityTypeId,
+  name: Schema.String,
+  slug: Schema.OptionFromNullOr(Schema.String),
+  emoji: Schema.OptionFromNullOr(Schema.String),
+  isGlobal: Schema.Boolean,
+}) {}
+
+export class ActivityTypeNotFound extends Schema.TaggedErrorClass<ActivityTypeNotFound>()(
+  'ActivityTypeNotFound',
+  {},
+) {}

@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-13 — Custom activity types for admins
+
+- Team admins can now define **custom activity types** from the **Team → Activity types** page in the web app.
+- Each type has a name (unique within the team, max 50 characters), an optional emoji, and an optional short description.
+- Custom types appear alongside the four global built-ins (Gym, Running, Stretching, Training) in the activity log form and as autocomplete choices in the `/makanicko log` Discord command.
+- Built-in types now have their own emoji (🏋️ Gym, 🏃 Running, 🧘 Stretching, ⚽ Training).
+- Types that have been used in at least one activity log entry cannot be deleted — the API returns the current usage count in the error so you can decide what to do.
+
 ## 2026-05-13 — Weekly makáníčko summary in Discord
 
 - Every Sunday at 20:00 in your team's configured timezone, the bot posts a **weekly activity summary embed** to a Discord channel of your choice.

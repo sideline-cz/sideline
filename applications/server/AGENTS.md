@@ -401,6 +401,53 @@ Rules when adding a new column to a `Model.Class` that is INSERTed via hand-writ
 - **`TIME` columns** — node-postgres returns `'HH:MM:SS'`. If consumers expect `'HH:MM'`, normalize on read with `TO_CHAR(col, 'HH24:MI') AS col` in both `SELECT` and `RETURNING` clauses (see `TeamSettingsRepository._findByTeam`).
 - **`sql` template tag** — interpolated values become bind parameters, never SQL fragments. To pass "now" into a query, pass a real `Date` (or its ISO string) and cast in SQL (`${nowIso}::timestamptz`); never interpolate the literal string `'NOW()'` — it becomes a bound text value, not a function call.
 
+## Team-Scoped Resources With Global Rows
+
+Some resource tables hold both **global** rows (shared across every team) and **team-specific** rows in the same table, distinguished by `team_id`:
+
+| Value | Meaning |
+|-------|---------|
+| `team_id IS NULL` | Global / built-in row. Immutable from the HTTP API — never UPDATE or DELETE. Seeded by migrations. |
+| `team_id = <teamId>` | Team-specific row. Owned by that team; the team's captains may CRUD it. |
+
+Reference implementation: `activity_types` (see `ActivityTypesRepository`, `src/api/activity-type.ts`, migration `1781000000_activity_type_metadata.ts`).
+
+Rules:
+
+1. **Case-insensitive name uniqueness is enforced per scope** via two partial unique indexes:
+   ```sql
+   CREATE UNIQUE INDEX idx_<table>_global_lower_name ON <table> (LOWER(name)) WHERE team_id IS NULL;
+   CREATE UNIQUE INDEX idx_<table>_team_lower_name   ON <table> (team_id, LOWER(name)) WHERE team_id IS NOT NULL;
+   ```
+   The team-scoped uniqueness check helper (`findByNameInScope(name, teamId)`) returns the first row matching `LOWER(name) = LOWER($1) AND (team_id IS NULL OR team_id = $2)` so a team cannot create a row whose name shadows a global row or another team-row of theirs. Always trim the name before the lookup AND before the insert/update.
+2. **Tenant isolation reads use `findByIdScoped(id, teamId)`**, which filters `id = $1 AND (team_id IS NULL OR team_id = $2)`. Never expose a bare `findById` to API handlers — that would let team A read or reference team B's row by guessing the id. `findById` (no scope) is reserved for internal lookups that have already authenticated the resource owner.
+3. **Mutation methods must include `team_id` in the `WHERE` clause** to prevent cross-tenant writes:
+   ```sql
+   UPDATE activity_types SET ... WHERE id = ${id} AND team_id = ${teamId} AND team_id IS NOT NULL
+   DELETE FROM activity_types        WHERE id = ${id} AND team_id = ${teamId} AND team_id IS NOT NULL
+   ```
+   The trailing `team_id IS NOT NULL` guard is what prevents a captain from accidentally clobbering a global row even if they pass a global row's id — the API layer's `Protected` check (see below) is the primary defence; the SQL guard is defence-in-depth.
+4. **List queries return both scopes in one call**, sorted globals-first: `WHERE team_id IS NULL OR team_id = $1 ORDER BY (team_id IS NULL) DESC, LOWER(name) ASC`. Do not run two queries and merge in TS.
+5. **Catch the unique-violation defect** from the unique indexes with `SqlErrors.catchUniqueViolation(() => new <Resource>NameAlreadyTakenError())` on `insertCustom` / `updateCustom`. The pre-check via `findByNameInScope` handles the happy path; the catch handles the race-condition path.
+
+## HTTP API Error Tags: `Forbidden` vs `Protected` vs `<Resource>NotFound`
+
+Use three distinct tagged errors at the HTTP-API layer when a write may be rejected for different reasons. Do not collapse them into one error.
+
+| Tag | HTTP status | Meaning | Example trigger |
+|-----|-------------|---------|-----------------|
+| `<Resource>Forbidden` | 403 | Caller lacks the required permission on this team. | Member without `activity-type:create` calling create. |
+| `<Resource>Protected` | 422 | Caller has permission, but the **target row is immutable** (e.g. global / built-in). | Captain trying to edit a row with `team_id IS NULL`. |
+| `<Resource>NotFound` | 404 | The row does not exist, or exists but is not visible to this team. | `findByIdScoped` returns `None`. |
+
+Reference: `packages/domain/src/api/ActivityTypeApi.ts` defines `Forbidden` (403), `ActivityTypeProtected` (422), `ActivityTypeNotFound` (404), `ActivityTypeNameAlreadyTaken` (409), `ActivityTypeHasLogs` (409).
+
+Rules:
+
+1. **Order checks: permission → existence → mutability → business rules.** A member without permission must receive 403 regardless of whether the target row exists — never leak existence information by returning 404 before the permission check.
+2. **Detect "immutable target" by `Option.isNone(row.team_id)`** after `findByIdScoped` resolves; fail with `<Resource>Protected`. Do not encode immutability into the SQL `WHERE` clause alone — the API needs to return a distinct error so the client can render the correct UI ("This is built-in and cannot be edited" vs "You don't have permission").
+3. **`<Resource>NameAlreadyTaken` is 409, `<Resource>HasLogs` (and similar referential-integrity blockers) is 409.** Validation errors that the caller can fix by changing the payload are 409, not 422 — 422 is reserved for "the target row's class forbids this operation".
+
 ## Atomic Conditional UPDATE Pattern
 
 When a state transition must be race-free (e.g. "claim if not yet claimed", "mark started if still active"), encode the precondition in the `WHERE` clause and use `RETURNING id` to detect whether the row was updated. Use `SqlSchema.findOneOption` so callers receive `Option<{ id }>` — `Option.isSome` means "we won the race", `Option.isNone` means "preconditions failed (already claimed / cancelled / wrong member / not found)".

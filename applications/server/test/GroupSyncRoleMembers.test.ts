@@ -93,6 +93,8 @@ const ADMIN_PERMISSIONS: readonly Role.Permission[] = [
   'role:view',
   'role:manage',
   'group:manage',
+  'activity-type:create',
+  'activity-type:delete',
 ];
 
 // ---------------------------------------------------------------------------

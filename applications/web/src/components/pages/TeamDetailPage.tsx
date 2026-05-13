@@ -3,6 +3,7 @@ import * as m from '@sideline/i18n/messages';
 import { Link } from '@tanstack/react-router';
 import { DateTime, Option } from 'effect';
 import {
+  Activity,
   Calendar,
   ChevronRight,
   Clock,
@@ -361,6 +362,7 @@ function TeamManagementCard({ teamId }: { teamId: string }) {
     { to: '/teams/$teamId/rosters' as const, label: m.team_rosters(), icon: Users },
     { to: '/teams/$teamId/roles' as const, label: m.team_roles(), icon: Settings },
     { to: '/teams/$teamId/groups' as const, label: m.team_groups(), icon: Users },
+    { to: '/teams/$teamId/activity-types' as const, label: m.team_activityTypes(), icon: Activity },
     { to: '/teams/$teamId/training-types' as const, label: m.team_trainingTypes(), icon: Zap },
     { to: '/teams/$teamId/age-thresholds' as const, label: m.team_ageThresholds(), icon: Calendar },
     { to: '/teams/$teamId/settings' as const, label: m.team_settings(), icon: Settings },

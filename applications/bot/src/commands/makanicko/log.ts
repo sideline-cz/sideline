@@ -1,10 +1,10 @@
-import { ActivityType, Discord } from '@sideline/domain';
+import { Discord } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
-import { Array, Effect, Metric, Option, pipe, Schema } from 'effect';
+import { Array, Effect, Metric, Option, pipe } from 'effect';
 import { userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { interactionUserId } from '~/schemas.js';
@@ -54,17 +54,13 @@ export const logHandler = Interaction.asEffect().pipe(
     const subCommand = data && 'options' in data ? data.options?.[0] : undefined;
     const options = subCommand && 'options' in subCommand ? [...(subCommand.options ?? [])] : [];
 
-    const activityTypeRaw = pipe(
+    const maybeActivityType = pipe(
       options,
       Array.findFirst((o) => o.name === 'activity'),
       Option.flatMap((o) => ('value' in o ? Option.some(String(o.value)) : Option.none())),
-      Option.getOrElse(() => 'gym'),
-    );
-    const activityTypeSlug = Schema.decodeUnknownOption(ActivityType.ActivityTypeSlug)(
-      activityTypeRaw,
     );
 
-    if (Option.isNone(activityTypeSlug)) {
+    if (Option.isNone(maybeActivityType)) {
       return Effect.succeed(
         Ix.response({
           type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
@@ -75,6 +71,8 @@ export const logHandler = Interaction.asEffect().pipe(
         }),
       );
     }
+
+    const activityType = maybeActivityType.value;
 
     const durationMinutes = pipe(
       options,
@@ -103,7 +101,7 @@ export const logHandler = Interaction.asEffect().pipe(
         rpc['Activity/LogActivity']({
           guild_id: snowflakeGuildId,
           discord_user_id: discordUserId,
-          activity_type: activityTypeSlug.value,
+          activity_type: activityType,
           duration_minutes: durationMinutes,
           note,
         }).pipe(
@@ -115,6 +113,9 @@ export const logHandler = Interaction.asEffect().pipe(
           ),
           Effect.catchTag('ActivityMemberNotFound', () =>
             Effect.succeed({ content: m.bot_makanicko_log_not_member({}, { locale }) }),
+          ),
+          Effect.catchTag('ActivityTypeNotFound', () =>
+            Effect.succeed({ content: m.bot_makanicko_log_error({}, { locale }) }),
           ),
           Effect.catchTag('RpcClientError', () =>
             Effect.succeed({ content: m.bot_makanicko_log_error({}, { locale }) }),

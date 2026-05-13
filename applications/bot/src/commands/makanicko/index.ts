@@ -23,15 +23,7 @@ export const MakanickoCommand = Ix.global(
             description_localizations: { cs: 'Typ aktivity' },
             type: DiscordTypes.ApplicationCommandOptionType.STRING,
             required: true as const,
-            choices: [
-              { name: 'Gym', name_localizations: { cs: 'Posilovna' }, value: 'gym' },
-              { name: 'Running', name_localizations: { cs: 'Běh' }, value: 'running' },
-              {
-                name: 'Stretching',
-                name_localizations: { cs: 'Protahování' },
-                value: 'stretching',
-              },
-            ],
+            autocomplete: true as const,
           },
           {
             name: 'duration',

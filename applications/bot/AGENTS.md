@@ -388,6 +388,33 @@ Interaction.pipe(
 
 Prefer `guild_locale` (server-configured language) over `locale` (individual user's language) for server-wide consistency.
 
+## Autocomplete Handlers (`src/interactions/*-autocomplete.ts`)
+
+Discord slash-command `STRING` / `INTEGER` options support up to 25 static `choices`. When the choice set is **dynamic** (per-guild custom rows, user-created lists) or may exceed 25 entries, declare the option as `autocomplete: true` on the command definition and register an `Ix.autocomplete(...)` handler in `src/interactions/`.
+
+Reference: `MakanickoLogAutocomplete` in `src/interactions/makanicko-log-autocomplete.ts` — backs the `/makanicko log activity` option, which lists both global and team-custom `activity_types` rows.
+
+### Pattern
+
+1. **File location.** One handler per `(command, option)` pair, named `<command>-<option>-autocomplete.ts`. Export the handler as `<Pascal>Autocomplete`.
+2. **Predicate.** First arg to `Ix.autocomplete` is `(data, focused) => data.name === '<command>' && focused.name === '<option>'`. Never match by command alone — a command with multiple autocomplete options needs distinct handlers.
+3. **Body shape.** Wrap the entire handler in `Effect.Do.pipe(...)`:
+   - `Effect.tap` → increment `discordInteractionsTotal` with `Metric.withAttributes(..., { interaction_type: 'autocomplete' })`.
+   - `Effect.bind('interaction', () => Interaction.asEffect())`, `Effect.bind('focused', () => FocusedOptionContext.asEffect())`, `Effect.bind('rpc', () => SyncRpc.asEffect())`.
+   - Read the typed query string: `focused && 'value' in focused && typeof focused.value === 'string' ? focused.value : ''`.
+   - Call the RPC that returns the candidate list, filter client-side by `name.toLowerCase().includes(queryLower)`, sort (globals first, then customs, both alphabetically), `Array.take(25)`, map to `{ name, value }`.
+   - `Effect.catchTag('RpcClientError', () => Effect.succeed([]))` — return an empty choice list on RPC failure, never throw out of an autocomplete handler.
+   - `Effect.withSpan('interaction/<command>-<option>-autocomplete')`.
+4. **Response shape.** Return `Ix.response({ type: APPLICATION_COMMAND_AUTOCOMPLETE_RESULT, data: { choices } })`.
+5. **Registration.** Add the handler to `interactionBuilder` in `src/interactions/index.ts` via `.add(<Pascal>Autocomplete)`.
+
+### Rules
+
+1. **Always cap at 25 choices** with `Array.take(25)` after sorting — Discord rejects the response otherwise. Sort so the most relevant 25 win; never trust the server to pre-truncate.
+2. **Never throw `RpcClientError`** out of an autocomplete handler — Discord's autocomplete is a hot interaction (fired on every keystroke); a failed response shows the user a broken UI. Always `Effect.catchTag('RpcClientError', () => Effect.succeed([]))`.
+3. **Display label may differ from submitted `value`.** Use `name: emoji ? `${emoji} ${row.name}` : row.name` for the user-visible label and `value: row.id` (UUID) for what the command handler receives. The command handler is responsible for resolving the id back to a row.
+4. **Filter and sort in the bot, not the server.** The server's RPC returns the full candidate list (or a per-guild pre-filtered list); the bot does query matching, ordering, and the 25-cap. This keeps the server RPC reusable across commands with different filtering rules.
+
 ## Embed Display Conventions
 
 ### User Name Display in Embeds

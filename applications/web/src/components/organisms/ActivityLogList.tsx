@@ -10,6 +10,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '~/components/ui/sh
 type ActivityTypeOption = {
   id: ActivityType.ActivityTypeId;
   name: string;
+  emoji: Option.Option<string>;
 };
 
 const formatDuration = (minutes: number): string => {
@@ -78,7 +79,11 @@ export function ActivityLogList({
     for (const log of logs) {
       if (!seenIds.has(log.activityTypeId)) {
         seenIds.add(log.activityTypeId);
-        extra.push({ id: log.activityTypeId, name: log.activityTypeName });
+        extra.push({
+          id: log.activityTypeId,
+          name: log.activityTypeName,
+          emoji: log.activityTypeEmoji,
+        });
       }
     }
     return [...activityTypes, ...extra];
@@ -172,6 +177,14 @@ export function ActivityLogList({
                 size='sm'
                 onClick={() => setSelectedTypeId(type.id)}
               >
+                {Option.match(type.emoji, {
+                  onNone: () => null,
+                  onSome: (e) => (
+                    <span aria-hidden='true' className='mr-1'>
+                      {e}
+                    </span>
+                  ),
+                })}
                 {type.name}
               </Button>
             ))}
@@ -227,7 +240,17 @@ export function ActivityLogList({
                     className='flex items-center justify-between p-2 rounded border'
                   >
                     <div className='flex items-center gap-2'>
-                      <span className='font-medium text-sm'>{log.activityTypeName}</span>
+                      <span className='font-medium text-sm'>
+                        {Option.match(log.activityTypeEmoji, {
+                          onNone: () => null,
+                          onSome: (e) => (
+                            <span aria-hidden='true' className='mr-1'>
+                              {e}
+                            </span>
+                          ),
+                        })}
+                        {log.activityTypeName}
+                      </span>
                       {log.source === 'auto' && (
                         <span className='text-xs text-muted-foreground italic'>(auto)</span>
                       )}
@@ -297,6 +320,14 @@ export function ActivityLogList({
                     size='sm'
                     onClick={() => setEditTypeId(type.id)}
                   >
+                    {Option.match(type.emoji, {
+                      onNone: () => null,
+                      onSome: (e) => (
+                        <span aria-hidden='true' className='mr-1'>
+                          {e}
+                        </span>
+                      ),
+                    })}
                     {type.name}
                   </Button>
                 ))}

@@ -6,6 +6,8 @@ export * as ActivityLogApi from './api/ActivityLogApi.js';
 
 export * as ActivityStatsApi from './api/ActivityStatsApi.js';
 
+export * as ActivityTypeApi from './api/ActivityTypeApi.js';
+
 export * as AgeThresholdApi from './api/AgeThresholdApi.js';
 
 export * as Auth from './api/Auth.js';

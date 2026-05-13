@@ -21,7 +21,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout')({
             query: { timeframe: Option.none(), activityTypeId: Option.none() },
           }),
           members: api.roster.listMembers({ params: { teamId } }),
-          activityTypes: api.activityLog.listActivityTypes({ params: { teamId } }),
+          activityTypes: api.activityType.listActivityTypes({ params: { teamId } }),
         }).pipe(
           Effect.flatMap(({ leaderboard, members, activityTypes }) => {
             const currentMember = members.find((member) => member.userId === userId);

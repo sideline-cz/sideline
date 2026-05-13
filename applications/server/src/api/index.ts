@@ -3,6 +3,7 @@ import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { AchievementApiLive } from '~/api/achievement.js';
 import { ActivityLogApiLive } from '~/api/activity-logs.js';
 import { ActivityStatsApiLive } from '~/api/activity-stats.js';
+import { ActivityTypeApiLive } from '~/api/activity-type.js';
 import { AgeThresholdApiLive } from '~/api/age-threshold.js';
 import { Api } from '~/api/api.js';
 import { AuthApiLive } from '~/api/auth.js';
@@ -22,27 +23,29 @@ import { TeamSettingsApiLive } from '~/api/team-settings.js';
 import { TrainingTypeApiLive } from '~/api/training-type.js';
 import { WeeklySummaryApiLive } from '~/api/weekly-summary.js';
 
-export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.json' }).pipe(
-  Layer.provide(AchievementApiLive),
-  Layer.provide(ActivityLogApiLive),
-  Layer.provide(ActivityStatsApiLive),
-  Layer.provide(DashboardApiLive),
-  Layer.provide(LeaderboardApiLive),
-  Layer.provide(AgeThresholdApiLive),
-  Layer.provide(AuthApiLive),
-  Layer.provide(EventApiLive),
-  Layer.provide(EventRsvpApiLive),
-  Layer.provide(EventSeriesApiLive),
-  Layer.provide(GroupApiLive),
-  Layer.provide(ICalApiLive),
-  Layer.provide(InviteApiLive),
-  Layer.provide(NotificationApiLive),
-  Layer.provide(RosterApiLive),
-  Layer.provide(RoleApiLive),
-  Layer.provide(TeamApiLive),
-  Layer.provide(TeamSettingsApiLive),
-  Layer.provide(TrainingTypeApiLive),
-  Layer.provide(WeeklySummaryApiLive),
-);
+export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.json' })
+  .pipe(
+    Layer.provide(AchievementApiLive),
+    Layer.provide(ActivityLogApiLive),
+    Layer.provide(ActivityStatsApiLive),
+    Layer.provide(ActivityTypeApiLive),
+    Layer.provide(DashboardApiLive),
+    Layer.provide(LeaderboardApiLive),
+    Layer.provide(AgeThresholdApiLive),
+    Layer.provide(AuthApiLive),
+    Layer.provide(EventApiLive),
+    Layer.provide(EventRsvpApiLive),
+    Layer.provide(EventSeriesApiLive),
+    Layer.provide(GroupApiLive),
+    Layer.provide(ICalApiLive),
+    Layer.provide(InviteApiLive),
+    Layer.provide(NotificationApiLive),
+    Layer.provide(RosterApiLive),
+    Layer.provide(RoleApiLive),
+    Layer.provide(TeamApiLive),
+    Layer.provide(TeamSettingsApiLive),
+    Layer.provide(TrainingTypeApiLive),
+  )
+  .pipe(Layer.provide(WeeklySummaryApiLive));
 
 export { Redirect } from '~/api/redirect.js';

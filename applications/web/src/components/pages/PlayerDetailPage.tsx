@@ -55,6 +55,7 @@ export type PlayerEditValues = Schema.Schema.Type<typeof PlayerEditSchema>;
 type ActivityTypeOption = {
   id: ActivityType.ActivityTypeId;
   name: string;
+  emoji: Option.Option<string>;
 };
 
 interface PlayerDetailPageProps {
