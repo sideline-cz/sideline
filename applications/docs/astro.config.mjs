@@ -55,7 +55,7 @@ export default defineConfig({
       sidebar: [
         {
           label: 'Introduction',
-          autogenerate: { directory: 'introduction' },
+          items: [{ autogenerate: { directory: 'introduction' } }],
         },
         {
           label: 'Quick start',
