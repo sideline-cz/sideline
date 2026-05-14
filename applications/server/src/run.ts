@@ -18,6 +18,7 @@ import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsReposit
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
+import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import {
@@ -136,6 +137,7 @@ const StartCron = EventStartCron.asEffect().pipe(
 
 const WeeklySummaryRepositoriesLive = Layer.mergeAll(
   TeamSettingsRepository.Default,
+  TeamMembersRepository.Default,
   WeeklySummaryRepository.Default,
   WeeklySummarySyncEventsRepository.Default,
 );
