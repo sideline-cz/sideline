@@ -31,6 +31,18 @@ updates:
       prefix: "deps:"
     open-pull-requests-limit: 10
     groups:
+      # Astro core + integrations have coupled peer ranges (a major bump of
+      # `astro` requires matching majors of `@astrojs/*`). Group them — and
+      # explicitly opt majors in, since Dependabot excludes majors from
+      # groups by default.
+      astro:
+        patterns:
+          - "astro"
+          - "@astrojs/*"
+        update-types:
+          - "minor"
+          - "patch"
+          - "major"
       npm:
         patterns:
           - "*"
