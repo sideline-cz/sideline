@@ -43,6 +43,7 @@ services:
       SERVER_URL: ${SERVICE_URL_PROXY}/api
       APP_ENV: preview
       APP_ORIGIN: ${SERVICE_FQDN_PROXY}
+      APP_GLOBAL_ADMIN_DISCORD_IDS: "635530520125767750"
       OTEL_EXPORTER_OTLP_ENDPOINT: https://otelcollectorhttp-ccogw4cogg00wwowc0s4c0cs.majksa.net/
       OTEL_SERVICE_NAME: sideline-server
     healthcheck:
