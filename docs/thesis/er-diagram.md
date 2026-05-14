@@ -767,6 +767,31 @@ erDiagram
 
 ---
 
+### Translation CMS
+
+`translation_overrides` stores global admin-managed overrides for compiled UI strings. Each row replaces the compiled default for a specific key and locale combination. `translation_cache_version` holds a single row whose `version` counter is incremented by the application on every write (via `UPDATE … RETURNING version` and a `NOTIFY translation_cache_invalidate` call), allowing the server's in-process cache to refresh without polling.
+
+```mermaid
+erDiagram
+    translation_overrides {
+        TEXT translation_key PK
+        TEXT locale PK
+        TEXT value
+        TIMESTAMPTZ updated_at
+        UUID updated_by FK
+    }
+
+    translation_cache_version {
+        INT id PK
+        BIGINT version
+        TIMESTAMPTZ updated_at
+    }
+
+    users ||--o{ translation_overrides : "last updated by"
+```
+
+---
+
 ## Entity Summary
 
 | Table | Description |
@@ -813,3 +838,5 @@ erDiagram
 | `rosters` | Named match-day squad lists managed per team. |
 | `roster_members` | Many-to-many junction placing team members on a roster. |
 | `notifications` | In-app alert records scoped to a team and user, with read/unread tracking. |
+| `translation_overrides` | Global admin-managed overrides for compiled UI strings, keyed by translation key and locale. |
+| `translation_cache_version` | Single-row version counter incremented on every translation override write; used by the frontend for cache invalidation. |

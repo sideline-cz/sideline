@@ -5,7 +5,6 @@ import type {
   ActivityType,
   LeaderboardApi,
 } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link } from '@tanstack/react-router';
 import type { Option } from 'effect';
 import { ActivityLogList } from '~/components/organisms/ActivityLogList.js';
@@ -13,6 +12,7 @@ import { ActivityStatsCard } from '~/components/organisms/ActivityStatsCard.js';
 import { LeaderboardPage } from '~/components/pages/LeaderboardPage.js';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card';
+import { tr } from '~/lib/translations.js';
 
 interface MakanickoPageProps {
   teamId: string;
@@ -57,11 +57,11 @@ export function MakanickoPage({
       <header>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId' params={{ teamId }}>
-            ← {m.team_backToTeams()}
+            ← {tr('team_backToTeams')}
           </Link>
         </Button>
         <div className='flex items-center justify-between gap-4'>
-          <h1 className='text-2xl font-bold'>{m.makanicko_title()}</h1>
+          <h1 className='text-2xl font-bold'>{tr('makanicko_title')}</h1>
           <Button asChild variant='outline' size='sm'>
             <Link to='/teams/$teamId/workout/weekly' params={{ teamId }}>
               View weekly summary →
@@ -74,7 +74,7 @@ export function MakanickoPage({
         {/* Left: Activity card */}
         <Card>
           <CardHeader>
-            <CardTitle>{m.makanicko_yourActivity()}</CardTitle>
+            <CardTitle>{tr('makanicko_yourActivity')}</CardTitle>
           </CardHeader>
           <CardContent>
             <ActivityStatsCard stats={activityStats} />

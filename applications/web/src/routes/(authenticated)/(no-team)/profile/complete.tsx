@@ -1,4 +1,3 @@
-import * as m from '@sideline/i18n/messages';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { Array, Effect, Option } from 'effect';
 import React from 'react';
@@ -6,6 +5,7 @@ import { toast } from 'sonner';
 import { ProfileCompletePage } from '~/components/pages/ProfileCompletePage';
 import { getLastTeamId, setLastTeamId } from '~/lib/auth';
 import { ApiClient, Redirect, SilentClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 export const Route = createFileRoute('/(authenticated)/(no-team)/profile/complete')({
   component: ProfileCompleteRoute,
@@ -55,7 +55,7 @@ function ProfileCompleteRoute() {
     if (Option.isSome(firstTeam)) {
       const team = firstTeam.value;
       Effect.runSync(setLastTeamId(team.teamId));
-      toast.success(m.team_autoJoined({ teamName: team.teamName }));
+      toast.success(tr('team_autoJoined', { teamName: team.teamName }));
       await navigate({ to: '/teams/$teamId', params: { teamId: team.teamId } });
     } else {
       await navigate({ to: '/' });

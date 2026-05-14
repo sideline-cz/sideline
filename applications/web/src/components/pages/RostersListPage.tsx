@@ -1,7 +1,6 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { Roster as RosterDomain } from '@sideline/domain';
 import { Team } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
@@ -19,9 +18,10 @@ import {
 } from '~/components/ui/form';
 import { Input } from '~/components/ui/input';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 const CreateRosterSchema = Schema.Struct({
-  name: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
+  name: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
 });
 
 type CreateRosterValues = Schema.Schema.Type<typeof CreateRosterSchema>;
@@ -58,8 +58,8 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.roster_createFailed())),
-      run({ success: m.roster_rosterCreated() }),
+      Effect.mapError(() => ClientError.make(tr('roster_createFailed'))),
+      run({ success: tr('roster_rosterCreated') }),
     );
     if (Option.isSome(result)) {
       form.reset();
@@ -74,10 +74,10 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
       <header className='mb-8'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId' params={{ teamId }}>
-            ← {m.team_backToTeams()}
+            ← {tr('team_backToTeams')}
           </Link>
         </Button>
-        <h1 className='text-2xl font-bold'>{m.roster_rosters()}</h1>
+        <h1 className='text-2xl font-bold'>{tr('roster_rosters')}</h1>
       </header>
 
       {canManage && (
@@ -89,7 +89,7 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
             <div className='flex gap-2 items-end'>
               <div className='flex flex-col'>
                 <label htmlFor='roster-create-emoji' className='text-sm font-medium mb-1'>
-                  {m.roster_emoji()}
+                  {tr('roster_emoji')}
                 </label>
                 <Input
                   id='roster-create-emoji'
@@ -101,7 +101,7 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
               </div>
               <div className='flex flex-col'>
                 <label htmlFor='roster-create-color' className='text-sm font-medium mb-1'>
-                  {m.common_color()}
+                  {tr('common_color')}
                 </label>
                 <ColorPicker
                   id='roster-create-color'
@@ -113,9 +113,9 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
                 {...form.register('name')}
                 render={({ field }) => (
                   <FormItem className='flex-1'>
-                    <FormLabel>{m.roster_rosterName()}</FormLabel>
+                    <FormLabel>{tr('roster_rosterName')}</FormLabel>
                     <FormControl>
-                      <Input {...field} placeholder={m.roster_rosterNamePlaceholder()} />
+                      <Input {...field} placeholder={tr('roster_rosterNamePlaceholder')} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -123,14 +123,14 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
               />
             </div>
             <Button type='submit' disabled={form.formState.isSubmitting} className='self-end'>
-              {m.roster_createRoster()}
+              {tr('roster_createRoster')}
             </Button>
           </form>
         </Form>
       )}
 
       {rosters.length === 0 ? (
-        <p className='text-muted-foreground'>{m.roster_noRosters()}</p>
+        <p className='text-muted-foreground'>{tr('roster_noRosters')}</p>
       ) : (
         <table className='w-full'>
           <tbody>
@@ -151,10 +151,10 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
                   </div>
                   <p className='text-xs text-muted-foreground sm:hidden'>
                     <span className={roster.active ? 'text-green-700 font-medium' : 'font-medium'}>
-                      {roster.active ? m.roster_active() : m.roster_inactive()}
+                      {roster.active ? tr('roster_active') : tr('roster_inactive')}
                     </span>
                     {' · '}
-                    {m.roster_memberCount({ count: roster.memberCount })}
+                    {tr('roster_memberCount', { count: roster.memberCount })}
                   </p>
                 </td>
                 <td className='hidden sm:table-cell py-2 px-4'>
@@ -165,11 +165,11 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
                         : 'text-muted-foreground font-medium'
                     }
                   >
-                    {roster.active ? m.roster_active() : m.roster_inactive()}
+                    {roster.active ? tr('roster_active') : tr('roster_inactive')}
                   </span>
                 </td>
                 <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-                  {m.roster_memberCount({ count: roster.memberCount })}
+                  {tr('roster_memberCount', { count: roster.memberCount })}
                 </td>
                 <td className='py-2 px-4'>
                   <Button asChild variant='outline' size='sm'>

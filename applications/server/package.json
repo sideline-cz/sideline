@@ -28,6 +28,7 @@
     "@effect/sql-pg": "4.0.0-beta.40",
     "@sideline/domain": "workspace:^",
     "@sideline/effect-lib": "workspace:^",
+    "@sideline/i18n": "workspace:*",
     "@sideline/migrations": "workspace:^",
     "@sideline/template-renderer": "workspace:^",
     "@t3-oss/env-core": "^0.13.8",

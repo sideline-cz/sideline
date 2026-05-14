@@ -201,6 +201,7 @@ Build stages:
 | `APP_ORIGIN` | Yes | — | Origin hostname (e.g. `sideline-preview.majksa.net`), used as OTEL resource attribute |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Yes | — | OTLP HTTP endpoint for telemetry export |
 | `OTEL_SERVICE_NAME` | Yes | — | Service name reported to the telemetry backend (e.g. `sideline-server`) |
+| `APP_GLOBAL_ADMIN_DISCORD_IDS` | No | `''` | Comma-separated list of Discord user snowflake IDs that are granted global-admin access. Global admins can read and write translation overrides via the `/api/translations` endpoints and access the `/admin/translations` page in the web app. Empty or unset means no users have global-admin access. Example: `123456789012345678,987654321098765432` |
 
 ### 3.2 Bot (`applications/bot/src/env.ts`)
 

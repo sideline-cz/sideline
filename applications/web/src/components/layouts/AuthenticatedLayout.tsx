@@ -1,5 +1,4 @@
 import type { Auth } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, Outlet, useMatches, useRouter } from '@tanstack/react-router';
 import React from 'react';
 import { AppSidebar } from '~/components/layouts/AppSidebar';
@@ -15,6 +14,7 @@ import {
 } from '~/components/ui/breadcrumb';
 import { Separator } from '~/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '~/components/ui/sidebar';
+import { tr } from '~/lib/translations.js';
 
 interface BreadcrumbEntry {
   label: string;
@@ -35,57 +35,57 @@ function useBreadcrumbs(): ReadonlyArray<BreadcrumbEntry> {
       const pathname = match.pathname;
 
       if (routeId.includes('/create-team')) {
-        crumbs.push({ label: m.breadcrumb_createTeam(), to: pathname });
+        crumbs.push({ label: tr('breadcrumb_createTeam'), to: pathname });
       } else if (routeId.includes('/profile/complete')) {
-        crumbs.push({ label: m.breadcrumb_profile(), to: '/profile' });
-        crumbs.push({ label: m.breadcrumb_complete(), to: pathname });
+        crumbs.push({ label: tr('breadcrumb_profile'), to: '/profile' });
+        crumbs.push({ label: tr('breadcrumb_complete'), to: pathname });
       } else if (routeId.includes('/profile')) {
-        crumbs.push({ label: m.breadcrumb_profile(), to: pathname });
+        crumbs.push({ label: tr('breadcrumb_profile'), to: pathname });
       } else if (routeId.includes('/teams/$teamId/')) {
         // Team sub-pages: add the team crumb, then the sub-page
         const teamId = (match.params as Record<string, string>).teamId;
         if (teamId && !crumbs.some((c) => c.to.includes('/teams/'))) {
-          crumbs.push({ label: m.breadcrumb_team(), to: `/teams/${teamId}` });
+          crumbs.push({ label: tr('breadcrumb_team'), to: `/teams/${teamId}` });
         }
 
         if (routeId.includes('/workout')) {
-          crumbs.push({ label: m.makanicko_title(), to: pathname });
+          crumbs.push({ label: tr('makanicko_title'), to: pathname });
         } else if (routeId.includes('/notifications')) {
-          crumbs.push({ label: m.notification_title(), to: pathname });
+          crumbs.push({ label: tr('notification_title'), to: pathname });
         } else if (routeId.includes('/members')) {
           if (!crumbs.some((c) => c.to.endsWith('/members'))) {
-            crumbs.push({ label: m.team_members(), to: `/teams/${teamId}/members` });
+            crumbs.push({ label: tr('team_members'), to: `/teams/${teamId}/members` });
           }
           if (routeId.includes('$memberId')) {
-            crumbs.push({ label: m.breadcrumb_details(), to: pathname });
+            crumbs.push({ label: tr('breadcrumb_details'), to: pathname });
           }
         } else if (routeId.includes('/roles')) {
           if (!crumbs.some((c) => c.to.endsWith('/roles'))) {
-            crumbs.push({ label: m.team_roles(), to: `/teams/${teamId}/roles` });
+            crumbs.push({ label: tr('team_roles'), to: `/teams/${teamId}/roles` });
           }
           if (routeId.includes('$roleId')) {
-            crumbs.push({ label: m.breadcrumb_details(), to: pathname });
+            crumbs.push({ label: tr('breadcrumb_details'), to: pathname });
           }
         } else if (routeId.includes('/rosters')) {
           if (!crumbs.some((c) => c.to.endsWith('/rosters'))) {
-            crumbs.push({ label: m.team_rosters(), to: `/teams/${teamId}/rosters` });
+            crumbs.push({ label: tr('team_rosters'), to: `/teams/${teamId}/rosters` });
           }
           if (routeId.includes('$rosterId')) {
-            crumbs.push({ label: m.breadcrumb_details(), to: pathname });
+            crumbs.push({ label: tr('breadcrumb_details'), to: pathname });
           }
         } else if (routeId.includes('/groups')) {
           if (!crumbs.some((c) => c.to.endsWith('/groups'))) {
-            crumbs.push({ label: m.team_groups(), to: `/teams/${teamId}/groups` });
+            crumbs.push({ label: tr('team_groups'), to: `/teams/${teamId}/groups` });
           }
           if (routeId.includes('$groupId')) {
-            crumbs.push({ label: m.breadcrumb_details(), to: pathname });
+            crumbs.push({ label: tr('breadcrumb_details'), to: pathname });
           }
         } else if (routeId.includes('/age-thresholds')) {
-          crumbs.push({ label: m.team_ageThresholds(), to: pathname });
+          crumbs.push({ label: tr('team_ageThresholds'), to: pathname });
         }
       } else if (routeId === '/(authenticated)/teams/$teamId/') {
         const teamId = (match.params as Record<string, string>).teamId;
-        crumbs.push({ label: m.breadcrumb_team(), to: `/teams/${teamId}` });
+        crumbs.push({ label: tr('breadcrumb_team'), to: `/teams/${teamId}` });
       }
     }
 

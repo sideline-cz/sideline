@@ -1,5 +1,6 @@
 import { Auth } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option, Redacted, type ServiceMap } from 'effect';
+import { globalAdminDiscordIds } from '~/env.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 
@@ -37,6 +38,7 @@ export const AuthMiddlewareLive = Layer.effect(
                     birthDate: Option.map(user.birth_date, DateTime.formatIsoDateUtc),
                     gender: user.gender,
                     locale: user.locale,
+                    isGlobalAdmin: globalAdminDiscordIds.has(user.discord_id),
                   }),
                 );
               }),

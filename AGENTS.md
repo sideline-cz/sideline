@@ -592,4 +592,4 @@ The `docs/thesis/` directory contains Mermaid diagrams and documentation for the
 
 ---
 
-**Last Updated**: 2026-05-13 (custom activity types: team-scoped `team_id IS NULL` global rows, `findByIdScoped` tenant isolation, `Protected` vs `Forbidden` HTTP errors, bot autocomplete handlers, single-page admin with inline dialog)
+**Last Updated**: 2026-05-14 (Translation CMS: web `tr()` helper + Biome `noRestrictedImports` rule blocking `@sideline/i18n/messages` in web, `@sideline/i18n` registry + raw JSON exports, server `APP_GLOBAL_ADMIN_DISCORD_IDS` + `requireGlobalAdmin` guard, LISTEN/NOTIFY cache invalidation pattern for `TranslationCache`)

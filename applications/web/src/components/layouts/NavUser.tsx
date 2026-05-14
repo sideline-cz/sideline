@@ -1,5 +1,4 @@
 import type { Auth } from '@sideline/domain';
-import { m } from '@sideline/i18n/messages';
 import { getLocale, setLocale } from '@sideline/i18n/runtime';
 import { Link } from '@tanstack/react-router';
 import { Effect, Option } from 'effect';
@@ -38,6 +37,7 @@ import {
 } from '~/components/ui/sidebar';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { useTheme } from '~/lib/theme.js';
+import { tr } from '~/lib/translations.js';
 
 function discordAvatarUrl(discordId: string, avatar: string): string {
   return `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png?size=64`;
@@ -62,14 +62,14 @@ interface NavUserProps {
 }
 
 const localeOptions = [
-  { value: 'en' as const, flag: '🇬🇧', label: () => m.language_en() },
-  { value: 'cs' as const, flag: '🇨🇿', label: () => m.language_cs() },
+  { value: 'en' as const, flag: '🇬🇧', label: () => tr('language_en') },
+  { value: 'cs' as const, flag: '🇨🇿', label: () => tr('language_cs') },
 ] as const;
 
 const themeOptions = [
-  { value: 'light' as const, icon: Sun, label: () => m.theme_light() },
-  { value: 'dark' as const, icon: Moon, label: () => m.theme_dark() },
-  { value: 'system' as const, icon: Monitor, label: () => m.theme_system() },
+  { value: 'light' as const, icon: Sun, label: () => tr('theme_light') },
+  { value: 'dark' as const, icon: Moon, label: () => tr('theme_dark') },
+  { value: 'system' as const, icon: Monitor, label: () => tr('theme_system') },
 ] as const;
 
 export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
@@ -84,7 +84,7 @@ export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
       setLocale(locale);
       ApiClient.asEffect().pipe(
         Effect.flatMap((api) => api.auth.updateLocale({ payload: { locale } })),
-        Effect.mapError(() => ClientError.make(m.auth_errors_profileFailed())),
+        Effect.mapError(() => ClientError.make(tr('auth_errors_profileFailed'))),
         run(),
       );
     },
@@ -144,14 +144,14 @@ export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
               <DropdownMenuItem asChild>
                 <Link to='/profile'>
                   <UserIcon />
-                  {m.nav_profile()}
+                  {tr('nav_profile')}
                 </Link>
               </DropdownMenuItem>
               {activeTeamId && (
                 <DropdownMenuItem asChild>
                   <Link to='/teams/$teamId/notifications' params={{ teamId: activeTeamId }}>
                     <Bell />
-                    {m.nav_notifications()}
+                    {tr('nav_notifications')}
                   </Link>
                 </DropdownMenuItem>
               )}
@@ -161,7 +161,7 @@ export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <Languages />
-                  {m.language_label()}
+                  {tr('language_label')}
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
                   {localeOptions.map((loc) => (
@@ -178,7 +178,7 @@ export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
                     const ActiveIcon = themeOptions.find((o) => o.value === theme)?.icon ?? Sun;
                     return <ActiveIcon />;
                   })()}
-                  {m.theme_label()}
+                  {tr('theme_label')}
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
                   {themeOptions.map((opt) => (
@@ -196,7 +196,7 @@ export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
               <DropdownMenuItem asChild>
                 <a href='/docs/' target='_blank' rel='noopener noreferrer'>
                   <BookOpen />
-                  {m.nav_documentation()}
+                  {tr('nav_documentation')}
                 </a>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
@@ -206,14 +206,14 @@ export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
                   rel='noopener noreferrer'
                 >
                   <Bug />
-                  {m.nav_reportBug()}
+                  {tr('nav_reportBug')}
                 </a>
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onLogout}>
               <LogOut />
-              {m.nav_logOut()}
+              {tr('nav_logOut')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

@@ -15,6 +15,7 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 | **Captain** | A team member holding the built-in `Captain` role. Inherits all Player capabilities and additionally holds `roster:manage`, `member:edit`, `role:view`, `event:create`, `event:edit`, and `event:cancel` permissions. |
 | **Admin** | A team member holding the built-in `Admin` role. Holds the full permission set including `team:manage`, `team:invite`, `member:remove`, `role:manage`, `training-type:create`, and `training-type:delete`, in addition to all Captain permissions. |
 | **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/event list`, `/event create`, `/event overview`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination). Receives RPC calls from the server to synchronise Discord roles and channels. |
+| **Global Admin** | A user whose Discord ID is listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. |
 | **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes, sending RSVP reminder notifications before events, auto-logging attendance from RSVP data, and evaluating age-threshold rules to move members between groups. |
 
 ---
@@ -623,3 +624,15 @@ The following structured descriptions cover the most significant use cases in th
 | **Precondition** | An event has been created or updated and has a Discord channel configured. The bot is a member of the relevant guild. |
 | **Main Flow** | 1. When an event is created or updated the server writes an event sync record to the database. 2. The bot's event sync worker polls `Event/GetUnprocessedEvents`. 3. For each pending event the worker calls `Event/GetEventEmbedInfo` to fetch the event details and current RSVP counts. 4. The worker uses the Discord REST API to post (or edit) a message in the configured channel containing a rich embed with event details and RSVP Yes/No/Maybe buttons. 5. The worker stores the resulting Discord message ID via `Event/SaveDiscordMessageId` and marks the event as processed via `Event/MarkEventProcessed`. |
 | **Postcondition** | An up-to-date event embed with interactive RSVP buttons is visible in the designated Discord channel. |
+
+---
+
+### UC-11: Manage Translation Overrides
+
+| Field | Detail |
+|---|---|
+| **Actor** | Global Admin |
+| **Precondition** | The actor's Discord ID is listed in `APP_GLOBAL_ADMIN_DISCORD_IDS`. The actor is authenticated. |
+| **Main Flow** | 1. The actor navigates to `/admin/translations` in the web app. 2. The page loads all translation keys from the compiled message registry and fetches current overrides via `GET /api/translations`. 3. The actor searches for a key by name and edits the EN or CS override value inline. 4. On blur (or pressing Enter) the web app calls `PATCH /api/translations/:key` with the new value. The server upserts the override row and bumps the cache version. 5. Alternatively, the actor uploads a JSON file (locale-keyed object or flat array) via the Import dialog; the web app calls `POST /api/translations/import`. The server validates all keys against the compiled registry, rejects unknown keys with a `400 UnknownTranslationKeys` error listing the bad keys, and on success upserts all valid overrides. 6. The actor can delete an individual override by clicking the delete button next to it; the web app calls `PATCH /api/translations/:key` with `null` for the locale, which removes the row and restores the compiled default. 7. The actor can download a full locale-keyed JSON bundle (compiled defaults merged with all active overrides) via the Export button, which opens `GET /api/translations/export.json`. |
+| **Postcondition** | The `translation_overrides` table reflects the actor's changes. The `translation_cache_version` counter is incremented. All authenticated clients that call `GET /api/translations` subsequently receive the updated overrides. |
+| **Notes** | Keys whose names begin with `bot_` are used by the Discord bot. Overrides to such keys take effect only after the bot process is redeployed, because the bot loads its string table at startup from the compiled registry. An override value of `""` (empty string) suppresses the compiled default and renders nothing; this is intentional and distinct from deleting the override. |

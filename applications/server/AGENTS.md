@@ -471,6 +471,129 @@ Rules:
 2. The handler that consumes the `Option` must, on `None`, re-read the row to distinguish which precondition failed and map to the appropriate typed error (e.g. `ClaimEventNotFound` vs `ClaimAlreadyClaimed` vs `ClaimEventInactive`)
 3. Used by: `EventsRepository.claimTraining` / `unclaimTraining` (claim race), `EventsRepository.markEventStarted` (start race), `EventRsvpsRepository` upserts
 
+## Global Admin Authorization (`APP_GLOBAL_ADMIN_DISCORD_IDS`)
+
+Some HTTP endpoints (translations CMS, future cross-team operator tools) must be restricted to a small allow-list of Sideline operators that is **not** modelled per-team in the database. The mechanism is an env-driven Discord-id allow-list materialized into a per-request boolean on `CurrentUser`.
+
+| Component | File | Behaviour |
+|-----------|------|-----------|
+| Env var | `APP_GLOBAL_ADMIN_DISCORD_IDS` | Comma-separated list of Discord user ids. Empty / unset → no global admins. |
+| Parsed set | `globalAdminDiscordIds` in `src/env.ts` | `ReadonlySet<string>` materialized once at module load — trimmed entries, empty strings filtered. |
+| Per-request flag | `Auth.CurrentUser.isGlobalAdmin` | Set in `AuthMiddlewareLive` by checking `globalAdminDiscordIds.has(user.discord_id)`. |
+| Handler guard | `requireGlobalAdmin(forbidden)` in `src/utils/requireGlobalAdmin.ts` | Reads `Auth.CurrentUserContext`; on `isGlobalAdmin === false`, fails with the caller-supplied `forbidden` error. |
+
+Rules:
+
+1. **Use `requireGlobalAdmin(new <Resource>Forbidden())` as the FIRST step** of any admin-only handler — before reading payload, before DB lookups. Returning 403 on permission must not leak existence information about the target row.
+2. **The endpoint's domain error must be a dedicated `<Resource>Forbidden` tag bound to HTTP 403** via `HttpApiSchema.status(403)`. Do not reuse `Auth.Unauthorized` — that is reserved for "no valid session" (401), not "session valid but insufficient privilege".
+3. **Never check `discord_id` against the env set inside a handler.** Always go through `currentUser.isGlobalAdmin` (set by middleware) so the resolution rule lives in exactly one place.
+4. **Changing the allow-list is a redeploy.** `globalAdminDiscordIds` is computed at module load from `process.env` — there is no hot-reload path. Document the env var in `docs/deployment.md` when adding a new admin-only endpoint.
+5. **Do not use the global-admin flag for team-scoped operations.** Captain/member permissions on a team are checked via `requirePermission(membership, '<perm>', forbidden)` from the membership repository — global admin does NOT implicitly grant team permissions and must not be made to.
+
+Reference: `src/api/translations.ts` (every mutating endpoint starts with `Effect.tap(() => requireGlobalAdmin(forbidden))`).
+
+## LISTEN/NOTIFY Cache Invalidation
+
+When a small, frequently-read table (e.g. `translation_overrides`) must be served from an in-memory cache that stays coherent across multiple server instances, use Postgres `LISTEN/NOTIFY` as the invalidation bus. Every mutation bumps a monotonic version row in the same transaction and emits `NOTIFY <channel>`; every server instance subscribes to the channel via `PgClient.listen(channel)` and refreshes its in-memory snapshot on each notification.
+
+Reference: `TranslationCache` (`src/services/TranslationCache.ts`) backed by `translation_overrides` and `translation_cache_version`.
+
+### Schema Contract
+
+```sql
+-- The data table (any shape).
+CREATE TABLE <resource>_overrides ( ... );
+
+-- The single-row version counter. Bumped on every mutation.
+CREATE TABLE <resource>_cache_version (
+  id          INT PRIMARY KEY CHECK (id = 1),
+  version     INT NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO <resource>_cache_version (id, version) VALUES (1, 1);
+```
+
+### Mutation Path (Repository)
+
+Every write that should invalidate the cache must, **in a single transaction**, (1) write the row(s) and (2) bump the version + emit `NOTIFY`:
+
+```typescript
+const bumpVersionAndNotify = () =>
+  bumpVersionQuery(undefined).pipe(
+    catchSqlErrors,
+    Effect.flatMap((opt) =>
+      Option.match(opt, {
+        onNone: () => Effect.succeed(1),
+        onSome: (row) => Effect.succeed(row.version),
+      }),
+    ),
+    Effect.tap((version) =>
+      sql
+        .unsafe(`NOTIFY <resource>_cache_invalidate, '${String(version)}'`)
+        .pipe(catchSqlErrors),
+    ),
+  );
+
+const upsert = (args) =>
+  sql.withTransaction(
+    Effect.Do.pipe(
+      Effect.tap(() => sql`INSERT INTO <resource>_overrides ... ON CONFLICT ...`.pipe(catchSqlErrors)),
+      Effect.flatMap(() => bumpVersionAndNotify()),
+    ),
+  ).pipe(catchSqlErrors);
+```
+
+### Subscriber Path (Service)
+
+The cache service is a `ServiceMap.Service` with a `Layer.effect` (NOT `Layer.scoped`) so that `Effect.forkScoped` inside `make` is wired into the layer's scope:
+
+```typescript
+const make = Effect.Do.pipe(
+  Effect.bind('repository', () => <Resource>Repository.asEffect()),
+  Effect.bind('pgClient', () => PgClient.PgClient.asEffect()),
+  Effect.bind('initialOverrides', ({ repository }) => repository.findAll()),
+  Effect.bind('initialVersion', ({ repository }) => repository.getVersion()),
+  Effect.bind('stateRef', ({ initialOverrides, initialVersion }) =>
+    Ref.make({ version: initialVersion, overrides: initialOverrides }),
+  ),
+  Effect.let('refresh', ({ repository, stateRef }) => () =>
+    Effect.Do.pipe(
+      Effect.bind('overrides', () => repository.findAll()),
+      Effect.bind('version', () => repository.getVersion()),
+      Effect.tap(({ overrides, version }) => Ref.set(stateRef, { version, overrides })),
+      Effect.asVoid,
+      Effect.tapError((e) => Effect.logWarning('<Resource>Cache: refresh failed', e)),
+      Effect.ignore,
+    ),
+  ),
+  Effect.tap(({ pgClient, refresh }) =>
+    pgClient.listen('<resource>_cache_invalidate').pipe(
+      Stream.tap(() => refresh()),
+      Stream.runDrain,
+      Effect.retry(Schedule.exponential('1 second', 2).pipe(Schedule.take(20))),
+      Effect.tapError((e) =>
+        Effect.logError('<Resource>Cache: LISTEN fiber stopped unexpectedly', e),
+      ),
+      Effect.ignore,
+      Effect.forkScoped,
+    ),
+  ),
+  Effect.map(({ stateRef, refresh }) => ({
+    get: () => Ref.get(stateRef),
+    refresh,
+  })),
+);
+```
+
+### Rules
+
+1. **The version bump and the `NOTIFY` must run inside the same `sql.withTransaction(...)` as the data write.** A write that commits before the NOTIFY fires would leave other instances serving stale data until the next mutation.
+2. **The NOTIFY payload is informational only.** The subscriber must re-read `findAll()` + `getVersion()` from the DB on every notification — never reconstruct state from the payload. The payload is a `String(version)` for log-correlation only.
+3. **Use `Layer.effect`, not `Layer.scoped`, when the service uses `Effect.forkScoped` internally.** `Layer.effect` already provides a scope that lives for the layer's lifetime; the forked fiber is automatically interrupted on layer release.
+4. **Wrap `Stream.runDrain` in `Effect.retry(Schedule.exponential('1 second', 2).pipe(Schedule.take(20)))`** so the LISTEN fiber auto-reconnects after pg connection drops. After exhausting retries, log via `Effect.tapError` and `Effect.ignore` so the layer never fails — operator monitoring on the error log catches sustained outages.
+5. **Always provide `findAll` + `getVersion` separately on the repository** (not a fused `findAllWithVersion`). The initial-load path and the refresh path call both; keeping them separate keeps each query indexable and lets unit tests stub them independently.
+6. **The `get()` method on the cache returns the in-memory snapshot synchronously** — handlers must not call `refresh()` on the read path. The only legitimate caller of `refresh()` outside the LISTEN fiber is a test that needs to force a re-read between mutations.
+
 ## Testing
 
 Tests go in `test/` directory. When adding new repositories, add corresponding mock implementations to all test files that compose `AppLive` (e.g., `MockChannelSyncEventsRepository`).

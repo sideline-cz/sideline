@@ -1,12 +1,12 @@
 import type { Roster } from '@sideline/domain';
 import { Team, TeamMember } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { createFileRoute } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
 
 import { TeamMembersPage } from '~/components/pages/TeamMembersPage';
 import { ApiClient, ClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/')({
   ssr: false,
@@ -36,12 +36,12 @@ function MembersRoute() {
 
   const handleDeactivate = React.useCallback(
     async (memberIdRaw: string) => {
-      if (!window.confirm(m.members_deactivateConfirm())) return;
+      if (!window.confirm(tr('members_deactivateConfirm'))) return;
       const memberId = Schema.decodeSync(TeamMember.TeamMemberId)(memberIdRaw);
       const result = await ApiClient.asEffect().pipe(
         Effect.flatMap((api) => api.roster.deactivateMember({ params: { teamId, memberId } })),
-        Effect.mapError(() => ClientError.make(m.members_saveFailed())),
-        run({ success: m.members_deactivated() }),
+        Effect.mapError(() => ClientError.make(tr('members_saveFailed'))),
+        run({ success: tr('members_deactivated') }),
       );
       if (Option.isSome(result)) {
         setPlayers((prev) => prev.filter((p) => p.memberId !== memberId));

@@ -1,7 +1,6 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { EventApi, EventRsvpApi, GroupApi, TrainingTypeApi } from '@sideline/domain';
 import { Discord, Event, EventSeries, GroupModel, Team, TrainingType } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, useNavigate, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
@@ -34,30 +33,31 @@ import { DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import { eventStatusClasses, eventStatusLabels, eventTypeLabels } from '~/lib/event-labels';
 import { toGroupOptions } from '~/lib/group-options';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 const NONE_VALUE = '__none__';
 
 const EventEditSchema = Schema.Struct({
-  title: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
-  eventType: Event.EventType.annotate({ message: m.validation_invalidOption() }),
+  title: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
+  eventType: Event.EventType.annotate({ message: tr('validation_invalidOption') }),
   trainingTypeId: Schema.String,
   description: Schema.String,
   imageUrl: Schema.String.pipe(
     Schema.check(
       Schema.makeFilter<string>((s) =>
-        s === '' || s.startsWith('https://') ? true : m.event_imageUrlInvalid(),
+        s === '' || s.startsWith('https://') ? true : tr('event_imageUrlInvalid'),
       ),
     ),
   ),
   locationUrl: Schema.String.pipe(
     Schema.check(
       Schema.makeFilter<string>((s) =>
-        s === '' || s.startsWith('https://') ? true : m.event_locationUrlInvalid(),
+        s === '' || s.startsWith('https://') ? true : tr('event_locationUrlInvalid'),
       ),
     ),
   ),
-  startDate: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
-  startTime: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
+  startDate: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
+  startTime: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   endDate: Schema.String,
   endTime: Schema.String,
   location: Schema.String,
@@ -196,8 +196,8 @@ export function EventDetailPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.event_updateFailed())),
-      run({ success: m.event_eventSaved() }),
+      Effect.mapError(() => ClientError.make(tr('event_updateFailed'))),
+      run({ success: tr('event_eventSaved') }),
     );
     setSaving(false);
     if (Option.isSome(result)) {
@@ -254,8 +254,8 @@ export function EventDetailPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.event_updateSeriesFailed())),
-      run({ success: m.event_seriesSaved() }),
+      Effect.mapError(() => ClientError.make(tr('event_updateSeriesFailed'))),
+      run({ success: tr('event_seriesSaved') }),
     );
     setSaving(false);
     if (Option.isSome(result)) {
@@ -277,8 +277,8 @@ export function EventDetailPage({
       Effect.flatMap((api) =>
         api.event.cancelEvent({ params: { teamId: teamIdBranded, eventId: eventIdBranded } }),
       ),
-      Effect.mapError(() => ClientError.make(m.event_cancelFailed())),
-      run({ success: m.event_cancelled() }),
+      Effect.mapError(() => ClientError.make(tr('event_cancelFailed'))),
+      run({ success: tr('event_cancelled') }),
     );
     if (Option.isSome(result)) {
       navigate({ to: '/teams/$teamId/events', params: { teamId } });
@@ -297,8 +297,8 @@ export function EventDetailPage({
           params: { teamId: teamIdBranded, seriesId: seriesIdBranded },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.event_cancelFailed())),
-      run({ success: m.event_seriesCancelled() }),
+      Effect.mapError(() => ClientError.make(tr('event_cancelFailed'))),
+      run({ success: tr('event_seriesCancelled') }),
     );
     if (Option.isSome(result)) {
       navigate({ to: '/teams/$teamId/events', params: { teamId } });
@@ -309,7 +309,7 @@ export function EventDetailPage({
     if (hasSeries) {
       setShowCancelScope(true);
     } else {
-      if (!window.confirm(m.event_cancelConfirm())) return;
+      if (!window.confirm(tr('event_cancelConfirm'))) return;
       doCancelThisOnly();
     }
   }, [hasSeries, doCancelThisOnly]);
@@ -326,7 +326,7 @@ export function EventDetailPage({
             },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.rsvp_submitFailed())),
+        Effect.mapError(() => ClientError.make(tr('rsvp_submitFailed'))),
         Effect.tap(() => Effect.sync(() => router.invalidate())),
       ),
     [teamIdBranded, eventIdBranded, router],
@@ -339,7 +339,7 @@ export function EventDetailPage({
       <header className='mb-8'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId/events' params={{ teamId }}>
-            ← {m.event_backToEvents()}
+            ← {tr('event_backToEvents')}
           </Link>
         </Button>
         <h1 className='text-2xl font-bold'>{eventDetail.title}</h1>
@@ -348,7 +348,7 @@ export function EventDetailPage({
           <span className={eventStatusClasses[status]}>{eventStatusLabels[status]()}</span>
           {Option.isSome(eventDetail.createdByName) && (
             <span>
-              {m.event_createdBy()}: {eventDetail.createdByName.value}
+              {tr('event_createdBy')}: {eventDetail.createdByName.value}
             </span>
           )}
         </div>
@@ -356,7 +356,7 @@ export function EventDetailPage({
 
       {hasSeries && (
         <div className='mb-4 rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-800'>
-          {m.event_partOfSeries()}
+          {tr('event_partOfSeries')}
         </div>
       )}
 
@@ -387,9 +387,9 @@ export function EventDetailPage({
                     {...form.register('title')}
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{m.event_title()}</FormLabel>
+                        <FormLabel>{tr('event_title')}</FormLabel>
                         <FormControl>
-                          <Input {...field} placeholder={m.event_titlePlaceholder()} />
+                          <Input {...field} placeholder={tr('event_titlePlaceholder')} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -401,7 +401,7 @@ export function EventDetailPage({
                       {...form.register('eventType')}
                       render={({ field }) => (
                         <FormItem className='flex-1'>
-                          <FormLabel>{m.event_eventType()}</FormLabel>
+                          <FormLabel>{tr('event_eventType')}</FormLabel>
                           <Select onValueChange={field.onChange} value={field.value}>
                             <FormControl>
                               <SelectTrigger>
@@ -425,14 +425,14 @@ export function EventDetailPage({
                         {...form.register('trainingTypeId')}
                         render={({ field }) => (
                           <FormItem className='flex-1'>
-                            <FormLabel>{m.event_trainingType()}</FormLabel>
+                            <FormLabel>{tr('event_trainingType')}</FormLabel>
                             <FormControl>
                               <SearchableSelect
                                 value={field.value}
                                 onValueChange={field.onChange}
-                                placeholder={m.event_noTrainingType()}
+                                placeholder={tr('event_noTrainingType')}
                                 options={[
-                                  { value: NONE_VALUE, label: m.event_noTrainingType() },
+                                  { value: NONE_VALUE, label: tr('event_noTrainingType') },
                                   ...trainingTypes.map((tt) => ({
                                     value: tt.trainingTypeId,
                                     label: tt.name,
@@ -453,12 +453,12 @@ export function EventDetailPage({
                       {...form.register('startDate')}
                       render={({ field }) => (
                         <FormItem className='flex-1'>
-                          <FormLabel>{m.event_startDate()}</FormLabel>
+                          <FormLabel>{tr('event_startDate')}</FormLabel>
                           <FormControl>
                             <DatePicker
                               value={field.value}
                               onChange={field.onChange}
-                              placeholder={m.event_startDate()}
+                              placeholder={tr('event_startDate')}
                             />
                           </FormControl>
                           <FormMessage />
@@ -469,7 +469,7 @@ export function EventDetailPage({
                       {...form.register('startTime')}
                       render={({ field }) => (
                         <FormItem className='flex-1'>
-                          <FormLabel>{m.event_startTime()}</FormLabel>
+                          <FormLabel>{tr('event_startTime')}</FormLabel>
                           <FormControl>
                             <Input {...field} type='time' />
                           </FormControl>
@@ -484,12 +484,12 @@ export function EventDetailPage({
                       {...form.register('endDate')}
                       render={({ field }) => (
                         <FormItem className='flex-1'>
-                          <FormLabel>{m.event_endDate()}</FormLabel>
+                          <FormLabel>{tr('event_endDate')}</FormLabel>
                           <FormControl>
                             <DatePicker
                               value={field.value}
                               onChange={field.onChange}
-                              placeholder={m.event_endDate()}
+                              placeholder={tr('event_endDate')}
                             />
                           </FormControl>
                           <FormMessage />
@@ -500,7 +500,7 @@ export function EventDetailPage({
                       {...form.register('endTime')}
                       render={({ field }) => (
                         <FormItem className='flex-1'>
-                          <FormLabel>{m.event_endTime()}</FormLabel>
+                          <FormLabel>{tr('event_endTime')}</FormLabel>
                           <FormControl>
                             <Input {...field} type='time' />
                           </FormControl>
@@ -514,9 +514,9 @@ export function EventDetailPage({
                     {...form.register('location')}
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{m.event_location()}</FormLabel>
+                        <FormLabel>{tr('event_location')}</FormLabel>
                         <FormControl>
-                          <Input {...field} placeholder={m.event_locationPlaceholder()} />
+                          <Input {...field} placeholder={tr('event_locationPlaceholder')} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -527,18 +527,20 @@ export function EventDetailPage({
                     {...form.register('locationUrl')}
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{m.event_locationUrl()}</FormLabel>
+                        <FormLabel>{tr('event_locationUrl')}</FormLabel>
                         <FormControl>
                           <Input
                             {...field}
                             type='url'
                             inputMode='url'
                             autoComplete='url'
-                            placeholder={m.event_locationUrlPlaceholder()}
+                            placeholder={tr('event_locationUrlPlaceholder')}
                             disabled={!form.watch('location')}
                           />
                         </FormControl>
-                        <p className='text-xs text-muted-foreground'>{m.event_locationUrlHelp()}</p>
+                        <p className='text-xs text-muted-foreground'>
+                          {tr('event_locationUrlHelp')}
+                        </p>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -548,11 +550,11 @@ export function EventDetailPage({
                     {...form.register('description')}
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{m.event_description()}</FormLabel>
+                        <FormLabel>{tr('event_description')}</FormLabel>
                         <FormControl>
                           <Textarea
                             {...field}
-                            placeholder={m.event_descriptionPlaceholder()}
+                            placeholder={tr('event_descriptionPlaceholder')}
                             rows={3}
                           />
                         </FormControl>
@@ -565,12 +567,12 @@ export function EventDetailPage({
                     {...form.register('imageUrl')}
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{m.event_imageUrl()}</FormLabel>
+                        <FormLabel>{tr('event_imageUrl')}</FormLabel>
                         <FormControl>
                           <Input
                             {...field}
                             type='url'
-                            placeholder={m.event_imageUrlPlaceholder()}
+                            placeholder={tr('event_imageUrlPlaceholder')}
                           />
                         </FormControl>
                         {field.value &&
@@ -588,7 +590,7 @@ export function EventDetailPage({
                               }}
                             />
                           )}
-                        <p className='text-xs text-muted-foreground'>{m.event_imageUrlHelp()}</p>
+                        <p className='text-xs text-muted-foreground'>{tr('event_imageUrlHelp')}</p>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -598,14 +600,14 @@ export function EventDetailPage({
                     {...form.register('discordChannelId')}
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{m.event_discordChannel()}</FormLabel>
+                        <FormLabel>{tr('event_discordChannel')}</FormLabel>
                         <FormControl>
                           <SearchableSelect
                             value={field.value}
                             onValueChange={field.onChange}
-                            placeholder={m.event_useDefault()}
+                            placeholder={tr('event_useDefault')}
                             options={[
-                              { value: NONE_VALUE, label: m.event_useDefault() },
+                              { value: NONE_VALUE, label: tr('event_useDefault') },
                               ...discordChannels
                                 .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
                                 .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
@@ -623,21 +625,21 @@ export function EventDetailPage({
                       {...form.register('ownerGroupId')}
                       render={({ field }) => (
                         <FormItem className='flex-1'>
-                          <FormLabel>{m.event_ownerGroup()}</FormLabel>
+                          <FormLabel>{tr('event_ownerGroup')}</FormLabel>
                           <FormControl>
                             <SearchableSelect
                               value={field.value}
                               onValueChange={field.onChange}
-                              placeholder={m.event_useDefault()}
+                              placeholder={tr('event_useDefault')}
                               options={[
-                                { value: NONE_VALUE, label: m.event_useDefault() },
+                                { value: NONE_VALUE, label: tr('event_useDefault') },
                                 ...toGroupOptions(groups),
                               ]}
                               pinnedValues={[NONE_VALUE]}
                             />
                           </FormControl>
                           <p className='text-xs text-muted-foreground'>
-                            {m.event_ownerGroupHelp()}
+                            {tr('event_ownerGroupHelp')}
                           </p>
                           <FormMessage />
                         </FormItem>
@@ -647,21 +649,21 @@ export function EventDetailPage({
                       {...form.register('memberGroupId')}
                       render={({ field }) => (
                         <FormItem className='flex-1'>
-                          <FormLabel>{m.event_memberGroup()}</FormLabel>
+                          <FormLabel>{tr('event_memberGroup')}</FormLabel>
                           <FormControl>
                             <SearchableSelect
                               value={field.value}
                               onValueChange={field.onChange}
-                              placeholder={m.event_useDefault()}
+                              placeholder={tr('event_useDefault')}
                               options={[
-                                { value: NONE_VALUE, label: m.event_useDefault() },
+                                { value: NONE_VALUE, label: tr('event_useDefault') },
                                 ...toGroupOptions(groups),
                               ]}
                               pinnedValues={[NONE_VALUE]}
                             />
                           </FormControl>
                           <p className='text-xs text-muted-foreground'>
-                            {m.event_memberGroupHelp()}
+                            {tr('event_memberGroupHelp')}
                           </p>
                           <FormMessage />
                         </FormItem>
@@ -671,13 +673,13 @@ export function EventDetailPage({
 
                   {showEditScope && (
                     <div className='rounded-md border p-4 space-y-2'>
-                      <p className='font-medium'>{m.event_editScopeTitle()}</p>
+                      <p className='font-medium'>{tr('event_editScopeTitle')}</p>
                       <div className='flex gap-2'>
                         <Button type='button' size='sm' variant='outline' onClick={doSaveThisOnly}>
-                          {m.event_editThisOnly()}
+                          {tr('event_editThisOnly')}
                         </Button>
                         <Button type='button' size='sm' onClick={doSaveAllFuture}>
-                          {m.event_editAllFuture()}
+                          {tr('event_editAllFuture')}
                         </Button>
                       </div>
                     </div>
@@ -685,7 +687,7 @@ export function EventDetailPage({
 
                   {showCancelScope && (
                     <div className='rounded-md border border-destructive/30 p-4 space-y-2'>
-                      <p className='font-medium'>{m.event_cancelScopeTitle()}</p>
+                      <p className='font-medium'>{tr('event_cancelScopeTitle')}</p>
                       <div className='flex gap-2'>
                         <Button
                           type='button'
@@ -693,7 +695,7 @@ export function EventDetailPage({
                           variant='outline'
                           onClick={doCancelThisOnly}
                         >
-                          {m.event_cancelThisOnly()}
+                          {tr('event_cancelThisOnly')}
                         </Button>
                         <Button
                           type='button'
@@ -701,7 +703,7 @@ export function EventDetailPage({
                           variant='destructive'
                           onClick={doCancelAllFuture}
                         >
-                          {m.event_cancelAllFuture()}
+                          {tr('event_cancelAllFuture')}
                         </Button>
                       </div>
                     </div>
@@ -709,11 +711,11 @@ export function EventDetailPage({
 
                   <div className='flex gap-2'>
                     <Button type='submit' disabled={saving}>
-                      {saving ? m.event_saving() : m.event_saveChanges()}
+                      {saving ? tr('event_saving') : tr('event_saveChanges')}
                     </Button>
                     {eventDetail.canCancel && (
                       <Button type='button' variant='destructive' onClick={handleCancel}>
-                        {m.event_cancelEvent()}
+                        {tr('event_cancelEvent')}
                       </Button>
                     )}
                   </div>
@@ -724,24 +726,24 @@ export function EventDetailPage({
                 {eventDetail.eventType === 'training' &&
                   Option.isSome(eventDetail.trainingTypeName) && (
                     <p>
-                      <span className='text-sm font-medium'>{m.event_trainingType()}: </span>
+                      <span className='text-sm font-medium'>{tr('event_trainingType')}: </span>
                       {eventDetail.trainingTypeName.value}
                     </p>
                   )}
                 <p>
-                  <span className='text-sm font-medium'>{m.event_startDate()}: </span>
+                  <span className='text-sm font-medium'>{tr('event_startDate')}: </span>
                   {formatLocalDate(eventDetail.startAt)} {formatLocalTime(eventDetail.startAt)}
                 </p>
                 {Option.isSome(eventDetail.endAt) && (
                   <p>
-                    <span className='text-sm font-medium'>{m.event_endDate()}: </span>
+                    <span className='text-sm font-medium'>{tr('event_endDate')}: </span>
                     {formatLocalDate(eventDetail.endAt.value)}{' '}
                     {formatLocalTime(eventDetail.endAt.value)}
                   </p>
                 )}
                 {Option.isSome(eventDetail.location) && (
                   <p>
-                    <span className='text-sm font-medium'>{m.event_location()}: </span>
+                    <span className='text-sm font-medium'>{tr('event_location')}: </span>
                     <EventLocation
                       text={eventDetail.location.value}
                       url={eventDetail.locationUrl}
@@ -750,26 +752,26 @@ export function EventDetailPage({
                 )}
                 {Option.isSome(eventDetail.description) && (
                   <p>
-                    <span className='text-sm font-medium'>{m.event_description()}: </span>
+                    <span className='text-sm font-medium'>{tr('event_description')}: </span>
                     {eventDetail.description.value}
                   </p>
                 )}
                 {Option.isSome(eventDetail.ownerGroupName) && (
                   <p>
-                    <span className='text-sm font-medium'>{m.event_ownerGroup()}: </span>
+                    <span className='text-sm font-medium'>{tr('event_ownerGroup')}: </span>
                     {eventDetail.ownerGroupName.value}
                   </p>
                 )}
                 {Option.isSome(eventDetail.memberGroupName) && (
                   <p>
-                    <span className='text-sm font-medium'>{m.event_memberGroup()}: </span>
+                    <span className='text-sm font-medium'>{tr('event_memberGroup')}: </span>
                     {eventDetail.memberGroupName.value}
                   </p>
                 )}
                 {eventDetail.canCancel && status === 'active' && (
                   <div>
                     <Button variant='destructive' onClick={handleCancel}>
-                      {m.event_cancelEvent()}
+                      {tr('event_cancelEvent')}
                     </Button>
                   </div>
                 )}

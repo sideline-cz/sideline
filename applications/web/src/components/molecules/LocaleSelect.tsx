@@ -1,4 +1,3 @@
-import { m } from '@sideline/i18n/messages';
 import {
   Select,
   SelectContent,
@@ -6,6 +5,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '~/components/ui/select';
+import { tr } from '~/lib/translations.js';
 
 const locales = [
   { value: 'en' as const, flag: '🇬🇧' },
@@ -15,9 +15,9 @@ const locales = [
 const localeLabel = (locale: 'en' | 'cs') => {
   switch (locale) {
     case 'en':
-      return m.language_en();
+      return tr('language_en');
     case 'cs':
-      return m.language_cs();
+      return tr('language_cs');
   }
 };
 

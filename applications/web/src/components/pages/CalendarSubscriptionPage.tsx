@@ -1,5 +1,4 @@
 import type { ICalApi } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect } from 'effect';
 import React from 'react';
@@ -8,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card';
 import { Input } from '~/components/ui/input';
 import { Separator } from '~/components/ui/separator';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 interface CalendarSubscriptionPageProps {
   teamId: string;
@@ -28,12 +28,12 @@ export function CalendarSubscriptionPage({ teamId, icalToken }: CalendarSubscrip
   };
 
   const handleRegenerate = async () => {
-    if (!window.confirm(m.ical_regenerateConfirm())) return;
+    if (!window.confirm(tr('ical_regenerateConfirm'))) return;
     setRegenerating(true);
-    const result = await run({ success: m.ical_regenerated() })(
+    const result = await run({ success: tr('ical_regenerated') })(
       ApiClient.asEffect().pipe(
         Effect.flatMap((api) => api.ical.regenerateICalToken()),
-        Effect.mapError(() => ClientError.make(m.ical_regenerateFailed())),
+        Effect.mapError(() => ClientError.make(tr('ical_regenerateFailed'))),
       ),
     );
     setRegenerating(false);
@@ -48,27 +48,27 @@ export function CalendarSubscriptionPage({ teamId, icalToken }: CalendarSubscrip
       <header>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId' params={{ teamId }}>
-            ← {m.team_backToTeams()}
+            ← {tr('team_backToTeams')}
           </Link>
         </Button>
-        <h1 className='text-2xl font-bold'>{m.ical_title()}</h1>
-        <p className='text-muted-foreground mt-1'>{m.ical_description()}</p>
+        <h1 className='text-2xl font-bold'>{tr('ical_title')}</h1>
+        <p className='text-muted-foreground mt-1'>{tr('ical_description')}</p>
       </header>
 
       <Card>
         <CardHeader>
-          <CardTitle className='text-base'>{m.ical_subscribeUrl()}</CardTitle>
+          <CardTitle className='text-base'>{tr('ical_subscribeUrl')}</CardTitle>
         </CardHeader>
         <CardContent className='space-y-4'>
           <div className='flex flex-col gap-2 sm:flex-row'>
             <Input value={url} readOnly className='font-mono text-sm flex-1' />
             <Button variant='outline' onClick={handleCopy} className='shrink-0'>
-              {copied ? m.ical_copied() : m.ical_copyUrl()}
+              {copied ? tr('ical_copied') : tr('ical_copyUrl')}
             </Button>
           </div>
           <div>
             <Button variant='destructive' onClick={handleRegenerate} disabled={regenerating}>
-              {m.ical_regenerate()}
+              {tr('ical_regenerate')}
             </Button>
           </div>
         </CardContent>
@@ -78,17 +78,17 @@ export function CalendarSubscriptionPage({ teamId, icalToken }: CalendarSubscrip
         <CardContent className='pt-6 space-y-4'>
           <div>
             <h2 className='text-base font-semibold mb-1'>Google Calendar</h2>
-            <p className='text-muted-foreground text-sm'>{m.ical_instructions_google()}</p>
+            <p className='text-muted-foreground text-sm'>{tr('ical_instructions_google')}</p>
           </div>
           <Separator />
           <div>
             <h2 className='text-base font-semibold mb-1'>Apple Calendar</h2>
-            <p className='text-muted-foreground text-sm'>{m.ical_instructions_apple()}</p>
+            <p className='text-muted-foreground text-sm'>{tr('ical_instructions_apple')}</p>
           </div>
           <Separator />
           <div>
             <h2 className='text-base font-semibold mb-1'>Outlook</h2>
-            <p className='text-muted-foreground text-sm'>{m.ical_instructions_outlook()}</p>
+            <p className='text-muted-foreground text-sm'>{tr('ical_instructions_outlook')}</p>
           </div>
         </CardContent>
       </Card>

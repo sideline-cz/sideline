@@ -1,11 +1,11 @@
 import type { ActivityLog, ActivityLogApi, ActivityType } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Option } from 'effect';
 import React from 'react';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '~/components/ui/sheet';
+import { tr } from '~/lib/translations.js';
 
 type ActivityTypeOption = {
   id: ActivityType.ActivityTypeId;
@@ -163,11 +163,11 @@ export function ActivityLogList({
 
   return (
     <div className='mt-6'>
-      <h2 className='text-lg font-semibold mb-4'>{m.activityLog_title()}</h2>
+      <h2 className='text-lg font-semibold mb-4'>{tr('activityLog_title')}</h2>
 
       {isOwnProfile && (
         <div className='mb-6 p-4 border rounded-lg'>
-          <p className='text-sm font-medium mb-2'>{m.activityLog_logActivity()}</p>
+          <p className='text-sm font-medium mb-2'>{tr('activityLog_logActivity')}</p>
           <div className='flex gap-2 mb-3 flex-wrap'>
             {activityTypes.map((type) => (
               <Button
@@ -194,7 +194,7 @@ export function ActivityLogList({
               <div className='flex gap-2 mb-2'>
                 <div className='flex-1'>
                   <Label htmlFor='log-duration' className='text-xs text-muted-foreground'>
-                    {m.activityLog_durationLabel()}
+                    {tr('activityLog_durationLabel')}
                   </Label>
                   <Input
                     id='log-duration'
@@ -203,23 +203,23 @@ export function ActivityLogList({
                     max={1440}
                     value={durationInput}
                     onChange={(e) => setDurationInput(e.target.value)}
-                    placeholder={m.activityLog_durationPlaceholder()}
+                    placeholder={tr('activityLog_durationPlaceholder')}
                   />
                 </div>
               </div>
               <div className='mb-3'>
                 <Label htmlFor='log-note' className='text-xs text-muted-foreground'>
-                  {m.activityLog_noteLabel()}
+                  {tr('activityLog_noteLabel')}
                 </Label>
                 <Input
                   id='log-note'
                   value={noteInput}
                   onChange={(e) => setNoteInput(e.target.value)}
-                  placeholder={m.activityLog_notePlaceholder()}
+                  placeholder={tr('activityLog_notePlaceholder')}
                 />
               </div>
               <Button size='sm' disabled={creating} onClick={handleCreate}>
-                {creating ? m.activityLog_logging() : m.activityLog_logActivity()}
+                {creating ? tr('activityLog_logging') : tr('activityLog_logActivity')}
               </Button>
             </>
           )}
@@ -227,7 +227,7 @@ export function ActivityLogList({
       )}
 
       {logs.length === 0 ? (
-        <p className='text-muted-foreground'>{m.activityLog_empty()}</p>
+        <p className='text-muted-foreground'>{tr('activityLog_empty')}</p>
       ) : (
         <div className='flex flex-col gap-4'>
           {Array.from(groupedByDate.entries()).map(([date, dateLogs]) => (
@@ -271,7 +271,7 @@ export function ActivityLogList({
                           size='sm'
                           onClick={() => openEdit(log)}
                         >
-                          {m.activityLog_edit()}
+                          {tr('activityLog_edit')}
                         </Button>
                         <Button
                           type='button'
@@ -279,12 +279,12 @@ export function ActivityLogList({
                           size='sm'
                           disabled={deletingId === log.id}
                           onClick={() => {
-                            if (confirm(m.activityLog_deleteConfirm())) {
+                            if (confirm(tr('activityLog_deleteConfirm'))) {
                               handleDelete(log.id);
                             }
                           }}
                         >
-                          {deletingId === log.id ? '...' : m.activityLog_delete()}
+                          {deletingId === log.id ? '...' : tr('activityLog_delete')}
                         </Button>
                       </div>
                     )}
@@ -304,12 +304,12 @@ export function ActivityLogList({
       >
         <SheetContent>
           <SheetHeader>
-            <SheetTitle>{m.activityLog_editTitle()}</SheetTitle>
+            <SheetTitle>{tr('activityLog_editTitle')}</SheetTitle>
           </SheetHeader>
           <div className='flex flex-col gap-4 px-4 pb-4'>
             <div>
               <Label className='text-sm font-medium mb-2 block'>
-                {m.activityLog_activityType()}
+                {tr('activityLog_activityType')}
               </Label>
               <div className='flex gap-2 flex-wrap'>
                 {editActivityTypes.map((type) => (
@@ -335,7 +335,7 @@ export function ActivityLogList({
             </div>
             <div>
               <Label htmlFor='edit-duration' className='text-sm font-medium'>
-                {m.activityLog_durationLabel()}
+                {tr('activityLog_durationLabel')}
               </Label>
               <Input
                 id='edit-duration'
@@ -344,22 +344,22 @@ export function ActivityLogList({
                 max={1440}
                 value={editDuration}
                 onChange={(e) => setEditDuration(e.target.value)}
-                placeholder={m.activityLog_durationPlaceholder()}
+                placeholder={tr('activityLog_durationPlaceholder')}
               />
             </div>
             <div>
               <Label htmlFor='edit-note' className='text-sm font-medium'>
-                {m.activityLog_noteLabel()}
+                {tr('activityLog_noteLabel')}
               </Label>
               <Input
                 id='edit-note'
                 value={editNote}
                 onChange={(e) => setEditNote(e.target.value)}
-                placeholder={m.activityLog_notePlaceholder()}
+                placeholder={tr('activityLog_notePlaceholder')}
               />
             </div>
             <Button disabled={saving} onClick={handleUpdate}>
-              {saving ? m.activityLog_saving() : m.activityLog_saveChanges()}
+              {saving ? tr('activityLog_saving') : tr('activityLog_saveChanges')}
             </Button>
           </div>
         </SheetContent>

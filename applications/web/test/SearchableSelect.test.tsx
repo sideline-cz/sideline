@@ -1,9 +1,15 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('@sideline/i18n/messages', () => ({
-  searchable_select_search: () => 'Search...',
-  searchable_select_noResults: () => 'No results found.',
+vi.mock('~/lib/translations.js', () => ({
+  tr: (key: string) => {
+    const map: Record<string, string> = {
+      searchable_select_search: 'Search...',
+      searchable_select_noResults: 'No results found.',
+    };
+    return map[key] ?? key;
+  },
+  setTranslationOverrides: vi.fn(),
 }));
 
 const { SearchableSelect } = await import('~/components/atoms/SearchableSelect.js');

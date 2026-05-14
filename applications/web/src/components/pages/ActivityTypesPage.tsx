@@ -1,7 +1,6 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { ActivityTypeApi } from '@sideline/domain';
 import { ActivityType, Team } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
@@ -28,6 +27,7 @@ import { Input } from '~/components/ui/input';
 import { Textarea } from '~/components/ui/textarea';
 import { withFieldErrors } from '~/lib/form';
 import { ApiClient, ClientError, SilentClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ function countGraphemes(s: string): number {
 // ─── Form Schema ──────────────────────────────────────────────────────────────
 
 const ActivityTypeFormSchema = Schema.Struct({
-  name: ActivityType.ActivityTypeName.annotate({ message: m.validation_required() }),
+  name: ActivityType.ActivityTypeName.annotate({ message: tr('validation_required') }),
   emoji: Schema.String,
   description: Schema.String,
 });
@@ -93,9 +93,9 @@ function ActivityTypeFormDialog({
   const watchedEmoji = form.watch('emoji');
 
   const validateEmoji = (value: string): string | true => {
-    if (!value) return m.activityType_emojiRequired();
-    if (value.length > 8) return m.activityType_emojiRequired();
-    if (countGraphemes(value) !== 1) return m.activityType_emojiRequired();
+    if (!value) return tr('activityType_emojiRequired');
+    if (value.length > 8) return tr('activityType_emojiRequired');
+    if (countGraphemes(value) !== 1) return tr('activityType_emojiRequired');
     return true;
   };
 
@@ -129,11 +129,11 @@ function ActivityTypeFormDialog({
           {
             tag: 'ActivityTypeNameAlreadyTaken',
             field: 'name',
-            message: m.activityType_nameAlreadyTaken(),
+            message: tr('activityType_nameAlreadyTaken'),
           },
         ]),
         Effect.mapError(() => ClientError.make('Failed to save activity type')),
-        run({ success: m.activityType_saved() }),
+        run({ success: tr('activityType_saved') }),
       );
       if (Option.isSome(result)) {
         form.reset();
@@ -156,11 +156,11 @@ function ActivityTypeFormDialog({
           {
             tag: 'ActivityTypeNameAlreadyTaken',
             field: 'name',
-            message: m.activityType_nameAlreadyTaken(),
+            message: tr('activityType_nameAlreadyTaken'),
           },
         ]),
         Effect.mapError(() => ClientError.make('Failed to create activity type')),
-        run({ success: m.activityType_created() }),
+        run({ success: tr('activityType_created') }),
       );
       if (Option.isSome(result)) {
         form.reset();
@@ -174,7 +174,9 @@ function ActivityTypeFormDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className='max-w-lg'>
         <DialogHeader>
-          <DialogTitle>{isEditing ? m.activityType_edit() : m.activityType_create()}</DialogTitle>
+          <DialogTitle>
+            {isEditing ? tr('activityType_edit') : tr('activityType_create')}
+          </DialogTitle>
         </DialogHeader>
 
         <Form {...form}>
@@ -184,11 +186,11 @@ function ActivityTypeFormDialog({
               {...form.register('name')}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{m.activityType_name()}</FormLabel>
+                  <FormLabel>{tr('activityType_name')}</FormLabel>
                   <FormControl>
                     <Input
                       {...field}
-                      placeholder={m.activityType_namePlaceholder()}
+                      placeholder={tr('activityType_namePlaceholder')}
                       maxLength={50}
                     />
                   </FormControl>
@@ -203,7 +205,7 @@ function ActivityTypeFormDialog({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>
-                    {m.activityType_emoji()}
+                    {tr('activityType_emoji')}
                     {watchedEmoji && (
                       <span className='ml-2 text-xl leading-none'>{watchedEmoji}</span>
                     )}
@@ -212,7 +214,7 @@ function ActivityTypeFormDialog({
                     <Input {...field} placeholder='🏃' maxLength={8} className='w-24' />
                   </FormControl>
                   <FormDescription className='text-xs'>
-                    {m.activityType_emojiHelp()}
+                    {tr('activityType_emojiHelp')}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -224,12 +226,12 @@ function ActivityTypeFormDialog({
               {...form.register('description')}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{m.activityType_description()}</FormLabel>
+                  <FormLabel>{tr('activityType_description')}</FormLabel>
                   <FormControl>
                     <Textarea
                       {...field}
                       rows={2}
-                      placeholder={m.activityType_descriptionPlaceholder()}
+                      placeholder={tr('activityType_descriptionPlaceholder')}
                       maxLength={200}
                     />
                   </FormControl>
@@ -240,16 +242,16 @@ function ActivityTypeFormDialog({
 
             <DialogFooter>
               <Button type='button' variant='outline' onClick={onClose}>
-                {m.achievement_admin_cancel()}
+                {tr('achievement_admin_cancel')}
               </Button>
               <Button type='submit' disabled={form.formState.isSubmitting}>
                 {form.formState.isSubmitting
                   ? isEditing
-                    ? m.activityType_saving()
-                    : m.activityType_creating()
+                    ? tr('activityType_saving')
+                    : tr('activityType_creating')
                   : isEditing
-                    ? m.activityType_save()
-                    : m.activityType_create()}
+                    ? tr('activityType_save')
+                    : tr('activityType_create')}
               </Button>
             </DialogFooter>
           </form>
@@ -280,16 +282,16 @@ function CannotDeleteDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className='max-w-md'>
         <DialogHeader>
-          <DialogTitle>{m.activityType_cannotDelete_title({ name })}</DialogTitle>
+          <DialogTitle>{tr('activityType_cannotDelete_title', { name })}</DialogTitle>
         </DialogHeader>
         <p className='text-sm text-muted-foreground'>
-          {m.activityType_cannotDelete_body({ count: usageCount })}
+          {tr('activityType_cannotDelete_body', { count: usageCount })}
         </p>
         <DialogFooter>
           <Button variant='outline' onClick={onClose}>
-            {m.achievement_admin_cancel()}
+            {tr('achievement_admin_cancel')}
           </Button>
-          <Button onClick={onRename}>{m.activityType_cannotDelete_rename()}</Button>
+          <Button onClick={onRename}>{tr('activityType_cannotDelete_rename')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -327,7 +329,7 @@ export function ActivityTypesPage({ teamId, canAdmin, activityTypes }: ActivityT
         return;
       }
 
-      if (!window.confirm(m.activityType_deleteConfirm({ name: activityType.name }))) {
+      if (!window.confirm(tr('activityType_deleteConfirm', { name: activityType.name }))) {
         return;
       }
 
@@ -345,7 +347,7 @@ export function ActivityTypesPage({ teamId, canAdmin, activityTypes }: ActivityT
           }
           return ClientError.make('Failed to delete activity type');
         }),
-        run({ success: m.activityType_deleted() }),
+        run({ success: tr('activityType_deleted') }),
       );
       if (Option.isSome(result)) {
         router.invalidate();
@@ -359,17 +361,17 @@ export function ActivityTypesPage({ teamId, canAdmin, activityTypes }: ActivityT
       <header className='mb-8'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId' params={{ teamId }}>
-            ← {m.team_backToTeams()}
+            ← {tr('team_backToTeams')}
           </Link>
         </Button>
-        <h1 className='text-2xl font-bold'>{m.activityType_title()}</h1>
-        <p className='text-muted-foreground mt-1'>{m.activityType_subtitle()}</p>
+        <h1 className='text-2xl font-bold'>{tr('activityType_title')}</h1>
+        <p className='text-muted-foreground mt-1'>{tr('activityType_subtitle')}</p>
       </header>
 
       {/* Top action */}
       {canAdmin && (
         <div className='flex justify-end mb-4'>
-          <Button onClick={() => setCreateOpen(true)}>+ {m.activityType_create()}</Button>
+          <Button onClick={() => setCreateOpen(true)}>+ {tr('activityType_create')}</Button>
         </div>
       )}
 
@@ -377,10 +379,10 @@ export function ActivityTypesPage({ teamId, canAdmin, activityTypes }: ActivityT
       {activityTypes.length === 0 ? (
         <div className='flex flex-col items-center gap-3 py-12 text-center'>
           <span className='text-4xl'>🏃</span>
-          <p className='font-medium'>{m.activityType_empty_title()}</p>
-          <p className='text-sm text-muted-foreground'>{m.activityType_empty_subtitle()}</p>
+          <p className='font-medium'>{tr('activityType_empty_title')}</p>
+          <p className='text-sm text-muted-foreground'>{tr('activityType_empty_subtitle')}</p>
           {canAdmin && (
-            <Button onClick={() => setCreateOpen(true)}>{m.activityType_create()}</Button>
+            <Button onClick={() => setCreateOpen(true)}>{tr('activityType_create')}</Button>
           )}
         </div>
       ) : (
@@ -388,11 +390,11 @@ export function ActivityTypesPage({ teamId, canAdmin, activityTypes }: ActivityT
           <table className='w-full'>
             <thead>
               <tr className='border-b text-left text-sm text-muted-foreground'>
-                <th className='py-2 px-2 w-10'>{m.activityType_emoji()}</th>
-                <th className='py-2 px-3'>{m.activityType_name()}</th>
-                <th className='hidden sm:table-cell py-2 px-3'>{m.activityType_description()}</th>
-                <th className='py-2 px-3'>{m.activityType_inUse()}</th>
-                {canAdmin && <th className='py-2 px-3'>{m.achievement_admin_table_actions()}</th>}
+                <th className='py-2 px-2 w-10'>{tr('activityType_emoji')}</th>
+                <th className='py-2 px-3'>{tr('activityType_name')}</th>
+                <th className='hidden sm:table-cell py-2 px-3'>{tr('activityType_description')}</th>
+                <th className='py-2 px-3'>{tr('activityType_inUse')}</th>
+                {canAdmin && <th className='py-2 px-3'>{tr('achievement_admin_table_actions')}</th>}
               </tr>
             </thead>
             <tbody>
@@ -410,7 +412,7 @@ export function ActivityTypesPage({ teamId, canAdmin, activityTypes }: ActivityT
                       <span className='font-medium'>{activityType.name}</span>
                       {isBuiltIn && (
                         <span className='ml-2 text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700'>
-                          {m.activityType_builtIn()}
+                          {tr('activityType_builtIn')}
                         </span>
                       )}
                     </td>
@@ -430,23 +432,23 @@ export function ActivityTypesPage({ teamId, canAdmin, activityTypes }: ActivityT
                             variant='outline'
                             size='sm'
                             disabled={isBuiltIn}
-                            title={isBuiltIn ? m.activityType_protected() : undefined}
+                            title={isBuiltIn ? tr('activityType_protected') : undefined}
                             onClick={() => {
                               if (!isBuiltIn) setEditTarget(activityType);
                             }}
                           >
-                            {m.activityType_edit()}
+                            {tr('activityType_edit')}
                           </Button>
                           <Button
                             variant='outline'
                             size='sm'
                             disabled={isBuiltIn}
-                            title={isBuiltIn ? m.activityType_protected() : undefined}
+                            title={isBuiltIn ? tr('activityType_protected') : undefined}
                             onClick={() => {
                               if (!isBuiltIn) handleDelete(activityType);
                             }}
                           >
-                            {m.activityType_delete()}
+                            {tr('activityType_delete')}
                           </Button>
                         </div>
                       </td>

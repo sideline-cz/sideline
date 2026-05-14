@@ -1,7 +1,6 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { GroupApi } from '@sideline/domain';
 import { GroupModel, Team } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import { ChevronDown, ChevronRight } from 'lucide-react';
@@ -22,9 +21,10 @@ import {
 import { Input } from '~/components/ui/input';
 import { withFieldErrors } from '~/lib/form';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 const CreateGroupSchema = Schema.Struct({
-  name: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
+  name: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
 });
 
 type CreateGroupValues = Schema.Schema.Type<typeof CreateGroupSchema>;
@@ -95,18 +95,18 @@ function GroupTreeNode({ node, teamId, depth, onCreateSubgroup }: GroupTreeNodeP
                   : node.group.name}
               </Link>
               <p className='text-xs text-muted-foreground sm:hidden'>
-                {m.group_memberCount({ count: String(node.group.memberCount) })}
+                {tr('group_memberCount', { count: String(node.group.memberCount) })}
               </p>
             </div>
           </div>
         </td>
         <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-          {m.group_memberCount({ count: String(node.group.memberCount) })}
+          {tr('group_memberCount', { count: String(node.group.memberCount) })}
         </td>
         <td className='py-2 px-4'>
           <div className='flex gap-1 flex-wrap'>
             <Button variant='ghost' size='sm' onClick={() => onCreateSubgroup(node.group.groupId)}>
-              {m.group_createSubgroup()}
+              {tr('group_createSubgroup')}
             </Button>
             <Button asChild variant='outline' size='sm'>
               <Link
@@ -172,10 +172,10 @@ export function GroupsListPage({ teamId, groups }: GroupsListPageProps) {
         }),
       ),
       withFieldErrors(form, [
-        { tag: 'GroupNameAlreadyTaken', field: 'name', message: m.group_nameAlreadyTaken() },
+        { tag: 'GroupNameAlreadyTaken', field: 'name', message: tr('group_nameAlreadyTaken') },
       ]),
-      Effect.mapError(() => ClientError.make(m.group_createFailed())),
-      run({ success: m.group_groupCreated() }),
+      Effect.mapError(() => ClientError.make(tr('group_createFailed'))),
+      run({ success: tr('group_groupCreated') }),
     );
     if (Option.isSome(result)) {
       form.reset();
@@ -196,10 +196,10 @@ export function GroupsListPage({ teamId, groups }: GroupsListPageProps) {
       <header className='mb-8'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId' params={{ teamId }}>
-            ← {m.team_backToTeams()}
+            ← {tr('team_backToTeams')}
           </Link>
         </Button>
-        <h1 className='text-2xl font-bold'>{m.group_groups()}</h1>
+        <h1 className='text-2xl font-bold'>{tr('group_groups')}</h1>
       </header>
 
       <Form {...form}>
@@ -210,7 +210,7 @@ export function GroupsListPage({ teamId, groups }: GroupsListPageProps) {
           <div className='flex gap-2 items-end'>
             <div className='flex flex-col'>
               <label htmlFor='group-create-emoji' className='text-sm font-medium mb-1'>
-                {m.roster_emoji()}
+                {tr('roster_emoji')}
               </label>
               <Input
                 id='group-create-emoji'
@@ -222,7 +222,7 @@ export function GroupsListPage({ teamId, groups }: GroupsListPageProps) {
             </div>
             <div className='flex flex-col'>
               <label htmlFor='group-create-color' className='text-sm font-medium mb-1'>
-                {m.common_color()}
+                {tr('common_color')}
               </label>
               <ColorPicker id='group-create-color' value={createColor} onChange={setCreateColor} />
             </div>
@@ -230,12 +230,12 @@ export function GroupsListPage({ teamId, groups }: GroupsListPageProps) {
               {...form.register('name')}
               render={({ field }) => (
                 <FormItem className='flex-1 min-w-48'>
-                  <FormLabel>{m.group_groupName()}</FormLabel>
+                  <FormLabel>{tr('group_groupName')}</FormLabel>
                   <FormControl>
                     <Input
                       {...field}
                       id='group-name-input'
-                      placeholder={m.group_groupNamePlaceholder()}
+                      placeholder={tr('group_groupNamePlaceholder')}
                     />
                   </FormControl>
                   <FormMessage />
@@ -245,7 +245,7 @@ export function GroupsListPage({ teamId, groups }: GroupsListPageProps) {
           </div>
           <div className='flex flex-col'>
             <label htmlFor='parent-group-select' className='text-sm font-medium mb-1'>
-              {m.group_parentGroup()}
+              {tr('group_parentGroup')}
             </label>
             <SearchableSelect
               id='parent-group-select'
@@ -254,7 +254,7 @@ export function GroupsListPage({ teamId, groups }: GroupsListPageProps) {
               onValueChange={setSelectedParentId}
               pinnedValues={['__root__']}
               options={[
-                { value: '__root__', label: m.group_rootGroup() },
+                { value: '__root__', label: tr('group_rootGroup') },
                 ...groups.map((g) => ({
                   value: g.groupId,
                   label: g.emoji.pipe(
@@ -266,13 +266,13 @@ export function GroupsListPage({ teamId, groups }: GroupsListPageProps) {
             />
           </div>
           <Button type='submit' disabled={form.formState.isSubmitting}>
-            {m.group_createGroup()}
+            {tr('group_createGroup')}
           </Button>
         </form>
       </Form>
 
       {groups.length === 0 ? (
-        <p className='text-muted-foreground'>{m.group_noGroups()}</p>
+        <p className='text-muted-foreground'>{tr('group_noGroups')}</p>
       ) : (
         <table className='w-full'>
           <tbody>

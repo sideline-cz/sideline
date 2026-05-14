@@ -1,9 +1,9 @@
 import type { Roster } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link } from '@tanstack/react-router';
 import { Option } from 'effect';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Button } from '~/components/ui/button';
+import { tr } from '~/lib/translations.js';
 
 interface PlayerRowProps {
   player: Roster.RosterPlayer;
@@ -52,13 +52,13 @@ export function PlayerRow({ player, teamId, canEdit, canRemove, onDeactivate }: 
                   to='/teams/$teamId/members/$memberId'
                   params={{ teamId, memberId: player.memberId }}
                 >
-                  {m.members_editPlayer()}
+                  {tr('members_editPlayer')}
                 </Link>
               </Button>
             ) : null}
             {canRemove ? (
               <Button variant='destructive' size='sm' onClick={() => onDeactivate(player.memberId)}>
-                {m.members_deactivatePlayer()}
+                {tr('members_deactivatePlayer')}
               </Button>
             ) : null}
           </div>

@@ -34,6 +34,7 @@ export class CurrentUser extends Schema.Class<CurrentUser>('CurrentUser')({
   birthDate: Schema.OptionFromNullOr(Schema.String),
   gender: Schema.OptionFromNullOr(Gender),
   locale: Locale,
+  isGlobalAdmin: Schema.Boolean,
 }) {}
 
 export const UpdateLocaleRequest = Schema.Struct({

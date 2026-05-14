@@ -1,4 +1,3 @@
-import * as m from '@sideline/i18n/messages';
 import { Option, Record } from 'effect';
 import {
   Calendar,
@@ -19,13 +18,14 @@ import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card';
 import { useTheme } from '~/lib/theme';
+import { tr } from '~/lib/translations.js';
 
 const reasonMessages: Record<string, () => string> = {
-  access_denied: m.auth_errors_accessDenied,
-  missing_params: m.auth_errors_missingParams,
-  oauth_failed: m.auth_errors_oauthFailed,
-  profile_failed: m.auth_errors_profileFailed,
-  internal_error: m.auth_errors_internalError,
+  access_denied: () => tr('auth_errors_accessDenied'),
+  missing_params: () => tr('auth_errors_missingParams'),
+  oauth_failed: () => tr('auth_errors_oauthFailed'),
+  profile_failed: () => tr('auth_errors_profileFailed'),
+  internal_error: () => tr('auth_errors_internalError'),
 };
 
 interface HomePageProps {
@@ -44,7 +44,7 @@ function ThemeToggle() {
   return (
     <Button variant='ghost' size='icon' onClick={() => setTheme(nextTheme)} className='size-9'>
       <Icon className='size-4' />
-      <span className='sr-only'>{m.theme_label()}</span>
+      <span className='sr-only'>{tr('theme_label')}</span>
     </Button>
   );
 }
@@ -53,16 +53,16 @@ function ThemeToggle() {
 
 function DemoStats() {
   const stats = [
-    { label: m.dashboard_currentStreak(), value: '12d', icon: Flame, accent: 'text-orange-500' },
-    { label: m.dashboard_recentActivities(), value: '8', icon: Zap, accent: 'text-blue-500' },
+    { label: tr('dashboard_currentStreak'), value: '12d', icon: Flame, accent: 'text-orange-500' },
+    { label: tr('dashboard_recentActivities'), value: '8', icon: Zap, accent: 'text-blue-500' },
     {
-      label: m.dashboard_totalActivities(),
+      label: tr('dashboard_totalActivities'),
       value: '147',
       icon: Calendar,
       accent: 'text-muted-foreground',
     },
     {
-      label: m.dashboard_leaderboardPosition(),
+      label: tr('dashboard_leaderboardPosition'),
       value: '#3',
       icon: Trophy,
       accent: 'text-yellow-500',
@@ -73,7 +73,7 @@ function DemoStats() {
     <Card className='shadow-lg border-border/50'>
       <CardHeader className='pb-2'>
         <CardTitle className='text-sm font-medium text-muted-foreground'>
-          {m.hero_demo_stats()}
+          {tr('hero_demo_stats')}
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -100,21 +100,21 @@ function DemoUpcomingEvents() {
     {
       day: '29',
       month: 'Mar',
-      title: m.hero_demo_event1_title(),
+      title: tr('hero_demo_event1_title'),
       type: 'training',
-      time: m.hero_demo_event1_time(),
+      time: tr('hero_demo_event1_time'),
       timeDetail: '10:00',
-      location: m.hero_demo_event1_location(),
+      location: tr('hero_demo_event1_location'),
       rsvp: 'yes' as const,
     },
     {
       day: '2',
       month: 'Apr',
-      title: m.hero_demo_event2_title(),
+      title: tr('hero_demo_event2_title'),
       type: 'match',
-      time: m.hero_demo_event2_time(),
+      time: tr('hero_demo_event2_time'),
       timeDetail: '18:30',
-      location: m.hero_demo_event2_location(),
+      location: tr('hero_demo_event2_location'),
       rsvp: 'maybe' as const,
     },
   ];
@@ -129,7 +129,7 @@ function DemoUpcomingEvents() {
     <Card className='shadow-lg border-border/50'>
       <CardHeader className='pb-2'>
         <CardTitle className='text-sm font-medium text-muted-foreground'>
-          {m.hero_demo_nextEvent()}
+          {tr('hero_demo_nextEvent')}
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -164,7 +164,7 @@ function DemoUpcomingEvents() {
                 variant='outline'
                 className={`text-[10px] px-1.5 py-0 shrink-0 ${rsvpStyles[event.rsvp]}`}
               >
-                {event.rsvp === 'yes' ? m.dashboard_rsvpYes() : m.dashboard_rsvpMaybe()}
+                {event.rsvp === 'yes' ? tr('dashboard_rsvpYes') : tr('dashboard_rsvpMaybe')}
               </Badge>
             </div>
           ))}
@@ -178,7 +178,7 @@ function DemoLeaderboard() {
   const players = [
     { rank: 1, name: 'Martin K.', points: '2,450', streak: 18 },
     { rank: 2, name: 'Jakub N.', points: '2,180', streak: 12 },
-    { rank: 3, name: m.hero_demo_player_you(), points: '1,920', streak: 12, isYou: true },
+    { rank: 3, name: tr('hero_demo_player_you'), points: '1,920', streak: 12, isYou: true },
     { rank: 4, name: 'Tomas P.', points: '1,740', streak: 5 },
   ];
 
@@ -186,7 +186,7 @@ function DemoLeaderboard() {
     <Card className='shadow-lg border-border/50'>
       <CardHeader className='pb-2'>
         <CardTitle className='text-sm font-medium text-muted-foreground'>
-          {m.hero_demo_leaderboard()}
+          {tr('hero_demo_leaderboard')}
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -226,7 +226,7 @@ function DemoRsvpBanner() {
             <Clock className='size-3 text-amber-600 dark:text-amber-400' />
           </div>
           <CardTitle className='text-sm font-medium text-muted-foreground'>
-            {m.hero_demo_rsvp()}
+            {tr('hero_demo_rsvp')}
           </CardTitle>
           <Badge
             variant='secondary'
@@ -239,11 +239,11 @@ function DemoRsvpBanner() {
       <CardContent>
         <div className='flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white p-2.5 dark:border-amber-800 dark:bg-amber-950/30'>
           <div className='min-w-0 flex-1'>
-            <p className='font-medium truncate text-xs'>{m.hero_demo_rsvp_event()}</p>
-            <p className='text-[10px] text-muted-foreground'>{m.hero_demo_rsvp_time()}</p>
+            <p className='font-medium truncate text-xs'>{tr('hero_demo_rsvp_event')}</p>
+            <p className='text-[10px] text-muted-foreground'>{tr('hero_demo_rsvp_time')}</p>
           </div>
           <Button size='sm' className='shrink-0 text-xs h-7 px-2.5'>
-            {m.dashboard_rsvpNow()}
+            {tr('dashboard_rsvpNow')}
           </Button>
         </div>
       </CardContent>
@@ -260,7 +260,7 @@ export function HomePage({ loginUrl, error, reason }: HomePageProps) {
       <div className='pointer-events-none fixed inset-0 bg-[radial-gradient(circle,_var(--color-muted-foreground)_1px,_transparent_1px)] bg-[size:24px_24px] opacity-[0.07]' />
 
       <header className='relative z-10 flex items-center justify-between px-6 py-4 border-b bg-background/80 backdrop-blur-sm'>
-        <span className='text-lg font-bold'>{m.app_name()}</span>
+        <span className='text-lg font-bold'>{tr('app_name')}</span>
         <div className='flex items-center gap-1'>
           <LanguageSwitcher isAuthenticated={false} />
           <ThemeToggle />
@@ -270,15 +270,15 @@ export function HomePage({ loginUrl, error, reason }: HomePageProps) {
       <main className='relative z-10 flex flex-1 flex-col items-center px-6 pb-24'>
         {Option.isSome(error) ? (
           <div className='flex flex-col items-center gap-4 text-center max-w-md mt-32'>
-            <h1 className='text-3xl font-bold'>{m.app_name()}</h1>
+            <h1 className='text-3xl font-bold'>{tr('app_name')}</h1>
             <p className='text-muted-foreground'>
               {reason.pipe(
                 Option.flatMap((msg) => Record.get(reasonMessages, msg)),
-                Option.getOrElse(() => m.auth_loginFailed),
+                Option.getOrElse(() => () => tr('auth_loginFailed')),
               )()}
             </p>
             <Button asChild size='lg'>
-              <a href={loginUrl}>{m.auth_tryAgain()}</a>
+              <a href={loginUrl}>{tr('auth_tryAgain')}</a>
             </Button>
           </div>
         ) : (
@@ -288,28 +288,28 @@ export function HomePage({ loginUrl, error, reason }: HomePageProps) {
               <div className='flex items-center gap-2 mb-2'>
                 <Badge variant='secondary' className='gap-1.5 px-3 py-1 text-xs'>
                   <Users className='size-3' />
-                  {m.hero_feature_team()}
+                  {tr('hero_feature_team')}
                 </Badge>
                 <Badge variant='secondary' className='gap-1.5 px-3 py-1 text-xs'>
                   <Calendar className='size-3' />
-                  {m.hero_feature_events()}
+                  {tr('hero_feature_events')}
                 </Badge>
                 <Badge
                   variant='secondary'
                   className='gap-1.5 px-3 py-1 text-xs hidden sm:inline-flex'
                 >
                   <Dumbbell className='size-3' />
-                  {m.hero_feature_workout()}
+                  {tr('hero_feature_workout')}
                 </Badge>
               </div>
               <h1 className='text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl max-w-3xl bg-gradient-to-br from-foreground via-foreground to-muted-foreground/70 bg-clip-text text-transparent'>
-                {m.hero_headline()}
+                {tr('hero_headline')}
               </h1>
-              <p className='text-lg text-muted-foreground max-w-2xl'>{m.hero_subheadline()}</p>
+              <p className='text-lg text-muted-foreground max-w-2xl'>{tr('hero_subheadline')}</p>
               <Button asChild size='lg' className='mt-4 text-base px-8 h-12'>
                 <a href={loginUrl}>
                   <DiscordIcon />
-                  {m.auth_signInDiscord()}
+                  {tr('auth_signInDiscord')}
                 </a>
               </Button>
             </div>
@@ -345,18 +345,18 @@ export function HomePage({ loginUrl, error, reason }: HomePageProps) {
               {[
                 {
                   icon: Calendar,
-                  title: m.hero_feature_events(),
-                  desc: m.hero_feature_events_desc(),
+                  title: tr('hero_feature_events'),
+                  desc: tr('hero_feature_events_desc'),
                 },
                 {
                   icon: Dumbbell,
-                  title: m.hero_feature_workout(),
-                  desc: m.hero_feature_workout_desc(),
+                  title: tr('hero_feature_workout'),
+                  desc: tr('hero_feature_workout_desc'),
                 },
                 {
                   icon: Users,
-                  title: m.hero_feature_team(),
-                  desc: m.hero_feature_team_desc(),
+                  title: tr('hero_feature_team'),
+                  desc: tr('hero_feature_team_desc'),
                 },
               ].map((feature) => (
                 <div
@@ -376,7 +376,7 @@ export function HomePage({ loginUrl, error, reason }: HomePageProps) {
             <div className='mt-16 flex flex-col items-center gap-3'>
               <div className='flex items-center gap-2 text-sm text-muted-foreground'>
                 <CheckCircle2 className='size-4 text-green-500' />
-                <span>{m.hero_footer()}</span>
+                <span>{tr('hero_footer')}</span>
               </div>
             </div>
           </div>
@@ -384,7 +384,7 @@ export function HomePage({ loginUrl, error, reason }: HomePageProps) {
       </main>
 
       <footer className='relative z-10 border-t px-6 py-4 text-center text-sm text-muted-foreground bg-background/80 backdrop-blur-sm'>
-        {m.hero_footer()}
+        {tr('hero_footer')}
       </footer>
     </div>
   );

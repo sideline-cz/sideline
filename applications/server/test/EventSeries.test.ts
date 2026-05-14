@@ -51,6 +51,7 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { MockTranslationsLayers } from './mocks/translationMocks.js';
 
 // --- Test IDs ---
 const TEST_USER_ID = '00000000-0000-0000-0000-000000000001' as Auth.UserId;
@@ -1173,7 +1174,7 @@ const TestLayer = ApiLive.pipe(
     ),
   ),
   Layer.provide(MockAchievementAdminLayers),
-);
+).pipe(Layer.provide(MockTranslationsLayers));
 
 let handler: (...args: any) => Promise<Response>;
 let dispose: () => Promise<void>;

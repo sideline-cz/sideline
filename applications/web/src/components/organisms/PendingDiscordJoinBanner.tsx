@@ -1,4 +1,3 @@
-import * as m from '@sideline/i18n/messages';
 import { Effect, Option } from 'effect';
 import { ExternalLink, X } from 'lucide-react';
 import React from 'react';
@@ -9,6 +8,7 @@ import {
   type PendingDiscordJoin,
 } from '~/lib/auth';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 const STALE_MS = 24 * 60 * 60 * 1000; // 24h matches the Discord invite max_age
 
@@ -75,7 +75,7 @@ export function PendingDiscordJoinBanner() {
   if (failed) {
     return (
       <div className='border-b bg-destructive/10 px-4 py-2 text-sm flex items-center justify-between gap-3'>
-        <span>{m.invite_discordInviteFailedDescription()}</span>
+        <span>{tr('invite_discordInviteFailedDescription')}</span>
         <Button variant='ghost' size='icon' onClick={handleDismiss} aria-label='Dismiss'>
           <X className='size-4' />
         </Button>
@@ -86,7 +86,7 @@ export function PendingDiscordJoinBanner() {
     return (
       <div className='border-b bg-muted px-4 py-2 text-sm flex items-center justify-between gap-3'>
         <span className='text-muted-foreground'>
-          {m.invite_preparingDiscordInviteDescription()}
+          {tr('invite_preparingDiscordInviteDescription')}
         </span>
         <Button variant='ghost' size='icon' onClick={handleDismiss} aria-label='Dismiss'>
           <X className='size-4' />
@@ -96,11 +96,11 @@ export function PendingDiscordJoinBanner() {
   }
   return (
     <div className='border-b bg-primary/10 px-4 py-2 text-sm flex items-center justify-between gap-3'>
-      <span>{m.invite_joinDiscordBannerDescription()}</span>
+      <span>{tr('invite_joinDiscordBannerDescription')}</span>
       <div className='flex items-center gap-1'>
         <a href={discordUrl} target='_blank' rel='noopener noreferrer' onClick={handleOpen}>
           <Button size='sm'>
-            {m.invite_joinDiscordButton()}
+            {tr('invite_joinDiscordButton')}
             <ExternalLink className='size-3 ml-1' />
           </Button>
         </a>

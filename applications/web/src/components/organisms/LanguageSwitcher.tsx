@@ -1,9 +1,9 @@
-import { m } from '@sideline/i18n/messages';
 import { getLocale, setLocale } from '@sideline/i18n/runtime';
 import { Effect } from 'effect';
 import { useCallback } from 'react';
 import { LocaleSelect } from '~/components/molecules/LocaleSelect';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 export function LanguageSwitcher({ isAuthenticated }: { isAuthenticated: boolean }) {
   const run = useRun();
@@ -16,7 +16,7 @@ export function LanguageSwitcher({ isAuthenticated }: { isAuthenticated: boolean
       if (isAuthenticated) {
         ApiClient.asEffect().pipe(
           Effect.flatMap((api) => api.auth.updateLocale({ payload: { locale } })),
-          Effect.mapError(() => ClientError.make(m.auth_errors_profileFailed())),
+          Effect.mapError(() => ClientError.make(tr('auth_errors_profileFailed'))),
           run(),
         );
       }

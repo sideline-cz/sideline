@@ -1,7 +1,6 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { EventApi, GroupApi, TrainingTypeApi } from '@sideline/domain';
 import { Discord, Event, EventSeries, GroupModel, Team, TrainingType } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, useRouter } from '@tanstack/react-router';
 import { DateTime, Effect, Option, Schema } from 'effect';
 import { CalendarDays, List } from 'lucide-react';
@@ -47,30 +46,31 @@ import {
 } from '~/lib/event-labels';
 import { toGroupOptions } from '~/lib/group-options';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 const NONE_VALUE = '__none__';
 
 const CreateEventSchema = Schema.Struct({
-  title: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
-  eventType: Event.EventType.annotate({ message: m.validation_invalidOption() }),
+  title: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
+  eventType: Event.EventType.annotate({ message: tr('validation_invalidOption') }),
   trainingTypeId: Schema.String,
   description: Schema.String,
   imageUrl: Schema.String.pipe(
     Schema.check(
       Schema.makeFilter<string>((s) =>
-        s === '' || s.startsWith('https://') ? true : m.event_imageUrlInvalid(),
+        s === '' || s.startsWith('https://') ? true : tr('event_imageUrlInvalid'),
       ),
     ),
   ),
   locationUrl: Schema.String.pipe(
     Schema.check(
       Schema.makeFilter<string>((s) =>
-        s === '' || s.startsWith('https://') ? true : m.event_locationUrlInvalid(),
+        s === '' || s.startsWith('https://') ? true : tr('event_locationUrlInvalid'),
       ),
     ),
   ),
-  startDate: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
-  startTime: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
+  startDate: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
+  startTime: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   endDate: Schema.String,
   endTime: Schema.String,
   location: Schema.String,
@@ -82,23 +82,23 @@ const CreateEventSchema = Schema.Struct({
 type CreateEventValues = Schema.Schema.Type<typeof CreateEventSchema>;
 
 const CreateSeriesSchema = Schema.Struct({
-  title: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
+  title: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   trainingTypeId: Schema.String,
   description: Schema.String,
   frequency: EventSeries.RecurrenceFrequency.annotate({
-    message: m.validation_invalidOption(),
+    message: tr('validation_invalidOption'),
   }),
   daysOfWeek: EventSeries.DaysOfWeek,
   locationUrl: Schema.String.pipe(
     Schema.check(
       Schema.makeFilter<string>((s) =>
-        s === '' || s.startsWith('https://') ? true : m.event_locationUrlInvalid(),
+        s === '' || s.startsWith('https://') ? true : tr('event_locationUrlInvalid'),
       ),
     ),
   ),
-  startDate: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
+  startDate: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   endDate: Schema.String,
-  startTime: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
+  startTime: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   endTime: Schema.String,
   location: Schema.String,
   discordChannelId: Schema.String,
@@ -233,8 +233,8 @@ export function EventsListPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.event_createFailed())),
-      run({ success: m.event_eventCreated() }),
+      Effect.mapError(() => ClientError.make(tr('event_createFailed'))),
+      run({ success: tr('event_eventCreated') }),
     );
     if (Option.isSome(result)) {
       form.reset();
@@ -279,8 +279,8 @@ export function EventsListPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.event_createSeriesFailed())),
-      run({ success: m.event_seriesCreated() }),
+      Effect.mapError(() => ClientError.make(tr('event_createSeriesFailed'))),
+      run({ success: tr('event_seriesCreated') }),
     );
     if (Option.isSome(result)) {
       seriesForm.reset();
@@ -293,18 +293,18 @@ export function EventsListPage({
       <header className='mb-8'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId' params={{ teamId }}>
-            ← {m.team_backToTeams()}
+            ← {tr('team_backToTeams')}
           </Link>
         </Button>
         <div className='flex items-center gap-3'>
-          <h1 className='text-2xl font-bold'>{m.event_events()}</h1>
+          <h1 className='text-2xl font-bold'>{tr('event_events')}</h1>
           <div className='flex rounded-md border'>
             <Button
               variant={viewMode === 'list' ? 'default' : 'ghost'}
               size='icon'
               className='rounded-r-none h-8 w-8'
               onClick={() => setViewMode('list')}
-              title={m.event_viewList()}
+              title={tr('event_viewList')}
             >
               <List className='h-4 w-4' />
             </Button>
@@ -313,7 +313,7 @@ export function EventsListPage({
               size='icon'
               className='rounded-l-none h-8 w-8'
               onClick={() => setViewMode('calendar')}
-              title={m.event_viewCalendar()}
+              title={tr('event_viewCalendar')}
             >
               <CalendarDays className='h-4 w-4' />
             </Button>
@@ -334,14 +334,14 @@ export function EventsListPage({
                     size='sm'
                     onClick={() => setMode('one-time')}
                   >
-                    {m.event_oneTime()}
+                    {tr('event_oneTime')}
                   </Button>
                   <Button
                     variant={mode === 'recurring' ? 'default' : 'outline'}
                     size='sm'
                     onClick={() => setMode('recurring')}
                   >
-                    {m.event_recurring()}
+                    {tr('event_recurring')}
                   </Button>
                 </div>
 
@@ -352,9 +352,9 @@ export function EventsListPage({
                         {...form.register('title')}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{m.event_title()}</FormLabel>
+                            <FormLabel>{tr('event_title')}</FormLabel>
                             <FormControl>
-                              <Input {...field} placeholder={m.event_titlePlaceholder()} />
+                              <Input {...field} placeholder={tr('event_titlePlaceholder')} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -365,7 +365,7 @@ export function EventsListPage({
                           {...form.register('eventType')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_eventType()}</FormLabel>
+                              <FormLabel>{tr('event_eventType')}</FormLabel>
                               <Select onValueChange={field.onChange} value={field.value}>
                                 <FormControl>
                                   <SelectTrigger>
@@ -389,14 +389,14 @@ export function EventsListPage({
                             {...form.register('trainingTypeId')}
                             render={({ field }) => (
                               <FormItem className='flex-1'>
-                                <FormLabel>{m.event_trainingType()}</FormLabel>
+                                <FormLabel>{tr('event_trainingType')}</FormLabel>
                                 <FormControl>
                                   <SearchableSelect
                                     value={field.value}
                                     onValueChange={field.onChange}
-                                    placeholder={m.event_noTrainingType()}
+                                    placeholder={tr('event_noTrainingType')}
                                     options={[
-                                      { value: NONE_VALUE, label: m.event_noTrainingType() },
+                                      { value: NONE_VALUE, label: tr('event_noTrainingType') },
                                       ...trainingTypes.map((tt) => ({
                                         value: tt.trainingTypeId,
                                         label: tt.name,
@@ -416,12 +416,12 @@ export function EventsListPage({
                           {...form.register('startDate')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_startDate()}</FormLabel>
+                              <FormLabel>{tr('event_startDate')}</FormLabel>
                               <FormControl>
                                 <DatePicker
                                   value={field.value}
                                   onChange={field.onChange}
-                                  placeholder={m.event_startDate()}
+                                  placeholder={tr('event_startDate')}
                                 />
                               </FormControl>
                               <FormMessage />
@@ -432,7 +432,7 @@ export function EventsListPage({
                           {...form.register('startTime')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_startTime()}</FormLabel>
+                              <FormLabel>{tr('event_startTime')}</FormLabel>
                               <FormControl>
                                 <Input {...field} type='time' />
                               </FormControl>
@@ -446,12 +446,12 @@ export function EventsListPage({
                           {...form.register('endDate')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_endDate()}</FormLabel>
+                              <FormLabel>{tr('event_endDate')}</FormLabel>
                               <FormControl>
                                 <DatePicker
                                   value={field.value}
                                   onChange={field.onChange}
-                                  placeholder={m.event_endDate()}
+                                  placeholder={tr('event_endDate')}
                                 />
                               </FormControl>
                               <FormMessage />
@@ -462,7 +462,7 @@ export function EventsListPage({
                           {...form.register('endTime')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_endTime()}</FormLabel>
+                              <FormLabel>{tr('event_endTime')}</FormLabel>
                               <FormControl>
                                 <Input {...field} type='time' />
                               </FormControl>
@@ -475,9 +475,9 @@ export function EventsListPage({
                         {...form.register('location')}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{m.event_location()}</FormLabel>
+                            <FormLabel>{tr('event_location')}</FormLabel>
                             <FormControl>
-                              <Input {...field} placeholder={m.event_locationPlaceholder()} />
+                              <Input {...field} placeholder={tr('event_locationPlaceholder')} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -487,19 +487,19 @@ export function EventsListPage({
                         {...form.register('locationUrl')}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{m.event_locationUrl()}</FormLabel>
+                            <FormLabel>{tr('event_locationUrl')}</FormLabel>
                             <FormControl>
                               <Input
                                 {...field}
                                 type='url'
                                 inputMode='url'
                                 autoComplete='url'
-                                placeholder={m.event_locationUrlPlaceholder()}
+                                placeholder={tr('event_locationUrlPlaceholder')}
                                 disabled={!form.watch('location')}
                               />
                             </FormControl>
                             <p className='text-xs text-muted-foreground'>
-                              {m.event_locationUrlHelp()}
+                              {tr('event_locationUrlHelp')}
                             </p>
                             <FormMessage />
                           </FormItem>
@@ -509,11 +509,11 @@ export function EventsListPage({
                         {...form.register('description')}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{m.event_description()}</FormLabel>
+                            <FormLabel>{tr('event_description')}</FormLabel>
                             <FormControl>
                               <Textarea
                                 {...field}
-                                placeholder={m.event_descriptionPlaceholder()}
+                                placeholder={tr('event_descriptionPlaceholder')}
                                 rows={3}
                               />
                             </FormControl>
@@ -525,12 +525,12 @@ export function EventsListPage({
                         {...form.register('imageUrl')}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{m.event_imageUrl()}</FormLabel>
+                            <FormLabel>{tr('event_imageUrl')}</FormLabel>
                             <FormControl>
                               <Input
                                 {...field}
                                 type='url'
-                                placeholder={m.event_imageUrlPlaceholder()}
+                                placeholder={tr('event_imageUrlPlaceholder')}
                               />
                             </FormControl>
                             {field.value &&
@@ -549,7 +549,7 @@ export function EventsListPage({
                                 />
                               )}
                             <p className='text-xs text-muted-foreground'>
-                              {m.event_imageUrlHelp()}
+                              {tr('event_imageUrlHelp')}
                             </p>
                             <FormMessage />
                           </FormItem>
@@ -559,14 +559,14 @@ export function EventsListPage({
                         {...form.register('discordChannelId')}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{m.event_discordChannel()}</FormLabel>
+                            <FormLabel>{tr('event_discordChannel')}</FormLabel>
                             <FormControl>
                               <SearchableSelect
                                 value={field.value}
                                 onValueChange={field.onChange}
-                                placeholder={m.event_useDefault()}
+                                placeholder={tr('event_useDefault')}
                                 options={[
-                                  { value: NONE_VALUE, label: m.event_useDefault() },
+                                  { value: NONE_VALUE, label: tr('event_useDefault') },
                                   ...discordChannels
                                     .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
                                     .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
@@ -575,7 +575,7 @@ export function EventsListPage({
                               />
                             </FormControl>
                             <p className='text-xs text-muted-foreground'>
-                              {m.event_discordChannelHelp()}
+                              {tr('event_discordChannelHelp')}
                             </p>
                             <FormMessage />
                           </FormItem>
@@ -586,21 +586,21 @@ export function EventsListPage({
                           {...form.register('ownerGroupId')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_ownerGroup()}</FormLabel>
+                              <FormLabel>{tr('event_ownerGroup')}</FormLabel>
                               <FormControl>
                                 <SearchableSelect
                                   value={field.value}
                                   onValueChange={field.onChange}
-                                  placeholder={m.event_useDefault()}
+                                  placeholder={tr('event_useDefault')}
                                   options={[
-                                    { value: NONE_VALUE, label: m.event_useDefault() },
+                                    { value: NONE_VALUE, label: tr('event_useDefault') },
                                     ...toGroupOptions(groups),
                                   ]}
                                   pinnedValues={[NONE_VALUE]}
                                 />
                               </FormControl>
                               <p className='text-xs text-muted-foreground'>
-                                {m.event_ownerGroupHelp()}
+                                {tr('event_ownerGroupHelp')}
                               </p>
                               <FormMessage />
                             </FormItem>
@@ -610,21 +610,21 @@ export function EventsListPage({
                           {...form.register('memberGroupId')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_memberGroup()}</FormLabel>
+                              <FormLabel>{tr('event_memberGroup')}</FormLabel>
                               <FormControl>
                                 <SearchableSelect
                                   value={field.value}
                                   onValueChange={field.onChange}
-                                  placeholder={m.event_useDefault()}
+                                  placeholder={tr('event_useDefault')}
                                   options={[
-                                    { value: NONE_VALUE, label: m.event_useDefault() },
+                                    { value: NONE_VALUE, label: tr('event_useDefault') },
                                     ...toGroupOptions(groups),
                                   ]}
                                   pinnedValues={[NONE_VALUE]}
                                 />
                               </FormControl>
                               <p className='text-xs text-muted-foreground'>
-                                {m.event_memberGroupHelp()}
+                                {tr('event_memberGroupHelp')}
                               </p>
                               <FormMessage />
                             </FormItem>
@@ -636,7 +636,7 @@ export function EventsListPage({
                         disabled={form.formState.isSubmitting}
                         className='self-start'
                       >
-                        {m.event_createEvent()}
+                        {tr('event_createEvent')}
                       </Button>
                     </form>
                   </Form>
@@ -650,9 +650,9 @@ export function EventsListPage({
                         {...seriesForm.register('title')}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{m.event_title()}</FormLabel>
+                            <FormLabel>{tr('event_title')}</FormLabel>
                             <FormControl>
-                              <Input {...field} placeholder={m.event_titlePlaceholder()} />
+                              <Input {...field} placeholder={tr('event_titlePlaceholder')} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -663,14 +663,14 @@ export function EventsListPage({
                           {...seriesForm.register('trainingTypeId')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_trainingType()}</FormLabel>
+                              <FormLabel>{tr('event_trainingType')}</FormLabel>
                               <FormControl>
                                 <SearchableSelect
                                   value={field.value}
                                   onValueChange={field.onChange}
-                                  placeholder={m.event_noTrainingType()}
+                                  placeholder={tr('event_noTrainingType')}
                                   options={[
-                                    { value: NONE_VALUE, label: m.event_noTrainingType() },
+                                    { value: NONE_VALUE, label: tr('event_noTrainingType') },
                                     ...trainingTypes.map((tt) => ({
                                       value: tt.trainingTypeId,
                                       label: tt.name,
@@ -687,7 +687,7 @@ export function EventsListPage({
                           {...seriesForm.register('frequency')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_frequency()}</FormLabel>
+                              <FormLabel>{tr('event_frequency')}</FormLabel>
                               <Select onValueChange={field.onChange} value={field.value}>
                                 <FormControl>
                                   <SelectTrigger>
@@ -696,10 +696,10 @@ export function EventsListPage({
                                 </FormControl>
                                 <SelectContent>
                                   <SelectItem value='weekly'>
-                                    {m.event_frequency_weekly()}
+                                    {tr('event_frequency_weekly')}
                                   </SelectItem>
                                   <SelectItem value='biweekly'>
-                                    {m.event_frequency_biweekly()}
+                                    {tr('event_frequency_biweekly')}
                                   </SelectItem>
                                 </SelectContent>
                               </Select>
@@ -713,7 +713,7 @@ export function EventsListPage({
                         control={seriesForm.control}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{m.event_daysOfWeek()}</FormLabel>
+                            <FormLabel>{tr('event_daysOfWeek')}</FormLabel>
                             <div className='flex gap-1'>
                               {DAY_ORDER.map((d) => {
                                 const selected = (field.value as number[]).includes(d);
@@ -751,12 +751,12 @@ export function EventsListPage({
                           {...seriesForm.register('startDate')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_startDate()}</FormLabel>
+                              <FormLabel>{tr('event_startDate')}</FormLabel>
                               <FormControl>
                                 <DatePicker
                                   value={field.value}
                                   onChange={field.onChange}
-                                  placeholder={m.event_startDate()}
+                                  placeholder={tr('event_startDate')}
                                 />
                               </FormControl>
                               <FormMessage />
@@ -767,16 +767,16 @@ export function EventsListPage({
                           {...seriesForm.register('endDate')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_endDate()}</FormLabel>
+                              <FormLabel>{tr('event_endDate')}</FormLabel>
                               <FormControl>
                                 <DatePicker
                                   value={field.value}
                                   onChange={field.onChange}
-                                  placeholder={m.event_endDate()}
+                                  placeholder={tr('event_endDate')}
                                 />
                               </FormControl>
                               <p className='text-xs text-muted-foreground'>
-                                {m.event_endDateHelp()}
+                                {tr('event_endDateHelp')}
                               </p>
                               <FormMessage />
                             </FormItem>
@@ -788,7 +788,7 @@ export function EventsListPage({
                           {...seriesForm.register('startTime')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_startTime()}</FormLabel>
+                              <FormLabel>{tr('event_startTime')}</FormLabel>
                               <FormControl>
                                 <Input {...field} type='time' />
                               </FormControl>
@@ -800,7 +800,7 @@ export function EventsListPage({
                           {...seriesForm.register('endTime')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_endTime()}</FormLabel>
+                              <FormLabel>{tr('event_endTime')}</FormLabel>
                               <FormControl>
                                 <Input {...field} type='time' />
                               </FormControl>
@@ -813,9 +813,9 @@ export function EventsListPage({
                         {...seriesForm.register('location')}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{m.event_location()}</FormLabel>
+                            <FormLabel>{tr('event_location')}</FormLabel>
                             <FormControl>
-                              <Input {...field} placeholder={m.event_locationPlaceholder()} />
+                              <Input {...field} placeholder={tr('event_locationPlaceholder')} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -825,19 +825,19 @@ export function EventsListPage({
                         {...seriesForm.register('locationUrl')}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{m.event_locationUrl()}</FormLabel>
+                            <FormLabel>{tr('event_locationUrl')}</FormLabel>
                             <FormControl>
                               <Input
                                 {...field}
                                 type='url'
                                 inputMode='url'
                                 autoComplete='url'
-                                placeholder={m.event_locationUrlPlaceholder()}
+                                placeholder={tr('event_locationUrlPlaceholder')}
                                 disabled={!seriesForm.watch('location')}
                               />
                             </FormControl>
                             <p className='text-xs text-muted-foreground'>
-                              {m.event_locationUrlHelp()}
+                              {tr('event_locationUrlHelp')}
                             </p>
                             <FormMessage />
                           </FormItem>
@@ -847,11 +847,11 @@ export function EventsListPage({
                         {...seriesForm.register('description')}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{m.event_description()}</FormLabel>
+                            <FormLabel>{tr('event_description')}</FormLabel>
                             <FormControl>
                               <Textarea
                                 {...field}
-                                placeholder={m.event_descriptionPlaceholder()}
+                                placeholder={tr('event_descriptionPlaceholder')}
                                 rows={3}
                               />
                             </FormControl>
@@ -863,14 +863,14 @@ export function EventsListPage({
                         {...seriesForm.register('discordChannelId')}
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>{m.event_discordChannel()}</FormLabel>
+                            <FormLabel>{tr('event_discordChannel')}</FormLabel>
                             <FormControl>
                               <SearchableSelect
                                 value={field.value}
                                 onValueChange={field.onChange}
-                                placeholder={m.event_useDefault()}
+                                placeholder={tr('event_useDefault')}
                                 options={[
-                                  { value: NONE_VALUE, label: m.event_useDefault() },
+                                  { value: NONE_VALUE, label: tr('event_useDefault') },
                                   ...discordChannels
                                     .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
                                     .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
@@ -879,7 +879,7 @@ export function EventsListPage({
                               />
                             </FormControl>
                             <p className='text-xs text-muted-foreground'>
-                              {m.event_discordChannelHelp()}
+                              {tr('event_discordChannelHelp')}
                             </p>
                             <FormMessage />
                           </FormItem>
@@ -890,21 +890,21 @@ export function EventsListPage({
                           {...seriesForm.register('ownerGroupId')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_ownerGroup()}</FormLabel>
+                              <FormLabel>{tr('event_ownerGroup')}</FormLabel>
                               <FormControl>
                                 <SearchableSelect
                                   value={field.value}
                                   onValueChange={field.onChange}
-                                  placeholder={m.event_useDefault()}
+                                  placeholder={tr('event_useDefault')}
                                   options={[
-                                    { value: NONE_VALUE, label: m.event_useDefault() },
+                                    { value: NONE_VALUE, label: tr('event_useDefault') },
                                     ...toGroupOptions(groups),
                                   ]}
                                   pinnedValues={[NONE_VALUE]}
                                 />
                               </FormControl>
                               <p className='text-xs text-muted-foreground'>
-                                {m.event_ownerGroupHelp()}
+                                {tr('event_ownerGroupHelp')}
                               </p>
                               <FormMessage />
                             </FormItem>
@@ -914,21 +914,21 @@ export function EventsListPage({
                           {...seriesForm.register('memberGroupId')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_memberGroup()}</FormLabel>
+                              <FormLabel>{tr('event_memberGroup')}</FormLabel>
                               <FormControl>
                                 <SearchableSelect
                                   value={field.value}
                                   onValueChange={field.onChange}
-                                  placeholder={m.event_useDefault()}
+                                  placeholder={tr('event_useDefault')}
                                   options={[
-                                    { value: NONE_VALUE, label: m.event_useDefault() },
+                                    { value: NONE_VALUE, label: tr('event_useDefault') },
                                     ...toGroupOptions(groups),
                                   ]}
                                   pinnedValues={[NONE_VALUE]}
                                 />
                               </FormControl>
                               <p className='text-xs text-muted-foreground'>
-                                {m.event_memberGroupHelp()}
+                                {tr('event_memberGroupHelp')}
                               </p>
                               <FormMessage />
                             </FormItem>
@@ -940,7 +940,7 @@ export function EventsListPage({
                         disabled={seriesForm.formState.isSubmitting}
                         className='self-start'
                       >
-                        {m.event_createSeries()}
+                        {tr('event_createSeries')}
                       </Button>
                     </form>
                   </Form>
@@ -950,7 +950,7 @@ export function EventsListPage({
           </div>
           <div className='order-1 lg:order-1'>
             {events.length === 0 ? (
-              <p className='text-muted-foreground'>{m.event_noEvents()}</p>
+              <p className='text-muted-foreground'>{tr('event_noEvents')}</p>
             ) : (
               <div className='flex flex-col gap-2'>
                 {events.map((event) => (
@@ -976,7 +976,7 @@ export function EventsListPage({
                         <p className='font-medium truncate text-sm'>{event.title}</p>
                         {Option.isSome(event.seriesId) && (
                           <span className='text-[10px] text-muted-foreground'>
-                            {m.event_recurring()}
+                            {tr('event_recurring')}
                           </span>
                         )}
                       </div>

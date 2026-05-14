@@ -1,11 +1,11 @@
 import type { NotificationApi } from '@sideline/domain';
 import { Notification, Team } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
 import { Button } from '~/components/ui/button';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 interface NotificationsPageProps {
   notifications: ReadonlyArray<NotificationApi.NotificationInfo>;
@@ -21,7 +21,7 @@ export function NotificationsPage({ notifications, teamId }: NotificationsPagePr
       const notificationId = Schema.decodeSync(Notification.NotificationId)(notificationIdRaw);
       const result = await ApiClient.asEffect().pipe(
         Effect.flatMap((api) => api.notification.markAsRead({ params: { notificationId } })),
-        Effect.mapError(() => ClientError.make(m.notification_markReadFailed())),
+        Effect.mapError(() => ClientError.make(tr('notification_markReadFailed'))),
         run(),
       );
       if (Option.isSome(result)) {
@@ -37,7 +37,7 @@ export function NotificationsPage({ notifications, teamId }: NotificationsPagePr
       Effect.flatMap((api) =>
         api.notification.markAllAsRead({ payload: { teamId: decodedTeamId } }),
       ),
-      Effect.mapError(() => ClientError.make(m.notification_markReadFailed())),
+      Effect.mapError(() => ClientError.make(tr('notification_markReadFailed'))),
       run(),
     );
     if (Option.isSome(result)) {
@@ -50,17 +50,17 @@ export function NotificationsPage({ notifications, teamId }: NotificationsPagePr
   return (
     <div>
       <header className='mb-8'>
-        <h1 className='text-2xl font-bold'>{m.notification_title()}</h1>
+        <h1 className='text-2xl font-bold'>{tr('notification_title')}</h1>
       </header>
 
       {unreadCount > 0 && (
         <Button onClick={handleMarkAllAsRead} variant='outline' className='mb-4' size='sm'>
-          {m.notification_markAllRead()}
+          {tr('notification_markAllRead')}
         </Button>
       )}
 
       {notifications.length === 0 ? (
-        <p className='text-muted-foreground'>{m.notification_noNotifications()}</p>
+        <p className='text-muted-foreground'>{tr('notification_noNotifications')}</p>
       ) : (
         <div className='flex flex-col gap-2'>
           {notifications.map((notification) => (
@@ -80,7 +80,7 @@ export function NotificationsPage({ notifications, teamId }: NotificationsPagePr
                     size='sm'
                     onClick={() => handleMarkAsRead(notification.notificationId)}
                   >
-                    {m.notification_markRead()}
+                    {tr('notification_markRead')}
                   </Button>
                 )}
               </div>

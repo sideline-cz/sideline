@@ -21,6 +21,7 @@ export const mockCurrentUser = {
   birthDate: null,
   gender: null,
   locale: 'en',
+  isGlobalAdmin: false,
 };
 
 export const mockIncompleteUser = {

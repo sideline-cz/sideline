@@ -1,7 +1,6 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { EventSeriesApi, GroupApi, TrainingTypeApi } from '@sideline/domain';
 import { Discord, EventSeries, GroupModel, Team, TrainingType } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, useNavigate, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
@@ -37,24 +36,25 @@ import { DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import { DAY_ORDER, dayFullLabels, dayShortLabels, sortDays } from '~/lib/event-labels';
 import { toGroupOptions } from '~/lib/group-options';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 const CreateScheduleSchema = Schema.Struct({
-  title: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
+  title: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   description: Schema.String,
   frequency: EventSeries.RecurrenceFrequency.annotate({
-    message: m.validation_invalidOption(),
+    message: tr('validation_invalidOption'),
   }),
   daysOfWeek: EventSeries.DaysOfWeek,
   locationUrl: Schema.String.pipe(
     Schema.check(
       Schema.makeFilter<string>((s) =>
-        s === '' || s.startsWith('https://') ? true : m.event_locationUrlInvalid(),
+        s === '' || s.startsWith('https://') ? true : tr('event_locationUrlInvalid'),
       ),
     ),
   ),
-  startDate: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
+  startDate: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   endDate: Schema.String,
-  startTime: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
+  startTime: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   endTime: Schema.String,
   location: Schema.String,
 });
@@ -154,8 +154,8 @@ export function TrainingTypeDetailPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.trainingType_updateFailed())),
-      run({ success: m.trainingType_saved() }),
+      Effect.mapError(() => ClientError.make(tr('trainingType_updateFailed'))),
+      run({ success: tr('trainingType_saved') }),
     );
     setSaving(false);
     if (Option.isSome(result)) {
@@ -173,15 +173,15 @@ export function TrainingTypeDetailPage({
   ]);
 
   const handleDelete = React.useCallback(async () => {
-    if (!window.confirm(m.trainingType_deleteConfirm())) return;
+    if (!window.confirm(tr('trainingType_deleteConfirm'))) return;
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.trainingType.deleteTrainingType({
           params: { teamId: teamIdBranded, trainingTypeId: trainingTypeIdBranded },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.trainingType_deleteFailed())),
-      run({ success: m.trainingType_deleted() }),
+      Effect.mapError(() => ClientError.make(tr('trainingType_deleteFailed'))),
+      run({ success: tr('trainingType_deleted') }),
     );
     if (Option.isSome(result)) {
       navigate({ to: '/teams/$teamId/training-types', params: { teamId } });
@@ -213,8 +213,8 @@ export function TrainingTypeDetailPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.trainingType_createScheduleFailed())),
-      run({ success: m.trainingType_scheduleCreated() }),
+      Effect.mapError(() => ClientError.make(tr('trainingType_createScheduleFailed'))),
+      run({ success: tr('trainingType_scheduleCreated') }),
     );
     if (Option.isSome(result)) {
       scheduleForm.reset();
@@ -225,7 +225,7 @@ export function TrainingTypeDetailPage({
 
   const handleCancelSchedule = React.useCallback(
     async (seriesId: string) => {
-      if (!window.confirm(m.trainingType_cancelScheduleConfirm())) return;
+      if (!window.confirm(tr('trainingType_cancelScheduleConfirm'))) return;
       const result = await ApiClient.asEffect().pipe(
         Effect.flatMap((api) =>
           api.eventSeries.cancelEventSeries({
@@ -235,8 +235,8 @@ export function TrainingTypeDetailPage({
             },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.event_cancelFailed())),
-        run({ success: m.trainingType_scheduleCancelled() }),
+        Effect.mapError(() => ClientError.make(tr('event_cancelFailed'))),
+        run({ success: tr('trainingType_scheduleCancelled') }),
       );
       if (Option.isSome(result)) {
         router.invalidate();
@@ -301,8 +301,8 @@ export function TrainingTypeDetailPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.trainingType_updateScheduleFailed())),
-      run({ success: m.trainingType_scheduleUpdated() }),
+      Effect.mapError(() => ClientError.make(tr('trainingType_updateScheduleFailed'))),
+      run({ success: tr('trainingType_scheduleUpdated') }),
     );
     if (Option.isSome(result)) {
       setEditingSeriesId(null);
@@ -330,18 +330,18 @@ export function TrainingTypeDetailPage({
       <header className='mb-8'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId/training-types' params={{ teamId }}>
-            ← {m.trainingType_backToTrainingTypes()}
+            ← {tr('trainingType_backToTrainingTypes')}
           </Link>
         </Button>
         <h1 className='text-2xl font-bold'>{trainingTypeDetail.name}</h1>
         {Option.isSome(trainingTypeDetail.ownerGroupName) && (
           <p className='text-muted-foreground'>
-            {m.trainingType_ownerGroupName()}: {trainingTypeDetail.ownerGroupName.value}
+            {tr('trainingType_ownerGroupName')}: {trainingTypeDetail.ownerGroupName.value}
           </p>
         )}
         {Option.isSome(trainingTypeDetail.memberGroupName) && (
           <p className='text-muted-foreground'>
-            {m.trainingType_memberGroupName()}: {trainingTypeDetail.memberGroupName.value}
+            {tr('trainingType_memberGroupName')}: {trainingTypeDetail.memberGroupName.value}
           </p>
         )}
       </header>
@@ -350,7 +350,7 @@ export function TrainingTypeDetailPage({
         {/* Rename */}
         <div>
           <label htmlFor='training-type-name' className='text-sm font-medium mb-1 block'>
-            {m.trainingType_rename()}
+            {tr('trainingType_rename')}
           </label>
           <div className='flex gap-2'>
             <Input
@@ -372,7 +372,7 @@ export function TrainingTypeDetailPage({
                     Option.getOrElse(trainingTypeDetail.memberGroupId, () => NONE_VALUE))
               }
             >
-              {saving ? m.trainingType_saving() : m.trainingType_saveChanges()}
+              {saving ? tr('trainingType_saving') : tr('trainingType_saveChanges')}
             </Button>
           </div>
         </div>
@@ -381,17 +381,17 @@ export function TrainingTypeDetailPage({
         {canAdmin && discordChannels.length > 0 && (
           <div>
             <label htmlFor='discord-channel' className='text-sm font-medium mb-1 block'>
-              {m.trainingType_discordChannel()}
+              {tr('trainingType_discordChannel')}
             </label>
             <p className='text-xs text-muted-foreground mb-2'>
-              {m.trainingType_discordChannelHelp()}
+              {tr('trainingType_discordChannelHelp')}
             </p>
             <SearchableSelect
               value={channelId}
               onValueChange={setChannelId}
-              placeholder={m.event_useDefault()}
+              placeholder={tr('event_useDefault')}
               options={[
-                { value: NONE_VALUE, label: m.event_useDefault() },
+                { value: NONE_VALUE, label: tr('event_useDefault') },
                 ...discordChannels
                   .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
                   .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
@@ -407,15 +407,15 @@ export function TrainingTypeDetailPage({
           <div className='flex flex-col gap-4 sm:flex-row'>
             <div className='flex-1'>
               <label htmlFor='owner-group' className='text-sm font-medium mb-1 block'>
-                {m.event_ownerGroup()}
+                {tr('event_ownerGroup')}
               </label>
-              <p className='text-xs text-muted-foreground mb-2'>{m.event_ownerGroupHelp()}</p>
+              <p className='text-xs text-muted-foreground mb-2'>{tr('event_ownerGroupHelp')}</p>
               <SearchableSelect
                 value={ownerGroupId}
                 onValueChange={setOwnerGroupId}
-                placeholder={m.event_useDefault()}
+                placeholder={tr('event_useDefault')}
                 options={[
-                  { value: NONE_VALUE, label: m.event_useDefault() },
+                  { value: NONE_VALUE, label: tr('event_useDefault') },
                   ...toGroupOptions(groups),
                 ]}
                 pinnedValues={[NONE_VALUE]}
@@ -424,15 +424,15 @@ export function TrainingTypeDetailPage({
             </div>
             <div className='flex-1'>
               <label htmlFor='member-group' className='text-sm font-medium mb-1 block'>
-                {m.event_memberGroup()}
+                {tr('event_memberGroup')}
               </label>
-              <p className='text-xs text-muted-foreground mb-2'>{m.event_memberGroupHelp()}</p>
+              <p className='text-xs text-muted-foreground mb-2'>{tr('event_memberGroupHelp')}</p>
               <SearchableSelect
                 value={memberGroupId}
                 onValueChange={setMemberGroupId}
-                placeholder={m.event_useDefault()}
+                placeholder={tr('event_useDefault')}
                 options={[
-                  { value: NONE_VALUE, label: m.event_useDefault() },
+                  { value: NONE_VALUE, label: tr('event_useDefault') },
                   ...toGroupOptions(groups),
                 ]}
                 pinnedValues={[NONE_VALUE]}
@@ -445,10 +445,10 @@ export function TrainingTypeDetailPage({
         {/* Recurring Schedules */}
         {canAdmin && (
           <div>
-            <h2 className='text-lg font-semibold mb-3'>{m.trainingType_recurringSchedules()}</h2>
+            <h2 className='text-lg font-semibold mb-3'>{tr('trainingType_recurringSchedules')}</h2>
 
             {activeSeries.length === 0 && !showCreateForm && (
-              <p className='text-muted-foreground mb-3'>{m.trainingType_noSchedules()}</p>
+              <p className='text-muted-foreground mb-3'>{tr('trainingType_noSchedules')}</p>
             )}
 
             {activeSeries.length > 0 && (
@@ -460,8 +460,8 @@ export function TrainingTypeDetailPage({
                         <td className='py-2 px-4 font-medium'>{s.title}</td>
                         <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
                           {s.frequency === 'weekly'
-                            ? m.event_frequency_weekly()
-                            : m.event_frequency_biweekly()}
+                            ? tr('event_frequency_weekly')
+                            : tr('event_frequency_biweekly')}
                         </td>
                         <td className='py-2 px-4 text-muted-foreground'>
                           {s.daysOfWeek.map((d) => dayShortLabels[d]()).join(', ')}
@@ -476,7 +476,7 @@ export function TrainingTypeDetailPage({
                         <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
                           {formatLocalDate(s.startDate)} →{' '}
                           {Option.match(s.endDate, {
-                            onNone: () => m.event_ongoing(),
+                            onNone: () => tr('event_ongoing'),
                             onSome: formatLocalDate,
                           })}
                         </td>
@@ -487,14 +487,14 @@ export function TrainingTypeDetailPage({
                               size='sm'
                               onClick={() => handleEditSchedule(s)}
                             >
-                              {m.trainingType_editSchedule()}
+                              {tr('trainingType_editSchedule')}
                             </Button>
                             <Button
                               variant='outline'
                               size='sm'
                               onClick={() => handleCancelSchedule(s.seriesId)}
                             >
-                              {m.trainingType_cancelSchedule()}
+                              {tr('trainingType_cancelSchedule')}
                             </Button>
                           </div>
                         </td>
@@ -518,9 +518,9 @@ export function TrainingTypeDetailPage({
                       {...scheduleForm.register('title')}
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>{m.event_title()}</FormLabel>
+                          <FormLabel>{tr('event_title')}</FormLabel>
                           <FormControl>
-                            <Input {...field} placeholder={m.event_titlePlaceholder()} />
+                            <Input {...field} placeholder={tr('event_titlePlaceholder')} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -532,7 +532,7 @@ export function TrainingTypeDetailPage({
                           {...scheduleForm.register('frequency')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_frequency()}</FormLabel>
+                              <FormLabel>{tr('event_frequency')}</FormLabel>
                               <Select onValueChange={field.onChange} value={field.value}>
                                 <FormControl>
                                   <SelectTrigger>
@@ -541,10 +541,10 @@ export function TrainingTypeDetailPage({
                                 </FormControl>
                                 <SelectContent>
                                   <SelectItem value='weekly'>
-                                    {m.event_frequency_weekly()}
+                                    {tr('event_frequency_weekly')}
                                   </SelectItem>
                                   <SelectItem value='biweekly'>
-                                    {m.event_frequency_biweekly()}
+                                    {tr('event_frequency_biweekly')}
                                   </SelectItem>
                                 </SelectContent>
                               </Select>
@@ -557,7 +557,7 @@ export function TrainingTypeDetailPage({
                           control={scheduleForm.control}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_daysOfWeek()}</FormLabel>
+                              <FormLabel>{tr('event_daysOfWeek')}</FormLabel>
                               <div className='flex gap-1'>
                                 {DAY_ORDER.map((d) => {
                                   const selected = (field.value as number[]).includes(d);
@@ -598,7 +598,7 @@ export function TrainingTypeDetailPage({
                           {...scheduleForm.register('startDate')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{m.event_startDate()}</FormLabel>
+                              <FormLabel>{tr('event_startDate')}</FormLabel>
                               <FormControl>
                                 <Input {...field} type='date' />
                               </FormControl>
@@ -611,11 +611,13 @@ export function TrainingTypeDetailPage({
                         {...scheduleForm.register('endDate')}
                         render={({ field }) => (
                           <FormItem className='flex-1'>
-                            <FormLabel>{m.event_endDate()}</FormLabel>
+                            <FormLabel>{tr('event_endDate')}</FormLabel>
                             <FormControl>
                               <Input {...field} type='date' />
                             </FormControl>
-                            <p className='text-xs text-muted-foreground'>{m.event_endDateHelp()}</p>
+                            <p className='text-xs text-muted-foreground'>
+                              {tr('event_endDateHelp')}
+                            </p>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -626,7 +628,7 @@ export function TrainingTypeDetailPage({
                         {...scheduleForm.register('startTime')}
                         render={({ field }) => (
                           <FormItem className='flex-1'>
-                            <FormLabel>{m.event_startTime()}</FormLabel>
+                            <FormLabel>{tr('event_startTime')}</FormLabel>
                             <FormControl>
                               <Input {...field} type='time' />
                             </FormControl>
@@ -638,7 +640,7 @@ export function TrainingTypeDetailPage({
                         {...scheduleForm.register('endTime')}
                         render={({ field }) => (
                           <FormItem className='flex-1'>
-                            <FormLabel>{m.event_endTime()}</FormLabel>
+                            <FormLabel>{tr('event_endTime')}</FormLabel>
                             <FormControl>
                               <Input {...field} type='time' />
                             </FormControl>
@@ -651,9 +653,9 @@ export function TrainingTypeDetailPage({
                       {...scheduleForm.register('location')}
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>{m.event_location()}</FormLabel>
+                          <FormLabel>{tr('event_location')}</FormLabel>
                           <FormControl>
-                            <Input {...field} placeholder={m.event_locationPlaceholder()} />
+                            <Input {...field} placeholder={tr('event_locationPlaceholder')} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -663,19 +665,19 @@ export function TrainingTypeDetailPage({
                       {...scheduleForm.register('locationUrl')}
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>{m.event_locationUrl()}</FormLabel>
+                          <FormLabel>{tr('event_locationUrl')}</FormLabel>
                           <FormControl>
                             <Input
                               {...field}
                               type='url'
                               inputMode='url'
                               autoComplete='url'
-                              placeholder={m.event_locationUrlPlaceholder()}
+                              placeholder={tr('event_locationUrlPlaceholder')}
                               disabled={!scheduleForm.watch('location')}
                             />
                           </FormControl>
                           <p className='text-xs text-muted-foreground'>
-                            {m.event_locationUrlHelp()}
+                            {tr('event_locationUrlHelp')}
                           </p>
                           <FormMessage />
                         </FormItem>
@@ -685,11 +687,11 @@ export function TrainingTypeDetailPage({
                       {...scheduleForm.register('description')}
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>{m.event_description()}</FormLabel>
+                          <FormLabel>{tr('event_description')}</FormLabel>
                           <FormControl>
                             <Textarea
                               {...field}
-                              placeholder={m.event_descriptionPlaceholder()}
+                              placeholder={tr('event_descriptionPlaceholder')}
                               rows={3}
                             />
                           </FormControl>
@@ -700,8 +702,8 @@ export function TrainingTypeDetailPage({
                     <div className='flex gap-2'>
                       <Button type='submit' disabled={scheduleForm.formState.isSubmitting}>
                         {editingSeriesId
-                          ? m.trainingType_updateSchedule()
-                          : m.trainingType_createSchedule()}
+                          ? tr('trainingType_updateSchedule')
+                          : tr('trainingType_createSchedule')}
                       </Button>
                       <Button
                         type='button'
@@ -723,7 +725,7 @@ export function TrainingTypeDetailPage({
                           });
                         }}
                       >
-                        {m.guild_back()}
+                        {tr('guild_back')}
                       </Button>
                     </div>
                   </form>
@@ -731,7 +733,7 @@ export function TrainingTypeDetailPage({
               </div>
             ) : (
               <Button variant='outline' onClick={() => setShowCreateForm(true)}>
-                {m.trainingType_createSchedule()}
+                {tr('trainingType_createSchedule')}
               </Button>
             )}
           </div>
@@ -741,7 +743,7 @@ export function TrainingTypeDetailPage({
         {canAdmin && (
           <div>
             <Button variant='destructive' onClick={handleDelete}>
-              {m.trainingType_deleteTrainingType()}
+              {tr('trainingType_deleteTrainingType')}
             </Button>
           </div>
         )}

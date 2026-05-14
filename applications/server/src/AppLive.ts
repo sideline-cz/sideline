@@ -43,6 +43,7 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
+import { TranslationsRepository } from '~/repositories/TranslationsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import {
   WeeklySummaryRepository,
@@ -52,6 +53,7 @@ import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { TranslationCache } from '~/services/TranslationCache.js';
 import { env } from './env.js';
 import { HttpLogger } from './middleware/HttpLogger.js';
 import { SyncRpcsLive } from './rpc/index.js';
@@ -109,6 +111,7 @@ const Repositories = Layer.mergeAll(
   DiscordRoleProvisionEventsRepository.Default,
   WeeklySummaryRepository.Default,
   WeeklySummarySyncEventsRepository.Default,
+  TranslationsRepository.Default,
 );
 
 const AppLayer = Layer.mergeAll(
@@ -124,6 +127,7 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   Layer.provide(AgeCheckService.Default),
   Layer.provide(AchievementEvaluator.Default),
   Layer.provide(AchievementPreview.Default),
+  Layer.provide(TranslationCache.Default),
   Layer.provide(Repositories),
   Layer.provide(DiscordOAuth.Default),
   Layer.provide(FetchHttpClient.layer),

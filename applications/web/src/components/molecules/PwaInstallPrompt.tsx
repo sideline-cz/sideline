@@ -1,7 +1,7 @@
-import * as m from '@sideline/i18n/messages';
 import { Download, Share, X } from 'lucide-react';
 import { Button } from '~/components/ui/button';
 import { usePwaInstall } from '~/hooks/use-pwa-install.js';
+import { tr } from '~/lib/translations.js';
 
 export function PwaInstallPrompt() {
   const { canInstall, isIOS, promptInstall, dismiss } = usePwaInstall();
@@ -20,14 +20,14 @@ export function PwaInstallPrompt() {
         )}
       </div>
       <div className='flex flex-1 flex-col gap-1'>
-        <p className='text-sm font-semibold leading-none'>{m.pwa_installTitle()}</p>
+        <p className='text-sm font-semibold leading-none'>{tr('pwa_installTitle')}</p>
         <p className='text-sm text-muted-foreground'>
-          {isIOS ? m.pwa_iosInstructions() : m.pwa_installDescription()}
+          {isIOS ? tr('pwa_iosInstructions') : tr('pwa_installDescription')}
         </p>
         {!isIOS && (
           <div className='mt-2'>
             <Button size='sm' onClick={promptInstall}>
-              {m.pwa_installButton()}
+              {tr('pwa_installButton')}
             </Button>
           </div>
         )}
@@ -37,7 +37,7 @@ export function PwaInstallPrompt() {
         size='icon'
         className='shrink-0'
         onClick={dismiss}
-        aria-label={m.pwa_dismissButton()}
+        aria-label={tr('pwa_dismissButton')}
       >
         <X className='h-4 w-4' />
       </Button>

@@ -1,9 +1,9 @@
-import * as m from '@sideline/i18n/messages';
 import { Palette } from 'lucide-react';
 import React from 'react';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover';
+import { tr } from '~/lib/translations.js';
 import { cn } from '~/lib/utils';
 
 const PRESET_COLORS = [
@@ -70,7 +70,7 @@ export function ColorPicker({ value, onChange, className, id }: ColorPickerProps
         <button
           id={id}
           type='button'
-          aria-label={value ? `Color: ${value}` : m.common_color()}
+          aria-label={value ? `Color: ${value}` : tr('common_color')}
           aria-haspopup='dialog'
           className={cn(
             'w-8 h-8 rounded border flex items-center justify-center shrink-0',
@@ -80,7 +80,7 @@ export function ColorPicker({ value, onChange, className, id }: ColorPickerProps
             className,
           )}
           style={value ? { backgroundColor: value } : undefined}
-          title={value ?? m.common_color()}
+          title={value ?? tr('common_color')}
         >
           {!value && <Palette className='size-4' />}
         </button>
@@ -109,12 +109,12 @@ export function ColorPicker({ value, onChange, className, id }: ColorPickerProps
             value={hexInput.replace(/^#/, '')}
             onChange={handleHexChange}
             className='h-7 text-sm'
-            placeholder={m.common_customColor()}
+            placeholder={tr('common_customColor')}
             maxLength={6}
           />
         </div>
         <Button variant='ghost' size='sm' className='w-full text-xs' onClick={handleClear}>
-          {m.common_clearColor()}
+          {tr('common_clearColor')}
         </Button>
       </PopoverContent>
     </Popover>

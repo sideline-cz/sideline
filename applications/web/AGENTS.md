@@ -402,16 +402,23 @@ JSON files at `messages/{locale}.json`. Key format: `snake_case` with `_` separa
 
 Parameterized strings use `{variable}` syntax: `"auth_signedInAs": "Signed in as {username}"`.
 
-### Adding New Translations
+### Calling Translations From Web Code — `tr()` Only
 
-1. Add the key + English text to `messages/en.json`
-2. Add the Czech translation to `messages/cs.json`
-3. Import and call in components:
-   ```typescript
-   import * as m from '../paraglide/messages.js';
-   <p>{m.my_new_key({ param: value })}</p>
-   ```
-4. Run `pnpm codegen` before committing
+In `applications/web/src/**`, **never** import from `@sideline/i18n/messages` directly. Always call `tr()` from `~/lib/translations.js`:
+
+```typescript
+import { tr } from '~/lib/translations.js';
+
+<p>{tr('auth_signedInAs', { username: user.name })}</p>
+```
+
+Rules:
+
+1. **The Biome rule `style/noRestrictedImports` enforces this** (`biome.json`): importing `@sideline/i18n/messages` from web fails lint. The override allows the path for `applications/bot/**`, `packages/i18n/**`, and `scripts/**` only — never extend the allow-list to web.
+2. **`tr(key, params?, options?)` returns a `string`.** It applies admin overrides on top of compiled Paraglide messages: it first checks the in-memory overrides map (kept in sync by `TranslationOverridesProvider`), and falls back to `messagesByKey[key]` from `@sideline/i18n/registry` if no override is set. An unknown key is logged via `console.warn` and the raw key is returned — never throw out of `tr()`.
+3. **Overrides are refreshed by `TranslationOverridesProvider`** (`src/lib/translation-overrides-context.tsx`), which polls `GET /api/translations` every 30s via React Query (`refetchIntervalInBackground: false`) and calls `setTranslationOverrides(...)` on every successful fetch. The provider is mounted once in the root layout; do not mount it elsewhere.
+4. **Use the `useTranslationOverrides()` hook only when a component must re-render explicitly on override changes** (e.g. the admin Translations page itself, where the version counter drives a refetch). `tr()` reads the current overrides snapshot synchronously and is sufficient for normal render paths.
+5. **Adding a new translation key**: add it to `messages/en.json` AND `messages/cs.json` in `@sideline/i18n`, run `pnpm codegen` and `pnpm build` so `messagesByKey` picks it up, then call `tr('my_new_key', { param: value })`. Do not call `m.my_new_key(...)` from web code.
 
 ### Locale Persistence
 
@@ -493,9 +500,14 @@ Web app tests use **jsdom** environment (configured in `vitest.config.ts`). A se
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-// Mock i18n messages used by the component
-vi.mock('@sideline/i18n/messages', () => ({
-  some_key: () => 'Some text',
+// Mock the tr() helper used by the component
+vi.mock('~/lib/translations.js', () => ({
+  tr: (key: string) => {
+    const map: Record<string, string> = {
+      some_key: 'Some text',
+    };
+    return map[key] ?? key;
+  },
 }));
 
 // Use dynamic import AFTER mocks are set up
@@ -510,7 +522,7 @@ describe('MyComponent', () => {
 ```
 
 **Key rules:**
-- Always mock `@sideline/i18n/messages` with `vi.mock` before importing the component under test.
+- Always mock `~/lib/translations.js` (the `tr` export) with `vi.mock` before importing the component under test. Never mock `@sideline/i18n/messages` — web code does not import it directly.
 - Use `await import(...)` (dynamic import) for the component after `vi.mock` calls — this ensures mocks are applied before module evaluation.
 - Test files live in `applications/web/test/` with `.test.tsx` extension.
 - Use `@testing-library/react` (`render`, `screen`, `fireEvent`) for DOM assertions.

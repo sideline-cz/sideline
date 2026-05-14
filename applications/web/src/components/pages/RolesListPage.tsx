@@ -1,7 +1,6 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { RoleApi } from '@sideline/domain';
 import { Team } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import { useForm } from 'react-hook-form';
@@ -17,9 +16,10 @@ import {
 import { Input } from '~/components/ui/input';
 import { withFieldErrors } from '~/lib/form';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 const CreateRoleSchema = Schema.Struct({
-  name: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
+  name: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
 });
 
 type CreateRoleValues = Schema.Schema.Type<typeof CreateRoleSchema>;
@@ -50,10 +50,10 @@ export function RolesListPage({ teamId, roles, canManage }: RolesListPageProps) 
         }),
       ),
       withFieldErrors(form, [
-        { tag: 'RoleNameAlreadyTaken', field: 'name', message: m.role_nameAlreadyTaken() },
+        { tag: 'RoleNameAlreadyTaken', field: 'name', message: tr('role_nameAlreadyTaken') },
       ]),
-      Effect.mapError(() => ClientError.make(m.role_createFailed())),
-      run({ success: m.role_roleCreated() }),
+      Effect.mapError(() => ClientError.make(tr('role_createFailed'))),
+      run({ success: tr('role_roleCreated') }),
     );
     if (Option.isSome(result)) {
       form.reset();
@@ -66,10 +66,10 @@ export function RolesListPage({ teamId, roles, canManage }: RolesListPageProps) 
       <header className='mb-8'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId' params={{ teamId }}>
-            ← {m.team_backToTeams()}
+            ← {tr('team_backToTeams')}
           </Link>
         </Button>
-        <h1 className='text-2xl font-bold'>{m.role_roles()}</h1>
+        <h1 className='text-2xl font-bold'>{tr('role_roles')}</h1>
       </header>
 
       {canManage && (
@@ -79,23 +79,23 @@ export function RolesListPage({ teamId, roles, canManage }: RolesListPageProps) 
               {...form.register('name')}
               render={({ field }) => (
                 <FormItem className='flex-1'>
-                  <FormLabel>{m.role_roleName()}</FormLabel>
+                  <FormLabel>{tr('role_roleName')}</FormLabel>
                   <FormControl>
-                    <Input {...field} placeholder={m.role_roleNamePlaceholder()} />
+                    <Input {...field} placeholder={tr('role_roleNamePlaceholder')} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
             <Button type='submit' disabled={form.formState.isSubmitting} className='self-end'>
-              {m.role_createRole()}
+              {tr('role_createRole')}
             </Button>
           </form>
         </Form>
       )}
 
       {roles.length === 0 ? (
-        <p className='text-muted-foreground'>{m.role_noRoles()}</p>
+        <p className='text-muted-foreground'>{tr('role_noRoles')}</p>
       ) : (
         <table className='w-full'>
           <tbody>
@@ -111,7 +111,7 @@ export function RolesListPage({ teamId, roles, canManage }: RolesListPageProps) 
                   </Link>
                   {/* Show permission count inline on mobile */}
                   <p className='text-xs text-muted-foreground sm:hidden'>
-                    {m.role_permissionCount({ count: String(role.permissionCount) })}
+                    {tr('role_permissionCount', { count: String(role.permissionCount) })}
                   </p>
                 </td>
                 <td className='hidden sm:table-cell py-2 px-4'>
@@ -122,11 +122,11 @@ export function RolesListPage({ teamId, roles, canManage }: RolesListPageProps) 
                         : 'text-muted-foreground font-medium'
                     }
                   >
-                    {role.isBuiltIn ? m.role_builtIn() : m.role_custom()}
+                    {role.isBuiltIn ? tr('role_builtIn') : tr('role_custom')}
                   </span>
                 </td>
                 <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-                  {m.role_permissionCount({ count: String(role.permissionCount) })}
+                  {tr('role_permissionCount', { count: String(role.permissionCount) })}
                 </td>
                 <td className='py-2 px-4'>
                   <Button asChild variant='outline' size='sm'>

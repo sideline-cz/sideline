@@ -1,12 +1,12 @@
 import type { ActivityLog, Auth, Role } from '@sideline/domain';
 import { ActivityLogApi, type ActivityType, Team, TeamMember } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { createFileRoute, useNavigate, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
 import type { PlayerEditValues } from '~/components/pages/PlayerDetailPage';
 import { PlayerDetailPage } from '~/components/pages/PlayerDetailPage';
 import { ApiClient, ClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$memberId')({
   ssr: false,
@@ -82,8 +82,8 @@ function MemberDetailRoute() {
             },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.members_saveFailed())),
-        run({ success: m.members_playerSaved() }),
+        Effect.mapError(() => ClientError.make(tr('members_saveFailed'))),
+        run({ success: tr('members_playerSaved') }),
       );
       if (Option.isSome(result)) {
         navigate({ to: '/teams/$teamId/members', params: { teamId: teamIdRaw } });
@@ -101,8 +101,8 @@ function MemberDetailRoute() {
             payload: { roleId: roleId as Role.RoleId },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.roles_assignFailed())),
-        run({ success: m.role_roleAssigned() }),
+        Effect.mapError(() => ClientError.make(tr('roles_assignFailed'))),
+        run({ success: tr('role_roleAssigned') }),
       );
       if (Option.isSome(result)) {
         router.invalidate();
@@ -119,8 +119,8 @@ function MemberDetailRoute() {
             params: { teamId, memberId, roleId: roleId as Role.RoleId },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.roles_unassignFailed())),
-        run({ success: m.role_roleUnassigned() }),
+        Effect.mapError(() => ClientError.make(tr('roles_unassignFailed'))),
+        run({ success: tr('role_roleUnassigned') }),
       );
       if (Option.isSome(result)) {
         router.invalidate();
@@ -146,8 +146,8 @@ function MemberDetailRoute() {
             },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.activityLog_logFailed())),
-        run({ success: m.activityLog_logged() }),
+        Effect.mapError(() => ClientError.make(tr('activityLog_logFailed'))),
+        run({ success: tr('activityLog_logged') }),
       );
       if (Option.isSome(result)) {
         router.invalidate();
@@ -176,8 +176,8 @@ function MemberDetailRoute() {
             },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.activityLog_updateFailed())),
-        run({ success: m.activityLog_updated() }),
+        Effect.mapError(() => ClientError.make(tr('activityLog_updateFailed'))),
+        run({ success: tr('activityLog_updated') }),
       );
       if (Option.isSome(result)) {
         router.invalidate();
@@ -194,8 +194,8 @@ function MemberDetailRoute() {
             params: { teamId, memberId, logId },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.activityLog_deleteFailed())),
-        run({ success: m.activityLog_deleted() }),
+        Effect.mapError(() => ClientError.make(tr('activityLog_deleteFailed'))),
+        run({ success: tr('activityLog_deleted') }),
       );
       if (Option.isSome(result)) {
         router.invalidate();

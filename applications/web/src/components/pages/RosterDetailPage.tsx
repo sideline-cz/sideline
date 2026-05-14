@@ -1,6 +1,5 @@
 import type { GroupApi, Roster as RosterDomain } from '@sideline/domain';
 import { Discord, RosterModel, Team, TeamMember } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import { Loader2 } from 'lucide-react';
@@ -16,6 +15,7 @@ import { Input } from '~/components/ui/input';
 import { Separator } from '~/components/ui/separator';
 import { DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 interface RosterDetailPageProps {
   teamId: string;
@@ -77,8 +77,8 @@ export function RosterDetailPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.roster_updateFailed())),
-      run({ success: m.roster_rosterSaved() }),
+      Effect.mapError(() => ClientError.make(tr('roster_updateFailed'))),
+      run({ success: tr('roster_rosterSaved') }),
     );
     setSaving(false);
     if (Option.isSome(result)) {
@@ -100,8 +100,8 @@ export function RosterDetailPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.roster_updateFailed())),
-      run({ success: m.roster_rosterUpdated() }),
+      Effect.mapError(() => ClientError.make(tr('roster_updateFailed'))),
+      run({ success: tr('roster_rosterUpdated') }),
     );
     if (Option.isSome(result)) {
       router.invalidate();
@@ -133,10 +133,10 @@ export function RosterDetailPage({
         }),
       ),
       Effect.catchTag('ChannelAlreadyLinked', () =>
-        Effect.fail(ClientError.make(m.roster_channelAlreadyLinked())),
+        Effect.fail(ClientError.make(tr('roster_channelAlreadyLinked'))),
       ),
-      Effect.mapError(() => ClientError.make(m.roster_updateFailed())),
-      run({ success: m.roster_channelLinked() }),
+      Effect.mapError(() => ClientError.make(tr('roster_updateFailed'))),
+      run({ success: tr('roster_channelLinked') }),
     );
     if (Option.isSome(result)) {
       setSelectedChannelId('');
@@ -166,8 +166,8 @@ export function RosterDetailPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.roster_updateFailed())),
-      run({ success: m.roster_channelUnlinked() }),
+      Effect.mapError(() => ClientError.make(tr('roster_updateFailed'))),
+      run({ success: tr('roster_channelUnlinked') }),
     );
     if (Option.isSome(result)) {
       router.invalidate();
@@ -181,8 +181,8 @@ export function RosterDetailPage({
           params: { teamId: teamIdBranded, rosterId: rosterIdBranded },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.roster_channelCreateFailed())),
-      run({ success: m.roster_channelCreateRequested() }),
+      Effect.mapError(() => ClientError.make(tr('roster_channelCreateFailed'))),
+      run({ success: tr('roster_channelCreateRequested') }),
     );
     if (Option.isSome(result)) {
       router.invalidate();
@@ -199,8 +199,8 @@ export function RosterDetailPage({
           payload: { memberId },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.roster_updateFailed())),
-      run({ success: m.roster_memberAdded() }),
+      Effect.mapError(() => ClientError.make(tr('roster_updateFailed'))),
+      run({ success: tr('roster_memberAdded') }),
     );
     if (Option.isSome(result)) {
       setSelectedMemberId('');
@@ -217,8 +217,8 @@ export function RosterDetailPage({
             params: { teamId: teamIdBranded, rosterId: rosterIdBranded, memberId },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.roster_updateFailed())),
-        run({ success: m.roster_memberRemoved() }),
+        Effect.mapError(() => ClientError.make(tr('roster_updateFailed'))),
+        run({ success: tr('roster_memberRemoved') }),
       );
       if (Option.isSome(result)) {
         router.invalidate();
@@ -228,15 +228,15 @@ export function RosterDetailPage({
   );
 
   const handleDelete = React.useCallback(async () => {
-    if (!window.confirm(m.roster_deleteRosterConfirm())) return;
+    if (!window.confirm(tr('roster_deleteRosterConfirm'))) return;
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.roster.deleteRoster({
           params: { teamId: teamIdBranded, rosterId: rosterIdBranded },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.roster_updateFailed())),
-      run({ success: m.roster_rosterDeleted() }),
+      Effect.mapError(() => ClientError.make(tr('roster_updateFailed'))),
+      run({ success: tr('roster_rosterDeleted') }),
     );
     if (Option.isSome(result)) {
       router.navigate({ to: '/teams/$teamId/rosters', params: { teamId } });
@@ -248,7 +248,7 @@ export function RosterDetailPage({
       <header className='mb-8'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId/rosters' params={{ teamId }}>
-            ← {m.roster_backToRosters()}
+            ← {tr('roster_backToRosters')}
           </Link>
         </Button>
         <div className='flex flex-wrap items-center gap-3'>
@@ -260,15 +260,15 @@ export function RosterDetailPage({
                 : 'text-muted-foreground font-medium'
             }
           >
-            {rosterDetail.active ? m.roster_active() : m.roster_inactive()}
+            {rosterDetail.active ? tr('roster_active') : tr('roster_inactive')}
           </span>
           {canManage && (
             <>
               <Button variant='outline' size='sm' onClick={handleToggleActive}>
-                {rosterDetail.active ? m.roster_toggleInactive() : m.roster_toggleActive()}
+                {rosterDetail.active ? tr('roster_toggleInactive') : tr('roster_toggleActive')}
               </Button>
               <Button variant='destructive' size='sm' onClick={handleDelete}>
-                {m.roster_deleteRoster()}
+                {tr('roster_deleteRoster')}
               </Button>
             </>
           )}
@@ -278,14 +278,14 @@ export function RosterDetailPage({
       {canManage && (
         <Card className='mb-6 max-w-md'>
           <CardHeader>
-            <CardTitle className='text-base'>{m.roster_nameEmojiColor()}</CardTitle>
+            <CardTitle className='text-base'>{tr('roster_nameEmojiColor')}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='flex flex-col gap-2 sm:flex-row'>
               <div className='flex gap-2 flex-1'>
                 <Input
                   id='roster-edit-emoji'
-                  aria-label={m.roster_emoji()}
+                  aria-label={tr('roster_emoji')}
                   value={editEmoji}
                   onChange={(e) => setEditEmoji(e.target.value)}
                   className='w-16 shrink-0'
@@ -294,14 +294,14 @@ export function RosterDetailPage({
                 <ColorPicker id='roster-edit-color' value={editColor} onChange={setEditColor} />
                 <Input
                   id='roster-edit-name'
-                  aria-label={m.roster_rosterName()}
+                  aria-label={tr('roster_rosterName')}
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   className='flex-1'
                 />
               </div>
               <Button onClick={handleSaveNameEmojiColor} disabled={saving}>
-                {saving ? m.roster_saving() : m.roster_saveChanges()}
+                {saving ? tr('roster_saving') : tr('roster_saveChanges')}
               </Button>
             </div>
           </CardContent>
@@ -311,15 +311,15 @@ export function RosterDetailPage({
       {canManage && (
         <Card className='mb-6 max-w-md'>
           <CardHeader>
-            <CardTitle className='text-base'>{m.roster_discordChannel()}</CardTitle>
+            <CardTitle className='text-base'>{tr('roster_discordChannel')}</CardTitle>
           </CardHeader>
           <CardContent>
             {rosterDetail.discordChannelProvisioning ? (
               <div className='flex flex-col items-center gap-2 py-4'>
                 <Loader2 className='size-5 animate-spin text-muted-foreground' />
-                <p className='text-sm font-medium'>{m.discord_channelProvisioning()}</p>
+                <p className='text-sm font-medium'>{tr('discord_channelProvisioning')}</p>
                 <p className='text-xs text-muted-foreground'>
-                  {m.discord_channelProvisioningHint()}
+                  {tr('discord_channelProvisioningHint')}
                 </p>
               </div>
             ) : Option.isSome(rosterDetail.discordChannelId) ? (
@@ -341,13 +341,13 @@ export function RosterDetailPage({
                   </span>
                 )}
                 <Button variant='outline' size='sm' onClick={handleUnlinkChannel}>
-                  {m.roster_unlinkChannel()}
+                  {tr('roster_unlinkChannel')}
                 </Button>
               </div>
             ) : (
               <div className='flex flex-col gap-4'>
                 <Button className='w-full' onClick={handleCreateChannel}>
-                  {m.roster_createChannel()}
+                  {tr('roster_createChannel')}
                 </Button>
 
                 <div className='relative'>
@@ -356,7 +356,7 @@ export function RosterDetailPage({
                   </div>
                   <div className='relative flex justify-center text-xs uppercase'>
                     <span className='bg-card px-2 text-muted-foreground'>
-                      {m.roster_orLinkExisting()}
+                      {tr('roster_orLinkExisting')}
                     </span>
                   </div>
                 </div>
@@ -365,7 +365,7 @@ export function RosterDetailPage({
                   <SearchableSelect
                     value={selectedChannelId}
                     onValueChange={setSelectedChannelId}
-                    placeholder={m.roster_selectChannel()}
+                    placeholder={tr('roster_selectChannel')}
                     options={discordChannels
                       .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
                       .map((ch) => ({ value: ch.id, label: `# ${ch.name}` }))}
@@ -376,7 +376,7 @@ export function RosterDetailPage({
                     onClick={handleLinkChannel}
                     disabled={!selectedChannelId}
                   >
-                    {m.roster_linkChannel()}
+                    {tr('roster_linkChannel')}
                   </Button>
                 </div>
               </div>
@@ -390,7 +390,7 @@ export function RosterDetailPage({
           <SearchableSelect
             value={selectedMemberId}
             onValueChange={setSelectedMemberId}
-            placeholder={m.roster_addMember()}
+            placeholder={tr('roster_addMember')}
             options={availableMembers.map((member) => ({
               value: member.memberId,
               label: Option.getOrElse(member.name, () => member.username),
@@ -398,13 +398,13 @@ export function RosterDetailPage({
             className='flex-1'
           />
           <Button onClick={handleAddMember} disabled={!selectedMemberId}>
-            {m.roster_addMember()}
+            {tr('roster_addMember')}
           </Button>
         </div>
       )}
 
       {rosterDetail.members.length === 0 ? (
-        <p className='text-muted-foreground'>{m.members_noPlayers()}</p>
+        <p className='text-muted-foreground'>{tr('members_noPlayers')}</p>
       ) : (
         <table className='w-full'>
           <tbody>
@@ -438,7 +438,7 @@ export function RosterDetailPage({
                         size='sm'
                         onClick={() => handleRemoveMember(player.memberId)}
                       >
-                        {m.roster_removeMember()}
+                        {tr('roster_removeMember')}
                       </Button>
                     </td>
                   )}

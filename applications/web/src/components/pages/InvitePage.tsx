@@ -1,5 +1,4 @@
 import type { Invite } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Effect, Option } from 'effect';
 import { Users } from 'lucide-react';
 import React from 'react';
@@ -7,6 +6,7 @@ import { LanguageSwitcher } from '~/components/organisms/LanguageSwitcher';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 interface InvitePageProps {
   isAuthenticated: boolean;
@@ -43,13 +43,13 @@ export function InvitePage({
         }),
       ),
       Effect.catchTag('AlreadyMember', () =>
-        Effect.fail(ClientError.make(m.invite_errors_alreadyMember())),
+        Effect.fail(ClientError.make(tr('invite_errors_alreadyMember'))),
       ),
       Effect.catchTag('InviteNotFound', () =>
-        Effect.fail(ClientError.make(m.invite_errors_inviteNotValid())),
+        Effect.fail(ClientError.make(tr('invite_errors_inviteNotValid'))),
       ),
-      Effect.mapError(() => ClientError.make(m.invite_errors_joinFailed())),
-      run({ success: m.invite_teamJoined() }),
+      Effect.mapError(() => ClientError.make(tr('invite_errors_joinFailed'))),
+      run({ success: tr('invite_teamJoined') }),
     );
     setJoining(false);
   }, [code, run, onJoined]);
@@ -57,7 +57,7 @@ export function InvitePage({
   return (
     <div className='flex min-h-screen flex-col'>
       <header className='flex items-center justify-between px-6 py-4 border-b'>
-        <span className='text-lg font-bold'>{m.app_name()}</span>
+        <span className='text-lg font-bold'>{tr('app_name')}</span>
         <div className='flex items-center gap-3'>
           <LanguageSwitcher isAuthenticated={false} />
         </div>
@@ -73,20 +73,20 @@ export function InvitePage({
             </div>
             {requiresReauth ? (
               <>
-                <CardTitle>{m.invite_reauthTitle()}</CardTitle>
-                <CardDescription>{m.invite_reauthDescription()}</CardDescription>
+                <CardTitle>{tr('invite_reauthTitle')}</CardTitle>
+                <CardDescription>{tr('invite_reauthDescription')}</CardDescription>
               </>
             ) : (
               <>
-                <CardTitle>{m.invite_joinTitle({ teamName: invite.teamName })}</CardTitle>
+                <CardTitle>{tr('invite_joinTitle', { teamName: invite.teamName })}</CardTitle>
                 <CardDescription>
-                  {m.invite_joinDescription({ teamName: invite.teamName })}
+                  {tr('invite_joinDescription', { teamName: invite.teamName })}
                 </CardDescription>
                 {Option.match(invite.groupName, {
                   onNone: () => null,
                   onSome: (name) => (
                     <p className='text-sm text-muted-foreground'>
-                      {m.invite_willJoinGroup()}: <strong>{name}</strong>
+                      {tr('invite_willJoinGroup')}: <strong>{name}</strong>
                     </p>
                   ),
                 })}
@@ -94,7 +94,7 @@ export function InvitePage({
                   onNone: () => null,
                   onSome: (name) => (
                     <p className='text-sm text-muted-foreground'>
-                      {m.invite_invitedBy()} <strong>{name}</strong>
+                      {tr('invite_invitedBy')} <strong>{name}</strong>
                     </p>
                   ),
                 })}
@@ -104,15 +104,15 @@ export function InvitePage({
           <CardContent className='flex flex-col gap-2'>
             {requiresReauth ? (
               <Button onClick={onReauth} className='w-full'>
-                {m.invite_reauthButton()}
+                {tr('invite_reauthButton')}
               </Button>
             ) : isAuthenticated ? (
               <Button onClick={handleJoin} disabled={joining} className='w-full'>
-                {joining ? m.invite_joining() : m.invite_joinButton()}
+                {joining ? tr('invite_joining') : tr('invite_joinButton')}
               </Button>
             ) : (
               <Button onClick={onSignIn} className='w-full'>
-                {m.invite_signInToJoin()}
+                {tr('invite_signInToJoin')}
               </Button>
             )}
           </CardContent>

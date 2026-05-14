@@ -1,5 +1,4 @@
 import type { GroupApi, Invite, Team } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link } from '@tanstack/react-router';
 import { Effect, Option } from 'effect';
 import { Copy, PlusCircle } from 'lucide-react';
@@ -9,6 +8,7 @@ import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { useFormatDate } from '~/hooks/useFormatDate';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 interface TeamInvitesPageProps {
   teamId: Team.TeamId;
@@ -40,11 +40,11 @@ export function TeamInvitesPage({
 
   const handleDisable = React.useCallback(
     async (inviteId: Invite.InviteListItem['id']) => {
-      if (!window.confirm(m.invites_disableConfirm())) return;
+      if (!window.confirm(tr('invites_disableConfirm'))) return;
       const result = await ApiClient.asEffect().pipe(
         Effect.flatMap((api) => api.invite.deactivateInvite({ params: { teamId, inviteId } })),
-        Effect.mapError(() => ClientError.make(m.invites_disableFailed())),
-        run({ success: m.invites_disabled_success() }),
+        Effect.mapError(() => ClientError.make(tr('invites_disableFailed'))),
+        run({ success: tr('invites_disabled_success') }),
       );
       if (Option.isSome(result)) {
         onRefresh();
@@ -68,39 +68,39 @@ export function TeamInvitesPage({
       <header className='mb-6'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId' params={{ teamId: teamIdRaw }}>
-            ← {m.team_backToTeams()}
+            ← {tr('team_backToTeams')}
           </Link>
         </Button>
         <div className='flex items-center justify-between'>
-          <h1 className='text-2xl font-bold'>{m.invites_title()}</h1>
+          <h1 className='text-2xl font-bold'>{tr('invites_title')}</h1>
           <Button onClick={() => setDialogOpen(true)} size='sm'>
             <PlusCircle className='size-4 mr-2' />
-            {m.invites_newInvite()}
+            {tr('invites_newInvite')}
           </Button>
         </div>
       </header>
 
       {invites.length === 0 ? (
-        <p className='text-muted-foreground'>{m.invites_noInvites()}</p>
+        <p className='text-muted-foreground'>{tr('invites_noInvites')}</p>
       ) : (
         <div className='overflow-x-auto'>
           <table className='w-full text-sm'>
             <thead>
               <tr className='border-b'>
                 <th className='py-2 px-3 text-left font-medium text-muted-foreground'>
-                  {m.invites_code()}
+                  {tr('invites_code')}
                 </th>
                 <th className='hidden sm:table-cell py-2 px-3 text-left font-medium text-muted-foreground'>
-                  {m.invites_group()}
+                  {tr('invites_group')}
                 </th>
                 <th className='hidden md:table-cell py-2 px-3 text-left font-medium text-muted-foreground'>
-                  {m.invites_createdBy()}
+                  {tr('invites_createdBy')}
                 </th>
                 <th className='hidden lg:table-cell py-2 px-3 text-left font-medium text-muted-foreground'>
-                  {m.invites_createdAt()}
+                  {tr('invites_createdAt')}
                 </th>
                 <th className='hidden md:table-cell py-2 px-3 text-left font-medium text-muted-foreground'>
-                  {m.invites_expiresAt()}
+                  {tr('invites_expiresAt')}
                 </th>
                 <th className='py-2 px-3 text-left font-medium text-muted-foreground'>
                   {/* status */}
@@ -117,7 +117,7 @@ export function TeamInvitesPage({
                       <Badge variant='secondary'>{invite.groupName.value}</Badge>
                     ) : (
                       <span className='text-muted-foreground text-xs'>
-                        {m.invites_allMembers()}
+                        {tr('invites_allMembers')}
                       </span>
                     )}
                   </td>
@@ -130,11 +130,11 @@ export function TeamInvitesPage({
                   <td className='hidden md:table-cell py-2 px-3 text-muted-foreground'>
                     {Option.isSome(invite.expiresAt)
                       ? formatDateTime(invite.expiresAt.value)
-                      : m.invites_never()}
+                      : tr('invites_never')}
                   </td>
                   <td className='py-2 px-3'>
                     <Badge variant={invite.active ? 'default' : 'outline'}>
-                      {invite.active ? m.invites_active() : m.invites_disabled()}
+                      {invite.active ? tr('invites_active') : tr('invites_disabled')}
                     </Badge>
                   </td>
                   <td className='py-2 px-3'>
@@ -143,19 +143,19 @@ export function TeamInvitesPage({
                         variant='ghost'
                         size='icon'
                         onClick={() => handleCopy(invite.code)}
-                        title={m.invites_copyLink()}
+                        title={tr('invites_copyLink')}
                       >
                         <Copy className='size-4' />
-                        <span className='sr-only'>{m.invites_copyLink()}</span>
+                        <span className='sr-only'>{tr('invites_copyLink')}</span>
                       </Button>
                       {copied === invite.code && (
                         <span className='text-xs text-muted-foreground'>
-                          {m.invites_linkCopied()}
+                          {tr('invites_linkCopied')}
                         </span>
                       )}
                       {invite.active && (
                         <Button variant='ghost' size='sm' onClick={() => handleDisable(invite.id)}>
-                          {m.invites_disable()}
+                          {tr('invites_disable')}
                         </Button>
                       )}
                     </div>

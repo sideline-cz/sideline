@@ -1,5 +1,4 @@
 import type { DashboardApi } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link } from '@tanstack/react-router';
 import { DateTime, Option } from 'effect';
 import {
@@ -20,6 +19,7 @@ import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
 import { Skeleton } from '~/components/ui/skeleton';
 import { formatLocalTime } from '~/lib/datetime';
+import { tr } from '~/lib/translations.js';
 
 interface TeamDetailPageProps {
   teamId: string;
@@ -44,14 +44,14 @@ const formatRelativeDate = (dt: DateTime.Utc): string => {
   const eventDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const diffDays = Math.round((eventDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-  if (diffDays === 0) return m.dashboard_today();
-  if (diffDays === 1) return m.dashboard_tomorrow();
+  if (diffDays === 0) return tr('dashboard_today');
+  if (diffDays === 1) return tr('dashboard_tomorrow');
   return date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 };
 
 const RsvpBadge = ({ rsvp }: { rsvp: Option.Option<'yes' | 'no' | 'maybe'> }) => {
   if (Option.isNone(rsvp)) {
-    return <Badge variant='secondary'>{m.dashboard_noResponse()}</Badge>;
+    return <Badge variant='secondary'>{tr('dashboard_noResponse')}</Badge>;
   }
   const styles = {
     yes: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/50 dark:text-green-200 dark:border-green-800',
@@ -60,9 +60,9 @@ const RsvpBadge = ({ rsvp }: { rsvp: Option.Option<'yes' | 'no' | 'maybe'> }) =>
       'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/50 dark:text-amber-200 dark:border-amber-800',
   };
   const labels = {
-    yes: m.dashboard_rsvpYes(),
-    no: m.dashboard_rsvpNo(),
-    maybe: m.dashboard_rsvpMaybe(),
+    yes: tr('dashboard_rsvpYes'),
+    no: tr('dashboard_rsvpNo'),
+    maybe: tr('dashboard_rsvpMaybe'),
   };
   return (
     <Badge variant='outline' className={styles[rsvp.value]}>
@@ -121,27 +121,27 @@ function StatCards({
 }) {
   const stats = [
     {
-      label: m.dashboard_currentStreak(),
+      label: tr('dashboard_currentStreak'),
       value: `${activitySummary.currentStreak}d`,
       icon: Flame,
       accent: activitySummary.currentStreak > 0 ? 'text-orange-500' : 'text-muted-foreground',
     },
     {
-      label: m.dashboard_recentActivities(),
+      label: tr('dashboard_recentActivities'),
       value: String(activitySummary.recentActivityCount),
       icon: Zap,
       accent: 'text-blue-500',
     },
     {
-      label: m.dashboard_totalActivities(),
+      label: tr('dashboard_totalActivities'),
       value: String(activitySummary.totalActivities),
       icon: Calendar,
       accent: 'text-muted-foreground',
     },
     {
-      label: m.dashboard_leaderboardPosition(),
+      label: tr('dashboard_leaderboardPosition'),
       value: Option.match(activitySummary.leaderboardRank, {
-        onNone: () => m.dashboard_notRanked(),
+        onNone: () => tr('dashboard_notRanked'),
         onSome: (rank) => `#${rank}`,
       }),
       icon: Trophy,
@@ -186,7 +186,7 @@ function AwaitingRsvpBanner({
           <div className='flex size-6 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/50'>
             <Clock className='size-3.5 text-amber-600 dark:text-amber-400' />
           </div>
-          <CardTitle className='text-sm font-semibold'>{m.dashboard_awaitingRsvp()}</CardTitle>
+          <CardTitle className='text-sm font-semibold'>{tr('dashboard_awaitingRsvp')}</CardTitle>
           <Badge
             variant='secondary'
             className='bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/50 dark:text-amber-300 dark:border-amber-800'
@@ -211,7 +211,7 @@ function AwaitingRsvpBanner({
                 </p>
               </div>
               <Button size='sm' className='shrink-0'>
-                {m.dashboard_rsvpNow()}
+                {tr('dashboard_rsvpNow')}
               </Button>
             </Link>
           ))}
@@ -234,10 +234,10 @@ function UpcomingEventsCard({
     <Card>
       <CardHeader>
         <div className='flex items-center justify-between'>
-          <CardTitle className='text-base'>{m.dashboard_upcomingEvents()}</CardTitle>
+          <CardTitle className='text-base'>{tr('dashboard_upcomingEvents')}</CardTitle>
           <Button asChild variant='ghost' size='sm'>
             <Link to='/teams/$teamId/events' params={{ teamId }}>
-              {m.dashboard_viewEvents()}
+              {tr('dashboard_viewEvents')}
               <ChevronRight className='size-4' />
             </Link>
           </Button>
@@ -247,7 +247,7 @@ function UpcomingEventsCard({
         {events.length === 0 ? (
           <div className='flex flex-col items-center justify-center py-6 text-center'>
             <Calendar className='size-8 text-muted-foreground/40 mb-2' />
-            <p className='text-sm text-muted-foreground'>{m.dashboard_noUpcomingEvents()}</p>
+            <p className='text-sm text-muted-foreground'>{tr('dashboard_noUpcomingEvents')}</p>
           </div>
         ) : (
           <div className='flex flex-col gap-2'>
@@ -313,15 +313,15 @@ function ActivityCard({
   teamId: string;
 }) {
   const details = [
-    { label: m.dashboard_longestStreak(), value: `${activitySummary.longestStreak}d` },
+    { label: tr('dashboard_longestStreak'), value: `${activitySummary.longestStreak}d` },
     {
-      label: m.dashboard_totalDuration(),
+      label: tr('dashboard_totalDuration'),
       value: formatDuration(activitySummary.totalDurationMinutes),
     },
     {
-      label: m.dashboard_leaderboardPosition(),
+      label: tr('dashboard_leaderboardPosition'),
       value: Option.match(activitySummary.leaderboardRank, {
-        onNone: () => m.dashboard_notRanked(),
+        onNone: () => tr('dashboard_notRanked'),
         onSome: (rank) => `#${rank} / ${activitySummary.leaderboardTotal}`,
       }),
     },
@@ -331,10 +331,10 @@ function ActivityCard({
     <Card>
       <CardHeader>
         <div className='flex items-center justify-between'>
-          <CardTitle className='text-base'>{m.dashboard_activitySummary()}</CardTitle>
+          <CardTitle className='text-base'>{tr('dashboard_activitySummary')}</CardTitle>
           <Button asChild variant='ghost' size='sm'>
             <Link to='/teams/$teamId/workout' params={{ teamId }}>
-              {m.dashboard_viewLeaderboard()}
+              {tr('dashboard_viewLeaderboard')}
               <ChevronRight className='size-4' />
             </Link>
           </Button>
@@ -358,21 +358,29 @@ function ActivityCard({
 
 function TeamManagementCard({ teamId }: { teamId: string }) {
   const sections = [
-    { to: '/teams/$teamId/members' as const, label: m.team_members(), icon: Users },
-    { to: '/teams/$teamId/rosters' as const, label: m.team_rosters(), icon: Users },
-    { to: '/teams/$teamId/roles' as const, label: m.team_roles(), icon: Settings },
-    { to: '/teams/$teamId/groups' as const, label: m.team_groups(), icon: Users },
-    { to: '/teams/$teamId/activity-types' as const, label: m.team_activityTypes(), icon: Activity },
-    { to: '/teams/$teamId/training-types' as const, label: m.team_trainingTypes(), icon: Zap },
-    { to: '/teams/$teamId/age-thresholds' as const, label: m.team_ageThresholds(), icon: Calendar },
-    { to: '/teams/$teamId/settings' as const, label: m.team_settings(), icon: Settings },
+    { to: '/teams/$teamId/members' as const, label: tr('team_members'), icon: Users },
+    { to: '/teams/$teamId/rosters' as const, label: tr('team_rosters'), icon: Users },
+    { to: '/teams/$teamId/roles' as const, label: tr('team_roles'), icon: Settings },
+    { to: '/teams/$teamId/groups' as const, label: tr('team_groups'), icon: Users },
+    {
+      to: '/teams/$teamId/activity-types' as const,
+      label: tr('team_activityTypes'),
+      icon: Activity,
+    },
+    { to: '/teams/$teamId/training-types' as const, label: tr('team_trainingTypes'), icon: Zap },
+    {
+      to: '/teams/$teamId/age-thresholds' as const,
+      label: tr('team_ageThresholds'),
+      icon: Calendar,
+    },
+    { to: '/teams/$teamId/settings' as const, label: tr('team_settings'), icon: Settings },
   ] as const;
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className='text-base'>{m.dashboard_teamManagement()}</CardTitle>
-        <CardDescription className='text-xs'>{m.team_settings()}</CardDescription>
+        <CardTitle className='text-base'>{tr('dashboard_teamManagement')}</CardTitle>
+        <CardDescription className='text-xs'>{tr('team_settings')}</CardDescription>
       </CardHeader>
       <CardContent>
         <nav className='grid grid-cols-1 gap-1 sm:grid-cols-2'>
@@ -400,7 +408,7 @@ export function TeamDetailPage({ teamId, dashboard }: TeamDetailPageProps) {
   if (!dashboard) {
     return (
       <div className='space-y-6'>
-        <h1 className='text-2xl font-bold'>{m.dashboard_title()}</h1>
+        <h1 className='text-2xl font-bold'>{tr('dashboard_title')}</h1>
         <DashboardSkeleton />
       </div>
     );

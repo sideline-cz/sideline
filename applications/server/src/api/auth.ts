@@ -27,7 +27,7 @@ import { HttpClient, HttpClientRequest } from 'effect/unstable/http';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { Redirect } from '~/api/index.js';
-import { env } from '~/env.js';
+import { env, globalAdminDiscordIds } from '~/env.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
@@ -400,6 +400,7 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
                     birthDate: Option.map(updated.birth_date, DateTime.formatIsoDateUtc),
                     gender: updated.gender,
                     locale: updated.locale,
+                    isGlobalAdmin: globalAdminDiscordIds.has(updated.discord_id),
                   }),
               ),
               Effect.catchTag(
@@ -432,6 +433,7 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
                     birthDate: Option.map(updated.birth_date, DateTime.formatIsoDateUtc),
                     gender: updated.gender,
                     locale: updated.locale,
+                    isGlobalAdmin: globalAdminDiscordIds.has(updated.discord_id),
                   }),
               ),
               Effect.catchTag(
@@ -464,6 +466,7 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
                     birthDate: Option.map(updated.birth_date, DateTime.formatIsoDateUtc),
                     gender: updated.gender,
                     locale: updated.locale,
+                    isGlobalAdmin: globalAdminDiscordIds.has(updated.discord_id),
                   }),
               ),
               Effect.catchTag(

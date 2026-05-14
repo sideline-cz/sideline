@@ -1,5 +1,4 @@
 import type { Auth } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { useRouter } from '@tanstack/react-router';
 import { Option } from 'effect';
 import { ArrowLeft } from 'lucide-react';
@@ -9,6 +8,7 @@ import { ProfileEditForm } from '~/components/organisms/ProfileEditForm';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
+import { tr } from '~/lib/translations.js';
 
 function discordAvatarUrl(discordId: string, avatar: string): string {
   return `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png?size=128`;
@@ -32,12 +32,12 @@ export function MyProfilePage({ user, onUpdated }: MyProfilePageProps) {
         <Button
           variant='ghost'
           size='icon'
-          aria-label={m.guild_back()}
+          aria-label={tr('guild_back')}
           onClick={() => router.history.back()}
         >
           <ArrowLeft className='size-5' />
         </Button>
-        <span className='text-lg font-bold'>{m.app_name()}</span>
+        <span className='text-lg font-bold'>{tr('app_name')}</span>
         <div className='flex items-center gap-3'>
           <LanguageSwitcher isAuthenticated />
         </div>
@@ -51,13 +51,13 @@ export function MyProfilePage({ user, onUpdated }: MyProfilePageProps) {
                 {Option.isSome(user.avatar) && (
                   <AvatarImage
                     src={discordAvatarUrl(user.discordId, user.avatar.value)}
-                    alt={m.profile_discordAvatar()}
+                    alt={tr('profile_discordAvatar')}
                   />
                 )}
                 <AvatarFallback>{initials}</AvatarFallback>
               </Avatar>
             </div>
-            <CardTitle>{m.profile_title()}</CardTitle>
+            <CardTitle>{tr('profile_title')}</CardTitle>
             <CardDescription>@{user.username}</CardDescription>
           </CardHeader>
           <CardContent>

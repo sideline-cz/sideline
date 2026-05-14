@@ -1,7 +1,6 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { GroupApi, TrainingTypeApi } from '@sideline/domain';
 import { GroupModel, Team } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
@@ -20,9 +19,10 @@ import { Input } from '~/components/ui/input';
 import { withFieldErrors } from '~/lib/form';
 import { toGroupOptions } from '~/lib/group-options';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 const CreateTrainingTypeSchema = Schema.Struct({
-  name: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
+  name: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
 });
 
 type CreateTrainingTypeValues = Schema.Schema.Type<typeof CreateTrainingTypeSchema>;
@@ -78,11 +78,11 @@ export function TrainingTypesListPage({
         {
           tag: 'TrainingTypeNameAlreadyTaken',
           field: 'name',
-          message: m.trainingType_nameAlreadyTaken(),
+          message: tr('trainingType_nameAlreadyTaken'),
         },
       ]),
-      Effect.mapError(() => ClientError.make(m.trainingType_createFailed())),
-      run({ success: m.trainingType_created() }),
+      Effect.mapError(() => ClientError.make(tr('trainingType_createFailed'))),
+      run({ success: tr('trainingType_created') }),
     );
     if (Option.isSome(result)) {
       form.reset();
@@ -97,10 +97,10 @@ export function TrainingTypesListPage({
       <header className='mb-8'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId' params={{ teamId }}>
-            ← {m.team_backToTeams()}
+            ← {tr('team_backToTeams')}
           </Link>
         </Button>
-        <h1 className='text-2xl font-bold'>{m.trainingType_trainingTypes()}</h1>
+        <h1 className='text-2xl font-bold'>{tr('trainingType_trainingTypes')}</h1>
       </header>
 
       {canAdmin && (
@@ -113,9 +113,9 @@ export function TrainingTypesListPage({
               {...form.register('name')}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{m.trainingType_name()}</FormLabel>
+                  <FormLabel>{tr('trainingType_name')}</FormLabel>
                   <FormControl>
-                    <Input {...field} placeholder={m.trainingType_namePlaceholder()} />
+                    <Input {...field} placeholder={tr('trainingType_namePlaceholder')} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -125,16 +125,16 @@ export function TrainingTypesListPage({
               <div className='flex flex-col gap-4 sm:flex-row'>
                 <div className='flex-1'>
                   <label htmlFor='owner-group-select' className='text-sm font-medium mb-1 block'>
-                    {m.event_ownerGroup()}
+                    {tr('event_ownerGroup')}
                   </label>
-                  <p className='text-xs text-muted-foreground mb-2'>{m.event_ownerGroupHelp()}</p>
+                  <p className='text-xs text-muted-foreground mb-2'>{tr('event_ownerGroupHelp')}</p>
                   <SearchableSelect
                     id='owner-group-select'
                     value={ownerGroupId}
                     onValueChange={setOwnerGroupId}
-                    placeholder={m.event_useDefault()}
+                    placeholder={tr('event_useDefault')}
                     options={[
-                      { value: NONE_VALUE, label: m.event_useDefault() },
+                      { value: NONE_VALUE, label: tr('event_useDefault') },
                       ...toGroupOptions(groups),
                     ]}
                     pinnedValues={[NONE_VALUE]}
@@ -143,16 +143,18 @@ export function TrainingTypesListPage({
                 </div>
                 <div className='flex-1'>
                   <label htmlFor='member-group-select' className='text-sm font-medium mb-1 block'>
-                    {m.event_memberGroup()}
+                    {tr('event_memberGroup')}
                   </label>
-                  <p className='text-xs text-muted-foreground mb-2'>{m.event_memberGroupHelp()}</p>
+                  <p className='text-xs text-muted-foreground mb-2'>
+                    {tr('event_memberGroupHelp')}
+                  </p>
                   <SearchableSelect
                     id='member-group-select'
                     value={memberGroupId}
                     onValueChange={setMemberGroupId}
-                    placeholder={m.event_useDefault()}
+                    placeholder={tr('event_useDefault')}
                     options={[
-                      { value: NONE_VALUE, label: m.event_useDefault() },
+                      { value: NONE_VALUE, label: tr('event_useDefault') },
                       ...toGroupOptions(groups),
                     ]}
                     pinnedValues={[NONE_VALUE]}
@@ -163,7 +165,7 @@ export function TrainingTypesListPage({
             )}
             <div>
               <Button type='submit' disabled={form.formState.isSubmitting}>
-                {m.trainingType_createTrainingType()}
+                {tr('trainingType_createTrainingType')}
               </Button>
             </div>
           </form>
@@ -171,17 +173,17 @@ export function TrainingTypesListPage({
       )}
 
       {trainingTypes.length === 0 ? (
-        <p className='text-muted-foreground'>{m.trainingType_noTrainingTypes()}</p>
+        <p className='text-muted-foreground'>{tr('trainingType_noTrainingTypes')}</p>
       ) : (
         <table className='w-full'>
           <thead>
             <tr className='border-b'>
-              <th className='py-2 px-4 text-left text-sm font-medium'>{m.trainingType_name()}</th>
+              <th className='py-2 px-4 text-left text-sm font-medium'>{tr('trainingType_name')}</th>
               <th className='hidden sm:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
-                {m.event_ownerGroup()}
+                {tr('event_ownerGroup')}
               </th>
               <th className='hidden sm:table-cell py-2 px-4 text-left text-sm font-medium text-muted-foreground'>
-                {m.event_memberGroup()}
+                {tr('event_memberGroup')}
               </th>
               <th className='py-2 px-4' />
             </tr>
@@ -199,17 +201,17 @@ export function TrainingTypesListPage({
                   </Link>
                   {(Option.isSome(tt.ownerGroupName) || Option.isSome(tt.memberGroupName)) && (
                     <p className='text-xs text-muted-foreground sm:hidden'>
-                      {Option.getOrElse(tt.ownerGroupName, () => m.trainingType_noGroup())}
+                      {Option.getOrElse(tt.ownerGroupName, () => tr('trainingType_noGroup'))}
                       {' / '}
-                      {Option.getOrElse(tt.memberGroupName, () => m.trainingType_noGroup())}
+                      {Option.getOrElse(tt.memberGroupName, () => tr('trainingType_noGroup'))}
                     </p>
                   )}
                 </td>
                 <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-                  {Option.getOrElse(tt.ownerGroupName, () => m.trainingType_noGroup())}
+                  {Option.getOrElse(tt.ownerGroupName, () => tr('trainingType_noGroup'))}
                 </td>
                 <td className='hidden sm:table-cell py-2 px-4 text-muted-foreground'>
-                  {Option.getOrElse(tt.memberGroupName, () => m.trainingType_noGroup())}
+                  {Option.getOrElse(tt.memberGroupName, () => tr('trainingType_noGroup'))}
                 </td>
                 <td className='py-2 px-4'>
                   <Button asChild variant='outline' size='sm'>

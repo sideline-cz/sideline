@@ -1,6 +1,5 @@
 import type { GroupApi, Team } from '@sideline/domain';
 import { GroupModel } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import { Copy, ExternalLink } from 'lucide-react';
@@ -24,6 +23,7 @@ import {
   SelectValue,
 } from '~/components/ui/select';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 type ExpiryPreset = 'never' | '7days' | '30days';
 
@@ -77,8 +77,8 @@ export function CreateInviteDialog({
         }),
       ),
       Effect.tapError((error) => Effect.logError('createInvite failed', error)),
-      Effect.mapError(() => ClientError.make(m.invites_createFailed())),
-      run({ success: m.invites_createSuccess() }),
+      Effect.mapError(() => ClientError.make(tr('invites_createFailed'))),
+      run({ success: tr('invites_createSuccess') }),
     );
     setCreating(false);
     if (Option.isSome(result)) {
@@ -109,40 +109,40 @@ export function CreateInviteDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className='sm:max-w-md'>
         <DialogHeader>
-          <DialogTitle>{m.invites_dialogTitle()}</DialogTitle>
-          <DialogDescription>{m.invites_dialogDescription()}</DialogDescription>
+          <DialogTitle>{tr('invites_dialogTitle')}</DialogTitle>
+          <DialogDescription>{tr('invites_dialogDescription')}</DialogDescription>
         </DialogHeader>
 
         {createdCode !== null ? (
           <div className='flex flex-col gap-4'>
-            <p className='text-sm font-medium'>{m.invites_createdLinkTitle()}</p>
-            <p className='text-xs text-muted-foreground'>{m.invites_createdLinkDescription()}</p>
+            <p className='text-sm font-medium'>{tr('invites_createdLinkTitle')}</p>
+            <p className='text-xs text-muted-foreground'>{tr('invites_createdLinkDescription')}</p>
             <div className='flex gap-2'>
               <Input readOnly value={inviteLink ?? ''} className='font-mono text-xs' />
               <Button type='button' variant='outline' size='icon' onClick={handleCopy}>
                 <Copy className='size-4' />
-                <span className='sr-only'>{m.invites_copyLink()}</span>
+                <span className='sr-only'>{tr('invites_copyLink')}</span>
               </Button>
             </div>
-            {copied && <p className='text-xs text-muted-foreground'>{m.invites_linkCopied()}</p>}
+            {copied && <p className='text-xs text-muted-foreground'>{tr('invites_linkCopied')}</p>}
             <DialogFooter>
-              <Button onClick={handleClose}>{m.invites_done()}</Button>
+              <Button onClick={handleClose}>{tr('invites_done')}</Button>
             </DialogFooter>
           </div>
         ) : (
           <div className='flex flex-col gap-5'>
             {/* Group selection */}
             <div className='flex flex-col gap-2'>
-              <Label>{m.invites_groupLabel()}</Label>
+              <Label>{tr('invites_groupLabel')}</Label>
               {!hasGroups ? (
                 <div className='text-sm text-muted-foreground'>
-                  <p>{m.invites_noGroupsCta()}</p>
+                  <p>{tr('invites_noGroupsCta')}</p>
                   <Link
                     to='/teams/$teamId/groups'
                     params={{ teamId }}
                     className='text-primary underline hover:no-underline inline-flex items-center gap-1 mt-1'
                   >
-                    {m.invites_noGroupsLink()}
+                    {tr('invites_noGroupsLink')}
                     <ExternalLink className='size-3' />
                   </Link>
                 </div>
@@ -158,7 +158,7 @@ export function CreateInviteDialog({
                         onChange={() => setGroupMode('any')}
                         className='accent-primary'
                       />
-                      {m.invites_groupAny()}
+                      {tr('invites_groupAny')}
                     </label>
                     <label className='flex items-center gap-2 text-sm cursor-pointer'>
                       <input
@@ -169,13 +169,13 @@ export function CreateInviteDialog({
                         onChange={() => setGroupMode('specific')}
                         className='accent-primary'
                       />
-                      {m.invites_groupSpecific()}
+                      {tr('invites_groupSpecific')}
                     </label>
                   </div>
                   {groupMode === 'specific' && (
                     <Select value={selectedGroupId} onValueChange={setSelectedGroupId}>
                       <SelectTrigger>
-                        <SelectValue placeholder={m.invites_groupSelect()} />
+                        <SelectValue placeholder={tr('invites_groupSelect')} />
                       </SelectTrigger>
                       <SelectContent>
                         {groups.map((g) => (
@@ -192,15 +192,15 @@ export function CreateInviteDialog({
 
             {/* Expiry */}
             <div className='flex flex-col gap-2'>
-              <Label htmlFor='invite-expiry'>{m.invites_expiryLabel()}</Label>
+              <Label htmlFor='invite-expiry'>{tr('invites_expiryLabel')}</Label>
               <Select value={expiry} onValueChange={(v) => setExpiry(v as ExpiryPreset)}>
                 <SelectTrigger id='invite-expiry'>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value='never'>{m.invites_expiryNever()}</SelectItem>
-                  <SelectItem value='7days'>{m.invites_expiry7days()}</SelectItem>
-                  <SelectItem value='30days'>{m.invites_expiry30days()}</SelectItem>
+                  <SelectItem value='never'>{tr('invites_expiryNever')}</SelectItem>
+                  <SelectItem value='7days'>{tr('invites_expiry7days')}</SelectItem>
+                  <SelectItem value='30days'>{tr('invites_expiry30days')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -210,7 +210,7 @@ export function CreateInviteDialog({
                 onClick={handleCreate}
                 disabled={creating || (groupMode === 'specific' && hasGroups && !selectedGroupId)}
               >
-                {creating ? m.invites_creating() : m.invites_create()}
+                {creating ? tr('invites_creating') : tr('invites_create')}
               </Button>
             </DialogFooter>
           </div>

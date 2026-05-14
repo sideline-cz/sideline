@@ -1,7 +1,6 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { AchievementApi } from '@sideline/domain';
 import { Achievement, CustomAchievement, Discord, Team } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
@@ -38,6 +37,7 @@ import { Textarea } from '~/components/ui/textarea';
 import { ToggleGroup, ToggleGroupItem } from '~/components/ui/toggle-group';
 import { withFieldErrors } from '~/lib/form';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -47,23 +47,19 @@ type RoleSource = 'none' | 'existing' | 'auto_create';
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function translateBuiltInTitle(titleKey: string): string {
-  const fn = m[titleKey as keyof typeof m];
-  if (typeof fn === 'function') {
-    return (fn as () => string)();
-  }
-  return titleKey;
+  return tr(titleKey);
 }
 
 function formatRule(ruleKind: string, threshold: number): string {
   switch (ruleKind) {
     case 'total_activities':
-      return `≥ ${String(threshold)} ${m.achievement_admin_rule_total_activities()}`;
+      return `≥ ${String(threshold)} ${tr('achievement_admin_rule_total_activities')}`;
     case 'longest_streak':
-      return `≥ ${String(threshold)} ${m.achievement_admin_rule_longest_streak()}`;
+      return `≥ ${String(threshold)} ${tr('achievement_admin_rule_longest_streak')}`;
     case 'total_duration':
-      return `≥ ${String(threshold)} ${m.achievement_admin_rule_total_duration()}`;
+      return `≥ ${String(threshold)} ${tr('achievement_admin_rule_total_duration')}`;
     case 'activity_type_count':
-      return `≥ ${String(threshold)} ${m.achievement_admin_rule_activity_type_count()}`;
+      return `≥ ${String(threshold)} ${tr('achievement_admin_rule_activity_type_count')}`;
     default:
       return `≥ ${String(threshold)}`;
   }
@@ -90,7 +86,7 @@ function RoleMappingSection({
 }: RoleMappingSectionProps) {
   return (
     <div className='flex flex-col gap-3'>
-      <Label className='text-sm font-medium'>{m.achievement_admin_table_role()}</Label>
+      <Label className='text-sm font-medium'>{tr('achievement_admin_table_role')}</Label>
       <div className='flex flex-col gap-2'>
         {/* None */}
         <label className='flex items-center gap-2 cursor-pointer'>
@@ -102,7 +98,7 @@ function RoleMappingSection({
             onChange={() => onRoleSourceChange('none')}
             className='accent-primary'
           />
-          <span className='text-sm'>{m.achievement_admin_roleMapping_none()}</span>
+          <span className='text-sm'>{tr('achievement_admin_roleMapping_none')}</span>
         </label>
 
         {/* Existing */}
@@ -116,7 +112,7 @@ function RoleMappingSection({
               onChange={() => onRoleSourceChange('existing')}
               className='accent-primary'
             />
-            <span className='text-sm'>{m.achievement_admin_roleMapping_existing()}</span>
+            <span className='text-sm'>{tr('achievement_admin_roleMapping_existing')}</span>
           </label>
           {roleSource === 'existing' && (
             <div className='ml-5'>
@@ -146,11 +142,11 @@ function RoleMappingSection({
               disabled={!botCanManageRoles}
               className='accent-primary'
             />
-            <span className='text-sm'>{m.achievement_admin_roleMapping_autoCreate()}</span>
+            <span className='text-sm'>{tr('achievement_admin_roleMapping_autoCreate')}</span>
           </label>
           {!botCanManageRoles && (
             <p className='ml-5 text-xs text-destructive'>
-              {m.achievement_admin_roleMapping_botMissingPermission()}
+              {tr('achievement_admin_roleMapping_botMissingPermission')}
             </p>
           )}
         </div>
@@ -287,7 +283,7 @@ function EditBuiltInSheet({ achievement, teamId, open, onClose, onSaved }: EditB
           }),
         ),
         Effect.mapError(() => ClientError.make('Failed to save role mapping')),
-        run({ success: m.achievement_admin_save() }),
+        run({ success: tr('achievement_admin_save') }),
       );
     } else if (roleSource === 'auto_create') {
       await ApiClient.asEffect().pipe(
@@ -298,7 +294,7 @@ function EditBuiltInSheet({ achievement, teamId, open, onClose, onSaved }: EditB
           }),
         ),
         Effect.mapError(() => ClientError.make('Failed to save role mapping')),
-        run({ success: m.achievement_admin_save() }),
+        run({ success: tr('achievement_admin_save') }),
       );
     } else {
       await ApiClient.asEffect().pipe(
@@ -309,7 +305,7 @@ function EditBuiltInSheet({ achievement, teamId, open, onClose, onSaved }: EditB
           }),
         ),
         Effect.mapError(() => ClientError.make('Failed to save role mapping')),
-        run({ success: m.achievement_admin_save() }),
+        run({ success: tr('achievement_admin_save') }),
       );
     }
 
@@ -333,7 +329,7 @@ function EditBuiltInSheet({ achievement, teamId, open, onClose, onSaved }: EditB
           {/* Threshold */}
           <div className='flex flex-col gap-2'>
             <Label htmlFor='threshold-input' className='text-sm font-medium'>
-              {m.achievement_admin_thresholdOverride_label()}
+              {tr('achievement_admin_thresholdOverride_label')}
             </Label>
             <Input
               id='threshold-input'
@@ -362,7 +358,7 @@ function EditBuiltInSheet({ achievement, teamId, open, onClose, onSaved }: EditB
               )}
               {previewState.status === 'loaded' && (
                 <p className='text-muted-foreground'>
-                  {m.achievement_admin_qualifyingCount({ count: previewState.qualifyingCount })}{' '}
+                  {tr('achievement_admin_qualifyingCount', { count: previewState.qualifyingCount })}{' '}
                   after save
                 </p>
               )}
@@ -401,7 +397,7 @@ function EditBuiltInSheet({ achievement, teamId, open, onClose, onSaved }: EditB
                     onChange={(e) => setConfirmedDestructive(e.target.checked)}
                   />
                   <span className='text-sm'>
-                    {m.achievement_admin_thresholdOverride_destructiveConfirm({
+                    {tr('achievement_admin_thresholdOverride_destructiveConfirm', {
                       count: removedCount,
                     })}
                   </span>
@@ -423,10 +419,10 @@ function EditBuiltInSheet({ achievement, teamId, open, onClose, onSaved }: EditB
 
         <SheetFooter className='flex flex-row gap-2 justify-end px-4 pb-4'>
           <Button variant='outline' onClick={onClose} disabled={saving}>
-            {m.achievement_admin_cancel()}
+            {tr('achievement_admin_cancel')}
           </Button>
           <Button onClick={handleSave} disabled={!canSave}>
-            {saving ? 'Saving…' : m.achievement_admin_save()}
+            {saving ? 'Saving…' : tr('achievement_admin_save')}
           </Button>
         </SheetFooter>
       </SheetContent>
@@ -437,8 +433,8 @@ function EditBuiltInSheet({ achievement, teamId, open, onClose, onSaved }: EditB
 // ─── Create/Edit Custom Schema ─────────────────────────────────────────────────
 
 const CustomAchievementFormSchema = Schema.Struct({
-  name: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
-  description: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
+  name: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
+  description: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   emoji: Schema.String,
   ruleKind: CustomAchievement.CustomRuleKind,
   threshold: Schema.String,
@@ -528,11 +524,11 @@ function CustomAchievementDialog({
           {
             tag: 'CustomAchievementNameTaken',
             field: 'name',
-            message: m.achievement_admin_custom_nameTaken(),
+            message: tr('achievement_admin_custom_nameTaken'),
           },
         ]),
         Effect.mapError(() => ClientError.make('Failed to save achievement')),
-        run({ success: m.achievement_admin_save() }),
+        run({ success: tr('achievement_admin_save') }),
       );
       if (Option.isSome(result)) {
         form.reset();
@@ -559,11 +555,11 @@ function CustomAchievementDialog({
           {
             tag: 'CustomAchievementNameTaken',
             field: 'name',
-            message: m.achievement_admin_custom_nameTaken(),
+            message: tr('achievement_admin_custom_nameTaken'),
           },
         ]),
         Effect.mapError(() => ClientError.make('Failed to create achievement')),
-        run({ success: m.achievement_admin_custom_create() }),
+        run({ success: tr('achievement_admin_custom_create') }),
       );
       if (Option.isSome(result)) {
         form.reset();
@@ -578,7 +574,9 @@ function CustomAchievementDialog({
       <DialogContent className='max-w-lg max-h-[90vh] overflow-y-auto'>
         <DialogHeader>
           <DialogTitle>
-            {isEditing ? m.achievement_admin_custom_edit() : m.achievement_admin_custom_create()}
+            {isEditing
+              ? tr('achievement_admin_custom_edit')
+              : tr('achievement_admin_custom_create')}
           </DialogTitle>
         </DialogHeader>
 
@@ -589,7 +587,7 @@ function CustomAchievementDialog({
               {...form.register('name')}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{m.achievement_admin_table_name()}</FormLabel>
+                  <FormLabel>{tr('achievement_admin_table_name')}</FormLabel>
                   <FormControl>
                     <Input {...field} placeholder='e.g. Team Spirit' />
                   </FormControl>
@@ -603,7 +601,7 @@ function CustomAchievementDialog({
               {...form.register('description')}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{m.achievement_admin_table_description()}</FormLabel>
+                  <FormLabel>{tr('achievement_admin_table_description')}</FormLabel>
                   <FormControl>
                     <Textarea {...field} rows={2} placeholder='Shown to players…' maxLength={140} />
                   </FormControl>
@@ -617,7 +615,7 @@ function CustomAchievementDialog({
               {...form.register('emoji')}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{m.achievement_admin_table_emoji()}</FormLabel>
+                  <FormLabel>{tr('achievement_admin_table_emoji')}</FormLabel>
                   <FormControl>
                     <Input {...field} placeholder='🏅' maxLength={4} className='w-20' />
                   </FormControl>
@@ -631,7 +629,7 @@ function CustomAchievementDialog({
               {...form.register('ruleKind')}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{m.achievement_admin_table_rule()}</FormLabel>
+                  <FormLabel>{tr('achievement_admin_table_rule')}</FormLabel>
                   <FormControl>
                     <Select value={field.value} onValueChange={field.onChange}>
                       <SelectTrigger>
@@ -639,16 +637,16 @@ function CustomAchievementDialog({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value='total_activities'>
-                          {m.achievement_admin_rule_total_activities()}
+                          {tr('achievement_admin_rule_total_activities')}
                         </SelectItem>
                         <SelectItem value='longest_streak'>
-                          {m.achievement_admin_rule_longest_streak()}
+                          {tr('achievement_admin_rule_longest_streak')}
                         </SelectItem>
                         <SelectItem value='total_duration'>
-                          {m.achievement_admin_rule_total_duration()}
+                          {tr('achievement_admin_rule_total_duration')}
                         </SelectItem>
                         <SelectItem value='activity_type_count'>
-                          {m.achievement_admin_rule_activity_type_count()}
+                          {tr('achievement_admin_rule_activity_type_count')}
                         </SelectItem>
                       </SelectContent>
                     </Select>
@@ -663,7 +661,7 @@ function CustomAchievementDialog({
               {...form.register('threshold')}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{m.achievement_admin_thresholdOverride_label()}</FormLabel>
+                  <FormLabel>{tr('achievement_admin_thresholdOverride_label')}</FormLabel>
                   <FormControl>
                     <Input {...field} type='number' min={1} className='w-28' />
                   </FormControl>
@@ -690,7 +688,7 @@ function CustomAchievementDialog({
 
             {/* Role mapping */}
             <div className='flex flex-col gap-2'>
-              <Label className='text-sm font-medium'>{m.achievement_admin_table_role()}</Label>
+              <Label className='text-sm font-medium'>{tr('achievement_admin_table_role')}</Label>
               <div className='flex flex-col gap-2'>
                 <label className='flex items-center gap-2 cursor-pointer'>
                   <input
@@ -701,7 +699,7 @@ function CustomAchievementDialog({
                     onChange={() => form.setValue('roleSource', 'none')}
                     className='accent-primary'
                   />
-                  <span className='text-sm'>{m.achievement_admin_roleMapping_none()}</span>
+                  <span className='text-sm'>{tr('achievement_admin_roleMapping_none')}</span>
                 </label>
                 <div className='flex flex-col gap-1'>
                   <label className='flex items-center gap-2 cursor-pointer'>
@@ -713,7 +711,7 @@ function CustomAchievementDialog({
                       onChange={() => form.setValue('roleSource', 'existing')}
                       className='accent-primary'
                     />
-                    <span className='text-sm'>{m.achievement_admin_roleMapping_existing()}</span>
+                    <span className='text-sm'>{tr('achievement_admin_roleMapping_existing')}</span>
                   </label>
                   {watchedRoleSource === 'existing' && (
                     <div className='ml-5'>
@@ -744,21 +742,21 @@ function CustomAchievementDialog({
                     onChange={() => form.setValue('roleSource', 'auto_create')}
                     className='accent-primary'
                   />
-                  <span className='text-sm'>{m.achievement_admin_roleMapping_autoCreate()}</span>
+                  <span className='text-sm'>{tr('achievement_admin_roleMapping_autoCreate')}</span>
                 </label>
               </div>
             </div>
 
             <DialogFooter>
               <Button type='button' variant='outline' onClick={onClose}>
-                {m.achievement_admin_cancel()}
+                {tr('achievement_admin_cancel')}
               </Button>
               <Button type='submit' disabled={form.formState.isSubmitting}>
                 {form.formState.isSubmitting
                   ? 'Saving…'
                   : isEditing
-                    ? m.achievement_admin_save()
-                    : m.achievement_admin_custom_create()}
+                    ? tr('achievement_admin_save')
+                    : tr('achievement_admin_custom_create')}
               </Button>
             </DialogFooter>
           </form>
@@ -796,7 +794,7 @@ export function AchievementsAdminPage({ teamId, initialData }: AchievementsAdmin
 
   const handleDelete = React.useCallback(
     async (achievement: AchievementApi.AchievementOverview) => {
-      if (!window.confirm(m.achievement_admin_custom_deleteConfirm())) return;
+      if (!window.confirm(tr('achievement_admin_custom_deleteConfirm'))) return;
       const customId = Schema.decodeSync(CustomAchievement.CustomAchievementId)(
         achievement.keyOrId,
       );
@@ -807,7 +805,7 @@ export function AchievementsAdminPage({ teamId, initialData }: AchievementsAdmin
           }),
         ),
         Effect.mapError(() => ClientError.make('Failed to delete achievement')),
-        run({ success: m.achievement_admin_custom_delete() }),
+        run({ success: tr('achievement_admin_custom_delete') }),
       );
       if (Option.isSome(result)) {
         router.invalidate();
@@ -825,11 +823,11 @@ export function AchievementsAdminPage({ teamId, initialData }: AchievementsAdmin
       <header className='mb-8'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId' params={{ teamId }}>
-            ← {m.team_backToTeams()}
+            ← {tr('team_backToTeams')}
           </Link>
         </Button>
-        <h1 className='text-2xl font-bold'>{m.achievement_admin_title()}</h1>
-        <p className='text-muted-foreground mt-1'>{m.achievement_admin_subtitle()}</p>
+        <h1 className='text-2xl font-bold'>{tr('achievement_admin_title')}</h1>
+        <p className='text-muted-foreground mt-1'>{tr('achievement_admin_subtitle')}</p>
       </header>
 
       {/* Top action */}
@@ -842,12 +840,14 @@ export function AchievementsAdminPage({ teamId, initialData }: AchievementsAdmin
           }}
           variant='outline'
         >
-          <ToggleGroupItem value='all'>{m.achievement_admin_filter_all()}</ToggleGroupItem>
-          <ToggleGroupItem value='system'>{m.achievement_admin_filter_system()}</ToggleGroupItem>
-          <ToggleGroupItem value='custom'>{m.achievement_admin_filter_custom()}</ToggleGroupItem>
+          <ToggleGroupItem value='all'>{tr('achievement_admin_filter_all')}</ToggleGroupItem>
+          <ToggleGroupItem value='system'>{tr('achievement_admin_filter_system')}</ToggleGroupItem>
+          <ToggleGroupItem value='custom'>{tr('achievement_admin_filter_custom')}</ToggleGroupItem>
         </ToggleGroup>
 
-        <Button onClick={() => setCreateOpen(true)}>+ {m.achievement_admin_custom_create()}</Button>
+        <Button onClick={() => setCreateOpen(true)}>
+          + {tr('achievement_admin_custom_create')}
+        </Button>
       </div>
 
       {/* Table */}
@@ -858,22 +858,24 @@ export function AchievementsAdminPage({ teamId, initialData }: AchievementsAdmin
           <p className='text-sm text-muted-foreground'>
             Create one to recognise team-specific milestones.
           </p>
-          <Button onClick={() => setCreateOpen(true)}>{m.achievement_admin_custom_create()}</Button>
+          <Button onClick={() => setCreateOpen(true)}>
+            {tr('achievement_admin_custom_create')}
+          </Button>
         </div>
       ) : (
         <div className='overflow-x-auto'>
           <table className='w-full'>
             <thead>
               <tr className='border-b text-left text-sm text-muted-foreground'>
-                <th className='py-2 px-2 w-10'>{m.achievement_admin_table_emoji()}</th>
-                <th className='py-2 px-3'>{m.achievement_admin_table_name()}</th>
+                <th className='py-2 px-2 w-10'>{tr('achievement_admin_table_emoji')}</th>
+                <th className='py-2 px-3'>{tr('achievement_admin_table_name')}</th>
                 <th className='hidden sm:table-cell py-2 px-3'>
-                  {m.achievement_admin_table_rule()}
+                  {tr('achievement_admin_table_rule')}
                 </th>
                 <th className='hidden sm:table-cell py-2 px-3'>
-                  {m.achievement_admin_table_role()}
+                  {tr('achievement_admin_table_role')}
                 </th>
-                <th className='py-2 px-3'>{m.achievement_admin_table_actions()}</th>
+                <th className='py-2 px-3'>{tr('achievement_admin_table_actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -896,8 +898,8 @@ export function AchievementsAdminPage({ teamId, initialData }: AchievementsAdmin
                       }`}
                     >
                       {achievement.isBuiltIn
-                        ? m.achievement_admin_filter_system()
-                        : m.achievement_admin_filter_custom()}
+                        ? tr('achievement_admin_filter_system')
+                        : tr('achievement_admin_filter_custom')}
                     </span>
                   </td>
                   <td className='hidden sm:table-cell py-3 px-3 text-sm text-muted-foreground'>
@@ -923,7 +925,7 @@ export function AchievementsAdminPage({ teamId, initialData }: AchievementsAdmin
                           }
                         }}
                       >
-                        {m.achievement_admin_custom_edit()}
+                        {tr('achievement_admin_custom_edit')}
                       </Button>
                       {!achievement.isBuiltIn && (
                         <Button
@@ -931,7 +933,7 @@ export function AchievementsAdminPage({ teamId, initialData }: AchievementsAdmin
                           size='sm'
                           onClick={() => handleDelete(achievement)}
                         >
-                          {m.achievement_admin_custom_delete()}
+                          {tr('achievement_admin_custom_delete')}
                         </Button>
                       )}
                     </div>

@@ -54,6 +54,7 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { MockTranslationsLayers } from '../mocks/translationMocks.js';
 
 // ---------------------------------------------------------------------------
 // Test constants
@@ -435,6 +436,7 @@ const MockNoopLayers = Layer.mergeAll(
   noopMockLayer(DiscordRoleProvisionEventsRepository),
   noopMockLayer(AchievementPreview),
   MockTeamSettingsRepositoryLayer,
+  MockTranslationsLayers,
 );
 
 const TestLayer = ApiLive.pipe(

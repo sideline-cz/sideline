@@ -1,6 +1,5 @@
 import type { GroupApi, TeamApi, TeamSettingsApi } from '@sideline/domain';
 import { ChannelSyncEvent, Discord } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { applyTemplate, sanitizeRendered } from '@sideline/template-renderer';
 import { Link, useRouter } from '@tanstack/react-router';
 import { DateTime, Effect, Option, Schema } from 'effect';
@@ -29,6 +28,7 @@ import { ToggleGroup, ToggleGroupItem } from '~/components/ui/toggle-group';
 import { useFormatDate } from '~/hooks/useFormatDate';
 import { DISCORD_CHANNEL_TYPE_CATEGORY, DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 interface TeamSettingsPageProps {
   teamId: string;
@@ -240,8 +240,8 @@ export function TeamSettingsPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.teamSettings_profileSaveFailed())),
-      run({ success: m.teamSettings_profileSaved() }),
+      Effect.mapError(() => ClientError.make(tr('teamSettings_profileSaveFailed'))),
+      run({ success: tr('teamSettings_profileSaved') }),
     );
     setSavingProfile(false);
     if (Option.isSome(result)) {
@@ -291,8 +291,8 @@ export function TeamSettingsPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.teamSettings_saveFailed())),
-      run({ success: m.teamSettings_saved() }),
+      Effect.mapError(() => ClientError.make(tr('teamSettings_saveFailed'))),
+      run({ success: tr('teamSettings_saved') }),
     );
     setSavingSettings(false);
     if (Option.isSome(result)) {
@@ -347,8 +347,8 @@ export function TeamSettingsPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.teamSettings_welcomeSaveFailed())),
-      run({ success: m.teamSettings_welcomeSaved() }),
+      Effect.mapError(() => ClientError.make(tr('teamSettings_welcomeSaveFailed'))),
+      run({ success: tr('teamSettings_welcomeSaved') }),
     );
     setSavingWelcome(false);
     if (Option.isSome(result)) {
@@ -366,7 +366,7 @@ export function TeamSettingsPage({
 
   const handleSaveOnboarding = React.useCallback(async () => {
     setSavingOnboarding(true);
-    toast(m.teamSettings_onboardingSavedSyncing(), { duration: 3000 });
+    toast(tr('teamSettings_onboardingSavedSyncing'), { duration: 3000 });
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.team.updateTeamInfo({
@@ -385,7 +385,7 @@ export function TeamSettingsPage({
           },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.teamSettings_welcomeSaveFailed())),
+      Effect.mapError(() => ClientError.make(tr('teamSettings_welcomeSaveFailed'))),
       run({}),
     );
     setSavingOnboarding(false);
@@ -410,7 +410,7 @@ export function TeamSettingsPage({
           params: { teamId: teamInfo.teamId },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.teamSettings_welcomeSaveFailed())),
+      Effect.mapError(() => ClientError.make(tr('teamSettings_welcomeSaveFailed'))),
       run({}),
     );
     setRetryingOnboarding(false);
@@ -424,43 +424,43 @@ export function TeamSettingsPage({
       key: 'training',
       value: channelTraining,
       setter: setChannelTraining,
-      label: m.teamSettings_channelTraining(),
+      label: tr('teamSettings_channelTraining'),
     },
     {
       key: 'match',
       value: channelMatch,
       setter: setChannelMatch,
-      label: m.teamSettings_channelMatch(),
+      label: tr('teamSettings_channelMatch'),
     },
     {
       key: 'tournament',
       value: channelTournament,
       setter: setChannelTournament,
-      label: m.teamSettings_channelTournament(),
+      label: tr('teamSettings_channelTournament'),
     },
     {
       key: 'meeting',
       value: channelMeeting,
       setter: setChannelMeeting,
-      label: m.teamSettings_channelMeeting(),
+      label: tr('teamSettings_channelMeeting'),
     },
     {
       key: 'social',
       value: channelSocial,
       setter: setChannelSocial,
-      label: m.teamSettings_channelSocial(),
+      label: tr('teamSettings_channelSocial'),
     },
     {
       key: 'other',
       value: channelOther,
       setter: setChannelOther,
-      label: m.teamSettings_channelOther(),
+      label: tr('teamSettings_channelOther'),
     },
     {
       key: 'lateRsvp',
       value: channelLateRsvp,
       setter: setChannelLateRsvp,
-      label: m.teamSettings_channelLateRsvp(),
+      label: tr('teamSettings_channelLateRsvp'),
     },
   ] as const;
 
@@ -469,10 +469,10 @@ export function TeamSettingsPage({
       <header className='mb-6'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId' params={{ teamId }}>
-            ← {m.team_backToTeams()}
+            ← {tr('team_backToTeams')}
           </Link>
         </Button>
-        <h1 className='text-2xl font-bold'>{m.team_settings()}</h1>
+        <h1 className='text-2xl font-bold'>{tr('team_settings')}</h1>
       </header>
 
       <div className='flex flex-col gap-6 max-w-2xl'>
@@ -481,9 +481,9 @@ export function TeamSettingsPage({
           <CardHeader>
             <div className='flex items-center gap-2'>
               <Users className='size-4 text-muted-foreground' />
-              <CardTitle className='text-base'>{m.teamSettings_teamProfile()}</CardTitle>
+              <CardTitle className='text-base'>{tr('teamSettings_teamProfile')}</CardTitle>
             </div>
-            <CardDescription>{m.teamSettings_teamProfileDescription()}</CardDescription>
+            <CardDescription>{tr('teamSettings_teamProfileDescription')}</CardDescription>
           </CardHeader>
           <CardContent>
             <div className='flex flex-col gap-5'>
@@ -497,7 +497,7 @@ export function TeamSettingsPage({
               )}
               <div>
                 <label htmlFor='team-name' className='text-sm font-medium mb-1 block'>
-                  {m.teamSettings_teamName()}
+                  {tr('teamSettings_teamName')}
                 </label>
                 <Input
                   id='team-name'
@@ -509,10 +509,10 @@ export function TeamSettingsPage({
               </div>
               <div>
                 <label htmlFor='team-description' className='text-sm font-medium mb-1 block'>
-                  {m.teamSettings_description()}
+                  {tr('teamSettings_description')}
                 </label>
                 <p className='text-xs text-muted-foreground mb-2'>
-                  {m.teamSettings_descriptionHelp()}
+                  {tr('teamSettings_descriptionHelp')}
                 </p>
                 <Textarea
                   id='team-description'
@@ -524,9 +524,9 @@ export function TeamSettingsPage({
               </div>
               <div>
                 <label htmlFor='team-sport' className='text-sm font-medium mb-1 block'>
-                  {m.teamSettings_sport()}
+                  {tr('teamSettings_sport')}
                 </label>
-                <p className='text-xs text-muted-foreground mb-2'>{m.teamSettings_sportHelp()}</p>
+                <p className='text-xs text-muted-foreground mb-2'>{tr('teamSettings_sportHelp')}</p>
                 <Input
                   id='team-sport'
                   type='text'
@@ -537,9 +537,11 @@ export function TeamSettingsPage({
               </div>
               <div>
                 <label htmlFor='team-logo-url' className='text-sm font-medium mb-1 block'>
-                  {m.teamSettings_logoUrl()}
+                  {tr('teamSettings_logoUrl')}
                 </label>
-                <p className='text-xs text-muted-foreground mb-2'>{m.teamSettings_logoUrlHelp()}</p>
+                <p className='text-xs text-muted-foreground mb-2'>
+                  {tr('teamSettings_logoUrlHelp')}
+                </p>
                 <Input
                   id='team-logo-url'
                   type='url'
@@ -551,10 +553,12 @@ export function TeamSettingsPage({
               </div>
               <div className='flex items-center gap-3'>
                 <Button onClick={handleSaveProfile} disabled={savingProfile || !hasProfileChanges}>
-                  {savingProfile ? m.profile_saving() : m.profile_saveChanges()}
+                  {savingProfile ? tr('profile_saving') : tr('profile_saveChanges')}
                 </Button>
                 {hasProfileChanges && (
-                  <p className='text-sm text-muted-foreground'>{m.teamSettings_unsavedChanges()}</p>
+                  <p className='text-sm text-muted-foreground'>
+                    {tr('teamSettings_unsavedChanges')}
+                  </p>
                 )}
               </div>
             </div>
@@ -566,18 +570,18 @@ export function TeamSettingsPage({
           <CardHeader>
             <div className='flex items-center gap-2'>
               <Settings className='size-4 text-muted-foreground' />
-              <CardTitle className='text-base'>{m.teamSettings_generalTitle()}</CardTitle>
+              <CardTitle className='text-base'>{tr('teamSettings_generalTitle')}</CardTitle>
             </div>
-            <CardDescription>{m.teamSettings_generalDescription()}</CardDescription>
+            <CardDescription>{tr('teamSettings_generalDescription')}</CardDescription>
           </CardHeader>
           <CardContent>
             <div className='flex flex-col gap-5'>
               <div>
                 <label htmlFor='horizon-days' className='text-sm font-medium mb-1 block'>
-                  {m.teamSettings_horizonDays()}
+                  {tr('teamSettings_horizonDays')}
                 </label>
                 <p className='text-xs text-muted-foreground mb-2'>
-                  {m.teamSettings_horizonDaysHelp()}
+                  {tr('teamSettings_horizonDaysHelp')}
                 </p>
                 <Input
                   id='horizon-days'
@@ -592,10 +596,10 @@ export function TeamSettingsPage({
               <Separator />
               <div>
                 <label htmlFor='min-players' className='text-sm font-medium mb-1 block'>
-                  {m.teamSettings_minPlayersThreshold()}
+                  {tr('teamSettings_minPlayersThreshold')}
                 </label>
                 <p className='text-xs text-muted-foreground mb-2'>
-                  {m.teamSettings_minPlayersThresholdHelp()}
+                  {tr('teamSettings_minPlayersThresholdHelp')}
                 </p>
                 <Input
                   id='min-players'
@@ -614,26 +618,26 @@ export function TeamSettingsPage({
         {/* Reminders */}
         <Card>
           <CardHeader>
-            <CardTitle className='text-base'>{m.teamSettings_remindersChannel()}</CardTitle>
-            <CardDescription>{m.teamSettings_rsvpReminderHelp()}</CardDescription>
+            <CardTitle className='text-base'>{tr('teamSettings_remindersChannel')}</CardTitle>
+            <CardDescription>{tr('teamSettings_rsvpReminderHelp')}</CardDescription>
           </CardHeader>
           <CardContent>
             <div className='flex flex-col gap-5'>
               <div>
                 <label htmlFor='reminders-channel' className='text-sm font-medium mb-1 block'>
-                  {m.teamSettings_remindersChannel()}
+                  {tr('teamSettings_remindersChannel')}
                 </label>
                 <p className='text-xs text-muted-foreground mb-2'>
-                  {m.teamSettings_remindersChannelHelp()}
+                  {tr('teamSettings_remindersChannelHelp')}
                 </p>
                 <SearchableSelect
                   id='reminders-channel'
                   value={remindersChannelId}
                   onValueChange={setRemindersChannelId}
-                  placeholder={m.teamSettings_channelNone()}
+                  placeholder={tr('teamSettings_channelNone')}
                   pinnedValues={[NONE_VALUE]}
                   options={[
-                    { value: NONE_VALUE, label: m.teamSettings_channelNone() },
+                    { value: NONE_VALUE, label: tr('teamSettings_channelNone') },
                     ...discordChannels
                       .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
                       .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
@@ -646,7 +650,7 @@ export function TeamSettingsPage({
                   htmlFor='rsvp-reminder-days-before'
                   className='text-sm font-medium mb-1 block'
                 >
-                  {m.teamSettings_rsvpReminderDaysBefore()}
+                  {tr('teamSettings_rsvpReminderDaysBefore')}
                 </label>
                 <Input
                   id='rsvp-reminder-days-before'
@@ -660,7 +664,7 @@ export function TeamSettingsPage({
               </div>
               <div>
                 <label htmlFor='rsvp-reminder-time' className='text-sm font-medium mb-1 block'>
-                  {m.teamSettings_rsvpReminderTime()}
+                  {tr('teamSettings_rsvpReminderTime')}
                 </label>
                 <input
                   id='rsvp-reminder-time'
@@ -672,10 +676,10 @@ export function TeamSettingsPage({
               </div>
               <div>
                 <label htmlFor='timezone' className='text-sm font-medium mb-1 block'>
-                  {m.teamSettings_timezone()}
+                  {tr('teamSettings_timezone')}
                 </label>
                 <p className='text-xs text-muted-foreground mb-2'>
-                  {m.teamSettings_timezoneHelp()}
+                  {tr('teamSettings_timezoneHelp')}
                 </p>
                 <select
                   id='timezone'
@@ -699,20 +703,20 @@ export function TeamSettingsPage({
           <CardHeader>
             <div className='flex items-center gap-2'>
               <MessageSquare className='size-4 text-muted-foreground' />
-              <CardTitle className='text-base'>{m.teamSettings_discordChannels()}</CardTitle>
+              <CardTitle className='text-base'>{tr('teamSettings_discordChannels')}</CardTitle>
             </div>
-            <CardDescription>{m.teamSettings_discordChannelsHelp()}</CardDescription>
+            <CardDescription>{tr('teamSettings_discordChannelsHelp')}</CardDescription>
           </CardHeader>
           <CardContent>
             <div className='flex flex-col gap-6'>
               {/* Naming formats */}
               <div className='space-y-4'>
-                <h4 className='font-medium'>{m.teamSettings_namingFormats()}</h4>
+                <h4 className='font-medium'>{tr('teamSettings_namingFormats')}</h4>
                 <div className='grid gap-4'>
                   {/* Role format */}
                   <div className='space-y-2'>
                     <div className='flex items-center justify-between'>
-                      <Label>{m.teamSettings_roleFormat()}</Label>
+                      <Label>{tr('teamSettings_roleFormat')}</Label>
                       {roleFormat !== DEFAULT_ROLE_FORMAT && (
                         <Button
                           variant='link'
@@ -720,28 +724,28 @@ export function TeamSettingsPage({
                           className='h-auto p-0 text-xs'
                           onClick={() => setRoleFormat(DEFAULT_ROLE_FORMAT)}
                         >
-                          {m.teamSettings_formatResetDefault()}
+                          {tr('teamSettings_formatResetDefault')}
                         </Button>
                       )}
                     </div>
                     <p className='text-xs text-muted-foreground'>
-                      {m.teamSettings_roleFormatHelp({ emoji: '{emoji}', name: '{name}' })}
+                      {tr('teamSettings_roleFormatHelp', { emoji: '{emoji}', name: '{name}' })}
                     </p>
                     <Input value={roleFormat} onChange={(e) => setRoleFormat(e.target.value)} />
                     <div className='text-xs text-muted-foreground'>
-                      <span>{m.teamSettings_formatPreview()} </span>
+                      <span>{tr('teamSettings_formatPreview')} </span>
                       <span className='font-mono'>{renderFormatPreview(roleFormat, false)}</span>
                     </div>
                     {!isFormatValid(roleFormat) && (
                       <p className='text-xs text-destructive'>
-                        {m.teamSettings_formatMustIncludeName({ name: '{name}' })}
+                        {tr('teamSettings_formatMustIncludeName', { name: '{name}' })}
                       </p>
                     )}
                   </div>
                   {/* Channel format */}
                   <div className='space-y-2'>
                     <div className='flex items-center justify-between'>
-                      <Label>{m.teamSettings_channelFormat()}</Label>
+                      <Label>{tr('teamSettings_channelFormat')}</Label>
                       {channelFormat !== DEFAULT_CHANNEL_FORMAT && (
                         <Button
                           variant='link'
@@ -749,24 +753,24 @@ export function TeamSettingsPage({
                           className='h-auto p-0 text-xs'
                           onClick={() => setChannelFormat(DEFAULT_CHANNEL_FORMAT)}
                         >
-                          {m.teamSettings_formatResetDefault()}
+                          {tr('teamSettings_formatResetDefault')}
                         </Button>
                       )}
                     </div>
                     <p className='text-xs text-muted-foreground'>
-                      {m.teamSettings_channelFormatHelp({ emoji: '{emoji}', name: '{name}' })}
+                      {tr('teamSettings_channelFormatHelp', { emoji: '{emoji}', name: '{name}' })}
                     </p>
                     <Input
                       value={channelFormat}
                       onChange={(e) => setChannelFormat(e.target.value)}
                     />
                     <div className='text-xs text-muted-foreground'>
-                      <span>{m.teamSettings_formatPreview()} </span>
+                      <span>{tr('teamSettings_formatPreview')} </span>
                       <span className='font-mono'>{renderFormatPreview(channelFormat, true)}</span>
                     </div>
                     {!isFormatValid(channelFormat) && (
                       <p className='text-xs text-destructive'>
-                        {m.teamSettings_formatMustIncludeName({ name: '{name}' })}
+                        {tr('teamSettings_formatMustIncludeName', { name: '{name}' })}
                       </p>
                     )}
                   </div>
@@ -777,7 +781,7 @@ export function TeamSettingsPage({
               {/* Event notification channels */}
               <div>
                 <h4 className='text-sm font-semibold mb-3'>
-                  {m.teamSettings_discordEventChannels()}
+                  {tr('teamSettings_discordEventChannels')}
                 </h4>
                 <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
                   {channelConfigs.map(({ key, value, setter, label }) => (
@@ -789,10 +793,10 @@ export function TeamSettingsPage({
                         id={`channel-${key}`}
                         value={value}
                         onValueChange={setter}
-                        placeholder={m.teamSettings_channelNone()}
+                        placeholder={tr('teamSettings_channelNone')}
                         pinnedValues={[NONE_VALUE]}
                         options={[
-                          { value: NONE_VALUE, label: m.teamSettings_channelNone() },
+                          { value: NONE_VALUE, label: tr('teamSettings_channelNone') },
                           ...discordChannels
                             .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
                             .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
@@ -807,14 +811,14 @@ export function TeamSettingsPage({
 
               {/* Group channels sub-section */}
               <div className='flex flex-col gap-4'>
-                <h4 className='text-sm font-semibold'>{m.teamSettings_groupChannelSettings()}</h4>
+                <h4 className='text-sm font-semibold'>{tr('teamSettings_groupChannelSettings')}</h4>
                 <div className='flex items-start justify-between gap-4'>
                   <div>
                     <label htmlFor='create-discord-channel' className='text-sm font-medium block'>
-                      {m.teamSettings_createDiscordChannelOnGroup()}
+                      {tr('teamSettings_createDiscordChannelOnGroup')}
                     </label>
                     <p className='text-xs text-muted-foreground mt-1'>
-                      {m.teamSettings_createDiscordChannelOnGroupHelp()}
+                      {tr('teamSettings_createDiscordChannelOnGroupHelp')}
                     </p>
                   </div>
                   <Switch
@@ -828,10 +832,10 @@ export function TeamSettingsPage({
                     htmlFor='cleanup-on-group-delete'
                     className='text-sm font-medium mb-1 block'
                   >
-                    {m.teamSettings_channelCleanupOnGroupDelete()}
+                    {tr('teamSettings_channelCleanupOnGroupDelete')}
                   </label>
                   <p className='text-xs text-muted-foreground mb-2'>
-                    {m.teamSettings_channelCleanupOnGroupDeleteHelp()}
+                    {tr('teamSettings_channelCleanupOnGroupDeleteHelp')}
                   </p>
                   <Select
                     value={cleanupOnGroupDelete}
@@ -841,9 +845,9 @@ export function TeamSettingsPage({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value='nothing'>{m.teamSettings_cleanupNothing()}</SelectItem>
-                      <SelectItem value='delete'>{m.teamSettings_cleanupDelete()}</SelectItem>
-                      <SelectItem value='archive'>{m.teamSettings_cleanupArchive()}</SelectItem>
+                      <SelectItem value='nothing'>{tr('teamSettings_cleanupNothing')}</SelectItem>
+                      <SelectItem value='delete'>{tr('teamSettings_cleanupDelete')}</SelectItem>
+                      <SelectItem value='archive'>{tr('teamSettings_cleanupArchive')}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -853,17 +857,19 @@ export function TeamSettingsPage({
 
               {/* Roster channels sub-section */}
               <div className='flex flex-col gap-4'>
-                <h4 className='text-sm font-semibold'>{m.teamSettings_rosterChannelSettings()}</h4>
+                <h4 className='text-sm font-semibold'>
+                  {tr('teamSettings_rosterChannelSettings')}
+                </h4>
                 <div className='flex items-start justify-between gap-4'>
                   <div>
                     <label
                       htmlFor='create-discord-channel-roster'
                       className='text-sm font-medium block'
                     >
-                      {m.teamSettings_createDiscordChannelOnRoster()}
+                      {tr('teamSettings_createDiscordChannelOnRoster')}
                     </label>
                     <p className='text-xs text-muted-foreground mt-1'>
-                      {m.teamSettings_createDiscordChannelOnRosterHelp()}
+                      {tr('teamSettings_createDiscordChannelOnRosterHelp')}
                     </p>
                   </div>
                   <Switch
@@ -877,10 +883,10 @@ export function TeamSettingsPage({
                     htmlFor='cleanup-on-roster-deactivate'
                     className='text-sm font-medium mb-1 block'
                   >
-                    {m.teamSettings_channelCleanupOnRosterDeactivate()}
+                    {tr('teamSettings_channelCleanupOnRosterDeactivate')}
                   </label>
                   <p className='text-xs text-muted-foreground mb-2'>
-                    {m.teamSettings_channelCleanupOnRosterDeactivateHelp()}
+                    {tr('teamSettings_channelCleanupOnRosterDeactivateHelp')}
                   </p>
                   <Select
                     value={cleanupOnRosterDeactivate}
@@ -890,9 +896,9 @@ export function TeamSettingsPage({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value='nothing'>{m.teamSettings_cleanupNothing()}</SelectItem>
-                      <SelectItem value='delete'>{m.teamSettings_cleanupDelete()}</SelectItem>
-                      <SelectItem value='archive'>{m.teamSettings_cleanupArchive()}</SelectItem>
+                      <SelectItem value='nothing'>{tr('teamSettings_cleanupNothing')}</SelectItem>
+                      <SelectItem value='delete'>{tr('teamSettings_cleanupDelete')}</SelectItem>
+                      <SelectItem value='archive'>{tr('teamSettings_cleanupArchive')}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -904,19 +910,19 @@ export function TeamSettingsPage({
                   <Separator />
                   <div>
                     <label htmlFor='archive-category' className='text-sm font-medium mb-1 block'>
-                      {m.teamSettings_archiveCategory()}
+                      {tr('teamSettings_archiveCategory')}
                     </label>
                     <p className='text-xs text-muted-foreground mb-2'>
-                      {m.teamSettings_archiveCategoryHelp()}
+                      {tr('teamSettings_archiveCategoryHelp')}
                     </p>
                     <SearchableSelect
                       id='archive-category'
                       value={archiveCategory}
                       onValueChange={setArchiveCategory}
-                      placeholder={m.teamSettings_channelNone()}
+                      placeholder={tr('teamSettings_channelNone')}
                       pinnedValues={[NONE_VALUE]}
                       options={[
-                        { value: NONE_VALUE, label: m.teamSettings_channelNone() },
+                        { value: NONE_VALUE, label: tr('teamSettings_channelNone') },
                         ...discordChannels
                           .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_CATEGORY)
                           .map((ch) => ({ value: ch.id, label: ch.name })),
@@ -932,10 +938,10 @@ export function TeamSettingsPage({
         {/* Settings save button */}
         <div className='flex items-center gap-3'>
           <Button onClick={handleSaveSettings} disabled={savingSettings || !hasSettingsChanges}>
-            {savingSettings ? m.profile_saving() : m.profile_saveChanges()}
+            {savingSettings ? tr('profile_saving') : tr('profile_saveChanges')}
           </Button>
           {hasSettingsChanges && (
-            <p className='text-sm text-muted-foreground'>{m.teamSettings_unsavedChanges()}</p>
+            <p className='text-sm text-muted-foreground'>{tr('teamSettings_unsavedChanges')}</p>
           )}
         </div>
 
@@ -944,27 +950,27 @@ export function TeamSettingsPage({
           <CardHeader>
             <div className='flex items-center gap-2'>
               <MessageSquare className='size-4 text-muted-foreground' />
-              <CardTitle className='text-base'>{m.teamSettings_welcomeTitle()}</CardTitle>
+              <CardTitle className='text-base'>{tr('teamSettings_welcomeTitle')}</CardTitle>
             </div>
-            <CardDescription>{m.teamSettings_welcomeDescription()}</CardDescription>
+            <CardDescription>{tr('teamSettings_welcomeDescription')}</CardDescription>
           </CardHeader>
           <CardContent>
             <div className='flex flex-col gap-5'>
               <div>
                 <label htmlFor='welcome-channel' className='text-sm font-medium mb-1 block'>
-                  {m.teamSettings_welcomeChannel()}
+                  {tr('teamSettings_welcomeChannel')}
                 </label>
                 <p className='text-xs text-muted-foreground mb-2'>
-                  {m.teamSettings_welcomeChannelHelp()}
+                  {tr('teamSettings_welcomeChannelHelp')}
                 </p>
                 <SearchableSelect
                   id='welcome-channel'
                   value={welcomeChannel}
                   onValueChange={setWelcomeChannel}
-                  placeholder={m.teamSettings_channelNone()}
+                  placeholder={tr('teamSettings_channelNone')}
                   pinnedValues={[NONE_VALUE]}
                   options={[
-                    { value: NONE_VALUE, label: m.teamSettings_channelNone() },
+                    { value: NONE_VALUE, label: tr('teamSettings_channelNone') },
                     ...discordChannels
                       .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
                       .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
@@ -973,19 +979,19 @@ export function TeamSettingsPage({
               </div>
               <div>
                 <label htmlFor='system-log-channel' className='text-sm font-medium mb-1 block'>
-                  {m.teamSettings_systemLogChannel()}
+                  {tr('teamSettings_systemLogChannel')}
                 </label>
                 <p className='text-xs text-muted-foreground mb-2'>
-                  {m.teamSettings_systemLogChannelHelp()}
+                  {tr('teamSettings_systemLogChannelHelp')}
                 </p>
                 <SearchableSelect
                   id='system-log-channel'
                   value={systemLogChannel}
                   onValueChange={setSystemLogChannel}
-                  placeholder={m.teamSettings_channelNone()}
+                  placeholder={tr('teamSettings_channelNone')}
                   pinnedValues={[NONE_VALUE]}
                   options={[
-                    { value: NONE_VALUE, label: m.teamSettings_channelNone() },
+                    { value: NONE_VALUE, label: tr('teamSettings_channelNone') },
                     ...discordChannels
                       .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
                       .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
@@ -993,9 +999,9 @@ export function TeamSettingsPage({
                 />
               </div>
               <div>
-                <Label htmlFor='welcome-template'>{m.teamSettings_welcomeTemplate()}</Label>
+                <Label htmlFor='welcome-template'>{tr('teamSettings_welcomeTemplate')}</Label>
                 <p className='text-xs text-muted-foreground mt-1 mb-2'>
-                  {m.teamSettings_welcomeTemplateHelp()}
+                  {tr('teamSettings_welcomeTemplateHelp')}
                 </p>
                 <Textarea
                   id='welcome-template'
@@ -1009,7 +1015,7 @@ export function TeamSettingsPage({
               {welcomePreview && (
                 <div>
                   <p className='text-xs font-medium text-muted-foreground mb-2'>
-                    {m.teamSettings_welcomePreview()}
+                    {tr('teamSettings_welcomePreview')}
                   </p>
                   <div className='rounded-md border border-border bg-muted/40 px-4 py-3 flex gap-3'>
                     <div className='w-1 rounded-full bg-[#5865F2] shrink-0' />
@@ -1021,10 +1027,12 @@ export function TeamSettingsPage({
               )}
               <div className='flex items-center gap-3'>
                 <Button onClick={handleSaveWelcome} disabled={savingWelcome || !hasWelcomeChanges}>
-                  {savingWelcome ? m.profile_saving() : m.profile_saveChanges()}
+                  {savingWelcome ? tr('profile_saving') : tr('profile_saveChanges')}
                 </Button>
                 {hasWelcomeChanges && (
-                  <p className='text-sm text-muted-foreground'>{m.teamSettings_unsavedChanges()}</p>
+                  <p className='text-sm text-muted-foreground'>
+                    {tr('teamSettings_unsavedChanges')}
+                  </p>
                 )}
               </div>
             </div>
@@ -1116,20 +1124,20 @@ function getOnboardingErrorMessage(syncError: string | null): string {
   if (!syncError) return '';
   try {
     const parsed = JSON.parse(syncError) as { code?: string; detail?: string };
-    if (parsed.code === 'role_deleted') return m.teamSettings_onboardingErrorRoleDeleted();
-    if (parsed.code === 'channel_deleted') return m.teamSettings_onboardingErrorChannelDeleted();
+    if (parsed.code === 'role_deleted') return tr('teamSettings_onboardingErrorRoleDeleted');
+    if (parsed.code === 'channel_deleted') return tr('teamSettings_onboardingErrorChannelDeleted');
     if (parsed.code === 'community_not_enabled' || parsed.code === 'community_disabled')
-      return m.teamSettings_onboardingErrorCommunityDisabled();
+      return tr('teamSettings_onboardingErrorCommunityDisabled');
     if (parsed.code === 'requirements_not_met')
-      return m.teamSettings_onboardingErrorRequirementsNotMet();
+      return tr('teamSettings_onboardingErrorRequirementsNotMet');
     if (parsed.code === 'default_channel_private')
-      return m.teamSettings_onboardingErrorDefaultChannelPrivate();
-    if (parsed.code === 'too_many_prompts') return m.teamSettings_onboardingErrorTooManyPrompts();
-    return m.teamSettings_onboardingErrorGeneric({
+      return tr('teamSettings_onboardingErrorDefaultChannelPrivate');
+    if (parsed.code === 'too_many_prompts') return tr('teamSettings_onboardingErrorTooManyPrompts');
+    return tr('teamSettings_onboardingErrorGeneric', {
       message: extractGenericDetail(parsed.detail ?? syncError),
     });
   } catch {
-    return m.teamSettings_onboardingErrorGeneric({ message: extractGenericDetail(syncError) });
+    return tr('teamSettings_onboardingErrorGeneric', { message: extractGenericDetail(syncError) });
   }
 }
 
@@ -1172,28 +1180,28 @@ function OnboardingCard({
         : '';
       return (
         <Badge variant='success'>
-          {m.teamSettings_onboardingStatusSynced()}
+          {tr('teamSettings_onboardingStatusSynced')}
           {relTime ? ` ${relTime}` : ''}
         </Badge>
       );
     }
     if (syncStatus === 'failed') {
-      return <Badge variant='destructive'>{m.teamSettings_onboardingStatusFailed()}</Badge>;
+      return <Badge variant='destructive'>{tr('teamSettings_onboardingStatusFailed')}</Badge>;
     }
-    return <Badge variant='secondary'>{m.teamSettings_onboardingStatusPending()}</Badge>;
+    return <Badge variant='secondary'>{tr('teamSettings_onboardingStatusPending')}</Badge>;
   })();
 
   const errorMessage = syncStatus === 'failed' ? getOnboardingErrorMessage(syncError) : '';
 
   const textChannelOptions = [
-    { value: NONE_VALUE, label: m.teamSettings_channelNone() },
+    { value: NONE_VALUE, label: tr('teamSettings_channelNone') },
     ...discordChannels
       .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
       .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
   ];
 
   const roleOptions = [
-    { value: NONE_VALUE, label: m.teamSettings_channelNone() },
+    { value: NONE_VALUE, label: tr('teamSettings_channelNone') },
     ...filteredDiscordRoles.map((role) => ({
       value: role.id,
       label: `@${role.name}`,
@@ -1206,10 +1214,10 @@ function OnboardingCard({
         <div className='flex items-center gap-2'>
           <ShieldCheck className='size-4 text-muted-foreground' />
           <CardTitle className='text-base'>
-            <h3 className='m-0 text-inherit font-inherit'>{m.teamSettings_onboardingTitle()}</h3>
+            <h3 className='m-0 text-inherit font-inherit'>{tr('teamSettings_onboardingTitle')}</h3>
           </CardTitle>
         </div>
-        <CardDescription>{m.teamSettings_onboardingDescription()}</CardDescription>
+        <CardDescription>{tr('teamSettings_onboardingDescription')}</CardDescription>
       </CardHeader>
       <CardContent>
         <div className='flex flex-col gap-5'>
@@ -1218,7 +1226,7 @@ function OnboardingCard({
             <Alert variant='warning'>
               <AlertTriangle className='size-4' />
               <AlertDescription>
-                {m.teamSettings_onboardingCommunityWarning({
+                {tr('teamSettings_onboardingCommunityWarning', {
                   learnHow: '',
                 })}{' '}
                 <a
@@ -1245,7 +1253,7 @@ function OnboardingCard({
                   disabled={retryingOnboarding}
                   aria-describedby={errorMessage ? 'onboarding-error-message' : undefined}
                 >
-                  {m.teamSettings_onboardingRetry()}
+                  {tr('teamSettings_onboardingRetry')}
                 </Button>
               )}
             </div>
@@ -1279,19 +1287,19 @@ function OnboardingCard({
                   htmlFor='onboarding-rules-channel'
                   className='text-sm font-medium mb-1 block'
                 >
-                  {m.teamSettings_onboardingRulesChannel()}
+                  {tr('teamSettings_onboardingRulesChannel')}
                 </label>
                 <p
                   id='onboarding-rules-channel-help'
                   className='text-xs text-muted-foreground mb-2'
                 >
-                  {m.teamSettings_onboardingRulesChannelHelp()}
+                  {tr('teamSettings_onboardingRulesChannelHelp')}
                 </p>
                 <SearchableSelect
                   id='onboarding-rules-channel'
                   value={onboardingRulesChannel}
                   onValueChange={setOnboardingRulesChannel}
-                  placeholder={m.teamSettings_channelNone()}
+                  placeholder={tr('teamSettings_channelNone')}
                   pinnedValues={[NONE_VALUE]}
                   options={textChannelOptions}
                   aria-describedby='onboarding-rules-channel-help'
@@ -1300,16 +1308,16 @@ function OnboardingCard({
 
               <div>
                 <label htmlFor='onboarding-role' className='text-sm font-medium mb-1 block'>
-                  {m.teamSettings_onboardingRulesRole()}
+                  {tr('teamSettings_onboardingRulesRole')}
                 </label>
                 <p id='onboarding-role-help' className='text-xs text-muted-foreground mb-2'>
-                  {m.teamSettings_onboardingRulesRoleHelp()}
+                  {tr('teamSettings_onboardingRulesRoleHelp')}
                 </p>
                 <SearchableSelect
                   id='onboarding-role'
                   value={onboardingRole}
                   onValueChange={setOnboardingRole}
-                  placeholder={m.teamSettings_channelNone()}
+                  placeholder={tr('teamSettings_channelNone')}
                   pinnedValues={[NONE_VALUE]}
                   options={roleOptions}
                   aria-describedby='onboarding-role-help'
@@ -1318,8 +1326,8 @@ function OnboardingCard({
 
               <div>
                 <fieldset>
-                  <legend className='sr-only'>{m.teamSettings_onboardingLocale()}</legend>
-                  <p className='text-sm font-medium mb-1'>{m.teamSettings_onboardingLocale()}</p>
+                  <legend className='sr-only'>{tr('teamSettings_onboardingLocale')}</legend>
+                  <p className='text-sm font-medium mb-1'>{tr('teamSettings_onboardingLocale')}</p>
                   <ToggleGroup
                     type='single'
                     value={onboardingLocale}
@@ -1328,11 +1336,11 @@ function OnboardingCard({
                     }}
                     variant='outline'
                   >
-                    <ToggleGroupItem value='en' aria-label={m.teamSettings_onboardingLocaleEn()}>
-                      {m.teamSettings_onboardingLocaleEn()}
+                    <ToggleGroupItem value='en' aria-label={tr('teamSettings_onboardingLocaleEn')}>
+                      {tr('teamSettings_onboardingLocaleEn')}
                     </ToggleGroupItem>
-                    <ToggleGroupItem value='cs' aria-label={m.teamSettings_onboardingLocaleCs()}>
-                      {m.teamSettings_onboardingLocaleCs()}
+                    <ToggleGroupItem value='cs' aria-label={tr('teamSettings_onboardingLocaleCs')}>
+                      {tr('teamSettings_onboardingLocaleCs')}
                     </ToggleGroupItem>
                   </ToggleGroup>
                 </fieldset>
@@ -1343,10 +1351,12 @@ function OnboardingCard({
                   onClick={handleSaveOnboarding}
                   disabled={savingOnboarding || !hasOnboardingChanges || !isCommunityEnabled}
                 >
-                  {savingOnboarding ? m.profile_saving() : m.profile_saveChanges()}
+                  {savingOnboarding ? tr('profile_saving') : tr('profile_saveChanges')}
                 </Button>
                 {hasOnboardingChanges && (
-                  <p className='text-sm text-muted-foreground'>{m.teamSettings_unsavedChanges()}</p>
+                  <p className='text-sm text-muted-foreground'>
+                    {tr('teamSettings_unsavedChanges')}
+                  </p>
                 )}
               </div>
             </div>

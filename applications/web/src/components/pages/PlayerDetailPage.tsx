@@ -8,7 +8,6 @@ import type {
   RoleApi,
   Roster,
 } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link } from '@tanstack/react-router';
 import { Option, Schema } from 'effect';
 import React from 'react';
@@ -35,6 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '~/components/ui/select';
+import { tr } from '~/lib/translations.js';
 
 const PlayerEditSchema = Schema.Struct({
   name: Schema.NullOr(Schema.String),
@@ -45,7 +45,7 @@ const PlayerEditSchema = Schema.Struct({
       Schema.check(Schema.isInt()),
       Schema.check(Schema.isBetween({ minimum: 0, maximum: 99 })),
     ).annotate({
-      message: m.validation_jerseyNumber(),
+      message: tr('validation_jerseyNumber'),
     }),
   ),
 });
@@ -127,7 +127,7 @@ export function PlayerDetailPage({
       <header className='mb-8'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId/members' params={{ teamId }}>
-            ← {m.members_backToMembers()}
+            ← {tr('members_backToMembers')}
           </Link>
         </Button>
         <h1 className='text-2xl font-bold'>{displayName}</h1>
@@ -139,7 +139,7 @@ export function PlayerDetailPage({
               {...form.register('name')}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{m.profile_complete_displayName()}</FormLabel>
+                  <FormLabel>{tr('profile_complete_displayName')}</FormLabel>
                   <FormControl>
                     <Input {...field} value={field.value ?? ''} />
                   </FormControl>
@@ -151,12 +151,12 @@ export function PlayerDetailPage({
               {...form.register('birthDate')}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{m.profile_complete_birthDate()}</FormLabel>
+                  <FormLabel>{tr('profile_complete_birthDate')}</FormLabel>
                   <FormControl>
                     <DatePicker
                       value={field.value ?? ''}
                       onChange={field.onChange}
-                      placeholder={m.profile_complete_birthDatePlaceholder()}
+                      placeholder={tr('profile_complete_birthDatePlaceholder')}
                       fromYear={1900}
                       toYear={new Date().getFullYear()}
                     />
@@ -169,17 +169,17 @@ export function PlayerDetailPage({
               {...form.register('gender')}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{m.profile_complete_gender()}</FormLabel>
+                  <FormLabel>{tr('profile_complete_gender')}</FormLabel>
                   <Select onValueChange={field.onChange} value={field.value ?? ''}>
                     <FormControl>
                       <SelectTrigger className='w-full'>
-                        <SelectValue placeholder={m.profile_complete_genderPlaceholder()} />
+                        <SelectValue placeholder={tr('profile_complete_genderPlaceholder')} />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value='male'>{m.profile_complete_genderMale()}</SelectItem>
-                      <SelectItem value='female'>{m.profile_complete_genderFemale()}</SelectItem>
-                      <SelectItem value='other'>{m.profile_complete_genderOther()}</SelectItem>
+                      <SelectItem value='male'>{tr('profile_complete_genderMale')}</SelectItem>
+                      <SelectItem value='female'>{tr('profile_complete_genderFemale')}</SelectItem>
+                      <SelectItem value='other'>{tr('profile_complete_genderOther')}</SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />
@@ -190,12 +190,12 @@ export function PlayerDetailPage({
               {...form.register('jerseyNumber')}
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{m.profile_complete_jerseyNumber()}</FormLabel>
+                  <FormLabel>{tr('profile_complete_jerseyNumber')}</FormLabel>
                   <FormControl>
                     <Input
                       {...field}
                       value={field.value ?? ''}
-                      placeholder={m.profile_complete_jerseyNumberPlaceholder()}
+                      placeholder={tr('profile_complete_jerseyNumberPlaceholder')}
                     />
                   </FormControl>
                   <FormMessage />
@@ -203,14 +203,14 @@ export function PlayerDetailPage({
               )}
             />
             <Button type='submit' disabled={form.formState.isSubmitting}>
-              {form.formState.isSubmitting ? m.members_saving() : m.members_saveChanges()}
+              {form.formState.isSubmitting ? tr('members_saving') : tr('members_saveChanges')}
             </Button>
           </form>
         </Form>
       ) : (
         <div className='flex flex-col gap-2'>
           <p>
-            <strong>{m.profile_complete_jerseyNumber()}:</strong>{' '}
+            <strong>{tr('profile_complete_jerseyNumber')}:</strong>{' '}
             {player.jerseyNumber.pipe(
               Option.map((v) => `#${v}`),
               Option.getOrElse(() => '—'),
@@ -272,9 +272,9 @@ function RolesSection({
 
   return (
     <div className='mt-6'>
-      <h2 className='text-lg font-semibold mb-2'>{m.roles_currentRoles()}</h2>
+      <h2 className='text-lg font-semibold mb-2'>{tr('roles_currentRoles')}</h2>
       {player.roleNames.length === 0 ? (
-        <p className='text-muted-foreground'>{m.roles_noRoles()}</p>
+        <p className='text-muted-foreground'>{tr('roles_noRoles')}</p>
       ) : (
         <div className='flex flex-wrap gap-2 mb-4'>
           {player.roleNames.map((roleName) => {
@@ -304,12 +304,12 @@ function RolesSection({
           <SearchableSelect
             value={selectedRoleId}
             onValueChange={setSelectedRoleId}
-            placeholder={m.roles_addRole()}
+            placeholder={tr('roles_addRole')}
             options={assignableRoles.map((r) => ({ value: r.roleId, label: r.name }))}
             className='w-48'
           />
           <Button size='sm' disabled={!selectedRoleId || assigning} onClick={handleAssign}>
-            {m.roles_addRole()}
+            {tr('roles_addRole')}
           </Button>
         </div>
       ) : null}

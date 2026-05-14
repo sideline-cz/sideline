@@ -1,8 +1,8 @@
-import { searchable_select_noResults, searchable_select_search } from '@sideline/i18n/messages';
 import { rankItem, rankings } from '@tanstack/match-sorter-utils';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 import React from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover';
+import { tr } from '~/lib/translations.js';
 import { cn } from '~/lib/utils';
 
 interface SearchableSelectOption {
@@ -165,7 +165,7 @@ export function SearchableSelect({
             value={query}
             onChange={handleQueryChange}
             onKeyDown={handleKeyDown}
-            placeholder={searchable_select_search()}
+            placeholder={tr('searchable_select_search')}
             aria-autocomplete='list'
             className='flex-1 bg-transparent px-2 py-2 text-sm outline-none'
           />
@@ -186,7 +186,7 @@ export function SearchableSelect({
         <div ref={listboxRef} role='listbox' className='max-h-60 overflow-y-auto'>
           {filteredOptions.length === 0 ? (
             <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
-              {searchable_select_noResults()}
+              {tr('searchable_select_noResults')}
             </div>
           ) : (
             filteredOptions.map((option, index) => {

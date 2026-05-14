@@ -1,7 +1,6 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { AgeThresholdApi, GroupApi } from '@sideline/domain';
 import { AgeThresholdRule, GroupModel, Team, User } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema, SchemaGetter } from 'effect';
 import { Info } from 'lucide-react';
@@ -28,6 +27,7 @@ import {
 } from '~/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/components/ui/tooltip';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 const OptionalNumber = Schema.String.pipe(
   Schema.decodeTo(Schema.Option(Schema.Number), {
@@ -129,7 +129,7 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
     if (isSelfReference) {
       form.setError('requiredGroupId', {
         type: 'selfReference',
-        message: m.ageThreshold_selfReferenceError(),
+        message: tr('ageThreshold_selfReferenceError'),
       });
     } else if (form.formState.errors.requiredGroupId?.type === 'selfReference') {
       form.clearErrors('requiredGroupId');
@@ -146,19 +146,19 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
       ),
       Effect.catchTags({
         AgeThresholdEmptyCriteria: () =>
-          Effect.fail(ClientError.make(m.ageThreshold_emptyCriteria())),
+          Effect.fail(ClientError.make(tr('ageThreshold_emptyCriteria'))),
         AgeThresholdAlreadyExists: () =>
-          Effect.fail(ClientError.make(m.ageThreshold_alreadyExists())),
+          Effect.fail(ClientError.make(tr('ageThreshold_alreadyExists'))),
         AgeThresholdSelfRequired: () =>
-          Effect.fail(ClientError.make(m.ageThreshold_selfReferenceError())),
+          Effect.fail(ClientError.make(tr('ageThreshold_selfReferenceError'))),
       }),
       // Only map *unhandled* errors to the generic toast — leave ClientErrors thrown
       // by the catchTags above intact so users see the specific message.
       Effect.catchIf(
         (e): e is Exclude<typeof e, ClientError> => (e as { _tag?: string })._tag !== 'ClientError',
-        () => Effect.fail(ClientError.make(m.ageThreshold_createFailed())),
+        () => Effect.fail(ClientError.make(tr('ageThreshold_createFailed'))),
       ),
-      run({ success: m.ageThreshold_created() }),
+      run({ success: tr('ageThreshold_created') }),
     );
     if (Option.isSome(result)) {
       form.reset();
@@ -168,7 +168,7 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
 
   const handleDelete = React.useCallback(
     async (ruleIdRaw: string) => {
-      if (!window.confirm(m.ageThreshold_deleteConfirm())) return;
+      if (!window.confirm(tr('ageThreshold_deleteConfirm'))) return;
       const ruleId = Schema.decodeSync(AgeThresholdRule.AgeThresholdRuleId)(ruleIdRaw);
       const result = await ApiClient.asEffect().pipe(
         Effect.flatMap((api) =>
@@ -176,8 +176,8 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
             params: { teamId: teamIdBranded, ruleId },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.ageThreshold_deleteFailed())),
-        run({ success: m.ageThreshold_deleted() }),
+        Effect.mapError(() => ClientError.make(tr('ageThreshold_deleteFailed'))),
+        run({ success: tr('ageThreshold_deleted') }),
       );
       if (Option.isSome(result)) {
         router.invalidate();
@@ -194,8 +194,8 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
           params: { teamId: teamIdBranded },
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.ageThreshold_evaluateFailed())),
-      run({ success: m.ageThreshold_evaluated() }),
+      Effect.mapError(() => ClientError.make(tr('ageThreshold_evaluateFailed'))),
+      run({ success: tr('ageThreshold_evaluated') }),
     );
     setEvaluating(false);
     if (Option.isSome(result)) {
@@ -214,16 +214,16 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
     if (Option.isSome(maxAge)) {
       return `≤${maxAge.value}`;
     }
-    return m.ageThreshold_anyAge();
+    return tr('ageThreshold_anyAge');
   };
 
   const formatGender = (gender: Option.Option<User.Gender>) =>
     Option.match(gender, {
       onNone: () => '—',
       onSome: (g) => {
-        if (g === 'male') return m.ageThreshold_genderMale();
-        if (g === 'female') return m.ageThreshold_genderFemale();
-        return m.ageThreshold_genderOther();
+        if (g === 'male') return tr('ageThreshold_genderMale');
+        if (g === 'female') return tr('ageThreshold_genderFemale');
+        return tr('ageThreshold_genderOther');
       },
     });
 
@@ -232,11 +232,11 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
       <header className='mb-8'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId' params={{ teamId }}>
-            ← {m.team_backToTeams()}
+            ← {tr('team_backToTeams')}
           </Link>
         </Button>
-        <h1 className='text-2xl font-bold'>{m.ageThreshold_title()}</h1>
-        <p className='text-muted-foreground mt-1'>{m.ageThreshold_subtitle()}</p>
+        <h1 className='text-2xl font-bold'>{tr('ageThreshold_title')}</h1>
+        <p className='text-muted-foreground mt-1'>{tr('ageThreshold_subtitle')}</p>
       </header>
 
       <Form {...form}>
@@ -248,12 +248,12 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
             {...form.register('groupId')}
             render={({ field }) => (
               <FormItem className='flex-1 min-w-[12rem]'>
-                <FormLabel>{m.group_groupName()}</FormLabel>
+                <FormLabel>{tr('group_groupName')}</FormLabel>
                 <FormControl>
                   <SearchableSelect
                     value={field.value}
                     onValueChange={field.onChange}
-                    placeholder={m.ageThreshold_selectGroup()}
+                    placeholder={tr('ageThreshold_selectGroup')}
                     options={groups.map((group) => ({
                       value: group.groupId,
                       label: group.name,
@@ -268,14 +268,14 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
             {...form.register('requiredGroupId')}
             render={({ field }) => (
               <FormItem className='flex-1 min-w-[12rem]'>
-                <FormLabel>{m.ageThreshold_requiredGroup()}</FormLabel>
+                <FormLabel>{tr('ageThreshold_requiredGroup')}</FormLabel>
                 <FormControl>
                   <SearchableSelect
                     value={field.value}
                     onValueChange={field.onChange}
-                    placeholder={m.ageThreshold_requiredGroupAny()}
+                    placeholder={tr('ageThreshold_requiredGroupAny')}
                     options={[
-                      { value: '', label: m.ageThreshold_requiredGroupAny() },
+                      { value: '', label: tr('ageThreshold_requiredGroupAny') },
                       ...groups.map((g) => ({ value: g.groupId, label: g.name })),
                     ]}
                   />
@@ -288,17 +288,17 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
             {...form.register('gender')}
             render={({ field }) => (
               <FormItem className='w-32'>
-                <FormLabel>{m.ageThreshold_gender()}</FormLabel>
+                <FormLabel>{tr('ageThreshold_gender')}</FormLabel>
                 <FormControl>
                   <Select value={field.value} onValueChange={field.onChange}>
                     <SelectTrigger className='w-32'>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value='any'>{m.ageThreshold_genderAny()}</SelectItem>
-                      <SelectItem value='male'>{m.ageThreshold_genderMale()}</SelectItem>
-                      <SelectItem value='female'>{m.ageThreshold_genderFemale()}</SelectItem>
-                      <SelectItem value='other'>{m.ageThreshold_genderOther()}</SelectItem>
+                      <SelectItem value='any'>{tr('ageThreshold_genderAny')}</SelectItem>
+                      <SelectItem value='male'>{tr('ageThreshold_genderMale')}</SelectItem>
+                      <SelectItem value='female'>{tr('ageThreshold_genderFemale')}</SelectItem>
+                      <SelectItem value='other'>{tr('ageThreshold_genderOther')}</SelectItem>
                     </SelectContent>
                   </Select>
                 </FormControl>
@@ -311,12 +311,12 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
               {...form.register('minAge')}
               render={({ field }) => (
                 <FormItem className='w-24'>
-                  <FormLabel>{m.ageThreshold_minAge()}</FormLabel>
+                  <FormLabel>{tr('ageThreshold_minAge')}</FormLabel>
                   <FormControl>
                     <Input
                       {...field}
                       type='number'
-                      placeholder={m.ageThreshold_minAgePlaceholder()}
+                      placeholder={tr('ageThreshold_minAgePlaceholder')}
                     />
                   </FormControl>
                   <FormMessage />
@@ -327,12 +327,12 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
               {...form.register('maxAge')}
               render={({ field }) => (
                 <FormItem className='w-24'>
-                  <FormLabel>{m.ageThreshold_maxAge()}</FormLabel>
+                  <FormLabel>{tr('ageThreshold_maxAge')}</FormLabel>
                   <FormControl>
                     <Input
                       {...field}
                       type='number'
-                      placeholder={m.ageThreshold_maxAgePlaceholder()}
+                      placeholder={tr('ageThreshold_maxAgePlaceholder')}
                     />
                   </FormControl>
                   <FormMessage />
@@ -344,35 +344,37 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
             type='submit'
             disabled={form.formState.isSubmitting || isAllBlank || isSelfReference}
           >
-            {m.ageThreshold_create()}
+            {tr('ageThreshold_create')}
           </Button>
         </form>
-        <p className='text-sm text-muted-foreground'>{m.ageThreshold_andSemantics()}</p>
+        <p className='text-sm text-muted-foreground'>{tr('ageThreshold_andSemantics')}</p>
       </Form>
 
       {rules.length === 0 ? (
-        <p className='text-muted-foreground'>{m.ageThreshold_noRules()}</p>
+        <p className='text-muted-foreground'>{tr('ageThreshold_noRules')}</p>
       ) : (
         <div className='overflow-x-auto'>
           <table className='w-full mb-6'>
             <thead>
               <tr className='border-b'>
-                <th className='py-2 px-4 text-left'>{m.group_groupName()}</th>
+                <th className='py-2 px-4 text-left'>{tr('group_groupName')}</th>
                 <th className='py-2 px-4 text-left'>
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button type='button' className='flex items-center gap-1 cursor-default'>
-                          {m.ageThreshold_requiredGroup()}
+                          {tr('ageThreshold_requiredGroup')}
                           <Info className='h-3 w-3' />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent>{m.ageThreshold_requiredGroupHeaderTooltip()}</TooltipContent>
+                      <TooltipContent>
+                        {tr('ageThreshold_requiredGroupHeaderTooltip')}
+                      </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 </th>
-                <th className='py-2 px-4 text-left'>{m.ageThreshold_gender()}</th>
-                <th className='py-2 px-4 text-left'>{m.ageThreshold_ageRange()}</th>
+                <th className='py-2 px-4 text-left'>{tr('ageThreshold_gender')}</th>
+                <th className='py-2 px-4 text-left'>{tr('ageThreshold_ageRange')}</th>
                 <th className='py-2 px-4' />
               </tr>
             </thead>
@@ -395,10 +397,10 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
                           </TooltipTrigger>
                           <TooltipContent>
                             {Option.isSome(rule.requiredGroupId)
-                              ? m.ageThreshold_requiredGroupTooltipSpecific({
+                              ? tr('ageThreshold_requiredGroupTooltipSpecific', {
                                   group: requiredGroupName,
                                 })
-                              : m.ageThreshold_requiredGroupTooltipAny()}
+                              : tr('ageThreshold_requiredGroupTooltipAny')}
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
@@ -413,10 +415,10 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
                           </TooltipTrigger>
                           <TooltipContent>
                             {Option.isSome(rule.gender)
-                              ? m.ageThreshold_genderTooltipSpecific({
+                              ? tr('ageThreshold_genderTooltipSpecific', {
                                   gender: formatGender(rule.gender),
                                 })
-                              : m.ageThreshold_genderTooltipAny()}
+                              : tr('ageThreshold_genderTooltipAny')}
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
@@ -424,7 +426,7 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
                     <td className='py-2 px-4'>{formatAgeRange(rule.minAge, rule.maxAge)}</td>
                     <td className='py-2 px-4'>
                       <Button variant='outline' size='sm' onClick={() => handleDelete(rule.ruleId)}>
-                        {m.ageThreshold_delete()}
+                        {tr('ageThreshold_delete')}
                       </Button>
                     </td>
                   </tr>
@@ -437,12 +439,12 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
 
       <div className='flex flex-col gap-4'>
         <Button onClick={handleEvaluate} disabled={evaluating} variant='secondary'>
-          {evaluating ? m.ageThreshold_evaluating() : m.ageThreshold_evaluateNow()}
+          {evaluating ? tr('ageThreshold_evaluating') : tr('ageThreshold_evaluateNow')}
         </Button>
 
         {evaluationResults.length > 0 && (
           <div>
-            <h2 className='text-lg font-semibold mb-2'>{m.ageThreshold_results()}</h2>
+            <h2 className='text-lg font-semibold mb-2'>{tr('ageThreshold_results')}</h2>
             <table className='w-full'>
               <tbody>
                 {evaluationResults.map((change, i) => (
@@ -461,8 +463,8 @@ export function AgeThresholdsPage({ teamId, rules, groups }: AgeThresholdsPagePr
                         }
                       >
                         {change.action === 'added'
-                          ? m.ageThreshold_added()
-                          : m.ageThreshold_removed()}
+                          ? tr('ageThreshold_added')
+                          : tr('ageThreshold_removed')}
                       </span>
                     </td>
                   </tr>

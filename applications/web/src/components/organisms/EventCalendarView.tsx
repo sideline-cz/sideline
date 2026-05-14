@@ -1,5 +1,4 @@
 import type { EventApi, TrainingTypeApi } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { getLocale } from '@sideline/i18n/runtime';
 import { Link } from '@tanstack/react-router';
 import { format } from 'date-fns';
@@ -24,6 +23,7 @@ import {
   type TrainingTypeColorMap,
 } from '~/lib/event-colors';
 import { eventTypeLabels } from '~/lib/event-labels';
+import { tr } from '~/lib/translations.js';
 import { cn } from '~/lib/utils';
 
 const FILTER_ALL = '__all__';
@@ -110,7 +110,7 @@ export function EventCalendarView({ teamId, events, trainingTypes }: EventCalend
             <ChevronRight className='h-4 w-4' />
           </Button>
           <Button variant='outline' size='sm' onClick={handleToday}>
-            {m.event_calendarToday()}
+            {tr('event_calendarToday')}
           </Button>
         </div>
 
@@ -122,7 +122,7 @@ export function EventCalendarView({ teamId, events, trainingTypes }: EventCalend
             onValueChange={setFilterTrainingType}
             className='w-[160px]'
             options={[
-              { value: FILTER_ALL, label: m.event_calendarFilterAll() },
+              { value: FILTER_ALL, label: tr('event_calendarFilterAll') },
               ...trainingTypes.map((tt) => ({ value: tt.name, label: tt.name })),
             ]}
             pinnedValues={[FILTER_ALL]}
@@ -135,7 +135,7 @@ export function EventCalendarView({ teamId, events, trainingTypes }: EventCalend
               className='rounded-r-none'
               onClick={() => setCalendarMode('month')}
             >
-              {m.event_calendarMonth()}
+              {tr('event_calendarMonth')}
             </Button>
             <Button
               variant={calendarMode === 'week' ? 'default' : 'ghost'}
@@ -143,7 +143,7 @@ export function EventCalendarView({ teamId, events, trainingTypes }: EventCalend
               className='rounded-l-none'
               onClick={() => setCalendarMode('week')}
             >
-              {m.event_calendarWeek()}
+              {tr('event_calendarWeek')}
             </Button>
           </div>
         </div>
@@ -335,7 +335,9 @@ function WeekGrid({
             </div>
             <div className='flex flex-col gap-1'>
               {day.events.length === 0 ? (
-                <span className='text-xs text-muted-foreground'>{m.event_calendarNoEvents()}</span>
+                <span className='text-xs text-muted-foreground'>
+                  {tr('event_calendarNoEvents')}
+                </span>
               ) : (
                 day.events.map((event) => (
                   <WeekEventCard
@@ -359,7 +361,7 @@ function WeekGrid({
               {format(day.date, 'EEEE, MMM d', { locale: dateFnsLocale })}
             </div>
             {day.events.length === 0 ? (
-              <p className='text-xs text-muted-foreground px-1'>{m.event_calendarNoEvents()}</p>
+              <p className='text-xs text-muted-foreground px-1'>{tr('event_calendarNoEvents')}</p>
             ) : (
               <div className='flex flex-col gap-1'>
                 {day.events.map((event) => (

@@ -1,11 +1,11 @@
 import type { ActivityLog, ActivityLogApi, ActivityStatsApi, ActivityType } from '@sideline/domain';
 import { Team, TeamMember } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { createFileRoute, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
 import { MakanickoPage } from '~/components/pages/MakanickoPage.js';
 import { ApiClient, ClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout')({
   ssr: false,
@@ -101,8 +101,8 @@ function MakanickoRoute() {
             },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.activityLog_logFailed())),
-        run({ success: m.activityLog_logged() }),
+        Effect.mapError(() => ClientError.make(tr('activityLog_logFailed'))),
+        run({ success: tr('activityLog_logged') }),
       );
       if (Option.isSome(result)) {
         router.invalidate();
@@ -132,8 +132,8 @@ function MakanickoRoute() {
             },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.activityLog_updateFailed())),
-        run({ success: m.activityLog_updated() }),
+        Effect.mapError(() => ClientError.make(tr('activityLog_updateFailed'))),
+        run({ success: tr('activityLog_updated') }),
       );
       if (Option.isSome(result)) {
         router.invalidate();
@@ -151,8 +151,8 @@ function MakanickoRoute() {
             params: { teamId, memberId, logId },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.activityLog_deleteFailed())),
-        run({ success: m.activityLog_deleted() }),
+        Effect.mapError(() => ClientError.make(tr('activityLog_deleteFailed'))),
+        run({ success: tr('activityLog_deleted') }),
       );
       if (Option.isSome(result)) {
         router.invalidate();

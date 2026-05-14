@@ -30,6 +30,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [iCal](#19-ical)
    - [Achievement](#20-achievement)
    - [Weekly Summary](#21-weekly-summary)
+   - [Translations](#22-translations)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -146,6 +147,7 @@ Returns the currently authenticated user's profile.
 | `birthDate` | `string \| null` | Yes | Birth date (ISO 8601 date string) |
 | `gender` | `"male" \| "female" \| "other" \| null` | Yes | Gender |
 | `locale` | `"en" \| "cs"` | No | Preferred locale |
+| `isGlobalAdmin` | `boolean` | No | Whether the user is a global admin (Discord ID listed in `APP_GLOBAL_ADMIN_DISCORD_IDS`). Global admins can manage translation overrides. |
 
 **Errors:**
 
@@ -3617,6 +3619,113 @@ Returns the weekly activity summary for the authenticated team member. By defaul
 
 ---
 
+### 22. Translations
+
+**Source:** `packages/domain/src/api/Translations.ts`
+
+Manages global UI translation overrides. All endpoints require `AuthMiddleware`. Write endpoints (`PATCH`, `POST import`, `GET export`) additionally require the caller to be a global admin (Discord ID in `APP_GLOBAL_ADMIN_DISCORD_IDS`). Read endpoints (`GET /api/translations`) are available to any authenticated user and are used by the web frontend to load active overrides at startup.
+
+---
+
+#### `GET /api/translations`
+
+Returns the current cache version and all active translation overrides.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Response:** `200 OK` — `TranslationsResponse`
+
+`TranslationsResponse`:
+
+| Field | Type | Description |
+|---|---|---|
+| `version` | `number` | Monotonically increasing cache version. Incremented on every write. |
+| `overrides` | `TranslationOverride[]` | All active override rows. |
+
+`TranslationOverride`:
+
+| Field | Type | Description |
+|---|---|---|
+| `key` | `string` | Translation key (non-empty string). |
+| `locale` | `"en" \| "cs"` | Locale this override applies to. |
+| `value` | `string` | Override text (may be an empty string, which suppresses the compiled default). |
+| `updatedAt` | `DateTime` | When this override was last written. |
+| `updatedBy` | `UserId \| null` | ID of the user who last wrote this override, or `null` if the row was imported without an auth context. |
+
+---
+
+#### `PATCH /api/translations/:key`
+
+Upserts or deletes the EN and/or CS override for a single translation key. Global-admin only.
+
+**Auth:** Bearer token (AuthMiddleware), global admin required
+
+**Path parameters:** `key` — translation key (non-empty string)
+
+**Request Body:** `UpsertTranslationPayload`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `en` | `string \| null` | No (omit = leave unchanged) | `null` deletes the EN override; any string (including `""`) upserts it. |
+| `cs` | `string \| null` | No (omit = leave unchanged) | `null` deletes the CS override; any string (including `""`) upserts it. |
+
+**Response:** `200 OK` — `TranslationsResponse` (full updated state; see `GET /api/translations`)
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `TranslationForbidden` | 403 | Caller is not a global admin |
+
+---
+
+#### `POST /api/translations/import`
+
+Bulk-imports translation overrides from a structured payload. Existing overrides for keys included in the payload are overwritten; keys not included are left untouched. Global-admin only.
+
+**Auth:** Bearer token (AuthMiddleware), global admin required
+
+**Request Body:** `ImportTranslationsPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `overrides` | `Array<{ key: string; locale: "en" \| "cs"; value: string }>` | List of overrides to upsert. All keys must exist in the compiled message registry. |
+
+**Response:** `200 OK` — `TranslationsResponse` (full updated state; see `GET /api/translations`)
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `TranslationForbidden` | 403 | Caller is not a global admin |
+| `UnknownTranslationKeys` | 400 | One or more `key` values are not present in the compiled message registry. The error body contains a `keys` array listing the unknown keys. |
+
+---
+
+#### `GET /api/translations/export.json`
+
+Returns the full merged translation bundle — compiled defaults with active overrides applied — as a JSON object keyed by locale. Global-admin only. Useful for exporting, reviewing, and round-tripping translations via the import endpoint.
+
+**Auth:** Bearer token (AuthMiddleware), global admin required
+
+**Response:** `200 OK` — `Record<"en" | "cs", Record<string, string>>`
+
+The response shape is:
+```json
+{
+  "en": { "key": "translated value", ... },
+  "cs": { "key": "translated value", ... }
+}
+```
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `TranslationForbidden` | 403 | Caller is not a global admin |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -3800,3 +3909,5 @@ The following table consolidates all error tags across all API groups.
 | `NoGuildLinked` | 400 | Achievement | `auto_create` role mapping requested but the team has no linked Discord guild |
 | `WeeklySummaryForbidden` | 403 | Weekly Summary | Caller is not a member of the team |
 | `WeeklySummaryNotFound` | 404 | Weekly Summary | The `week` query parameter is syntactically invalid |
+| `TranslationForbidden` | 403 | Translations | Caller is not a global admin |
+| `UnknownTranslationKeys` | 400 | Translations | Import payload contains key(s) not present in the compiled message registry |

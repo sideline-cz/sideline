@@ -1,10 +1,10 @@
 import type { Auth, Role } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 import {
   Calendar,
   Dumbbell,
   Home,
+  Languages,
   Link2,
   type LucideIcon,
   Rss,
@@ -31,6 +31,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from '~/components/ui/sidebar';
+import { tr } from '~/lib/translations.js';
 
 interface NavItem {
   title: string;
@@ -47,23 +48,23 @@ function getTeamNavGroups(
   return [
     {
       id: 'team',
-      label: m.sidebar_team(),
+      label: tr('sidebar_team'),
       items: [
         {
-          title: m.sidebar_dashboard(),
+          title: tr('sidebar_dashboard'),
           icon: Home,
           to: '/teams/$teamId',
           params: { teamId },
           exact: true,
         },
         {
-          title: m.event_events(),
+          title: tr('event_events'),
           icon: Calendar,
           to: '/teams/$teamId/events',
           params: { teamId },
         },
         {
-          title: m.sidebar_makanicko(),
+          title: tr('sidebar_makanicko'),
           icon: Trophy,
           to: '/teams/$teamId/workout',
           params: { teamId },
@@ -72,31 +73,36 @@ function getTeamNavGroups(
     },
     {
       id: 'coach',
-      label: m.sidebar_coach(),
+      label: tr('sidebar_coach'),
       items: [
-        { title: m.team_members(), icon: Users, to: '/teams/$teamId/members', params: { teamId } },
         {
-          title: m.team_groups(),
+          title: tr('team_members'),
+          icon: Users,
+          to: '/teams/$teamId/members',
+          params: { teamId },
+        },
+        {
+          title: tr('team_groups'),
           icon: UserCog,
           to: '/teams/$teamId/groups',
           params: { teamId },
           requiredPermission: 'group:manage' satisfies Role.Permission,
         },
         {
-          title: m.invites_title(),
+          title: tr('invites_title'),
           icon: Link2,
           to: '/teams/$teamId/invites',
           params: { teamId },
           requiredPermission: 'team:invite' satisfies Role.Permission,
         },
         {
-          title: m.team_rosters(),
+          title: tr('team_rosters'),
           icon: UsersRound,
           to: '/teams/$teamId/rosters',
           params: { teamId },
         },
         {
-          title: m.team_trainingTypes(),
+          title: tr('team_trainingTypes'),
           icon: Dumbbell,
           to: '/teams/$teamId/training-types',
           params: { teamId },
@@ -106,37 +112,37 @@ function getTeamNavGroups(
     },
     {
       id: 'administration',
-      label: m.sidebar_administration(),
+      label: tr('sidebar_administration'),
       items: [
         {
-          title: m.team_roles(),
+          title: tr('team_roles'),
           icon: Shield,
           to: '/teams/$teamId/roles',
           params: { teamId },
           requiredPermission: 'role:manage' satisfies Role.Permission,
         },
         {
-          title: m.team_ageThresholds(),
+          title: tr('team_ageThresholds'),
           icon: Wand2,
           to: '/teams/$teamId/age-thresholds',
           params: { teamId },
           requiredPermission: 'group:manage' satisfies Role.Permission,
         },
         {
-          title: m.ical_title(),
+          title: tr('ical_title'),
           icon: Rss,
           to: '/teams/$teamId/calendar-subscription',
           params: { teamId },
         },
         {
-          title: m.achievement_admin_navTitle(),
+          title: tr('achievement_admin_navTitle'),
           icon: Trophy,
           to: '/teams/$teamId/achievements',
           params: { teamId },
           requiredPermission: 'team:manage' satisfies Role.Permission,
         },
         {
-          title: m.team_settings(),
+          title: tr('team_settings'),
           icon: Settings,
           to: '/teams/$teamId/settings',
           params: { teamId },
@@ -197,6 +203,27 @@ export function AppSidebar({ user, teams, activeTeam, onLogout, ...props }: AppS
             </SidebarGroupContent>
           </SidebarGroup>
         ))}
+        {user.isGlobalAdmin && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Admin</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={!!matchRoute({ to: '/admin/translations', fuzzy: false })}
+                    tooltip='Translations'
+                  >
+                    <Link to='/admin/translations'>
+                      <Languages />
+                      <span>Translations</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={user} activeTeamId={activeTeam.teamId} onLogout={onLogout} />

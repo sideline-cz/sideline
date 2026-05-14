@@ -42,7 +42,18 @@ export const env = createEnv({
     APP_ORIGIN: Schema.NonEmptyString.pipe(Schema.toStandardSchemaV1),
     OTEL_EXPORTER_OTLP_ENDPOINT: Schema.NonEmptyString.pipe(Schema.toStandardSchemaV1),
     OTEL_SERVICE_NAME: Schema.NonEmptyString.pipe(Schema.toStandardSchemaV1),
+    APP_GLOBAL_ADMIN_DISCORD_IDS: Schema.String.pipe(
+      Schemas.Optional(() => ''),
+      Schema.toStandardSchemaV1,
+    ),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
 });
+
+export const globalAdminDiscordIds: ReadonlySet<string> = new Set(
+  (process.env.APP_GLOBAL_ADMIN_DISCORD_IDS ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0),
+);

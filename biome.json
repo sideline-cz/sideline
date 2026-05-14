@@ -41,7 +41,15 @@
         "useImportType": "error",
         "useExportType": "error",
         "useNodejsImportProtocol": "error",
-        "useConst": "error"
+        "useConst": "error",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@sideline/i18n/messages": "Use tr() from ~/lib/translations.js instead of importing message functions directly."
+            }
+          }
+        }
       },
       "complexity": {
         "noForEach": "warn"
@@ -93,6 +101,16 @@
         "rules": {
           "suspicious": {
             "noExplicitAny": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["applications/bot/**", "packages/i18n/**", "scripts/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
           }
         }
       }

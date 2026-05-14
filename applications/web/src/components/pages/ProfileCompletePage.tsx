@@ -1,8 +1,8 @@
-import * as m from '@sideline/i18n/messages';
 import { UserCircle } from 'lucide-react';
 import { LanguageSwitcher } from '~/components/organisms/LanguageSwitcher';
 import { ProfileCompleteForm } from '~/components/organisms/ProfileCompleteForm';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
+import { tr } from '~/lib/translations.js';
 
 interface ProfileCompletePageProps {
   user: { username: string };
@@ -13,7 +13,7 @@ export function ProfileCompletePage({ user, onSuccess }: ProfileCompletePageProp
   return (
     <div className='flex min-h-screen flex-col'>
       <header className='flex items-center justify-between px-6 py-4 border-b'>
-        <span className='text-lg font-bold'>{m.app_name()}</span>
+        <span className='text-lg font-bold'>{tr('app_name')}</span>
         <div className='flex items-center gap-3'>
           <LanguageSwitcher isAuthenticated />
         </div>
@@ -27,8 +27,8 @@ export function ProfileCompletePage({ user, onSuccess }: ProfileCompletePageProp
                 <UserCircle className='size-6 text-muted-foreground' />
               </div>
             </div>
-            <CardTitle>{m.profile_complete_title()}</CardTitle>
-            <CardDescription>{m.profile_complete_subtitle()}</CardDescription>
+            <CardTitle>{tr('profile_complete_title')}</CardTitle>
+            <CardDescription>{tr('profile_complete_subtitle')}</CardDescription>
           </CardHeader>
           <CardContent>
             <ProfileCompleteForm initialName={user.username} onSuccess={onSuccess} />

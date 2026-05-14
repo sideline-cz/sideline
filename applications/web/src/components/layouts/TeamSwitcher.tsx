@@ -1,5 +1,4 @@
 import type { Auth } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Link } from '@tanstack/react-router';
 import { Option } from 'effect';
 import { ChevronsUpDown, Plus, Users } from 'lucide-react';
@@ -18,6 +17,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from '~/components/ui/sidebar';
+import { tr } from '~/lib/translations.js';
 
 interface TeamSwitcherProps {
   teams: ReadonlyArray<Auth.UserTeam>;
@@ -50,7 +50,7 @@ export function TeamSwitcher({ teams, activeTeamId }: TeamSwitcherProps) {
               )}
               <div className='grid flex-1 text-left text-sm leading-tight'>
                 <span className='truncate font-semibold'>
-                  {activeTeam?.teamName ?? m.nav_selectTeam()}
+                  {activeTeam?.teamName ?? tr('nav_selectTeam')}
                 </span>
                 {activeTeam && (
                   <span className='truncate text-xs'>{activeTeam.roleNames.join(', ')}</span>
@@ -66,7 +66,7 @@ export function TeamSwitcher({ teams, activeTeamId }: TeamSwitcherProps) {
             sideOffset={4}
           >
             <DropdownMenuLabel className='text-xs text-muted-foreground'>
-              {m.nav_teams()}
+              {tr('nav_teams')}
             </DropdownMenuLabel>
             {teams.map((team, index) => (
               <DropdownMenuItem key={team.teamId} className='gap-2 p-2' asChild>
@@ -98,7 +98,7 @@ export function TeamSwitcher({ teams, activeTeamId }: TeamSwitcherProps) {
                 <div className='flex size-6 items-center justify-center rounded-md border bg-background'>
                   <Plus className='size-4' />
                 </div>
-                <div className='font-medium text-muted-foreground'>{m.nav_addTeam()}</div>
+                <div className='font-medium text-muted-foreground'>{tr('nav_addTeam')}</div>
               </Link>
             </DropdownMenuItem>
           </DropdownMenuContent>

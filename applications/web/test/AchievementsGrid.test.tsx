@@ -5,29 +5,35 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('@sideline/i18n/messages', () => ({
-  achievement_first_activity_title: () => 'First Activity',
-  achievement_ten_activities_title: () => 'Ten Activities',
-  achievement_fifty_activities_title: () => 'Fifty Activities',
-  achievement_hundred_activities_title: () => 'Hundred Activities',
-  achievement_streak_3_title: () => 'Streak 3',
-  achievement_streak_7_title: () => 'Streak 7',
-  achievement_streak_30_title: () => 'Streak 30',
-  achievement_duration_600_title: () => '600 Minutes',
-  achievement_duration_3000_title: () => '3000 Minutes',
-  achievement_gym_25_title: () => '25 Gym Sessions',
-  achievement_running_25_title: () => '25 Runs',
-  achievement_first_activity_description: () => 'Log your first activity',
-  achievement_ten_activities_description: () => 'Log 10 activities',
-  achievement_fifty_activities_description: () => 'Log 50 activities',
-  achievement_hundred_activities_description: () => 'Log 100 activities',
-  achievement_streak_3_description: () => '3-day streak',
-  achievement_streak_7_description: () => '7-day streak',
-  achievement_streak_30_description: () => '30-day streak',
-  achievement_duration_600_description: () => '600 total minutes',
-  achievement_duration_3000_description: () => '3000 total minutes',
-  achievement_gym_25_description: () => '25 gym sessions',
-  achievement_running_25_description: () => '25 running sessions',
+vi.mock('~/lib/translations.js', () => ({
+  tr: (key: string) => {
+    const map: Record<string, string> = {
+      achievement_first_activity_title: 'First Activity',
+      achievement_ten_activities_title: 'Ten Activities',
+      achievement_fifty_activities_title: 'Fifty Activities',
+      achievement_hundred_activities_title: 'Hundred Activities',
+      achievement_streak_3_title: 'Streak 3',
+      achievement_streak_7_title: 'Streak 7',
+      achievement_streak_30_title: 'Streak 30',
+      achievement_duration_600_title: '600 Minutes',
+      achievement_duration_3000_title: '3000 Minutes',
+      achievement_gym_25_title: '25 Gym Sessions',
+      achievement_running_25_title: '25 Runs',
+      achievement_first_activity_description: 'Log your first activity',
+      achievement_ten_activities_description: 'Log 10 activities',
+      achievement_fifty_activities_description: 'Log 50 activities',
+      achievement_hundred_activities_description: 'Log 100 activities',
+      achievement_streak_3_description: '3-day streak',
+      achievement_streak_7_description: '7-day streak',
+      achievement_streak_30_description: '30-day streak',
+      achievement_duration_600_description: '600 total minutes',
+      achievement_duration_3000_description: '3000 total minutes',
+      achievement_gym_25_description: '25 gym sessions',
+      achievement_running_25_description: '25 running sessions',
+    };
+    return map[key] ?? key;
+  },
+  setTranslationOverrides: vi.fn(),
 }));
 
 // Dynamic import — will fail until the component exists at this path

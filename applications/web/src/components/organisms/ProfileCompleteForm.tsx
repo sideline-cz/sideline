@@ -1,6 +1,5 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import { Auth } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Effect, Option, Schema } from 'effect';
 import { useForm } from 'react-hook-form';
 import { Button } from '~/components/ui/button';
@@ -22,36 +21,37 @@ import {
   SelectValue,
 } from '~/components/ui/select';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 const currentYear = new Date().getFullYear();
 const maxBirthYear = currentYear - Auth.MIN_AGE;
 const defaultBirthMonth = new Date(currentYear - Auth.DEFAULT_BIRTH_YEAR_OFFSET, 0);
 
 const ProfileFormSchema = Schema.Struct({
-  name: Schema.NonEmptyString.annotate({ message: m.validation_required() }),
-  birthDate: Schema.NonEmptyString.annotate({ message: m.validation_required() }).pipe(
+  name: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
+  birthDate: Schema.NonEmptyString.annotate({ message: tr('validation_required') }).pipe(
     Schema.check(
       Schema.makeFilter((s: string) => {
         const d = new Date(s);
-        if (Number.isNaN(d.getTime())) return m.validation_required();
+        if (Number.isNaN(d.getTime())) return tr('validation_required');
         const minDate = new Date();
         minDate.setFullYear(minDate.getFullYear() - Auth.MIN_AGE);
-        if (d > minDate) return m.validation_minAge({ minAge: Auth.MIN_AGE });
+        if (d > minDate) return tr('validation_minAge', { minAge: Auth.MIN_AGE });
         return true;
       }),
     ),
   ),
   gender: Schema.Literals(['male', 'female', 'other']).annotate({
-    message: m.validation_invalidOption(),
+    message: tr('validation_invalidOption'),
   }),
 });
 
 type ProfileFormValues = Schema.Schema.Type<typeof ProfileFormSchema>;
 
 const genderOptions = [
-  { value: 'male', label: () => m.profile_complete_genderMale() },
-  { value: 'female', label: () => m.profile_complete_genderFemale() },
-  { value: 'other', label: () => m.profile_complete_genderOther() },
+  { value: 'male', label: () => tr('profile_complete_genderMale') },
+  { value: 'female', label: () => tr('profile_complete_genderFemale') },
+  { value: 'other', label: () => tr('profile_complete_genderOther') },
 ] as const;
 
 interface ProfileCompleteFormProps {
@@ -78,8 +78,8 @@ export function ProfileCompleteForm({ initialName, onSuccess }: ProfileCompleteF
           payload: values,
         }),
       ),
-      Effect.mapError(() => ClientError.make(m.profile_complete_saveFailed())),
-      run({ success: m.profile_profileCompleted() }),
+      Effect.mapError(() => ClientError.make(tr('profile_complete_saveFailed'))),
+      run({ success: tr('profile_profileCompleted') }),
     );
     if (Option.isSome(result)) {
       onSuccess();
@@ -93,9 +93,9 @@ export function ProfileCompleteForm({ initialName, onSuccess }: ProfileCompleteF
           {...form.register('name')}
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{m.profile_complete_displayName()}</FormLabel>
+              <FormLabel>{tr('profile_complete_displayName')}</FormLabel>
               <FormControl>
-                <Input placeholder={m.profile_complete_displayNamePlaceholder()} {...field} />
+                <Input placeholder={tr('profile_complete_displayNamePlaceholder')} {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -106,12 +106,12 @@ export function ProfileCompleteForm({ initialName, onSuccess }: ProfileCompleteF
           {...form.register('birthDate')}
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{m.profile_complete_birthDate()}</FormLabel>
+              <FormLabel>{tr('profile_complete_birthDate')}</FormLabel>
               <FormControl>
                 <DatePicker
                   value={field.value}
                   onChange={field.onChange}
-                  placeholder={m.profile_complete_birthDatePlaceholder()}
+                  placeholder={tr('profile_complete_birthDatePlaceholder')}
                   fromYear={1900}
                   toYear={maxBirthYear}
                   defaultMonth={defaultBirthMonth}
@@ -126,11 +126,11 @@ export function ProfileCompleteForm({ initialName, onSuccess }: ProfileCompleteF
           {...form.register('gender')}
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{m.profile_complete_gender()}</FormLabel>
+              <FormLabel>{tr('profile_complete_gender')}</FormLabel>
               <Select onValueChange={field.onChange} value={field.value}>
                 <FormControl>
                   <SelectTrigger className='w-full'>
-                    <SelectValue placeholder={m.profile_complete_genderPlaceholder()} />
+                    <SelectValue placeholder={tr('profile_complete_genderPlaceholder')} />
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
@@ -147,7 +147,9 @@ export function ProfileCompleteForm({ initialName, onSuccess }: ProfileCompleteF
         />
 
         <Button type='submit' disabled={form.formState.isSubmitting} className='mt-2'>
-          {form.formState.isSubmitting ? m.profile_complete_saving() : m.profile_complete_submit()}
+          {form.formState.isSubmitting
+            ? tr('profile_complete_saving')
+            : tr('profile_complete_submit')}
         </Button>
       </form>
     </Form>

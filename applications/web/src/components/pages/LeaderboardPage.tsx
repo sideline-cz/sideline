@@ -1,5 +1,5 @@
 import type { LeaderboardApi } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
+import { tr } from '~/lib/translations.js';
 
 interface LeaderboardPageProps {
   entries: ReadonlyArray<LeaderboardApi.LeaderboardEntry>;
@@ -52,15 +52,15 @@ export function LeaderboardPage({ entries, currentUserId }: LeaderboardPageProps
   if (entries.length === 0) {
     return (
       <div>
-        <h1 className='text-2xl font-bold mb-6'>{m.leaderboard_title()}</h1>
-        <p className='text-muted-foreground'>{m.leaderboard_empty()}</p>
+        <h1 className='text-2xl font-bold mb-6'>{tr('leaderboard_title')}</h1>
+        <p className='text-muted-foreground'>{tr('leaderboard_empty')}</p>
       </div>
     );
   }
 
   return (
     <div>
-      <h1 className='text-2xl font-bold mb-6'>{m.leaderboard_title()}</h1>
+      <h1 className='text-2xl font-bold mb-6'>{tr('leaderboard_title')}</h1>
 
       <div className='flex flex-col gap-2'>
         {entries.map((entry) => {
@@ -82,13 +82,13 @@ export function LeaderboardPage({ entries, currentUserId }: LeaderboardPageProps
                   {entry.username}
                 </p>
                 <p className='text-xs text-muted-foreground'>
-                  {entry.totalActivities} {m.leaderboard_activities()} ·{' '}
+                  {entry.totalActivities} {tr('leaderboard_activities')} ·{' '}
                   {formatDuration(entry.totalDurationMinutes)}
                 </p>
               </div>
               <div className='text-right shrink-0'>
                 <p className='text-sm font-medium'>{entry.currentStreak}d</p>
-                <p className='text-xs text-muted-foreground'>{m.leaderboard_currentStreak()}</p>
+                <p className='text-xs text-muted-foreground'>{tr('leaderboard_currentStreak')}</p>
               </div>
             </div>
           );

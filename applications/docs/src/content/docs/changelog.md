@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-14 — Translation CMS for global admins
+
+- Global admins can now manage UI translations without a code deployment, at `/admin/translations`.
+- The page lists every translation key with its compiled English and Czech defaults alongside editable override fields. Edits save on blur or Enter.
+- Saving an empty string suppresses the compiled default; deleting an override restores it.
+- Bulk changes are supported via **Import JSON** (locale-keyed object or flat array format) and **Export JSON** (full merged bundle including overrides).
+- Unknown keys are rejected with a clear error listing the bad keys so you can fix the file and retry.
+- Keys whose names start with `bot_` are used by the Discord bot. Override values are stored immediately, but the bot only picks them up after it is redeployed. These keys are marked with a warning badge in the CMS table.
+
 ## 2026-05-13 — Custom activity types for admins
 
 - Team admins can now define **custom activity types** from the **Team → Activity types** page in the web app.

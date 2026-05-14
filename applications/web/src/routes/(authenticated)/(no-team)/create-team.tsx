@@ -1,11 +1,11 @@
 import type { Auth } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { createFileRoute, redirect, useNavigate, useRouter } from '@tanstack/react-router';
 import { Effect, Option } from 'effect';
 import React from 'react';
 import { CreateTeamPage } from '~/components/pages/CreateTeamPage';
 import { setLastTeamId } from '~/lib/auth';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 export const Route = createFileRoute('/(authenticated)/(no-team)/create-team')({
   component: CreateTeamRoute,
@@ -49,8 +49,8 @@ function CreateTeamRoute() {
             payload: { name, guildId: guildId as Auth.CreateTeamRequest['guildId'] },
           }),
         ),
-        Effect.mapError(() => ClientError.make(m.dashboard_createFailed())),
-        run({ success: m.team_teamCreated() }),
+        Effect.mapError(() => ClientError.make(tr('dashboard_createFailed'))),
+        run({ success: tr('team_teamCreated') }),
       );
       if (Option.isSome(result)) {
         const teamId = result.value.teamId;

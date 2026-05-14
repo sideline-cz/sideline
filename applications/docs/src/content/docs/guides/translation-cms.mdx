@@ -1,0 +1,103 @@
+---
+title: Translation CMS
+description: How global admins can edit, import, and export UI translations without a code deployment.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Global admins can override any UI string in Sideline — for both English and Czech — without touching the source code. Changes take effect immediately for all users who next load the application.
+
+<Aside type="caution" title="Who can access this page?">
+  The Translation CMS is available only to users whose Discord ID is listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` environment variable. This is configured by the server operator, not inside the app itself. Regular team admins and captains do not have access.
+</Aside>
+
+## Opening the Translation CMS
+
+Navigate to `/admin/translations` in the web app. The page is not linked from the main sidebar for regular users — go directly by URL, or add it to your browser bookmarks.
+
+## Understanding the table
+
+The page shows every translation key defined in the application:
+
+| Column | What it shows |
+|---|---|
+| **Key** | Internal string identifier (e.g. `nav_events`). Keys starting with `bot_` are used by the Discord bot (see note below). |
+| **EN Default** | The compiled English string built into the application. Read-only. |
+| **EN Override** | The active English override, if any. Edit this field to change what users see. |
+| **CS Default** | The compiled Czech string. Read-only. |
+| **CS Override** | The active Czech override, if any. |
+| **Del** | Delete buttons to remove individual overrides and restore the compiled default. |
+
+You can search by key name using the search box above the table. Keys are paginated — use Previous / Next to navigate through the full list.
+
+## Editing a translation
+
+<Steps>
+1. Find the key you want to change using the search box.
+2. Click into the **EN Override** or **CS Override** cell and type your new text.
+3. Press **Enter** or click away from the field.
+4. The change saves automatically and the cache version increments.
+</Steps>
+
+The new value applies immediately. The next time any user loads the app (or the app polls for overrides) they will see the updated string.
+
+<Aside type="note" title="Empty string overrides">
+  You can save an empty string as an override. This is treated as an intentional override — the compiled default is suppressed and the field renders nothing. To restore the compiled default, delete the override using the Del button instead.
+</Aside>
+
+## Deleting an override
+
+Click the **×** button next to an EN or CS override to delete it. The row is removed from `translation_overrides` and the compiled default for that key is used again.
+
+## How `tr()` resolves a string
+
+When the application looks up a translation key, it uses this priority order:
+
+1. **Active override** — if a row exists in `translation_overrides` for the key and the user's locale, that value is used (even if it is an empty string).
+2. **Compiled default** — the string baked into the application bundle at build time.
+3. **Key fallback** — if neither exists (which should not happen in production), the key itself is returned and a warning is logged.
+
+## Importing overrides from a JSON file
+
+<Steps>
+1. Click **Import JSON** in the toolbar.
+2. Upload a `.json` file in one of the two supported formats:
+
+   **Locale-keyed object** (the same shape as `export.json`):
+   ```json
+   { "en": { "nav_events": "Events" }, "cs": { "nav_events": "Události" } }
+   ```
+
+   **Flat array**:
+   ```json
+   [{ "key": "nav_events", "locale": "en", "value": "Events" }]
+   ```
+
+3. The dialog shows a preview with the number of overrides to import.
+4. Click **Import**. Existing overrides for keys in the file are overwritten; keys not in the file are left unchanged.
+</Steps>
+
+If the file contains keys that do not exist in the compiled message registry the import is rejected and the unknown keys are listed. Fix or remove those keys and try again.
+
+## Exporting the full translation bundle
+
+Click **Export JSON** to download the complete merged bundle — compiled defaults with all active overrides applied — as a `export.json` file. The file uses the locale-keyed object format:
+
+```json
+{
+  "en": { "nav_events": "Events", ... },
+  "cs": { "nav_events": "Události", ... }
+}
+```
+
+This file can be edited and re-imported to make bulk changes.
+
+## Bot keys — changes require a redeploy
+
+Keys beginning with `bot_` are loaded by the Discord bot at startup from the compiled message registry. Overrides to these keys are stored in the database and will apply to the **web app immediately**, but the bot will not pick them up until it is redeployed.
+
+These keys are marked with a **Bot — requires redeploy** badge in the Key column so you can identify them at a glance.
+
+## See also
+
+- [API overview](/api/overview/) — the `GET /api/translations` endpoint that the web app uses to load overrides at runtime.

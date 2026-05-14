@@ -967,6 +967,40 @@ In-app alert records scoped to a specific team and user.
 
 ---
 
+### 11. Translations
+
+#### `translation_overrides`
+
+Admin-managed overrides for compiled UI strings. Each row overrides a single translation key for a single locale. When no row exists for a key+locale pair the application falls back to the compiled default.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `translation_key` | TEXT | NOT NULL, PK (composite) | — |
+| `locale` | TEXT | NOT NULL, PK (composite), CHECK (`'en'`, `'cs'`) | — |
+| `value` | TEXT | NOT NULL | — |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_by` | UUID | FK → `users(id)` ON DELETE SET NULL | `NULL` |
+
+**Primary Key**: `(translation_key, locale)`
+
+**Notes**: Overrides are not scoped to a team — they are global and affect all users. Keys must correspond to entries in the compiled i18n message registry; the API rejects unknown keys at write time.
+
+---
+
+#### `translation_cache_version`
+
+Single-row counter used for cache invalidation. Incremented by the application (via a SQL `UPDATE … RETURNING version` followed by `NOTIFY translation_cache_invalidate`) on every write to `translation_overrides`, allowing the in-process translation cache to refresh without polling.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | INT | PK, CHECK (`id = 1`) | `1` |
+| `version` | BIGINT | NOT NULL | `1` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Notes**: The single row (id = 1) is seeded by the migration. The `version` value is included in `GET /api/translations` responses so clients can skip re-fetching when the version has not changed.
+
+---
+
 ## Migration History
 
 All 50 migration files in `packages/migrations/src/before/` plus 1 after-migration.
@@ -1038,6 +1072,7 @@ All 50 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1779000000 | `achievement_admin` | Creates `achievement_settings` (team_id FK CASCADE, achievement_slug, threshold_override INTEGER, updated_at; PK on (team_id, achievement_slug)); creates `custom_achievements` (id PK, team_id FK CASCADE, name, description, emoji, rule_kind, threshold CHECK > 0, activity_type_slug, discord_role_id, created_at, updated_at; UNIQUE (team_id, name)); adds index `idx_custom_achievements_team`; creates `discord_role_provision_events` (id PK, team_id FK CASCADE, guild_id, kind, ref_id, desired_name, attempts DEFAULT 0, created_at, processed_at, error; UNIQUE (team_id, kind, ref_id)); adds partial index `idx_drpe_unprocessed` on `discord_role_provision_events(created_at) WHERE processed_at IS NULL` |
 | 1780000000 | `weekly_summary` | Adds `weekly_summary_channel_id TEXT` to `team_settings`; creates `weekly_summary_sync_events` (id PK, team_id FK CASCADE, week_start TIMESTAMPTZ, week_end TIMESTAMPTZ, channel_id TEXT, payload JSONB DEFAULT '{}', attempts INT DEFAULT 0, last_error TEXT, created_at, processed_at, delivered_at; UNIQUE (team_id, week_start)); adds partial indexes `idx_wsse_pending` and `idx_wsse_delivered` |
 | 1781000000 | `activity_type_metadata` | Adds `emoji TEXT`, `description TEXT`, and `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()` to `activity_types`; backfills emoji for the four global built-ins (🏋️ gym, 🏃 running, 🧘 stretching, ⚽ training); creates unique index `idx_activity_types_global_lower_name` on `(LOWER(name)) WHERE team_id IS NULL`; creates unique index `idx_activity_types_team_lower_name` on `(team_id, LOWER(name)) WHERE team_id IS NOT NULL` |
+| 1782000000 | `create_translations` | Creates `translation_overrides` (translation_key TEXT, locale TEXT CHECK `'en'`/`'cs'`, value TEXT, updated_at TIMESTAMPTZ, updated_by UUID FK → users ON DELETE SET NULL; PK on (translation_key, locale)) and `translation_cache_version` (id INT PK CHECK id=1, version BIGINT DEFAULT 1, updated_at TIMESTAMPTZ); seeds the single `translation_cache_version` row |
 
 ### After Migrations (seed data)
 

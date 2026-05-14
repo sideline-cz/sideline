@@ -1,7 +1,7 @@
 import { EventApi } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import * as Option from 'effect/Option';
 import { ExternalLink } from 'lucide-react';
+import { tr } from '~/lib/translations.js';
 
 interface EventLocationProps {
   text: string;
@@ -21,7 +21,7 @@ export function EventLocation({ text, url, stopPropagation = false }: EventLocat
       >
         {text}
         <ExternalLink className='size-3.5 shrink-0' aria-hidden />
-        <span className='sr-only'>{m.common_opensInNewTab()}</span>
+        <span className='sr-only'>{tr('common_opensInNewTab')}</span>
       </a>
     );
   }

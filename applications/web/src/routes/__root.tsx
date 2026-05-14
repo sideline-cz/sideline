@@ -124,7 +124,9 @@ function RootDocumentRoute({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeProvider>
-      <RootDocument run={runPromiseClient(serverUrl)}>{children}</RootDocument>
+      <RootDocument run={runPromiseClient(serverUrl)} serverUrl={serverUrl}>
+        {children}
+      </RootDocument>
     </ThemeProvider>
   );
 }

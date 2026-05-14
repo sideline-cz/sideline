@@ -1,5 +1,4 @@
 import type { EventApi, EventRsvpApi } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { type Effect, Option } from 'effect';
 import { Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -7,6 +6,7 @@ import { Button } from '~/components/ui/button';
 import { Textarea } from '~/components/ui/textarea';
 import type { ClientConfig } from '~/lib/client';
 import { type ApiClient, type ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 interface EventRsvpPanelProps {
   eventDetail: EventApi.EventDetail;
@@ -43,7 +43,7 @@ export function EventRsvpPanel({
     if (response === currentResponse) return;
     if (isBusy) return;
     setSubmittingResponse(response);
-    await run({ success: m.event_rsvpSubmitted() })(onRsvpSubmit(response, savedMessage));
+    await run({ success: tr('event_rsvpSubmitted') })(onRsvpSubmit(response, savedMessage));
     setSubmittingResponse(null);
   };
 
@@ -51,13 +51,13 @@ export function EventRsvpPanel({
     if (!currentResponse) return;
     if (isBusy) return;
     setSavingMessage(true);
-    await run({ success: m.event_rsvpSubmitted() })(onRsvpSubmit(currentResponse, draftMessage));
+    await run({ success: tr('event_rsvpSubmitted') })(onRsvpSubmit(currentResponse, draftMessage));
     setSavingMessage(false);
   };
 
   return (
     <div>
-      <h2 className='text-lg font-semibold mb-4'>{m.rsvp_title()}</h2>
+      <h2 className='text-lg font-semibold mb-4'>{tr('rsvp_title')}</h2>
 
       {rsvpDetail.canRsvp ? (
         <div className='flex flex-col gap-4'>
@@ -78,10 +78,10 @@ export function EventRsvpPanel({
                 >
                   {isLoadingThis && <Loader2 className='animate-spin' aria-hidden='true' />}
                   {response === 'yes'
-                    ? m.rsvp_yes()
+                    ? tr('rsvp_yes')
                     : response === 'maybe'
-                      ? m.rsvp_maybe()
-                      : m.rsvp_no()}
+                      ? tr('rsvp_maybe')
+                      : tr('rsvp_no')}
                 </Button>
               );
             })}
@@ -91,47 +91,47 @@ export function EventRsvpPanel({
             <>
               <div>
                 <label htmlFor='rsvp-message' className='text-sm font-medium mb-1 block'>
-                  {m.rsvp_message()}
+                  {tr('rsvp_message')}
                 </label>
                 <Textarea
                   id='rsvp-message'
                   value={draftMessage}
                   onChange={(e) => setDraftMessage(e.target.value)}
-                  placeholder={m.rsvp_messagePlaceholder()}
+                  placeholder={tr('rsvp_messagePlaceholder')}
                   rows={2}
                 />
               </div>
               <div>
                 <Button onClick={handleSaveNote} disabled={isBusy}>
                   {savingMessage && <Loader2 className='animate-spin' aria-hidden='true' />}
-                  {savingMessage ? m.rsvp_savingNote() : m.rsvp_saveNote()}
+                  {savingMessage ? tr('rsvp_savingNote') : tr('rsvp_saveNote')}
                 </Button>
               </div>
             </>
           )}
         </div>
       ) : (
-        <p className='text-sm text-muted-foreground'>{m.rsvp_deadlinePassed()}</p>
+        <p className='text-sm text-muted-foreground'>{tr('rsvp_deadlinePassed')}</p>
       )}
 
       <div className='mt-6'>
-        <h3 className='text-sm font-semibold mb-2'>{m.rsvp_summary()}</h3>
+        <h3 className='text-sm font-semibold mb-2'>{tr('rsvp_summary')}</h3>
         <div className='flex gap-4 text-sm mb-4'>
           <span className='text-green-700 dark:text-green-400'>
-            {m.rsvp_attending({ count: String(rsvpDetail.yesCount) })}
+            {tr('rsvp_attending', { count: String(rsvpDetail.yesCount) })}
           </span>
           <span className='text-yellow-600 dark:text-yellow-400'>
-            {m.rsvp_undecided({ count: String(rsvpDetail.maybeCount) })}
+            {tr('rsvp_undecided', { count: String(rsvpDetail.maybeCount) })}
           </span>
           <span className='text-red-600 dark:text-red-400'>
-            {m.rsvp_notAttending({ count: String(rsvpDetail.noCount) })}
+            {tr('rsvp_notAttending', { count: String(rsvpDetail.noCount) })}
           </span>
         </div>
 
         {rsvpDetail.minPlayersThreshold > 0 &&
           rsvpDetail.yesCount < rsvpDetail.minPlayersThreshold && (
             <div className='mb-4 rounded-md border border-yellow-300 bg-yellow-50 px-4 py-2 text-sm text-yellow-800 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-200'>
-              {m.rsvp_belowMinPlayers({
+              {tr('rsvp_belowMinPlayers', {
                 count: String(rsvpDetail.yesCount),
                 threshold: String(rsvpDetail.minPlayersThreshold),
               })}
@@ -157,10 +157,10 @@ export function EventRsvpPanel({
                     }
                   >
                     {r.response === 'yes'
-                      ? m.rsvp_yes()
+                      ? tr('rsvp_yes')
                       : r.response === 'maybe'
-                        ? m.rsvp_maybe()
-                        : m.rsvp_no()}
+                        ? tr('rsvp_maybe')
+                        : tr('rsvp_no')}
                   </span>
                   <span>
                     {Option.getOrElse(r.memberName, () => Option.getOrElse(r.username, () => '—'))}
@@ -172,12 +172,12 @@ export function EventRsvpPanel({
               ))}
           </ul>
         ) : (
-          <p className='text-sm text-muted-foreground'>{m.rsvp_noResponses()}</p>
+          <p className='text-sm text-muted-foreground'>{tr('rsvp_noResponses')}</p>
         )}
 
         {(eventDetail.canEdit || eventDetail.canCancel) && nonResponders.length > 0 && (
           <div className='mt-6'>
-            <h3 className='text-sm font-semibold mb-2'>{m.rsvp_nonRespondersTitle()}</h3>
+            <h3 className='text-sm font-semibold mb-2'>{tr('rsvp_nonRespondersTitle')}</h3>
             <ul className='space-y-1 text-sm text-muted-foreground'>
               {nonResponders.map((nr) => (
                 <li key={nr.teamMemberId}>

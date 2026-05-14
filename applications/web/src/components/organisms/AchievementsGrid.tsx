@@ -1,7 +1,7 @@
 import { Achievement } from '@sideline/domain';
-import * as m from '@sideline/i18n/messages';
 import { Card } from '~/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/components/ui/tooltip';
+import { tr } from '~/lib/translations.js';
 
 const SLUG_EMOJI: Record<Achievement.AchievementSlug, string> = {
   first_activity: '🌱',
@@ -17,40 +17,12 @@ const SLUG_EMOJI: Record<Achievement.AchievementSlug, string> = {
   running_25: '🏃',
 };
 
-type TitleKey =
-  | 'achievement_first_activity_title'
-  | 'achievement_ten_activities_title'
-  | 'achievement_fifty_activities_title'
-  | 'achievement_hundred_activities_title'
-  | 'achievement_streak_3_title'
-  | 'achievement_streak_7_title'
-  | 'achievement_streak_30_title'
-  | 'achievement_duration_600_title'
-  | 'achievement_duration_3000_title'
-  | 'achievement_gym_25_title'
-  | 'achievement_running_25_title';
-
-type DescriptionKey =
-  | 'achievement_first_activity_description'
-  | 'achievement_ten_activities_description'
-  | 'achievement_fifty_activities_description'
-  | 'achievement_hundred_activities_description'
-  | 'achievement_streak_3_description'
-  | 'achievement_streak_7_description'
-  | 'achievement_streak_30_description'
-  | 'achievement_duration_600_description'
-  | 'achievement_duration_3000_description'
-  | 'achievement_gym_25_description'
-  | 'achievement_running_25_description';
-
 function getTitle(slug: Achievement.AchievementSlug): string {
-  const key = `achievement_${slug}_title` as TitleKey;
-  return m[key]();
+  return tr(`achievement_${slug}_title`);
 }
 
 function getDescription(slug: Achievement.AchievementSlug): string {
-  const key = `achievement_${slug}_description` as DescriptionKey;
-  return m[key]();
+  return tr(`achievement_${slug}_description`);
 }
 
 type EarnedAchievement = {
@@ -182,11 +154,11 @@ export function AchievementsGridI18n({
   return (
     <AchievementsGrid
       earnedAchievements={earnedAchievements}
-      sectionTitle={m.achievements_section_title()}
-      sectionCount={m.achievements_section_count({ earned: earnedCount, total })}
-      emptyTitle={m.achievements_empty_title()}
-      emptyDescription={m.achievements_empty_description()}
-      earnedOnLabel={(date) => m.achievements_earned_on({ date })}
+      sectionTitle={tr('achievements_section_title')}
+      sectionCount={tr('achievements_section_count', { earned: earnedCount, total })}
+      emptyTitle={tr('achievements_empty_title')}
+      emptyDescription={tr('achievements_empty_description')}
+      earnedOnLabel={(date) => tr('achievements_earned_on', { date })}
     />
   );
 }
