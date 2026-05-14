@@ -3,6 +3,7 @@ import { AchievementRpcLive } from './achievement/index.js';
 import { ActivityRpcLive } from './activity/index.js';
 import { ChannelsRpcLive } from './channel/index.js';
 import { EventsRpcLive } from './event/index.js';
+import { FinanceRpcLive } from './finance/index.js';
 import { GuildsRpcLive } from './guild/index.js';
 import { InvitesRpcLive } from './invite/index.js';
 import { RolesRpcLive } from './role/index.js';
@@ -19,4 +20,5 @@ export const SyncRpcsLive = Layer.mergeAll(
   AchievementRpcLive,
   RoleProvisionRpcLive,
   WeeklySummaryRpcLive,
+  FinanceRpcLive,
 );

@@ -31,6 +31,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Achievement](#20-achievement)
    - [Weekly Summary](#21-weekly-summary)
    - [Translations](#22-translations)
+   - [Finance](#23-finance)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -3726,6 +3727,470 @@ The response shape is:
 
 ---
 
+### 23. Finance
+
+**Source:** `packages/domain/src/api/FinanceApi.ts`
+**Prefix:** `/teams/:teamId`
+
+The Finance group exposes fee management and payment tracking. Permissions follow the treasurer pattern: `finance:view` grants read-only access; `finance:manage_fees` is required to create, update, or archive fees and to assign them to members; `finance:record_payments` is required to record or void payments. By default Admin holds all three, Captain holds `finance:view` and `finance:manage_fees`, Player holds none.
+
+**View types (response DTOs):**
+
+`FeeView` — a fee definition with aggregated assignment counts.
+
+| Field | Type | Description |
+|---|---|---|
+| `feeId` | `FeeId` (string) | Fee ID |
+| `teamId` | `TeamId` (string) | Team ID |
+| `name` | `string` | Fee name |
+| `description` | `string \| null` | Optional description |
+| `amountMinor` | `integer ≥ 0` | Default amount in minor currency units (e.g. cents) |
+| `currency` | `string (3 chars)` | ISO 4217 currency code |
+| `dueAt` | `DateTime \| null` | Default due date |
+| `targetScope` | `'all_members' \| 'custom'` | Whether the fee targets all members or a custom list |
+| `archivedAt` | `DateTime \| null` | Archive timestamp; `null` if active |
+| `assignmentCount` | `number` | Total assignments |
+| `paidCount` | `number` | Assignments with status `paid` |
+| `pendingCount` | `number` | Assignments with status `pending` |
+| `overdueCount` | `number` | Assignments with status `overdue` |
+
+`FeeAssignmentView` — an individual fee assignment with computed status.
+
+| Field | Type | Description |
+|---|---|---|
+| `assignmentId` | `FeeAssignmentId` (string) | Assignment ID |
+| `feeId` | `FeeId` (string) | Parent fee |
+| `teamMemberId` | `TeamMemberId` (string) | Assigned member |
+| `memberName` | `string \| null` | Member display name |
+| `feeName` | `string` | Fee name (denormalised) |
+| `currency` | `string (3 chars)` | ISO 4217 currency code |
+| `dueMinor` | `integer ≥ 0` | Amount due (assignment-level override or fee default) |
+| `paidMinor` | `integer ≥ 0` | Amount already paid (maintained by trigger) |
+| `status` | `'pending' \| 'partial' \| 'paid' \| 'overdue' \| 'waived'` | Computed status |
+| `effectiveDueAt` | `DateTime \| null` | Assignment-level override due date, or fee-level due date |
+| `waivedReason` | `string \| null` | Reason for waiver (if waived) |
+
+`PaymentView` — an individual payment record.
+
+| Field | Type | Description |
+|---|---|---|
+| `paymentId` | `PaymentId` (string) | Payment ID |
+| `feeAssignmentId` | `FeeAssignmentId` (string) | Parent assignment |
+| `teamMemberId` | `TeamMemberId` (string) | Member who paid |
+| `memberName` | `string \| null` | Member display name |
+| `amountMinor` | `integer ≥ 0` | Payment amount in minor units |
+| `method` | `'cash' \| 'bank_transfer'` | Payment method |
+| `paidAt` | `DateTime` | When the payment was made |
+| `note` | `string \| null` | Optional note |
+| `recorderName` | `string \| null` | Name of the user who recorded the payment |
+| `voidedAt` | `DateTime \| null` | Void timestamp; `null` if active |
+| `voidReason` | `string \| null` | Reason for voiding |
+
+`FinanceOverviewMemberRow` — per-member summary for the overview page.
+
+| Field | Type | Description |
+|---|---|---|
+| `teamMemberId` | `TeamMemberId` (string) | Member ID |
+| `memberName` | `string \| null` | Member display name |
+| `currency` | `string (3 chars)` | ISO 4217 currency code |
+| `totalDueMinor` | `number` | Total amount due across all assignments |
+| `totalPaidMinor` | `number` | Total amount paid across all assignments |
+| `overdueCount` | `number` | Number of overdue assignments |
+| `pendingCount` | `number` | Number of pending assignments |
+| `paidCount` | `number` | Number of paid assignments |
+
+`MyFinanceStatus` — the invoking member's own status grouped by currency.
+
+| Field | Type | Description |
+|---|---|---|
+| `currency` | `string (3 chars)` | ISO 4217 currency code |
+| `assignments` | `FeeAssignmentView[]` | All assignments in this currency |
+| `totalOutstandingMinor` | `number` | Sum of `dueMinor - paidMinor` for non-waived assignments |
+
+---
+
+#### `GET /teams/:teamId/fees`
+
+Lists all fees for the team (including archived).
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:view`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Response:** `200 OK` — `FeeView[]`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:view` permission |
+
+---
+
+#### `POST /teams/:teamId/fees`
+
+Creates a new fee.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:manage_fees`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `CreateFeeRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string (non-empty)` | Yes | Fee name |
+| `description` | `string \| null` | No | Optional description |
+| `amountMinor` | `integer ≥ 0` | Yes | Default amount in minor units |
+| `currency` | `string (3 chars)` | Yes | ISO 4217 currency code |
+| `dueAt` | `DateTime \| null` | No | Default due date |
+| `targetScope` | `'all_members' \| 'custom'` | Yes | Scope |
+
+**Response:** `201 Created` — `FeeView`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `InvalidAmount` | 400 | Amount is negative |
+
+---
+
+#### `GET /teams/:teamId/fees/:feeId`
+
+Returns a single fee.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:view`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `feeId` | `FeeId` (string) | Fee ID |
+
+**Response:** `200 OK` — `FeeView`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:view` permission |
+| `FeeNotFound` | 404 | Fee does not exist |
+
+---
+
+#### `PATCH /teams/:teamId/fees/:feeId`
+
+Updates fee metadata. All fields are optional.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:manage_fees`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `feeId` | `FeeId` (string) | Fee ID |
+
+**Request Body:** `UpdateFeeRequest` (all fields optional)
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `string (non-empty)` | New fee name |
+| `description` | `string \| null` | New description (or `null` to clear) |
+| `amountMinor` | `integer ≥ 0` | New default amount |
+| `currency` | `string (3 chars)` | New currency code |
+| `dueAt` | `DateTime \| null` | New default due date (or `null` to clear) |
+| `targetScope` | `'all_members' \| 'custom'` | New scope |
+
+**Response:** `200 OK` — `FeeView`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `FeeNotFound` | 404 | Fee does not exist |
+| `FeeArchived` | 409 | Fee is archived; updates are not permitted |
+| `InvalidAmount` | 400 | Amount is negative |
+
+---
+
+#### `DELETE /teams/:teamId/fees/:feeId`
+
+Archives a fee (soft-delete). Assignments are preserved.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:manage_fees`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `feeId` | `FeeId` (string) | Fee ID |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `FeeNotFound` | 404 | Fee does not exist |
+
+---
+
+#### `GET /teams/:teamId/fees/:feeId/assignments`
+
+Lists all assignments for a fee.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:view`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `feeId` | `FeeId` (string) | Fee ID |
+
+**Response:** `200 OK` — `FeeAssignmentView[]`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:view` permission |
+| `FeeNotFound` | 404 | Fee does not exist |
+
+---
+
+#### `POST /teams/:teamId/fees/:feeId/assignments`
+
+Assigns a fee to one or more members.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:manage_fees`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `feeId` | `FeeId` (string) | Fee ID |
+
+**Request Body:** `AssignFeeRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `memberIds` | `TeamMemberId[]` | Yes | Members to assign |
+| `amountMinorOverride` | `integer ≥ 0 \| null` | No | Per-assignment amount override (uses fee default if `null`) |
+| `dueAtOverride` | `DateTime \| null` | No | Per-assignment due date override (uses fee default if `null`) |
+
+**Response:** `201 Created` — `FeeAssignmentView[]`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `FeeNotFound` | 404 | Fee does not exist |
+| `FeeArchived` | 409 | Fee is archived |
+| `InvalidAmount` | 400 | Amount override is negative |
+
+---
+
+#### `PATCH /teams/:teamId/fees/:feeId/assignments/:assignmentId`
+
+Updates an individual fee assignment (amount, due date, or waiver state).
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:manage_fees`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `feeId` | `FeeId` (string) | Fee ID |
+| `assignmentId` | `FeeAssignmentId` (string) | Assignment ID |
+
+**Request Body:** `UpdateAssignmentRequest` (all fields optional)
+
+| Field | Type | Description |
+|---|---|---|
+| `amountMinor` | `integer ≥ 0` | New amount due |
+| `dueAt` | `DateTime \| null` | New due date override (or `null` to clear, falling back to the fee-level date) |
+| `waived` | `boolean` | Set to `true` to waive, `false` to re-activate |
+| `waivedReason` | `string \| null` | Reason for waiving (or `null` to clear) |
+
+**Response:** `200 OK` — `FeeAssignmentView`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `FeeNotFound` | 404 | Fee does not exist |
+| `AssignmentNotFound` | 404 | Assignment does not exist |
+| `FeeArchived` | 409 | Fee is archived |
+| `InvalidAmount` | 400 | Amount is negative |
+
+---
+
+#### `GET /teams/:teamId/payments`
+
+Lists all payments for the team (including voided).
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:view`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Response:** `200 OK` — `PaymentView[]`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:view` permission |
+
+---
+
+#### `POST /teams/:teamId/fees/:feeId/assignments/:assignmentId/payments`
+
+Records a payment against an assignment.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:record_payments`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `feeId` | `FeeId` (string) | Fee ID |
+| `assignmentId` | `FeeAssignmentId` (string) | Assignment ID |
+
+**Request Body:** `RecordPaymentRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `amountMinor` | `integer ≥ 0` | Yes | Amount paid in minor units |
+| `method` | `'cash' \| 'bank_transfer'` | Yes | Payment method |
+| `paidAt` | `DateTime` | Yes | When the payment was made |
+| `note` | `string \| null` | No | Optional note |
+
+**Response:** `201 Created` — `PaymentView`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:record_payments` permission |
+| `FeeNotFound` | 404 | Fee does not exist |
+| `AssignmentNotFound` | 404 | Assignment does not exist |
+| `FeeArchived` | 409 | Fee is archived |
+| `InvalidAmount` | 400 | Amount is zero or negative |
+
+---
+
+#### `DELETE /teams/:teamId/payments/:paymentId`
+
+Voids a payment. The payment record is preserved but marked as voided; the assignment's `paidMinor` is recomputed automatically by the database trigger.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:record_payments`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `paymentId` | `PaymentId` (string) | Payment ID |
+
+**Request Body:** `VoidPaymentRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `reason` | `string (non-empty)` | Yes | Reason for voiding |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:record_payments` permission |
+| `PaymentNotFound` | 404 | Payment does not exist |
+
+---
+
+#### `GET /teams/:teamId/finance/overview`
+
+Returns per-member finance summary rows for the team overview page.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:view`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Response:** `200 OK` — `FinanceOverviewMemberRow[]`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:view` permission |
+
+---
+
+#### `GET /teams/:teamId/finance/my-status`
+
+Returns the invoking member's own fee assignment status grouped by currency.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `finance:view`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Response:** `200 OK` — `MyFinanceStatus[]` (one element per currency)
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Missing `finance:view` permission |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -3847,6 +4312,16 @@ Drains the `weekly_summary_sync_events` outbox. Each Sunday at 20:00 local team 
 
 `UnprocessedWeeklySummaryEvent` fields: `id`, `team_id`, `channel_id` (Discord channel snowflake), `week_start`, `week_end`, `payload` (encoded `WeeklySummaryDigest` JSON).
 
+#### Finance
+
+Returns a member's own fee assignment status for the `/finance status` Discord slash command.
+
+| Method | Payload / Returns | Description |
+|---|---|---|
+| `Finance/GetMyStatus` | `guild_id`, `discord_user_id` → `GetMyStatusResult` | Fetches the invoking member's fee assignments grouped by currency; errors: `FinanceGuildNotFound`, `FinanceMemberNotFound` |
+
+`GetMyStatusResult` shape: `{ groups: FinanceStatusCurrencyGroup[] }`. Each group: `{ currency, total_outstanding_minor, assignments: FinanceStatusAssignment[] }`. Each assignment: `{ assignment_id, fee_name, status, due_minor, paid_minor, effective_due_at }`.
+
 ---
 
 ## Error Reference
@@ -3910,4 +4385,10 @@ The following table consolidates all error tags across all API groups.
 | `WeeklySummaryForbidden` | 403 | Weekly Summary | Caller is not a member of the team |
 | `WeeklySummaryNotFound` | 404 | Weekly Summary | The `week` query parameter is syntactically invalid |
 | `TranslationForbidden` | 403 | Translations | Caller is not a global admin |
+| `FinanceForbidden` | 403 | Finance | Missing required finance permission (`finance:view`, `finance:manage_fees`, or `finance:record_payments`) |
+| `FeeNotFound` | 404 | Finance | Fee does not exist or does not belong to this team |
+| `AssignmentNotFound` | 404 | Finance | Fee assignment does not exist |
+| `PaymentNotFound` | 404 | Finance | Payment does not exist |
+| `InvalidAmount` | 400 | Finance | Amount is negative (or zero for payments) |
+| `FeeArchived` | 409 | Finance | Fee is archived; the operation requires an active fee |
 | `UnknownTranslationKeys` | 400 | Translations | Import payload contains key(s) not present in the compiled message registry |

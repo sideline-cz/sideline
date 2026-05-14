@@ -58,6 +58,7 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { MockFinanceLayers } from './mocks/financeMocks.js';
 import { MockTranslationsLayers } from './mocks/translationMocks.js';
 
 // ---------------------------------------------------------------------------
@@ -919,7 +920,9 @@ const buildTestLayer = () => {
       ),
     ),
     Layer.provide(MockAchievementAdminLayers),
-  ).pipe(Layer.provide(MockTranslationsLayers));
+  )
+    .pipe(Layer.provide(MockFinanceLayers))
+    .pipe(Layer.provide(MockTranslationsLayers));
 };
 
 // ---------------------------------------------------------------------------

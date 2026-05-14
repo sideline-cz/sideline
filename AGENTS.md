@@ -592,4 +592,4 @@ The `docs/thesis/` directory contains Mermaid diagrams and documentation for the
 
 ---
 
-**Last Updated**: 2026-05-14 (Translation CMS: web `tr()` helper + Biome `noRestrictedImports` rule blocking `@sideline/i18n/messages` in web, `@sideline/i18n` registry + raw JSON exports, server `APP_GLOBAL_ADMIN_DISCORD_IDS` + `requireGlobalAdmin` guard, LISTEN/NOTIFY cache invalidation pattern for `TranslationCache`)
+**Last Updated**: 2026-05-14 (Fee Management MVP: domain models `Fee` / `FeeAssignment` / `Payment` with branded ids, `FinanceApi` HTTP group + `FinanceRpcGroup`, three permissions `finance:view` / `finance:manage_fees` / `finance:record_payments` (treasurer pattern), trigger-maintained `fee_assignments.paid_minor` with `FOR UPDATE` lock, `fee_assignment_status_v` view deriving status, cross-tenant `findActiveByIdAndTeam` lookup pattern via JOIN-to-team-scope, `ON DELETE RESTRICT` cascade discipline on financial records)

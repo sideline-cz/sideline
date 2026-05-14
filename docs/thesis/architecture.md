@@ -184,7 +184,7 @@ For the server, `AppLive` composes:
 - `ApiLive` — all REST route handlers
 - `RpcLive` — the NDJSON RPC router at `/rpc/sync` (used by the bot)
 - `AuthMiddlewareLive` — Discord session authentication middleware
-- All repository layers (`UsersRepository`, `TeamsRepository`, etc.)
+- All repository layers (`UsersRepository`, `TeamsRepository`, `FeesRepository`, `FeeAssignmentsRepository`, `PaymentsRepository`, `FinanceOverviewRepository`, etc.)
 - `DiscordOAuth.Default` — Discord OAuth2 client
 
 For the bot, `AppLive` composes:
@@ -192,6 +192,7 @@ For the bot, `AppLive` composes:
 - `HealthServerLive` — lightweight HTTP health-check server
 - `DiscordIxLive` — dfx Gateway connection (WebSocket to Discord)
 - `SyncLive` — `RoleSyncService`, `ChannelSyncService`, `EventSyncService`, `AchievementSyncService`, `RoleProvisionSyncService` (all backed by `SyncRpc` which calls the server over RPC)
+- `FinanceCommand` — `/finance` slash command group (ephemeral, calls `Finance/GetMyStatus` RPC)
 
 ### `run.ts` — deployment entrypoint
 

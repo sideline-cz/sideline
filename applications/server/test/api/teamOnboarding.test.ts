@@ -54,6 +54,7 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { MockFinanceLayers } from '../mocks/financeMocks.js';
 import { MockTranslationsLayers } from '../mocks/translationMocks.js';
 
 // ---------------------------------------------------------------------------
@@ -450,7 +451,7 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(MockBotGuildsRepositoryLayer),
   Layer.provide(MockHttpClientLayer),
   Layer.provide(MockNoopLayers),
-);
+).pipe(Layer.provide(MockFinanceLayers));
 
 // ---------------------------------------------------------------------------
 // Test setup

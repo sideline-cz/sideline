@@ -1001,9 +1001,119 @@ Single-row counter used for cache invalidation. Incremented by the application (
 
 ---
 
+### 12. Finance
+
+The Finance subsystem tracks fee definitions, per-member fee assignments, and payment records. A PostgreSQL trigger automatically maintains the denormalised `fee_assignments.paid_minor` column so the server never needs to aggregate payments on read. A computed view (`fee_assignment_status_v`) derives the displayed status from stored data.
+
+#### `fees`
+
+A fee definition scoped to a team. Fees can be archived (soft-deleted) but never hard-deleted.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `name` | TEXT | NOT NULL | — |
+| `description` | TEXT | — | `NULL` |
+| `amount_minor` | BIGINT | NOT NULL, CHECK ≥ 0 | — |
+| `currency` | CHAR(3) | NOT NULL | — |
+| `due_at` | TIMESTAMPTZ | — | `NULL` |
+| `recurrence` | TEXT | NOT NULL, CHECK (`'none'`) | `'none'` |
+| `target_scope` | TEXT | NOT NULL, CHECK (`'all_members'`, `'custom'`) | `'all_members'` |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `archived_at` | TIMESTAMPTZ | — | `NULL` |
+
+**Indexes**: `idx_fees_team_active` on `(team_id) WHERE archived_at IS NULL`; `idx_fees_team_due` on `(team_id, due_at)`
+
+**Notes**: `recurrence = 'none'` is the only supported value in v1 (no auto-monthly recurrence). `amount_minor` and `currency` are stored per-fee. `archived_at IS NOT NULL` means the fee is soft-deleted; updates to archived fees return `409 FeeArchived`.
+
+---
+
+#### `fee_assignments`
+
+Assigns a fee to a specific team member, optionally overriding the amount or due date. The `paid_minor` column is maintained automatically by the `payments_recompute_paid_minor` trigger.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `fee_id` | UUID | NOT NULL, FK → `fees(id)` ON DELETE CASCADE | — |
+| `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE RESTRICT | — |
+| `amount_minor` | BIGINT | NOT NULL, CHECK ≥ 0 | — |
+| `paid_minor` | BIGINT | NOT NULL, CHECK ≥ 0 | `0` |
+| `due_at` | TIMESTAMPTZ | — | `NULL` |
+| `stored_status` | TEXT | NOT NULL, CHECK (`'active'`, `'waived'`) | `'active'` |
+| `waived_reason` | TEXT | — | `NULL` |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(fee_id, team_member_id)` — one assignment per member per fee.
+
+**Indexes**: `idx_fee_assignments_member` on `(team_member_id)`; `idx_fee_assignments_fee` on `(fee_id)`
+
+**Notes**: `stored_status` is the durable flag (`active` or `waived`). The computed status shown in API responses (`pending`, `partial`, `paid`, `overdue`, `waived`) is derived by the `fee_assignment_status_v` view. Member deletion is blocked (`ON DELETE RESTRICT`) while any assignment exists. `paid_minor` must not be set directly; it is always computed by the trigger.
+
+---
+
+#### `payments`
+
+An individual payment against a fee assignment. Payments are never deleted; instead they are voided by setting `voided_at`, `voided_by_user_id`, and `void_reason` atomically.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `fee_assignment_id` | UUID | NOT NULL, FK → `fee_assignments(id)` ON DELETE RESTRICT | — |
+| `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE RESTRICT | — |
+| `amount_minor` | BIGINT | NOT NULL, CHECK > 0 | — |
+| `method` | TEXT | NOT NULL, CHECK (`'cash'`, `'bank_transfer'`) | — |
+| `paid_at` | TIMESTAMPTZ | NOT NULL | — |
+| `note` | TEXT | — | `NULL` |
+| `recorded_by_user_id` | UUID | NOT NULL, FK → `users(id)` ON DELETE RESTRICT | — |
+| `voided_at` | TIMESTAMPTZ | — | `NULL` |
+| `voided_by_user_id` | UUID | FK → `users(id)` ON DELETE RESTRICT | `NULL` |
+| `void_reason` | TEXT | — | `NULL` |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Constraint**: `voided_at`, `voided_by_user_id`, and `void_reason` must all be `NULL` or all non-`NULL` (atomic void state).
+
+**Indexes**: `idx_payments_assignment_active` on `(fee_assignment_id) WHERE voided_at IS NULL`; `idx_payments_member` on `(team_member_id)`; `idx_payments_paid_at` on `(paid_at DESC)`
+
+**Notes**: `amount_minor > 0` (not ≥ 0) — a zero-amount payment is rejected at the DB level. Voiding a payment triggers `payments_recompute_paid_minor` to recompute `fee_assignments.paid_minor`.
+
+---
+
+#### `fee_assignment_status_v` (view)
+
+A read-only view that joins `fee_assignments` with `fees` to produce the computed assignment status. It is the source for `FeeAssignmentView` in API responses.
+
+| Column | Derived from | Description |
+|---|---|---|
+| `assignment_id` | `fee_assignments.id` | Assignment PK |
+| `fee_id` | `fee_assignments.fee_id` | Parent fee |
+| `team_id` | `fees.team_id` | Team scope |
+| `team_member_id` | `fee_assignments.team_member_id` | Assigned member |
+| `due_minor` | `fee_assignments.amount_minor` | Amount due |
+| `paid_minor` | `fee_assignments.paid_minor` | Amount paid (trigger-maintained) |
+| `effective_due_at` | `COALESCE(fa.due_at, f.due_at)` | Assignment override or fee default |
+| `status` | computed | `waived` → `paid` → `partial` → `overdue` → `pending` (priority order) |
+| `currency` | `fees.currency` | ISO 4217 code |
+| `fee_name` | `fees.name` | Fee name |
+| `stored_status` | `fee_assignments.stored_status` | Durable status flag |
+| `waived_reason` | `fee_assignments.waived_reason` | Waiver reason |
+
+**Status computation rule**: `waived` if `stored_status = 'waived'`; else `paid` if `paid_minor >= amount_minor`; else `partial` if `paid_minor > 0`; else `overdue` if `effective_due_at < now()`; else `pending`.
+
+---
+
+#### `recompute_paid_minor` (trigger function)
+
+A PostgreSQL trigger function attached to the `payments` table as `AFTER INSERT OR UPDATE OR DELETE`. After any payment write it calls `recompute_paid_minor(assignment_id)` which locks the assignment row and resets `paid_minor` to the sum of non-voided payments for that assignment. On `UPDATE` it also recomputes the old assignment if `fee_assignment_id` changed. This keeps `fee_assignments.paid_minor` always accurate without application-level coordination.
+
+---
+
 ## Migration History
 
-All 50 migration files in `packages/migrations/src/before/` plus 1 after-migration.
+All 51 migration files in `packages/migrations/src/before/` plus 1 after-migration.
 
 ### Before Migrations (schema changes)
 
@@ -1073,6 +1183,7 @@ All 50 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1780000000 | `weekly_summary` | Adds `weekly_summary_channel_id TEXT` to `team_settings`; creates `weekly_summary_sync_events` (id PK, team_id FK CASCADE, week_start TIMESTAMPTZ, week_end TIMESTAMPTZ, channel_id TEXT, payload JSONB DEFAULT '{}', attempts INT DEFAULT 0, last_error TEXT, created_at, processed_at, delivered_at; UNIQUE (team_id, week_start)); adds partial indexes `idx_wsse_pending` and `idx_wsse_delivered` |
 | 1781000000 | `activity_type_metadata` | Adds `emoji TEXT`, `description TEXT`, and `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()` to `activity_types`; backfills emoji for the four global built-ins (🏋️ gym, 🏃 running, 🧘 stretching, ⚽ training); creates unique index `idx_activity_types_global_lower_name` on `(LOWER(name)) WHERE team_id IS NULL`; creates unique index `idx_activity_types_team_lower_name` on `(team_id, LOWER(name)) WHERE team_id IS NOT NULL` |
 | 1782000000 | `create_translations` | Creates `translation_overrides` (translation_key TEXT, locale TEXT CHECK `'en'`/`'cs'`, value TEXT, updated_at TIMESTAMPTZ, updated_by UUID FK → users ON DELETE SET NULL; PK on (translation_key, locale)) and `translation_cache_version` (id INT PK CHECK id=1, version BIGINT DEFAULT 1, updated_at TIMESTAMPTZ); seeds the single `translation_cache_version` row |
+| 1783000000 | `create_finance` | Creates `fees`, `fee_assignments`, `payments` tables; creates `fee_assignment_status_v` view; creates `recompute_paid_minor` function and `payments_recompute_paid_minor` trigger |
 
 ### After Migrations (seed data)
 
@@ -1104,7 +1215,7 @@ The server inserts rows when the relevant domain action occurs. The bot polls `W
 
 ### Cascading Deletes
 
-Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, and achievement_sync_events. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
+Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events, fees). Fee deletion cascades to fee_assignments. Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, and achievement_sync_events. Member deletion is blocked (`ON DELETE RESTRICT`) when any fee_assignment or payment row references the member. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
 
 Role deletion uses `ON DELETE RESTRICT` on `member_roles` to prevent accidentally orphaning members. FK references from `role_sync_events.role_id` and `channel_sync_events.group_id` are stored as plain UUID (no FK constraint) so audit rows are retained after the referenced entity is deleted.
 
@@ -1114,8 +1225,8 @@ When a team is created, the application seeds three built-in roles:
 
 | Role | Permissions |
 |---|---|
-| Admin | All 14 permissions |
-| Captain | roster:view, roster:manage, member:view, member:edit, role:view, event:create, event:edit, event:cancel |
+| Admin | All 17 permissions (including `finance:view`, `finance:manage_fees`, `finance:record_payments`) |
+| Captain | roster:view, roster:manage, member:view, member:edit, role:view, event:create, event:edit, event:cancel, group:manage, finance:view, finance:manage_fees |
 | Player | roster:view, member:view |
 
 Four global activity types are seeded by the after-migration and are shared across all teams:

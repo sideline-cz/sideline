@@ -1,0 +1,180 @@
+---
+title: Finances
+description: Track team fees, record payments, and check your outstanding balance.
+---
+
+import { Aside, Steps, Badge } from '@astrojs/starlight/components';
+
+Sideline's Finance module lets captains define fees (membership dues, equipment levies, tournament entry costs), assign them to members, and record payments as they come in. Members can check their own balance at any time — in Discord or in the web app.
+
+## Key concepts
+
+- **Fee** — a named charge defined at the team level (e.g. "Spring 2026 membership", "Kit fee"). Each fee has a default amount, a currency, and an optional due date.
+- **Assignment** — the record that links a fee to a specific member. An assignment inherits the fee's amount and due date, but both can be overridden per member.
+- **Payment** — money received against an assignment. Payments are never deleted; they can be **voided** with a reason if recorded in error.
+- **Status** — computed automatically from the assignment's amounts and due date:
+
+  | Status | Meaning |
+  |---|---|
+  | **Pending** | No payment received yet, due date has not passed |
+  | **Partial** | Some payment received, not yet fully paid |
+  | **Paid** | Fully paid |
+  | **Overdue** | No or partial payment and the due date has passed |
+  | **Waived** | Captain has marked this assignment as waived (e.g. hardship exemption) |
+
+## Who can do what
+
+Finance permissions follow the treasurer pattern. By default:
+
+| Action | Admin | Captain | Player |
+|---|---|---|---|
+| View fee list and assignments | Yes | Yes | No |
+| View finance overview (all members) | Yes | Yes | No |
+| Create, edit, or archive fees | Yes | Yes | No |
+| Assign fees to members | Yes | Yes | No |
+| Record or void payments | Yes | No | No |
+| View own fee status | Yes | Yes | No\* |
+
+\* Players do not have `finance:view` in the default role configuration. An admin can create a custom role that grants `finance:view` to specific members or groups.
+
+<Aside type="note" title="MVP limitations">
+The Finance module shipped as an MVP in May 2026. Several features are planned for follow-up releases:
+
+- **Automated reminders** — Discord DMs or channel pings when fees are approaching or past due.
+- **iCal payment events** — fees as calendar entries.
+- **Full web UI** — fee creation/editing form, fee detail page, payment log page, and a "my finances" self-service page are not yet available. For now, all write operations require the API (see [API reference](/api/overview/)).
+- **Monthly recurrence** — auto-generating monthly charges from a fee definition.
+- **Self-report "I've paid"** — a Discord interaction for members to notify captains of unrecorded payments.
+
+All features listed above are **not available in the current release**.
+</Aside>
+
+## Finance overview page
+
+Go to **Team → Finances** (`/teams/:teamId/finances`) to see a summary table of all active members with their total amount due, total paid, and counts of pending/overdue/paid assignments. The page is visible to anyone holding `finance:view` (Admin and Captain by default).
+
+Each row shows:
+- Member name
+- Currency
+- Total due (all active assignments combined)
+- Total paid
+- Number of overdue, pending, and paid assignments
+
+Use this view to quickly see who is behind on payments.
+
+## Checking your own balance in Discord
+
+Any member can check their own fee status using the `/finance status` slash command.
+
+<Steps>
+
+1. Open Discord in any channel where the Sideline bot has permission.
+2. Type `/finance status` and press Enter.
+3. The bot replies with an ephemeral (visible only to you) embed.
+
+</Steps>
+
+The embed colour tells you at a glance where you stand:
+
+- **Green** — all fees paid or waived.
+- **Amber** — one or more fees are pending or partially paid.
+- **Red** — one or more fees are overdue.
+
+Each outstanding fee appears as a field showing the fee name, amount still owed, and due date. Overdue items also show how many days past due they are.
+
+<Aside type="caution" title="No access? Check with your captain">
+  If `/finance status` tells you "not a member", your captain needs to make sure your Sideline profile is linked to your Discord account. If you have no fees assigned at all, the bot shows the green all-clear embed even if your role does not normally grant `finance:view`.
+</Aside>
+
+## Captain / admin workflows (via API)
+
+The full fee management UI is coming in a future release. In the meantime, captains and admins with API access can manage finances via the REST API. See the [API overview](/api/overview/) for authentication instructions.
+
+### Create a fee
+
+```http
+POST /api/teams/{teamId}/fees
+Content-Type: application/json
+
+{
+  "name": "Spring 2026 membership",
+  "amountMinor": 50000,
+  "currency": "CZK",
+  "dueAt": "2026-03-31T23:59:59.000Z",
+  "targetScope": "all_members",
+  "description": null
+}
+```
+
+`amountMinor` is the amount in the smallest unit of the currency (e.g. hellers for CZK, cents for EUR). 50 000 hellers = 500 CZK.
+
+### Assign a fee to members
+
+```http
+POST /api/teams/{teamId}/fees/{feeId}/assignments
+Content-Type: application/json
+
+{
+  "memberIds": ["member-uuid-1", "member-uuid-2"],
+  "amountMinorOverride": null,
+  "dueAtOverride": null
+}
+```
+
+Pass `amountMinorOverride` or `dueAtOverride` to override the fee's defaults for specific members. Pass `null` to use the fee-level values.
+
+### Record a payment
+
+```http
+POST /api/teams/{teamId}/fees/{feeId}/assignments/{assignmentId}/payments
+Content-Type: application/json
+
+{
+  "amountMinor": 50000,
+  "method": "cash",
+  "paidAt": "2026-02-15T10:30:00.000Z",
+  "note": "Paid at training"
+}
+```
+
+`method` is either `"cash"` or `"bank_transfer"`.
+
+### Void a payment
+
+```http
+DELETE /api/teams/{teamId}/payments/{paymentId}
+Content-Type: application/json
+
+{
+  "reason": "Entered against wrong member"
+}
+```
+
+The payment is marked voided (not deleted). The assignment's paid amount is automatically recalculated.
+
+### Waive an assignment
+
+```http
+PATCH /api/teams/{teamId}/fees/{feeId}/assignments/{assignmentId}
+Content-Type: application/json
+
+{
+  "waived": true,
+  "waivedReason": "Hardship exemption approved by committee"
+}
+```
+
+### Archive a fee
+
+Archiving a fee hides it from active listings but preserves all assignments and payments for historical records.
+
+```http
+DELETE /api/teams/{teamId}/fees/{feeId}
+```
+
+Archived fees cannot be modified. Create a new fee if you need to issue a revised charge.
+
+## See also
+
+- [API overview](/api/overview/) — authentication and base URL.
+- [Roles and permissions](/quick-start/admins/) — how to grant `finance:view` to a custom treasurer role.

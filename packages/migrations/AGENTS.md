@@ -84,6 +84,34 @@ export default Effect.flatMap(SqlClient.SqlClient, (sql) =>
 
 Always use the exact constraint name. Check the original migration that created the constraint for the name.
 
+### Trigger-Maintained Denormalized Aggregates
+
+When a derived aggregate (e.g. `fee_assignments.paid_minor = SUM(payments.amount_minor) WHERE voided_at IS NULL`) is read on every status query, prefer a **trigger-maintained denormalized column** over re-aggregating with `SUM(...)` on each read. Reference implementation: `recompute_paid_minor` + `payments_recompute_trigger` in `1783000000_create_finance.ts`.
+
+Schema contract:
+
+1. The denormalized column lives on the parent row (e.g. `fee_assignments.paid_minor BIGINT NOT NULL DEFAULT 0 CHECK (paid_minor >= 0)`).
+2. A `RETURNS void` PL/pgSQL function (`recompute_<column>(p_parent_id UUID)`) recomputes the value from the source rows and UPDATEs the parent. **The function MUST `PERFORM 1 FROM <parent> WHERE id = p_parent_id FOR UPDATE`** before the UPDATE to serialize concurrent recomputations — without the row lock, two concurrent payment writes can both read the same `SUM(...)` and one overwrites the other.
+3. An `AFTER INSERT OR UPDATE OR DELETE` trigger on the source table calls the recompute function with the affected parent id. On `UPDATE` that changes the FK (`OLD.fk <> NEW.fk`), the trigger MUST recompute both the old and new parents in the same firing.
+4. Define both function and trigger **in the same migration** that creates the source table. Adding the trigger later requires a `UPDATE ... SET <col> = (SELECT SUM ...)` backfill, which is easy to forget.
+
+Rules:
+
+1. **Never write to the denormalized column from application code.** All writes go through the source table; the trigger maintains the parent. The repository layer reads `paid_minor` directly — never `SELECT SUM(...)`.
+2. **Always include `WHERE voided_at IS NULL`** (or the equivalent "active" predicate) inside the recompute SUM. A void/soft-delete that does not update the trigger's predicate corrupts the denormalized value.
+3. **Pair the column with a SQL view that derives status from it** (e.g. `fee_assignment_status_v` derives `'paid' | 'partial' | 'overdue' | 'pending' | 'waived'` from `paid_minor`, `amount_minor`, `due_at`, `stored_status`). Read status through the view, not by re-running `CASE WHEN` in TypeScript — keeps the rule in one place and lets the planner index/filter on view columns.
+4. **The view is a stateless `CREATE VIEW`, not `MATERIALIZED VIEW`.** Materialization adds a second cache that must be refreshed; the trigger already maintains the underlying denormalized column.
+
+### Cascade Discipline for Financial / Audit Records
+
+Tables that represent financial transactions, audit trails, or any record that must survive parent-row deletion use `ON DELETE RESTRICT` on every FK that points to a user/member/recorder. Reference: `payments.fee_assignment_id`, `payments.team_member_id`, `payments.recorded_by_user_id`, `payments.voided_by_user_id`, and `fee_assignments.team_member_id` all use `ON DELETE RESTRICT`.
+
+Rules:
+
+1. **Use `ON DELETE RESTRICT` (not `CASCADE`) on FKs from audit/financial rows to users, members, or other audit-bearing parents.** Deleting a user with recorded payments must fail, not silently erase the payment. The application layer handles this by soft-deleting (e.g. `voided_at`) instead of hard-deleting.
+2. **Only the soft-archive parent FK (e.g. `fee_assignments.fee_id → fees(id) ON DELETE CASCADE`) may cascade**, because deleting an unused `fees` row (no assignments yet) is a cleanup operation, not a financial event.
+3. **Document the cascade choice inline in the migration** with a one-line comment when it deviates from "default to RESTRICT" — future readers should not have to infer policy from column-by-column reading.
+
 ### Unique Constraints with Nullable Columns
 
 The deployed PostgreSQL major version is 17 (see `applications/server/test/integration/globalSetup.ts`), so PostgreSQL 15+ syntax is available. When a composite `UNIQUE` constraint contains nullable columns and you want `NULL` values to collide (i.e. treat `NULL` as a regular distinct value for uniqueness), use `UNIQUE NULLS NOT DISTINCT`:

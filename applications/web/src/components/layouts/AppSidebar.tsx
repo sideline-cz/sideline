@@ -14,6 +14,7 @@ import {
   UserCog,
   Users,
   UsersRound,
+  Wallet,
   Wand2,
 } from 'lucide-react';
 import { NavUser } from '~/components/layouts/NavUser';
@@ -107,6 +108,13 @@ function getTeamNavGroups(
           to: '/teams/$teamId/training-types',
           params: { teamId },
           requiredPermission: 'training-type:create' satisfies Role.Permission,
+        },
+        {
+          title: tr('finance_navTitle'),
+          icon: Wallet,
+          to: '/teams/$teamId/finances',
+          params: { teamId },
+          requiredPermission: 'finance:view' satisfies Role.Permission,
         },
       ],
     },
