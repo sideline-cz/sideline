@@ -227,7 +227,7 @@ const MockGroupsRepository = Layer.succeed(GroupsRepository, {
 const MockTeamInvitesRepository = Layer.succeed(TeamInvitesRepository, {
   findByCodeWithContext: (code: string) => {
     const ctx = inviteContexts.get(code);
-    if (!ctx || !ctx.active) return Effect.succeed(Option.none());
+    if (!ctx?.active) return Effect.succeed(Option.none());
     return Effect.succeed(
       Option.some({
         ...ctx,
@@ -237,7 +237,7 @@ const MockTeamInvitesRepository = Layer.succeed(TeamInvitesRepository, {
   },
   findByCode: (code: string) => {
     const ctx = inviteContexts.get(code);
-    if (!ctx || !ctx.active) return Effect.succeed(Option.none());
+    if (!ctx?.active) return Effect.succeed(Option.none());
     return Effect.succeed(Option.some(ctx));
   },
   create: () => Effect.die(new Error('Not implemented')),
@@ -252,7 +252,7 @@ const MockInviteAcceptancesRepository = Layer.succeed(InviteAcceptancesRepositor
   _tag: 'api/InviteAcceptancesRepository',
   findByDiscordCodeWithContext: (code: string) => {
     const ctx = inviteContexts.get(code);
-    if (!ctx || !ctx.active) return Effect.succeed(Option.none());
+    if (!ctx?.active) return Effect.succeed(Option.none());
     return Effect.succeed(
       Option.some({
         ...ctx,

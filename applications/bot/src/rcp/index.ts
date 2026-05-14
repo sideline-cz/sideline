@@ -15,7 +15,7 @@ export {
   GuildJoinSyncService,
   InviteGeneratorService,
   OnboardingSyncService,
-  RoleSyncService,
   RoleProvisionSyncService,
+  RoleSyncService,
   WeeklySummarySyncService,
 };

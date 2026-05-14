@@ -22,7 +22,7 @@
     "./runtime": "./dist/runtime.js"
   },
   "devDependencies": {
-    "@inlang/paraglide-js": "^2.12.0",
-    "typescript": "5.7.2"
+    "@inlang/paraglide-js": "^2.18.0",
+    "typescript": "5.9.3"
   }
 }
