@@ -1,6 +1,7 @@
 import type { Auth, Role } from '@sideline/domain';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 import {
+  Activity,
   Calendar,
   Dumbbell,
   Home,
@@ -108,6 +109,13 @@ function getTeamNavGroups(
           to: '/teams/$teamId/training-types',
           params: { teamId },
           requiredPermission: 'training-type:create' satisfies Role.Permission,
+        },
+        {
+          title: tr('team_activityTypes'),
+          icon: Activity,
+          to: '/teams/$teamId/activity-types',
+          params: { teamId },
+          requiredPermission: 'activity-type:create' satisfies Role.Permission,
         },
         {
           title: tr('finance_navTitle'),
