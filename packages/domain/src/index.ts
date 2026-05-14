@@ -20,6 +20,8 @@ export * as EventRsvpApi from './api/EventRsvpApi.js';
 
 export * as EventSeriesApi from './api/EventSeriesApi.js';
 
+export * as FinanceApi from './api/FinanceApi.js';
+
 export * as GroupApi from './api/GroupApi.js';
 
 export * as ICalApi from './api/ICalApi.js';
@@ -83,6 +85,10 @@ export * as EventRsvp from './models/EventRsvp.js';
 
 export * as EventSeries from './models/EventSeries.js';
 
+export * as Fee from './models/Fee.js';
+
+export * as FeeAssignment from './models/FeeAssignment.js';
+
 export * as GroupModel from './models/GroupModel.js';
 
 export * as ICalToken from './models/ICalToken.js';
@@ -98,6 +104,8 @@ export * as Notification from './models/Notification.js';
 export * as OAuthConnection from './models/OAuthConnection.js';
 
 export * as Onboarding from './models/Onboarding.js';
+
+export * as Payment from './models/Payment.js';
 
 export * as Role from './models/Role.js';
 
@@ -138,6 +146,8 @@ export * as ChannelRpcModels from './rpc/channel/ChannelRpcModels.js';
 export * as EventRpcEvents from './rpc/event/EventRpcEvents.js';
 export * as EventRpcGroup from './rpc/event/EventRpcGroup.js';
 export * as EventRpcModels from './rpc/event/EventRpcModels.js';
+export * as FinanceRpcGroup from './rpc/finance/FinanceRpcGroup.js';
+export * as FinanceRpcModels from './rpc/finance/FinanceRpcModels.js';
 export * as GuildRpcGroup from './rpc/guild/GuildRpcGroup.js';
 export * as InviteRpcGroup from './rpc/invite/InviteRpcGroup.js';
 export * as RoleRpcEvents from './rpc/role/RoleRpcEvents.js';

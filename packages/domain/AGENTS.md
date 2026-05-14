@@ -124,6 +124,18 @@ Rules:
 4. **Server reads overrides once per evaluation** via a repository method like `findOverridesByTeam(teamId) => Effect<ReadonlyMap<Slug, number>>` and threads the map through the evaluator. Do not call the override resolver inside a hot per-member loop without first hoisting the `Map` lookup out of the loop.
 5. **Deleting an override row is the way to "reset to default"** — never store the default value in the override table as a sentinel. The override repository exposes a `deleteOverride(teamId, slug)` method for this.
 
+## Permission Catalog (`src/models/Role.ts`)
+
+`Permission` is a `Schema.Literals([...])` enum that lists every permission string usable in `role_permissions.permission`. Reference entries: `team:manage`, `roster:view`, `member:edit`, `finance:view`, `finance:manage_fees`, `finance:record_payments`.
+
+Rules when adding, renaming, or splitting permissions:
+
+1. **Append the new literal to `Permission.literals`** AND add it to the relevant entry of `defaultPermissions` (`Admin`, `Captain`, `Player`). `allPermissions` is derived from the literal union and updates automatically.
+2. **Splitting one permission into multiple (e.g. `finance:manage` → `finance:manage_fees` + `finance:record_payments`) is a breaking migration.** Existing `role_permissions` rows store the old string and will fail `Permission` decoding after the split. Ship a migration that rewrites stored rows to the new vocabulary in the same PR — never let a deploy land where the production DB carries a permission string that no longer parses.
+3. **Use `<domain>:<verb>` or `<domain>:<verb>_<noun>` snake_case after the colon.** Examples: `finance:manage_fees`, `member:remove`. Do not mix dialects (no `finance.manageFees`, no `manage-fees`).
+4. **Captain ≠ Admin by default.** When introducing a permission, decide explicitly whether each built-in role gets it. The "treasurer" pattern (Admin gets all three finance permissions; Captain gets `finance:view` + `finance:manage_fees` but NOT `finance:record_payments`) is intentional — it lets teams give a non-captain member the record-payments permission via a custom role without elevating them to Captain.
+5. **Server handlers gate every protected endpoint with `requirePermission(membership, '<perm>', forbidden)`** — the domain catalog is the only source of truth for permission strings; do not hard-code literal strings in server handlers, always reference `Permission.literals` or pass the literal through a typed parameter.
+
 ## HTTP API Error Tag Conventions
 
 When defining `HttpApiGroup` endpoints in `src/api/*.ts`, follow these tag conventions so handlers and clients can branch on a stable, semantic set of errors:

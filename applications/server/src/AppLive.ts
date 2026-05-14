@@ -27,12 +27,16 @@ import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
+import { FeesRepository } from '~/repositories/FeesRepository.js';
+import { FinanceOverviewRepository } from '~/repositories/FinanceOverviewRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { ICalTokensRepository } from '~/repositories/ICalTokensRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
+import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
@@ -112,6 +116,10 @@ const Repositories = Layer.mergeAll(
   WeeklySummaryRepository.Default,
   WeeklySummarySyncEventsRepository.Default,
   TranslationsRepository.Default,
+  FeesRepository.Default,
+  FeeAssignmentsRepository.Default,
+  PaymentsRepository.Default,
+  FinanceOverviewRepository.Default,
 );
 
 const AppLayer = Layer.mergeAll(

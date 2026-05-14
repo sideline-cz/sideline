@@ -48,3 +48,15 @@ A milestone badge earned automatically when a member's activity stats cross a th
 ## Invite
 
 A link captains share so new people can join the team. Expires after first use (by default) and can be scoped to a specific group or role.
+
+## Fee
+
+A named charge defined at the team level — for example, a membership subscription, a kit levy, or a tournament entry fee. Each fee has a default amount, a currency, and an optional due date. Captains create fees and assign them to individual members.
+
+## Fee assignment
+
+The record that ties a specific fee to a specific member. An assignment tracks how much is owed and how much has been paid. The **status** is computed automatically: pending, partial, paid, overdue, or waived.
+
+## Payment
+
+Money received against a fee assignment. Payments are recorded by captains or admins and can be voided if entered in error. The voided record is kept for auditing. See the [Finances guide](/guides/finances/) for the full workflow.

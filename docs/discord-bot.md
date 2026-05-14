@@ -30,7 +30,7 @@ The bot is built with **dfx**, an Effect-native Discord framework. It connects t
 
 ## Slash Commands
 
-Two top-level commands are registered globally: `/event` and `/makanicko`. Each has sub-commands.
+Three top-level commands are registered globally: `/event`, `/finance`, and `/makanicko`. Each has sub-commands.
 
 ### /event create
 
@@ -143,6 +143,42 @@ Two top-level commands are registered globally: `/event` and `/makanicko`. Each 
 - `applications/bot/src/interactions/upcoming-rsvp.ts`
 - `applications/bot/src/rest/events/buildUpcomingEventEmbed.ts`
 - `applications/bot/src/rest/events/sendUpcomingEventFollowups.ts`
+
+---
+
+### /finance status
+
+**Description:** Show your current fee status (outstanding fees, payment progress).
+
+**Czech sub-command name:** `stav`
+
+**Options:** None.
+
+**Flow:**
+
+1. User invokes `/finance status`.
+2. The handler (`applications/bot/src/commands/finance/statusHandler.ts`) immediately returns a deferred ephemeral acknowledgement and forks a background fiber.
+3. The background fiber calls `Finance/GetMyStatus` RPC with `guild_id` and `discord_user_id`.
+4. On success the handler builds a rich embed via `buildFinanceStatusEmbed` and updates the original deferred message:
+   - If all assignments are paid or waived, the embed is **green** with an "all clear" description.
+   - If any assignment is overdue, the embed is **red**. If any is pending or partial (with no overdue), the embed is **amber**.
+   - Each outstanding assignment appears as an embed field showing fee name, amount due (remaining), due date, and — for overdue items — how many days past due.
+   - The embed footer shows today's date.
+5. If the guild is not found in Sideline, the bot silently returns the "all clear" embed (the server is not connected to this Discord server).
+
+**Errors from `Finance/GetMyStatus`:**
+
+| Error tag | Behavior |
+|-----------|----------|
+| `FinanceGuildNotFound` | Falls back to "all clear" embed (team not found in this Discord server) |
+| `FinanceMemberNotFound` | Shows a "not a member" message |
+| `RpcClientError` | Shows a generic error message |
+
+**Source files:**
+- `applications/bot/src/commands/finance/index.ts`
+- `applications/bot/src/commands/finance/statusHandler.ts`
+- `applications/bot/src/commands/finance/buildFinanceStatusEmbed.ts`
+- `applications/bot/src/rest/finance/formatMoney.ts`
 
 ---
 
@@ -862,6 +898,16 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `RoleProvision/GetUnprocessedEvents` | Poll for pending `discord_role_provision_events` outbox rows |
 | `RoleProvision/MarkProcessed` | Acknowledge a successful Discord role provision |
 | `RoleProvision/MarkFailed` | Record a provision failure (sets `processed_at`; event is not retried) |
+
+### Finance group (`Finance/`)
+
+| Method | Payload / Returns | Description |
+|--------|---------|-------------|
+| `Finance/GetMyStatus` | `guild_id`, `discord_user_id` → `GetMyStatusResult` | Returns the invoking member's fee assignment status grouped by currency. Used by `/finance status`. Errors: `FinanceGuildNotFound`, `FinanceMemberNotFound`. |
+
+`GetMyStatusResult` shape: `{ groups: FinanceStatusCurrencyGroup[] }` where each group carries `{ currency, total_outstanding_minor, assignments: FinanceStatusAssignment[] }` and each assignment carries `{ assignment_id, fee_name, status, due_minor, paid_minor, effective_due_at }`.
+
+Status values: `pending`, `partial`, `paid`, `overdue`, `waived`.
 
 ---
 

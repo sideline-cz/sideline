@@ -5,6 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-14 — Fee Management & Payment Tracking (MVP)
+
+- Admins and captains can now create **fees** (e.g. membership dues, kit fees, tournament entry) and assign them to individual members via the API. Full web UI is coming in a follow-up release.
+- Each member assignment tracks how much is owed and how much has been paid. The status updates automatically: **Pending** → **Partial** → **Paid** (or **Overdue** if the due date passes unpaid). Assignments can also be **Waived** with a reason.
+- Admins with the `finance:record_payments` permission can record payments as `cash` or `bank_transfer`, specifying the date and an optional note. Payments can be voided if entered in error — the voided record is kept for audit purposes.
+- The **Finance overview page** (`/teams/:teamId/finances`) shows all members' outstanding balances at a glance, with KPI cards for total due and paid amounts.
+- Members can check their own outstanding fees using the new **`/finance status`** Discord slash command. The bot replies with an ephemeral colour-coded embed: green (all clear), amber (pending/partial), or red (overdue).
+- Finance permissions follow a treasurer pattern: `finance:view` (read), `finance:manage_fees` (create/assign/archive), and `finance:record_payments` (record/void). Captains get view and manage_fees by default; admins get all three.
+- **Not yet available:** reminder DMs, iCal payment events, the full fee-creation/editing web UI, per-fee detail page, payment log page, member self-service "my finances" page, and auto-monthly recurring fees.
+
 ## 2026-05-14 — Translation CMS for global admins
 
 - Global admins can now manage UI translations without a code deployment, at `/admin/translations`.

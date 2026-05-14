@@ -430,6 +430,20 @@ Rules:
 4. **List queries return both scopes in one call**, sorted globals-first: `WHERE team_id IS NULL OR team_id = $1 ORDER BY (team_id IS NULL) DESC, LOWER(name) ASC`. Do not run two queries and merge in TS.
 5. **Catch the unique-violation defect** from the unique indexes with `SqlErrors.catchUniqueViolation(() => new <Resource>NameAlreadyTakenError())` on `insertCustom` / `updateCustom`. The pre-check via `findByNameInScope` handles the happy path; the catch handles the race-condition path.
 
+## Cross-Tenant Resource Lookups (JOIN Through Team Scope)
+
+When a resource id is exposed in a URL path (`/teams/:teamId/.../:resourceId`) but the resource table does **not** carry a `team_id` column directly (e.g. `payments` only has `fee_assignment_id`, which reaches `team_id` via `fee_assignments → fees → team_id`), the repository MUST expose a `findActive<Resource>ByIdAndTeam(id, teamId)` variant that JOINs through to the team scope and only returns the row when `f.team_id = ${teamId}`.
+
+Reference: `PaymentsRepository.findActiveByIdAndTeam` joins `payments → fee_assignments → fees` and filters `WHERE p.id = ${id} AND p.voided_at IS NULL AND f.team_id = ${team_id}`.
+
+Rules:
+
+1. **Never use a bare `findById(id)` inside an HTTP handler when the URL also carries a `teamId`.** A handler that fetches by id alone and then asserts `row.team_id === teamId` in TypeScript only works for tables that store `team_id` directly. For transitively-scoped tables, the assertion is impossible without an extra round-trip — the JOIN-based `findByIdAndTeam` is the only correct shape.
+2. **Return `Option<Row>` and treat `None` as 404.** The handler must not distinguish "row does not exist" from "row exists but belongs to another team" — both responses are 404. Leaking existence information by returning a different error for cross-tenant lookups is the bug this pattern prevents.
+3. **The JOIN must filter on the scope column with `=`, never with `IN (...)`.** Each request has exactly one `teamId` from the path; do not accept arrays.
+4. **For directly-scoped tables (the resource table itself has `team_id`)**, the equivalent is `findByIdScoped(id, teamId)` with `WHERE id = $1 AND team_id = $2` — see the "Team-Scoped Resources With Global Rows" section above. Use whichever variant matches the table's schema; never expose a bare `findById` to handlers.
+5. **Bulk-insert / batch operations must apply the same scope inside SQL.** Example: `FeeAssignmentsRepository.bulkInsert` filters candidate members via `JOIN team_members tm ON tm.id = v.member_id JOIN fees f ON f.id = ${feeId} WHERE tm.team_id = f.team_id` — a member id supplied by the caller that belongs to a different team is silently dropped by the JOIN, never inserted.
+
 ## HTTP API Error Tags: `Forbidden` vs `Protected` vs `<Resource>NotFound`
 
 Use three distinct tagged errors at the HTTP-API layer when a write may be rejected for different reasons. Do not collapse them into one error.

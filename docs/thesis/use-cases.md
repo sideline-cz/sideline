@@ -12,9 +12,9 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 |---|---|
 | **Unauthenticated User** | Any visitor who has not yet authenticated via Discord OAuth2. Can view the landing page, follow invite links, and initiate the login flow. |
 | **Player** | An authenticated Discord user who is a member of at least one team. Holds the built-in `Player` role granting `roster:view` and `member:view` permissions. Can view events, submit RSVPs, log personal activities, and subscribe to the iCal feed. |
-| **Captain** | A team member holding the built-in `Captain` role. Inherits all Player capabilities and additionally holds `roster:manage`, `member:edit`, `role:view`, `event:create`, `event:edit`, and `event:cancel` permissions. |
-| **Admin** | A team member holding the built-in `Admin` role. Holds the full permission set including `team:manage`, `team:invite`, `member:remove`, `role:manage`, `training-type:create`, and `training-type:delete`, in addition to all Captain permissions. |
-| **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/event list`, `/event create`, `/event overview`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination). Receives RPC calls from the server to synchronise Discord roles and channels. |
+| **Captain** | A team member holding the built-in `Captain` role. Inherits all Player capabilities and additionally holds `roster:manage`, `member:edit`, `role:view`, `event:create`, `event:edit`, `event:cancel`, `finance:view`, and `finance:manage_fees` permissions. |
+| **Admin** | A team member holding the built-in `Admin` role. Holds the full permission set including `team:manage`, `team:invite`, `member:remove`, `role:manage`, `training-type:create`, `training-type:delete`, `finance:view`, `finance:manage_fees`, and `finance:record_payments`, in addition to all Captain permissions. |
+| **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/event list`, `/event create`, `/event overview`, `/finance status`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination). Receives RPC calls from the server to synchronise Discord roles and channels. |
 | **Global Admin** | A user whose Discord ID is listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. |
 | **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes, sending RSVP reminder notifications before events, auto-logging attendance from RSVP data, and evaluating age-threshold rules to move members between groups. |
 
@@ -93,10 +93,20 @@ flowchart LR
         UC_BOT_RSVP["Submit RSVP via Button"]
         UC_BOT_SYNC_ROLES["Sync Discord Roles"]
         UC_BOT_POST_EMBED["Post Event Embed"]
+        UC_BOT_FINANCE_STATUS["View Finance Status via Bot"]
     end
 
     subgraph NOTIFICATIONS["Notifications"]
         UC_NOTIFICATIONS["View & Mark Notifications"]
+    end
+
+    subgraph FINANCE["Finance (MVP)"]
+        UC_VIEW_FINANCE["View Finance Overview"]
+        UC_MANAGE_FEES["Create / Update / Archive Fees"]
+        UC_ASSIGN_FEES["Assign Fee to Members"]
+        UC_RECORD_PAYMENT["Record Payment"]
+        UC_VOID_PAYMENT["Void Payment"]
+        UC_VIEW_MY_STATUS["View Own Fee Status"]
     end
 
     UA --> UC_LOGIN
@@ -122,6 +132,9 @@ flowchart LR
     CP --> UC_EDIT_EVENT
     CP --> UC_CANCEL_EVENT
     CP --> UC_ASSIGN_ROLE
+    CP --> UC_VIEW_FINANCE
+    CP --> UC_MANAGE_FEES
+    CP --> UC_ASSIGN_FEES
 
     AD --> UC_REMOVE_MEMBER
     AD --> UC_MANAGE_ROLES
@@ -132,6 +145,8 @@ flowchart LR
     AD --> UC_TEAM_SETTINGS
     AD --> UC_MANAGE_INVITES
     AD --> UC_MANAGE_TRAINING_TYPES
+    AD --> UC_RECORD_PAYMENT
+    AD --> UC_VOID_PAYMENT
 
     BOT --> UC_BOT_LIST
     BOT --> UC_BOT_OVERVIEW
@@ -141,6 +156,7 @@ flowchart LR
     BOT --> UC_BOT_RSVP
     BOT --> UC_BOT_SYNC_ROLES
     BOT --> UC_BOT_POST_EMBED
+    BOT --> UC_BOT_FINANCE_STATUS
 
     SYS --> UC_CREATE_EVENT
     SYS --> UC_START_EVENT
@@ -636,3 +652,40 @@ The following structured descriptions cover the most significant use cases in th
 | **Main Flow** | 1. The actor navigates to `/admin/translations` in the web app. 2. The page loads all translation keys from the compiled message registry and fetches current overrides via `GET /api/translations`. 3. The actor searches for a key by name and edits the EN or CS override value inline. 4. On blur (or pressing Enter) the web app calls `PATCH /api/translations/:key` with the new value. The server upserts the override row and bumps the cache version. 5. Alternatively, the actor uploads a JSON file (locale-keyed object or flat array) via the Import dialog; the web app calls `POST /api/translations/import`. The server validates all keys against the compiled registry, rejects unknown keys with a `400 UnknownTranslationKeys` error listing the bad keys, and on success upserts all valid overrides. 6. The actor can delete an individual override by clicking the delete button next to it; the web app calls `PATCH /api/translations/:key` with `null` for the locale, which removes the row and restores the compiled default. 7. The actor can download a full locale-keyed JSON bundle (compiled defaults merged with all active overrides) via the Export button, which opens `GET /api/translations/export.json`. |
 | **Postcondition** | The `translation_overrides` table reflects the actor's changes. The `translation_cache_version` counter is incremented. All authenticated clients that call `GET /api/translations` subsequently receive the updated overrides. |
 | **Notes** | Keys whose names begin with `bot_` are used by the Discord bot. Overrides to such keys take effect only after the bot process is redeployed, because the bot loads its string table at startup from the compiled registry. An override value of `""` (empty string) suppresses the compiled default and renders nothing; this is intentional and distinct from deleting the override. |
+
+---
+
+### UC-12: Create and Assign a Fee (Captain/Admin)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Captain (requires `finance:manage_fees`); Admin |
+| **Precondition** | The actor is authenticated and holds `finance:manage_fees` permission. |
+| **Main Flow** | 1. The actor calls `POST /teams/:teamId/fees` with a name, amount, currency, optional due date, and target scope. 2. The server creates a `fees` row and returns a `FeeView`. 3. The actor calls `POST /teams/:teamId/fees/:feeId/assignments` with a list of `memberIds` (and optional per-member amount or due date overrides). 4. The server inserts one `fee_assignments` row per member and returns `FeeAssignmentView[]`. |
+| **Postcondition** | Each target member has an assignment with status `pending`. |
+| **Alternate Flow** | If the fee's `target_scope` is `'all_members'`, the captain can assign all current team members in a single call by passing the full member ID list. |
+| **Notes** | v1 only supports `recurrence = 'none'`. Auto-monthly recurrence is planned for a future release. |
+
+---
+
+### UC-13: Record a Payment (Admin)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Admin (requires `finance:record_payments`) |
+| **Precondition** | The actor holds `finance:record_payments`. A fee assignment exists for the member. |
+| **Main Flow** | 1. The actor calls `POST /teams/:teamId/fees/:feeId/assignments/:assignmentId/payments` with `amountMinor`, `method` (`cash` or `bank_transfer`), `paidAt`, and optional `note`. 2. The server inserts a `payments` row. 3. The database trigger `payments_recompute_paid_minor` immediately updates `fee_assignments.paid_minor`. 4. If `paid_minor >= amount_minor` the assignment status transitions to `paid`; otherwise to `partial`. |
+| **Postcondition** | The payment is recorded. The assignment's status reflects the new payment total. |
+| **Alternate Flow** | If a payment was recorded in error, the actor calls `DELETE /teams/:teamId/payments/:paymentId` with a `reason`. The payment is voided (not deleted) and the trigger recomputes `paid_minor`, potentially reverting the status from `paid` to `partial` or `pending`. |
+
+---
+
+### UC-14: Check Finance Status via Discord (Member)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Any Discord user who is a Sideline team member |
+| **Precondition** | The user is in a Discord guild linked to a Sideline team. |
+| **Main Flow** | 1. The user invokes `/finance status` in any Discord channel where the bot has permission. 2. The bot sends a deferred ephemeral acknowledgement and calls `Finance/GetMyStatus` RPC with the guild and user IDs. 3. The server locates the team by guild ID, finds the team member by Discord user ID, and returns all fee assignments grouped by currency. 4. The bot builds a rich embed coloured green (all clear), amber (pending/partial), or red (overdue) and updates the deferred message with it. |
+| **Postcondition** | The invoking user sees their outstanding fees in an ephemeral embed visible only to them. |
+| **Alternate Flow** | If the guild is not linked to a Sideline team (`FinanceGuildNotFound`), the bot silently returns the all-clear embed. If the user is not a team member (`FinanceMemberNotFound`), the bot responds with a "not a member" message. |

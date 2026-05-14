@@ -27,6 +27,9 @@ const permissionLabels: Record<Role.Permission, () => string> = {
   'event:edit': () => tr('role_perm_eventEdit'),
   'event:cancel': () => tr('role_perm_eventCancel'),
   'group:manage': () => tr('role_perm_groupManage'),
+  'finance:view': () => tr('role_perm_financeView'),
+  'finance:manage_fees': () => tr('role_perm_financeManageFees'),
+  'finance:record_payments': () => tr('role_perm_financeRecordPayments'),
 };
 
 interface RoleDetailPageProps {

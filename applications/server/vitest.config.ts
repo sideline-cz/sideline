@@ -4,7 +4,7 @@ import { defineProject } from 'vitest/config';
 export default defineProject({
   test: {
     alias: { '~': path.resolve(__dirname, 'src') },
-    exclude: ['test/integration/**', 'test/rpc/OnboardingSync.test.ts'],
+    exclude: ['test/integration/**', 'test/rpc/OnboardingSync.test.ts', '**/node_modules/**'],
     env: {
       DATABASE_HOST: 'localhost',
       DATABASE_PORT: '5432',
