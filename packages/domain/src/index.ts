@@ -46,7 +46,9 @@ export * as Roster from './api/Roster.js';
 export * as TeamApi from './api/TeamApi.js';
 
 export * as TeamSettingsApi from './api/TeamSettingsApi.js';
+
 export * as TrainingTypeApi from './api/TrainingTypeApi.js';
+
 export * as Translations from './api/Translations.js';
 
 export * as WeeklySummaryApi from './api/WeeklySummaryApi.js';
