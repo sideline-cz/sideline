@@ -61,3 +61,16 @@ updates:
       - dependency-name: "@effect/schema"
       - dependency-name: "@effect/cluster"
       - dependency-name: "@effect/cluster-workflow"
+      # TypeScript 6 promotes deprecated tsconfig options (baseUrl,
+      # downlevelIteration, esModuleInterop=false) from warnings to errors
+      # across 7+ tsconfigs. Remove this when the deprecation migration lands.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # react-day-picker v10 renamed the ClassNames API (removed `table` key,
+      # restructured slot names). Remove this when calendar.tsx is migrated.
+      - dependency-name: "react-day-picker"
+        update-types: ["version-update:semver-major"]
+      # dfx 1.0.13 regressed Discord client + Snowflake type inference
+      # (auth.ts loses types on client.listMyGuilds, bot tests fail on
+      # DiscordREST service keys). Patches aren't safe — update manually.
+      - dependency-name: "dfx"
