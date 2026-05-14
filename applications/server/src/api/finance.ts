@@ -215,13 +215,12 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
             Effect.tap(({ membership }) =>
               requirePermission(membership, 'finance:manage_fees', forbidden),
             ),
+            // Use findByIdAny to distinguish "fee is archived" from "fee doesn't exist"
             Effect.bind('existing', () =>
-              fees.findWithCountsById(feeId).pipe(
+              fees.findByIdAny(feeId).pipe(
                 Effect.flatMap(
                   Option.match({
-                    onNone: () =>
-                      // Could be archived - check by fetching with archived too
-                      Effect.fail(feeNotFound),
+                    onNone: () => Effect.fail(feeNotFound),
                     onSome: Effect.succeed,
                   }),
                 ),

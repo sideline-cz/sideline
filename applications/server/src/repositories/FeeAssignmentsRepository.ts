@@ -154,7 +154,7 @@ const make = Effect.gen(function* () {
               const dueAt = Option.isSome(input.dueAtOverride)
                 ? (input.dueAtOverride.value as Date)
                 : null;
-              return sql`(${memberId}::uuid, ${amount}, ${dueAt})`;
+              return sql`(${memberId}::uuid, ${amount}::bigint, ${dueAt}::timestamptz)`;
             });
             return sql`
               INSERT INTO fee_assignments (fee_id, team_member_id, amount_minor, due_at)

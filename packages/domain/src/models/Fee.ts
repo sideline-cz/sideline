@@ -6,10 +6,19 @@ import { TeamId } from '~/models/Team.js';
 export const FeeId = Schema.String.pipe(Schema.brand('FeeId'));
 export type FeeId = typeof FeeId.Type;
 
-export const AmountMinor = Schema.Int.pipe(
-  Schema.check(Schema.isGreaterThanOrEqualTo(0)),
-  Schema.brand('AmountMinor'),
-);
+const _intFilter = Schema.makeFilter((n: number) => Number.isInteger(n), {
+  message: 'Expected an integer',
+  meta: { _tag: 'isInt' as const },
+  toArbitraryConstraint: { number: { isInteger: true } },
+});
+
+export const AmountMinor = Schema.Union([
+  Schema.Number.pipe(Schema.check(_intFilter), Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  Schema.NumberFromString.pipe(
+    Schema.check(_intFilter),
+    Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+  ),
+]).pipe(Schema.brand('AmountMinor'));
 export type AmountMinor = typeof AmountMinor.Type;
 
 export const CurrencyCode = Schema.String.pipe(

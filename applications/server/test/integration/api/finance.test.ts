@@ -118,7 +118,10 @@ type AssignmentRecord = {
   currency: Fee.CurrencyCode;
   due_minor: Fee.AmountMinor;
   paid_minor: Fee.AmountMinor;
+  // stored_status is used by AssignmentRow; computed_status by AssignmentViewRow
+  stored_status: FeeAssignment.StoredAssignmentStatus;
   status: FeeAssignment.FeeAssignmentStatus;
+  computed_status: FeeAssignment.FeeAssignmentStatus;
   effective_due_at: Option.Option<ReturnType<typeof DateTime.nowUnsafe>>;
   waived_reason: Option.Option<string>;
 };
@@ -229,6 +232,15 @@ const MockFeesRepositoryLayer = Layer.succeed(FeesRepository, {
     if (!fee || Option.isSome(fee.archived_at)) return Effect.succeed(Option.none());
     return Effect.succeed(Option.some(fee));
   },
+  findByIdAny: (id: Fee.FeeId) => {
+    const fee = feesStore.get(id);
+    return Effect.succeed(fee ? Option.some(fee) : Option.none());
+  },
+  findWithCountsById: (id: Fee.FeeId) => {
+    const fee = feesStore.get(id);
+    if (!fee || Option.isSome(fee.archived_at)) return Effect.succeed(Option.none());
+    return Effect.succeed(Option.some(fee));
+  },
   listByTeam: (teamId: Team.TeamId) => {
     const fees = Array.from(feesStore.values()).filter(
       (f) => f.team_id === teamId && Option.isNone(f.archived_at),
@@ -295,7 +307,9 @@ const MockFeeAssignmentsRepositoryLayer = Layer.succeed(FeeAssignmentsRepository
           ? input.amountMinorOverride.value
           : (fee?.amount_minor ?? (0 as Fee.AmountMinor)),
         paid_minor: 0 as Fee.AmountMinor,
+        stored_status: 'active',
         status: 'pending',
+        computed_status: 'pending',
         effective_due_at: Option.none(),
         waived_reason: Option.none(),
       };
@@ -303,6 +317,10 @@ const MockFeeAssignmentsRepositoryLayer = Layer.succeed(FeeAssignmentsRepository
       results.push(record);
     }
     return Effect.succeed(results);
+  },
+  findById: (id: FeeAssignment.FeeAssignmentId) => {
+    const assignment = assignmentsStore.get(id);
+    return Effect.succeed(assignment ? Option.some(assignment) : Option.none());
   },
   findByFee: (feeId: Fee.FeeId) => {
     const results = Array.from(assignmentsStore.values()).filter((a) => a.fee_id === feeId);
@@ -313,6 +331,12 @@ const MockFeeAssignmentsRepositoryLayer = Layer.succeed(FeeAssignmentsRepository
       (a) => a.team_member_id === memberId,
     );
     return Effect.succeed(results);
+  },
+  findByFeeAndMember: (feeId: Fee.FeeId, teamMemberId: TeamMember.TeamMemberId) => {
+    const result = Array.from(assignmentsStore.values()).find(
+      (a) => a.fee_id === feeId && a.team_member_id === teamMemberId,
+    );
+    return Effect.succeed(result ? Option.some(result) : Option.none());
   },
 } as any);
 
@@ -1351,7 +1375,9 @@ describe('Finance API — voidPayment', () => {
       currency: 'CZK' as Fee.CurrencyCode,
       due_minor: 1000 as Fee.AmountMinor,
       paid_minor: 0 as Fee.AmountMinor,
-      status: 'pending',
+      stored_status: 'active' as FeeAssignment.StoredAssignmentStatus,
+      status: 'pending' as FeeAssignment.FeeAssignmentStatus,
+      computed_status: 'pending' as FeeAssignment.FeeAssignmentStatus,
       effective_due_at: Option.none(),
       waived_reason: Option.none(),
     });

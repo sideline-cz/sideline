@@ -81,6 +81,13 @@ const make = Effect.gen(function* () {
     execute: (id) => sql`SELECT * FROM fees WHERE id = ${id} AND archived_at IS NULL`,
   });
 
+  // Returns the fee regardless of archived_at — used to distinguish "archived" from "not found"
+  const findByIdAnyQuery = SqlSchema.findOneOption({
+    Request: Fee.FeeId,
+    Result: FeeRow,
+    execute: (id) => sql`SELECT * FROM fees WHERE id = ${id}`,
+  });
+
   const findWithCountsByIdQuery = SqlSchema.findOneOption({
     Request: Fee.FeeId,
     Result: FeeWithCountsRow,
@@ -189,6 +196,8 @@ const make = Effect.gen(function* () {
 
   const findById = (id: Fee.FeeId) => findByIdQuery(id).pipe(catchSqlErrors);
 
+  const findByIdAny = (id: Fee.FeeId) => findByIdAnyQuery(id).pipe(catchSqlErrors);
+
   const findWithCountsById = (id: Fee.FeeId) => findWithCountsByIdQuery(id).pipe(catchSqlErrors);
 
   const listByTeam = (teamId: Team.TeamId, opts?: { includeArchived?: boolean }) =>
@@ -249,6 +258,7 @@ const make = Effect.gen(function* () {
   return {
     insert,
     findById,
+    findByIdAny,
     findWithCountsById,
     listByTeam,
     update,

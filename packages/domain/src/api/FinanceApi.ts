@@ -2,7 +2,7 @@ import * as Schemas from '@sideline/effect-lib/Schemas';
 import { Schema } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
-import { AmountMinor, CurrencyCode, FeeId, FeeTargetScope } from '~/models/Fee.js';
+import { AmountMinor, CurrencyCode, FeeId, FeeRecurrence, FeeTargetScope } from '~/models/Fee.js';
 import { FeeAssignmentId, FeeAssignmentStatus } from '~/models/FeeAssignment.js';
 import { PaymentId, PaymentMethod } from '~/models/Payment.js';
 import { TeamId } from '~/models/Team.js';
@@ -86,6 +86,7 @@ export const CreateFeeRequest = Schema.Struct({
   currency: CurrencyCode,
   dueAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
   targetScope: FeeTargetScope,
+  recurrence: Schema.OptionFromOptional(FeeRecurrence),
 });
 export type CreateFeeRequest = Schema.Schema.Type<typeof CreateFeeRequest>;
 

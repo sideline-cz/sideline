@@ -315,6 +315,14 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  // Test helper — bypasses soft-delete to exercise FK constraints.
+  // Intentionally does NOT use catchSqlErrors so FK violations propagate as Effect failures.
+  const hardDelete = (id: TeamMember.TeamMemberId) =>
+    SqlSchema.void({
+      Request: TeamMember.TeamMemberId,
+      execute: (memberId) => sql`DELETE FROM team_members WHERE id = ${memberId}`,
+    })(id);
+
   return {
     addMember,
     findById,
@@ -329,6 +337,8 @@ const make = Effect.gen(function* () {
     assignRole,
     unassignRole,
     setJerseyNumber,
+    // test helper
+    hardDelete,
   };
 });
 
