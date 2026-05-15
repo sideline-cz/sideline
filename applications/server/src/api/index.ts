@@ -23,6 +23,7 @@ import { TeamApiLive } from '~/api/team.js';
 import { TeamSettingsApiLive } from '~/api/team-settings.js';
 import { TrainingTypeApiLive } from '~/api/training-type.js';
 import { TranslationsApiLive } from '~/api/translations.js';
+import { VersionApiLive } from '~/api/version.js';
 import { WeeklySummaryApiLive } from '~/api/weekly-summary.js';
 
 export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.json' })
@@ -50,6 +51,7 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
   )
   .pipe(Layer.provide(TrainingTypeApiLive))
   .pipe(Layer.provide(TranslationsApiLive))
+  .pipe(Layer.provide(VersionApiLive))
   .pipe(Layer.provide(WeeklySummaryApiLive));
 
 export { Redirect } from '~/api/redirect.js';

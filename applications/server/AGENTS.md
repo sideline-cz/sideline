@@ -96,6 +96,7 @@ RPC groups are served via NDJSON over HTTP. Each group has a domain definition a
 | Guild | `packages/domain/src/rpc/guild/GuildRpcGroup.ts` | `src/rpc/guild/index.ts` | Guild operations (sync/upsert/delete channels, register members, update channel names) |
 | Event | `packages/domain/src/rpc/event/EventRpcGroup.ts` | `src/rpc/event/index.ts` | Event sync |
 | Activity | `packages/domain/src/rpc/activity/ActivityRpcGroup.ts` | `src/rpc/activity/index.ts` | Activity sync |
+| BotInfo | `packages/domain/src/rpc/botInfo/BotInfoRpcGroup.ts` | `src/rpc/botInfo/index.ts` | Bot version reporting (`ReportBotInfo` writes the bot's `APP_VERSION` into the in-memory `BotInfoStore` at startup; `GetServerVersion` returns the server's `APP_VERSION`). Backs the `/version` HTTP endpoint and the bot's `/info` slash command. |
 
 The `Guild/UpdateChannelName` RPC updates the `discord_channels` table when the bot renames a Discord channel. The bot calls this after processing a `channel_updated` event to keep the server's `discord_channels.name` column in sync with the actual Discord channel name.
 

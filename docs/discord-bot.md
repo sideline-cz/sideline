@@ -30,7 +30,26 @@ The bot is built with **dfx**, an Effect-native Discord framework. It connects t
 
 ## Slash Commands
 
-Three top-level commands are registered globally: `/event`, `/finance`, and `/makanicko`. Each has sub-commands.
+Four top-level commands are registered globally: `/event`, `/finance`, `/info`, and `/makanicko`. `/event`, `/finance`, and `/makanicko` each have sub-commands.
+
+### /info
+
+**Description:** Show bot and server version information.
+
+**Options:** None.
+
+**Flow:**
+
+1. User invokes `/info`.
+2. The handler (`applications/bot/src/commands/info/handler.ts`) calls `BotInfo/GetServerVersion` RPC to retrieve the server version. If the RPC fails, the server version falls back to `"unknown"`.
+3. Returns an ephemeral embed containing:
+   - Bot version (static, from `APP_VERSION` in `applications/bot/src/version.ts`).
+   - Server version (from RPC response or `"unknown"` on failure).
+   - Author credit with a link to [https://majksa.com](https://majksa.com).
+
+**Source file:** `applications/bot/src/commands/info/handler.ts`
+
+---
 
 ### /event create
 
@@ -790,6 +809,13 @@ The optional `snowflakeOverrides` parameter on `reorderChannelMessages` (a `Read
 ## RPC Method Reference
 
 The bot communicates with the server using the `SyncRpcs` RPC group defined in `packages/domain/src/rpc/SyncRpcs.ts`. Below is a complete list of all methods used by the bot, organized by group prefix.
+
+### BotInfo group (`BotInfo/`)
+
+| Method | Purpose |
+|--------|---------|
+| `BotInfo/ReportBotInfo` | Called at bot startup to report the running bot version to the server; payload: `{ version: string }`. Forked as a daemon fiber with a 5-second timeout so it does not block startup. |
+| `BotInfo/GetServerVersion` | Called by the `/info` slash command handler to retrieve the server's running version string. |
 
 ### Guild group (`Guild/`)
 

@@ -5,7 +5,8 @@ import { commandBuilder } from '~/commands/index.js';
 import { eventHandlers } from '~/events/index.js';
 import { interactionBuilder } from '~/interactions/index.js';
 import { recoverDeletedMessages } from '~/rcp/event/recoverDeletedMessages.js';
-import type { SyncRpc } from '~/services/SyncRpc.js';
+import { SyncRpc } from '~/services/SyncRpc.js';
+import { APP_VERSION } from '~/version.js';
 import {
   AchievementSyncService,
   ChannelSyncService,
@@ -35,6 +36,14 @@ const fastPollLoop = <E, R>(processTick: Effect.Effect<void, E, R>) =>
   processTick.pipe(Effect.repeat(Schedule.spaced('1 seconds')));
 
 export const program = Effect.Do.pipe(
+  Effect.bind('rpc', () => SyncRpc.asEffect()),
+  Effect.bind('reportVersion', ({ rpc }) =>
+    rpc['BotInfo/ReportBotInfo']({ version: APP_VERSION }).pipe(
+      Effect.timeout('5 seconds'),
+      Effect.catchCause((cause) => Effect.logWarning('Failed to report bot version', cause)),
+      Effect.forkDetach,
+    ),
+  ),
   Effect.bind('events', () => eventHandlers),
   Effect.bind('roles', () => RoleSyncService.asEffect()),
   Effect.bind('channels', () => ChannelSyncService.asEffect()),

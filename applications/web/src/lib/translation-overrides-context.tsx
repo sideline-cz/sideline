@@ -15,6 +15,8 @@ interface TranslationOverridesValue {
 
 const TranslationOverridesContext = React.createContext<TranslationOverridesValue | null>(null);
 
+const ServerUrlContext = React.createContext<string>('');
+
 const AppLayer = Layer.mergeAll(
   Layer.effect(ApiClient, client),
   Logger.layer([Logger.consolePretty()]),
@@ -85,13 +87,19 @@ export function TranslationOverridesProvider({
   const value = data ?? { version: 0, overrides: {} };
 
   return (
-    <TranslationOverridesContext.Provider value={value}>
-      {children}
-    </TranslationOverridesContext.Provider>
+    <ServerUrlContext.Provider value={serverUrl}>
+      <TranslationOverridesContext.Provider value={value}>
+        {children}
+      </TranslationOverridesContext.Provider>
+    </ServerUrlContext.Provider>
   );
 }
 
 export function useTranslationOverrides(): TranslationOverridesValue {
   const ctx = React.useContext(TranslationOverridesContext);
   return ctx ?? { version: 0, overrides: {} };
+}
+
+export function useServerUrl(): string {
+  return React.useContext(ServerUrlContext);
 }

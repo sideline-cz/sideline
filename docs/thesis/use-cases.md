@@ -14,7 +14,7 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 | **Player** | An authenticated Discord user who is a member of at least one team. Holds the built-in `Player` role granting `roster:view` and `member:view` permissions. Can view events, submit RSVPs, log personal activities, and subscribe to the iCal feed. |
 | **Captain** | A team member holding the built-in `Captain` role. Inherits all Player capabilities and additionally holds `roster:manage`, `member:edit`, `role:view`, `event:create`, `event:edit`, `event:cancel`, `finance:view`, and `finance:manage_fees` permissions. |
 | **Admin** | A team member holding the built-in `Admin` role. Holds the full permission set including `team:manage`, `team:invite`, `member:remove`, `role:manage`, `training-type:create`, `training-type:delete`, `finance:view`, `finance:manage_fees`, and `finance:record_payments`, in addition to all Captain permissions. |
-| **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/event list`, `/event create`, `/event overview`, `/finance status`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination). Receives RPC calls from the server to synchronise Discord roles and channels. |
+| **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination). Receives RPC calls from the server to synchronise Discord roles and channels. |
 | **Global Admin** | A user whose Discord ID is listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. |
 | **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes, sending RSVP reminder notifications before events, auto-logging attendance from RSVP data, and evaluating age-threshold rules to move members between groups. |
 
@@ -94,6 +94,7 @@ flowchart LR
         UC_BOT_SYNC_ROLES["Sync Discord Roles"]
         UC_BOT_POST_EMBED["Post Event Embed"]
         UC_BOT_FINANCE_STATUS["View Finance Status via Bot"]
+        UC_BOT_INFO["View Version Info via Bot"]
     end
 
     subgraph NOTIFICATIONS["Notifications"]
@@ -157,6 +158,7 @@ flowchart LR
     BOT --> UC_BOT_SYNC_ROLES
     BOT --> UC_BOT_POST_EMBED
     BOT --> UC_BOT_FINANCE_STATUS
+    BOT --> UC_BOT_INFO
 
     SYS --> UC_CREATE_EVENT
     SYS --> UC_START_EVENT
@@ -480,6 +482,7 @@ flowchart LR
         UC_EVT_LIST["\/event list\nShows per-user upcoming events\none event per page · ephemeral · own RSVP visible\n(Event/GetUpcomingEventsForUser)"]
         UC_EVT_OVERVIEW["\/event overview\nPosts a persistent overview button in the channel\nrequires Manage Server permission"]
         UC_EVT_CREATE["\/event create\nCreates a new event for the team\nrequires event:create permission"]
+        UC_INFO["\/info\nShows bot and server version information\nephemeral embed · no permission required"]
         UC_MAK_LOG["\/makanicko log\nLogs an activity for the invoking user\nactivity type · optional duration · optional note"]
         UC_MAK_STATS["\/makanicko stats\nDisplays personal activity stats and streak"]
         UC_MAK_LB["\/makanicko leaderboard\nDisplays top-10 leaderboard embed\nshows requesting user's own rank in footer"]
@@ -500,6 +503,7 @@ flowchart LR
     DU --> UC_EVT_LIST
     DU --> UC_EVT_OVERVIEW
     DU --> UC_EVT_CREATE
+    DU --> UC_INFO
     DU --> UC_MAK_LOG
     DU --> UC_MAK_STATS
     DU --> UC_MAK_LB
@@ -510,6 +514,7 @@ flowchart LR
     BOT --> UC_EVT_LIST
     BOT --> UC_EVT_OVERVIEW
     BOT --> UC_EVT_CREATE
+    BOT --> UC_INFO
     BOT --> UC_MAK_LOG
     BOT --> UC_MAK_STATS
     BOT --> UC_MAK_LB
@@ -694,3 +699,15 @@ The following structured descriptions cover the most significant use cases in th
 | **Main Flow** | 1. The user invokes `/finance status` in any Discord channel where the bot has permission. 2. The bot sends a deferred ephemeral acknowledgement and calls `Finance/GetMyStatus` RPC with the guild and user IDs. 3. The server locates the team by guild ID, finds the team member by Discord user ID, and returns all fee assignments grouped by currency. 4. The bot builds a rich embed coloured green (all clear), amber (pending/partial), or red (overdue) and updates the deferred message with it. |
 | **Postcondition** | The invoking user sees their outstanding fees in an ephemeral embed visible only to them. |
 | **Alternate Flow** | If the guild is not linked to a Sideline team (`FinanceGuildNotFound`), the bot silently returns the all-clear embed. If the user is not a team member (`FinanceMemberNotFound`), the bot responds with a "not a member" message. |
+
+---
+
+### UC-15: View Version Information via Discord
+
+| Field | Detail |
+|---|---|
+| **Actor** | Any Discord user |
+| **Precondition** | The bot is installed in the Discord server. |
+| **Main Flow** | 1. The user invokes `/info` in any channel where the bot has permission to reply. 2. The bot calls `BotInfo/GetServerVersion` RPC to retrieve the server's running version. If the RPC call fails, the server version falls back to `"unknown"`. 3. The bot replies with an ephemeral embed displaying the bot version, the server version, and an author credit link. |
+| **Postcondition** | The invoking user sees the current bot and server version strings in an ephemeral message visible only to them. |
+| **Alternate Flow** | If the RPC call to retrieve the server version fails, the embed still displays, with `"unknown"` shown in the server version field. |

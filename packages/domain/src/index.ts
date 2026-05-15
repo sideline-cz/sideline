@@ -53,6 +53,8 @@ export * as TrainingTypeApi from './api/TrainingTypeApi.js';
 
 export * as Translations from './api/Translations.js';
 
+export * as VersionApi from './api/VersionApi.js';
+
 export * as WeeklySummaryApi from './api/WeeklySummaryApi.js';
 
 export * as Achievement from './models/Achievement.js';
@@ -140,6 +142,7 @@ export * as AchievementRpcEvents from './rpc/achievement/AchievementRpcEvents.js
 export * as AchievementRpcGroup from './rpc/achievement/AchievementRpcGroup.js';
 export * as ActivityRpcGroup from './rpc/activity/ActivityRpcGroup.js';
 export * as ActivityRpcModels from './rpc/activity/ActivityRpcModels.js';
+export * as BotInfoRpcGroup from './rpc/botInfo/BotInfoRpcGroup.js';
 export * as ChannelRpcEvents from './rpc/channel/ChannelRpcEvents.js';
 export * as ChannelRpcGroup from './rpc/channel/ChannelRpcGroup.js';
 export * as ChannelRpcModels from './rpc/channel/ChannelRpcModels.js';

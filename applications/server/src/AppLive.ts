@@ -56,6 +56,7 @@ import {
 import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
+import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { TranslationCache } from '~/services/TranslationCache.js';
 import { env } from './env.js';
@@ -135,6 +136,7 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   Layer.provide(AgeCheckService.Default),
   Layer.provide(AchievementEvaluator.Default),
   Layer.provide(AchievementPreview.Default),
+  Layer.provide(BotInfoStore.Default),
   Layer.provide(TranslationCache.Default),
   Layer.provide(Repositories),
   Layer.provide(DiscordOAuth.Default),

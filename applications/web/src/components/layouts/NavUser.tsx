@@ -1,7 +1,9 @@
 import type { Auth } from '@sideline/domain';
 import { getLocale, setLocale } from '@sideline/i18n/runtime';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Effect, Option } from 'effect';
+import { Effect, Layer, Logger, Option, References } from 'effect';
+import { FetchHttpClient } from 'effect/unstable/http';
 import {
   Bell,
   BookOpen,
@@ -35,9 +37,29 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from '~/components/ui/sidebar';
+import { ClientConfig, client } from '~/lib/client.js';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { useTheme } from '~/lib/theme.js';
+import { useServerUrl } from '~/lib/translation-overrides-context.js';
 import { tr } from '~/lib/translations.js';
+import { APP_VERSION } from '~/lib/version.js';
+
+const VersionsAppLayer = Layer.mergeAll(
+  Layer.effect(ApiClient, client),
+  Logger.layer([Logger.consolePretty()]),
+  Layer.succeed(References.MinimumLogLevel, 'Info' as const),
+);
+
+async function fetchVersions(serverUrl: string): Promise<{ server: string; bot: string }> {
+  const effect = ApiClient.asEffect().pipe(
+    Effect.flatMap((api) => api.version.get()),
+    Effect.provide(VersionsAppLayer),
+    Effect.provide(FetchHttpClient.layer),
+    Effect.provideService(ClientConfig, { baseUrl: serverUrl }),
+  );
+  const result = await Effect.runPromise(effect);
+  return { server: result.server, bot: result.bot };
+}
 
 function discordAvatarUrl(discordId: string, avatar: string): string {
   return `https://cdn.discordapp.com/avatars/${discordId}/${avatar}.png?size=64`;
@@ -78,6 +100,14 @@ export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
   const displayName = Option.getOrElse(user.name, () => user.username);
   const currentLocale = getLocale();
   const { theme, setTheme } = useTheme();
+  const serverUrl = useServerUrl();
+
+  const versionsQuery = useQuery({
+    queryKey: ['versions'],
+    queryFn: () => fetchVersions(serverUrl),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
 
   const handleLocaleChange = useCallback(
     (locale: 'en' | 'cs') => {
@@ -210,6 +240,12 @@ export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
                 </a>
               </DropdownMenuItem>
             </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className='px-2 py-1.5 text-xs font-normal text-muted-foreground'>
+              <div>Web {APP_VERSION}</div>
+              <div>Server {versionsQuery.data?.server ?? '—'}</div>
+              <div>Bot {versionsQuery.data?.bot ?? '—'}</div>
+            </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onLogout}>
               <LogOut />

@@ -1,6 +1,44 @@
 import { cleanup } from '@testing-library/react';
-import { afterEach } from 'vitest';
+import React from 'react';
+import { afterEach, vi } from 'vitest';
 
 afterEach(() => {
   cleanup();
+});
+
+// Mock Radix UI dropdown-menu so its content is always rendered in the DOM.
+// Without this, Radix UI portals only render content when the dropdown is open,
+// making it impossible to test content without simulating user interaction.
+vi.mock('~/components/ui/dropdown-menu', () => {
+  const passThrough =
+    (displayName: string) =>
+    ({ children, className, ...rest }: React.PropsWithChildren<Record<string, unknown>>) =>
+      React.createElement('div', { 'data-testid': displayName, className, ...rest }, children);
+
+  return {
+    DropdownMenu: passThrough('dropdown-menu'),
+    DropdownMenuTrigger: passThrough('dropdown-menu-trigger'),
+    DropdownMenuContent: passThrough('dropdown-menu-content'),
+    DropdownMenuGroup: passThrough('dropdown-menu-group'),
+    DropdownMenuItem: ({
+      children,
+      onClick,
+      asChild,
+      ...rest
+    }: React.PropsWithChildren<{
+      onClick?: () => void;
+      asChild?: boolean;
+    }>) =>
+      React.createElement(
+        'div',
+        { 'data-testid': 'dropdown-menu-item', onClick, ...rest },
+        children,
+      ),
+    DropdownMenuLabel: passThrough('dropdown-menu-label'),
+    DropdownMenuSeparator: () =>
+      React.createElement('hr', { 'data-testid': 'dropdown-menu-separator' }),
+    DropdownMenuSub: passThrough('dropdown-menu-sub'),
+    DropdownMenuSubTrigger: passThrough('dropdown-menu-sub-trigger'),
+    DropdownMenuSubContent: passThrough('dropdown-menu-sub-content'),
+  };
 });

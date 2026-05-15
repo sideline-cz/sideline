@@ -1,6 +1,7 @@
 import { Layer } from 'effect';
 import { AchievementRpcLive } from './achievement/index.js';
 import { ActivityRpcLive } from './activity/index.js';
+import { BotInfoRpcLive } from './botInfo/index.js';
 import { ChannelsRpcLive } from './channel/index.js';
 import { EventsRpcLive } from './event/index.js';
 import { FinanceRpcLive } from './finance/index.js';
@@ -18,6 +19,7 @@ export const SyncRpcsLive = Layer.mergeAll(
   ActivityRpcLive,
   InvitesRpcLive,
   AchievementRpcLive,
+  BotInfoRpcLive,
   RoleProvisionRpcLive,
   WeeklySummaryRpcLive,
   FinanceRpcLive,

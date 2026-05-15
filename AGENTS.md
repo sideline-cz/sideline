@@ -537,6 +537,23 @@ When searching logs in SigNoz, always filter by resource attributes for faster q
 - **Stale domain `dist/`**: Run `pnpm build`, delete `.tsbuildinfo` files
 - **TanStack Router serialization errors**: Add `ssr: false` to route options
 
+## App Version (`APP_VERSION`)
+
+Every long-running application exposes its own version string as `export const APP_VERSION: string`. Consumers (info commands, `/version` endpoint, web footer) import it from a per-app `version.ts`.
+
+| App | File | Source of truth |
+|-----|------|-----------------|
+| Server | `applications/server/src/version.ts` | Reads `package.json` at runtime via parent-walking from `import.meta.url`, guarded by `parsed.name === '@sideline/server'`. |
+| Bot | `applications/bot/src/version.ts` | Reads `package.json` at runtime via parent-walking from `import.meta.url`, guarded by `parsed.name === '@sideline/bot'`. |
+| Web | `applications/web/src/lib/version.ts` | Reads `import.meta.env.VITE_APP_VERSION`, injected at build time by `vite.config.ts` + `vitest.config.ts` via `define: { 'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version) }` (both configs must mirror each other). |
+
+### Rules for adding `APP_VERSION` to a new application
+
+1. **Node runtime apps (server, bot, future workers)** — copy `applications/server/src/version.ts` and change only the workspace-name guard to the new package's `name` field. Walk **at most 5** parent directories from `import.meta.url`, match `package.json` by `name`, and fall back to `'unknown'` on any failure. The parent-walk + name-match is required because the file may live under `src/` (tsx dev) or `build/src/` (compiled) — neither layout is hard-coded.
+2. **Vite-bundled apps** — use the `define` injection pattern: read `./package.json` with `import pkg from './package.json' with { type: 'json' }` and inject `import.meta.env.VITE_APP_VERSION`. Mirror the `define` block in both `vite.config.ts` and `vitest.config.ts` — otherwise unit tests read `undefined` and fall back to `'unknown'`.
+3. **Never read `process.env.npm_package_version`** — it is only set under `npm/pnpm run` scripts and is absent in the Docker runtime.
+4. **Never hard-code the version string.** `APP_VERSION` must always resolve from `package.json` so Changesets bumps propagate automatically.
+
 ## Documentation Conventions
 
 Sideline has **three distinct documentation surfaces**. Know which one to update:
@@ -592,4 +609,4 @@ The `docs/thesis/` directory contains Mermaid diagrams and documentation for the
 
 ---
 
-**Last Updated**: 2026-05-15 (Permission Catalog backfill rule in `packages/domain/AGENTS.md`: granting an existing built-in role a brand-new permission requires a backfill migration in the same PR — `defaultPermissions` only seeds permissions for newly-created teams; reference template uses `INSERT INTO role_permissions ... CROSS JOIN VALUES ... WHERE r.name = '<Role>' AND r.is_built_in = true ON CONFLICT DO NOTHING`)
+**Last Updated**: 2026-05-15 (added `App Version (APP_VERSION)` section: every long-running app exposes `export const APP_VERSION: string`; Node apps read `package.json` at runtime via parent-walking from `import.meta.url` guarded by workspace-name match (max 5 parents, fall back to `'unknown'`); Vite-bundled apps inject via `define` block mirrored in both `vite.config.ts` and `vitest.config.ts`; never hard-code, never use `process.env.npm_package_version`)

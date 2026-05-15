@@ -49,6 +49,7 @@ import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
+import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
 import { MockTranslationsLayers } from './mocks/translationMocks.js';
@@ -813,7 +814,8 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(MockAchievementAdminLayers),
 )
   .pipe(Layer.provide(MockFinanceLayers))
-  .pipe(Layer.provide(MockTranslationsLayers));
+  .pipe(Layer.provide(MockTranslationsLayers))
+  .pipe(Layer.provide(BotInfoStore.Default));
 
 const makeTestSettingsLayer = (findByTeamId: () => Effect.Effect<Option.Option<unknown>>) =>
   Layer.succeed(TeamSettingsRepository, {
@@ -926,7 +928,8 @@ const buildTestLayer = (settingsLayer: Layer.Layer<TeamSettingsRepository>) =>
     Layer.provide(MockAchievementAdminLayers),
   )
     .pipe(Layer.provide(MockFinanceLayers))
-    .pipe(Layer.provide(MockTranslationsLayers));
+    .pipe(Layer.provide(MockTranslationsLayers))
+    .pipe(Layer.provide(BotInfoStore.Default));
 
 let handler: (...args: any) => Promise<Response>;
 let dispose: () => Promise<void>;

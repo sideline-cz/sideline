@@ -32,6 +32,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Weekly Summary](#21-weekly-summary)
    - [Translations](#22-translations)
    - [Finance](#23-finance)
+   - [Version](#24-version)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -4193,6 +4194,32 @@ Returns the invoking member's own fee assignment status grouped by currency.
 
 ---
 
+### 24. Version
+
+**Source:** `packages/domain/src/api/VersionApi.ts`
+**Prefix:** `/version`
+
+The Version group exposes the running versions of the server and the Discord bot. It is intentionally unauthenticated so health dashboards and the web frontend can query it without a session.
+
+---
+
+#### `GET /api/version`
+
+Returns the currently running server version and the most recently reported bot version.
+
+**Auth:** None (unauthenticated endpoint)
+
+**Response:** `200 OK` — `VersionInfo`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `server` | `string` | No | Server application version string (from `package.json#version` at startup) |
+| `bot` | `string` | No | Bot application version string as last reported by the bot via `BotInfo/ReportBotInfo` RPC; `"unknown"` if the bot has not yet reported |
+
+**Errors:** None — the endpoint always returns 200.
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -4204,6 +4231,15 @@ The RPC API is an internal HTTP endpoint used exclusively for communication betw
 **Transport:** All requests are HTTP POST with a JSON payload. The bot acts as the RPC client; the server acts as the RPC handler.
 
 ### RPC Groups
+
+#### BotInfo
+
+Allows the Discord bot to report its running version to the server and retrieve the server version.
+
+| Method | Payload / Returns | Description |
+|---|---|---|
+| `BotInfo/ReportBotInfo` | `{ version: string }` → `void` | Called by the bot at startup to store the bot's running version in the server's `BotInfoStore`. The stored value is served via `GET /api/version`. |
+| `BotInfo/GetServerVersion` | `void` → `string` | Called by the bot's `/info` slash command to retrieve the server's running version (`APP_VERSION`). |
 
 #### Guild
 

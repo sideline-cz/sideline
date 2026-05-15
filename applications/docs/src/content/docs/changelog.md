@@ -5,6 +5,11 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-15 — Version display in web app and Discord
+
+- The **user menu** in the web app (bottom-left corner) now shows the running versions of the web frontend, the server, and the Discord bot. Useful when reporting a bug or confirming a deployment landed.
+- The new **`/info`** Discord slash command shows the same bot and server version information as an ephemeral embed — visible only to you.
+
 ## 2026-05-15 — Captains can now manage activity types
 
 - **Captains** can now create, update, and delete team-specific activity types, in addition to admins. No configuration required — the `activity-type:create` and `activity-type:delete` permissions are granted to all Captain roles automatically via a backfill migration.
