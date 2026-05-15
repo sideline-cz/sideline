@@ -154,7 +154,8 @@ const make = Effect.gen(function* () {
       VALUES
         (${input.team_id}, 'Admin', true),
         (${input.team_id}, 'Captain', true),
-        (${input.team_id}, 'Player', true)
+        (${input.team_id}, 'Player', true),
+        (${input.team_id}, 'Treasurer', true)
       ON CONFLICT (team_id, name) DO NOTHING
     `,
   });

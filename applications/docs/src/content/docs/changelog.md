@@ -5,6 +5,12 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-15 — Built-in Treasurer role
+
+- Introduced a built-in `Treasurer` role available on every team. Treasurer holds `finance:view`, `finance:manage_fees`, and `finance:record_payments` by default. Use it to give a non-captain member finance authority without elevating them to Admin.
+- Captain no longer receives `finance:manage_fees` when a new team is created. Any team whose Captain role was previously granted `finance:manage_fees` keeps it — the migration is additive, not destructive. Going forward, assign the Treasurer role (or a custom role with the perm) to whoever should manage fees.
+- Existing teams are upgraded automatically via migration: Treasurer is created on every team, and Admin/Captain receive any finance read perms they were previously missing.
+
 ## 2026-05-15 — Version display in web app and Discord
 
 - The **user menu** in the web app (bottom-left corner) now shows the running versions of the web frontend, the server, and the Discord bot. Useful when reporting a bug or confirming a deployment landed.
@@ -23,7 +29,7 @@ This page lists user-visible changes to Sideline. For developer-level release no
 - Admins with the `finance:record_payments` permission can record payments as `cash` or `bank_transfer`, specifying the date and an optional note. Payments can be voided if entered in error — the voided record is kept for audit purposes.
 - The **Finance overview page** (`/teams/:teamId/finances`) shows all members' outstanding balances at a glance, with KPI cards for total due and paid amounts.
 - Members can check their own outstanding fees using the new **`/finance status`** Discord slash command. The bot replies with an ephemeral colour-coded embed: green (all clear), amber (pending/partial), or red (overdue).
-- Finance permissions follow a treasurer pattern: `finance:view` (read), `finance:manage_fees` (create/assign/archive), and `finance:record_payments` (record/void). Captains get view and manage_fees by default; admins get all three.
+- Finance permissions follow a treasurer pattern: `finance:view` (read), `finance:manage_fees` (create/assign/archive), and `finance:record_payments` (record/void). The built-in Treasurer role holds all three; admins get all three; captains get view only (see the 2026-05-15 release note).
 - **Not yet available:** reminder DMs, iCal payment events, the full fee-creation/editing web UI, per-fee detail page, payment log page, member self-service "my finances" page, and auto-monthly recurring fees.
 
 ## 2026-05-14 — Translation CMS for global admins

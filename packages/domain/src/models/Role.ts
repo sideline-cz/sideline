@@ -69,12 +69,12 @@ export const defaultPermissions: Record<string, ReadonlyArray<Permission>> = {
     'event:cancel',
     'group:manage',
     'finance:view',
-    'finance:manage_fees',
   ],
   Player: ['roster:view', 'member:view'],
+  Treasurer: ['finance:view', 'finance:manage_fees', 'finance:record_payments'],
 };
 
-export const builtInRoleNames = ['Admin', 'Captain', 'Player'] as const;
+export const builtInRoleNames = ['Admin', 'Captain', 'Player', 'Treasurer'] as const;
 
 export class Role extends Model.Class<Role>('Role')({
   id: Model.Generated(RoleId),

@@ -926,13 +926,14 @@ Manages roles and their permission assignments. Roles control what members can d
 
 #### Built-in Roles
 
-Three roles are automatically created for every new team and cannot be deleted or renamed:
+Four roles are automatically created for every new team and cannot be deleted or renamed:
 
 | Role | Default Permissions |
 |---|---|
 | **Admin** | All permissions |
-| **Captain** | `roster:view`, `roster:manage`, `member:view`, `member:edit`, `role:view`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `finance:manage_fees` |
+| **Captain** | `roster:view`, `roster:manage`, `member:view`, `member:edit`, `role:view`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view` |
 | **Player** | `roster:view`, `member:view` |
+| **Treasurer** | `finance:view`, `finance:manage_fees`, `finance:record_payments` |
 
 ---
 
@@ -3735,7 +3736,7 @@ The response shape is:
 **Source:** `packages/domain/src/api/FinanceApi.ts`
 **Prefix:** `/teams/:teamId`
 
-The Finance group exposes fee management and payment tracking. Permissions follow the treasurer pattern: `finance:view` grants read-only access; `finance:manage_fees` is required to create, update, or archive fees and to assign them to members; `finance:record_payments` is required to record or void payments. By default Admin holds all three, Captain holds `finance:view` and `finance:manage_fees`, Player holds none.
+The Finance group exposes fee management and payment tracking. Permissions follow the treasurer pattern: `finance:view` grants read-only access; `finance:manage_fees` is required to create, update, or archive fees and to assign them to members; `finance:record_payments` is required to record or void payments. By default Admin holds all three finance permissions; Captain holds `finance:view` only; the built-in Treasurer role holds all three; Player holds none.
 
 **View types (response DTOs):**
 

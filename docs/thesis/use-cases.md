@@ -12,8 +12,9 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 |---|---|
 | **Unauthenticated User** | Any visitor who has not yet authenticated via Discord OAuth2. Can view the landing page, follow invite links, and initiate the login flow. |
 | **Player** | An authenticated Discord user who is a member of at least one team. Holds the built-in `Player` role granting `roster:view` and `member:view` permissions. Can view events, submit RSVPs, log personal activities, and subscribe to the iCal feed. |
-| **Captain** | A team member holding the built-in `Captain` role. Inherits all Player capabilities and additionally holds `roster:manage`, `member:edit`, `role:view`, `event:create`, `event:edit`, `event:cancel`, `finance:view`, and `finance:manage_fees` permissions. |
+| **Captain** | A team member holding the built-in `Captain` role. Inherits all Player capabilities and additionally holds `roster:manage`, `member:edit`, `role:view`, `event:create`, `event:edit`, `event:cancel`, and `finance:view` permissions. |
 | **Admin** | A team member holding the built-in `Admin` role. Holds the full permission set including `team:manage`, `team:invite`, `member:remove`, `role:manage`, `training-type:create`, `training-type:delete`, `finance:view`, `finance:manage_fees`, and `finance:record_payments`, in addition to all Captain permissions. |
+| **Treasurer** | A team member holding the built-in `Treasurer` role. Holds `finance:view`, `finance:manage_fees`, and `finance:record_payments`. Used to delegate finance authority without elevating the member to Captain or Admin. |
 | **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination). Receives RPC calls from the server to synchronise Discord roles and channels. |
 | **Global Admin** | A user whose Discord ID is listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. |
 | **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes, sending RSVP reminder notifications before events, auto-logging attendance from RSVP data, and evaluating age-threshold rules to move members between groups. |
@@ -30,6 +31,7 @@ flowchart LR
     PL(["Player"])
     CP(["Captain"])
     AD(["Admin"])
+    TR(["Treasurer"])
     BOT(["Discord Bot"])
     SYS(["System (Cron)"])
 
@@ -134,8 +136,12 @@ flowchart LR
     CP --> UC_CANCEL_EVENT
     CP --> UC_ASSIGN_ROLE
     CP --> UC_VIEW_FINANCE
-    CP --> UC_MANAGE_FEES
-    CP --> UC_ASSIGN_FEES
+
+    TR --> UC_VIEW_FINANCE
+    TR --> UC_MANAGE_FEES
+    TR --> UC_ASSIGN_FEES
+    TR --> UC_RECORD_PAYMENT
+    TR --> UC_VOID_PAYMENT
 
     AD --> UC_REMOVE_MEMBER
     AD --> UC_MANAGE_ROLES
@@ -249,13 +255,14 @@ flowchart LR
 
 ### 3.3 Roles & Permissions
 
-Roles are team-scoped and carry a set of permissions. Three built-in roles (Admin, Captain, Player) exist for every team and cannot be deleted or renamed. Custom roles can be created by users with the `role:manage` permission.
+Roles are team-scoped and carry a set of permissions. Four built-in roles (Admin, Captain, Player, Treasurer) exist for every team and cannot be deleted or renamed. Custom roles can be created by users with the `role:manage` permission.
 
 ```mermaid
 flowchart LR
     PL(["Player"])
     CP(["Captain"])
     AD(["Admin"])
+    TR(["Treasurer"])
 
     UC_LIST_ROLES["List Roles\n(GET /teams/:teamId/roles)\nrequires: role:view"]
     UC_GET_ROLE["View Role Detail\n(GET /teams/:teamId/roles/:roleId)\nrequires: role:view"]
@@ -665,11 +672,11 @@ The following structured descriptions cover the most significant use cases in th
 
 ---
 
-### UC-12: Create and Assign a Fee (Captain/Admin)
+### UC-12: Create and Assign a Fee (Treasurer/Admin)
 
 | Field | Detail |
 |---|---|
-| **Actor** | Captain (requires `finance:manage_fees`); Admin |
+| **Actor** | Treasurer; Admin |
 | **Precondition** | The actor is authenticated and holds `finance:manage_fees` permission. |
 | **Main Flow** | 1. The actor calls `POST /teams/:teamId/fees` with a name, amount, currency, optional due date, and target scope. 2. The server creates a `fees` row and returns a `FeeView`. 3. The actor calls `POST /teams/:teamId/fees/:feeId/assignments` with a list of `memberIds` (and optional per-member amount or due date overrides). 4. The server inserts one `fee_assignments` row per member and returns `FeeAssignmentView[]`. |
 | **Postcondition** | Each target member has an assignment with status `pending`. |
@@ -678,11 +685,11 @@ The following structured descriptions cover the most significant use cases in th
 
 ---
 
-### UC-13: Record a Payment (Admin)
+### UC-13: Record a Payment (Treasurer/Admin)
 
 | Field | Detail |
 |---|---|
-| **Actor** | Admin (requires `finance:record_payments`) |
+| **Actor** | Treasurer; Admin |
 | **Precondition** | The actor holds `finance:record_payments`. A fee assignment exists for the member. |
 | **Main Flow** | 1. The actor calls `POST /teams/:teamId/fees/:feeId/assignments/:assignmentId/payments` with `amountMinor`, `method` (`cash` or `bank_transfer`), `paidAt`, and optional `note`. 2. The server inserts a `payments` row. 3. The database trigger `payments_recompute_paid_minor` immediately updates `fee_assignments.paid_minor`. 4. If `paid_minor >= amount_minor` the assignment status transitions to `paid`; otherwise to `partial`. |
 | **Postcondition** | The payment is recorded. The assignment's status reflects the new payment total. |

@@ -71,18 +71,24 @@ import { MockTranslationsLayers } from '../../mocks/translationMocks.js';
 
 const TEST_CAPTAIN_USER_ID = '00000000-0000-0000-0000-000000000001' as Auth.UserId;
 const TEST_PLAYER_USER_ID = '00000000-0000-0000-0000-000000000002' as Auth.UserId;
+const TEST_TREASURER_USER_ID = '00000000-0000-0000-0000-000000000003' as Auth.UserId;
 const TEST_TEAM_ID = '00000000-0000-0000-0000-000000000010' as Team.TeamId;
 const TEST_OTHER_TEAM_ID = '00000000-0000-0000-0000-000000000011' as Team.TeamId;
 const TEST_CAPTAIN_MEMBER_ID = '00000000-0000-0000-0000-000000000020' as TeamMember.TeamMemberId;
 const TEST_PLAYER_MEMBER_ID = '00000000-0000-0000-0000-000000000021' as TeamMember.TeamMemberId;
 const TEST_OTHER_TEAM_MEMBER_ID = '00000000-0000-0000-0000-000000000022' as TeamMember.TeamMemberId;
+const TEST_TREASURER_MEMBER_ID = '00000000-0000-0000-0000-000000000023' as TeamMember.TeamMemberId;
 
 const CAPTAIN_PERMISSIONS: readonly Role.Permission[] = [
   'finance:view',
-  'finance:manage_fees',
-  'finance:record_payments',
   'member:view',
   'roster:view',
+];
+
+const TREASURER_PERMISSIONS: readonly Role.Permission[] = [
+  'finance:view',
+  'finance:manage_fees',
+  'finance:record_payments',
 ];
 
 const PLAYER_PERMISSIONS: readonly Role.Permission[] = ['member:view', 'roster:view'];
@@ -151,10 +157,16 @@ usersMap.set(TEST_PLAYER_USER_ID, {
   discord_id: '222222222222222222',
   username: 'player',
 });
+usersMap.set(TEST_TREASURER_USER_ID, {
+  id: TEST_TREASURER_USER_ID,
+  discord_id: '333333333333333333',
+  username: 'treasurer',
+});
 
 const sessionsStore = new Map<string, Auth.UserId>();
 sessionsStore.set('captain-token', TEST_CAPTAIN_USER_ID);
 sessionsStore.set('player-token', TEST_PLAYER_USER_ID);
+sessionsStore.set('treasurer-token', TEST_TREASURER_USER_ID);
 
 const membersStore = new Map<string, MembershipWithRole>();
 membersStore.set(TEST_CAPTAIN_MEMBER_ID, {
@@ -173,12 +185,21 @@ membersStore.set(TEST_PLAYER_MEMBER_ID, {
   role_names: ['Player'],
   permissions: PLAYER_PERMISSIONS as any,
 } as MembershipWithRole);
+membersStore.set(TEST_TREASURER_MEMBER_ID, {
+  id: TEST_TREASURER_MEMBER_ID,
+  team_id: TEST_TEAM_ID,
+  user_id: TEST_TREASURER_USER_ID,
+  active: true,
+  role_names: ['Treasurer'],
+  permissions: TREASURER_PERMISSIONS as any,
+} as MembershipWithRole);
 
 // Maps each TeamMemberId to its team_id — used for team-membership validation in bulkInsert
 const memberTeamMap = new Map<TeamMember.TeamMemberId, Team.TeamId>();
 memberTeamMap.set(TEST_CAPTAIN_MEMBER_ID, TEST_TEAM_ID);
 memberTeamMap.set(TEST_PLAYER_MEMBER_ID, TEST_TEAM_ID);
 memberTeamMap.set(TEST_OTHER_TEAM_MEMBER_ID, TEST_OTHER_TEAM_ID);
+memberTeamMap.set(TEST_TREASURER_MEMBER_ID, TEST_TEAM_ID);
 
 const testTeam = {
   id: TEST_TEAM_ID,
@@ -936,6 +957,38 @@ describe('Finance API — permission checks', () => {
     expect(body._tag ?? body.error ?? JSON.stringify(body)).toMatch(/FinanceForbidden/i);
   });
 
+  it('POST /fees with captain-token (Captain lacks finance:manage_fees by default) → 403 FinanceForbidden', async () => {
+    const response = await handler(
+      new Request(FEES_BASE, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer captain-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'Fee',
+          description: null,
+          amountMinor: 1000,
+          currency: 'CZK',
+          dueAt: null,
+          targetScope: 'all_members',
+        }),
+      }),
+    );
+    expect(response.status).toBe(403);
+    const body = await response.json();
+    expect(body._tag ?? body.error ?? JSON.stringify(body)).toMatch(/FinanceForbidden/i);
+  });
+
+  it('GET /finance/overview with captain-token (Captain has finance:view) → 200', async () => {
+    const response = await handler(
+      new Request(`${FINANCE_BASE}/overview`, {
+        headers: { Authorization: 'Bearer captain-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+  });
+
   it('GET /finance/overview without finance:view → 403 FinanceForbidden', async () => {
     const response = await handler(
       new Request(`${FINANCE_BASE}/overview`, {
@@ -965,7 +1018,7 @@ describe('Finance API — createFee', () => {
       new Request(FEES_BASE, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -991,7 +1044,7 @@ describe('Finance API — createFee', () => {
       new Request(FEES_BASE, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1012,7 +1065,7 @@ describe('Finance API — createFee', () => {
       new Request(FEES_BASE, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1037,7 +1090,7 @@ describe('Finance API — updateFee', () => {
       new Request(FEES_BASE, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1057,7 +1110,7 @@ describe('Finance API — updateFee', () => {
     await handler(
       new Request(`${FEES_BASE}/${feeId}`, {
         method: 'DELETE',
-        headers: { Authorization: 'Bearer captain-token' },
+        headers: { Authorization: 'Bearer treasurer-token' },
       }),
     );
 
@@ -1066,7 +1119,7 @@ describe('Finance API — updateFee', () => {
       new Request(`${FEES_BASE}/${feeId}`, {
         method: 'PATCH',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ name: 'Updated Name' }),
@@ -1084,7 +1137,7 @@ describe('Finance API — archiveFee', () => {
       new Request(FEES_BASE, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1104,7 +1157,7 @@ describe('Finance API — archiveFee', () => {
     const r1 = await handler(
       new Request(`${FEES_BASE}/${feeId}`, {
         method: 'DELETE',
-        headers: { Authorization: 'Bearer captain-token' },
+        headers: { Authorization: 'Bearer treasurer-token' },
       }),
     );
     expect(r1.status).toBe(204);
@@ -1113,7 +1166,7 @@ describe('Finance API — archiveFee', () => {
     const r2 = await handler(
       new Request(`${FEES_BASE}/${feeId}`, {
         method: 'DELETE',
-        headers: { Authorization: 'Bearer captain-token' },
+        headers: { Authorization: 'Bearer treasurer-token' },
       }),
     );
     expect(r2.status).toBe(204);
@@ -1127,7 +1180,7 @@ describe('Finance API — recordPayment', () => {
       new Request(FEES_BASE, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1148,7 +1201,7 @@ describe('Finance API — recordPayment', () => {
       new Request(`${FEES_BASE}/${feeId}/assignments`, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1167,7 +1220,7 @@ describe('Finance API — recordPayment', () => {
       new Request(`${FEES_BASE}/${feeId}/assignments/${assignmentId}/payments`, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1182,7 +1235,7 @@ describe('Finance API — recordPayment', () => {
     expect(paymentResponse.status).toBe(201);
     const payment = await paymentResponse.json();
     // The response should not expose a recordedByUserId that matches the rogue value
-    // The actual value should be derived from the authenticated captain user
+    // The actual value should be derived from the authenticated treasurer user
     expect(payment.recordedByUserId).not.toBe('rogue-user-id-should-be-ignored');
   });
 
@@ -1191,7 +1244,7 @@ describe('Finance API — recordPayment', () => {
       new Request(FEES_BASE, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1211,7 +1264,7 @@ describe('Finance API — recordPayment', () => {
       new Request(`${FEES_BASE}/${feeId}/assignments`, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1228,7 +1281,7 @@ describe('Finance API — recordPayment', () => {
       new Request(`${FEES_BASE}/${feeId}/assignments/${assignmentId}/payments`, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1249,7 +1302,7 @@ describe('Finance API — assignFee bulk idempotent', () => {
       new Request(FEES_BASE, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1274,14 +1327,14 @@ describe('Finance API — assignFee bulk idempotent', () => {
     const r1 = await handler(
       new Request(`${FEES_BASE}/${feeId}/assignments`, {
         method: 'POST',
-        headers: { Authorization: 'Bearer captain-token', 'Content-Type': 'application/json' },
+        headers: { Authorization: 'Bearer treasurer-token', 'Content-Type': 'application/json' },
         body: assignBody,
       }),
     );
     const r2 = await handler(
       new Request(`${FEES_BASE}/${feeId}/assignments`, {
         method: 'POST',
-        headers: { Authorization: 'Bearer captain-token', 'Content-Type': 'application/json' },
+        headers: { Authorization: 'Bearer treasurer-token', 'Content-Type': 'application/json' },
         body: assignBody,
       }),
     );
@@ -1318,7 +1371,7 @@ describe('Finance API — voidPayment', () => {
       new Request(`http://localhost/teams/${TEST_TEAM_ID}/payments/${fakePaymentId}`, {
         method: 'DELETE',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ reason: 'Error' }),
@@ -1400,7 +1453,7 @@ describe('Finance API — voidPayment', () => {
       new Request(`http://localhost/teams/${TEST_TEAM_ID}/payments/${otherTeamPaymentId}`, {
         method: 'DELETE',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ reason: 'Cross-tenant void attempt' }),
@@ -1417,7 +1470,7 @@ describe('Finance API — assignFee cross-team member filter', () => {
       new Request(FEES_BASE, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1438,7 +1491,7 @@ describe('Finance API — assignFee cross-team member filter', () => {
       new Request(`${FEES_BASE}/${feeId}/assignments`, {
         method: 'POST',
         headers: {
-          Authorization: 'Bearer captain-token',
+          Authorization: 'Bearer treasurer-token',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({

@@ -261,7 +261,7 @@ erDiagram
 
 ### Roles & Permissions
 
-Every team defines a set of roles. Built-in roles (Admin, Captain, Player) are seeded automatically. `role_permissions` stores the individual permission strings granted to a role. `member_roles` is the many-to-many junction associating team members with roles.
+Every team defines a set of roles. Built-in roles (Admin, Captain, Player, Treasurer) are seeded automatically. `role_permissions` stores the individual permission strings granted to a role. `member_roles` is the many-to-many junction associating team members with roles.
 
 ```mermaid
 erDiagram

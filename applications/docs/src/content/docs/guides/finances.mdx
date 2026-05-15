@@ -5,7 +5,7 @@ description: Track team fees, record payments, and check your outstanding balanc
 
 import { Aside, Steps, Badge } from '@astrojs/starlight/components';
 
-Sideline's Finance module lets captains define fees (membership dues, equipment levies, tournament entry costs), assign them to members, and record payments as they come in. Members can check their own balance at any time — in Discord or in the web app.
+Sideline's Finance module lets admins and members with the Treasurer role define fees (membership dues, equipment levies, tournament entry costs), assign them to members, and record payments as they come in. Members can check their own balance at any time — in Discord or in the web app.
 
 ## Key concepts
 
@@ -24,16 +24,16 @@ Sideline's Finance module lets captains define fees (membership dues, equipment 
 
 ## Who can do what
 
-Finance permissions follow the treasurer pattern. By default:
+Finance permissions follow a treasurer-style split across four built-in roles. By default:
 
-| Action | Admin | Captain | Player |
-|---|---|---|---|
-| View fee list and assignments | Yes | Yes | No |
-| View finance overview (all members) | Yes | Yes | No |
-| Create, edit, or archive fees | Yes | Yes | No |
-| Assign fees to members | Yes | Yes | No |
-| Record or void payments | Yes | No | No |
-| View own fee status | Yes | Yes | No\* |
+| Action | Admin | Captain | Treasurer | Player |
+|---|---|---|---|---|
+| View fee list and assignments | Yes | Yes | Yes | No |
+| View finance overview (all members) | Yes | Yes | Yes | No |
+| Create, edit, or archive fees | Yes | No | Yes | No |
+| Assign fees to members | Yes | No | Yes | No |
+| Record or void payments | Yes | No | Yes | No |
+| View own fee status | Yes | Yes | Yes | No\* |
 
 \* Players do not have `finance:view` in the default role configuration. An admin can create a custom role that grants `finance:view` to specific members or groups.
 
@@ -51,7 +51,7 @@ All features listed above are **not available in the current release**.
 
 ## Finance overview page
 
-Go to **Team → Finances** (`/teams/:teamId/finances`) to see a summary table of all active members with their total amount due, total paid, and counts of pending/overdue/paid assignments. The page is visible to anyone holding `finance:view` (Admin and Captain by default).
+Go to **Team → Finances** (`/teams/:teamId/finances`) to see a summary table of all active members with their total amount due, total paid, and counts of pending/overdue/paid assignments. The page is visible to anyone holding `finance:view` (Admin, Captain, and Treasurer by default).
 
 Each row shows:
 - Member name
@@ -88,7 +88,7 @@ Each outstanding fee appears as a field showing the fee name, amount still owed,
 
 ## Captain / admin workflows (via API)
 
-The full fee management UI is coming in a future release. In the meantime, captains and admins with API access can manage finances via the REST API. See the [API overview](/api/overview/) for authentication instructions.
+The full fee management UI is coming in a future release. In the meantime, admins, treasurers, and any member with the relevant `finance:*` permissions can manage finances via the REST API. See the [API overview](/api/overview/) for authentication instructions.
 
 ### Create a fee
 
@@ -177,4 +177,4 @@ Archived fees cannot be modified. Create a new fee if you need to issue a revise
 ## See also
 
 - [API overview](/api/overview/) — authentication and base URL.
-- [Roles and permissions](/quick-start/admins/) — how to grant `finance:view` to a custom treasurer role.
+- [Roles and permissions](/quick-start/admins/) — Treasurer is a built-in role on every team — assign it to anyone who needs finance authority without giving them Admin. Custom roles can also be granted the `finance:*` permissions individually if you want different splits.

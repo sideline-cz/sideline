@@ -19,7 +19,7 @@ A subdivision within a team's roster — "first team", "reserves", "under-17s", 
 
 ## Role
 
-Permissions attached to a person within a team: `player`, `captain`, `admin`. Roles control what actions are allowed (creating events, editing roster, changing team settings).
+Permissions attached to a person within a team. Built-in roles are `player`, `captain`, `admin`, and `treasurer`. Roles control what actions are allowed (creating events, editing roster, changing team settings, managing fees).
 
 ## Event
 
@@ -51,7 +51,7 @@ A link captains share so new people can join the team. Expires after first use (
 
 ## Fee
 
-A named charge defined at the team level — for example, a membership subscription, a kit levy, or a tournament entry fee. Each fee has a default amount, a currency, and an optional due date. Captains create fees and assign them to individual members.
+A named charge defined at the team level — for example, a membership subscription, a kit levy, or a tournament entry fee. Each fee has a default amount, a currency, and an optional due date. Admins or Treasurers create fees and assign them to individual members.
 
 ## Fee assignment
 
@@ -59,4 +59,4 @@ The record that ties a specific fee to a specific member. An assignment tracks h
 
 ## Payment
 
-Money received against a fee assignment. Payments are recorded by captains or admins and can be voided if entered in error. The voided record is kept for auditing. See the [Finances guide](/guides/finances/) for the full workflow.
+Money received against a fee assignment. Payments are recorded by admins or treasurers (anyone with `finance:record_payments`) and can be voided if entered in error. The voided record is kept for auditing. See the [Finances guide](/guides/finances/) for the full workflow.

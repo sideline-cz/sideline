@@ -16,7 +16,7 @@
 | Cascade deletes | Applied where child records are meaningless without the parent (e.g. team members when a team is deleted) |
 | Restrict/Set Null | Used where the child should be preserved or the FK reference cleared |
 | Soft archiving | `is_archived BOOLEAN` on `roles` and `groups` instead of hard deletion |
-| Built-in seeding | Team creation seeds 3 roles (Admin, Captain, Player) and 4 global activity types |
+| Built-in seeding | Team creation seeds 4 roles (Admin, Captain, Player, Treasurer) and 4 global activity types |
 
 For visual ER diagrams, refer to [`docs/thesis/er-diagram.md`](thesis/er-diagram.md).
 
@@ -253,7 +253,7 @@ Archive of teams that existed before mandatory guild linking was enforced (migra
 
 #### `roles`
 
-Named permission bundles defined per team. Built-in roles (Admin, Captain, Player) are seeded automatically when a team is created.
+Named permission bundles defined per team. Built-in roles (Admin, Captain, Player, Treasurer) are seeded automatically when a team is created.
 
 | Column | Type | Constraints | Default |
 |---|---|---|---|
@@ -281,12 +281,13 @@ Individual permission strings granted to a role.
 
 **Primary Key**: `(role_id, permission)`
 
-**Built-in permission values**: `team:manage`, `team:invite`, `roster:view`, `roster:manage`, `member:view`, `member:edit`, `member:remove`, `role:view`, `role:manage`, `training-type:create`, `training-type:delete`, `event:create`, `event:edit`, `event:cancel`
+**Built-in permission values**: `team:manage`, `team:invite`, `roster:view`, `roster:manage`, `member:view`, `member:edit`, `member:remove`, `role:view`, `role:manage`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `training-type:delete`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `finance:manage_fees`, `finance:record_payments`
 
 **Built-in role defaults**:
-- **Admin**: all 14 permissions listed above
-- **Captain**: `roster:view`, `roster:manage`, `member:view`, `member:edit`, `role:view`, `event:create`, `event:edit`, `event:cancel`
+- **Admin**: all permissions (see `defaultPermissions.Admin` in `packages/domain/src/models/Role.ts`)
+- **Captain**: `roster:view`, `roster:manage`, `member:view`, `member:edit`, `role:view`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`
 - **Player**: `roster:view`, `member:view`
+- **Treasurer**: `finance:view`, `finance:manage_fees`, `finance:record_payments`
 
 ---
 
@@ -1184,6 +1185,8 @@ All 51 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1781000000 | `activity_type_metadata` | Adds `emoji TEXT`, `description TEXT`, and `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()` to `activity_types`; backfills emoji for the four global built-ins (🏋️ gym, 🏃 running, 🧘 stretching, ⚽ training); creates unique index `idx_activity_types_global_lower_name` on `(LOWER(name)) WHERE team_id IS NULL`; creates unique index `idx_activity_types_team_lower_name` on `(team_id, LOWER(name)) WHERE team_id IS NOT NULL` |
 | 1782000000 | `create_translations` | Creates `translation_overrides` (translation_key TEXT, locale TEXT CHECK `'en'`/`'cs'`, value TEXT, updated_at TIMESTAMPTZ, updated_by UUID FK → users ON DELETE SET NULL; PK on (translation_key, locale)) and `translation_cache_version` (id INT PK CHECK id=1, version BIGINT DEFAULT 1, updated_at TIMESTAMPTZ); seeds the single `translation_cache_version` row |
 | 1783000000 | `create_finance` | Creates `fees`, `fee_assignments`, `payments` tables; creates `fee_assignment_status_v` view; creates `recompute_paid_minor` function and `payments_recompute_paid_minor` trigger |
+| 1783100000 | `grant_captain_activity_type_perms` | Backfills `activity-type:create` and `activity-type:delete` permissions to existing Captain built-in roles on all teams |
+| 1784000000 | `introduce_treasurer_role` | Creates a built-in Treasurer role on every existing team; grants Treasurer `finance:view`, `finance:manage_fees`, `finance:record_payments`; backfills Admin with any missing finance perms; backfills Captain with `finance:view` |
 
 ### After Migrations (seed data)
 
@@ -1221,13 +1224,14 @@ Role deletion uses `ON DELETE RESTRICT` on `member_roles` to prevent accidentall
 
 ### Built-in Seeding
 
-When a team is created, the application seeds three built-in roles:
+When a team is created, the application seeds four built-in roles:
 
 | Role | Permissions |
 |---|---|
-| Admin | All 17 permissions (including `finance:view`, `finance:manage_fees`, `finance:record_payments`) |
-| Captain | roster:view, roster:manage, member:view, member:edit, role:view, event:create, event:edit, event:cancel, group:manage, finance:view, finance:manage_fees |
-| Player | roster:view, member:view |
+| Admin | All 20 permissions (including `finance:view`, `finance:manage_fees`, `finance:record_payments`) |
+| Captain | `roster:view`, `roster:manage`, `member:view`, `member:edit`, `role:view`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view` |
+| Player | `roster:view`, `member:view` |
+| Treasurer | `finance:view`, `finance:manage_fees`, `finance:record_payments` |
 
 Four global activity types are seeded by the after-migration and are shared across all teams:
 
