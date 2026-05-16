@@ -148,13 +148,13 @@ const make = Effect.gen(function* () {
         Effect.Do.pipe(
           Effect.tap(() => {
             const valueRows = input.memberIds.map((memberId) => {
-              const amount = Option.isSome(input.amountMinorOverride)
-                ? (input.amountMinorOverride.value as number)
-                : null;
-              const dueAt = Option.isSome(input.dueAtOverride)
-                ? (input.dueAtOverride.value as Date)
-                : null;
-              return sql`(${memberId}::uuid, ${amount}::bigint, ${dueAt}::timestamptz)`;
+              const amountFragment = Option.isSome(input.amountMinorOverride)
+                ? sql`${input.amountMinorOverride.value as number}::bigint`
+                : sql`NULL::bigint`;
+              const dueAtFragment = Option.isSome(input.dueAtOverride)
+                ? sql`${input.dueAtOverride.value as Date}::timestamptz`
+                : sql`NULL::timestamptz`;
+              return sql`(${memberId}::uuid, ${amountFragment}, ${dueAtFragment})`;
             });
             return sql`
               INSERT INTO fee_assignments (fee_id, team_member_id, amount_minor, due_at)
