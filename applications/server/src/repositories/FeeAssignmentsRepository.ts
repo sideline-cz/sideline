@@ -145,14 +145,16 @@ const make = Effect.gen(function* () {
 
     // amountOverride / dueAtOverride are SINGLE values applied to ALL members
     // (the input shape carries one override per call, not one per member).
-    // Use unnest() to expand the memberIds array, and bind the overrides once.
-    const memberIdsArray = input.memberIds as ReadonlyArray<string>;
+    // Bind each member id individually via sql.join (the codebase's existing
+    // pattern, used in the SELECT below) to sidestep Postgres array-binding
+    // quirks where pg may serialize a JS array as a record/composite.
     const amountOverrideValue = Option.isSome(input.amountMinorOverride)
       ? (input.amountMinorOverride.value as number)
       : null;
     const dueAtOverrideValue = Option.isSome(input.dueAtOverride)
       ? (input.dueAtOverride.value as Date)
       : null;
+    const memberIdFragments = input.memberIds.map((id) => sql`${id}`);
     return sql
       .withTransaction(
         Effect.Do.pipe(
@@ -162,13 +164,13 @@ const make = Effect.gen(function* () {
               INSERT INTO fee_assignments (fee_id, team_member_id, amount_minor, due_at)
               SELECT
                 ${input.feeId},
-                u.member_id::uuid,
+                tm.id,
                 COALESCE(${amountOverrideValue}::bigint, f.amount_minor),
                 ${dueAtOverrideValue}::timestamptz
-              FROM unnest(${memberIdsArray}::uuid[]) AS u(member_id)
-              JOIN team_members tm ON tm.id = u.member_id::uuid
+              FROM team_members tm
               JOIN fees f ON f.id = ${input.feeId}
-              WHERE tm.team_id = f.team_id
+              WHERE tm.id IN (${sql.join(',')(memberIdFragments)})
+                AND tm.team_id = f.team_id
               ON CONFLICT (fee_id, team_member_id) DO NOTHING
             `,
           ),
