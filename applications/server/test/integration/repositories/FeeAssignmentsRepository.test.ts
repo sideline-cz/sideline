@@ -134,6 +134,46 @@ describe('FeeAssignmentsRepository — bulkInsert', () => {
     ),
   );
 
+  // Regression: production hit "table v has 2 columns" / "uuid = record" errors
+  // because every SQL-construction approach broke for >= 2 member rows while
+  // passing for a single member. All bulkInsert tests must exercise the
+  // multi-member path to catch this class of bug.
+  it.effect('bulkInsert creates one assignment per memberId for MULTIPLE members', () =>
+    Effect.Do.pipe(
+      Effect.bind('owner', () => createUser('910000000000000010', 'multi-owner')),
+      Effect.bind('member2User', () => createUser('910000000000000011', 'multi-member-2')),
+      Effect.bind('member3User', () => createUser('910000000000000012', 'multi-member-3')),
+      Effect.bind('team', ({ owner }) =>
+        createTeam('911000000000000000' as Discord.Snowflake, owner),
+      ),
+      Effect.bind('fee', ({ team }) => createFee(team.id, 4200)),
+      Effect.bind('member1', ({ team, owner }) => addMember(team.id, owner)),
+      Effect.bind('member2', ({ team, member2User }) => addMember(team.id, member2User)),
+      Effect.bind('member3', ({ team, member3User }) => addMember(team.id, member3User)),
+      Effect.bind('assignments', ({ fee, member1, member2, member3 }) =>
+        FeeAssignmentsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.bulkInsert({
+              feeId: fee.id,
+              memberIds: [(member1 as any).id, (member2 as any).id, (member3 as any).id],
+              amountMinorOverride: Option.none(),
+              dueAtOverride: Option.none(),
+            }),
+          ),
+        ),
+      ),
+      Effect.tap(({ assignments }) =>
+        Effect.sync(() => {
+          expect(assignments).toHaveLength(3);
+          for (const a of assignments) {
+            expect(a.amount_minor).toBe(4200);
+          }
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
   it.effect('bulkInsert is idempotent — second call with same memberIds does not error', () =>
     Effect.Do.pipe(
       Effect.bind('ownerId', () => createUser('910000000000000002', 'assign-owner-2')),

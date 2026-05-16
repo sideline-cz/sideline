@@ -169,7 +169,7 @@ const make = Effect.gen(function* () {
                 ${dueAtOverrideValue}::timestamptz
               FROM team_members tm
               JOIN fees f ON f.id = ${input.feeId}
-              WHERE tm.id IN (${sql.join(',')(memberIdFragments)})
+              WHERE tm.id IN (${sql.csv(memberIdFragments)})
                 AND tm.team_id = f.team_id
               ON CONFLICT (fee_id, team_member_id) DO NOTHING
             `,
@@ -191,7 +191,7 @@ const make = Effect.gen(function* () {
                 LEFT JOIN team_members tm ON tm.id = fa.team_member_id
                 LEFT JOIN users u ON u.id = tm.user_id
                 WHERE fa.fee_id = ${input.feeId}
-                  AND fa.team_member_id IN (${sql.join(',')(memberTuples)})
+                  AND fa.team_member_id IN (${sql.csv(memberTuples)})
                 ORDER BY fa.created_at ASC
               `,
             })(undefined);
