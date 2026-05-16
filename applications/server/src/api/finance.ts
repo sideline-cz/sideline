@@ -168,6 +168,24 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
                 target_scope: payload.targetScope,
               }),
             ),
+            Effect.tap(({ fee }) =>
+              payload.targetScope === 'all_members'
+                ? Effect.Do.pipe(
+                    Effect.bind('teamMembers', () => members.findByTeam(teamId)),
+                    Effect.tap(({ teamMembers }) =>
+                      teamMembers.length > 0
+                        ? assignments.bulkInsert({
+                            feeId: fee.id,
+                            memberIds: teamMembers.map((m) => m.id),
+                            amountMinorOverride: Option.none(),
+                            dueAtOverride: Option.none(),
+                          })
+                        : Effect.void,
+                    ),
+                    Effect.asVoid,
+                  )
+                : Effect.void,
+            ),
             Effect.map(({ fee }) => toFeeViewWithZeroCounts(fee)),
             Effect.catchTag(
               'NoSuchElementError',

@@ -2,6 +2,7 @@ import { Fee, type FinanceApi, Team } from '@sideline/domain';
 import { createFileRoute, useRouter } from '@tanstack/react-router';
 import { Array, Effect, Option, Schema } from 'effect';
 import React from 'react';
+import { AssignFeeDialog } from '~/components/organisms/AssignFeeDialog.js';
 import { FeeFormDialog } from '~/components/organisms/FeeFormDialog.js';
 import type { FeeView } from '~/components/pages/FeeManagementPage.js';
 import { FeeManagementPage } from '~/components/pages/FeeManagementPage.js';
@@ -26,28 +27,42 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/finances_/f
       context.run,
     );
 
-    const fees = await ApiClient.asEffect().pipe(
-      Effect.flatMap((api) => api.finance.listFees({ params: { teamId } })),
-      warnAndCatchAll,
-      context.run,
-    );
+    const [fees, members] = await Effect.all(
+      [
+        ApiClient.asEffect().pipe(
+          Effect.flatMap((api) => api.finance.listFees({ params: { teamId } })),
+          warnAndCatchAll,
+        ),
+        ApiClient.asEffect().pipe(
+          Effect.flatMap((api) => api.roster.listMembers({ params: { teamId } })),
+          warnAndCatchAll,
+        ),
+      ],
+      { concurrency: 'unbounded' },
+    ).pipe(context.run);
 
     const team = Array.findFirst(context.teams, (t) => t.teamId === params.teamId);
     const permissions = Option.isSome(team) ? team.value.permissions : [];
     const canManageFees = permissions.includes('finance:manage_fees');
 
-    return { fees, canManageFees, teamId };
+    const memberList = members.map((m) => ({
+      teamMemberId: m.memberId,
+      name: Option.getOrElse(m.name, () => m.username),
+    }));
+
+    return { fees, canManageFees, teamId, members: memberList };
   },
 });
 
 function FeesRoute() {
-  const { fees, canManageFees, teamId } = Route.useLoaderData();
+  const { fees, canManageFees, teamId, members } = Route.useLoaderData();
   const router = useRouter();
   const run = useRun();
 
   const [createOpen, setCreateOpen] = React.useState(false);
   const [editFee, setEditFee] = React.useState<FeeView | null>(null);
   const [archiveFeeId, setArchiveFeeId] = React.useState<string | null>(null);
+  const [assignFee, setAssignFee] = React.useState<FeeView | null>(null);
 
   const handleCreateSubmit = async (
     req: FinanceApi.CreateFeeRequest | FinanceApi.UpdateFeeRequest,
@@ -103,6 +118,25 @@ function FeesRoute() {
     }
   };
 
+  const handleAssignSubmit = async (req: FinanceApi.AssignFeeRequest) => {
+    if (!assignFee) return;
+    const feeId = Schema.decodeSync(Fee.FeeId)(assignFee.feeId);
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.finance.assignFee({
+          params: { teamId, feeId },
+          payload: req,
+        }),
+      ),
+      Effect.mapError(() => ClientError.make('Failed to assign members')),
+      run({ success: 'Members assigned' }),
+    );
+    if (Option.isSome(result)) {
+      setAssignFee(null);
+      router.invalidate();
+    }
+  };
+
   return (
     <>
       <FeeManagementPage
@@ -111,6 +145,7 @@ function FeesRoute() {
         onCreateFee={() => setCreateOpen(true)}
         onEditFee={(fee) => setEditFee(fee)}
         onArchiveFee={(feeIdStr) => setArchiveFeeId(feeIdStr)}
+        onAssignMembers={(fee) => setAssignFee(fee)}
       />
       <FeeFormDialog
         open={createOpen}
@@ -127,6 +162,16 @@ function FeesRoute() {
           teamId={teamId}
           onSubmit={handleEditSubmit}
           onCancel={() => setEditFee(null)}
+        />
+      )}
+      {/* Assign members dialog */}
+      {assignFee !== null && (
+        <AssignFeeDialog
+          open={true}
+          fee={assignFee}
+          members={members}
+          onSubmit={handleAssignSubmit}
+          onCancel={() => setAssignFee(null)}
         />
       )}
       {/* Archive confirmation dialog */}

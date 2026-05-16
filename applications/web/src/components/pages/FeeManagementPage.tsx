@@ -30,6 +30,7 @@ interface FeeManagementPageProps {
   onCreateFee?: () => void;
   onEditFee?: (fee: FeeView) => void;
   onArchiveFee?: (feeId: string) => void;
+  onAssignMembers?: (fee: FeeView) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -42,6 +43,7 @@ export function FeeManagementPage({
   onCreateFee,
   onEditFee,
   onArchiveFee,
+  onAssignMembers,
 }: FeeManagementPageProps) {
   // Filter out archived fees
   const activeFees = fees.filter((f) => Option.isNone(f.archivedAt));
@@ -102,7 +104,21 @@ export function FeeManagementPage({
                   </td>
                   {canManageFees && (
                     <td className='py-3 px-3'>
-                      <div className='flex gap-2'>
+                      <div className='flex gap-2 items-center'>
+                        {fee.targetScope === 'all_members' ? (
+                          <span className='text-xs text-muted-foreground px-2 py-0.5 rounded-full border'>
+                            {tr('fee_management_autoAssigned')}
+                          </span>
+                        ) : (
+                          <Button
+                            type='button'
+                            size='sm'
+                            variant='outline'
+                            onClick={() => onAssignMembers?.(fee)}
+                          >
+                            {tr('fee_management_assignMembers')}
+                          </Button>
+                        )}
                         <Button
                           type='button'
                           size='sm'
