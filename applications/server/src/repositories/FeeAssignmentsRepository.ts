@@ -64,7 +64,7 @@ const make = Effect.gen(function* () {
         fa.id, fa.fee_id, fa.team_member_id, fa.amount_minor, fa.paid_minor,
         fa.due_at, fa.stored_status, fa.waived_reason, fa.created_at, fa.updated_at,
         v.fee_name, v.currency, v.due_minor, v.effective_due_at, v.status AS computed_status,
-        u.name AS member_name
+        COALESCE(u.name, u.discord_display_name, u.discord_nickname, u.username) AS member_name
       FROM fee_assignments fa
       JOIN fee_assignment_status_v v ON v.assignment_id = fa.id
       LEFT JOIN team_members tm ON tm.id = fa.team_member_id
@@ -82,7 +82,7 @@ const make = Effect.gen(function* () {
         fa.id, fa.fee_id, fa.team_member_id, fa.amount_minor, fa.paid_minor,
         fa.due_at, fa.stored_status, fa.waived_reason, fa.created_at, fa.updated_at,
         v.fee_name, v.currency, v.due_minor, v.effective_due_at, v.status AS computed_status,
-        u.name AS member_name
+        COALESCE(u.name, u.discord_display_name, u.discord_nickname, u.username) AS member_name
       FROM fee_assignments fa
       JOIN fee_assignment_status_v v ON v.assignment_id = fa.id
       LEFT JOIN team_members tm ON tm.id = fa.team_member_id
@@ -103,7 +103,7 @@ const make = Effect.gen(function* () {
         fa.id, fa.fee_id, fa.team_member_id, fa.amount_minor, fa.paid_minor,
         fa.due_at, fa.stored_status, fa.waived_reason, fa.created_at, fa.updated_at,
         v.fee_name, v.currency, v.due_minor, v.effective_due_at, v.status AS computed_status,
-        u.name AS member_name
+        COALESCE(u.name, u.discord_display_name, u.discord_nickname, u.username) AS member_name
       FROM fee_assignments fa
       JOIN fee_assignment_status_v v ON v.assignment_id = fa.id
       LEFT JOIN team_members tm ON tm.id = fa.team_member_id
@@ -185,7 +185,7 @@ const make = Effect.gen(function* () {
                   fa.id, fa.fee_id, fa.team_member_id, fa.amount_minor, fa.paid_minor,
                   fa.due_at, fa.stored_status, fa.waived_reason, fa.created_at, fa.updated_at,
                   v.fee_name, v.currency, v.due_minor, v.effective_due_at, v.status AS computed_status,
-                  u.name AS member_name
+                  COALESCE(u.name, u.discord_display_name, u.discord_nickname, u.username) AS member_name
                 FROM fee_assignments fa
                 JOIN fee_assignment_status_v v ON v.assignment_id = fa.id
                 LEFT JOIN team_members tm ON tm.id = fa.team_member_id

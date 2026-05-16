@@ -31,7 +31,7 @@ const make = Effect.gen(function* () {
     execute: (teamId) => sql`
       SELECT
         fa.team_member_id AS "teamMemberId",
-        u.name AS "memberName",
+        COALESCE(u.name, u.discord_display_name, u.discord_nickname, u.username) AS "memberName",
         v.currency AS currency,
         COALESCE(SUM(v.due_minor) FILTER (WHERE v.status != 'waived'), 0)::int AS "totalDueMinor",
         COALESCE(SUM(v.paid_minor) FILTER (WHERE v.status != 'waived'), 0)::int AS "totalPaidMinor",
@@ -43,8 +43,8 @@ const make = Effect.gen(function* () {
       LEFT JOIN team_members tm ON tm.id = fa.team_member_id
       LEFT JOIN users u ON u.id = tm.user_id
       WHERE v.team_id = ${teamId}
-      GROUP BY fa.team_member_id, v.currency, u.name
-      ORDER BY u.name ASC, v.currency ASC
+      GROUP BY fa.team_member_id, v.currency, u.name, u.discord_display_name, u.discord_nickname, u.username
+      ORDER BY 2 ASC, v.currency ASC
     `,
   });
 
@@ -75,7 +75,7 @@ const make = Effect.gen(function* () {
         v.status,
         v.effective_due_at,
         v.waived_reason,
-        u.name AS member_name
+        COALESCE(u.name, u.discord_display_name, u.discord_nickname, u.username) AS member_name
       FROM team_members tm
       JOIN fee_assignment_status_v v ON v.team_id = tm.team_id
       JOIN fee_assignments fa ON fa.id = v.assignment_id AND fa.team_member_id = tm.id

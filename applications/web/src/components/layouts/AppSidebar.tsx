@@ -124,6 +124,7 @@ function getTeamNavGroups(
           to: '/teams/$teamId/finances',
           params: { teamId },
           requiredPermission: 'finance:view' satisfies Role.Permission,
+          exact: true,
         },
         {
           title: tr('fees_navTitle'),

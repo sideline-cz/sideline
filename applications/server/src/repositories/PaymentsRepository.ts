@@ -199,7 +199,7 @@ const make = Effect.gen(function* () {
         p.id, p.fee_assignment_id, p.team_member_id, p.amount_minor,
         p.method, p.paid_at, p.note, p.recorded_by_user_id,
         p.voided_at, p.voided_by_user_id, p.void_reason, p.created_at,
-        mu.name AS member_name,
+        COALESCE(mu.name, mu.discord_display_name, mu.discord_nickname, mu.username) AS member_name,
         ru.name AS recorder_name
       FROM payments p
       JOIN fee_assignments fa ON fa.id = p.fee_assignment_id
