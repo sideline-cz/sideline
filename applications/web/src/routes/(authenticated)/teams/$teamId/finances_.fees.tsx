@@ -17,7 +17,7 @@ import {
 import { ApiClient, ClientError, NotFound, useRun, warnAndCatchAll } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
-export const Route = createFileRoute('/(authenticated)/teams/$teamId/finances/fees')({
+export const Route = createFileRoute('/(authenticated)/teams/$teamId/finances_/fees')({
   ssr: false,
   component: FeesRoute,
   loader: async ({ params, context }) => {

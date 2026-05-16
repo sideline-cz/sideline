@@ -1,5 +1,7 @@
+import { Link } from '@tanstack/react-router';
 import React from 'react';
 import { PaymentStatusBadge } from '~/components/molecules/PaymentStatusBadge.js';
+import { Button } from '~/components/ui/button.js';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { tr } from '~/lib/translations.js';
 
@@ -30,6 +32,10 @@ interface FinancesOverviewPageProps {
    * The provided ReactNode is rendered when the "By assignment" tab is active.
    */
   assignmentsTabContent?: React.ReactNode;
+  /**
+   * When provided, the empty-state "Create a fee" button links to this href.
+   */
+  createFeeHref?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,7 +117,13 @@ const FILTERS: ReadonlyArray<{ value: FilterValue; labelKey: string }> = [
 // By-member content
 // ---------------------------------------------------------------------------
 
-function ByMemberContent({ rows }: { rows: ReadonlyArray<MemberOverviewRow> }) {
+function ByMemberContent({
+  rows,
+  createFeeHref,
+}: {
+  rows: ReadonlyArray<MemberOverviewRow>;
+  createFeeHref?: string;
+}) {
   const [search, setSearch] = React.useState('');
   const [filter, setFilter] = React.useState<FilterValue>('all');
 
@@ -140,13 +152,15 @@ function ByMemberContent({ rows }: { rows: ReadonlyArray<MemberOverviewRow> }) {
       <div className='flex flex-col items-center justify-center gap-4 py-16 text-center'>
         <p className='text-xl font-semibold'>{tr('finance_overview_noFees')}</p>
         <p className='text-sm text-muted-foreground'>{tr('finance_empty_noFeesBody')}</p>
-        <button
-          type='button'
-          className='mt-2 inline-flex items-center rounded-md border px-4 py-2 text-sm font-medium opacity-50 cursor-not-allowed'
-          disabled
-        >
-          {tr('finance_overview_createFee')}
-        </button>
+        {createFeeHref !== undefined ? (
+          <Button asChild className='mt-2'>
+            <Link to={createFeeHref}>{tr('finance_overview_createFee')}</Link>
+          </Button>
+        ) : (
+          <Button className='mt-2' disabled>
+            {tr('finance_overview_createFee')}
+          </Button>
+        )}
       </div>
     );
   }
@@ -257,12 +271,16 @@ function ByMemberContent({ rows }: { rows: ReadonlyArray<MemberOverviewRow> }) {
 // Main component
 // ---------------------------------------------------------------------------
 
-export function FinancesOverviewPage({ rows, assignmentsTabContent }: FinancesOverviewPageProps) {
+export function FinancesOverviewPage({
+  rows,
+  assignmentsTabContent,
+  createFeeHref,
+}: FinancesOverviewPageProps) {
   const [activeTab, setActiveTab] = React.useState<'by-member' | 'by-assignment'>('by-member');
 
   // When no tabs are requested, render the by-member content directly
   if (!assignmentsTabContent) {
-    return <ByMemberContent rows={rows} />;
+    return <ByMemberContent rows={rows} createFeeHref={createFeeHref} />;
   }
 
   // Tab navigation
@@ -299,7 +317,11 @@ export function FinancesOverviewPage({ rows, assignmentsTabContent }: FinancesOv
       </div>
 
       {/* Tab content */}
-      {activeTab === 'by-member' ? <ByMemberContent rows={rows} /> : assignmentsTabContent}
+      {activeTab === 'by-member' ? (
+        <ByMemberContent rows={rows} createFeeHref={createFeeHref} />
+      ) : (
+        assignmentsTabContent
+      )}
     </div>
   );
 }

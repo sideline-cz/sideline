@@ -197,6 +197,7 @@ function FinancesRoute() {
         rows={rows}
         teamId={teamId}
         assignmentsTabContent={assignmentsTabContent}
+        createFeeHref={`/teams/${teamId}/finances/fees`}
       />
       {logPaymentAssignment !== null && (
         <RecordPaymentDialog
