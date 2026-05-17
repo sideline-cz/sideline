@@ -324,4 +324,14 @@ export class FinanceApiGroup extends HttpApiGroup.make('finance')
       error: FinanceForbidden.pipe(HttpApiSchema.status(403)),
       params: { teamId: TeamId },
     }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.get('myPaymentHistory', '/teams/:teamId/finance/my-payments', {
+      success: Schema.Array(PaymentView),
+      error: FinanceForbidden.pipe(HttpApiSchema.status(403)),
+      params: { teamId: TeamId },
+      query: {
+        feeId: Schema.OptionFromOptional(FeeId),
+      },
+    }).middleware(AuthMiddleware),
   ) {}

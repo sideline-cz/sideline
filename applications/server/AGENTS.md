@@ -463,6 +463,48 @@ Rules:
 2. **Detect "immutable target" by `Option.isNone(row.team_id)`** after `findByIdScoped` resolves; fail with `<Resource>Protected`. Do not encode immutability into the SQL `WHERE` clause alone — the API needs to return a distinct error so the client can render the correct UI ("This is built-in and cannot be edited" vs "You don't have permission").
 3. **`<Resource>NameAlreadyTaken` is 409, `<Resource>HasLogs` (and similar referential-integrity blockers) is 409.** Validation errors that the caller can fix by changing the payload are 409, not 422 — 422 is reserved for "the target row's class forbids this operation".
 
+## Caller-Scoped Reads: Membership-Gated Without `requirePermission`
+
+Some HTTP endpoints return data **about the caller** rather than about an arbitrary resource — e.g. "my fee assignment status", "my payment history". These endpoints intentionally bypass the team-permission system so that every member can read their own data without being granted a `finance:view` (or analogous) permission.
+
+| Endpoint | Path | Auth chain |
+|----------|------|-----------|
+| `myStatus` | `GET /teams/:teamId/finance/status` | `requireMembership(...)` only |
+| `myPaymentHistory` | `GET /teams/:teamId/finance/my-payments` | `requireMembership(...)` only |
+
+### Handler Shape
+
+```typescript
+.handle('myPaymentHistory', ({ params: { teamId }, query }) =>
+  Effect.Do.pipe(
+    Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+    Effect.bind('membership', ({ currentUser }) =>
+      requireMembership(members, teamId, currentUser.id, forbidden),
+    ),
+    Effect.bind('list', ({ membership }) =>
+      payments.listByTeam(teamId, {
+        memberId: Option.some(membership.id), // ← scope HARDCODED to caller's membership
+        feeId: query.feeId,
+        from: Option.none(),
+        to: Option.none(),
+        includeVoided: true,
+      }),
+    ),
+    Effect.map(({ list }) => Array.map(list, toPaymentView)),
+  ),
+)
+```
+
+Rules:
+
+1. **No `requirePermission` call.** The endpoint name MUST start with `my` (`myStatus`, `myPaymentHistory`, future `myAttendance`, etc.). The naming is the contract — a reviewer scanning the handler sees `my*` and knows the data is caller-scoped.
+2. **The repository query MUST be scoped to `membership.id`,** not to the caller-supplied `query`/`payload`. Never accept a `memberId` from the request body or URL — that would let a member read another member's data with a forged id. The example above passes `memberId: Option.some(membership.id)` directly from the bound membership.
+3. **Reuse the team-scoped repository method** (`payments.listByTeam`, `assignments.findByTeamMember`, etc.) rather than adding a `findByMyMember` variant. The pre-existing method already filters by `teamId`; the `memberId` argument restricts it further to the caller.
+4. **The 403 error is `FinanceForbidden` (or analogous) with the message "not a member of this team",** not "missing permission". The only failure mode here is "caller is not a member" — `requireMembership` returns the membership row or fails with `forbidden`.
+5. **Document the endpoint in `docs/api.md` with `Required Permission: membership in the team (bearer token must belong to a team member)`** — never `finance:view` or any specific permission string. This is how API consumers learn the auth contract.
+
+Reference: `applications/server/src/api/finance.ts` (`myStatus`, `myPaymentHistory`).
+
 ## Atomic Conditional UPDATE Pattern
 
 When a state transition must be race-free (e.g. "claim if not yet claimed", "mark started if still active"), encode the precondition in the `WHERE` clause and use `RETURNING id` to detect whether the row was updated. Use `SqlSchema.findOneOption` so callers receive `Option<{ id }>` — `Option.isSome` means "we won the race", `Option.isNone` means "preconditions failed (already claimed / cancelled / wrong member / not found)".

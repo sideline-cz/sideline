@@ -331,6 +331,41 @@ beforeLoad: ({ search, context }) =>
 - `Option.match({ onSome: ..., onNone: ... })` — branch on `Option` values
 - No `async`/`await` or `Effect.runSync` — the entire `beforeLoad` is one `Effect.Do` pipe
 
+## Loader: Parallel Fetch With Per-Arm Graceful Degradation
+
+When a route `loader` must fetch multiple resources in parallel and one of them is **non-critical** (the page must still render if it fails — e.g. a banner that only appears for some users), wrap that single arm in `Effect.tapError(...) → Effect.catch(() => Effect.succeed(<fallback>))` **inside** the `Effect.all`. The other arms must NOT be wrapped — their failure must propagate to `warnAndCatchAll` so the route shows a real error.
+
+```typescript
+loader: async ({ params, context }) => {
+  const teamId = Schema.decodeSync(Team.TeamId)(params.teamId);
+  const [dashboard, myStatus] = await ApiClient.asEffect().pipe(
+    Effect.flatMap((api) =>
+      Effect.all([
+        // Critical: failure breaks the page (handled by warnAndCatchAll below)
+        api.dashboard.getDashboard({ params: { teamId } }),
+        // Non-critical: failure degrades to an empty banner, page still renders
+        api.finance.myStatus({ params: { teamId } }).pipe(
+          Effect.tapError((e) => Effect.logWarning('Failed to load my finance status', e)),
+          Effect.catch(() => Effect.succeed([] as ReadonlyArray<FinanceApi.MyFinanceStatus>)),
+        ),
+      ]),
+    ),
+    warnAndCatchAll,
+    context.run,
+  );
+  return { dashboard, myStatus };
+},
+```
+
+Rules:
+
+1. **Only wrap the non-critical arm.** Wrapping every arm with `catch(() => ...)` silently hides every failure and produces a page that looks blank with no toast. Reserve graceful degradation for arms whose absence is a known acceptable UX.
+2. **`Effect.tapError` MUST log before `Effect.catch` swallows.** Never `Effect.catch(() => Effect.succeed(...))` without an upstream log — the failure must be visible in SigNoz.
+3. **The fallback must match the arm's `Success` type exactly,** including readonly-ness and currying. The `as ReadonlyArray<...>` cast above is required because `Effect.succeed([])` infers `never[]`.
+4. **Return a named object, not a tuple, from the loader** (`return { dashboard, myStatus }`). The route component destructures by name; tuples break when a third arm is added later.
+
+Reference: `applications/web/src/routes/(authenticated)/teams/$teamId/index.tsx` (dashboard + `myStatus`).
+
 ## Runtime — Client vs Server Runners
 
 `lib/runtime.ts` exposes two distinct run functions:
@@ -406,6 +441,57 @@ function MyPanel({ onSubmit }: MyPanelProps) {
 - The parent must never import or depend on `useRun()` for this Effect — it only builds the pipeline.
 - Use `React.useCallback` in the parent to memoize the Effect builder.
 
+### Pattern C: Per-Row Lazy Fetch With `useQuery` + `useRun`
+
+When a component (typically a row in a collapsible list) fetches data **on demand** (after the user expands the row) and the data is small enough that caching per-row is desirable, combine TanStack Query's `useQuery` with `useRun()` so the request still flows through the app's Effect runtime, gets the standard auth headers, and produces a typed `ClientError` on failure.
+
+```typescript
+import { useQuery } from '@tanstack/react-query';
+import { Effect, Option, Schema } from 'effect';
+import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
+
+function MyPaymentHistoryRow({ teamId, feeId, currency }: Props) {
+  const run = useRun();
+  const decodedTeamId = Schema.decodeSync(Team.TeamId)(teamId);
+  const decodedFeeId = Schema.decodeSync(Fee.FeeId)(feeId);
+
+  const { data, isLoading, isError } = useQuery<ReadonlyArray<PaymentView>>({
+    queryKey: ['myPaymentHistory', teamId, feeId],
+    queryFn: async () => {
+      const effect = ApiClient.asEffect().pipe(
+        Effect.flatMap((api) =>
+          api.finance.myPaymentHistory({
+            params: { teamId: decodedTeamId },
+            query: { feeId: Option.some(decodedFeeId) },
+          }),
+        ),
+        Effect.mapError(() => ClientError.make(tr('my_payments_history_error'))),
+      );
+      const result = await run()(effect);
+      return Option.getOrThrow(result);
+    },
+    retry: false,
+    throwOnError: false,
+  });
+
+  if (isLoading) return <div>{tr('my_payments_history_loading')}</div>;
+  if (isError) return <div className='text-destructive'>{tr('my_payments_history_error')}</div>;
+  // ... render data ...
+}
+```
+
+Rules:
+
+1. **Use `useQuery` only for per-row / on-demand data,** not for the page's primary payload. Primary payload always lives in the route loader (see "Loader" section above).
+2. **`queryKey` must include every parameter that changes the request** (`teamId`, `feeId` in the example). Two rows with different `feeId` must have different keys so React Query caches them independently.
+3. **`queryFn` builds the Effect, runs it via `run()()`, and unwraps the `Option`.** Call the curried `run()` with no `RunOptions` (no toast — TanStack Query owns the loading/error UI). `Option.getOrThrow(result)` converts `None` (the auto-toasted failure path) into a thrown error that drives `isError = true`.
+4. **`Effect.mapError(() => ClientError.make(tr('...')))`** is required so the error has a localized user-facing message; `Effect.catchAll` would mask the failure entirely and `useQuery` would never enter `isError`.
+5. **Always set `retry: false` and `throwOnError: false`.** Auto-retry produces flashing UI for on-demand fetches; `throwOnError: true` would crash the row instead of rendering the error state.
+6. **Decode branded route params with `Schema.decodeSync(<Brand>)(value)` at the top of the component,** not inside `queryFn` — the cost is paid once per render, and any invalid value throws synchronously instead of on first interaction. Follow the same rule as "Submitting Branded Values to API Endpoints" above.
+
+Reference: `applications/web/src/components/organisms/MyPaymentHistoryRow.tsx` + `.test.tsx`.
+
 ## Internationalization (i18n)
 
 ### Supported Locales
@@ -444,6 +530,7 @@ Rules:
 3. **Overrides are refreshed by `TranslationOverridesProvider`** (`src/lib/translation-overrides-context.tsx`), which polls `GET /api/translations` every 30s via React Query (`refetchIntervalInBackground: false`) and calls `setTranslationOverrides(...)` on every successful fetch. The provider is mounted once in the root layout; do not mount it elsewhere.
 4. **Use the `useTranslationOverrides()` hook only when a component must re-render explicitly on override changes** (e.g. the admin Translations page itself, where the version counter drives a refetch). `tr()` reads the current overrides snapshot synchronously and is sufficient for normal render paths.
 5. **Adding a new translation key**: add it to `messages/en.json` AND `messages/cs.json` in `@sideline/i18n`, run `pnpm codegen` and `pnpm build` so `messagesByKey` picks it up, then call `tr('my_new_key', { param: value })`. Do not call `m.my_new_key(...)` from web code.
+6. **Before adding a scoped key (e.g. `my_payments_kpi_*`, `<feature>_kpi_*`), grep for an existing key with the same English string** in `packages/i18n/messages/en.json`. If a generic key exists (e.g. `finance_kpi_outstanding = "Outstanding"`, `finance_kpi_overdue = "Overdue"`) and your component needs the same string, **reuse the generic key** — do not create `my_payments_kpi_outstanding` as a duplicate. The check is `grep -i '"<english string>"' packages/i18n/messages/en.json`. Reference: `MyPaymentsPage` reuses `finance_kpi_outstanding` and `finance_kpi_overdue` instead of minting `my_payments_kpi_outstanding` / `_overdue`.
 
 ### Locale Persistence
 
@@ -515,6 +602,19 @@ Reusable label maps and option builders live in `src/lib/`. Always import from t
 | `src/lib/event-colors.ts` | `getEventColor`, color map utilities | Calendar view |
 | `src/lib/datetime.ts` | `formatLocalDate`, `formatLocalTime`, `formatUtcTime`, `localToUtc` | Event/training forms |
 | `src/lib/discord.ts` | `DISCORD_CHANNEL_TYPE_TEXT`, `DISCORD_CHANNEL_TYPE_CATEGORY` | Any page with Discord channel selects |
+| `src/lib/finance/` | `formatMoney`, `parseAmount`, `sortAssignments`, `computeKpis` | Finance pages, payment dialogs, "My Payments" page, dashboard banner |
+
+### Pure Helpers in `src/lib/<feature>/`
+
+When a component needs non-trivial derived data (sorting, KPI computation, parsing), extract the logic into a **pure helper module** under `src/lib/<feature>/` with a co-located `<name>.test.ts`. Reference: `src/lib/finance/sortAssignments.ts` + `sortAssignments.test.ts`, `src/lib/finance/computeKpis.ts` + `computeKpis.test.ts`.
+
+Rules:
+
+1. **One exported pure function per file.** The file name matches the function name (`sortAssignments.ts` exports `sortAssignments`).
+2. **No React, no `tr()`, no `useRun`, no `ApiClient`.** Helpers in `src/lib/<feature>/` are framework-free — they only import from `effect` and other pure helpers. This keeps them testable under Vitest's default Node environment (no jsdom needed).
+3. **Define a local mirror type instead of importing from `@sideline/domain`** when the helper consumes a model shape (e.g. `FeeAssignmentView`). The mirror keeps the helper decoupled from the domain package's compile cycle and lets the test stub data with plain object literals. See `sortAssignments.ts` (`type FeeAssignmentView = { ... }`).
+4. **Co-locate `<name>.test.ts` next to `<name>.ts`.** The test file imports the function directly and tests with plain object literals — no `render`, no `screen`, no mocks. `vitest.config.ts` already includes `src/**/*.test.ts` in the project glob.
+5. **Call helpers from components/pages, not from loaders.** Loaders return raw API data; the page/component runs the helper to derive sorted/KPI'd views on each render.
 
 ## Testing React Components
 

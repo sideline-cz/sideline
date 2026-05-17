@@ -5,6 +5,13 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-17 — My Payments page for all members
+
+- Every team member can now visit **Team → My Payments** (`/teams/:teamId/my-payments`) to see their own fee history. No special permission required — each member sees only their own data.
+- Four KPI cards show total outstanding balance, number of overdue assignments, total amount paid, and the next upcoming due date.
+- Use the filter chips (**All / Outstanding / Paid / Waived**) to narrow the assignment list. Click the chevron on any row to expand the full payment history for that assignment.
+- A banner appears at the top of the **Team Dashboard** when you have outstanding or overdue fees, with a direct link to the My Payments page.
+
 ## 2026-05-16 — Fee management web UI and payment filters
 
 - **Fee management page** (`/teams/:teamId/finances/fees`) is now available in the web app. Admins and Treasurers can create fees, assign them to members, edit or archive fees, waive individual assignments, and record payments — all without touching the API.
@@ -37,7 +44,7 @@ This page lists user-visible changes to Sideline. For developer-level release no
 - The **Finance overview page** (`/teams/:teamId/finances`) shows all members' outstanding balances at a glance, with KPI cards for total due and paid amounts.
 - Members can check their own outstanding fees using the new **`/finance status`** Discord slash command. The bot replies with an ephemeral colour-coded embed: green (all clear), amber (pending/partial), or red (overdue).
 - Finance permissions follow a treasurer pattern: `finance:view` (read), `finance:manage_fees` (create/assign/archive), and `finance:record_payments` (record/void). The built-in Treasurer role holds all three; admins get all three; captains get view only (see the 2026-05-15 release note).
-- **Not yet available:** reminder DMs, iCal payment events, the full fee-creation/editing web UI, per-fee detail page, payment log page, member self-service "my finances" page, and auto-monthly recurring fees.
+- **Not yet available:** reminder DMs, iCal payment events, per-fee detail page, and auto-monthly recurring fees.
 
 ## 2026-05-14 — Translation CMS for global admins
 

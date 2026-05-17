@@ -718,3 +718,15 @@ The following structured descriptions cover the most significant use cases in th
 | **Main Flow** | 1. The user invokes `/info` in any channel where the bot has permission to reply. 2. The bot calls `BotInfo/GetServerVersion` RPC to retrieve the server's running version. If the RPC call fails, the server version falls back to `"unknown"`. 3. The bot replies with an ephemeral embed displaying the bot version, the server version, and an author credit link. |
 | **Postcondition** | The invoking user sees the current bot and server version strings in an ephemeral message visible only to them. |
 | **Alternate Flow** | If the RPC call to retrieve the server version fails, the embed still displays, with `"unknown"` shown in the server version field. |
+
+---
+
+### UC-16: View Own Payment History (Member)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Any authenticated team member (Player, Captain, Treasurer, Admin) |
+| **Precondition** | The actor is authenticated and is a member of the team. No additional permission is required. |
+| **Main Flow** | 1. The actor navigates to **Team → My Payments** (`/teams/:teamId/my-payments`). The page loads via `GET /teams/:teamId/finance/my-status` (assignments) and on row expand via `GET /teams/:teamId/finance/my-payments?feeId=…` (payment records). 2. The page displays four KPI cards: outstanding balance, overdue count, total paid, and next due date. 3. The actor optionally filters by status (All / Outstanding / Paid / Waived). 4. The actor clicks the chevron on a row to expand the inline payment history for that assignment, showing each payment's amount, method, date, and recorder. |
+| **Postcondition** | The actor sees only their own fee assignments and payment records. No cross-member reads are possible. |
+| **Alternate Flow** | If the actor has no assignments, the page shows an empty-state message. If the dashboard detects outstanding or overdue fees, a banner with a link to the My Payments page appears on the Team Dashboard. |

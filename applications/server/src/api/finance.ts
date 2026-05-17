@@ -97,7 +97,7 @@ const toPaymentView = (
     | 'recorder_name'
     | 'voided_at'
     | 'void_reason'
-  >,
+  > & { paid_at: DateTime.Utc | Date },
 ): FinanceApi.PaymentView =>
   new FinanceApi.PaymentView({
     paymentId: row.id,
@@ -106,7 +106,7 @@ const toPaymentView = (
     memberName: row.member_name,
     amountMinor: row.amount_minor,
     method: row.method,
-    paidAt: row.paid_at,
+    paidAt: row.paid_at instanceof Date ? DateTime.fromDateUnsafe(row.paid_at) : row.paid_at,
     note: row.note,
     recorderName: row.recorder_name,
     voidedAt: row.voided_at,
@@ -689,6 +689,27 @@ export const FinanceApiLive = HttpApiBuilder.group(Api, 'finance', (handlers) =>
                   }),
               );
             }),
+          ),
+        )
+        // ------------------------------------------------------------------
+        // myPaymentHistory
+        // ------------------------------------------------------------------
+        .handle('myPaymentHistory', ({ params: { teamId }, query }) =>
+          Effect.Do.pipe(
+            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+            Effect.bind('membership', ({ currentUser }) =>
+              requireMembership(members, teamId, currentUser.id, forbidden),
+            ),
+            Effect.bind('list', ({ membership }) =>
+              payments.listByTeam(teamId, {
+                memberId: Option.some(membership.id),
+                feeId: query.feeId,
+                from: Option.none(),
+                to: Option.none(),
+                includeVoided: true,
+              }),
+            ),
+            Effect.map(({ list }) => Array.map(list, toPaymentView)),
           ),
         ),
     ),
