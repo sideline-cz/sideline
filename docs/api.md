@@ -3736,7 +3736,7 @@ The response shape is:
 **Source:** `packages/domain/src/api/FinanceApi.ts`
 **Prefix:** `/teams/:teamId`
 
-The Finance group exposes fee management and payment tracking. Permissions follow the treasurer pattern: `finance:view` grants read-only access; `finance:manage_fees` is required to create, update, or archive fees and to assign them to members; `finance:record_payments` is required to record or void payments. By default Admin holds all three finance permissions; Captain holds `finance:view` only; the built-in Treasurer role holds all three; Player holds none.
+The Finance group exposes fee management and payment tracking. Permissions follow the treasurer pattern: `finance:view` grants read-only access to team-wide finance data; `finance:manage_fees` is required to create, update, or archive fees and to assign them to members; `finance:record_payments` is required to record or void payments. By default Admin holds all three finance permissions; Captain holds `finance:view` only; the built-in Treasurer role holds all three; Player holds none of the named permissions. Two endpoints — `myStatus` and `myPaymentHistory` — are an exception: they are gated on team membership only (no `finance:view` required) and always return data scoped to the invoking member.
 
 **View types (response DTOs):**
 
@@ -4213,7 +4213,7 @@ Returns per-member finance summary rows for the team overview page.
 Returns the invoking member's own fee assignment status grouped by currency.
 
 **Auth:** Bearer token (AuthMiddleware)
-**Required Permission:** `finance:view`
+**Required Permission:** membership in the team (bearer token must belong to a team member)
 
 **Path Parameters:**
 
@@ -4227,7 +4227,36 @@ Returns the invoking member's own fee assignment status grouped by currency.
 
 | Tag | Status | When |
 |---|---|---|
-| `FinanceForbidden` | 403 | Missing `finance:view` permission |
+| `FinanceForbidden` | 403 | Caller is not a member of this team |
+
+---
+
+#### `GET /teams/:teamId/finance/my-payments`
+
+Returns the invoking member's individual payment records, optionally filtered to a specific fee.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** membership in the team (bearer token must belong to a team member)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Query Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `feeId` | `FeeId` (string) | No | When provided, only payments for that fee are returned |
+
+**Response:** `200 OK` — `PaymentView[]`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `FinanceForbidden` | 403 | Caller is not a member of this team |
 
 ---
 

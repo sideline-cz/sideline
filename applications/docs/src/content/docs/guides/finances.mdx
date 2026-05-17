@@ -33,9 +33,9 @@ Finance permissions follow a treasurer-style split across four built-in roles. B
 | Create, edit, or archive fees | Yes | No | Yes | No |
 | Assign fees to members | Yes | No | Yes | No |
 | Record or void payments | Yes | No | Yes | No |
-| View own fee status | Yes | Yes | Yes | No\* |
+| View own fee status (My Payments) | Yes | Yes | Yes | Yes |
 
-\* Players do not have `finance:view` in the default role configuration. An admin can create a custom role that grants `finance:view` to specific members or groups.
+All team members can access their own My Payments page and check their own fee balance in Discord, regardless of role.
 
 <Aside type="note" title="Planned features">
 Several Finance features are planned for follow-up releases:
@@ -74,6 +74,36 @@ From this page you can:
 - Waive an individual assignment (e.g. hardship exemption).
 - Record a payment directly from the assignment list.
 
+## My Payments page
+
+Any team member can visit **Team → My Payments** (`/teams/:teamId/my-payments`) to see a personal summary of all their fee assignments. No special permission is required — every member sees only their own data.
+
+### Four KPI cards
+
+| Card | What it shows |
+|---|---|
+| **Outstanding** | Total amount still owed (one entry per currency; additional currencies shown as "+N more") |
+| **Overdue** | Count of assignments past their due date with unpaid balance |
+| **Paid total** | Sum of all payments made (per currency) |
+| **Next due** | Amount and due date of the earliest upcoming pending or partial assignment |
+
+### Filter chips
+
+Below the KPI cards a row of chips lets you narrow the assignment list:
+
+- **All** — every assignment
+- **Outstanding** — pending, partial, or overdue assignments
+- **Paid** — fully paid assignments
+- **Waived** — assignments the captain has waived
+
+### Per-fee table
+
+Assignments are grouped by currency. Each group is displayed as a table with columns for **Fee name**, **Due date**, **Amount paid**, and **Status badge**. Click the chevron on any row that has recorded payments to expand an inline payment history showing the amount, method, date, and who recorded each payment.
+
+### Outstanding / overdue alert banner
+
+When a member has outstanding or overdue fees, a banner appears at the top of the **Team Dashboard** page with a summary of the amounts owed and a direct link to the My Payments page.
+
 ## Checking your own balance in Discord
 
 Any member can check their own fee status using the `/finance status` slash command.
@@ -95,7 +125,7 @@ The embed colour tells you at a glance where you stand:
 Each outstanding fee appears as a field showing the fee name, amount still owed, and due date. Overdue items also show how many days past due they are.
 
 <Aside type="caution" title="No access? Check with your captain">
-  If `/finance status` tells you "not a member", your captain needs to make sure your Sideline profile is linked to your Discord account. If you have no fees assigned at all, the bot shows the green all-clear embed even if your role does not normally grant `finance:view`.
+  If `/finance status` tells you "not a member", your captain needs to make sure your Sideline profile is linked to your Discord account. If you have no fees assigned at all, the bot shows the green all-clear embed.
 </Aside>
 
 ## Captain / admin workflows (via API)

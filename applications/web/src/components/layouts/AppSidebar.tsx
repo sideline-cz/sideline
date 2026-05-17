@@ -3,6 +3,7 @@ import { Link, useMatchRoute } from '@tanstack/react-router';
 import {
   Activity,
   Calendar,
+  CreditCard,
   Dumbbell,
   Home,
   Languages,
@@ -59,6 +60,12 @@ function getTeamNavGroups(
           to: '/teams/$teamId',
           params: { teamId },
           exact: true,
+        },
+        {
+          title: tr('my_payments_navTitle'),
+          icon: CreditCard,
+          to: '/teams/$teamId/my-payments',
+          params: { teamId },
         },
         {
           title: tr('event_events'),

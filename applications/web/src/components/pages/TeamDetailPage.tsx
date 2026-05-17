@@ -14,6 +14,8 @@ import {
   Zap,
 } from 'lucide-react';
 import { EventLocation } from '~/components/atoms/EventLocation.js';
+import type { MyFinanceStatus } from '~/components/organisms/OutstandingPaymentsBanner.js';
+import { OutstandingPaymentsBanner } from '~/components/organisms/OutstandingPaymentsBanner.js';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
@@ -24,6 +26,7 @@ import { tr } from '~/lib/translations.js';
 interface TeamDetailPageProps {
   teamId: string;
   dashboard: DashboardApi.DashboardResponse | undefined;
+  myStatus?: ReadonlyArray<MyFinanceStatus>;
 }
 
 const formatDuration = (minutes: number): string => {
@@ -404,7 +407,7 @@ function TeamManagementCard({ teamId }: { teamId: string }) {
 
 // -- Main page component --
 
-export function TeamDetailPage({ teamId, dashboard }: TeamDetailPageProps) {
+export function TeamDetailPage({ teamId, dashboard, myStatus = [] }: TeamDetailPageProps) {
   if (!dashboard) {
     return (
       <div className='space-y-6'>
@@ -423,6 +426,9 @@ export function TeamDetailPage({ teamId, dashboard }: TeamDetailPageProps) {
 
       {/* Awaiting RSVP banner - urgent items at the top, visually distinct */}
       <AwaitingRsvpBanner teamId={teamId} events={awaitingRsvp} />
+
+      {/* Outstanding payments banner - shown when player has outstanding fees */}
+      <OutstandingPaymentsBanner teamId={teamId} groups={myStatus} />
 
       {/* Main content grid */}
       <div className='grid grid-cols-1 gap-6 lg:grid-cols-3'>

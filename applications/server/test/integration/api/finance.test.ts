@@ -411,7 +411,59 @@ const MockPaymentsRepositoryLayer = Layer.succeed(PaymentsRepository, {
     }
     return Effect.void;
   },
-  listByTeam: () => Effect.succeed([]),
+  listByTeam: (
+    teamId: Team.TeamId,
+    filters: {
+      memberId?: Option.Option<TeamMember.TeamMemberId>;
+      feeId?: Option.Option<Fee.FeeId>;
+      from?: Option.Option<unknown>;
+      to?: Option.Option<unknown>;
+      includeVoided?: boolean;
+    },
+  ) => {
+    const memberId = filters.memberId ?? Option.none<TeamMember.TeamMemberId>();
+    const feeId = filters.feeId ?? Option.none<Fee.FeeId>();
+    const includeVoided = filters.includeVoided ?? false;
+
+    const results = Array.from(paymentsStore.values()).filter((payment) => {
+      // Check team ownership via assignment → fee chain
+      const assignment = assignmentsStore.get(payment.fee_assignment_id);
+      if (!assignment) return false;
+      const fee = feesStore.get(assignment.fee_id);
+      if (!fee || fee.team_id !== teamId) return false;
+
+      // memberId filter
+      if (Option.isSome(memberId) && payment.team_member_id !== memberId.value) return false;
+
+      // feeId filter (filter by fee_id on the assignment, not fee_assignment_id)
+      if (Option.isSome(feeId) && assignment.fee_id !== feeId.value) return false;
+
+      // voided filter
+      if (!includeVoided && Option.isSome(payment.voided_at)) return false;
+
+      return true;
+    });
+
+    // Map to PaymentView-like shape (enough for the handler to decode)
+    return Effect.succeed(
+      results.map((p) => ({
+        id: p.id,
+        fee_assignment_id: p.fee_assignment_id,
+        team_member_id: p.team_member_id,
+        amount_minor: p.amount_minor,
+        method: 'cash' as Payment.PaymentMethod,
+        paid_at: new Date(),
+        note: Option.none(),
+        recorded_by_user_id: TEST_CAPTAIN_USER_ID,
+        voided_at: p.voided_at,
+        voided_by_user_id: Option.none(),
+        void_reason: p.void_reason,
+        created_at: new Date(),
+        member_name: Option.none(),
+        recorder_name: Option.none(),
+      })),
+    );
+  },
 } as any);
 
 const MockFinanceOverviewRepositoryLayer = Layer.succeed(FinanceOverviewRepository, {
@@ -1506,5 +1558,212 @@ describe('Finance API — assignFee cross-team member filter', () => {
     // Only the valid same-team member should be assigned; the foreign member is silently skipped
     expect(assignments).toHaveLength(1);
     expect(assignments[0].teamMemberId).toBe(TEST_PLAYER_MEMBER_ID);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Finance API — myPaymentHistory
+// ---------------------------------------------------------------------------
+
+/**
+ * Helper: seed a fee + assignment + payments directly into the stores so the
+ * handler can serve them through the (now filter-aware) MockPaymentsRepositoryLayer.
+ */
+function seedFee(teamId: Team.TeamId, overrides: Partial<FeeRecord> = {}): Fee.FeeId {
+  const id = crypto.randomUUID() as Fee.FeeId;
+  feesStore.set(id, {
+    id,
+    team_id: teamId,
+    name: overrides.name ?? 'Test Fee',
+    description: Option.none(),
+    amount_minor: 5000 as Fee.AmountMinor,
+    currency: (overrides.currency ?? 'CZK') as Fee.CurrencyCode,
+    due_at: Option.none(),
+    recurrence: 'none',
+    target_scope: 'all_members',
+    created_at: DateTime.nowUnsafe(),
+    updated_at: DateTime.nowUnsafe(),
+    archived_at: Option.none(),
+    assignment_count: 0,
+    paid_count: 0,
+    pending_count: 0,
+    overdue_count: 0,
+    ...overrides,
+  });
+  return id;
+}
+
+function seedAssignment(
+  feeId: Fee.FeeId,
+  memberId: TeamMember.TeamMemberId,
+  overrides: Partial<AssignmentRecord> = {},
+): FeeAssignment.FeeAssignmentId {
+  const id = crypto.randomUUID() as FeeAssignment.FeeAssignmentId;
+  const fee = feesStore.get(feeId)!;
+  assignmentsStore.set(id, {
+    id,
+    fee_id: feeId,
+    team_member_id: memberId,
+    member_name: Option.none(),
+    fee_name: fee?.name ?? 'Test Fee',
+    currency: fee?.currency ?? ('CZK' as Fee.CurrencyCode),
+    due_minor: 5000 as Fee.AmountMinor,
+    paid_minor: 0 as Fee.AmountMinor,
+    stored_status: 'active',
+    status: 'pending',
+    computed_status: 'pending',
+    effective_due_at: Option.none(),
+    waived_reason: Option.none(),
+    ...overrides,
+  });
+  return id;
+}
+
+function seedPayment(
+  assignmentId: FeeAssignment.FeeAssignmentId,
+  memberId: TeamMember.TeamMemberId,
+  overrides: Partial<PaymentRecord> = {},
+): Payment.PaymentId {
+  const id = crypto.randomUUID() as Payment.PaymentId;
+  paymentsStore.set(id, {
+    id,
+    fee_assignment_id: assignmentId,
+    team_member_id: memberId,
+    amount_minor: 5000 as Fee.AmountMinor,
+    voided_at: Option.none(),
+    void_reason: Option.none(),
+    ...overrides,
+  });
+  return id;
+}
+
+describe('Finance API — myPaymentHistory', () => {
+  it('player calling for self with feeId returns own payments (200)', async () => {
+    // Seed one fee + assignment for the player
+    const feeId = seedFee(TEST_TEAM_ID, { name: 'Membership Fee' });
+    const assignmentId = seedAssignment(feeId, TEST_PLAYER_MEMBER_ID);
+    seedPayment(assignmentId, TEST_PLAYER_MEMBER_ID);
+    seedPayment(assignmentId, TEST_PLAYER_MEMBER_ID);
+
+    const response = await handler(
+      new Request(`${FINANCE_BASE}/my-payments?feeId=${feeId}`, {
+        headers: { Authorization: 'Bearer player-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(Array.isArray(body)).toBe(true);
+    // Both payments belonging to the player for this fee should be returned
+    expect(body).toHaveLength(2);
+  });
+
+  it('player without feeId returns all own payments (200)', async () => {
+    // Seed two fees — player has 2 payments in fee1, 1 in fee2
+    const feeId1 = seedFee(TEST_TEAM_ID, { name: 'Fee 1' });
+    const feeId2 = seedFee(TEST_TEAM_ID, { name: 'Fee 2' });
+    const a1 = seedAssignment(feeId1, TEST_PLAYER_MEMBER_ID);
+    const a2 = seedAssignment(feeId2, TEST_PLAYER_MEMBER_ID);
+    seedPayment(a1, TEST_PLAYER_MEMBER_ID);
+    seedPayment(a1, TEST_PLAYER_MEMBER_ID);
+    seedPayment(a2, TEST_PLAYER_MEMBER_ID);
+
+    const response = await handler(
+      new Request(`${FINANCE_BASE}/my-payments`, {
+        headers: { Authorization: 'Bearer player-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(Array.isArray(body)).toBe(true);
+    expect(body).toHaveLength(3);
+  });
+
+  it('voided payments are included (200) and have voidedAt populated', async () => {
+    const feeId = seedFee(TEST_TEAM_ID, { name: 'Voided Fee Test' });
+    const assignmentId = seedAssignment(feeId, TEST_PLAYER_MEMBER_ID);
+    seedPayment(assignmentId, TEST_PLAYER_MEMBER_ID); // active
+    seedPayment(assignmentId, TEST_PLAYER_MEMBER_ID, {
+      voided_at: Option.some(DateTime.nowUnsafe()),
+      void_reason: Option.some('Duplicate entry'),
+    }); // voided
+
+    const response = await handler(
+      new Request(`${FINANCE_BASE}/my-payments`, {
+        headers: { Authorization: 'Bearer player-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toHaveLength(2);
+    // At least one should have voidedAt set (non-null)
+    const voidedPayment = body.find((p: any) => p.voidedAt !== null && p.voidedAt !== undefined);
+    expect(voidedPayment).not.toBeUndefined();
+  });
+
+  it('non-member calling → 403 FinanceForbidden', async () => {
+    // Player token, but calling against OTHER_TEAM_ID — they are not a member there
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_OTHER_TEAM_ID}/finance/my-payments`, {
+        headers: { Authorization: 'Bearer player-token' },
+      }),
+    );
+    expect(response.status).toBe(403);
+    const body = await response.json();
+    expect(body._tag ?? body.error ?? JSON.stringify(body)).toMatch(/FinanceForbidden/i);
+  });
+
+  it('payments from another member are not leaked', async () => {
+    // Captain's payment and player's payment — both in TEST_TEAM_ID
+    const feeId = seedFee(TEST_TEAM_ID, { name: 'Shared Fee' });
+    const captainAssignmentId = seedAssignment(feeId, TEST_CAPTAIN_MEMBER_ID);
+    const playerAssignmentId = seedAssignment(feeId, TEST_PLAYER_MEMBER_ID);
+    seedPayment(captainAssignmentId, TEST_CAPTAIN_MEMBER_ID); // captain's payment
+    seedPayment(playerAssignmentId, TEST_PLAYER_MEMBER_ID);
+
+    const response = await handler(
+      new Request(`${FINANCE_BASE}/my-payments`, {
+        headers: { Authorization: 'Bearer player-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    // Only the player's payment
+    expect(body).toHaveLength(1);
+    expect(body[0].teamMemberId).toBe(TEST_PLAYER_MEMBER_ID);
+    // Captain's payment is not present
+    expect(body.find((p: any) => p.teamMemberId === TEST_CAPTAIN_MEMBER_ID)).toBeUndefined();
+  });
+
+  it('cross-team isolation — payments in another team for same user are not returned', async () => {
+    // Seed a fee + assignment + payment in the OTHER team for the player's other-team membership
+    const otherFeeId = seedFee(TEST_OTHER_TEAM_ID, { name: 'Other Team Fee' });
+    const otherAssignmentId = seedAssignment(otherFeeId, TEST_OTHER_TEAM_MEMBER_ID);
+    seedPayment(otherAssignmentId, TEST_OTHER_TEAM_MEMBER_ID);
+
+    // Call on TEST_TEAM_ID (player's primary team)
+    const response = await handler(
+      new Request(`${FINANCE_BASE}/my-payments`, {
+        headers: { Authorization: 'Bearer player-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    // 0 payments — the other-team payment is not visible here
+    expect(body).toHaveLength(0);
+  });
+
+  // Case #7: works without finance:view permission (same as case #1 assertion)
+  // The player token only has 'member:view' and 'roster:view' — no 'finance:view'.
+  // Getting 200 in cases #1 and #2 above already confirms this, but let's be explicit:
+  it('player without finance:view permission gets 200', async () => {
+    // PLAYER_PERMISSIONS does NOT include 'finance:view' — verified by the PLAYER_PERMISSIONS constant above.
+    // A simple call to my-payments should succeed with 200 regardless.
+    const response = await handler(
+      new Request(`${FINANCE_BASE}/my-payments`, {
+        headers: { Authorization: 'Bearer player-token' },
+      }),
+    );
+    // 200 even though player has no finance:view
+    expect(response.status).toBe(200);
   });
 });
