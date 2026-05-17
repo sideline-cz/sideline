@@ -1004,7 +1004,7 @@ Single-row counter used for cache invalidation. Incremented by the application (
 
 ### 12. Finance
 
-The Finance subsystem tracks fee definitions, per-member fee assignments, and payment records. A PostgreSQL trigger automatically maintains the denormalised `fee_assignments.paid_minor` column so the server never needs to aggregate payments on read. A computed view (`fee_assignment_status_v`) derives the displayed status from stored data.
+The Finance subsystem tracks fee definitions, per-member fee assignments, and payment records. A PostgreSQL trigger automatically maintains the denormalised `fee_assignments.paid_minor` column so the server never needs to aggregate payments on read. A computed view (`fee_assignment_status_v`) derives the displayed status from stored data. Payment reminders are delivered asynchronously via two additional tables: `payment_reminder_sync_events` (outbox for the bot's Finance Sync worker) and `payment_reminders_sent` (idempotency guard so a reminder is never delivered twice for the same assignment/kind pair).
 
 #### `fees`
 
@@ -1050,7 +1050,7 @@ Assigns a fee to a specific team member, optionally overriding the amount or due
 
 **Unique**: `(fee_id, team_member_id)` — one assignment per member per fee.
 
-**Indexes**: `idx_fee_assignments_member` on `(team_member_id)`; `idx_fee_assignments_fee` on `(fee_id)`
+**Indexes**: `idx_fee_assignments_member` on `(team_member_id)`; `idx_fee_assignments_fee` on `(fee_id)`; `idx_fee_assignments_due_at` on `(due_at)` (added by migration `1785000000` to support efficient reminder candidate queries)
 
 **Notes**: `stored_status` is the durable flag (`active` or `waived`). The computed status shown in API responses (`pending`, `partial`, `paid`, `overdue`, `waived`) is derived by the `fee_assignment_status_v` view. Member deletion is blocked (`ON DELETE RESTRICT`) while any assignment exists. `paid_minor` must not be set directly; it is always computed by the trigger.
 
@@ -1112,9 +1112,50 @@ A PostgreSQL trigger function attached to the `payments` table as `AFTER INSERT 
 
 ---
 
+#### `payment_reminder_sync_events`
+
+Outbox table for the bot's Finance Sync worker. The `PaymentReminderCron` (server-side, every minute) finds fee assignments whose due-date cadence has triggered a reminder and inserts one row per candidate. The bot drains this queue, sends a Discord DM, and marks the row processed or failed.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `guild_id` | TEXT | NOT NULL | — |
+| `assignment_id` | UUID | NOT NULL, FK → `fee_assignments(id)` ON DELETE CASCADE | — |
+| `kind` | VARCHAR(32) | NOT NULL, one of `due_in_3d`, `due_today`, `overdue_3d`, `overdue_10d`, `overdue_21d` | — |
+| `effective_due_at` | TIMESTAMPTZ | NOT NULL | — |
+| `fee_name` | TEXT | NOT NULL | — |
+| `currency` | CHAR(3) | NOT NULL | — |
+| `amount_minor` | BIGINT | NOT NULL | — |
+| `paid_minor` | BIGINT | NOT NULL | — |
+| `user_discord_id` | TEXT | NOT NULL | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `processed_at` | TIMESTAMPTZ | — | `NULL` |
+| `error` | TEXT | — | `NULL` |
+
+**Indexes**: partial index `idx_payment_reminder_sync_events_unprocessed` on `(created_at) WHERE processed_at IS NULL` for efficient bot polling.
+
+**Notes**: Added in migration `1785000000_payment_reminders`. `processed_at` is `NULL` while the event is pending; set to `now()` on both success and failure (permanent failure semantics — failed events are not retried). The `PaymentReminderCron` guards against double-emission: it excludes assignments that already have an unprocessed row of the same `kind` in this table.
+
+---
+
+#### `payment_reminders_sent`
+
+Idempotency guard that records the successful delivery of each reminder DM. The bot writes a row here only after the Discord DM was accepted. Because the primary key is `(assignment_id, kind)`, a given reminder can be sent at most once per assignment, even if the server restarts or the cron fires early.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `assignment_id` | UUID | NOT NULL, PK (part 1), FK → `fee_assignments(id)` ON DELETE CASCADE | — |
+| `kind` | VARCHAR(32) | NOT NULL, PK (part 2) | — |
+| `sent_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Notes**: Added in migration `1785000000_payment_reminders`. Deletion of a `fee_assignments` row cascades and removes the corresponding sent records, preventing stale data from blocking future reminders if an assignment is recreated.
+
+---
+
 ## Migration History
 
-All 51 migration files in `packages/migrations/src/before/` plus 1 after-migration.
+All 52 migration files in `packages/migrations/src/before/` plus 1 after-migration.
 
 ### Before Migrations (schema changes)
 
@@ -1187,6 +1228,7 @@ All 51 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1783000000 | `create_finance` | Creates `fees`, `fee_assignments`, `payments` tables; creates `fee_assignment_status_v` view; creates `recompute_paid_minor` function and `payments_recompute_paid_minor` trigger |
 | 1783100000 | `grant_captain_activity_type_perms` | Backfills `activity-type:create` and `activity-type:delete` permissions to existing Captain built-in roles on all teams |
 | 1784000000 | `introduce_treasurer_role` | Creates a built-in Treasurer role on every existing team; grants Treasurer `finance:view`, `finance:manage_fees`, `finance:record_payments`; backfills Admin with any missing finance perms; backfills Captain with `finance:view` |
+| 1785000000 | `payment_reminders` | Creates `payment_reminder_sync_events` and `payment_reminders_sent` tables; adds `idx_fee_assignments_due_at` index on `fee_assignments(due_at)`; adds `idx_payment_reminder_sync_events_unprocessed` partial index on `payment_reminder_sync_events(created_at) WHERE processed_at IS NULL` |
 
 ### After Migrations (seed data)
 
@@ -1209,6 +1251,7 @@ Three tables act as outbox queues for bot-server communication:
 | `event_sync_events` | Event Sync | `event_created`, `event_updated`, `event_cancelled`, `rsvp_reminder`, `event_started`, `training_claim_request`, `training_claim_update`, `unclaimed_training_reminder` |
 | `achievement_sync_events` | Achievement Sync | `achievement_earned` |
 | `discord_role_provision_events` | Role Provision | `builtin_achievement`, `custom_achievement` |
+| `payment_reminder_sync_events` | Finance Sync | `payment_reminder_ready` |
 
 The server inserts rows when the relevant domain action occurs. The bot polls `WHERE processed_at IS NULL ORDER BY created_at` and updates `processed_at` (and optionally `error`) when processing is complete. Partial indexes on `(created_at) WHERE processed_at IS NULL` make these polls efficient. Event data is denormalised into snapshot columns so that the bot's message content remains accurate even if the source row is subsequently modified.
 
@@ -1218,7 +1261,7 @@ The server inserts rows when the relevant domain action occurs. The bot polls `W
 
 ### Cascading Deletes
 
-Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events, fees). Fee deletion cascades to fee_assignments. Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, and achievement_sync_events. Member deletion is blocked (`ON DELETE RESTRICT`) when any fee_assignment or payment row references the member. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
+Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events, fees). Fee deletion cascades to fee_assignments. Fee assignment deletion cascades to `payment_reminder_sync_events` and `payment_reminders_sent`. Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, and achievement_sync_events. Member deletion is blocked (`ON DELETE RESTRICT`) when any fee_assignment or payment row references the member. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
 
 Role deletion uses `ON DELETE RESTRICT` on `member_roles` to prevent accidentally orphaning members. FK references from `role_sync_events.role_id` and `channel_sync_events.group_id` are stored as plain UUID (no FK constraint) so audit rows are retained after the referenced entity is deleted.
 

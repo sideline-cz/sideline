@@ -12,6 +12,8 @@ scratchpad/*
 .local/
 .idea/
 /.claude/plans/
+/.claude/scheduled_tasks.lock
+.work/
 .venv/
 .env
 *.local

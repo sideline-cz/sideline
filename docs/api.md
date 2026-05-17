@@ -3273,7 +3273,7 @@ Marks all notifications as read for the authenticated user in a specific team.
 
 **Source:** `packages/domain/src/api/ICalApi.ts`
 
-The iCal API provides a personalized calendar feed for each user. The token is user-specific and persists across sessions.
+The iCal API provides a personalized calendar feed for each user. The token is user-specific and persists across sessions. The feed contains both team event VEVENTs and payment VEVENTs (one all-day event per unpaid or overdue fee assignment, capped to the past 180 days). Each payment VEVENT includes a VALARM that fires one day before the due date. The calendar's `PRODID` is `-//Sideline//Calendar//EN`; all VEVENTs include a `DTSTAMP` field (RFC 5545 compliance).
 
 ---
 
@@ -4418,13 +4418,19 @@ Drains the `weekly_summary_sync_events` outbox. Each Sunday at 20:00 local team 
 
 #### Finance
 
-Returns a member's own fee assignment status for the `/finance status` Discord slash command.
+Handles the `/finance status` slash command and the payment reminder delivery pipeline.
 
 | Method | Payload / Returns | Description |
 |---|---|---|
 | `Finance/GetMyStatus` | `guild_id`, `discord_user_id` → `GetMyStatusResult` | Fetches the invoking member's fee assignments grouped by currency; errors: `FinanceGuildNotFound`, `FinanceMemberNotFound` |
+| `Finance/GetUnprocessedPaymentReminders` | `limit` → `UnprocessedPaymentReminderEvent[]` | Polls `payment_reminder_sync_events` for rows where `processed_at IS NULL` (up to `limit`). Called by the bot's Finance Sync worker on a 5-second cadence. |
+| `Finance/MarkPaymentReminderProcessed` | `id` | Sets `processed_at = now()` on the outbox row after the bot successfully dispatches the DM. |
+| `Finance/MarkPaymentReminderFailed` | `id`, `error` | Sets `processed_at = now()` and records the error string. Failed events are not retried (permanent failure semantics). |
+| `Finance/MarkReminderSent` | `assignment_id`, `kind` | Inserts a row into `payment_reminders_sent` (PK `(assignment_id, kind)`). Only called after the Discord DM was accepted. Subsequent calls for the same pair are no-ops (idempotent upsert). |
 
 `GetMyStatusResult` shape: `{ groups: FinanceStatusCurrencyGroup[] }`. Each group: `{ currency, total_outstanding_minor, assignments: FinanceStatusAssignment[] }`. Each assignment: `{ assignment_id, fee_name, status, due_minor, paid_minor, effective_due_at }`.
+
+`UnprocessedPaymentReminderEvent` fields: `id`, `team_id`, `guild_id`, `assignment_id`, `kind` (`"due_in_3d" | "due_today" | "overdue_3d" | "overdue_10d" | "overdue_21d"`), `fee_name`, `effective_due_at`, `currency`, `amount_minor`, `paid_minor`, `user_discord_id`.
 
 ---
 

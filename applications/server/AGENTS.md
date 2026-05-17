@@ -295,6 +295,7 @@ Cron jobs are long-running Effects that repeat on a schedule. Each cron is defin
 | `TrainingAutoLogCron` | `src/services/TrainingAutoLogCron.ts` | every 5 minutes | Auto-log ended trainings |
 | `EventStartCron` | `src/services/EventStartCron.ts` | every minute | Mark active events as `started` when `start_at <= NOW()`, emit `event_started` sync events |
 | `WeeklySummaryCron` | `src/services/WeeklySummaryCron.ts` | every minute (gated to Sun 20:00 in team timezone) | Build a per-team weekly digest and insert one `weekly_summary_sync_events` row per team-week |
+| `PaymentReminderCron` | `src/services/PaymentReminderCron.ts` | every minute | For each unpaid fee assignment whose `effective_due_at` matches a `PaymentReminderKind` offset (−3 / 0 / +3 / +10 / +21 days in team timezone), insert one `payment_reminder_sync_events` row. Idempotency lives in `FeeAssignmentsRepository.findReminderCandidates` (NOT EXISTS against both `payment_reminders_sent` and the outbox) — see "Bot-Ack Idempotency for Discord-Side-Effect Crons" below. |
 
 ### Pattern
 
@@ -353,6 +354,61 @@ Rules for the TS-side variant:
 3. **The gate's hour/minute comparison must be exact** (`hour === 20 && minute === 0`) and the second must be range-checked (`second <= 59`) so a one-minute-cadence cron fires exactly once per team-week. Do not use `hour >= 20` — that fires every minute for the next four hours.
 4. **Wrap the `Intl.DateTimeFormat` call in `try { ... } catch { return false }`** — an unknown IANA zone in `team_settings.timezone` is a misconfiguration, not a cron failure. The bad team is skipped silently this cycle.
 5. **Skip via `Effect.fail(new SkipTeam(...))`** (a module-local `Data.TaggedError`) and `Effect.catchTag('SkipTeam', () => Effect.void)` at the per-team boundary. Do not use `Effect.when` — the gate is one of several short-circuit filters and the tagged-skip pattern keeps the chain readable.
+
+## Bot-Ack Idempotency for Discord-Side-Effect Crons
+
+Some crons fan out a one-shot Discord side effect per row (e.g. payment reminders DM'd to a user). The "did we already do this?" signal cannot be derived from the source row alone — it lives on a dedicated **`<resource>_sent` log table** that is written **only after the bot acknowledges delivery**, not when the outbox row is emitted. This makes cycles safe against overlapping ticks, server crashes, and bot retries.
+
+Reference implementation: `PaymentReminderCron` + `payment_reminder_sync_events` (outbox) + `payment_reminders_sent` (delivery log) + `Finance/MarkReminderSent` RPC.
+
+| Table | Purpose | Written by |
+|-------|---------|-----------|
+| `<resource>_sync_events` | Outbox — one row per pending delivery. `processed_at IS NULL` rows are visible to the bot poll. | Cron `emit(...)` on each cycle. |
+| `<resource>_sent` | Delivery log — `PRIMARY KEY (<ref_id>, <kind>)`. Existence of a row means "the bot has confirmed delivery". | Bot calls `Finance/MarkReminderSent` (or analogous) AFTER the Discord call succeeds. The server handler does `INSERT ... ON CONFLICT DO NOTHING`. |
+
+### Candidate Query Contract
+
+The cron's candidate query MUST filter out both states with two `NOT EXISTS` clauses on the same `(ref_id, kind)` natural key:
+
+```sql
+AND NOT EXISTS (
+  SELECT 1 FROM payment_reminders_sent prs
+  WHERE prs.assignment_id = c.assignment_id AND prs.kind = c.kind
+)
+AND NOT EXISTS (
+  SELECT 1 FROM payment_reminder_sync_events prse
+  WHERE prse.assignment_id = c.assignment_id
+    AND prse.kind = c.kind
+    AND prse.processed_at IS NULL
+)
+```
+
+The first guard prevents re-emission after a successful delivery. The second guard prevents double-emit when two cron ticks overlap (or one is mid-cycle while the bot has not yet acked) — once a row is in the outbox unprocessed, no new row is enqueued for the same `(ref_id, kind)`.
+
+### Rules
+
+1. **The `<resource>_sent` table is keyed by the natural delivery identity** (`PRIMARY KEY (assignment_id, kind)` in the reference), not by a synthetic id. The bot's mark-sent RPC must `INSERT ... ON CONFLICT DO NOTHING` so duplicate acks (e.g. bot retry after server timeout) become no-ops.
+2. **The bot calls `<Resource>/MarkSent` AFTER the Discord call returns success**, not before. If the Discord call fails, the bot falls back to `<Resource>/MarkPaymentReminderFailed` on the outbox row — `<resource>_sent` is NOT written, and the next cron tick will re-emit once the outbox row is marked processed/failed.
+3. **The outbox UPDATE statements (`markProcessed`, `markFailed`) MUST include `AND processed_at IS NULL` in the WHERE clause.** This makes ack idempotent — duplicate `MarkProcessed` / `MarkFailed` calls from retried bot polls become no-ops rather than rewriting the `processed_at` timestamp.
+4. **`emit` is called inside the cron's per-candidate loop with `Effect.exit` for per-item error isolation** (see "Per-Item Error Isolation" above) — one bad row never poisons the rest of the cycle.
+5. **Never write to `<resource>_sent` from the cron or from any server-side path.** It is exclusively bot-driven. A row in `<resource>_sent` is the only durable proof that Discord actually accepted the message; promoting the cron to write it would re-introduce the "we think we sent it but Discord never got it" bug class.
+
+## iCal Feed Generation (`src/api/ical.ts`)
+
+The `getICalFeed` endpoint builds a single `VCALENDAR` containing both user events and payment-due VEVENTs. Every interpolated user-supplied string MUST pass through `escapeICalText` defined at the top of `src/api/ical.ts`:
+
+```typescript
+const escapeICalText = (text: string): string =>
+  text.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+```
+
+Rules:
+
+1. **Escape every dynamic value placed into `SUMMARY`, `DESCRIPTION`, `LOCATION`, `CALNAME`, or `X-WR-CALNAME`** — names, currencies, fee names, team names, free-text descriptions, all come from user input and can contain `,` `;` `\n` `\\` which break the iCal parser.
+2. **Order of replacements matters.** Escape `\\` first, then `;` `,` `\n` — reversing the order would re-escape the backslashes added by the later replacements.
+3. **`UID` values are server-generated** (`payment-${assignment_id}@sideline`, `${event_id}@sideline`) — never interpolate user input into `UID`. The UUID/event-id source guarantees no special characters.
+4. **DTSTART/DTEND `VALUE=DATE` for payments use the team's IANA timezone** (`team_timezone` from `team_settings`, defaulting to `'UTC'`). Use `Intl.DateTimeFormat('en-CA', { timeZone })` to compute the local `YYYYMMDD` so a payment due "Friday in Prague" renders on Friday even for users whose calendar app is in Sydney.
+5. **Skip rules for payment VEVENTs** live in `buildPaymentVEvents`: skip rows where `computed_status === 'paid'` or `stored_status === 'waived'`, and skip rows whose `effective_due_at` is older than the 180-day `HISTORY_CAP_MS` window. Do not relax these — older paid/waived items would bloat every refresh of every subscriber's calendar.
 
 ## Outbox With Opaque JSONB Payload
 

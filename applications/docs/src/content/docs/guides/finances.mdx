@@ -40,8 +40,6 @@ All team members can access their own My Payments page and check their own fee b
 <Aside type="note" title="Planned features">
 Several Finance features are planned for follow-up releases:
 
-- **Automated reminders** — Discord DMs or channel pings when fees are approaching or past due.
-- **iCal payment events** — fees as calendar entries.
 - **Monthly recurrence** — auto-generating monthly charges from a fee definition.
 - **Self-report "I've paid"** — a Discord interaction for members to notify captains of unrecorded payments.
 </Aside>
@@ -127,6 +125,28 @@ Each outstanding fee appears as a field showing the fee name, amount still owed,
 <Aside type="caution" title="No access? Check with your captain">
   If `/finance status` tells you "not a member", your captain needs to make sure your Sideline profile is linked to your Discord account. If you have no fees assigned at all, the bot shows the green all-clear embed.
 </Aside>
+
+## Payment reminders
+
+Sideline automatically sends you a Discord DM when a fee assignment reaches one of five reminder points relative to its due date:
+
+| When | Reminder |
+|---|---|
+| 3 days before due | "Heads up — payment due soon" (blue embed) |
+| On the due date | "Payment due today" (yellow embed) |
+| 3 days overdue | "Payment overdue" (red embed) |
+| 10 days overdue | "Payment overdue" (red embed) |
+| 21 days overdue | "Payment overdue" (red embed) |
+
+Each DM shows the fee name, total amount, how much is still outstanding, and the due date. Reminders stop automatically once the assignment is marked paid or waived.
+
+<Aside type="note" title="Reminders require Discord DMs">
+Reminders are sent as Discord direct messages. If you have DMs from server members disabled in your Discord privacy settings, you will not receive them. Check **User Settings → Privacy & Safety → Allow direct messages from server members** if you are not getting reminders you expect.
+</Aside>
+
+### Payment due dates in your calendar
+
+Your personal iCal feed (see [Calendar subscription](/guides/calendar-subscription/)) also includes an all-day event for each unpaid or overdue fee assignment, with a built-in alarm that fires one day before the due date. This gives you a second reminder channel alongside the Discord DMs, and lets you see upcoming payment deadlines alongside team events.
 
 ## Captain / admin workflows (via API)
 

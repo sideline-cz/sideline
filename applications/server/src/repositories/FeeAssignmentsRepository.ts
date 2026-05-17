@@ -1,4 +1,12 @@
-import { Fee, FeeAssignment, TeamMember } from '@sideline/domain';
+import {
+  Discord,
+  Fee,
+  FeeAssignment,
+  PaymentReminder,
+  Team,
+  TeamMember,
+  User,
+} from '@sideline/domain';
 import { LogicError, Schemas } from '@sideline/effect-lib';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -41,6 +49,34 @@ export class AssignmentViewRow extends Schema.Class<AssignmentViewRow>('Assignme
   effective_due_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   computed_status: FeeAssignment.FeeAssignmentStatus,
   member_name: Schema.OptionFromNullOr(Schema.String),
+}) {}
+
+// Row returned by findReminderCandidates
+class ReminderCandidateRow extends Schema.Class<ReminderCandidateRow>('ReminderCandidateRow')({
+  assignment_id: FeeAssignment.FeeAssignmentId,
+  team_id: Team.TeamId,
+  guild_id: Discord.Snowflake,
+  user_discord_id: Discord.Snowflake,
+  fee_name: Schema.String,
+  currency: Schema.String,
+  amount_minor: Fee.AmountMinor,
+  paid_minor: Fee.AmountMinor,
+  effective_due_at: Schema.Date,
+  kind: PaymentReminder.PaymentReminderKind,
+}) {}
+
+// Row returned by findUnpaidAssignmentsForUser
+class UnpaidAssignmentRow extends Schema.Class<UnpaidAssignmentRow>('UnpaidAssignmentRow')({
+  assignment_id: FeeAssignment.FeeAssignmentId,
+  fee_name: Schema.String,
+  currency: Schema.String,
+  amount_minor: Fee.AmountMinor,
+  paid_minor: Fee.AmountMinor,
+  effective_due_at: Schema.Date,
+  computed_status: FeeAssignment.FeeAssignmentStatus,
+  stored_status: FeeAssignment.StoredAssignmentStatus,
+  team_name: Schema.String,
+  team_timezone: Schema.String,
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -255,6 +291,115 @@ const make = Effect.gen(function* () {
     })(undefined).pipe(catchSqlErrors);
   };
 
+  const _findReminderCandidates = SqlSchema.findAll({
+    Request: Schema.Date,
+    Result: ReminderCandidateRow,
+    execute: (now) => sql`
+      WITH candidates AS (
+        SELECT
+          v.assignment_id,
+          tm.team_id,
+          t.guild_id,
+          u.discord_id AS user_discord_id,
+          v.fee_name,
+          v.currency,
+          v.due_minor AS amount_minor,
+          v.paid_minor,
+          v.effective_due_at,
+          (
+            DATE(${now}::timestamptz AT TIME ZONE COALESCE(ts.timezone, 'UTC'))
+            - DATE(v.effective_due_at AT TIME ZONE COALESCE(ts.timezone, 'UTC'))
+          ) AS day_diff,
+          CASE
+            WHEN (DATE(${now}::timestamptz AT TIME ZONE COALESCE(ts.timezone, 'UTC'))
+                  - DATE(v.effective_due_at AT TIME ZONE COALESCE(ts.timezone, 'UTC'))) = -3 THEN 'due_in_3d'
+            WHEN (DATE(${now}::timestamptz AT TIME ZONE COALESCE(ts.timezone, 'UTC'))
+                  - DATE(v.effective_due_at AT TIME ZONE COALESCE(ts.timezone, 'UTC'))) = 0  THEN 'due_today'
+            WHEN (DATE(${now}::timestamptz AT TIME ZONE COALESCE(ts.timezone, 'UTC'))
+                  - DATE(v.effective_due_at AT TIME ZONE COALESCE(ts.timezone, 'UTC'))) = 3  THEN 'overdue_3d'
+            WHEN (DATE(${now}::timestamptz AT TIME ZONE COALESCE(ts.timezone, 'UTC'))
+                  - DATE(v.effective_due_at AT TIME ZONE COALESCE(ts.timezone, 'UTC'))) = 10 THEN 'overdue_10d'
+            WHEN (DATE(${now}::timestamptz AT TIME ZONE COALESCE(ts.timezone, 'UTC'))
+                  - DATE(v.effective_due_at AT TIME ZONE COALESCE(ts.timezone, 'UTC'))) = 21 THEN 'overdue_21d'
+            ELSE NULL
+          END AS kind
+        FROM fee_assignment_status_v v
+        JOIN fee_assignments fa ON fa.id = v.assignment_id
+        JOIN fees f ON f.id = fa.fee_id
+        JOIN team_members tm ON tm.id = fa.team_member_id
+        JOIN users u ON u.id = tm.user_id
+        JOIN teams t ON t.id = tm.team_id
+        JOIN team_settings ts ON ts.team_id = tm.team_id
+        WHERE v.status IN ('pending', 'partial', 'overdue')
+          AND v.effective_due_at IS NOT NULL
+          AND fa.stored_status != 'waived'
+          AND (
+            (${now}::timestamptz AT TIME ZONE COALESCE(ts.timezone, 'UTC'))::time
+              BETWEEN ts.rsvp_reminder_time
+              AND ts.rsvp_reminder_time::time + INTERVAL '5 minutes'
+          )
+      )
+      SELECT
+        c.assignment_id,
+        c.team_id,
+        c.guild_id,
+        c.user_discord_id,
+        c.fee_name,
+        c.currency,
+        c.amount_minor,
+        c.paid_minor,
+        c.effective_due_at,
+        c.kind
+      FROM candidates c
+      WHERE c.kind IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_reminders_sent prs
+          WHERE prs.assignment_id = c.assignment_id
+            AND prs.kind = c.kind
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_reminder_sync_events prse
+          WHERE prse.assignment_id = c.assignment_id
+            AND prse.kind = c.kind
+            AND prse.processed_at IS NULL
+        )
+    `,
+  });
+
+  const _findUnpaidAssignmentsForUser = SqlSchema.findAll({
+    Request: User.UserId,
+    Result: UnpaidAssignmentRow,
+    execute: (userId) => sql`
+      SELECT
+        v.assignment_id,
+        v.fee_name,
+        v.currency,
+        v.due_minor AS amount_minor,
+        v.paid_minor,
+        v.effective_due_at,
+        v.status AS computed_status,
+        fa.stored_status,
+        t.name AS team_name,
+        COALESCE(ts.timezone, 'UTC') AS team_timezone
+      FROM fee_assignment_status_v v
+      JOIN fee_assignments fa ON fa.id = v.assignment_id
+      JOIN team_members tm ON tm.id = fa.team_member_id
+      JOIN users u ON u.id = tm.user_id
+      JOIN teams t ON t.id = tm.team_id
+      LEFT JOIN team_settings ts ON ts.team_id = t.id
+      WHERE u.id = ${userId}
+        AND v.status IN ('pending', 'partial', 'overdue')
+        AND v.effective_due_at IS NOT NULL
+        AND v.effective_due_at >= now() - INTERVAL '180 days'
+      ORDER BY v.effective_due_at ASC
+    `,
+  });
+
+  const findReminderCandidates = (now: Date) => _findReminderCandidates(now).pipe(catchSqlErrors);
+
+  const findUnpaidAssignmentsForUser = (userId: User.UserId) =>
+    _findUnpaidAssignmentsForUser(userId).pipe(catchSqlErrors);
+
   return {
     findById,
     findByFee,
@@ -262,6 +407,8 @@ const make = Effect.gen(function* () {
     findByFeeAndMember,
     bulkInsert,
     update,
+    findReminderCandidates,
+    findUnpaidAssignmentsForUser,
   };
 });
 

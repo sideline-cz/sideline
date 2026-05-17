@@ -7,6 +7,7 @@ export {
   AchievementSyncService,
   ChannelSyncService,
   EventSyncService,
+  FinanceSyncService,
   GuildJoinSyncService,
   InviteGeneratorService,
   OnboardingSyncService,

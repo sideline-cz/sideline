@@ -19,6 +19,18 @@ Your data stays yours. Sideline stores what's needed for the product to work: yo
 
 ## For players
 
+### Why did I get a payment reminder DM from the bot?
+
+Sideline sends a direct message on your Discord account when a fee assignment is approaching or past its due date. The five reminder points are: 3 days before due, on the due date itself, then at 3, 10, and 21 days overdue. Each reminder is sent once per threshold and stops automatically once the fee is paid or waived.
+
+### What happens if I have Discord DMs disabled?
+
+If your Discord privacy settings block DMs from server members, the bot cannot reach you and the reminder is silently skipped. To enable DMs: open **Discord User Settings → Privacy & Safety** and turn on **Allow direct messages from server members**. You can also check your upcoming payment due dates in your [iCal feed](/guides/calendar-subscription/) as an alternative.
+
+### Can I turn off payment reminder DMs?
+
+There is no per-member opt-out at this time. Reminders are sent automatically to all members with unpaid assignments. Contact your captain if you believe a reminder was sent in error (e.g. you paid but the payment was not recorded yet).
+
 ### How do I change my RSVP after I submitted it?
 
 Click a different button — Yes, No, or Maybe. The new answer overwrites the old one. You can change it as many times as you like until the event starts.

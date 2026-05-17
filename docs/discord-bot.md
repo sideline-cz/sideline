@@ -620,9 +620,9 @@ Calls `Guild/UpsertChannel` RPC to update the channel's name and metadata in the
 
 ## RPC Sync Workers
 
-Six background worker loops run continuously inside the bot process. Five of them (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those five loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`) and fetch up to **50 events per poll** (`POLL_BATCH_SIZE = 50`). The sixth (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation.
+Seven background worker loops run continuously inside the bot process. Six of them (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those six loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`) and fetch up to **50 events per poll** (`POLL_BATCH_SIZE = 50`). The seventh (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation.
 
-The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, `event_sync_events`, `achievement_sync_events`, and `discord_role_provision_events`; the bot drains those queues.
+The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, `event_sync_events`, `achievement_sync_events`, `discord_role_provision_events`, and `payment_reminder_sync_events`; the bot drains those queues.
 
 > **Note on directory name:** The source files for these workers live under `applications/bot/src/rcp/`. This is a typo in the codebase; the intended name is `rpc`. The import paths and class names (`RoleSyncService`, `ChannelSyncService`, `EventSyncService`) all reflect the intended `rpc` meaning.
 
@@ -792,9 +792,45 @@ Failures are recorded via `RoleProvision/MarkFailed` (sets `processed_at`) and a
 
 ---
 
+### Finance Sync Worker
+
+**Service class:** `FinanceSyncService` (`applications/bot/src/rcp/finance/index.ts`)
+
+**Polling RPC:** `Finance/GetUnprocessedPaymentReminders`
+
+**Polling interval:** 5 seconds (`pollLoop` in `Bot.ts`).
+
+The server's `PaymentReminderCron` (every minute) finds fee assignments that have crossed a reminder cadence threshold and inserts rows into `payment_reminder_sync_events`. The Finance Sync worker drains this outbox and sends a Discord DM to the relevant member.
+
+**Events processed:**
+
+| Event tag | Handler file | Discord action |
+|-----------|-------------|----------------|
+| `payment_reminder_ready` | `handlePaymentReminderReady.ts` | Opens a DM channel with the member via `discord.createDm`, posts a rich embed built by `buildPaymentReminderEmbed`, then calls `Finance/MarkReminderSent` to record successful delivery in `payment_reminders_sent`. |
+
+The embed colour and copy vary by cadence:
+
+| Kind | Title | Embed colour |
+|---|---|---|
+| `due_in_3d` | Heads up — payment due soon | Blue |
+| `due_today` | Payment due today | Yellow |
+| `overdue_3d` | Payment overdue | Red |
+| `overdue_10d` | Payment overdue | Red |
+| `overdue_21d` | Payment overdue | Red |
+
+Each embed includes four fields: **Fee** (fee name), **Amount** (total charge), **Due** (due date as Discord timestamp), **Outstanding** (remaining unpaid amount).
+
+**Lifecycle RPCs:**
+- `Finance/MarkPaymentReminderProcessed` — called after each successful DM delivery (and after `Finance/MarkReminderSent` succeeds).
+- `Finance/MarkPaymentReminderFailed` — called on any error; sets `processed_at` and records the error string. Failed events are not automatically retried (permanent failure semantics).
+
+**Idempotency:** `Finance/MarkReminderSent` inserts into `payment_reminders_sent` with `PRIMARY KEY (assignment_id, kind)`. A reminder DM for a given assignment and kind is therefore sent at most once, even if the outbox row is retried or the bot restarts.
+
+---
+
 ## Startup Tasks
 
-In addition to the three poll loops, the bot runs one-off tasks at startup (after the gateway connection is established). These tasks are composed alongside the poll loops with `concurrency: 'unbounded'` in `Bot.ts`.
+In addition to the poll loops, the bot runs one-off tasks at startup (after the gateway connection is established). These tasks are composed alongside the poll loops with `concurrency: 'unbounded'` in `Bot.ts`.
 
 ### recoverDeletedMessages
 
@@ -930,10 +966,16 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | Method | Payload / Returns | Description |
 |--------|---------|-------------|
 | `Finance/GetMyStatus` | `guild_id`, `discord_user_id` → `GetMyStatusResult` | Returns the invoking member's fee assignment status grouped by currency. Used by `/finance status`. Errors: `FinanceGuildNotFound`, `FinanceMemberNotFound`. |
+| `Finance/GetUnprocessedPaymentReminders` | `limit` → `UnprocessedPaymentReminderEvent[]` | Polls `payment_reminder_sync_events` for rows where `processed_at IS NULL`, up to `limit`. Called by the Finance Sync worker on a 5-second cadence. |
+| `Finance/MarkPaymentReminderProcessed` | `id` → `void` | Sets `processed_at = now()` after the reminder DM was successfully delivered. |
+| `Finance/MarkPaymentReminderFailed` | `id`, `error` → `void` | Sets `processed_at = now()` and records the error string. Failed events are not retried. |
+| `Finance/MarkReminderSent` | `assignment_id`, `kind` → `void` | Inserts into `payment_reminders_sent` (idempotent upsert on PK `(assignment_id, kind)`). Called only after the Discord DM was accepted. |
 
 `GetMyStatusResult` shape: `{ groups: FinanceStatusCurrencyGroup[] }` where each group carries `{ currency, total_outstanding_minor, assignments: FinanceStatusAssignment[] }` and each assignment carries `{ assignment_id, fee_name, status, due_minor, paid_minor, effective_due_at }`.
 
 Status values: `pending`, `partial`, `paid`, `overdue`, `waived`.
+
+`UnprocessedPaymentReminderEvent` fields: `id`, `team_id`, `guild_id`, `assignment_id`, `kind` (`due_in_3d | due_today | overdue_3d | overdue_10d | overdue_21d`), `fee_name`, `effective_due_at`, `currency`, `amount_minor`, `paid_minor`, `user_discord_id`.
 
 ---
 

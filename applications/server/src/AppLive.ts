@@ -36,6 +36,8 @@ import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRep
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
+import { PaymentReminderSyncEventsRepository } from '~/repositories/PaymentReminderSyncEventsRepository.js';
+import { PaymentRemindersSentRepository } from '~/repositories/PaymentRemindersSentRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
@@ -121,6 +123,8 @@ const Repositories = Layer.mergeAll(
   FeeAssignmentsRepository.Default,
   PaymentsRepository.Default,
   FinanceOverviewRepository.Default,
+  PaymentReminderSyncEventsRepository.Default,
+  PaymentRemindersSentRepository.Default,
 );
 
 const AppLayer = Layer.mergeAll(

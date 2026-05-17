@@ -1,10 +1,43 @@
 ---
 title: Calendar subscription (iCal)
-description: Subscribe to your team's events from your phone or laptop calendar.
+description: Subscribe to your team's events and payment reminders from your phone or laptop calendar.
 ---
 
-import { Badge } from '@astrojs/starlight/components';
+import { Aside, Badge } from '@astrojs/starlight/components';
 
-<Badge text="Coming soon" variant="caution" />
+Sideline exposes a per-user iCal feed so your phone or laptop calendar can show your team's events and upcoming payment due dates alongside the rest of your life.
 
-Sideline exposes a per-user iCal feed so your phone or laptop calendar can show your team's events alongside the rest of your life. A full guide — where to find the URL, how to subscribe in Apple Calendar / Google Calendar / Outlook, and how refresh frequency works — is coming here soon.
+## What is in the feed?
+
+Your personal iCal feed contains two types of entries:
+
+- **Team events** — every event you are invited to across all of your teams (training, matches, tournaments, etc.).
+- **Payment due dates** — one all-day event per unpaid or overdue fee assignment, with a built-in alarm that fires one day before the due date. Assignments that are paid or waived are excluded. Events older than 180 days are not included.
+
+## Getting your feed URL
+
+<Aside type="note">
+A full how-to guide for subscribing in Apple Calendar, Google Calendar, and Outlook is coming soon. The steps below give you the URL you need.
+</Aside>
+
+The feed URL is unique to your account and acts as a private credential — anyone who has it can read your events.
+
+1. Log in to the Sideline web app.
+2. Open **Profile → Calendar** (or navigate to `/me/ical`).
+3. Copy the `webcal://` URL shown on the page.
+4. Paste it into your calendar application's "Subscribe to calendar" dialog.
+
+If you believe the URL has been shared or compromised, click **Regenerate** to get a new one. The old URL stops working immediately.
+
+## Payment events in your calendar
+
+Each unpaid or overdue fee assignment appears as an all-day event on its due date. The event title follows the format:
+
+- `Payment due — <Fee name> (<outstanding amount> <currency>)` for pending or partial assignments
+- `[Overdue] Payment due — <Fee name> (<outstanding amount> <currency>)` for overdue assignments
+
+A built-in alarm fires one day before the due date so your calendar app can notify you in advance.
+
+<Aside type="tip">
+Payment calendar events are a complement to Discord reminder DMs, not a replacement. See [Payment reminders](/guides/finances/#payment-reminders) for details on the DM cadence.
+</Aside>

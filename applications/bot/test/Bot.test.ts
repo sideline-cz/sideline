@@ -7,6 +7,7 @@ import {
   AchievementSyncService,
   ChannelSyncService,
   EventSyncService,
+  FinanceSyncService,
   GuildJoinSyncService,
   InviteGeneratorService,
   OnboardingSyncService,
@@ -94,6 +95,10 @@ const MockWeeklySummarySyncServiceLayer = Layer.succeed(WeeklySummarySyncService
   processTick: Effect.void,
 } as never);
 
+const MockFinanceSyncServiceLayer = Layer.succeed(FinanceSyncService, {
+  processTick: Effect.void,
+} as never);
+
 const MockOnboardingRoleCacheLayer = Layer.succeed(OnboardingRoleCache, {
   get: () => Effect.succeed(Option.none()),
   set: () => Effect.void,
@@ -132,6 +137,7 @@ describe('Bot', () => {
       MockAchievementSyncServiceLayer,
       MockRoleProvisionSyncServiceLayer,
       MockWeeklySummarySyncServiceLayer,
+      MockFinanceSyncServiceLayer,
       MockOnboardingRoleCacheLayer,
       MockSyncRpcLayer,
       MockInviteCacheLayer,

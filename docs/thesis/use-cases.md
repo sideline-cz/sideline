@@ -17,7 +17,7 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 | **Treasurer** | A team member holding the built-in `Treasurer` role. Holds `finance:view`, `finance:manage_fees`, and `finance:record_payments`. Used to delegate finance authority without elevating the member to Captain or Admin. |
 | **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination). Receives RPC calls from the server to synchronise Discord roles and channels. |
 | **Global Admin** | A user whose Discord ID is listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. |
-| **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes, sending RSVP reminder notifications before events, auto-logging attendance from RSVP data, and evaluating age-threshold rules to move members between groups. |
+| **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes, sending RSVP reminder notifications before events, auto-logging attendance from RSVP data, evaluating age-threshold rules to move members between groups, and queuing payment reminder DMs for members with upcoming or overdue fee assignments. |
 
 ---
 
@@ -110,6 +110,8 @@ flowchart LR
         UC_RECORD_PAYMENT["Record Payment"]
         UC_VOID_PAYMENT["Void Payment"]
         UC_VIEW_MY_STATUS["View Own Fee Status"]
+        UC_PAYMENT_REMINDER["Receive Payment Reminder DM"]
+        UC_PAYMENT_ICAL["View Payment in iCal Feed"]
     end
 
     UA --> UC_LOGIN
@@ -128,6 +130,9 @@ flowchart LR
     PL --> UC_VIEW_LEADERBOARD
     PL --> UC_ICAL
     PL --> UC_NOTIFICATIONS
+    PL --> UC_VIEW_MY_STATUS
+    PL --> UC_PAYMENT_REMINDER
+    PL --> UC_PAYMENT_ICAL
 
     CP --> UC_EDIT_MEMBER
     CP --> UC_MANAGE_ROSTER
@@ -165,12 +170,14 @@ flowchart LR
     BOT --> UC_BOT_POST_EMBED
     BOT --> UC_BOT_FINANCE_STATUS
     BOT --> UC_BOT_INFO
+    BOT --> UC_PAYMENT_REMINDER
 
     SYS --> UC_CREATE_EVENT
     SYS --> UC_START_EVENT
     SYS --> UC_NOTIFICATIONS
     SYS --> UC_LOG_ACTIVITY
     SYS --> UC_AGE_THRESHOLDS
+    SYS --> UC_PAYMENT_REMINDER
 ```
 
 ---
@@ -643,8 +650,8 @@ The following structured descriptions cover the most significant use cases in th
 |---|---|
 | **Actor** | Player; External Calendar Application |
 | **Precondition** | The actor is authenticated. |
-| **Main Flow** | 1. The actor navigates to the Calendar Subscription settings page. 2. The application calls `GET /me/ical-token` to retrieve the current token and feed URL. 3. The actor copies the URL and adds it as a calendar subscription in their calendar application. 4. The calendar application periodically fetches `GET /ical/:token`, which returns events across all of the user's teams in iCalendar format. |
-| **Postcondition** | The external calendar application displays all team events and keeps them up to date. |
+| **Main Flow** | 1. The actor navigates to the Calendar Subscription settings page. 2. The application calls `GET /me/ical-token` to retrieve the current token and feed URL. 3. The actor copies the URL and adds it as a calendar subscription in their calendar application. 4. The calendar application periodically fetches `GET /ical/:token`, which returns (a) team event VEVENTs across all of the user's teams and (b) all-day payment VEVENTs for unpaid or overdue fee assignments (capped to the past 180 days), each with a VALARM that fires one day before the due date. |
+| **Postcondition** | The external calendar application displays all team events and upcoming payment due dates, keeping both up to date. |
 | **Alternate Flow** | The actor can call `POST /me/ical-token/regenerate` to rotate the token (e.g., if the URL was shared accidentally), which renders the previous URL invalid. |
 
 ---
@@ -730,3 +737,16 @@ The following structured descriptions cover the most significant use cases in th
 | **Main Flow** | 1. The actor navigates to **Team → My Payments** (`/teams/:teamId/my-payments`). The page loads via `GET /teams/:teamId/finance/my-status` (assignments) and on row expand via `GET /teams/:teamId/finance/my-payments?feeId=…` (payment records). 2. The page displays four KPI cards: outstanding balance, overdue count, total paid, and next due date. 3. The actor optionally filters by status (All / Outstanding / Paid / Waived). 4. The actor clicks the chevron on a row to expand the inline payment history for that assignment, showing each payment's amount, method, date, and recorder. |
 | **Postcondition** | The actor sees only their own fee assignments and payment records. No cross-member reads are possible. |
 | **Alternate Flow** | If the actor has no assignments, the page shows an empty-state message. If the dashboard detects outstanding or overdue fees, a banner with a link to the My Payments page appears on the Team Dashboard. |
+
+---
+
+### UC-17: Receive Payment Reminder DM (Member)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Any Discord user who is a Sideline team member with an unpaid or overdue fee assignment |
+| **Precondition** | The user has a Discord account linked to their Sideline profile. A fee assignment exists with a due date. The bot is connected and the server is running. |
+| **Main Flow** | 1. The server's `PaymentReminderCron` runs every minute. It queries `fee_assignments` (using `idx_fee_assignments_due_at`) for assignments whose due date places them at one of five cadence thresholds: T−3 days (`due_in_3d`), T+0 (`due_today`), T+3 (`overdue_3d`), T+10 (`overdue_10d`), or T+21 (`overdue_21d`). 2. For each candidate that does not already have an unprocessed outbox row of the same kind, the cron inserts a row into `payment_reminder_sync_events`. 3. The bot's Finance Sync worker polls `Finance/GetUnprocessedPaymentReminders` (5-second cadence). 4. For each event the bot opens a DM channel with the member via the Discord REST API and posts a rich embed showing the fee name, total amount, outstanding balance, and due date. The embed colour indicates urgency (blue = soon, yellow = due today, red = overdue). 5. On successful delivery the bot calls `Finance/MarkReminderSent` to insert a row into `payment_reminders_sent` (`PRIMARY KEY (assignment_id, kind)`), then calls `Finance/MarkPaymentReminderProcessed`. |
+| **Postcondition** | The member receives a DM. The `payment_reminders_sent` row prevents a repeat DM for the same assignment and cadence, even if the cron fires again or the bot restarts. |
+| **Alternate Flow** | If the Discord DM API call fails (e.g. the user has DMs disabled from non-friends), the bot calls `Finance/MarkPaymentReminderFailed`. The outbox row is marked `processed_at = now()` (permanent failure — no retry). The member does not receive that cadence's reminder. |
+| **Notes** | Reminders are silenced automatically once the assignment is paid or waived: the cron's candidate query filters on `computed_status NOT IN ('paid', 'waived')`. |

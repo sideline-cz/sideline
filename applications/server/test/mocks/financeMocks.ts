@@ -26,6 +26,8 @@ export const MockFeeAssignmentsRepositoryLayer = Layer.succeed(FeeAssignmentsRep
   findByFeeAndMember: () => Effect.succeed(Option.none()),
   bulkInsert: () => Effect.succeed([]),
   update: () => Effect.die(new Error('Not implemented')),
+  findReminderCandidates: () => Effect.succeed([]),
+  findUnpaidAssignmentsForUser: () => Effect.succeed([]),
 } as never);
 
 export const MockPaymentsRepositoryLayer = Layer.succeed(PaymentsRepository, {
