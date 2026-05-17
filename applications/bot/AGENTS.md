@@ -276,6 +276,26 @@ Event types: `event_created`, `event_updated`, `event_cancelled`, `event_started
 
 The `event_started` handler updates the Discord embed to remove RSVP buttons and rebuilds the embed with current RSVP counts.
 
+### Finance Sync (payment reminders → user DMs)
+
+Syncs `payment_reminder_sync_events` rows to per-user DM embeds. The server's `PaymentReminderCron` enqueues one outbox row per `(assignment_id, kind)` candidate; the bot DMs the recipient, then acks delivery via `Finance/MarkReminderSent` BEFORE calling `Finance/MarkPaymentReminderProcessed`. See `applications/server/AGENTS.md` → "Bot-Ack Idempotency for Discord-Side-Effect Crons" for the server-side contract.
+
+| Component | File |
+|-----------|------|
+| Domain event | `packages/domain/src/rpc/finance/FinanceRpcEvents.ts` (`PaymentReminderReadyEvent`) |
+| Kind literal | `packages/domain/src/models/PaymentReminder.ts` (`PaymentReminderKind`) |
+| Bot service | `src/rcp/finance/ProcessorService.ts` (`FinanceSyncService.processTick`, exported via `src/rcp/finance/index.ts`) |
+| Ready handler | `src/rcp/finance/handlePaymentReminderReady.ts` — `createDm` → `createMessage` → `Finance/MarkReminderSent` |
+| Embed builder | `src/rcp/finance/buildPaymentReminderEmbed.ts` — `Match.value(kind).pipe(Match.when(...), Match.exhaustive)` over `PaymentReminderKind` |
+
+Event types: `payment_reminder_ready`. Uses standard `pollLoop` (5s).
+
+Rules:
+
+1. **`Finance/MarkReminderSent` must run AFTER `createMessage` succeeds and BEFORE `Finance/MarkPaymentReminderProcessed`.** If the Discord call fails, the handler falls through to `Finance/MarkPaymentReminderFailed` via `Effect.catch` in `ProcessorService.processEvent` — `payment_reminders_sent` is NOT written, so the next cron tick can re-emit after the outbox row is processed.
+2. **Never write to `payment_reminders_sent` from the bot directly.** The bot only calls the RPC; the server handler owns the `INSERT ... ON CONFLICT DO NOTHING`.
+3. **`buildPaymentReminderEmbed` must remain pure** — no Effect, no `DiscordREST` calls, no i18n side effects. The embed copy is currently English-only and lives inline; do not add `tr()` or `m.*` imports without first adding `bot_payment_reminder_*` keys per the "Translation Source — Compiled Paraglide Only" rules above.
+
 #### Coach-claim message id round-trip
 
 The `training_claim_request` handler posts the initial claim embed to the owner-group channel. The server does not know the resulting Discord channel/message id ahead of time. After `rest.createMessage` succeeds, the handler must call `rpc['Event/SaveClaimDiscordMessageId']({ event_id, channel_id, message_id })` so subsequent `training_claim_update` and `unclaimed_training_reminder` events can locate and edit / link to that message. Always save the id in the same effect chain as the create call (via `Effect.tap`) so a failure to save is logged together with the create.
@@ -427,6 +447,26 @@ Reference: `MakanickoLogAutocomplete` in `src/interactions/makanicko-log-autocom
 2. **Never throw `RpcClientError`** out of an autocomplete handler — Discord's autocomplete is a hot interaction (fired on every keystroke); a failed response shows the user a broken UI. Always `Effect.catchTag('RpcClientError', () => Effect.succeed([]))`.
 3. **Display label may differ from submitted `value`.** Use `name: emoji ? `${emoji} ${row.name}` : row.name` for the user-visible label and `value: row.id` (UUID) for what the command handler receives. The command handler is responsible for resolving the id back to a row.
 4. **Filter and sort in the bot, not the server.** The server's RPC returns the full candidate list (or a per-guild pre-filtered list); the bot does query matching, ordering, and the 25-cap. This keeps the server RPC reusable across commands with different filtering rules.
+
+## Tagged-Union Dispatch With `Match.exhaustive`
+
+When a bot handler or embed builder dispatches on a `Schema.Literals` union (e.g. `PaymentReminderKind`) or a `Schema.TaggedClass` union (e.g. `UnprocessedPaymentReminderEvent`), use `Match.value(x).pipe(Match.when(...), Match.exhaustive)` (literals) or `Match.type<T>().pipe(Match.tag(...), Match.exhaustive)` (tagged classes). `Match.exhaustive` is a compile-time check that every variant is handled — adding a new literal to the schema turns into a TS error at every dispatch site.
+
+Reference implementations:
+
+| Dispatch site | Shape | File |
+|---------------|-------|------|
+| Per-kind embed copy on `PaymentReminderKind` | `Match.value(kind).pipe(Match.when('due_in_3d', ...), ..., Match.exhaustive)` | `src/rcp/finance/buildPaymentReminderEmbed.ts` |
+| Per-tag handler on `UnprocessedPaymentReminderEvent` | `Match.type<T>().pipe(Match.tag('payment_reminder_ready', handler), Match.exhaustive)` | `src/rcp/finance/ProcessorService.ts` |
+| Per-tag handler on `UnprocessedChannelSyncEvent` | `Match.tag(...)` dispatcher | `src/rcp/channel/ProcessorService.ts` |
+| Per-tag handler on `UnprocessedEventSyncEvent` | `Match.tag(...)` dispatcher | `src/rcp/event/ProcessorService.ts` |
+
+Rules:
+
+1. **Always end the `Match` chain with `Match.exhaustive`** — never `Match.orElse(...)` for a closed union. A default branch silently hides the case when a new variant is added to the domain schema.
+2. **Type the `Match` constructor explicitly** when dispatching on a `Schema.Union` of `TaggedClass`es — use `Match.type<MyUnion>().pipe(...)` so the compiler can verify completeness against the static union, not against the runtime value.
+3. **Each branch must return the same type.** When branches need divergent shapes, lift the shared shape into a local interface (see `EmbedCopy` in `buildPaymentReminderEmbed.ts`) and have each branch construct it.
+4. **Never cast the dispatch value (`as <Variant>`) inside a branch.** `Match.when('literal', ...)` and `Match.tag('tag', ...)` narrow automatically; a cast bypasses that narrowing and re-introduces the very class of bug `Match.exhaustive` exists to prevent.
 
 ## Embed Display Conventions
 

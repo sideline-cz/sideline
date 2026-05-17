@@ -5,6 +5,13 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-17 — Payment reminders via Discord DM and iCal
+
+- Sideline now sends you a **Discord DM** when a fee assignment reaches a reminder threshold: 3 days before due, on the due date, then at 3, 10, and 21 days overdue. Each DM shows the fee name, amount, outstanding balance, and due date with a colour-coded embed (blue = due soon, yellow = due today, red = overdue).
+- Each reminder is sent **at most once per threshold** — reminders stop automatically once the assignment is paid or waived.
+- Your personal **iCal feed** now includes an all-day event for each unpaid or overdue fee assignment, with a built-in alarm one day before the due date. Older than 180 days or already paid/waived assignments are excluded. Overdue assignments are prefixed with `[Overdue]` in the calendar title.
+- The iCal feed previously only contained team events. No action is required — if you already have the feed subscribed, the payment entries will appear on the next refresh.
+
 ## 2026-05-17 — My Payments page for all members
 
 - Every team member can now visit **Team → My Payments** (`/teams/:teamId/my-payments`) to see their own fee history. No special permission required — each member sees only their own data.
@@ -44,7 +51,7 @@ This page lists user-visible changes to Sideline. For developer-level release no
 - The **Finance overview page** (`/teams/:teamId/finances`) shows all members' outstanding balances at a glance, with KPI cards for total due and paid amounts.
 - Members can check their own outstanding fees using the new **`/finance status`** Discord slash command. The bot replies with an ephemeral colour-coded embed: green (all clear), amber (pending/partial), or red (overdue).
 - Finance permissions follow a treasurer pattern: `finance:view` (read), `finance:manage_fees` (create/assign/archive), and `finance:record_payments` (record/void). The built-in Treasurer role holds all three; admins get all three; captains get view only (see the 2026-05-15 release note).
-- **Not yet available:** reminder DMs, iCal payment events, per-fee detail page, and auto-monthly recurring fees.
+- **Not yet available:** per-fee detail page, and auto-monthly recurring fees. (Reminder DMs and iCal payment events were added in the 2026-05-17 release.)
 
 ## 2026-05-14 — Translation CMS for global admins
 

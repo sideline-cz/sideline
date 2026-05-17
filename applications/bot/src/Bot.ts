@@ -11,6 +11,7 @@ import {
   AchievementSyncService,
   ChannelSyncService,
   EventSyncService,
+  FinanceSyncService,
   GuildJoinSyncService,
   InviteGeneratorService,
   OnboardingSyncService,
@@ -54,6 +55,7 @@ export const program = Effect.Do.pipe(
   Effect.bind('achievements', () => AchievementSyncService.asEffect()),
   Effect.bind('roleProvision', () => RoleProvisionSyncService.asEffect()),
   Effect.bind('weeklySummary', () => WeeklySummarySyncService.asEffect()),
+  Effect.bind('finance', () => FinanceSyncService.asEffect()),
   Effect.tap(() => Effect.logInfo('Bot connected to Discord')),
   Effect.andThen(
     ({
@@ -67,6 +69,7 @@ export const program = Effect.Do.pipe(
       achievements,
       roleProvision,
       weeklySummary,
+      finance,
     }) =>
       Effect.all(
         [
@@ -81,6 +84,7 @@ export const program = Effect.Do.pipe(
           pollLoop(achievements.processTick),
           pollLoop(roleProvision.processTick),
           pollLoop(weeklySummary.processTick),
+          pollLoop(finance.processTick),
           recoverDeletedMessages,
         ],
         {
@@ -98,6 +102,7 @@ export const program = Effect.Do.pipe(
   | RoleSyncService
   | ChannelSyncService
   | EventSyncService
+  | FinanceSyncService
   | GuildJoinSyncService
   | InviteGeneratorService
   | OnboardingSyncService

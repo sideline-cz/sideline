@@ -16,8 +16,10 @@ import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
+import { PaymentReminderSyncEventsRepository } from '~/repositories/PaymentReminderSyncEventsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
@@ -29,6 +31,7 @@ import { AgeCheckCron } from '~/services/AgeCheckCron.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { EventHorizonCron } from '~/services/EventHorizonCron.js';
 import { EventStartCron } from '~/services/EventStartCron.js';
+import { PaymentReminderCron } from '~/services/PaymentReminderCron.js';
 import { RsvpReminderCron } from '~/services/RsvpReminderCron.js';
 import { TrainingAutoLogCron } from '~/services/TrainingAutoLogCron.js';
 import { WeeklySummaryCron } from '~/services/WeeklySummaryCron.js';
@@ -148,6 +151,17 @@ const WeeklySummaryCronEffect = WeeklySummaryCron.asEffect().pipe(
   ),
 );
 
+const PaymentReminderRepositoriesLive = Layer.mergeAll(
+  FeeAssignmentsRepository.Default,
+  PaymentReminderSyncEventsRepository.Default,
+);
+
+const PaymentReminderCronEffect = PaymentReminderCron.asEffect().pipe(
+  Effect.provide(
+    PaymentReminderRepositoriesLive.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
+  ),
+);
+
 Effect.Do.pipe(
   Effect.tap(() => (env.DATABASE_MAIN !== env.DATABASE_NAME ? CreateDb : Effect.void)),
   Effect.tap(() => MigrateBefore),
@@ -163,9 +177,10 @@ Effect.Do.pipe(
         AutoLogCron,
         StartCron,
         WeeklySummaryCronEffect,
+        PaymentReminderCronEffect,
       ],
       {
-        concurrency: 8,
+        concurrency: 10,
       },
     ),
   ),

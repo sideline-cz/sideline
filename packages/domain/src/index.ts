@@ -109,6 +109,8 @@ export * as Onboarding from './models/Onboarding.js';
 
 export * as Payment from './models/Payment.js';
 
+export * as PaymentReminder from './models/PaymentReminder.js';
+
 export * as Role from './models/Role.js';
 
 export * as RoleGroup from './models/RoleGroup.js';
@@ -149,6 +151,7 @@ export * as ChannelRpcModels from './rpc/channel/ChannelRpcModels.js';
 export * as EventRpcEvents from './rpc/event/EventRpcEvents.js';
 export * as EventRpcGroup from './rpc/event/EventRpcGroup.js';
 export * as EventRpcModels from './rpc/event/EventRpcModels.js';
+export * as FinanceRpcEvents from './rpc/finance/FinanceRpcEvents.js';
 export * as FinanceRpcGroup from './rpc/finance/FinanceRpcGroup.js';
 export * as FinanceRpcModels from './rpc/finance/FinanceRpcModels.js';
 export * as GuildRpcGroup from './rpc/guild/GuildRpcGroup.js';
