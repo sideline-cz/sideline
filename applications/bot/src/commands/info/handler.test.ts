@@ -1,9 +1,15 @@
 import { Interaction } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
 import { Effect, Layer } from 'effect';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { infoHandler } from '~/commands/info/handler.js';
 import { SyncRpc, type SyncRpcClient } from '~/services/SyncRpc.js';
+
+// APP_VERSION is read from the bot's package.json, which changesets bumps on
+// every release — stub it so the snapshot stays stable across version bumps.
+vi.mock('~/version.js', () => ({
+  APP_VERSION: '0.0.0-test',
+}));
 
 // ---------------------------------------------------------------------------
 // SyncRpc stub helpers
@@ -131,7 +137,7 @@ describe('infoHandler', () => {
                 {
                   "inline": true,
                   "name": "Bot",
-                  "value": "0.13.0",
+                  "value": "0.0.0-test",
                 },
                 {
                   "inline": true,
