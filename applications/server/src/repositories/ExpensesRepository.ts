@@ -51,11 +51,21 @@ const BalanceSummaryRawRow = Schema.Struct({
   expenses_minor: Schema.String,
 });
 
+const CategoryBreakdownRawRow = Schema.Struct({
+  currency: Expense.CurrencyCode,
+  category: Expense.ExpenseCategory,
+  amount_minor: Schema.String,
+});
+
 export interface BalanceSummaryRow {
   readonly currency: Expense.CurrencyCode;
   readonly incomeMinor: Expense.AmountMinor;
   readonly expensesMinor: Expense.AmountMinor;
   readonly netMinor: ExpenseApi.NetAmountMinor;
+  readonly byCategory: ReadonlyArray<{
+    readonly category: Expense.ExpenseCategory;
+    readonly amountMinor: Expense.AmountMinor;
+  }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -78,18 +88,27 @@ const make = Effect.gen(function* () {
     }),
     Result: ExpenseWithNamesRow,
     execute: (input) => sql`
-      INSERT INTO expenses (team_id, amount_minor, currency, spent_at, category, description, created_by_user_id, updated_by_user_id)
-      VALUES (
-        ${input.team_id},
-        ${input.amount_minor},
-        ${input.currency},
-        ${input.spent_at},
-        ${input.category},
-        ${input.description},
-        ${input.created_by_user_id},
-        ${input.updated_by_user_id}
+      WITH affected AS (
+        INSERT INTO expenses (team_id, amount_minor, currency, spent_at, category, description, created_by_user_id, updated_by_user_id)
+        VALUES (
+          ${input.team_id},
+          ${input.amount_minor},
+          ${input.currency},
+          ${input.spent_at},
+          ${input.category},
+          ${input.description},
+          ${input.created_by_user_id},
+          ${input.updated_by_user_id}
+        )
+        RETURNING *
       )
-      RETURNING *, NULL::text AS created_by_name, NULL::text AS updated_by_name
+      SELECT
+        a.*,
+        COALESCE(cu.name, cu.discord_display_name, cu.discord_nickname, cu.username) AS created_by_name,
+        COALESCE(uu.name, uu.discord_display_name, uu.discord_nickname, uu.username) AS updated_by_name
+      FROM affected a
+      LEFT JOIN users cu ON cu.id = a.created_by_user_id
+      LEFT JOIN users uu ON uu.id = a.updated_by_user_id
     `,
   });
 
@@ -98,8 +117,13 @@ const make = Effect.gen(function* () {
     Result: ExpenseWithNamesRow,
     execute: (input) =>
       sql`
-        SELECT e.*, NULL::text AS created_by_name, NULL::text AS updated_by_name
+        SELECT
+          e.*,
+          COALESCE(cu.name, cu.discord_display_name, cu.discord_nickname, cu.username) AS created_by_name,
+          COALESCE(uu.name, uu.discord_display_name, uu.discord_nickname, uu.username) AS updated_by_name
         FROM expenses e
+        LEFT JOIN users cu ON cu.id = e.created_by_user_id
+        LEFT JOIN users uu ON uu.id = e.updated_by_user_id
         WHERE e.id = ${input.id} AND e.team_id = ${input.team_id}
       `,
   });
@@ -144,16 +168,25 @@ const make = Effect.gen(function* () {
       Request: Schema.Void,
       Result: ExpenseWithNamesRow,
       execute: () => sql`
-        UPDATE expenses SET
-          amount_minor = CASE WHEN ${Option.isSome(patch.amount_minor)} THEN ${Option.getOrNull(patch.amount_minor)} ELSE amount_minor END,
-          currency = CASE WHEN ${Option.isSome(patch.currency)} THEN ${Option.getOrNull(patch.currency)} ELSE currency END,
-          spent_at = CASE WHEN ${Option.isSome(patch.spent_at)} THEN ${Option.getOrNull(patch.spent_at)} ELSE spent_at END,
-          category = CASE WHEN ${Option.isSome(patch.category)} THEN ${Option.getOrNull(patch.category)} ELSE category END,
-          description = CASE WHEN ${Option.isSome(patch.description)} THEN ${Option.getOrNull(patch.description)} ELSE description END,
-          updated_by_user_id = ${userId},
-          updated_at = now()
-        WHERE id = ${id} AND team_id = ${teamId}
-        RETURNING *, NULL::text AS created_by_name, NULL::text AS updated_by_name
+        WITH affected AS (
+          UPDATE expenses SET
+            amount_minor = CASE WHEN ${Option.isSome(patch.amount_minor)} THEN ${Option.getOrNull(patch.amount_minor)} ELSE amount_minor END,
+            currency = CASE WHEN ${Option.isSome(patch.currency)} THEN ${Option.getOrNull(patch.currency)} ELSE currency END,
+            spent_at = CASE WHEN ${Option.isSome(patch.spent_at)} THEN ${Option.getOrNull(patch.spent_at)} ELSE spent_at END,
+            category = CASE WHEN ${Option.isSome(patch.category)} THEN ${Option.getOrNull(patch.category)} ELSE category END,
+            description = CASE WHEN ${Option.isSome(patch.description)} THEN ${Option.getOrNull(patch.description)} ELSE description END,
+            updated_by_user_id = ${userId},
+            updated_at = now()
+          WHERE id = ${id} AND team_id = ${teamId}
+          RETURNING *
+        )
+        SELECT
+          a.*,
+          COALESCE(cu.name, cu.discord_display_name, cu.discord_nickname, cu.username) AS created_by_name,
+          COALESCE(uu.name, uu.discord_display_name, uu.discord_nickname, uu.username) AS updated_by_name
+        FROM affected a
+        LEFT JOIN users cu ON cu.id = a.created_by_user_id
+        LEFT JOIN users uu ON uu.id = a.updated_by_user_id
       `,
     })(undefined).pipe(catchSqlErrors);
 
@@ -246,53 +279,81 @@ const make = Effect.gen(function* () {
   ) => {
     const from = Option.fromUndefinedOr(range.from);
     const to = Option.fromUndefinedOr(range.to);
-    return sql`
-      WITH
-        income AS (
+    return Effect.Do.pipe(
+      Effect.bind('totals', () =>
+        sql`
+          WITH
+            income AS (
+              SELECT
+                f.currency,
+                COALESCE(SUM(p.amount_minor), 0)::bigint AS income_minor
+              FROM payments p
+              JOIN fee_assignments fa ON fa.id = p.fee_assignment_id
+              JOIN fees f ON f.id = fa.fee_id
+              WHERE f.team_id = ${teamId}
+                AND p.voided_at IS NULL
+                AND (${Option.isNone(from)} OR p.paid_at >= ${Option.getOrNull(from)})
+                AND (${Option.isNone(to)} OR p.paid_at <= ${Option.getOrNull(to)})
+              GROUP BY f.currency
+            ),
+            expense_totals AS (
+              SELECT
+                currency,
+                COALESCE(SUM(amount_minor), 0)::bigint AS expenses_minor
+              FROM expenses
+              WHERE team_id = ${teamId}
+                AND (${Option.isNone(from)} OR spent_at >= ${Option.getOrNull(from)})
+                AND (${Option.isNone(to)} OR spent_at <= ${Option.getOrNull(to)})
+              GROUP BY currency
+            )
           SELECT
-            f.currency,
-            COALESCE(SUM(p.amount_minor), 0)::bigint AS income_minor
-          FROM payments p
-          JOIN fee_assignments fa ON fa.id = p.fee_assignment_id
-          JOIN fees f ON f.id = fa.fee_id
-          WHERE f.team_id = ${teamId}
-            AND p.voided_at IS NULL
-            AND (${Option.isNone(from)} OR p.paid_at >= ${Option.getOrNull(from)})
-            AND (${Option.isNone(to)} OR p.paid_at <= ${Option.getOrNull(to)})
-          GROUP BY f.currency
+            COALESCE(i.currency, e.currency) AS currency,
+            COALESCE(i.income_minor, 0)::bigint AS income_minor,
+            COALESCE(e.expenses_minor, 0)::bigint AS expenses_minor
+          FROM income i
+          FULL OUTER JOIN expense_totals e ON e.currency = i.currency
+          ORDER BY 1
+        `.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(BalanceSummaryRawRow))),
+          catchSqlErrors,
         ),
-        expense_totals AS (
+      ),
+      Effect.bind('categories', () =>
+        sql`
           SELECT
             currency,
-            COALESCE(SUM(amount_minor), 0)::bigint AS expenses_minor
+            category,
+            COALESCE(SUM(amount_minor), 0)::bigint AS amount_minor
           FROM expenses
           WHERE team_id = ${teamId}
             AND (${Option.isNone(from)} OR spent_at >= ${Option.getOrNull(from)})
             AND (${Option.isNone(to)} OR spent_at <= ${Option.getOrNull(to)})
-          GROUP BY currency
-        )
-      SELECT
-        COALESCE(i.currency, e.currency) AS currency,
-        COALESCE(i.income_minor, 0)::bigint AS income_minor,
-        COALESCE(e.expenses_minor, 0)::bigint AS expenses_minor
-      FROM income i
-      FULL OUTER JOIN expense_totals e ON e.currency = i.currency
-      ORDER BY 1
-    `.pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(BalanceSummaryRawRow))),
-      Effect.map((rows): ReadonlyArray<BalanceSummaryRow> => {
-        return rows.map((row) => {
+          GROUP BY currency, category
+          ORDER BY amount_minor DESC
+        `.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(CategoryBreakdownRawRow))),
+          catchSqlErrors,
+        ),
+      ),
+      Effect.map(({ totals, categories }): ReadonlyArray<BalanceSummaryRow> => {
+        return totals.map((row) => {
           const incomeMinor = Number(row.income_minor);
           const expensesMinor = Number(row.expenses_minor);
+          const byCategory = categories
+            .filter((c) => c.currency === row.currency)
+            .map((c) => ({
+              category: c.category,
+              amountMinor: Number(c.amount_minor) as Expense.AmountMinor,
+            }));
           return {
             currency: row.currency,
             incomeMinor: incomeMinor as Expense.AmountMinor,
             expensesMinor: expensesMinor as Expense.AmountMinor,
             netMinor: (incomeMinor - expensesMinor) as ExpenseApi.NetAmountMinor,
+            byCategory,
           };
         });
       }),
-      catchSqlErrors,
     );
   };
 

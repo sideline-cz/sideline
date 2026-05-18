@@ -42,6 +42,12 @@ export class BalanceSummary extends Schema.Class<BalanceSummary>('BalanceSummary
   incomeMinor: AmountMinor,
   expensesMinor: AmountMinor,
   netMinor: NetAmountMinor,
+  byCategory: Schema.Array(
+    Schema.Struct({
+      category: ExpenseCategory,
+      amountMinor: AmountMinor,
+    }),
+  ),
 }) {}
 
 // ---------------------------------------------------------------------------
@@ -142,7 +148,6 @@ export class ExpenseApiGroup extends HttpApiGroup.make('expenses')
       error: [
         ExpenseForbidden.pipe(HttpApiSchema.status(403)),
         ExpenseNotFound.pipe(HttpApiSchema.status(404)),
-        InvalidExpenseAmount.pipe(HttpApiSchema.status(400)),
       ],
       params: { teamId: TeamId, expenseId: ExpenseId },
     }).middleware(AuthMiddleware),

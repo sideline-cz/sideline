@@ -298,6 +298,8 @@ describe('ExpensesRepository — listByTeam', () => {
           const idx1 = ids.indexOf(exp1.id);
           const idx2 = ids.indexOf(exp2.id);
           // exp2 (later date) should appear before exp1 (earlier date)
+          expect(idx1).toBeGreaterThanOrEqual(0);
+          expect(idx2).toBeGreaterThanOrEqual(0);
           expect(idx2).toBeLessThan(idx1);
         }),
       ),

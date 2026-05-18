@@ -42,6 +42,7 @@ const toBalanceSummary = (row: BalanceSummaryRow): ExpenseApi.BalanceSummary =>
     incomeMinor: row.incomeMinor,
     expensesMinor: row.expensesMinor,
     netMinor: row.netMinor,
+    byCategory: row.byCategory,
   });
 
 // `Option.match` boilerplate that maps `None → fail(expenseNotFound)`, `Some → succeed(value)`.
@@ -147,6 +148,11 @@ export const ExpenseApiLive = HttpApiBuilder.group(Api, 'expenses', (handlers) =
             Effect.tap(({ membership }) =>
               requirePermission(membership, 'finance:manage_fees', forbidden),
             ),
+            // Existence check before business-rule validation so a missing/cross-team id
+            // returns 404 rather than 400.
+            Effect.tap(() =>
+              expenses.findById(expenseId, teamId).pipe(Effect.flatMap(requireFound)),
+            ),
             Effect.tap(() => {
               const invalidAmt =
                 Option.isSome(payload.amountMinor) && payload.amountMinor.value <= 0;
@@ -163,6 +169,7 @@ export const ExpenseApiLive = HttpApiBuilder.group(Api, 'expenses', (handlers) =
                   category: payload.category,
                   description: payload.description,
                 })
+                // Race-safety: row may have been deleted between existence check and update.
                 .pipe(Effect.flatMap(requireFound)),
             ),
             Effect.map(({ updated }) => fromExpenseRow(updated)),

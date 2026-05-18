@@ -340,7 +340,7 @@ export const setLastTeamId = (teamId: string) => set(LAST_TEAM, teamId);
 
 When storing per-user UX state in `localStorage` (e.g. "has the user seen the new X badge yet?", "preferred view mode", "dismissed tip"), the key MUST include the authenticated user's id. Shared-device scenarios (one browser, multiple Sideline accounts) would otherwise leak one user's "seen" flag onto another user's session.
 
-Reference: `FinancesOverviewPage.tsx` — `const overviewTabSeenKey = (userId: string) => 'sideline:finances-overview-tab-seen:${userId}';`
+Reference: `FinancesOverviewPage.tsx` — `` const overviewTabSeenKey = (userId: string) => `sideline:finances-overview-tab-seen:${userId}`; ``
 
 Rules:
 

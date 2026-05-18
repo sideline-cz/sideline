@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DateTime } from 'effect';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -27,6 +27,7 @@ vi.mock('~/lib/translations.js', () => ({
       expense_form_validation_amountRequired: 'Amount must be positive',
       expense_form_validation_descriptionTooLong: 'Description too long (max 500 chars)',
       expense_form_warning_futureDate: 'Expense date is in the future',
+      expense_form_descriptionPlaceholder: 'Optional note about this expense',
       expense_category_fields: 'Fields',
       expense_category_equipment: 'Equipment',
       expense_category_travel: 'Travel',
@@ -168,7 +169,7 @@ describe('ExpenseFormDialog', () => {
     expect(descriptionLabel).not.toBeNull();
   });
 
-  it('submitting with amount "10.50" calls onSubmit with amountMinor 1050', () => {
+  it('submitting with amount "10.50" calls onSubmit with amountMinor 1050', async () => {
     const onSubmit = vi.fn();
     renderCreate(onSubmit);
 
@@ -176,33 +177,56 @@ describe('ExpenseFormDialog', () => {
     expect(amountInput).not.toBeNull();
     fireEvent.change(amountInput!, { target: { value: '10.50' } });
 
+    // Also fill in the date so the form schema passes (minLength(1))
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement | null;
+    if (dateInput) {
+      fireEvent.change(dateInput, { target: { value: '2025-05-01' } });
+    }
+
     // Submit the form
     const submitBtn = screen.getByText('Add Expense');
     fireEvent.click(submitBtn);
 
-    expect(onSubmit).toHaveBeenCalledOnce();
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledOnce();
+    });
+
     const arg = onSubmit.mock.calls[0][0] as CreateExpenseRequest;
     expect(arg.amountMinor).toBe(1050);
   });
 
-  it('submitting with amount "0" shows inline validation error; onSubmit NOT called', () => {
+  it('submitting with amount "0" shows inline validation error; onSubmit NOT called', async () => {
     const onSubmit = vi.fn();
     renderCreate(onSubmit);
 
     const amountInput = document.querySelector('input[type="number"]') as HTMLInputElement | null;
     fireEvent.change(amountInput!, { target: { value: '0' } });
 
-    const submitBtn = screen.getByText('Add Expense');
-    fireEvent.click(submitBtn);
+    // Fill in the date so spentAt schema validation passes; only amountStr logic validation fails
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement | null;
+    if (dateInput) {
+      fireEvent.change(dateInput, { target: { value: '2025-05-01' } });
+    }
+
+    // Submit via the form element directly to ensure submit event fires
+    const formEl = document.querySelector('form') as HTMLFormElement | null;
+    if (formEl) {
+      fireEvent.submit(formEl);
+    } else {
+      const submitBtn = screen.getByText('Add Expense');
+      fireEvent.click(submitBtn);
+    }
+
+    // Wait for the validation error to appear in the DOM
+    await waitFor(() => {
+      const pageText = document.body.textContent ?? '';
+      expect(pageText).toMatch(/amount must be positive|Amount must be/i);
+    });
 
     expect(onSubmit).not.toHaveBeenCalled();
-
-    // An inline validation error should appear
-    const pageText = document.body.textContent ?? '';
-    expect(pageText).toMatch(/amount must be positive|Amount must be/i);
   });
 
-  it('submitting with description > 500 chars shows validation error; onSubmit NOT called', () => {
+  it('submitting with description > 500 chars shows validation error; onSubmit NOT called', async () => {
     const onSubmit = vi.fn();
     renderCreate(onSubmit);
 
@@ -210,28 +234,35 @@ describe('ExpenseFormDialog', () => {
     expect(textarea).not.toBeNull();
     fireEvent.change(textarea!, { target: { value: 'a'.repeat(501) } });
 
-    // Set a valid amount to avoid that error
+    // Set a valid amount and date to avoid those errors
     const amountInput = document.querySelector('input[type="number"]') as HTMLInputElement | null;
     fireEvent.change(amountInput!, { target: { value: '10' } });
+    const dateInput = document.querySelector('input[type="date"]') as HTMLInputElement | null;
+    if (dateInput) {
+      fireEvent.change(dateInput, { target: { value: '2025-05-01' } });
+    }
 
     const submitBtn = screen.getByText('Add Expense');
     fireEvent.click(submitBtn);
 
-    expect(onSubmit).not.toHaveBeenCalled();
+    // Wait for the validation error to appear in the DOM
+    await waitFor(() => {
+      const pageText = document.body.textContent ?? '';
+      expect(pageText).toMatch(/too long|max 500/i);
+    });
 
-    // An inline validation error should appear
-    const pageText = document.body.textContent ?? '';
-    expect(pageText).toMatch(/too long|max 500/i);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('category select shows all 5 expense categories when opened', () => {
     renderCreate();
 
-    // Open the category Shadcn Select by clicking its trigger button.
-    // The trigger displays the current value label (default: "Other").
-    const categoryTrigger = screen.getByRole('combobox', { name: /category/i });
+    // Open the category Shadcn Select by its id attribute.
+    // (The label's htmlFor links to the form-item element, not the trigger,
+    //  so accessible-name lookup via role+name is unreliable in JSDOM.)
+    const categoryTrigger = document.getElementById('expense-category') as HTMLButtonElement | null;
     expect(categoryTrigger).not.toBeNull();
-    fireEvent.click(categoryTrigger);
+    fireEvent.click(categoryTrigger!);
 
     // After opening, all options should be rendered in the portal.
     const pageText = document.body.textContent ?? '';

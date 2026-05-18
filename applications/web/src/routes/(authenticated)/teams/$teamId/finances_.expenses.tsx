@@ -68,8 +68,8 @@ function ExpensesRoute() {
           payload: req,
         }),
       ),
-      Effect.mapError(() => ClientError.make('Failed to create expense')),
-      run({ success: 'Expense logged' }),
+      Effect.mapError(() => ClientError.make(tr('expense_create_failed'))),
+      run({ success: tr('expense_create_success') }),
     );
     if (Option.isSome(result)) {
       setCreateOpen(false);
@@ -87,8 +87,8 @@ function ExpensesRoute() {
           payload: req,
         }),
       ),
-      Effect.mapError(() => ClientError.make('Failed to update expense')),
-      run({ success: 'Expense updated' }),
+      Effect.mapError(() => ClientError.make(tr('expense_update_failed'))),
+      run({ success: tr('expense_update_success') }),
     );
     if (Option.isSome(result)) {
       setEditExpense(null);
@@ -103,8 +103,8 @@ function ExpensesRoute() {
       Effect.flatMap((api) =>
         api.expenses.deleteExpense({ params: { teamId: teamIdBranded, expenseId } }),
       ),
-      Effect.mapError(() => ClientError.make('Failed to delete expense')),
-      run({ success: 'Expense deleted' }),
+      Effect.mapError(() => ClientError.make(tr('expense_delete_failed'))),
+      run({ success: tr('expense_delete_success') }),
     );
     setDeleteExpenseId(null);
     if (Option.isSome(result)) {

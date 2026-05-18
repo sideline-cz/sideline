@@ -15,6 +15,7 @@ import type {
   Team,
   TeamMember,
 } from '@sideline/domain';
+import { LogicError } from '@sideline/effect-lib';
 import { OAuth2Tokens } from 'arctic';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { HttpClient, HttpClientResponse, HttpRouter, HttpServer } from 'effect/unstable/http';
@@ -474,12 +475,21 @@ const MockFinanceOverviewRepositoryLayer = Layer.succeed(FinanceOverviewReposito
 
 const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
   _tag: 'api/ExpensesRepository',
-  insert: () => Effect.die(new Error('Not implemented')),
+  insert: () => LogicError.die('MockExpensesRepositoryLayer.insert not implemented'),
   findById: () => Effect.succeed(Option.none()),
   listByTeam: () => Effect.succeed([]),
   update: () => Effect.succeed(Option.none()),
   delete: () => Effect.succeed(false),
-  balanceSummaryByTeam: () => Effect.succeed([]),
+  balanceSummaryByTeam: () =>
+    Effect.succeed([
+      {
+        currency: 'CZK',
+        incomeMinor: 0,
+        expensesMinor: 0,
+        netMinor: 0,
+        byCategory: [],
+      },
+    ]),
   countHistoryRows: () => Effect.succeed(0),
 } as any);
 

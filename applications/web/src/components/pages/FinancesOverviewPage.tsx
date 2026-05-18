@@ -33,7 +33,7 @@ interface FinancesOverviewPageProps {
   teamId?: string;
   /**
    * The authenticated user's id, used to scope the "New" badge localStorage key.
-   * When omitted the badge always appears (safe fallback for test scenarios).
+   * When omitted the badge is hidden (treated as already-seen — safe default for test scenarios).
    */
   userId?: string;
   /**
@@ -346,15 +346,14 @@ export function FinancesOverviewPage({
       {/* Tab bar */}
       <div className='flex border-b mb-4' role='tablist'>
         {hasOverviewTab && (
-          <button
+          <Button
             type='button'
             role='tab'
+            variant={activeTab === 'overview' ? 'secondary' : 'ghost'}
             aria-selected={activeTab === 'overview'}
             onClick={() => handleTabChange('overview')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${
-              activeTab === 'overview'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
+            className={`rounded-none border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${
+              activeTab === 'overview' ? 'border-primary' : 'border-transparent'
             }`}
           >
             {tr('finance_overview_tab')}
@@ -363,35 +362,33 @@ export function FinancesOverviewPage({
                 {tr('finance_overview_tab_new_badge')}
               </span>
             )}
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           type='button'
           role='tab'
+          variant={activeTab === 'by-member' ? 'secondary' : 'ghost'}
           aria-selected={activeTab === 'by-member'}
           onClick={() => handleTabChange('by-member')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-            activeTab === 'by-member'
-              ? 'border-primary text-primary'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
+          className={`rounded-none border-b-2 -mb-px transition-colors ${
+            activeTab === 'by-member' ? 'border-primary' : 'border-transparent'
           }`}
         >
           {tr('finance_tab_byMember')}
-        </button>
+        </Button>
         {assignmentsTabContent && (
-          <button
+          <Button
             type='button'
             role='tab'
+            variant={activeTab === 'by-assignment' ? 'secondary' : 'ghost'}
             aria-selected={activeTab === 'by-assignment'}
             onClick={() => handleTabChange('by-assignment')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              activeTab === 'by-assignment'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
+            className={`rounded-none border-b-2 -mb-px transition-colors ${
+              activeTab === 'by-assignment' ? 'border-primary' : 'border-transparent'
             }`}
           >
             {tr('finance_tab_byAssignment')}
-          </button>
+          </Button>
         )}
       </div>
 

@@ -1,6 +1,8 @@
 import type { ExpenseApi } from '@sideline/domain';
 import { ExpenseCategoryBadge } from '~/components/molecules/ExpenseCategoryBadge.js';
 import { Button } from '~/components/ui/button';
+import { Input } from '~/components/ui/input';
+import { Label } from '~/components/ui/label';
 import { formatLocalDate } from '~/lib/datetime.js';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { tr } from '~/lib/translations.js';
@@ -231,54 +233,47 @@ function FilterBar({
   return (
     <div className='flex flex-wrap items-center gap-3'>
       <div className='flex items-center gap-1.5'>
-        <label htmlFor='expense-filter-from' className='text-sm text-muted-foreground'>
+        <Label htmlFor='expense-filter-from' className='text-sm text-muted-foreground'>
           {tr('expenses_filter_from')}
-        </label>
-        <input
+        </Label>
+        <Input
           id='expense-filter-from'
           type='date'
           value={fromFilter}
           onChange={(e) => onFromFilterChange(e.target.value)}
-          className='h-8 rounded-md border bg-background px-2 text-sm'
+          className='h-8 px-2 text-sm'
         />
       </div>
       <div className='flex items-center gap-1.5'>
-        <label htmlFor='expense-filter-to' className='text-sm text-muted-foreground'>
+        <Label htmlFor='expense-filter-to' className='text-sm text-muted-foreground'>
           {tr('expenses_filter_to')}
-        </label>
-        <input
+        </Label>
+        <Input
           id='expense-filter-to'
           type='date'
           value={toFilter}
           onChange={(e) => onToFilterChange(e.target.value)}
-          className='h-8 rounded-md border bg-background px-2 text-sm'
+          className='h-8 px-2 text-sm'
         />
       </div>
       <div className='flex flex-wrap gap-1'>
         {CATEGORIES.map((c) => (
-          <button
+          <Button
             key={c.value}
             type='button'
+            size='sm'
+            variant={categoryFilter.includes(c.value) ? 'secondary' : 'outline'}
             aria-pressed={categoryFilter.includes(c.value)}
             onClick={() => onToggleCategory(c.value)}
-            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-              categoryFilter.includes(c.value)
-                ? 'bg-primary text-primary-foreground border-primary'
-                : 'bg-background text-muted-foreground hover:bg-muted'
-            }`}
           >
             {tr(c.labelKey)}
-          </button>
+          </Button>
         ))}
       </div>
       {hasFilters && (
-        <button
-          type='button'
-          onClick={onClearFilters}
-          className='text-xs text-muted-foreground underline hover:text-foreground'
-        >
+        <Button type='button' variant='ghost' size='sm' onClick={onClearFilters}>
           {tr('expenses_clearFilters')}
-        </button>
+        </Button>
       )}
     </div>
   );

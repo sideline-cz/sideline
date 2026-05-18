@@ -101,8 +101,9 @@ function FinancesRoute() {
   const navigate = useNavigate({ from: Route.fullPath });
 
   const hasOverviewTab = balanceSummaries !== undefined;
-  const defaultTab = hasOverviewTab ? 'overview' : 'by-member';
-  const activeTab = searchTab ?? defaultTab;
+  const defaultTab: FinancesTab = hasOverviewTab ? 'overview' : 'by-member';
+  const activeTab: FinancesTab =
+    searchTab === 'overview' && !hasOverviewTab ? 'by-member' : (searchTab ?? defaultTab);
 
   const handleTabChange = (tab: FinancesTab) => {
     navigate({ search: { tab } });

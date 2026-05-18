@@ -103,6 +103,7 @@ erDiagram
     team_members ||--o{ payments : "makes"
     users ||--o{ payments : "records"
     users ||--o{ expenses : "creates"
+    users ||--o{ expense_history : "performs"
     expenses ||--o{ expense_history : "journalled in"
 ```
 
@@ -907,6 +908,7 @@ erDiagram
     team_members ||--o{ payments : "makes"
     users ||--o{ payments : "records"
     users ||--o{ expenses : "creates"
+    users ||--o{ expense_history : "performs"
     expenses ||--o{ expense_history : "journalled in"
 ```
 

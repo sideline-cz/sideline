@@ -3,6 +3,7 @@ import { createFileRoute, redirect, useRouter } from '@tanstack/react-router';
 import { Array, Effect, Option, Schema } from 'effect';
 import { ExpenseFormDialog } from '~/components/organisms/ExpenseFormDialog.js';
 import { ApiClient, ClientError, NotFound, useRun, warnAndCatchAll } from '~/lib/runtime';
+import { tr } from '~/lib/translations.js';
 
 export const Route = createFileRoute(
   '/(authenticated)/teams/$teamId/finances_/expenses/$expenseId',
@@ -57,8 +58,8 @@ function ExpenseEditRoute() {
           payload: req,
         }),
       ),
-      Effect.mapError(() => ClientError.make('Failed to update expense')),
-      run({ success: 'Expense updated' }),
+      Effect.mapError(() => ClientError.make(tr('expense_update_failed'))),
+      run({ success: tr('expense_update_success') }),
     );
     if (Option.isSome(result)) {
       router.invalidate();

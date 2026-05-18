@@ -1189,5 +1189,11 @@
   "balance_dashboard_expenses": "Výdaje",
   "balance_dashboard_net": "Bilance",
   "balance_dashboard_empty": "Zatím žádná finanční data",
-  "balance_dashboard_multi_currency_banner": "Zobrazena dominantní měna"
+  "balance_dashboard_multi_currency_banner": "Zobrazena dominantní měna",
+  "expense_create_failed": "Nepodařilo se vytvořit výdaj",
+  "expense_create_success": "Výdaj zaznamenán",
+  "expense_update_failed": "Nepodařilo se upravit výdaj",
+  "expense_update_success": "Výdaj upraven",
+  "expense_delete_failed": "Nepodařilo se smazat výdaj",
+  "expense_delete_success": "Výdaj smazán"
 }

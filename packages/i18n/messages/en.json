@@ -1189,5 +1189,11 @@
   "balance_dashboard_expenses": "Expenses",
   "balance_dashboard_net": "Net",
   "balance_dashboard_empty": "No financial data yet",
-  "balance_dashboard_multi_currency_banner": "Showing dominant currency only"
+  "balance_dashboard_multi_currency_banner": "Showing dominant currency only",
+  "expense_create_failed": "Failed to create expense",
+  "expense_create_success": "Expense logged",
+  "expense_update_failed": "Failed to update expense",
+  "expense_update_success": "Expense updated",
+  "expense_delete_failed": "Failed to delete expense",
+  "expense_delete_success": "Expense deleted"
 }

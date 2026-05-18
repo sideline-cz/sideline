@@ -12,7 +12,7 @@ export default Effect.flatMap(Effect.service(SqlClient.SqlClient), (sql) =>
         currency CHAR(3) NOT NULL,
         spent_at TIMESTAMPTZ NOT NULL CHECK (spent_at > '1900-01-01'::timestamptz AND spent_at < now() + interval '365 days'),
         category TEXT NOT NULL CHECK (category IN ('fields','equipment','travel','tournaments','other')),
-        description TEXT NOT NULL,
+        description VARCHAR(500) NOT NULL,
         created_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
         updated_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

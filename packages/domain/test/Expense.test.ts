@@ -194,11 +194,16 @@ describe('BalanceSummary', () => {
       incomeMinor: 50000,
       expensesMinor: 30000,
       netMinor: 20000,
+      byCategory: [
+        { category: 'fields', amountMinor: 20000 },
+        { category: 'equipment', amountMinor: 10000 },
+      ],
     });
     expect(result.currency).toBe('CZK');
     expect(result.incomeMinor).toBe(50000);
     expect(result.expensesMinor).toBe(30000);
     expect(result.netMinor).toBe(20000);
+    expect(result.byCategory).toHaveLength(2);
   });
 
   it('decodes EUR entry', () => {
@@ -207,9 +212,11 @@ describe('BalanceSummary', () => {
       incomeMinor: 10000,
       expensesMinor: 10000,
       netMinor: 0,
+      byCategory: [],
     });
     expect(result.currency).toBe('EUR');
     expect(result.netMinor).toBe(0);
+    expect(result.byCategory).toEqual([]);
   });
 
   it('rejects invalid currency code', () => {
@@ -219,6 +226,7 @@ describe('BalanceSummary', () => {
         incomeMinor: 0,
         expensesMinor: 0,
         netMinor: 0,
+        byCategory: [],
       }),
     ).toThrow();
   });

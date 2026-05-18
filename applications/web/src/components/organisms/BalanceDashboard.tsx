@@ -1,3 +1,4 @@
+import type { Expense } from '@sideline/domain';
 import { ArrowDown, ArrowUp, Minus } from 'lucide-react';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { pickDominantCurrency } from '~/lib/finance/pickDominantCurrency.js';
@@ -7,11 +8,19 @@ import { tr } from '~/lib/translations.js';
 // Types
 // ---------------------------------------------------------------------------
 
+type ExpenseCategory = Expense.ExpenseCategory;
+
+type CategoryBreakdownItem = {
+  readonly category: ExpenseCategory;
+  readonly amountMinor: number;
+};
+
 export type BalanceSummary = {
   readonly currency: string;
   readonly incomeMinor: number;
   readonly expensesMinor: number;
   readonly netMinor: number;
+  readonly byCategory: ReadonlyArray<CategoryBreakdownItem>;
 };
 
 interface BalanceDashboardProps {
@@ -19,16 +28,16 @@ interface BalanceDashboardProps {
 }
 
 // ---------------------------------------------------------------------------
-// Category colors for the stacked bar
+// Category colors for the stacked bar (matching ExpenseCategoryBadge palette)
 // ---------------------------------------------------------------------------
 
-const BAR_COLORS = [
-  'bg-emerald-500',
-  'bg-sky-500',
-  'bg-violet-500',
-  'bg-amber-500',
-  'bg-slate-500',
-];
+const CATEGORY_BAR_COLORS: Record<ExpenseCategory, string> = {
+  fields: 'bg-emerald-500',
+  equipment: 'bg-sky-500',
+  travel: 'bg-violet-500',
+  tournaments: 'bg-amber-500',
+  other: 'bg-slate-500',
+};
 
 // ---------------------------------------------------------------------------
 // KPI card
@@ -83,7 +92,7 @@ export function BalanceDashboard({ summaries }: BalanceDashboardProps) {
 
   const dominant = pickDominantCurrency(summaries) ?? summaries[0].currency;
   const dominantSummary = summaries.find((s) => s.currency === dominant) ?? summaries[0];
-  const { incomeMinor, expensesMinor, netMinor } = dominantSummary;
+  const { incomeMinor, expensesMinor, netMinor, byCategory } = dominantSummary;
   const otherCount = summaries.length - 1;
 
   const netSign: 'positive' | 'negative' | 'zero' =
@@ -96,6 +105,9 @@ export function BalanceDashboard({ summaries }: BalanceDashboardProps) {
       : netSign === 'negative'
         ? `-${absNetFormatted}`
         : absNetFormatted;
+
+  // byCategory is already sorted by amount descending (server guarantees this)
+  const hasBreakdown = byCategory.length > 0;
 
   return (
     <div className='flex flex-col gap-6'>
@@ -127,12 +139,21 @@ export function BalanceDashboard({ summaries }: BalanceDashboardProps) {
       </div>
 
       {/* Stacked bar breakdown by category */}
-      {expensesMinor > 0 ? (
+      {hasBreakdown ? (
         <div>
           <p className='mb-2 text-sm font-medium'>{tr('finance_breakdown_title')}</p>
-          {/* Visual bar — aria-hidden, screen readers use the table below */}
+          {/* Visual stacked bar — aria-hidden, screen readers use the table below */}
           <div className='flex h-6 w-full overflow-hidden rounded-full' aria-hidden='true'>
-            <div className={`h-full ${BAR_COLORS[0]} flex-1`} style={{ width: '100%' }} />
+            {byCategory.map((item) => {
+              const pct = expensesMinor > 0 ? (item.amountMinor / expensesMinor) * 100 : 0;
+              return (
+                <div
+                  key={item.category}
+                  className={`h-full ${CATEGORY_BAR_COLORS[item.category]}`}
+                  style={{ width: `${pct}%` }}
+                />
+              );
+            })}
           </div>
 
           {/* Screen-reader accessible table */}
@@ -146,11 +167,16 @@ export function BalanceDashboard({ summaries }: BalanceDashboardProps) {
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td>{tr('finance_kpi_expenses')}</td>
-                <td>{formatMoney(expensesMinor, dominant, 'en')}</td>
-                <td>100%</td>
-              </tr>
+              {byCategory.map((item) => {
+                const pct = expensesMinor > 0 ? (item.amountMinor / expensesMinor) * 100 : 0;
+                return (
+                  <tr key={item.category}>
+                    <td>{tr(`expense_category_${item.category}`)}</td>
+                    <td>{formatMoney(item.amountMinor, dominant, 'en')}</td>
+                    <td>{Math.round(pct)}%</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

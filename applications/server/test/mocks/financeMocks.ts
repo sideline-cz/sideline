@@ -1,3 +1,4 @@
+import { LogicError } from '@sideline/effect-lib';
 import { Effect, Layer, Option } from 'effect';
 import { ExpensesRepository } from '~/repositories/ExpensesRepository.js';
 import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
@@ -7,12 +8,12 @@ import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 
 export const MockFeesRepositoryLayer = Layer.succeed(FeesRepository, {
   _tag: 'api/FeesRepository' as const,
-  insert: () => Effect.die(new Error('Not implemented')),
+  insert: () => LogicError.die('MockFeesRepositoryLayer.insert not implemented'),
   findById: () => Effect.succeed(Option.none()),
   findByIdActive: () => Effect.succeed(Option.none()),
   findWithCountsById: () => Effect.succeed(Option.none()),
   listByTeam: () => Effect.succeed([]),
-  update: () => Effect.die(new Error('Not implemented')),
+  update: () => LogicError.die('MockFeesRepositoryLayer.update not implemented'),
   archive: () => Effect.void,
   insertAssignmentForTest: () => Effect.void,
   delete_: () => Effect.void,
@@ -26,14 +27,14 @@ export const MockFeeAssignmentsRepositoryLayer = Layer.succeed(FeeAssignmentsRep
   findByTeamMember: () => Effect.succeed([]),
   findByFeeAndMember: () => Effect.succeed(Option.none()),
   bulkInsert: () => Effect.succeed([]),
-  update: () => Effect.die(new Error('Not implemented')),
+  update: () => LogicError.die('MockFeeAssignmentsRepositoryLayer.update not implemented'),
   findReminderCandidates: () => Effect.succeed([]),
   findUnpaidAssignmentsForUser: () => Effect.succeed([]),
 } as never);
 
 export const MockPaymentsRepositoryLayer = Layer.succeed(PaymentsRepository, {
   _tag: 'api/PaymentsRepository' as const,
-  insert: () => Effect.die(new Error('Not implemented')),
+  insert: () => LogicError.die('MockPaymentsRepositoryLayer.insert not implemented'),
   findById: () => Effect.succeed(Option.none()),
   findActiveById: () => Effect.succeed(Option.none()),
   void_: () => Effect.succeed(Option.none()),
@@ -49,12 +50,21 @@ export const MockFinanceOverviewRepositoryLayer = Layer.succeed(FinanceOverviewR
 
 export const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
   _tag: 'api/ExpensesRepository' as const,
-  insert: () => Effect.die(new Error('Not implemented')),
+  insert: () => LogicError.die('MockExpensesRepositoryLayer.insert not implemented'),
   findById: () => Effect.succeed(Option.none()),
   listByTeam: () => Effect.succeed([]),
   update: () => Effect.succeed(Option.none()),
   delete: () => Effect.succeed(false),
-  balanceSummaryByTeam: () => Effect.succeed([]),
+  balanceSummaryByTeam: () =>
+    Effect.succeed([
+      {
+        currency: 'CZK',
+        incomeMinor: 0,
+        expensesMinor: 0,
+        netMinor: 0,
+        byCategory: [],
+      },
+    ]),
   countHistoryRows: () => Effect.succeed(0),
 } as never);
 

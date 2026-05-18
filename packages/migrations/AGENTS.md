@@ -181,7 +181,7 @@ Rules:
 3. **DELETE-actor lookup MUST use `current_setting('audit.user_id', true)`** (note the `true` second argument — without it, missing setting raises `42704` and aborts). The inner `BEGIN ... EXCEPTION WHEN OTHERS THEN audit_user_id := NULL; END;` block converts a missing or malformed setting into the `OLD.updated_by_user_id` fallback.
 4. **`performed_by_user_id` is `ON DELETE RESTRICT`**, not `CASCADE`. Audit rows must survive user-account deletion — GDPR anonymization is a separate per-PR story (document the obligation with `COMMENT ON COLUMN <resource>.created_by_user_id IS 'Author of the <resource>. Future GDPR-erasure stories must anonymize via SET NULL or separate anonymization.'`).
 5. **`snapshot` is `JSONB`, not denormalized columns.** Use `to_jsonb(NEW)` / `to_jsonb(OLD)` so the history row captures the full row shape at operation time. Schema migrations to the parent table do not require backfilling history columns.
-6. **The repository's DELETE method MUST set the actor via `sql.withTransaction(sql\`SET LOCAL audit.user_id = ${String(userId)}\`...)`** before the DELETE. See `applications/server/AGENTS.md` → "Application-Set Audit Actor For Hard Deletes".
+6. **The repository's DELETE method MUST set the actor before the DELETE using `yield* sql\`SELECT set_config('audit.user_id', ${userId}, true)\``** (not `SET LOCAL`, which cannot accept bind parameters in Postgres — `set_config(name, value, is_local=true)` is the equivalent function form and does accept them). See `applications/server/AGENTS.md` → "Application-Set Audit Actor For Hard Deletes".
 
 ### Unique Constraints with Nullable Columns
 

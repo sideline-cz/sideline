@@ -21,6 +21,7 @@ import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import type { ExpenseWithNamesRow } from '~/repositories/ExpensesRepository.js';
 import { ExpensesRepository } from '~/repositories/ExpensesRepository.js';
 import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
@@ -170,21 +171,28 @@ const buildNoop = (tag: string, extra: Record<string, any> = {}): never =>
 // ---------------------------------------------------------------------------
 
 // Returns an ExpenseWithNamesRow-shaped object (snake_case, matching the real repository output).
-const makeExpenseRow = (id: string, teamId: string, userId: Auth.UserId) => ({
-  id,
-  team_id: teamId,
-  amount_minor: 5000,
-  currency: 'CZK',
-  spent_at: now,
-  category: 'fields',
-  description: 'Test expense',
-  created_by_user_id: userId,
-  created_by_name: Option.none<string>(),
-  updated_by_user_id: userId,
-  updated_by_name: Option.none<string>(),
-  created_at: now,
-  updated_at: now,
-});
+const makeExpenseRow = (
+  id: string,
+  teamId: string,
+  userId: Auth.UserId,
+  overrides: Partial<ExpenseWithNamesRow> = {},
+): ExpenseWithNamesRow =>
+  ({
+    id,
+    team_id: teamId,
+    amount_minor: 5000,
+    currency: 'CZK',
+    spent_at: now,
+    category: 'fields',
+    description: 'Test expense',
+    created_by_user_id: userId,
+    created_by_name: Option.none<string>(),
+    updated_by_user_id: userId,
+    updated_by_name: Option.none<string>(),
+    created_at: now,
+    updated_at: now,
+    ...overrides,
+  }) as ExpenseWithNamesRow;
 
 const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
   _tag: 'api/ExpensesRepository' as const,
@@ -248,6 +256,7 @@ const MockExpensesRepositoryLayer = Layer.succeed(ExpensesRepository, {
         incomeMinor: 10000,
         expensesMinor: 5000,
         netMinor: 5000,
+        byCategory: [],
       },
     ]);
   },
@@ -935,7 +944,7 @@ describe('Expense API — getExpense', () => {
 
   it('GET /teams/:teamId/expenses/:expenseId → 404 when expense not found', async () => {
     const response = await handler(
-      new Request(getUrl('00000000-0000-0000-0000-nonexistent01'), {
+      new Request(getUrl('00000000-0000-0000-0000-000000000101'), {
         headers: { Authorization: 'Bearer treasurer-token' },
       }),
     );
@@ -1000,7 +1009,7 @@ describe('Expense API — updateExpense', () => {
 
   it('PATCH → 404 when expense missing or wrong team', async () => {
     const response = await handler(
-      new Request(patchUrl('00000000-0000-0000-0000-nonexistent02'), {
+      new Request(patchUrl('00000000-0000-0000-0000-000000000102'), {
         method: 'PATCH',
         headers: {
           Authorization: 'Bearer treasurer-token',
@@ -1126,7 +1135,7 @@ describe('Expense API — deleteExpense', () => {
 
   it('DELETE → 404 for non-existent id (NOT idempotent)', async () => {
     const response = await handler(
-      new Request(deleteUrl('00000000-0000-0000-0000-nonexistent03'), {
+      new Request(deleteUrl('00000000-0000-0000-0000-000000000103'), {
         method: 'DELETE',
         headers: { Authorization: 'Bearer treasurer-token' },
       }),

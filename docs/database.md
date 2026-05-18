@@ -1173,7 +1173,7 @@ A team-level expenditure record (pitch hire, equipment purchase, travel cost, to
 
 **Indexes**: `idx_expenses_team_spent_at` on `(team_id, spent_at DESC)`; `idx_expenses_team_category` on `(team_id, category)`
 
-**Notes**: `amount_minor > 0` — zero-amount expenses are rejected at the DB level. `spent_at` is validated server-side to be in the past (within a 365-day lookahead tolerance). GDPR note: `created_by_user_id` and `updated_by_user_id` use `ON DELETE RESTRICT`; future anonymisation stories must handle these columns explicitly.
+**Notes**: `amount_minor > 0` — zero-amount expenses are rejected at the DB level. `spent_at` is constrained to be at most 365 days in the future (and after the year 1900) — this is a sanity bound against typos like year 20255, not a strict past-date rule. GDPR note: `created_by_user_id` and `updated_by_user_id` use `ON DELETE RESTRICT`; future anonymisation stories must handle these columns explicitly.
 
 ---
 

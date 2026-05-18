@@ -18,6 +18,16 @@ vi.mock('~/lib/translations.js', () => ({
       balance_dashboard_net: 'Net',
       balance_dashboard_empty: 'No financial data yet',
       balance_dashboard_multi_currency_banner: 'Showing dominant currency only',
+      finance_breakdown_title: 'Breakdown by category',
+      finance_breakdown_empty: 'No expenses to break down',
+      finance_breakdown_categoryColumn: 'Category',
+      finance_breakdown_amountColumn: 'Amount',
+      finance_breakdown_shareColumn: 'Share',
+      expense_category_fields: 'Fields',
+      expense_category_equipment: 'Equipment',
+      expense_category_travel: 'Travel',
+      expense_category_tournaments: 'Tournaments',
+      expense_category_other: 'Other',
     };
     return map[key] ?? key;
   },
@@ -52,23 +62,35 @@ const { BalanceDashboard } = await import('~/components/organisms/BalanceDashboa
 // Type helpers
 // ---------------------------------------------------------------------------
 
+type CategoryBreakdownItem = {
+  category: 'fields' | 'equipment' | 'travel' | 'tournaments' | 'other';
+  amountMinor: number;
+};
+
 type BalanceSummary = {
   currency: string;
   incomeMinor: number;
   expensesMinor: number;
   netMinor: number;
+  byCategory: ReadonlyArray<CategoryBreakdownItem>;
 };
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function makeSummary(currency: string, incomeMinor: number, expensesMinor: number): BalanceSummary {
+function makeSummary(
+  currency: string,
+  incomeMinor: number,
+  expensesMinor: number,
+  byCategory: ReadonlyArray<CategoryBreakdownItem> = [],
+): BalanceSummary {
   return {
     currency,
     incomeMinor,
     expensesMinor,
     netMinor: incomeMinor - expensesMinor,
+    byCategory,
   };
 }
 
