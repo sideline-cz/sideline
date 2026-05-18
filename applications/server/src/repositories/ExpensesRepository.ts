@@ -42,10 +42,13 @@ export class ExpenseWithNamesRow extends Schema.Class<ExpenseWithNamesRow>('Expe
 // Balance-summary row (decoded once in the repo so callers receive typed values)
 // ---------------------------------------------------------------------------
 
+// Postgres returns BIGINT columns as strings via node-pg; decode as string here
+// and `Number()`-convert below. Sums of int64 minor units never approach
+// Number.MAX_SAFE_INTEGER for plausible team budgets.
 const BalanceSummaryRawRow = Schema.Struct({
   currency: Expense.CurrencyCode,
-  income_minor: Schema.BigInt,
-  expenses_minor: Schema.BigInt,
+  income_minor: Schema.String,
+  expenses_minor: Schema.String,
 });
 
 export interface BalanceSummaryRow {
@@ -227,7 +230,9 @@ const make = Effect.gen(function* () {
   const delete_ = (id: Expense.ExpenseId, teamId: Team.TeamId, userId: Auth.UserId) =>
     sql
       .withTransaction(
-        sql`SET LOCAL audit.user_id = ${String(userId)}`.pipe(
+        // SET LOCAL doesn't accept bind parameters; use set_config(name, value, is_local=true)
+        // so the audit trigger can read the deleting actor via current_setting('audit.user_id').
+        sql`SELECT set_config('audit.user_id', ${String(userId)}, true)`.pipe(
           Effect.flatMap(() => deleteReturningQuery({ id, team_id: teamId })),
           Effect.map(Option.isSome),
           catchSqlErrors,
