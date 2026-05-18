@@ -460,7 +460,11 @@ describe('ExpensesRepository — delete', () => {
       Effect.bind('result', ({ team, userId }) =>
         ExpensesRepository.asEffect().pipe(
           Effect.andThen((repo) =>
-            repo.delete('nonexistent-id' as Expense.ExpenseId, team.id, userId),
+            repo.delete(
+              '00000000-0000-0000-0000-000000000000' as Expense.ExpenseId,
+              team.id,
+              userId,
+            ),
           ),
         ),
       ),
