@@ -8,7 +8,7 @@ jobs:
   dependabot:
     name: Update Dependabot PR
     runs-on: ubuntu-latest
-    if: contains(github.event.pull_request.labels.*.name, 'dependencies')
+    if: github.actor == 'dependabot[bot]'
 
     steps:
       - name: Checkout
@@ -22,4 +22,4 @@ jobs:
           owner: maxa-ondrej
           repo: sideline
           pr-number: ${{ github.event.pull_request.number }}
-          token: ${{ secrets.CHANGESET_GITHUB_TOKEN }}
+          token: ${{ secrets.GH_PAT }}
