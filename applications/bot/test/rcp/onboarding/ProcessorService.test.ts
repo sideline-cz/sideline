@@ -1,11 +1,7 @@
-// TDD mode — these tests will FAIL until Phase 5 implements:
-//   applications/bot/src/rcp/onboarding/ProcessorService.ts
-//   applications/bot/src/services/OnboardingRoleCache.ts
-// Those modules do not exist yet. TypeScript errors are expected.
-
 import { DiscordREST } from 'dfx/DiscordREST';
 import { Effect, Layer, Option } from 'effect';
 import { describe, expect, it } from 'vitest';
+import { ProcessorService } from '~/rcp/onboarding/ProcessorService.js';
 import { OnboardingRoleCache } from '~/services/OnboardingRoleCache.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
@@ -222,21 +218,17 @@ const makeLiveCache = (
 // Run helper
 // ---------------------------------------------------------------------------
 
-// Dynamically import ProcessorService once implemented
-const runProcessTick = async (
+const runProcessTick = (
   rpcLayer: Layer.Layer<SyncRpc>,
   restLayer: Layer.Layer<DiscordREST>,
   cacheLayer: Layer.Layer<OnboardingRoleCache>,
-) => {
-  // This import will fail until Phase 5 — expected in TDD mode
-  const { ProcessorService } = await import('~/rcp/onboarding/ProcessorService.js');
-  return Effect.runPromise(
+) =>
+  Effect.runPromise(
     ProcessorService.pipe(
       Effect.flatMap((svc: any): Effect.Effect<void> => svc.processTick),
       Effect.provide(Layer.mergeAll(rpcLayer, restLayer, cacheLayer)),
     ),
   );
-};
 
 // ---------------------------------------------------------------------------
 // Tests

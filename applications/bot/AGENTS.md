@@ -548,3 +548,14 @@ Used by `/event list` and the overview show button (`overview-show`). Instead of
 #### Coach claim / release buttons
 
 `ClaimButton` and `UnclaimButton` (`src/interactions/claim.ts`) are matched via `Ix.idStartsWith('claim:')` and `Ix.idStartsWith('unclaim:')`. The `custom_id` format is `claim:{team_id}:{event_id}` and `unclaim:{team_id}:{event_id}` — parsed positionally by `data.custom_id.split(':')`. Both handlers respond with `DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE` (ephemeral), fork the RPC call (`Event/ClaimTraining` / `Event/UnclaimTraining`) in the background via `Effect.forkDetach`, and edit the original webhook message with the localized result. RPC error tags are mapped to localized strings via `Effect.catchTag`: `ClaimAlreadyClaimed` → `bot_claim_already_claimed_by`, `ClaimNotOwnerGroupMember` → `bot_claim_not_owner`, `ClaimEventInactive` / `ClaimEventNotFound` / `ClaimNotTraining` → `bot_claim_event_cancelled`, `ClaimNotClaimer` → `bot_claim_release_not_claimer`.
+
+## Test File Imports — Static Only
+
+The repo-root `vitest.config.ts` sets `sequence.concurrent: true`, so every test inside a file runs in parallel. Dynamic `await import('~/<module>.js')` inside a test helper (e.g. a `runProcessTick` wrapper) re-pays Vitest's module-graph resolution + transform on every call, which under parallel execution causes 5-second test timeouts and flaky CI runs. Reference fix: `applications/bot/test/rcp/onboarding/ProcessorService.test.ts` (hoisted `ProcessorService` import to the top of file).
+
+Rules:
+
+1. **Always import modules under test at the top of the test file** with a static `import { X } from '~/path/to/X.js'`. Never call `await import('~/...')` inside `it`, `beforeEach`, or test-local helpers.
+2. **TDD-scaffolding dynamic imports must be hoisted the moment the module under test exists.** A comment like `// TDD mode — these tests will FAIL until Phase N implements X` plus a dynamic `await import` is a transitional state, not a permanent pattern; remove both the comment and the dynamic import in the same commit that lands the implementation.
+3. **The only legitimate `await import('~/...')` inside a test body is when the test asserts on side effects of module loading itself** (e.g. registration order). Such cases must include a comment explaining why the static import is insufficient.
+4. **Known offenders to hoist** (left over from earlier TDD phases): `test/events/ready.test.ts`, `test/events/guildRoleEvents.test.ts`, `test/events/guildMemberUpdate.test.ts`, `test/rcp/channel/handleMemberAdded.test.ts`. Hoist each one's dynamic imports when next touching the file.
