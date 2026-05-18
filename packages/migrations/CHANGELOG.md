@@ -1,5 +1,21 @@
 # @sideline/migrations
 
+## 0.14.0
+
+### Minor Changes
+
+- [#311](https://github.com/maxa-ondrej/sideline/pull/311) [`2f5291f`](https://github.com/maxa-ondrej/sideline/commit/2f5291f5a2b6643ee5bd6bed922b208c669c3f09) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add team expense tracking. Admins and treasurers can log, edit, and delete team expenses across five categories (fields, equipment, travel, tournaments, other) via a new `/teams/:teamId/finances/expenses` page. The Finances overview gains a new default "Overview" tab with an income vs. expense balance dashboard — KPI strip for income, expenses, and net balance, plus a category breakdown — driven by a multi-currency `balance-summary` endpoint. Every write is captured in an `expense_history` audit table via a Postgres trigger. Reuses existing `finance:view` (read) and `finance:manage_fees` (write) permissions — no new permission literal.
+
+- [#289](https://github.com/maxa-ondrej/sideline/pull/289) [`6abf99c`](https://github.com/maxa-ondrej/sideline/commit/6abf99c886c1e5b43fed364699e1f0ee947c4a9c) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add fee management and payment tracking MVP. Admins can define fees, assign them to members, and record manual payments (cash or bank transfer); members see their outstanding fees via `/finance status` in Discord and captains get a team-wide overview in the web app. Introduces `finance:view`, `finance:manage_fees`, and `finance:record_payments` permissions (treasurer pattern).
+
+### Patch Changes
+
+- [#303](https://github.com/maxa-ondrej/sideline/pull/303) [`978746c`](https://github.com/maxa-ondrej/sideline/commit/978746ca35b12203a046be017483dbfa968dfaf8) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Captains can now create, update, and delete custom activity types (previously admin-only). The activity types management page is now reachable from the team sidebar (under Coach).
+
+- [#308](https://github.com/maxa-ondrej/sideline/pull/308) [`62db467`](https://github.com/maxa-ondrej/sideline/commit/62db46789598c4ec0b02c0f31dded7a262bca718) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Send payment reminders via Discord DM and surface them in the personal iCal feed. A new server cron emits five reminder cadences per unpaid fee (T-3, T-0, T+3, T+10, T+21); the bot delivers each as a DM and only records "sent" after a successful Discord delivery so transient failures get retried. The personal iCal feed (`GET /ical/:token`) now includes all-day VEVENTs with a 1-day VALARM for unpaid/partial/overdue assignments within a 180-day window, fixing RFC 5545 DTSTAMP omission on existing event VEVENTs along the way.
+
+- [#305](https://github.com/maxa-ondrej/sideline/pull/305) [`e656e54`](https://github.com/maxa-ondrej/sideline/commit/e656e543f3bb51f9279941d9d7edee529988bfa6) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Introduce a built-in `Treasurer` role that holds the money-moving finance permissions (`finance:manage_fees`, `finance:record_payments`) so teams can delegate finance authority without elevating to Admin. Captain's finance scope narrows to `finance:view` only. Admin keeps every permission. Migration `1784000000` creates Treasurer for every existing team and backfills missing finance/activity-type permissions on legacy Admin and Captain rows. The migration is additive — it never deletes existing `role_permissions` rows.
+
 ## 0.13.0
 
 ### Minor Changes
