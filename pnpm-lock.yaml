@@ -261,7 +261,7 @@ importers:
         version: 1.16.0(react@19.2.6)
       nitro:
         specifier: npm:nitro-nightly@latest
-        version: nitro-nightly@3.0.1-20260512-093145-0498ce70(chokidar@5.0.0)(dotenv@8.6.0)(ioredis@5.9.3)(jiti@2.7.0)(lru-cache@11.3.5)(rollup@4.60.4)(vite@8.0.13(@types/node@25.8.0)(esbuild@0.28.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.22.1)(yaml@2.9.0))
+        version: nitro-nightly@3.0.1-20260519-181425-9cc59cf7(chokidar@5.0.0)(dotenv@8.6.0)(ioredis@5.9.3)(jiti@2.7.0)(lru-cache@11.3.5)(rollup@4.60.4)(vite@8.0.13(@types/node@25.8.0)(esbuild@0.28.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.22.1)(yaml@2.9.0))
       radix-ui:
         specifier: 1.4.3
         version: 1.4.3(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -5080,8 +5080,8 @@ packages:
   nf3@0.3.17:
     resolution: {integrity: sha512-N9zEWySuJFw+gR0lhS5863YsvNeudOdqRyFvNb+jMXbeTJOdrjDqkCpDginIZfUm0LzT1t1nCRiDeqQm/8kirQ==}
 
-  nitro-nightly@3.0.1-20260512-093145-0498ce70:
-    resolution: {integrity: sha512-5vIbEn1ORiNIymy9RtRx3AavX4CAQqWNnsh1vOLag/fzsEQRD2wLBhR+ZcMeVTUbQb0mo8fIbMH2NkSeiGu6fw==}
+  nitro-nightly@3.0.1-20260519-181425-9cc59cf7:
+    resolution: {integrity: sha512-3Yd4X9aOb/8dS1Os1aba+KOUeYut+kFbcQoteNbRCUrASNZ+g33R/Ne8VBGAm96scjwMoP9miS2GsmcpuNIX2A==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -12010,7 +12010,7 @@ snapshots:
 
   nf3@0.3.17: {}
 
-  nitro-nightly@3.0.1-20260512-093145-0498ce70(chokidar@5.0.0)(dotenv@8.6.0)(ioredis@5.9.3)(jiti@2.7.0)(lru-cache@11.3.5)(rollup@4.60.4)(vite@8.0.13(@types/node@25.8.0)(esbuild@0.28.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.22.1)(yaml@2.9.0)):
+  nitro-nightly@3.0.1-20260519-181425-9cc59cf7(chokidar@5.0.0)(dotenv@8.6.0)(ioredis@5.9.3)(jiti@2.7.0)(lru-cache@11.3.5)(rollup@4.60.4)(vite@8.0.13(@types/node@25.8.0)(esbuild@0.28.0)(jiti@2.7.0)(terser@5.46.0)(tsx@4.22.1)(yaml@2.9.0)):
     dependencies:
       consola: 3.4.2
       crossws: 0.4.5(srvx@0.11.15)
