@@ -1,5 +1,11 @@
 # @sideline/domain
 
+## 0.19.1
+
+### Patch Changes
+
+- [`976c68c`](https://github.com/maxa-ondrej/sideline/commit/976c68c5e08e45906f65a237fe0e9b891642883f) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix custom achievement role-source radio: "auto-create role" now actually creates the Discord role on save, and "no role" clears an existing mapping when editing. Previously the dialog only honored `existing` — `auto_create` was silently discarded and `none` left any prior role in place. `createCustom` now returns the new achievement id so the web client can enqueue the role provision event after a successful save.
+
 ## 0.19.0
 
 ### Minor Changes
