@@ -103,6 +103,7 @@ const upsertSettingsWithReminder = (
     time: string;
     timezone: string;
     remindersChannelId?: Option.Option<Discord.Snowflake>;
+    enabled?: boolean;
   },
 ) =>
   TeamSettingsRepository.asEffect().pipe(
@@ -111,6 +112,7 @@ const upsertSettingsWithReminder = (
         teamId,
         eventHorizonDays: 30,
         minPlayersThreshold: 5,
+        rsvpRemindersEnabled: opts.enabled ?? true,
         rsvpReminderDaysBefore: opts.daysBefore,
         rsvpReminderTime: opts.time,
         timezone: opts.timezone,
@@ -374,6 +376,103 @@ describe('TeamSettingsRepository — _findEventsForReminder with pinned now', ()
       Effect.tap(({ events }) =>
         Effect.sync(() => {
           expect((events as unknown[]).length).toBeGreaterThanOrEqual(1);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('daysBefore = 0 → same-day reminder fires on event day', () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithMember(
+          '100000000000000108',
+          'owner108',
+          '108080808080808080' as Discord.Snowflake,
+        ),
+      ),
+      Effect.tap(({ seed }) =>
+        upsertSettingsWithReminder(seed.team.id, {
+          daysBefore: 0,
+          time: '10:00',
+          timezone: 'Europe/Prague',
+        }),
+      ),
+      Effect.tap(({ seed }) =>
+        // Event later same day — 2026-04-26 15:30 UTC (= 17:30 CEST)
+        createEvent(seed.team.id, seed.memberId, '2026-04-26T15:30:00Z'),
+      ),
+      Effect.bind('events', () =>
+        // now = 2026-04-26 08:00 UTC = 10:00 CEST — same day at reminder_time
+        findEventsNeedingReminderAt('2026-04-26T08:00:00Z'),
+      ),
+      Effect.tap(({ events }) =>
+        Effect.sync(() => {
+          expect((events as unknown[]).length).toBeGreaterThanOrEqual(1);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('daysBefore = 0 → does NOT fire the day before the event', () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithMember(
+          '100000000000000109',
+          'owner109',
+          '109090909090909090' as Discord.Snowflake,
+        ),
+      ),
+      Effect.tap(({ seed }) =>
+        upsertSettingsWithReminder(seed.team.id, {
+          daysBefore: 0,
+          time: '10:00',
+          timezone: 'Europe/Prague',
+        }),
+      ),
+      Effect.tap(({ seed }) =>
+        // Event tomorrow — 2026-04-27 15:30 UTC
+        createEvent(seed.team.id, seed.memberId, '2026-04-27T15:30:00Z'),
+      ),
+      Effect.bind('events', () =>
+        // now = 2026-04-26 08:00 UTC — one day before event
+        findEventsNeedingReminderAt('2026-04-26T08:00:00Z'),
+      ),
+      Effect.tap(({ events }) =>
+        Effect.sync(() => {
+          expect((events as unknown[]).length).toBe(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('enabled = false → no reminder fires even when window matches', () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithMember(
+          '100000000000000110',
+          'owner110',
+          '110000000000000000' as Discord.Snowflake,
+        ),
+      ),
+      Effect.tap(({ seed }) =>
+        upsertSettingsWithReminder(seed.team.id, {
+          daysBefore: 1,
+          time: '18:00',
+          timezone: 'Europe/Prague',
+          enabled: false,
+        }),
+      ),
+      Effect.tap(({ seed }) => createEvent(seed.team.id, seed.memberId, '2026-04-27T16:00:00Z')),
+      Effect.bind('events', () =>
+        // now = 2026-04-26 16:00 UTC = 18:00 CEST — window matches but reminders are disabled
+        findEventsNeedingReminderAt('2026-04-26T16:00:00Z'),
+      ),
+      Effect.tap(({ events }) =>
+        Effect.sync(() => {
+          expect((events as unknown[]).length).toBe(0);
         }),
       ),
       Effect.provide(TestLayer),

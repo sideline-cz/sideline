@@ -75,6 +75,9 @@ export function TeamSettingsPage({
   const [minPlayersThreshold, setMinPlayersThreshold] = React.useState(
     String(settings.minPlayersThreshold),
   );
+  const [rsvpRemindersEnabled, setRsvpRemindersEnabled] = React.useState(
+    settings.rsvpRemindersEnabled,
+  );
   const [rsvpReminderDaysBefore, setRsvpReminderDaysBefore] = React.useState(
     String(settings.rsvpReminderDaysBefore),
   );
@@ -190,6 +193,7 @@ export function TeamSettingsPage({
   const hasSettingsChanges =
     horizonDays !== String(settings.eventHorizonDays) ||
     minPlayersThreshold !== String(settings.minPlayersThreshold) ||
+    rsvpRemindersEnabled !== settings.rsvpRemindersEnabled ||
     rsvpReminderDaysBefore !== String(settings.rsvpReminderDaysBefore) ||
     rsvpReminderTime !== (settings.rsvpReminderTime || '18:00') ||
     timezone !== (settings.timezone || 'Europe/Prague') ||
@@ -270,6 +274,7 @@ export function TeamSettingsPage({
           payload: {
             eventHorizonDays: Option.some(parsed),
             minPlayersThreshold: Option.some(parsedThreshold),
+            rsvpRemindersEnabled: Option.some(rsvpRemindersEnabled),
             rsvpReminderDaysBefore: Option.some(parsedReminderDaysBefore),
             rsvpReminderTime: Option.some(rsvpReminderTime),
             timezone: Option.some(timezone),
@@ -302,6 +307,7 @@ export function TeamSettingsPage({
     settings.teamId,
     horizonDays,
     minPlayersThreshold,
+    rsvpRemindersEnabled,
     rsvpReminderDaysBefore,
     rsvpReminderTime,
     timezone,
@@ -645,6 +651,18 @@ export function TeamSettingsPage({
                 />
               </div>
               <Separator />
+              <div className='flex items-center gap-2'>
+                <input
+                  id='rsvp-reminders-enabled'
+                  type='checkbox'
+                  checked={rsvpRemindersEnabled}
+                  onChange={(e) => setRsvpRemindersEnabled(e.target.checked)}
+                  className='h-4 w-4'
+                />
+                <label htmlFor='rsvp-reminders-enabled' className='text-sm font-medium'>
+                  {tr('teamSettings_rsvpRemindersEnabled')}
+                </label>
+              </div>
               <div>
                 <label
                   htmlFor='rsvp-reminder-days-before'
@@ -659,6 +677,7 @@ export function TeamSettingsPage({
                   max={14}
                   value={rsvpReminderDaysBefore}
                   onChange={(e) => setRsvpReminderDaysBefore(e.target.value)}
+                  disabled={!rsvpRemindersEnabled}
                   className='max-w-32'
                 />
               </div>
