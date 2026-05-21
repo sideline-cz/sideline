@@ -15,6 +15,12 @@ const THREAD_CHANNEL_TYPES = new Set<number>([
   DiscordTypes.ChannelTypes.ANNOUNCEMENT_THREAD,
 ]);
 
+/** Manage Threads permission bit, required for `/summon`. Re-uses dfx's
+ * `Permissions.ManageThreads` (`PermissionFlagsBits.ManageThreads = 1n << 34n`)
+ * so the runtime check stays in sync with `default_member_permissions` in the
+ * command definition. */
+const MANAGE_THREADS = DiscordTypes.Permissions.ManageThreads;
+
 /** Max guild members the bot will scan when expanding a role. Discord caps a
  * single `listGuildMembers` page at 1000 — beyond that, the bot would need to
  * paginate. For v1, take the single largest page and treat anything larger as
@@ -89,7 +95,7 @@ const expandRoleMembers = (
         .map((member) => member.user.id as string),
     ),
     Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (error) =>
-      Effect.logWarning('Failed to list guild members for /join role expansion', error).pipe(
+      Effect.logWarning('Failed to list guild members for /summon role expansion', error).pipe(
         Effect.as<ReadonlyArray<string>>([]),
       ),
     ),
@@ -155,12 +161,12 @@ const buildSuccessContent = ({
 }): string => {
   if (outcome.added.length === 0) {
     if (roleHadNoMembers && Option.isSome(roleId) && Option.isNone(userId)) {
-      return m.bot_join_role_no_members({ roleId: roleId.value }, { locale });
+      return m.bot_summon_role_no_members({ roleId: roleId.value }, { locale });
     }
     if (outcome.permissionError) {
-      return m.bot_join_bot_forbidden({}, { locale });
+      return m.bot_summon_bot_forbidden({}, { locale });
     }
-    return m.bot_join_error({}, { locale });
+    return m.bot_summon_error({}, { locale });
   }
 
   const userAdded =
@@ -168,29 +174,29 @@ const buildSuccessContent = ({
   const roleAddCount = Option.isSome(userAdded) ? outcome.added.length - 1 : outcome.added.length;
 
   if (Option.isSome(userAdded) && Option.isSome(roleId) && roleAddCount > 0) {
-    return m.bot_join_success_both(
+    return m.bot_summon_success_both(
       { userId: userAdded.value, roleId: roleId.value, count: roleAddCount },
       { locale },
     );
   }
   if (Option.isSome(userAdded) && roleAddCount === 0) {
-    return m.bot_join_success_user({ userId: userAdded.value }, { locale });
+    return m.bot_summon_success_user({ userId: userAdded.value }, { locale });
   }
   if (Option.isSome(roleId) && roleAddCount > 0) {
-    return m.bot_join_success_role({ roleId: roleId.value, count: roleAddCount }, { locale });
+    return m.bot_summon_success_role({ roleId: roleId.value, count: roleAddCount }, { locale });
   }
   // Fallback: user was requested but didn't land in `added` (already a member,
   // or non-permission error). Use generic error if any failure occurred,
   // otherwise the generic "added" template with whatever IDs we did land.
-  if (outcome.permissionError) return m.bot_join_bot_forbidden({}, { locale });
-  if (outcome.otherError) return m.bot_join_error({}, { locale });
+  if (outcome.permissionError) return m.bot_summon_bot_forbidden({}, { locale });
+  if (outcome.otherError) return m.bot_summon_error({}, { locale });
   // Shouldn't happen given the branching above, but fall back gracefully.
   return Option.isSome(roleId) && roleMemberCount === 0
-    ? m.bot_join_role_no_members({ roleId: roleId.value }, { locale })
-    : m.bot_join_error({}, { locale });
+    ? m.bot_summon_role_no_members({ roleId: roleId.value }, { locale })
+    : m.bot_summon_error({}, { locale });
 };
 
-export const joinHandler = Interaction.asEffect().pipe(
+export const summonHandler = Interaction.asEffect().pipe(
   Effect.tap(() =>
     Metric.update(
       Metric.withAttributes(discordInteractionsTotal, { interaction_type: 'command' }),
@@ -204,10 +210,19 @@ export const joinHandler = Interaction.asEffect().pipe(
     const guildId = interaction.guild_id;
 
     if (channelId === undefined || channelType === undefined) {
-      return Effect.succeed(ephemeral(m.bot_join_not_thread({}, { locale })));
+      return Effect.succeed(ephemeral(m.bot_summon_not_thread({}, { locale })));
     }
     if (!THREAD_CHANNEL_TYPES.has(channelType)) {
-      return Effect.succeed(ephemeral(m.bot_join_not_thread({}, { locale })));
+      return Effect.succeed(ephemeral(m.bot_summon_not_thread({}, { locale })));
+    }
+
+    const memberPermissions = interaction.member?.permissions;
+    if (
+      memberPermissions === undefined ||
+      memberPermissions === null ||
+      (BigInt(memberPermissions) & MANAGE_THREADS) === 0n
+    ) {
+      return Effect.succeed(ephemeral(m.bot_summon_forbidden({}, { locale })));
     }
 
     const data = interaction.data;
@@ -217,14 +232,14 @@ export const joinHandler = Interaction.asEffect().pipe(
     const roleOption = readOption(options, 'role');
 
     if (Option.isNone(userOption) && Option.isNone(roleOption)) {
-      return Effect.succeed(ephemeral(m.bot_join_missing_target({}, { locale })));
+      return Effect.succeed(ephemeral(m.bot_summon_missing_target({}, { locale })));
     }
 
     // Expanding a role requires a guild context (listGuildMembers needs the
     // guild id). If somehow the interaction has no guild_id but does have a
     // role option, treat it as the "not in a server" case.
     if (Option.isSome(roleOption) && guildId === undefined) {
-      return Effect.succeed(ephemeral(m.bot_join_not_thread({}, { locale })));
+      return Effect.succeed(ephemeral(m.bot_summon_not_thread({}, { locale })));
     }
 
     const work = DiscordREST.asEffect().pipe(
@@ -268,7 +283,7 @@ export const joinHandler = Interaction.asEffect().pipe(
               .pipe(
                 Effect.catchTag(
                   ['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'],
-                  (error) => Effect.logError('Failed to update join response', error),
+                  (error) => Effect.logError('Failed to update summon response', error),
                 ),
               );
           }),
@@ -282,5 +297,5 @@ export const joinHandler = Interaction.asEffect().pipe(
     };
     return Effect.as(Effect.forkDetach(work), deferred);
   }),
-  Effect.withSpan('command/join'),
+  Effect.withSpan('command/summon'),
 );

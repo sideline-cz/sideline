@@ -3,8 +3,9 @@
 '@sideline/i18n': patch
 ---
 
-Add a `/join` slash command that adds a user and/or a role's members to the current Discord thread.
+Add a `/summon` slash command (Czech: `/přivolat`) that adds a user and/or a role's members to the current Discord thread.
 
+- Restricted to users with the **Manage Threads** permission (declared via `default_member_permissions` so Discord hides it for everyone else, and re-checked at runtime as a safety net).
 - `user` and `role` are both optional; at least one is required.
 - When `role` is provided, the bot lists the guild's members, filters those with the role, and adds each to the thread (with bounded concurrency to respect Discord rate limits).
 - When both are provided, the user is deduplicated against the role expansion so the final count is exact.

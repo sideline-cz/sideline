@@ -12,7 +12,7 @@ src/
 ├── env.ts           — Environment config (token, intents, health port)
 ├── run.ts           — Runtime entrypoint (config, logging, NodeRuntime)
 ├── schemas.ts       — Dfx decode schemas (DfxTextChannel, DfxSyncableChannel, DfxGuildMember, DfxUser incl. global_name)
-├── commands/        — Slash command registry (event/create, event/list, event/overview, makanicko/*, finance/*, info, join)
+├── commands/        — Slash command registry (event/create, event/list, event/overview, makanicko/*, finance/*, info, summon)
 ├── interactions/    — Component interaction registry (buttons/selects/modals)
 ├── events/          — Gateway event handler registry (guild, member, invite, channel lifecycle)
 ├── services/        — Sync services (RoleSyncService, ChannelSyncService) and welcome helpers (InviteCache, inviteDiff, welcomeRenderer)

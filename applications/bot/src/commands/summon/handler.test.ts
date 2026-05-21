@@ -3,7 +3,7 @@ import { Interaction } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
 import { Effect, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
-import { joinHandler } from '~/commands/join/handler.js';
+import { summonHandler } from '~/commands/summon/handler.js';
 
 // ---------------------------------------------------------------------------
 // DiscordREST stub helpers
@@ -50,13 +50,20 @@ interface InteractionFixtureOptions {
   options?: ReadonlyArray<InteractionOptionFixture>;
   locale?: string;
   guildId?: string | undefined;
+  /** Defaults to MANAGE_THREADS so most tests look at the happy path. Override
+   * with '0' to exercise the runtime permission gate. */
+  permissions?: string;
 }
+
+// MANAGE_THREADS = 1n << 34n
+const DEFAULT_PERMISSIONS = '17179869184';
 
 const makeInteraction = (opts: InteractionFixtureOptions = {}): DiscordTypes.APIInteraction => {
   const channelType = opts.channelType ?? DiscordTypes.ChannelTypes.PUBLIC_THREAD;
   const channelId = opts.channelId === undefined ? 'thread-123' : opts.channelId;
   const locale = opts.locale ?? 'en-US';
   const guildId = opts.guildId === undefined ? '9999999999' : opts.guildId;
+  const permissions = opts.permissions ?? DEFAULT_PERMISSIONS;
 
   return {
     id: '1234567890' as DiscordTypes.Snowflake,
@@ -84,12 +91,12 @@ const makeInteraction = (opts: InteractionFixtureOptions = {}): DiscordTypes.API
       joined_at: '2024-01-01T00:00:00Z',
       deaf: false,
       mute: false,
-      permissions: '0',
+      permissions,
     },
     locale,
     data: {
       id: 'cmd-id' as DiscordTypes.Snowflake,
-      name: 'join',
+      name: 'summon',
       type: DiscordTypes.ApplicationCommandType.CHAT,
       options: opts.options ?? [],
     },
@@ -128,7 +135,7 @@ const runHandler = async (
   restLayer: Layer.Layer<DiscordREST>,
 ) => {
   const response = await Effect.runPromise(
-    joinHandler.pipe(
+    summonHandler.pipe(
       Effect.provide(Layer.succeed(Interaction, interaction)),
       Effect.provide(restLayer),
     ),
@@ -142,7 +149,7 @@ const runHandler = async (
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('joinHandler', () => {
+describe('summonHandler', () => {
   it('returns ephemeral "not a thread" message when invoked in a regular text channel', async () => {
     const stub = makeRestStub();
     const response = await runHandler(
@@ -170,6 +177,37 @@ describe('joinHandler', () => {
     );
 
     expect(JSON.stringify(response)).toContain('thread');
+    expect(stub.addThreadMember).not.toHaveBeenCalled();
+  });
+
+  it('returns ephemeral "forbidden" when invoker lacks Manage Threads', async () => {
+    const stub = makeRestStub();
+    const response = await runHandler(
+      makeInteraction({
+        options: [userOption('target-1')],
+        permissions: '0',
+      }),
+      stub.layer,
+    );
+
+    const json = JSON.stringify(response);
+    expect(json.toLowerCase()).toContain('permission');
+    expect(json).toMatch(/64|ephemeral/i);
+    expect(stub.addThreadMember).not.toHaveBeenCalled();
+  });
+
+  it('returns ephemeral "forbidden" when interaction has no member.permissions', async () => {
+    // Simulate a missing permissions field — DM-like or malformed payload.
+    const stub = makeRestStub();
+    const baseInteraction = makeInteraction({ options: [userOption('target-1')] }) as unknown as {
+      member?: Record<string, unknown>;
+    } & DiscordTypes.APIInteraction;
+    const interaction = {
+      ...baseInteraction,
+      member: { ...(baseInteraction.member ?? {}), permissions: undefined },
+    } as unknown as DiscordTypes.APIInteraction;
+    const response = await runHandler(interaction, stub.layer);
+    expect(JSON.stringify(response).toLowerCase()).toContain('permission');
     expect(stub.addThreadMember).not.toHaveBeenCalled();
   });
 
@@ -278,7 +316,7 @@ describe('joinHandler', () => {
     expect(updateJson).toContain('2');
   });
 
-  it('maps Discord 403 (response.status) to bot_join_bot_forbidden', async () => {
+  it('maps Discord 403 (response.status) to bot_summon_bot_forbidden', async () => {
     const stub = makeRestStub({
       addThreadMember: vi.fn(() =>
         Effect.fail({
@@ -296,7 +334,7 @@ describe('joinHandler', () => {
     expect(JSON.stringify(update).toLowerCase()).toContain('permission');
   });
 
-  it('maps Discord JSON code 50013 (data.code) to bot_join_bot_forbidden', async () => {
+  it('maps Discord JSON code 50013 (data.code) to bot_summon_bot_forbidden', async () => {
     const stub = makeRestStub({
       addThreadMember: vi.fn(() =>
         Effect.fail({
