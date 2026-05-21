@@ -106,6 +106,41 @@ describe('UpdateTeamSettingsRequest — rsvpReminderTime validation', () => {
 });
 
 // ---------------------------------------------------------------------------
+// UpdateTeamSettingsRequest — rsvpRemindersEnabled
+// ---------------------------------------------------------------------------
+
+describe('UpdateTeamSettingsRequest — rsvpRemindersEnabled', () => {
+  it('accepts true', () => {
+    const result = Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+      eventHorizonDays: 30,
+      rsvpRemindersEnabled: true,
+    });
+    expect(Option.isSome(result.rsvpRemindersEnabled)).toBe(true);
+    if (Option.isSome(result.rsvpRemindersEnabled)) {
+      expect(result.rsvpRemindersEnabled.value).toBe(true);
+    }
+  });
+
+  it('accepts false', () => {
+    const result = Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+      eventHorizonDays: 30,
+      rsvpRemindersEnabled: false,
+    });
+    expect(Option.isSome(result.rsvpRemindersEnabled)).toBe(true);
+    if (Option.isSome(result.rsvpRemindersEnabled)) {
+      expect(result.rsvpRemindersEnabled.value).toBe(false);
+    }
+  });
+
+  it('omitting rsvpRemindersEnabled yields None', () => {
+    const result = Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+      eventHorizonDays: 30,
+    });
+    expect(Option.isNone(result.rsvpRemindersEnabled)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // UpdateTeamSettingsRequest — rsvpReminderDaysBefore
 // ---------------------------------------------------------------------------
 

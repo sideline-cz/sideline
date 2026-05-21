@@ -9,6 +9,7 @@ class TeamSettingsRow extends Schema.Class<TeamSettingsRow>('TeamSettingsRow')({
   team_id: Team.TeamId,
   event_horizon_days: Schema.Number,
   min_players_threshold: Schema.Number,
+  rsvp_reminders_enabled: Schema.Boolean,
   rsvp_reminder_days_before: Schema.Number,
   rsvp_reminder_time: Schema.String,
   reminders_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
@@ -40,6 +41,7 @@ const TeamSettingsUpsertInput = Schema.Struct({
   team_id: Schema.String,
   event_horizon_days: Schema.Number,
   min_players_threshold: Schema.Number,
+  rsvp_reminders_enabled: Schema.Boolean,
   rsvp_reminder_days_before: Schema.Number,
   rsvp_reminder_time: Schema.String,
   reminders_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
@@ -86,6 +88,7 @@ const make = Effect.gen(function* () {
     execute: (teamId) => sql`
       SELECT team_id, event_horizon_days,
              min_players_threshold,
+             rsvp_reminders_enabled,
              rsvp_reminder_days_before, TO_CHAR(rsvp_reminder_time, 'HH24:MI') AS rsvp_reminder_time,
              reminders_channel_id, timezone,
              discord_channel_training, discord_channel_match,
@@ -120,6 +123,7 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
       INSERT INTO team_settings (team_id, event_horizon_days,
                                  min_players_threshold,
+                                 rsvp_reminders_enabled,
                                  rsvp_reminder_days_before, rsvp_reminder_time,
                                  reminders_channel_id, timezone,
                                  discord_channel_training, discord_channel_match,
@@ -135,6 +139,7 @@ const make = Effect.gen(function* () {
                                  weekly_summary_channel_id)
       VALUES (${input.team_id}, ${input.event_horizon_days},
               ${input.min_players_threshold},
+              ${input.rsvp_reminders_enabled},
               ${input.rsvp_reminder_days_before}, ${input.rsvp_reminder_time},
               ${input.reminders_channel_id}, ${input.timezone},
               ${input.discord_channel_training}, ${input.discord_channel_match},
@@ -151,6 +156,7 @@ const make = Effect.gen(function* () {
       ON CONFLICT (team_id) DO UPDATE SET
         event_horizon_days = ${input.event_horizon_days},
         min_players_threshold = ${input.min_players_threshold},
+        rsvp_reminders_enabled = ${input.rsvp_reminders_enabled},
         rsvp_reminder_days_before = ${input.rsvp_reminder_days_before},
         rsvp_reminder_time = ${input.rsvp_reminder_time},
         reminders_channel_id = ${input.reminders_channel_id},
@@ -173,6 +179,7 @@ const make = Effect.gen(function* () {
         updated_at = now()
       RETURNING team_id, event_horizon_days,
                 min_players_threshold,
+                rsvp_reminders_enabled,
                 rsvp_reminder_days_before, TO_CHAR(rsvp_reminder_time, 'HH24:MI') AS rsvp_reminder_time,
                 reminders_channel_id, timezone,
                 discord_channel_training, discord_channel_match,
@@ -212,7 +219,7 @@ const make = Effect.gen(function* () {
         JOIN team_settings ts ON ts.team_id = e.team_id
         WHERE e.status = 'active'
           AND e.reminder_sent_at IS NULL
-          AND ts.rsvp_reminder_days_before > 0
+          AND ts.rsvp_reminders_enabled = TRUE
           AND DATE((${nowParam}::timestamptz) AT TIME ZONE ts.timezone)
               + ts.rsvp_reminder_days_before
               = DATE(e.start_at AT TIME ZONE ts.timezone)
@@ -229,6 +236,7 @@ const make = Effect.gen(function* () {
     teamId,
     eventHorizonDays,
     minPlayersThreshold,
+    rsvpRemindersEnabled = true,
     rsvpReminderDaysBefore = 1,
     rsvpReminderTime = '18:00',
     remindersChannelId = Option.none(),
@@ -252,6 +260,7 @@ const make = Effect.gen(function* () {
     teamId: Team.TeamId;
     eventHorizonDays: number;
     minPlayersThreshold: number;
+    rsvpRemindersEnabled?: boolean;
     rsvpReminderDaysBefore?: number;
     rsvpReminderTime?: string;
     remindersChannelId?: Option.Option<Discord.Snowflake>;
@@ -276,6 +285,7 @@ const make = Effect.gen(function* () {
       team_id: teamId,
       event_horizon_days: eventHorizonDays,
       min_players_threshold: minPlayersThreshold,
+      rsvp_reminders_enabled: rsvpRemindersEnabled,
       rsvp_reminder_days_before: rsvpReminderDaysBefore,
       rsvp_reminder_time: rsvpReminderTime,
       reminders_channel_id: remindersChannelId,

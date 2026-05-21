@@ -162,6 +162,7 @@ let rsvpsStore: Map<string, RsvpRecord>;
 let teamSettingsStore: {
   min_players_threshold: number;
   event_horizon_days: number;
+  rsvp_reminders_enabled: boolean;
   rsvp_reminder_days_before: number;
   rsvp_reminder_time: string;
   reminders_channel_id: Option.Option<string>;
@@ -173,6 +174,7 @@ const resetStores = () => {
   teamSettingsStore = {
     min_players_threshold: 5,
     event_horizon_days: 30,
+    rsvp_reminders_enabled: true,
     rsvp_reminder_days_before: 1,
     rsvp_reminder_time: '18:00',
     reminders_channel_id: Option.none(),
@@ -496,6 +498,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         team_id: TEST_TEAM_ID,
         event_horizon_days: teamSettingsStore.event_horizon_days,
         min_players_threshold: teamSettingsStore.min_players_threshold,
+        rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
         rsvp_reminder_days_before: teamSettingsStore.rsvp_reminder_days_before,
         rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
@@ -522,6 +525,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         team_id: TEST_TEAM_ID,
         event_horizon_days: teamSettingsStore.event_horizon_days,
         min_players_threshold: teamSettingsStore.min_players_threshold,
+        rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
         rsvp_reminder_days_before: teamSettingsStore.rsvp_reminder_days_before,
         rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
@@ -561,6 +565,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       team_id: TEST_TEAM_ID,
       event_horizon_days: input.event_horizon_days,
       min_players_threshold: input.min_players_threshold,
+      rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
       rsvp_reminder_days_before:
         input.rsvp_reminder_days_before ?? teamSettingsStore.rsvp_reminder_days_before,
       rsvp_reminder_time: input.rsvp_reminder_time ?? teamSettingsStore.rsvp_reminder_time,
@@ -609,6 +614,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       team_id: TEST_TEAM_ID,
       event_horizon_days: input.eventHorizonDays,
       min_players_threshold: input.minPlayersThreshold,
+      rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
       rsvp_reminder_days_before: teamSettingsStore.rsvp_reminder_days_before,
       rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
       reminders_channel_id: teamSettingsStore.reminders_channel_id,

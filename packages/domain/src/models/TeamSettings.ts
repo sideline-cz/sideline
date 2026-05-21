@@ -8,6 +8,7 @@ export class TeamSettings extends Model.Class<TeamSettings>('TeamSettings')({
   team_id: TeamId,
   event_horizon_days: Schema.Int,
   min_players_threshold: Schema.Int,
+  rsvp_reminders_enabled: Schema.Boolean,
   rsvp_reminder_days_before: Schema.Int,
   rsvp_reminder_time: Schema.String,
   reminders_channel_id: Schema.OptionFromNullOr(Snowflake),
