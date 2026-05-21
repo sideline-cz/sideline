@@ -53,32 +53,38 @@ Five top-level commands are registered globally: `/event`, `/finance`, `/info`, 
 
 ### /join
 
-**Description:** Add a user to the Discord thread this command is invoked in.
+**Description:** Add a user and/or a role's members to the Discord thread this command is invoked in.
 
 **Options:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `user` | User | Yes | The Discord user to add to the thread |
+| `user` | User | No | The Discord user to add to the thread |
+| `role` | Role | No | A Discord role; all of its members are added to the thread |
+
+At least one of `user` or `role` must be supplied.
 
 **Constraints:** `dm_permission: false` — the command cannot be used in DMs.
 
 **Flow:**
 
-1. User invokes `/join user:@Someone` inside a Discord thread (PUBLIC_THREAD, PRIVATE_THREAD, or ANNOUNCEMENT_THREAD).
+1. User invokes `/join` (with `user`, `role`, or both) inside a Discord thread (PUBLIC_THREAD, PRIVATE_THREAD, or ANNOUNCEMENT_THREAD).
 2. The handler (`applications/bot/src/commands/join/handler.ts`) checks the channel type. If the channel is not a thread, it replies ephemerally with "This command can only be used inside a thread."
-3. If no user option is present, it replies ephemerally with "You must specify a user to add."
-4. Otherwise the handler defers with an ephemeral acknowledgement and calls `rest.addThreadMember(channelId, userId)`.
-5. On success, it edits the original deferred message with "Added \<@userId\> to this thread."
+3. If neither option is provided, it replies ephemerally with "You must specify at least a user or a role."
+4. Otherwise it defers ephemerally and, in a forked fiber:
+   - If `role` is supplied, calls `rest.listGuildMembers(guild_id, { limit: 1000 })`, filters to members whose `roles` array contains the supplied role id, and dedupes against the explicit `user` (if any).
+   - Calls `rest.addThreadMember(channelId, userId)` for each target with bounded concurrency (5) to avoid Discord rate-limit storms.
+5. After all calls complete, it edits the original deferred message with a localized summary: per-user, per-role count, both, or "no members with role" / generic-error / forbidden as appropriate.
 
 **Errors:**
 
 | Condition | User-visible message |
 |-----------|----------------------|
 | Channel is not a thread | This command can only be used inside a thread. |
-| No user option provided | You must specify a user to add. |
-| Discord 403 / code 50013 | I don't have permission to add members to this thread. |
-| Other Discord error | Failed to add the user to this thread. Please try again. |
+| Neither option provided | You must specify at least a user or a role. |
+| Role expansion returns no members | No members found with role \<@&roleId\>. |
+| Discord HTTP 403 or JSON code 50013 on `addThreadMember` | I don't have permission to add members to this thread. |
+| Any other Discord error | Failed to add members to this thread. Please try again. |
 
 **Source files:**
 - `applications/bot/src/commands/join/index.ts`

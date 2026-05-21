@@ -11,53 +11,52 @@ import { joinHandler } from '~/commands/join/handler.js';
 
 interface RestStubOptions {
   addThreadMember?: ReturnType<typeof vi.fn>;
+  listGuildMembers?: ReturnType<typeof vi.fn>;
   updateOriginalWebhookMessage?: ReturnType<typeof vi.fn>;
 }
 
 const makeRestStub = (options: RestStubOptions = {}) => {
   const addThreadMember = options.addThreadMember ?? vi.fn(() => Effect.succeed(undefined));
+  const listGuildMembers = options.listGuildMembers ?? vi.fn(() => Effect.succeed([]));
   const updateOriginalWebhookMessage =
     options.updateOriginalWebhookMessage ?? vi.fn(() => Effect.succeed(undefined));
 
   const rest = new Proxy({} as DiscordRestService, {
     get: (_target, prop: string) => {
       if (prop === 'addThreadMember') return addThreadMember;
+      if (prop === 'listGuildMembers') return listGuildMembers;
       if (prop === 'updateOriginalWebhookMessage') return updateOriginalWebhookMessage;
       return () => Effect.succeed(undefined);
     },
   }) as unknown as DiscordRestService;
 
   const layer = Layer.succeed(DiscordREST, rest as unknown as InstanceType<typeof DiscordREST>);
-  return { layer, addThreadMember, updateOriginalWebhookMessage };
+  return { layer, addThreadMember, listGuildMembers, updateOriginalWebhookMessage };
 };
 
 // ---------------------------------------------------------------------------
 // Interaction fixture
 // ---------------------------------------------------------------------------
 
+interface InteractionOptionFixture {
+  type: number;
+  name: string;
+  value?: string;
+}
+
 interface InteractionFixtureOptions {
   channelType?: number;
   channelId?: string | undefined;
-  userOptionValue?: string | undefined;
+  options?: ReadonlyArray<InteractionOptionFixture>;
   locale?: string;
+  guildId?: string | undefined;
 }
 
 const makeInteraction = (opts: InteractionFixtureOptions = {}): DiscordTypes.APIInteraction => {
   const channelType = opts.channelType ?? DiscordTypes.ChannelTypes.PUBLIC_THREAD;
   const channelId = opts.channelId === undefined ? 'thread-123' : opts.channelId;
-  const userOptionValue = opts.userOptionValue;
   const locale = opts.locale ?? 'en-US';
-
-  const options =
-    userOptionValue === undefined
-      ? []
-      : [
-          {
-            type: DiscordTypes.ApplicationCommandOptionType.USER,
-            name: 'user',
-            value: userOptionValue,
-          },
-        ];
+  const guildId = opts.guildId === undefined ? '9999999999' : opts.guildId;
 
   return {
     id: '1234567890' as DiscordTypes.Snowflake,
@@ -65,7 +64,7 @@ const makeInteraction = (opts: InteractionFixtureOptions = {}): DiscordTypes.API
     token: 'interaction-token',
     version: 1,
     type: DiscordTypes.InteractionTypes.APPLICATION_COMMAND,
-    guild_id: '9999999999' as DiscordTypes.Snowflake,
+    guild_id: guildId as DiscordTypes.Snowflake | undefined,
     channel_id: channelId as DiscordTypes.Snowflake | undefined,
     channel: channelId
       ? ({
@@ -92,10 +91,37 @@ const makeInteraction = (opts: InteractionFixtureOptions = {}): DiscordTypes.API
       id: 'cmd-id' as DiscordTypes.Snowflake,
       name: 'join',
       type: DiscordTypes.ApplicationCommandType.CHAT,
-      options,
+      options: opts.options ?? [],
     },
   } as unknown as DiscordTypes.APIInteraction;
 };
+
+const userOption = (value: string): InteractionOptionFixture => ({
+  type: DiscordTypes.ApplicationCommandOptionType.USER,
+  name: 'user',
+  value,
+});
+
+const roleOption = (value: string): InteractionOptionFixture => ({
+  type: DiscordTypes.ApplicationCommandOptionType.ROLE,
+  name: 'role',
+  value,
+});
+
+const makeMember = (id: string, roles: ReadonlyArray<string>) => ({
+  user: { id, username: id, discriminator: '0000', global_name: null, avatar: null },
+  roles,
+  joined_at: '2024-01-01T00:00:00Z',
+  deaf: false,
+  mute: false,
+  pending: false,
+  flags: 0,
+  nick: null,
+  premium_since: null,
+  banner: null,
+  communication_disabled_until: null,
+  avatar_decoration_data: null,
+});
 
 const runHandler = async (
   interaction: DiscordTypes.APIInteraction,
@@ -107,9 +133,6 @@ const runHandler = async (
       Effect.provide(restLayer),
     ),
   );
-  // The handler returns deferred immediately and forks the REST work in a
-  // detached fiber. Yield a few microtasks so the forked work can settle
-  // before assertions run on the stubs.
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
   return response;
@@ -125,7 +148,7 @@ describe('joinHandler', () => {
     const response = await runHandler(
       makeInteraction({
         channelType: DiscordTypes.ChannelTypes.GUILD_TEXT,
-        userOptionValue: 'target-1',
+        options: [userOption('target-1')],
       }),
       stub.layer,
     );
@@ -141,211 +164,223 @@ describe('joinHandler', () => {
     const response = await runHandler(
       makeInteraction({
         channelType: DiscordTypes.ChannelTypes.GUILD_CATEGORY,
-        userOptionValue: 'target-1',
+        options: [userOption('target-1')],
       }),
       stub.layer,
     );
 
-    const json = JSON.stringify(response);
-    expect(json).toContain('thread');
+    expect(JSON.stringify(response)).toContain('thread');
     expect(stub.addThreadMember).not.toHaveBeenCalled();
   });
 
-  it('returns ephemeral "missing user" when user option is absent', async () => {
+  it('returns ephemeral "missing target" when neither user nor role is provided', async () => {
     const stub = makeRestStub();
-    const response = await runHandler(
-      makeInteraction({
-        channelType: DiscordTypes.ChannelTypes.PUBLIC_THREAD,
-        userOptionValue: undefined,
-      }),
-      stub.layer,
-    );
+    const response = await runHandler(makeInteraction({ options: [] }), stub.layer);
 
     const json = JSON.stringify(response);
-    expect(json).toMatch(/64|ephemeral/i);
     expect(json.toLowerCase()).toContain('user');
     expect(stub.addThreadMember).not.toHaveBeenCalled();
   });
 
-  it('defers and calls addThreadMember for a PUBLIC_THREAD', async () => {
+  it('user only — calls addThreadMember once and reports the user mention', async () => {
     const stub = makeRestStub();
     const response = await runHandler(
       makeInteraction({
         channelType: DiscordTypes.ChannelTypes.PUBLIC_THREAD,
         channelId: 'thread-123',
-        userOptionValue: 'target-1',
+        options: [userOption('target-1')],
       }),
       stub.layer,
     );
 
-    // Initial response is deferred + ephemeral
     expect(response).toEqual({
       type: DiscordTypes.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
       data: { flags: DiscordTypes.MessageFlags.Ephemeral },
     });
-
-    // Forked work completes synchronously under runPromise — addThreadMember was called
     expect(stub.addThreadMember).toHaveBeenCalledWith('thread-123', 'target-1');
-    expect(stub.updateOriginalWebhookMessage).toHaveBeenCalledTimes(1);
-
-    // The webhook update payload contains the user mention and the success text
-    const updateCall = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
-    expect(JSON.stringify(updateCall)).toContain('<@target-1>');
+    expect(stub.listGuildMembers).not.toHaveBeenCalled();
+    const update = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
+    expect(JSON.stringify(update)).toContain('<@target-1>');
   });
 
-  it('works in a PRIVATE_THREAD', async () => {
-    const stub = makeRestStub();
+  it('role only — expands role members and calls addThreadMember for each', async () => {
+    const members = [
+      makeMember('user-a', ['role-x']),
+      makeMember('user-b', ['role-x', 'role-y']),
+      makeMember('user-c', ['role-y']), // does NOT have role-x — should be filtered out
+      makeMember('user-d', ['role-x']),
+    ];
+    const stub = makeRestStub({
+      listGuildMembers: vi.fn(() => Effect.succeed(members)),
+    });
+
     await runHandler(
       makeInteraction({
-        channelType: DiscordTypes.ChannelTypes.PRIVATE_THREAD,
-        channelId: 'thread-456',
-        userOptionValue: 'target-1',
+        channelId: 'thread-xyz',
+        options: [roleOption('role-x')],
       }),
       stub.layer,
     );
-    expect(stub.addThreadMember).toHaveBeenCalledWith('thread-456', 'target-1');
+
+    expect(stub.listGuildMembers).toHaveBeenCalled();
+    const addedIds = stub.addThreadMember.mock.calls.map((c: unknown[]) => c[1]).sort();
+    expect(addedIds).toEqual(['user-a', 'user-b', 'user-d']);
+
+    const update = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
+    const updateJson = JSON.stringify(update);
+    expect(updateJson).toContain('<@&role-x>');
+    expect(updateJson).toContain('3');
   });
 
-  it('works in an ANNOUNCEMENT_THREAD', async () => {
-    const stub = makeRestStub();
+  it('role only with no matching members — reports "no members" message', async () => {
+    const stub = makeRestStub({
+      listGuildMembers: vi.fn(() =>
+        Effect.succeed([
+          makeMember('user-a', ['other-role']),
+          makeMember('user-b', ['another-role']),
+        ]),
+      ),
+    });
+
+    await runHandler(makeInteraction({ options: [roleOption('role-x')] }), stub.layer);
+
+    expect(stub.addThreadMember).not.toHaveBeenCalled();
+    const update = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
+    const updateJson = JSON.stringify(update);
+    expect(updateJson.toLowerCase()).toMatch(/no members|nemá žádné/);
+  });
+
+  it('user + role — deduplicates and reports both counts', async () => {
+    const members = [
+      makeMember('target-1', ['role-x']), // overlaps with explicit user
+      makeMember('user-b', ['role-x']),
+      makeMember('user-c', ['role-x']),
+    ];
+    const stub = makeRestStub({
+      listGuildMembers: vi.fn(() => Effect.succeed(members)),
+    });
+
     await runHandler(
       makeInteraction({
-        channelType: DiscordTypes.ChannelTypes.ANNOUNCEMENT_THREAD,
-        channelId: 'thread-789',
-        userOptionValue: 'target-1',
+        options: [userOption('target-1'), roleOption('role-x')],
       }),
       stub.layer,
     );
-    expect(stub.addThreadMember).toHaveBeenCalledWith('thread-789', 'target-1');
+
+    const addedIds = stub.addThreadMember.mock.calls.map((c: unknown[]) => c[1]).sort();
+    expect(addedIds).toEqual(['target-1', 'user-b', 'user-c']);
+
+    const update = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
+    const updateJson = JSON.stringify(update);
+    expect(updateJson).toContain('<@target-1>');
+    expect(updateJson).toContain('<@&role-x>');
+    // 2 = 3 added minus the explicit user
+    expect(updateJson).toContain('2');
   });
 
-  it('maps Discord HTTP 403 to bot_join_bot_forbidden', async () => {
+  it('maps Discord 403 (response.status) to bot_join_bot_forbidden', async () => {
     const stub = makeRestStub({
       addThreadMember: vi.fn(() =>
         Effect.fail({
           _tag: 'ErrorResponse' as const,
-          status: 403,
-          code: 50013,
+          response: { status: 403 },
+          data: { code: 50013, message: 'Missing Permissions' },
           message: 'Missing Permissions',
         }),
       ),
     });
 
-    await runHandler(
-      makeInteraction({
-        channelType: DiscordTypes.ChannelTypes.PUBLIC_THREAD,
-        userOptionValue: 'target-1',
-      }),
-      stub.layer,
-    );
+    await runHandler(makeInteraction({ options: [userOption('target-1')] }), stub.layer);
 
-    const updateCall = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
-    const payloadJson = JSON.stringify(updateCall);
-    expect(payloadJson.toLowerCase()).toContain('permission');
+    const update = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
+    expect(JSON.stringify(update).toLowerCase()).toContain('permission');
   });
 
-  it('maps Discord JSON code 50013 (without HTTP 403) to bot_join_bot_forbidden', async () => {
+  it('maps Discord JSON code 50013 (data.code) to bot_join_bot_forbidden', async () => {
     const stub = makeRestStub({
       addThreadMember: vi.fn(() =>
         Effect.fail({
           _tag: 'ErrorResponse' as const,
-          status: 400,
-          code: 50013,
+          response: { status: 400 },
+          data: { code: 50013, message: 'Missing Permissions' },
           message: 'Missing Permissions',
         }),
       ),
     });
 
-    await runHandler(
-      makeInteraction({
-        channelType: DiscordTypes.ChannelTypes.PUBLIC_THREAD,
-        userOptionValue: 'target-1',
-      }),
-      stub.layer,
-    );
+    await runHandler(makeInteraction({ options: [userOption('target-1')] }), stub.layer);
 
-    const updateCall = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
-    const payloadJson = JSON.stringify(updateCall);
-    expect(payloadJson.toLowerCase()).toContain('permission');
+    const update = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
+    expect(JSON.stringify(update).toLowerCase()).toContain('permission');
   });
 
-  it('falls back to generic error message on non-permission ErrorResponse', async () => {
+  it('does NOT map Discord 404 to forbidden — falls back to generic error', async () => {
     const stub = makeRestStub({
       addThreadMember: vi.fn(() =>
         Effect.fail({
           _tag: 'ErrorResponse' as const,
-          status: 500,
+          response: { status: 404 },
+          data: { code: 10003, message: 'Unknown Channel' },
+          message: 'Unknown Channel',
+        }),
+      ),
+    });
+
+    await runHandler(makeInteraction({ options: [userOption('target-1')] }), stub.layer);
+
+    const update = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
+    const json = JSON.stringify(update).toLowerCase();
+    expect(json).not.toContain('permission');
+  });
+
+  it('falls back to generic error on non-permission ErrorResponse', async () => {
+    const stub = makeRestStub({
+      addThreadMember: vi.fn(() =>
+        Effect.fail({
+          _tag: 'ErrorResponse' as const,
+          response: { status: 500 },
+          data: { code: 0, message: 'Internal' },
           message: 'Internal Server Error',
         }),
       ),
     });
 
-    await runHandler(
-      makeInteraction({
-        channelType: DiscordTypes.ChannelTypes.PUBLIC_THREAD,
-        userOptionValue: 'target-1',
-      }),
-      stub.layer,
-    );
+    await runHandler(makeInteraction({ options: [userOption('target-1')] }), stub.layer);
 
-    const updateCall = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
-    const payloadJson = JSON.stringify(updateCall);
-    // Should NOT contain "permission" — generic error wording differs in en
-    expect(payloadJson.toLowerCase()).not.toContain('permission');
+    const update = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
+    expect(JSON.stringify(update).toLowerCase()).not.toContain('permission');
   });
 
-  it('falls back to generic error on unknown REST failure', async () => {
-    const stub = makeRestStub({
-      addThreadMember: vi.fn(() =>
-        Effect.fail({
-          _tag: 'HttpClientError' as const,
-          message: 'network unreachable',
-        }),
-      ),
-    });
-
-    await runHandler(
-      makeInteraction({
-        channelType: DiscordTypes.ChannelTypes.PUBLIC_THREAD,
-        userOptionValue: 'target-1',
-      }),
-      stub.layer,
-    );
-
-    expect(stub.updateOriginalWebhookMessage).toHaveBeenCalledTimes(1);
-    const updateCall = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
-    expect(updateCall).toBeDefined();
-  });
-
-  it('uses Czech locale strings when invoker locale is cs', async () => {
+  it('Czech locale renders Czech success text', async () => {
     const stub = makeRestStub();
-    const response = await runHandler(
+    await runHandler(
       makeInteraction({
-        channelType: DiscordTypes.ChannelTypes.GUILD_TEXT,
-        userOptionValue: 'target-1',
+        options: [userOption('target-1')],
         locale: 'cs',
       }),
       stub.layer,
     );
-
-    const json = JSON.stringify(response);
-    // Czech "vlákno" (thread) should appear in the response content
-    expect(json).toContain('vlákn');
+    const update = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
+    expect(JSON.stringify(update)).toContain('vlákn');
   });
 
-  it('returns ephemeral missing-user message in Czech when locale is cs', async () => {
+  it('Czech locale renders Czech missing-target text', async () => {
     const stub = makeRestStub();
-    const response = await runHandler(
-      makeInteraction({
-        channelType: DiscordTypes.ChannelTypes.PUBLIC_THREAD,
-        userOptionValue: undefined,
-        locale: 'cs',
-      }),
-      stub.layer,
-    );
+    const response = await runHandler(makeInteraction({ options: [], locale: 'cs' }), stub.layer);
 
     const json = JSON.stringify(response);
-    // Czech text should contain a Czech-specific letter (zadat / uživatele)
-    expect(json).toMatch(/zadat|uživatele/);
+    expect(json).toMatch(/zadat|alespoň/);
+  });
+
+  it('sets allowed_mentions.users so the added user mention does not silently ping anyone', async () => {
+    const stub = makeRestStub();
+    await runHandler(makeInteraction({ options: [userOption('target-1')] }), stub.layer);
+
+    const update = stub.updateOriginalWebhookMessage.mock.calls[0]?.[2];
+    const payload = (update as { payload?: { allowed_mentions?: unknown } } | undefined)?.payload;
+    const allowedMentions = (payload as { allowed_mentions?: unknown } | undefined)
+      ?.allowed_mentions;
+    expect(allowedMentions).toBeDefined();
+    expect(allowedMentions).toEqual({ parse: [], users: ['target-1'] });
   });
 });

@@ -17,7 +17,16 @@ export const JoinCommand = Ix.global(
         description_localizations: {
           cs: m.bot_join_user_option_description({}, { locale: 'cs' }),
         },
-        required: true,
+        required: false,
+      },
+      {
+        type: DiscordTypes.ApplicationCommandOptionType.ROLE,
+        name: 'role',
+        description: m.bot_join_role_option_description({}, { locale: 'en' }),
+        description_localizations: {
+          cs: m.bot_join_role_option_description({}, { locale: 'cs' }),
+        },
+        required: false,
       },
     ],
   } as const,
