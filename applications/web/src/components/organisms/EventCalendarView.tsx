@@ -16,7 +16,7 @@ import {
   navigateMonth,
   navigateWeek,
 } from '~/lib/calendar-utils';
-import { formatLocalTime } from '~/lib/datetime';
+import { formatEventDateRange, formatLocalTime } from '~/lib/datetime';
 import {
   buildTrainingTypeColorMap,
   getEventColor,
@@ -392,8 +392,7 @@ function WeekEventCard({
 }) {
   const color = getEventColor(event.eventType, Option.getOrNull(event.trainingTypeName), colorMap);
   const isCancelled = event.status === 'cancelled';
-  const time = formatLocalTime(event.startAt);
-  const endTime = Option.map(event.endAt, formatLocalTime);
+  const { startTime, end } = formatEventDateRange(event.startAt, event.endAt);
 
   return (
     <Link
@@ -408,12 +407,9 @@ function WeekEventCard({
     >
       <div className={cn('text-sm font-medium', color.text)}>{event.title}</div>
       <div className='text-xs text-muted-foreground'>
-        {time}
-        {endTime.pipe(
-          Option.map((v) => ` – ${v}`),
-          Option.getOrElse(() => ''),
-        )}{' '}
-        · {eventTypeLabels[event.eventType]()}
+        {startTime}
+        {Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })} ·{' '}
+        {eventTypeLabels[event.eventType]()}
         {event.trainingTypeName.pipe(
           Option.map((v) => ` · ${v}`),
           Option.getOrElse(() => ''),
