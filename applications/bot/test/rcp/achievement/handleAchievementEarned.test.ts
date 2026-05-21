@@ -200,7 +200,7 @@ describe('handleAchievementEarned', () => {
       m.includes('skipped embed (achievement channel not configured)'),
     );
     expect(skippedEmbedLogs).toHaveLength(0);
-  }, 15_000);
+  });
 
   it('when addGuildMemberRole succeeds and achievement_channel_id is None, "skipped embed" log IS emitted', async () => {
     const { messages, layer: logLayer } = makeLogCapture();

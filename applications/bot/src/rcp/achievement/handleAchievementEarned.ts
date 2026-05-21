@@ -8,8 +8,10 @@ const grantRole = (event: AchievementRpcEvents.AchievementEarnedEvent, roleId: s
   Effect.Do.pipe(
     Effect.bind('rest', () => DiscordREST.asEffect()),
     Effect.bind('granted', ({ rest }) =>
+      // Order: short-circuit 404 BEFORE retrying. A missing role is a permanent
+      // failure, so retrying with exponential backoff would only add latency and
+      // spam warning logs. retryPolicy still applies to other transient errors.
       rest.addGuildMemberRole(event.guild_id, event.discord_user_id, roleId).pipe(
-        Effect.retry(retryPolicy),
         Effect.as(true),
         Effect.catchTag('ErrorResponse', (err) =>
           err.response.status === 404
@@ -18,6 +20,7 @@ const grantRole = (event: AchievementRpcEvents.AchievementEarnedEvent, roleId: s
               ).pipe(Effect.as(false))
             : Effect.fail(err),
         ),
+        Effect.retry(retryPolicy),
       ),
     ),
     Effect.tap(({ granted }) =>
@@ -54,8 +57,10 @@ const postEmbed = (
         roles: roleId !== undefined ? [roleId] : [],
       };
 
+      // Order: short-circuit 404 BEFORE retrying. A deleted channel is a
+      // permanent failure — retrying would only delay the worker. retryPolicy
+      // still applies to other transient errors.
       return rest.createMessage(channelId, { content, embeds: [embed], allowed_mentions }).pipe(
-        Effect.retry(retryPolicy),
         Effect.catchTag('ErrorResponse', (err) =>
           err.response.status === 404
             ? Effect.logWarning(
@@ -63,6 +68,7 @@ const postEmbed = (
               )
             : Effect.fail(err),
         ),
+        Effect.retry(retryPolicy),
       );
     }),
     Effect.tap(() =>
