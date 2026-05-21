@@ -1,4 +1,5 @@
-import { ActivityLogApi, Auth } from '@sideline/domain';
+import { ActivityLogApi, ActivityLogDate, Auth } from '@sideline/domain';
+import { Options } from '@sideline/effect-lib';
 import { DateTime, Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
@@ -7,6 +8,17 @@ import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
+
+/**
+ * Parses a `YYYY-MM-DD` Prague-local date string into a `Date` anchored at
+ * Prague noon, failing with `InvalidLoggedAtDate` if the string is not a
+ * valid date within the ±730 day window. Used by both `createLog` and
+ * `updateLog` to consistently surface bad client input.
+ */
+const parsePragueDate = (dateStr: string) =>
+  ActivityLogDate.parseLoggedAtDateInPrague(dateStr).pipe(
+    Options.toEffect(() => new ActivityLogApi.InvalidLoggedAtDate()),
+  );
 
 export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (handlers) =>
   Effect.Do.pipe(
@@ -62,11 +74,17 @@ export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (hand
             Effect.tap(({ membership }) =>
               membership.active ? Effect.void : Effect.fail(new ActivityLogApi.MemberInactive()),
             ),
-            Effect.flatMap(() =>
+            Effect.bind('loggedAt', () =>
+              Option.match(payload.loggedAtDate, {
+                onNone: () => Effect.sync(() => DateTime.toDateUtc(DateTime.nowUnsafe())),
+                onSome: parsePragueDate,
+              }),
+            ),
+            Effect.flatMap(({ loggedAt }) =>
               activityLogs.insert({
                 team_member_id: memberId,
                 activity_type_id: payload.activityTypeId,
-                logged_at: DateTime.toDateUtc(DateTime.nowUnsafe()),
+                logged_at: loggedAt,
                 duration_minutes: payload.durationMinutes,
                 note: payload.note,
                 source: 'manual',
@@ -114,9 +132,16 @@ export const ActivityLogApiLive = HttpApiBuilder.group(Api, 'activityLog', (hand
             Effect.tap(({ membership }) =>
               membership.active ? Effect.void : Effect.fail(new ActivityLogApi.MemberInactive()),
             ),
-            Effect.flatMap(() =>
+            Effect.bind('updatedLoggedAt', () =>
+              Option.match(payload.loggedAtDate, {
+                onNone: () => Effect.succeed(Option.none<Date>()),
+                onSome: (dateStr) => Effect.map(parsePragueDate(dateStr), Option.some),
+              }),
+            ),
+            Effect.flatMap(({ updatedLoggedAt }) =>
               activityLogs.update(logId, memberId, {
                 activity_type_id: payload.activityTypeId,
+                logged_at: updatedLoggedAt,
                 duration_minutes: payload.durationMinutes,
                 note: payload.note,
               }),

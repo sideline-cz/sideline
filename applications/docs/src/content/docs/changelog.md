@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-21 — Backdate and future-date activity log entries
+
+- You can now choose **any date** when logging a physical activity, instead of always using today. The limit is ±2 years from the current date.
+- In the **web app** (Workout page and member profile Activity tab), the create form and the edit sheet both have a new **Date** field. Leave it blank to keep the default of today.
+- In Discord, the **`/makanicko log`** command accepts a new optional `date` argument (`YYYY-MM-DD`). Omitting it continues to log against today.
+- Dates are anchored at noon Europe/Prague time so they always count toward the correct daily streak and stats bucket.
+- Auto-logged entries (created when a training event ends) are unaffected and still cannot be edited.
+
 ## 2026-05-18 — Expense tracking
 
 - Admins and Treasurers can now record **team expenditures** — pitch hire, equipment purchases, travel costs, tournament entry fees, and other team spending.

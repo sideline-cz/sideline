@@ -118,6 +118,22 @@ When adding a new URL-bearing field:
 
 Do NOT replace the IPv4/IPv6 patterns with a synchronous DNS lookup — domain schemas must remain pure (no I/O). The patterns block IP-literal URLs at the schema layer; defence-in-depth (e.g. egress filtering, DNS rebinding mitigation) is the consuming service's responsibility.
 
+## Wire-Format Date-String Helpers (`src/models/<Resource>Date.ts`)
+
+When a user-facing wire format carries a calendar date as a `YYYY-MM-DD` string (HTTP payload, RPC field, slash-command option) but the DB stores it as `TIMESTAMPTZ`, the **conversion from wire string to `Date` lives in a dedicated `src/models/<Resource>Date.ts` module** in `@sideline/domain` — never inline in the server handler or in the web/bot. Both producers (web, bot) and the server import the same helper so anchoring + validation cannot drift.
+
+Reference: `packages/domain/src/models/ActivityLogDate.ts` exports `parseLoggedAtDateInPrague(s) => Option<Date>` and `formatPragueDate(d) => string`. Used by `applications/server/src/api/activity-logs.ts`, `applications/server/src/rpc/activity/index.ts`, and `applications/web/src/components/organisms/ActivityLogList.tsx`.
+
+Rules:
+
+1. **The module exports two pure functions: a `parse...` returning `Option<Date>` and a `format...` returning `string`.** Parsing returns `Option.none()` on any invalid input — never throw, never return `null`. Formatting always returns the canonical `YYYY-MM-DD` (use `new Intl.DateTimeFormat('en-CA', { timeZone: '<IANA>' })` — `en-CA` guarantees ISO 8601 ordering).
+2. **Validate the format with a `/^\d{4}-\d{2}-\d{2}$/` regex AND a calendar round-trip** (`new Date(Date.UTC(y, m-1, d)).toISOString().slice(0,10) === input`). The regex alone accepts `2025-02-30`; the round-trip catches it.
+3. **Anchor the resulting `Date` to noon in the business timezone** (e.g. Prague noon UTC), not midnight. Midnight anchoring lands inside a DST gap once a year and silently shifts the row to the previous day; noon is DST-safe in every IANA zone. The DST-safe anchoring algorithm: start with `new Date(Date.UTC(y, m-1, d, 12, 0, 0))`, read the zone's hour back via `Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', hour12: false })`, and subtract `(pragueHour - 12) * 3600000ms` to correct for the zone offset.
+4. **Bound accepted dates to `±MAX_DAYS_OFFSET` from today in the business timezone** (current value: 730 days for activity logs). Compute "today" with the same `formatPragueDate(new Date())` so the bound matches the anchoring. Dates outside the window return `Option.none()` — this prevents backfilling decades-old rows or scheduling logs in the far future.
+5. **The module has no Effect, no I/O, no schema imports beyond `Option` from `effect`.** It is consumed by the web (browser), the bot (Node), and the server (Node) — keep it framework-free. Call sites in the server lift the `Option<Date>` into an `Effect` failure with `Options.toEffect(() => new <Resource>InvalidDate())` from `@sideline/effect-lib`.
+6. **Re-export from `packages/domain/src/index.ts` as `export * as <Resource>Date from './models/<Resource>Date.js';`** (namespace export) — consumers then write `<Resource>Date.parseLoggedAtDateInPrague(...)` and `<Resource>Date.formatPragueDate(...)`. Do not flat-export the function names; the namespace prefix prevents collisions when multiple resources have their own date helpers.
+7. **The matching wire-format schema lives in the same API/RPC file as the endpoint** (e.g. `LoggedAtDate = Schema.String.pipe(Schema.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/)))` in `ActivityLogApi.ts`) — the schema enforces the wire pattern at the HTTP boundary; the `parse...` helper does the calendar + bounds validation and the timezone-aware anchoring. Both layers are required: the schema rejects obvious garbage early; the helper handles the semantic checks the schema cannot express.
+
 ## Code-Defined Catalogs
 
 Some domain enumerations ship as a **code-defined catalog** in `src/models/` rather than as DB-seeded rows. Use this pattern when every entry needs structured per-entry metadata (predicates, flags, thresholds) that is consumed identically by server, bot, and web, and the list is small + change-controlled (PR-only, not user-editable at runtime).

@@ -1,5 +1,5 @@
 import { ActivityLog, ActivityLogApi, ActivityType, TeamMember } from '@sideline/domain';
-import { LogicError } from '@sideline/effect-lib';
+import { LogicError, Options } from '@sideline/effect-lib';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
@@ -47,6 +47,7 @@ const UpdateInput = Schema.Struct({
   id: ActivityLog.ActivityLogId,
   team_member_id: TeamMember.TeamMemberId,
   activity_type_id: ActivityType.ActivityTypeId,
+  logged_at: Schema.NullOr(Schema.Date),
   duration_minutes: Schema.OptionFromNullOr(Schema.Int),
   note: Schema.OptionFromNullOr(Schema.String),
 });
@@ -96,7 +97,7 @@ const make = Effect.gen(function* () {
       FROM activity_logs al
       JOIN activity_types at ON at.id = al.activity_type_id
       WHERE al.team_member_id = ${teamMemberId}
-      ORDER BY al.logged_at
+      ORDER BY al.logged_at, al.id
     `,
   });
 
@@ -110,7 +111,7 @@ const make = Effect.gen(function* () {
       FROM activity_logs al
       JOIN activity_types at ON at.id = al.activity_type_id
       WHERE al.team_member_id = ${teamMemberId}
-      ORDER BY al.logged_at DESC
+      ORDER BY al.logged_at DESC, al.id DESC
       LIMIT 100
     `,
   });
@@ -136,6 +137,7 @@ const make = Effect.gen(function* () {
       UPDATE activity_logs
       SET
         activity_type_id = ${input.activity_type_id},
+        logged_at = COALESCE(${input.logged_at}, logged_at),
         duration_minutes = ${input.duration_minutes},
         note = ${input.note}
       WHERE id = ${input.id}
@@ -184,6 +186,7 @@ const make = Effect.gen(function* () {
     memberId: TeamMember.TeamMemberId,
     input: {
       activity_type_id: Option.Option<ActivityType.ActivityTypeId>;
+      logged_at: Option.Option<Date>;
       duration_minutes: Option.Option<Option.Option<number>>;
       note: Option.Option<Option.Option<string>>;
     },
@@ -191,12 +194,7 @@ const make = Effect.gen(function* () {
     Effect.Do.pipe(
       Effect.bind('existing', () =>
         findById(id, memberId).pipe(
-          Effect.flatMap(
-            Option.match({
-              onNone: () => Effect.fail(new ActivityLogApi.LogNotFound()),
-              onSome: Effect.succeed,
-            }),
-          ),
+          Effect.flatMap(Options.toEffect(() => new ActivityLogApi.LogNotFound())),
         ),
       ),
       Effect.tap(({ existing }) =>
@@ -212,14 +210,12 @@ const make = Effect.gen(function* () {
             input.activity_type_id,
             () => existing.activity_type_id,
           ),
-          duration_minutes: Option.match(input.duration_minutes, {
-            onNone: () => existing.duration_minutes,
-            onSome: (v) => v,
-          }),
-          note: Option.match(input.note, {
-            onNone: () => existing.note,
-            onSome: (v) => v,
-          }),
+          logged_at: Option.getOrNull(input.logged_at),
+          duration_minutes: Option.getOrElse(
+            input.duration_minutes,
+            () => existing.duration_minutes,
+          ),
+          note: Option.getOrElse(input.note, () => existing.note),
         }).pipe(
           catchSqlErrors,
           Effect.catchTag(
@@ -237,12 +233,7 @@ const make = Effect.gen(function* () {
     Effect.Do.pipe(
       Effect.bind('existing', () =>
         findById(id, memberId).pipe(
-          Effect.flatMap(
-            Option.match({
-              onNone: () => Effect.fail(new ActivityLogApi.LogNotFound()),
-              onSome: Effect.succeed,
-            }),
-          ),
+          Effect.flatMap(Options.toEffect(() => new ActivityLogApi.LogNotFound())),
         ),
       ),
       Effect.tap(({ existing }) =>

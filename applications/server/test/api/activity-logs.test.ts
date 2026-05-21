@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from '@effect/vitest';
 import type { ActivityLog, ActivityType, Auth, Role, Team, TeamMember } from '@sideline/domain';
-import { ActivityLogApi } from '@sideline/domain';
+import { ActivityLogApi, ActivityLogDate } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option, Result } from 'effect';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import type { MembershipWithRole } from '~/repositories/TeamMembersRepository.js';
@@ -180,6 +180,7 @@ const MockActivityLogsRepositoryLayer = Layer.succeed(ActivityLogsRepository, {
       activity_type_id: Option.Option<ActivityType.ActivityTypeId>;
       duration_minutes: Option.Option<Option.Option<number>>;
       note: Option.Option<Option.Option<string>>;
+      logged_at: Option.Option<Date>;
     },
   ) => {
     const existing = activityLogsStore.get(id);
@@ -191,6 +192,10 @@ const MockActivityLogsRepositoryLayer = Layer.succeed(ActivityLogsRepository, {
       activity_type_id: Option.getOrElse(input.activity_type_id, () => existing.activity_type_id),
       duration_minutes: Option.getOrElse(input.duration_minutes, () => existing.duration_minutes),
       note: Option.getOrElse(input.note, () => existing.note),
+      logged_at: Option.match(input.logged_at, {
+        onNone: () => existing.logged_at,
+        onSome: (d) => d.toISOString(),
+      }),
     };
     activityLogsStore.set(id, updated);
     return Effect.succeed(updated);
@@ -272,9 +277,13 @@ const createLog = (payload: {
   activityTypeId: ActivityType.ActivityTypeId;
   durationMinutes: Option.Option<number>;
   note: Option.Option<string>;
+  loggedAtDate: Option.Option<string>;
 }): Effect.Effect<
   ActivityLogApi.ActivityLogEntry,
-  ActivityLogApi.Forbidden | ActivityLogApi.MemberNotFound | ActivityLogApi.MemberInactive,
+  | ActivityLogApi.Forbidden
+  | ActivityLogApi.MemberNotFound
+  | ActivityLogApi.MemberInactive
+  | ActivityLogApi.InvalidLoggedAtDate,
   TeamMembersRepository | ActivityLogsRepository
 > =>
   Effect.Do.pipe(
@@ -298,11 +307,20 @@ const createLog = (payload: {
     Effect.tap(({ membership }) =>
       membership.active ? Effect.void : Effect.fail(new ActivityLogApi.MemberInactive()),
     ),
-    Effect.flatMap(({ activityLogs }) =>
+    Effect.bind('loggedAt', () => {
+      if (Option.isSome(payload.loggedAtDate)) {
+        const parsed = ActivityLogDate.parseLoggedAtDateInPrague(payload.loggedAtDate.value);
+        return Option.isSome(parsed)
+          ? Effect.succeed(parsed.value)
+          : Effect.fail(new ActivityLogApi.InvalidLoggedAtDate());
+      }
+      return Effect.succeed(DateTime.toDateUtc(DateTime.nowUnsafe()));
+    }),
+    Effect.flatMap(({ activityLogs, loggedAt }) =>
       activityLogs.insert({
         team_member_id: payload.memberId,
         activity_type_id: payload.activityTypeId,
-        logged_at: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        logged_at: loggedAt,
         duration_minutes: payload.durationMinutes,
         note: payload.note,
         source: 'manual',
@@ -331,12 +349,14 @@ const updateLog = (payload: {
   activityTypeId: Option.Option<ActivityType.ActivityTypeId>;
   durationMinutes: Option.Option<Option.Option<number>>;
   note: Option.Option<Option.Option<string>>;
+  loggedAtDate: Option.Option<string>;
 }): Effect.Effect<
   ActivityLogApi.ActivityLogEntry,
   | ActivityLogApi.Forbidden
   | ActivityLogApi.LogNotFound
   | ActivityLogApi.MemberInactive
-  | ActivityLogApi.AutoSourceForbidden,
+  | ActivityLogApi.AutoSourceForbidden
+  | ActivityLogApi.InvalidLoggedAtDate,
   TeamMembersRepository | ActivityLogsRepository
 > =>
   Effect.Do.pipe(
@@ -360,9 +380,19 @@ const updateLog = (payload: {
     Effect.tap(({ membership }) =>
       membership.active ? Effect.void : Effect.fail(new ActivityLogApi.MemberInactive()),
     ),
-    Effect.flatMap(({ activityLogs }) =>
+    Effect.bind('loggedAtOpt', () => {
+      if (Option.isSome(payload.loggedAtDate)) {
+        const parsed = ActivityLogDate.parseLoggedAtDateInPrague(payload.loggedAtDate.value);
+        return Option.isSome(parsed)
+          ? Effect.succeed(Option.some(parsed.value))
+          : Effect.fail(new ActivityLogApi.InvalidLoggedAtDate());
+      }
+      return Effect.succeed(Option.none<Date>());
+    }),
+    Effect.flatMap(({ activityLogs, loggedAtOpt }) =>
       activityLogs.update(payload.logId, payload.memberId, {
         activity_type_id: payload.activityTypeId,
+        logged_at: loggedAtOpt,
         duration_minutes: payload.durationMinutes,
         note: payload.note,
       }),
@@ -483,6 +513,7 @@ describe('createLog handler', () => {
       activityTypeId: GYM_TYPE_ID,
       durationMinutes: Option.none(),
       note: Option.none(),
+      loggedAtDate: Option.none(),
     }).pipe(
       Effect.tap((result) =>
         Effect.sync(() => {
@@ -505,6 +536,7 @@ describe('createLog handler', () => {
       activityTypeId: RUNNING_TYPE_ID,
       durationMinutes: Option.none(),
       note: Option.none(),
+      loggedAtDate: Option.none(),
     }).pipe(
       Effect.result,
       Effect.tap((result) =>
@@ -529,6 +561,7 @@ describe('createLog handler', () => {
       activityTypeId: GYM_TYPE_ID,
       durationMinutes: Option.none(),
       note: Option.none(),
+      loggedAtDate: Option.none(),
     }).pipe(
       Effect.result,
       Effect.tap((result) =>
@@ -556,6 +589,7 @@ describe('updateLog handler', () => {
       activityTypeId: Option.some(RUNNING_TYPE_ID),
       durationMinutes: Option.none(),
       note: Option.none(),
+      loggedAtDate: Option.none(),
     }).pipe(
       Effect.tap((result) =>
         Effect.sync(() => {
@@ -577,6 +611,7 @@ describe('updateLog handler', () => {
       activityTypeId: Option.some(GYM_TYPE_ID),
       durationMinutes: Option.none(),
       note: Option.none(),
+      loggedAtDate: Option.none(),
     }).pipe(
       Effect.result,
       Effect.tap((result) =>
@@ -601,6 +636,7 @@ describe('updateLog handler', () => {
       activityTypeId: Option.some(GYM_TYPE_ID),
       durationMinutes: Option.none(),
       note: Option.none(),
+      loggedAtDate: Option.none(),
     }).pipe(
       Effect.result,
       Effect.tap((result) =>
@@ -625,6 +661,7 @@ describe('updateLog handler', () => {
       activityTypeId: Option.some(GYM_TYPE_ID),
       durationMinutes: Option.none(),
       note: Option.none(),
+      loggedAtDate: Option.none(),
     }).pipe(
       Effect.result,
       Effect.tap((result) =>
@@ -751,6 +788,7 @@ describe('auto-source guard on updateLog', () => {
       activityTypeId: Option.some(GYM_TYPE_ID),
       durationMinutes: Option.none(),
       note: Option.none(),
+      loggedAtDate: Option.none(),
     }).pipe(
       Effect.result,
       Effect.tap((result) =>
@@ -844,6 +882,7 @@ describe('createLog sets source to manual', () => {
       activityTypeId: GYM_TYPE_ID,
       durationMinutes: Option.none(),
       note: Option.none(),
+      loggedAtDate: Option.none(),
     }).pipe(
       Effect.tap((result) =>
         Effect.sync(() => {
@@ -857,5 +896,251 @@ describe('createLog sets source to manual', () => {
       Effect.provide(MockProvideLayer),
       Effect.asVoid,
     ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// loggedAtDate tests — TDD for backdating / future-dating feature
+// ---------------------------------------------------------------------------
+
+const TEST_AUTO_LOG_ID_3 = 'log-uuid-auto-003' as ActivityLog.ActivityLogId;
+
+describe('createLog with loggedAtDate', () => {
+  it.effect(
+    "succeeds with loggedAtDate=Some('2026-05-15') and persists Prague-noon UTC (CEST -> 10:00 UTC)",
+    () =>
+      createLog({
+        teamId: TEST_TEAM_ID,
+        memberId: TEST_MEMBER_ID,
+        currentUserId: TEST_USER_ID,
+        activityTypeId: GYM_TYPE_ID,
+        durationMinutes: Option.none(),
+        note: Option.none(),
+        loggedAtDate: Option.some('2026-05-15'),
+      }).pipe(
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            const storedRecord = Array.from(activityLogsStore.values()).find(
+              (r) => r.id === result.id,
+            );
+            expect(storedRecord).toBeDefined();
+            if (storedRecord) {
+              expect(storedRecord.logged_at).toBe('2026-05-15T10:00:00.000Z');
+            }
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      ),
+  );
+
+  it.effect('succeeds with loggedAtDate=None and logged_at is within 5s of now', () =>
+    createLog({
+      teamId: TEST_TEAM_ID,
+      memberId: TEST_MEMBER_ID,
+      currentUserId: TEST_USER_ID,
+      activityTypeId: GYM_TYPE_ID,
+      durationMinutes: Option.none(),
+      note: Option.none(),
+      loggedAtDate: Option.none(),
+    }).pipe(
+      Effect.tap((result) => {
+        const storedRecord = Array.from(activityLogsStore.values()).find((r) => r.id === result.id);
+        return Effect.sync(() => {
+          expect(storedRecord).toBeDefined();
+          if (storedRecord) {
+            const delta = Math.abs(Date.parse(storedRecord.logged_at) - Date.now());
+            expect(delta).toBeLessThan(5000);
+          }
+        });
+      }),
+      Effect.provide(MockProvideLayer),
+      Effect.asVoid,
+    ),
+  );
+
+  it.effect(
+    "fails with 'ActivityLogInvalidLoggedAtDate' when loggedAtDate=Some('9999-01-01') (out of bounds)",
+    () =>
+      createLog({
+        teamId: TEST_TEAM_ID,
+        memberId: TEST_MEMBER_ID,
+        currentUserId: TEST_USER_ID,
+        activityTypeId: GYM_TYPE_ID,
+        durationMinutes: Option.none(),
+        note: Option.none(),
+        loggedAtDate: Option.some('9999-01-01'),
+      }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(Result.isFailure(result)).toBe(true);
+            if (Result.isFailure(result)) {
+              expect(result.failure._tag).toBe('ActivityLogInvalidLoggedAtDate');
+            }
+            expect(activityLogsStore.size).toBe(2);
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      ),
+  );
+
+  it.effect(
+    "fails with 'ActivityLogInvalidLoggedAtDate' when loggedAtDate=Some('2025-02-29') (invalid calendar)",
+    () =>
+      createLog({
+        teamId: TEST_TEAM_ID,
+        memberId: TEST_MEMBER_ID,
+        currentUserId: TEST_USER_ID,
+        activityTypeId: GYM_TYPE_ID,
+        durationMinutes: Option.none(),
+        note: Option.none(),
+        loggedAtDate: Option.some('2025-02-29'),
+      }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(Result.isFailure(result)).toBe(true);
+            if (Result.isFailure(result)) {
+              expect(result.failure._tag).toBe('ActivityLogInvalidLoggedAtDate');
+            }
+            expect(activityLogsStore.size).toBe(2);
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      ),
+  );
+});
+
+describe('updateLog with loggedAtDate', () => {
+  it.effect(
+    "succeeds with loggedAtDate=Some('2026-01-15') and persists Prague-noon UTC (CET -> 11:00 UTC)",
+    () =>
+      updateLog({
+        teamId: TEST_TEAM_ID,
+        memberId: TEST_MEMBER_ID,
+        logId: TEST_LOG_ID_1,
+        currentUserId: TEST_USER_ID,
+        activityTypeId: Option.none(),
+        durationMinutes: Option.none(),
+        note: Option.none(),
+        loggedAtDate: Option.some('2026-01-15'),
+      }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            const storedRecord = activityLogsStore.get(TEST_LOG_ID_1);
+            expect(storedRecord).toBeDefined();
+            if (storedRecord) {
+              expect(storedRecord.logged_at).toBe('2026-01-15T11:00:00.000Z');
+            }
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      ),
+  );
+
+  it.effect('succeeds with loggedAtDate=None and logged_at is unchanged from initial seed', () =>
+    updateLog({
+      teamId: TEST_TEAM_ID,
+      memberId: TEST_MEMBER_ID,
+      logId: TEST_LOG_ID_1,
+      currentUserId: TEST_USER_ID,
+      activityTypeId: Option.none(),
+      durationMinutes: Option.none(),
+      note: Option.none(),
+      loggedAtDate: Option.none(),
+    }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          const storedRecord = activityLogsStore.get(TEST_LOG_ID_1);
+          expect(storedRecord).toBeDefined();
+          if (storedRecord) {
+            expect(storedRecord.logged_at).toBe('2026-03-25T10:00:00.000Z');
+          }
+        }),
+      ),
+      Effect.provide(MockProvideLayer),
+      Effect.asVoid,
+    ),
+  );
+
+  it.effect(
+    "fails with 'ActivityLogInvalidLoggedAtDate' when loggedAtDate=Some('not-a-date')",
+    () =>
+      updateLog({
+        teamId: TEST_TEAM_ID,
+        memberId: TEST_MEMBER_ID,
+        logId: TEST_LOG_ID_1,
+        currentUserId: TEST_USER_ID,
+        activityTypeId: Option.none(),
+        durationMinutes: Option.none(),
+        note: Option.none(),
+        loggedAtDate: Option.some('not-a-date'),
+      }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(Result.isFailure(result)).toBe(true);
+            if (Result.isFailure(result)) {
+              expect(result.failure._tag).toBe('ActivityLogInvalidLoggedAtDate');
+            }
+            const storedRecord = activityLogsStore.get(TEST_LOG_ID_1);
+            expect(storedRecord?.logged_at).toBe('2026-03-25T10:00:00.000Z');
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      ),
+  );
+
+  it.effect(
+    'auto-source precedence: updateLog with valid loggedAtDate on auto-source log fails with ActivityLogAutoSourceForbidden, not ActivityLogInvalidLoggedAtDate',
+    () => {
+      activityLogsStore.set(TEST_AUTO_LOG_ID_3, {
+        id: TEST_AUTO_LOG_ID_3,
+        team_member_id: TEST_MEMBER_ID,
+        activity_type_id: TRAINING_TYPE_ID,
+        activity_type_name: 'Training',
+        logged_at: '2026-03-27T09:00:00.000Z',
+        duration_minutes: Option.none(),
+        note: Option.none(),
+        source: 'auto',
+      });
+      const todayPrague = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(
+        new Date(),
+      );
+      const [ty, tm, td] = todayPrague.split('-').map(Number);
+      const todayUTC = new Date(Date.UTC(ty, tm - 1, td));
+      const targetUTC = new Date(todayUTC.getTime() - 10 * 86400000);
+      const validDateStr = `${targetUTC.getUTCFullYear()}-${String(targetUTC.getUTCMonth() + 1).padStart(2, '0')}-${String(targetUTC.getUTCDate()).padStart(2, '0')}`;
+      return updateLog({
+        teamId: TEST_TEAM_ID,
+        memberId: TEST_MEMBER_ID,
+        logId: TEST_AUTO_LOG_ID_3,
+        currentUserId: TEST_USER_ID,
+        activityTypeId: Option.none(),
+        durationMinutes: Option.none(),
+        note: Option.none(),
+        loggedAtDate: Option.some(validDateStr),
+      }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(Result.isFailure(result)).toBe(true);
+            if (Result.isFailure(result)) {
+              expect(result.failure._tag).toBe('ActivityLogAutoSourceForbidden');
+              expect(result.failure._tag).not.toBe('ActivityLogInvalidLoggedAtDate');
+            }
+            const storedRecord = activityLogsStore.get(TEST_AUTO_LOG_ID_3);
+            expect(storedRecord?.logged_at).toBe('2026-03-27T09:00:00.000Z');
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      );
+    },
   );
 });

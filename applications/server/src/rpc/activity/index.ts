@@ -1,4 +1,5 @@
 import {
+  ActivityLogDate,
   ActivityRpcGroup,
   ActivityRpcModels,
   ActivityStats,
@@ -35,12 +36,14 @@ export const ActivityRpcLive = Effect.Do.pipe(
         activity_type,
         duration_minutes,
         note,
+        logged_at_date,
       }: {
         readonly guild_id: Discord.Snowflake;
         readonly discord_user_id: Discord.Snowflake;
         readonly activity_type: string;
         readonly duration_minutes: Option.Option<number>;
         readonly note: Option.Option<string>;
+        readonly logged_at_date: Option.Option<string>;
       }) =>
         Effect.Do.pipe(
           Effect.bind('team', () =>
@@ -75,6 +78,16 @@ export const ActivityRpcLive = Effect.Do.pipe(
               ? Effect.void
               : Effect.fail(new ActivityRpcModels.ActivityMemberNotFound()),
           ),
+          // Resolve logged_at from optional date string
+          Effect.bind('loggedAt', () =>
+            Option.match(logged_at_date, {
+              onNone: () => Effect.succeed(DateTime.toDateUtc(DateTime.nowUnsafe())),
+              onSome: (dateStr) =>
+                ActivityLogDate.parseLoggedAtDateInPrague(dateStr).pipe(
+                  Options.toEffect(() => new ActivityRpcModels.InvalidLoggedAtDate()),
+                ),
+            }),
+          ),
           // Resolve activity type: UUID → findByIdScoped (tenant isolation); slug → findBySlug
           Effect.bind('activityType', ({ team }) => {
             if (UUID_REGEX.test(activity_type)) {
@@ -97,11 +110,11 @@ export const ActivityRpcLive = Effect.Do.pipe(
                 ),
               );
           }),
-          Effect.bind('inserted', ({ member, activityType }) =>
+          Effect.bind('inserted', ({ member, activityType, loggedAt }) =>
             activityLogs.insert({
               team_member_id: member.id,
               activity_type_id: activityType.id,
-              logged_at: DateTime.toDateUtc(DateTime.nowUnsafe()),
+              logged_at: loggedAt,
               duration_minutes,
               note,
               source: 'manual',

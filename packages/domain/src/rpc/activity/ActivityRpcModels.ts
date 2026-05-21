@@ -65,3 +65,8 @@ export class ActivityTypeNotFound extends Schema.TaggedErrorClass<ActivityTypeNo
   'ActivityTypeNotFound',
   {},
 ) {}
+
+export class InvalidLoggedAtDate extends Schema.TaggedErrorClass<InvalidLoggedAtDate>()(
+  'ActivityLogInvalidLoggedAtDate',
+  {},
+) {}

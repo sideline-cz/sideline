@@ -2589,6 +2589,7 @@ Creates a new activity log entry for a member.
 | `activityTypeId` | `ActivityTypeId` | Yes | — | Type of activity |
 | `durationMinutes` | `integer \| null` | Yes | 1–1440 if provided | Duration in minutes |
 | `note` | `string \| null` | Yes | — | Optional note |
+| `loggedAtDate` | `string \| null` | No | `YYYY-MM-DD`; within ±2 years of today | Date to record the entry against (defaults to today if omitted or null) |
 
 **Response:** `201 Created` — `ActivityLogEntry`
 
@@ -2599,6 +2600,7 @@ Creates a new activity log entry for a member.
 | `ActivityLogMemberNotFound` | 404 | Member does not exist |
 | `ActivityLogForbidden` | 403 | Not authorized to log for this member |
 | `ActivityLogMemberInactive` | 403 | Member is deactivated |
+| `ActivityLogInvalidLoggedAtDate` | 400 | `loggedAtDate` is not a valid `YYYY-MM-DD` date or is outside the ±2-year window |
 
 ---
 
@@ -2623,6 +2625,7 @@ Updates an existing activity log entry. Cannot update auto-sourced entries.
 | `activityTypeId` | `ActivityTypeId` | No | — | New activity type |
 | `durationMinutes` | `integer \| null` | No | 1–1440 if provided | New duration |
 | `note` | `string \| null` | No | — | New note |
+| `loggedAtDate` | `string \| null` | No | `YYYY-MM-DD`; within ±2 years of today | New date for the entry (null or omit to keep existing) |
 
 **Response:** `200 OK` — `ActivityLogEntry`
 
@@ -2634,6 +2637,7 @@ Updates an existing activity log entry. Cannot update auto-sourced entries.
 | `ActivityLogForbidden` | 403 | Not authorized |
 | `ActivityLogMemberInactive` | 403 | Member is deactivated |
 | `ActivityLogAutoSourceForbidden` | 403 | Entry was auto-logged and cannot be edited |
+| `ActivityLogInvalidLoggedAtDate` | 400 | `loggedAtDate` is not a valid `YYYY-MM-DD` date or is outside the ±2-year window |
 
 ---
 
@@ -4579,7 +4583,7 @@ Handles activity logging and stats retrieval from the bot.
 
 | Method | Payload / Returns | Description |
 |---|---|---|
-| `Activity/LogActivity` | `guild_id`, `discord_user_id`, `activity_type`, `duration_minutes`, `note` → `LogActivityResult` | Logs an activity for a member |
+| `Activity/LogActivity` | `guild_id`, `discord_user_id`, `activity_type`, `duration_minutes`, `note`, `logged_at_date` (optional `YYYY-MM-DD`) → `LogActivityResult` | Logs an activity for a member |
 | `Activity/GetStats` | `guild_id`, `discord_user_id` → `GetStatsResult` | Returns activity stats for a member |
 | `Activity/GetLeaderboard` | `guild_id`, `discord_user_id`, `limit` → `GetLeaderboardResult` | Returns the leaderboard for a guild |
 
@@ -4660,6 +4664,7 @@ The following table consolidates all error tags across all API groups.
 | `NotificationForbidden` | 403 | Notification | Not a member of the team |
 | `ActivityLogMemberInactive` | 403 | Activity Log | Member has been deactivated |
 | `ActivityLogAutoSourceForbidden` | 403 | Activity Log | Attempted to edit/delete an auto-logged entry |
+| `ActivityLogInvalidLoggedAtDate` | 400 | Activity Log | `loggedAtDate` is not a valid `YYYY-MM-DD` date or is outside the ±2-year window |
 | `Forbidden` | 403 | Invite | Missing `team:invite` permission |
 | `PlayerNotFound` | 404 | Roster | Team member does not exist |
 | `RosterNotFound` | 404 | Roster | Roster does not exist |

@@ -24,12 +24,17 @@ export class ActivityLogListResponse extends Schema.Class<ActivityLogListRespons
   logs: Schema.Array(ActivityLogEntry),
 }) {}
 
+export const LoggedAtDate = Schema.String.pipe(
+  Schema.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/)),
+);
+
 export const CreateActivityLogRequest = Schema.Struct({
   activityTypeId: ActivityTypeId,
   durationMinutes: Schema.OptionFromNullOr(
     Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 1440 }))),
   ),
   note: Schema.OptionFromNullOr(Schema.String),
+  loggedAtDate: Schema.OptionFromNullOr(LoggedAtDate),
 });
 export type CreateActivityLogRequest = Schema.Schema.Type<typeof CreateActivityLogRequest>;
 
@@ -41,6 +46,7 @@ export const UpdateActivityLogRequest = Schema.Struct({
     ),
   ),
   note: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schema.String)),
+  loggedAtDate: Schema.OptionFromOptional(LoggedAtDate),
 });
 export type UpdateActivityLogRequest = Schema.Schema.Type<typeof UpdateActivityLogRequest>;
 
@@ -66,6 +72,11 @@ export class AutoSourceForbidden extends Schema.TaggedErrorClass<AutoSourceForbi
   {},
 ) {}
 
+export class InvalidLoggedAtDate extends Schema.TaggedErrorClass<InvalidLoggedAtDate>()(
+  'ActivityLogInvalidLoggedAtDate',
+  {},
+) {}
+
 export class ActivityLogApiGroup extends HttpApiGroup.make('activityLog')
   .add(
     HttpApiEndpoint.get('listLogs', '/teams/:teamId/members/:memberId/activity-logs', {
@@ -84,6 +95,7 @@ export class ActivityLogApiGroup extends HttpApiGroup.make('activityLog')
         MemberNotFound.pipe(HttpApiSchema.status(404)),
         Forbidden.pipe(HttpApiSchema.status(403)),
         MemberInactive.pipe(HttpApiSchema.status(403)),
+        InvalidLoggedAtDate.pipe(HttpApiSchema.status(400)),
       ],
       payload: CreateActivityLogRequest,
       params: { teamId: TeamId, memberId: TeamMemberId },
@@ -97,6 +109,7 @@ export class ActivityLogApiGroup extends HttpApiGroup.make('activityLog')
         Forbidden.pipe(HttpApiSchema.status(403)),
         MemberInactive.pipe(HttpApiSchema.status(403)),
         AutoSourceForbidden.pipe(HttpApiSchema.status(403)),
+        InvalidLoggedAtDate.pipe(HttpApiSchema.status(400)),
       ],
       payload: UpdateActivityLogRequest,
       params: { teamId: TeamId, memberId: TeamMemberId, logId: ActivityLogId },

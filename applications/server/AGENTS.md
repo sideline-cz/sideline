@@ -453,6 +453,19 @@ Rules when adding a new column to a `Model.Class` that is INSERTed via hand-writ
 3. **Prefer `Model.makeRepository(...)` `insert` / `update`** when the operation maps 1:1 to the model — it derives the column list from the schema and cannot drift. Use hand-written SQL only when the operation needs JOINs, `ON CONFLICT`, `RETURNING` of computed columns, or partial column updates.
 4. **Add an integration test that round-trips the new field** through the repository — read the inserted row back and assert the new column equals the input. This is the only mechanism that catches the silent-drop bug.
 
+## Stable Tiebreaker On Timestamp ORDER BY
+
+Repository queries that `ORDER BY` a `TIMESTAMPTZ` column whose value is **user-editable** (i.e. not a server-set `created_at` that uses `clock_timestamp()`) MUST append the primary key as a deterministic tiebreaker on the same direction: `ORDER BY al.logged_at, al.id` (or `ORDER BY al.logged_at DESC, al.id DESC`). Two rows with the same wire-format date land on the same anchored UTC timestamp (see `packages/domain/AGENTS.md` → "Wire-Format Date-String Helpers"), so without a tiebreaker the row order is non-deterministic and page-to-page navigation can show the same row twice or skip it.
+
+Reference: `ActivityLogsRepository._listByMember` (`ORDER BY al.logged_at, al.id`) and `_listRecent` (`ORDER BY al.logged_at DESC, al.id DESC`). `EventRsvpsRepository.listByEventOrdered` (`ORDER BY CASE r.response WHEN ... END ASC, r.created_at ASC, r.id ASC`) is the equivalent for a multi-key sort.
+
+Rules:
+
+1. **Always include `id` as the final ORDER BY key whenever the leading key is a user-editable timestamp or a value with low cardinality** (status enums, response enums). For server-only `created_at`/`updated_at` columns the tiebreaker is optional — two rows inserted in the same microsecond is implausible — but adding it is harmless and future-proofs the query against backfill scripts that may set identical timestamps.
+2. **The tiebreaker direction must match the leading key's direction.** `ORDER BY logged_at DESC, id DESC` (not `id ASC`) so the most recent row with the same timestamp is consistently first on every page. Mixing directions across keys breaks the "lexicographic over keys" intuition operators rely on when paginating.
+3. **Do not introduce a new server-generated tiebreaker column** (e.g. a `sequence_no SERIAL`) to solve this — the `id UUID` column already provides a stable order, and a UUID's natural ordering is fine for a tiebreaker (it is consistent within a single query plan; the absolute order between two UUIDs is not semantically meaningful and never should be relied on by callers).
+4. **Migration is silent.** Adding a tiebreaker to an existing ORDER BY only narrows the previously-undefined order — it never changes a previously-defined order. No data backfill is needed.
+
 ## Postgres Type Conventions
 
 - **`TIME` columns** — node-postgres returns `'HH:MM:SS'`. If consumers expect `'HH:MM'`, normalize on read with `TO_CHAR(col, 'HH24:MI') AS col` in both `SELECT` and `RETURNING` clauses (see `TeamSettingsRepository._findByTeam`).

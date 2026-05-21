@@ -214,6 +214,7 @@ Four top-level commands are registered globally: `/event`, `/finance`, `/info`, 
 | `activity` | String (choices) | Yes | — | Activity type |
 | `duration` | Integer | No | 1–1440 | Duration in minutes |
 | `note` | String | No | — | Free-text note |
+| `date` | String | No | `YYYY-MM-DD`; within ±2 years of today | Date of the activity (defaults to today) |
 
 **`activity` choices:**
 
@@ -227,7 +228,7 @@ Four top-level commands are registered globally: `/event`, `/finance`, `/info`, 
 
 1. User invokes `/makanicko log activity:gym duration:45`.
 2. The handler sends an immediate ephemeral "thinking" response and forks a background fiber.
-3. The background fiber calls `Activity/LogActivity` RPC with `guild_id`, `discord_user_id`, `activity_type` (slug), and optional `duration_minutes` and `note`.
+3. The background fiber calls `Activity/LogActivity` RPC with `guild_id`, `discord_user_id`, `activity_type` (slug), and optional `duration_minutes`, `note`, and `logged_at_date`.
 4. On success the ephemeral message is updated with a confirmation showing the logged activity type.
 
 **Errors from `Activity/LogActivity`:**
@@ -236,6 +237,7 @@ Four top-level commands are registered globally: `/event`, `/finance`, `/info`, 
 |-----------|----------|
 | `ActivityGuildNotFound` | Generic error message |
 | `ActivityMemberNotFound` | "Not a member" message |
+| `ActivityLogInvalidLoggedAtDate` | "Invalid date" error message |
 
 **Source file:** `applications/bot/src/commands/makanicko/log.ts`
 

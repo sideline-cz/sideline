@@ -41,6 +41,13 @@ export const MakanickoCommand = Ix.global(
             type: DiscordTypes.ApplicationCommandOptionType.STRING,
             required: false as const,
           },
+          {
+            name: 'date',
+            description: 'Date of the activity (YYYY-MM-DD, defaults to today)',
+            description_localizations: { cs: 'Datum aktivity (RRRR-MM-DD, výchozí dnes)' },
+            type: DiscordTypes.ApplicationCommandOptionType.STRING,
+            required: false as const,
+          },
         ],
       },
       {

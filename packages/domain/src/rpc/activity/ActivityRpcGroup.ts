@@ -8,6 +8,7 @@ import {
   ActivityTypeNotFound,
   GetLeaderboardResult,
   GetStatsResult,
+  InvalidLoggedAtDate,
   LogActivityResult,
 } from './ActivityRpcModels.js';
 
@@ -21,9 +22,17 @@ export const ActivityRpcGroup = RpcGroup.make(
         Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 1440 }))),
       ),
       note: Schema.OptionFromNullOr(Schema.String),
+      logged_at_date: Schema.OptionFromNullOr(
+        Schema.String.pipe(Schema.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/))),
+      ),
     },
     success: LogActivityResult,
-    error: Schema.Union([ActivityMemberNotFound, ActivityGuildNotFound, ActivityTypeNotFound]),
+    error: Schema.Union([
+      ActivityMemberNotFound,
+      ActivityGuildNotFound,
+      ActivityTypeNotFound,
+      InvalidLoggedAtDate,
+    ]),
   }),
   Rpc.make('GetStats', {
     payload: {

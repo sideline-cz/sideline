@@ -39,8 +39,38 @@ pnpm -C ./applications/web dlx shadcn@latest add button
 - `<button>` → `<Button>` from `components/ui/button`
 - `<a href>` → `<Button asChild><a href={...}>...</a></Button>`
 - `<input>` → `<Input>` from `components/ui/input`
+- `<input type='date'>` → `<DatePicker>` from `components/ui/date-picker` (see "Date Inputs — `DatePicker`" below)
 - `<select>` → `<Select>` from `components/ui/select` (fixed enums) or `<SearchableSelect>` from `components/atoms/SearchableSelect` (dynamic data)
 - `<label>` (in forms) → `<FormLabel>` from `components/ui/form`
+
+### Date Inputs — `DatePicker`
+
+For any user-editable calendar date (event date, activity-log date, fee due date, expense spent-at date), use `<DatePicker>` from `~/components/ui/date-picker` — never the native `<input type='date'>`. The component is a Popover + Calendar combo that uses `date-fns` for locale-aware display and emits a canonical `YYYY-MM-DD` string via `onChange`.
+
+```typescript
+import { DatePicker } from '~/components/ui/date-picker';
+import { tr } from '~/lib/translations.js';
+
+const [dateInput, setDateInput] = React.useState<string>('');
+
+<DatePicker
+  value={dateInput}
+  onChange={setDateInput}
+  placeholder={tr('activityLog_datePlaceholder')}
+  fromYear={new Date().getFullYear() - 2}
+  toYear={new Date().getFullYear() + 2}
+/>
+```
+
+Reference: `applications/web/src/components/organisms/ActivityLogList.tsx` (create + edit sheet both render `<DatePicker>`).
+
+Rules:
+
+1. **`value` and `onChange` operate on `YYYY-MM-DD` strings, not `Date` objects.** The parent component holds a `string` in `useState`; the calendar internally decodes via `date-fns` `parse(value, 'yyyy-MM-dd', new Date())` and re-encodes via `format(date, 'yyyy-MM-dd')`. Do not convert to `Date` in the parent — keep the wire format end-to-end so it matches the `Schema.OptionFromNullOr(LoggedAtDate)`-style schemas on the API payload.
+2. **Pass the empty string `''` (not `undefined`) as the "no value" state** to the controlled `value` prop. The component renders the `placeholder` when `value` is empty. Use `Option.some(dateInput)` only at the API-payload-construction boundary: `dateInput ? Option.some(dateInput) : Option.none<string>()`.
+3. **Always pass `fromYear` and `toYear`** as `currentYear ± N` (typical: `±2` for activity logs, may differ per feature) so the year-dropdown caption-layout is enabled (`captionLayout: 'dropdown'`) instead of the default arrow-only nav. Users picking a date months/years away can jump directly via the dropdown.
+4. **For edit forms, track a `dirty` flag** so the API call only sends the new date when the user actually picked one. Initialize `editDate` from `<Resource>Date.formatPragueDate(new Date(row.<field>))` and set `editDateDirty = true` only inside `onChange`. The submit handler then sends `editDateDirty ? Option.some(editDate) : Option.none<string>()` — pairs cleanly with the server's "missing key = do not update" PATCH contract (see `packages/domain/AGENTS.md` → `Schema.OptionFromOptional`).
+5. **Never compute the displayed string with `date-fns` `format(...)` outside the component.** The component already calls `useDateFnsLocale()` internally; duplicating the locale wiring at the call site re-introduces the bug class that the central `useDateFnsLocale` hook exists to prevent (see "Date Formatting" below).
 
 ### SearchableSelect vs Select
 

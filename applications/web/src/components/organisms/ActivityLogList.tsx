@@ -1,7 +1,9 @@
 import type { ActivityLog, ActivityLogApi, ActivityType } from '@sideline/domain';
+import { ActivityLogDate } from '@sideline/domain';
 import { Option } from 'effect';
 import React from 'react';
 import { Button } from '~/components/ui/button';
+import { DatePicker } from '~/components/ui/date-picker';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '~/components/ui/sheet';
@@ -38,6 +40,7 @@ interface ActivityLogListProps {
     activityTypeId: ActivityType.ActivityTypeId;
     durationMinutes: Option.Option<number>;
     note: Option.Option<string>;
+    loggedAtDate: Option.Option<string>;
   }) => Promise<void>;
   onUpdateLog: (
     logId: ActivityLog.ActivityLogId,
@@ -45,6 +48,7 @@ interface ActivityLogListProps {
       activityTypeId: Option.Option<ActivityType.ActivityTypeId>;
       durationMinutes: Option.Option<Option.Option<number>>;
       note: Option.Option<Option.Option<string>>;
+      loggedAtDate: Option.Option<string>;
     },
   ) => Promise<void>;
   onDeleteLog: (logId: ActivityLog.ActivityLogId) => Promise<void>;
@@ -63,12 +67,15 @@ export function ActivityLogList({
   );
   const [durationInput, setDurationInput] = React.useState('');
   const [noteInput, setNoteInput] = React.useState('');
+  const [dateInput, setDateInput] = React.useState<string>('');
   const [creating, setCreating] = React.useState(false);
 
   const [editingLog, setEditingLog] = React.useState<ActivityLogApi.ActivityLogEntry | null>(null);
   const [editTypeId, setEditTypeId] = React.useState<ActivityType.ActivityTypeId | null>(null);
   const [editDuration, setEditDuration] = React.useState('');
   const [editNote, setEditNote] = React.useState('');
+  const [editDate, setEditDate] = React.useState<string>('');
+  const [editDateDirty, setEditDateDirty] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [deletingId, setDeletingId] = React.useState<ActivityLog.ActivityLogId | null>(null);
 
@@ -101,14 +108,16 @@ export function ActivityLogList({
             ? Option.some(durationNum)
             : Option.none(),
         note: noteInput.trim() ? Option.some(noteInput.trim()) : Option.none(),
+        loggedAtDate: dateInput ? Option.some(dateInput) : Option.none<string>(),
       });
       setSelectedTypeId(null);
       setDurationInput('');
       setNoteInput('');
+      setDateInput('');
     } finally {
       setCreating(false);
     }
-  }, [selectedTypeId, durationInput, noteInput, onCreateLog]);
+  }, [selectedTypeId, durationInput, noteInput, dateInput, onCreateLog]);
 
   const openEdit = React.useCallback((log: ActivityLogApi.ActivityLogEntry) => {
     setEditingLog(log);
@@ -117,6 +126,8 @@ export function ActivityLogList({
       Option.match(log.durationMinutes, { onNone: () => '', onSome: (n) => n.toString() }),
     );
     setEditNote(Option.match(log.note, { onNone: () => '', onSome: (s) => s }));
+    setEditDate(ActivityLogDate.formatPragueDate(new Date(log.loggedAt)));
+    setEditDateDirty(false);
   }, []);
 
   const handleUpdate = React.useCallback(async () => {
@@ -132,12 +143,13 @@ export function ActivityLogList({
         activityTypeId: Option.some(editTypeId),
         durationMinutes: Option.some(parsedDuration),
         note: Option.some(editNote.trim() ? Option.some(editNote.trim()) : Option.none<string>()),
+        loggedAtDate: editDateDirty ? Option.some(editDate) : Option.none<string>(),
       });
       setEditingLog(null);
     } finally {
       setSaving(false);
     }
-  }, [editingLog, editTypeId, editDuration, editNote, onUpdateLog]);
+  }, [editingLog, editTypeId, editDuration, editNote, editDate, editDateDirty, onUpdateLog]);
 
   const handleDelete = React.useCallback(
     async (logId: ActivityLog.ActivityLogId) => {
@@ -191,6 +203,18 @@ export function ActivityLogList({
           </div>
           {selectedTypeId && (
             <>
+              <div className='mb-2'>
+                <Label className='text-xs text-muted-foreground'>
+                  {tr('activityLog_dateLabel')}
+                </Label>
+                <DatePicker
+                  value={dateInput}
+                  onChange={setDateInput}
+                  placeholder={tr('activityLog_datePlaceholder')}
+                  fromYear={new Date().getFullYear() - 2}
+                  toYear={new Date().getFullYear() + 2}
+                />
+              </div>
               <div className='flex gap-2 mb-2'>
                 <div className='flex-1'>
                   <Label htmlFor='log-duration' className='text-xs text-muted-foreground'>
@@ -299,7 +323,11 @@ export function ActivityLogList({
       <Sheet
         open={editingLog !== null}
         onOpenChange={(open) => {
-          if (!open) setEditingLog(null);
+          if (!open) {
+            setEditingLog(null);
+            setEditDate('');
+            setEditDateDirty(false);
+          }
         }}
       >
         <SheetContent>
@@ -332,6 +360,19 @@ export function ActivityLogList({
                   </Button>
                 ))}
               </div>
+            </div>
+            <div>
+              <Label className='text-sm font-medium'>{tr('activityLog_dateLabel')}</Label>
+              <DatePicker
+                value={editDate}
+                onChange={(v) => {
+                  setEditDate(v);
+                  setEditDateDirty(true);
+                }}
+                placeholder={tr('activityLog_datePlaceholder')}
+                fromYear={new Date().getFullYear() - 2}
+                toYear={new Date().getFullYear() + 2}
+              />
             </div>
             <div>
               <Label htmlFor='edit-duration' className='text-sm font-medium'>

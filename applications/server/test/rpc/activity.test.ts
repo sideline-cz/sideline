@@ -14,7 +14,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from '@effect/vitest';
 import type { ActivityType, Discord, Team, TeamMember } from '@sideline/domain';
-import { ActivityRpcModels } from '@sideline/domain';
+import { ActivityLogDate, ActivityRpcModels } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option, Result } from 'effect';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
@@ -252,10 +252,12 @@ const logActivityWithTenantIsolation = (payload: {
   activity_type: string;
   duration_minutes: Option.Option<number>;
   note: Option.Option<string>;
+  logged_at_date: Option.Option<string>;
 }): Effect.Effect<
   ActivityRpcModels.LogActivityResult,
   | ActivityRpcModels.ActivityGuildNotFound
   | ActivityRpcModels.ActivityMemberNotFound
+  | ActivityRpcModels.InvalidLoggedAtDate
   | ActivityTypeNotFound,
   | TeamsRepository
   | UsersRepository
@@ -302,6 +304,16 @@ const logActivityWithTenantIsolation = (payload: {
     Effect.tap(({ member }) =>
       member.active ? Effect.void : Effect.fail(new ActivityRpcModels.ActivityMemberNotFound()),
     ),
+    // Resolve logged_at from optional date string
+    Effect.bind('loggedAt', () => {
+      if (Option.isSome(payload.logged_at_date)) {
+        const parsed = ActivityLogDate.parseLoggedAtDateInPrague(payload.logged_at_date.value);
+        return Option.isSome(parsed)
+          ? Effect.succeed(parsed.value)
+          : Effect.fail(new ActivityRpcModels.InvalidLoggedAtDate());
+      }
+      return Effect.succeed(DateTime.toDateUtc(DateTime.nowUnsafe()));
+    }),
     // Resolve activity type: UUID lookup uses findByIdScoped, slug lookup uses findBySlug.
     Effect.bind('activityType', ({ activityTypes, team }) => {
       if (UUID_REGEX.test(payload.activity_type)) {
@@ -327,11 +339,11 @@ const logActivityWithTenantIsolation = (payload: {
         ),
       );
     }),
-    Effect.flatMap(({ activityLogs, member, activityType }) =>
+    Effect.flatMap(({ activityLogs, member, activityType, loggedAt }) =>
       activityLogs.insert({
         team_member_id: member.id,
         activity_type_id: activityType.id,
-        logged_at: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        logged_at: loggedAt,
         duration_minutes: payload.duration_minutes,
         note: payload.note,
         source: 'manual',
@@ -359,6 +371,7 @@ describe('LogActivity RPC — Phase 5 tenant isolation', () => {
       activity_type: OWN_TEAM_CUSTOM_ID,
       duration_minutes: Option.none(),
       note: Option.none(),
+      logged_at_date: Option.none(),
     }).pipe(
       Effect.tap((result) =>
         Effect.sync(() => {
@@ -381,6 +394,7 @@ describe('LogActivity RPC — Phase 5 tenant isolation', () => {
         activity_type: OTHER_TEAM_CUSTOM_ID,
         duration_minutes: Option.none(),
         note: Option.none(),
+        logged_at_date: Option.none(),
       }).pipe(
         Effect.result,
         Effect.tap((result) =>
@@ -406,6 +420,7 @@ describe('LogActivity RPC — Phase 5 tenant isolation', () => {
       activity_type: 'gym',
       duration_minutes: Option.none(),
       note: Option.none(),
+      logged_at_date: Option.none(),
     }).pipe(
       Effect.tap((result) =>
         Effect.sync(() => {
@@ -425,6 +440,7 @@ describe('LogActivity RPC — Phase 5 tenant isolation', () => {
       activity_type: 'unknown-activity',
       duration_minutes: Option.none(),
       note: Option.none(),
+      logged_at_date: Option.none(),
     }).pipe(
       Effect.result,
       Effect.tap((result) =>
@@ -439,5 +455,110 @@ describe('LogActivity RPC — Phase 5 tenant isolation', () => {
       Effect.provide(MockProvideLayer),
       Effect.asVoid,
     ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// LogActivity RPC — logged_at_date tests (TDD for backdating feature)
+// ---------------------------------------------------------------------------
+
+describe('LogActivity RPC — logged_at_date', () => {
+  it.effect(
+    "succeeds with logged_at_date=Some('2026-04-20') and UUID activity type; captured logged_at matches Prague-noon UTC (CEST -> 10:00 UTC)",
+    () =>
+      logActivityWithTenantIsolation({
+        guild_id: TEST_GUILD_ID,
+        discord_user_id: TEST_DISCORD_USER_ID,
+        activity_type: GYM_TYPE_ID,
+        duration_minutes: Option.none(),
+        note: Option.none(),
+        logged_at_date: Option.some('2026-04-20'),
+      }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(activityLogsInserted).toHaveLength(1);
+            expect(activityLogsInserted[0]?.logged_at.toISOString()).toBe(
+              '2026-04-20T10:00:00.000Z',
+            );
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      ),
+  );
+
+  it.effect(
+    'succeeds with logged_at_date=None; captured logged_at is within 5s of Date.now()',
+    () =>
+      logActivityWithTenantIsolation({
+        guild_id: TEST_GUILD_ID,
+        discord_user_id: TEST_DISCORD_USER_ID,
+        activity_type: GYM_TYPE_ID,
+        duration_minutes: Option.none(),
+        note: Option.none(),
+        logged_at_date: Option.none(),
+      }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(activityLogsInserted).toHaveLength(1);
+            const delta = Math.abs(activityLogsInserted[0]?.logged_at.getTime() - Date.now());
+            expect(delta).toBeLessThan(5000);
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      ),
+  );
+
+  it.effect(
+    "fails with 'ActivityLogInvalidLoggedAtDate' when logged_at_date=Some('not-a-date')",
+    () =>
+      logActivityWithTenantIsolation({
+        guild_id: TEST_GUILD_ID,
+        discord_user_id: TEST_DISCORD_USER_ID,
+        activity_type: GYM_TYPE_ID,
+        duration_minutes: Option.none(),
+        note: Option.none(),
+        logged_at_date: Option.some('not-a-date'),
+      }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(Result.isFailure(result)).toBe(true);
+            if (Result.isFailure(result)) {
+              expect(result.failure._tag).toBe('ActivityLogInvalidLoggedAtDate');
+            }
+            expect(activityLogsInserted).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      ),
+  );
+
+  it.effect(
+    "fails with 'ActivityLogInvalidLoggedAtDate' when logged_at_date=Some('9999-01-01') (out of bounds)",
+    () =>
+      logActivityWithTenantIsolation({
+        guild_id: TEST_GUILD_ID,
+        discord_user_id: TEST_DISCORD_USER_ID,
+        activity_type: GYM_TYPE_ID,
+        duration_minutes: Option.none(),
+        note: Option.none(),
+        logged_at_date: Option.some('9999-01-01'),
+      }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(Result.isFailure(result)).toBe(true);
+            if (Result.isFailure(result)) {
+              expect(result.failure._tag).toBe('ActivityLogInvalidLoggedAtDate');
+            }
+            expect(activityLogsInserted).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      ),
   );
 });

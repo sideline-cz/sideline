@@ -334,6 +334,7 @@ export const mockTeamSettings = {
   teamId: TEAM_ID,
   eventHorizonDays: 30,
   minPlayersThreshold: 10,
+  rsvpRemindersEnabled: true,
   rsvpReminderDaysBefore: 1,
   rsvpReminderTime: '18:00',
   remindersChannelId: null,

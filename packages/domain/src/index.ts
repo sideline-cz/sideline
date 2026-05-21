@@ -65,6 +65,12 @@ export * as AchievementSyncEvent from './models/AchievementSyncEvent.js';
 
 export * as ActivityLog from './models/ActivityLog.js';
 
+/**
+ * Formats a `Date` as a Prague-local `YYYY-MM-DD` string.
+ * Uses `Intl.DateTimeFormat('en-CA', ...)` which guarantees ISO 8601 ordering.
+ */
+export * as ActivityLogDate from './models/ActivityLogDate.js';
+
 export * as ActivityStats from './models/ActivityStats.js';
 
 export * as ActivityType from './models/ActivityType.js';

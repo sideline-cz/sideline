@@ -88,6 +88,7 @@ function MakanickoRoute() {
       activityTypeId: ActivityType.ActivityTypeId;
       durationMinutes: Option.Option<number>;
       note: Option.Option<string>;
+      loggedAtDate: Option.Option<string>;
     }) => {
       if (!memberId) return;
       const result = await ApiClient.asEffect().pipe(
@@ -98,10 +99,16 @@ function MakanickoRoute() {
               activityTypeId: input.activityTypeId,
               durationMinutes: input.durationMinutes,
               note: input.note,
+              loggedAtDate: input.loggedAtDate,
             },
           }),
         ),
-        Effect.mapError(() => ClientError.make(tr('activityLog_logFailed'))),
+        Effect.catchTag('ActivityLogInvalidLoggedAtDate', () =>
+          Effect.fail(ClientError.make(tr('activityLog_invalidDate'))),
+        ),
+        Effect.mapError((err) =>
+          err._tag === 'ClientError' ? err : ClientError.make(tr('activityLog_logFailed')),
+        ),
         run({ success: tr('activityLog_logged') }),
       );
       if (Option.isSome(result)) {
@@ -118,6 +125,7 @@ function MakanickoRoute() {
         activityTypeId: Option.Option<ActivityType.ActivityTypeId>;
         durationMinutes: Option.Option<Option.Option<number>>;
         note: Option.Option<Option.Option<string>>;
+        loggedAtDate: Option.Option<string>;
       },
     ) => {
       if (!memberId) return;
@@ -129,10 +137,16 @@ function MakanickoRoute() {
               activityTypeId: input.activityTypeId,
               durationMinutes: input.durationMinutes,
               note: input.note,
+              loggedAtDate: input.loggedAtDate,
             },
           }),
         ),
-        Effect.mapError(() => ClientError.make(tr('activityLog_updateFailed'))),
+        Effect.catchTag('ActivityLogInvalidLoggedAtDate', () =>
+          Effect.fail(ClientError.make(tr('activityLog_invalidDate'))),
+        ),
+        Effect.mapError((err) =>
+          err._tag === 'ClientError' ? err : ClientError.make(tr('activityLog_updateFailed')),
+        ),
         run({ success: tr('activityLog_updated') }),
       );
       if (Option.isSome(result)) {

@@ -11,10 +11,18 @@ Sideline lets every team member log personal physical activity — gym sessions,
 
 You can log activity in two ways:
 
-- **From Discord:** use the `/makanicko log` slash command. Choose an activity type and optionally provide a duration and a note.
+- **From Discord:** use the `/makanicko log` slash command. Choose an activity type and optionally provide a duration, a note, and a date.
 - **From the web app:** open your member profile → **Activity** tab → **Log activity**.
 
 Each log entry records the activity type, the date, an optional duration in minutes, and an optional free-text note.
+
+### Backdating and future-dating entries
+
+By default an entry is stamped with today's date. You can pick a different date — up to 2 years in the past or 2 years in the future — using the **Date** picker in the web form or the `date` option in the Discord command. Dates always anchor at noon Europe/Prague time, so they land in the correct streak and stats bucket regardless of when you submit the form.
+
+<Aside type="note" title="Auto-logged entries">
+  Entries created automatically (for example, when a training event ends and you had RSVP'd yes) always use the training's own date. These entries cannot be backdated or edited.
+</Aside>
 
 <Aside type="note" title="Available activity types">
   The four global built-in types are **Gym**, **Running**, **Stretching**, and **Training**. Your team admins and captains may define additional custom types. All types (built-in and custom) appear in the web app's activity log form and as autocomplete choices in the `/makanicko log` command.

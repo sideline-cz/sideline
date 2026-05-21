@@ -94,6 +94,17 @@ export const logHandler = Interaction.asEffect().pipe(
       ),
     );
 
+    const loggedAtDate = pipe(
+      options,
+      Array.findFirst((o) => o.name === 'date'),
+      Option.flatMap((o) =>
+        'value' in o && o.value !== null && o.value !== undefined
+          ? Option.some(String(o.value))
+          : Option.none(),
+      ),
+      Option.flatMap((s) => (s === '' ? Option.none<string>() : Option.some(s))),
+    );
+
     const work = Effect.Do.pipe(
       Effect.bind('rpc', () => SyncRpc.asEffect()),
       Effect.bind('rest', () => DiscordREST.asEffect()),
@@ -104,6 +115,7 @@ export const logHandler = Interaction.asEffect().pipe(
           activity_type: activityType,
           duration_minutes: durationMinutes,
           note,
+          logged_at_date: loggedAtDate,
         }).pipe(
           Effect.map((result) => ({
             content: m.bot_makanicko_log_success({ activity: result.activity_type_id }, { locale }),
@@ -116,6 +128,9 @@ export const logHandler = Interaction.asEffect().pipe(
           ),
           Effect.catchTag('ActivityTypeNotFound', () =>
             Effect.succeed({ content: m.bot_makanicko_log_error({}, { locale }) }),
+          ),
+          Effect.catchTag('ActivityLogInvalidLoggedAtDate', () =>
+            Effect.succeed({ content: m.bot_makanicko_log_invalid_date({}, { locale }) }),
           ),
           Effect.catchTag('RpcClientError', () =>
             Effect.succeed({ content: m.bot_makanicko_log_error({}, { locale }) }),

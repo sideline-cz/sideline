@@ -29,6 +29,7 @@ interface MakanickoPageProps {
     activityTypeId: ActivityType.ActivityTypeId;
     durationMinutes: Option.Option<number>;
     note: Option.Option<string>;
+    loggedAtDate: Option.Option<string>;
   }) => Promise<void>;
   onUpdateLog: (
     logId: ActivityLog.ActivityLogId,
@@ -36,6 +37,7 @@ interface MakanickoPageProps {
       activityTypeId: Option.Option<ActivityType.ActivityTypeId>;
       durationMinutes: Option.Option<Option.Option<number>>;
       note: Option.Option<Option.Option<string>>;
+      loggedAtDate: Option.Option<string>;
     },
   ) => Promise<void>;
   onDeleteLog: (logId: ActivityLog.ActivityLogId) => Promise<void>;
