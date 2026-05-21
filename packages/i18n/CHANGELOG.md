@@ -1,5 +1,23 @@
 # @sideline/i18n
 
+## 0.5.2
+
+### Patch Changes
+
+- [#318](https://github.com/maxa-ondrej/sideline/pull/318) [`eac2e36`](https://github.com/maxa-ondrej/sideline/commit/eac2e365aedadbe052174e202700392bef507a7b) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Allow backdating and future-dating activity (makánicko) logs. Previously, activities could only be recorded for the current day; users now choose any date within ±2 years when logging or editing an activity, both on the web app and via the `/makanicko log` Discord command.
+  - **Web**: the activity log create form and edit sheet show a date picker. The picker defaults to "today" (empty submission) for create; on edit it pre-fills with the existing log's date and only overrides the stored timestamp when the user explicitly changes it.
+  - **Discord**: `/makanicko log` accepts an optional `date` (`YYYY-MM-DD`) parameter; omitting it keeps the original "log now" behaviour.
+  - Picked dates anchor at 12:00 Europe/Prague (DST-safe), so they always land in the correct day-bucket for streaks, stats and the leaderboard. Same-day display ordering gets a stable `id` tiebreaker so two logs sharing a noon timestamp don't jitter on refresh.
+  - Out-of-range or malformed dates surface a clear "Invalid date" toast (web) or ephemeral reply (bot) instead of failing silently.
+
+- [#320](https://github.com/maxa-ondrej/sideline/pull/320) [`344dcb8`](https://github.com/maxa-ondrej/sideline/commit/344dcb8b542f57b360e186a8b09a63645855f933) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add a `/summon` slash command (Czech: `/přivolat`) that adds a user and/or a role's members to the current Discord thread.
+  - Restricted to users with the **Manage Threads** permission (declared via `default_member_permissions` so Discord hides it for everyone else, and re-checked at runtime as a safety net).
+  - `user` and `role` are both optional; at least one is required.
+  - When `role` is provided, the bot lists the guild's members, filters those with the role, and adds each to the thread (with bounded concurrency to respect Discord rate limits).
+  - When both are provided, the user is deduplicated against the role expansion so the final count is exact.
+  - Reports outcomes ephemerally: per-user success, per-role count, the combined "user + N members" message, "no members with role" when the role expansion is empty, "bot lacks permission" for Discord 403 / code 50013, or a generic error otherwise.
+  - The command is rejected outside threads (text channel, category, DM) with a localized "not a thread" message. Czech and English translations are included.
+
 ## 0.5.1
 
 ### Patch Changes
