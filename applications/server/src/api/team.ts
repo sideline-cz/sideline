@@ -54,6 +54,7 @@ const teamToInfo = (team: Team.Team, isCommunityEnabled: boolean) =>
     logoUrl: team.logo_url,
     guildId: team.guild_id,
     welcomeChannelId: team.welcome_channel_id,
+    achievementChannelId: team.achievement_channel_id,
     systemLogChannelId: team.system_log_channel_id,
     welcomeMessageTemplate: team.welcome_message_template,
     rulesChannelId: team.rules_channel_id,
@@ -117,57 +118,46 @@ export const TeamApiLive = HttpApiBuilder.group(Api, 'team', (handlers) =>
             ),
             Effect.tap(({ membership }) => requirePermission(membership, 'team:manage', forbidden)),
             Effect.bind('existing', () => getTeamOrForbidden(teams, teamId)),
-            Effect.bind('nextFields', ({ existing }) => {
-              const rules_channel_id = Option.match(payload.rulesChannelId, {
-                onNone: () => existing.rules_channel_id,
-                onSome: (v) => v,
-              });
-              const onboarding_rules_role_id = Option.match(payload.onboardingRulesRoleId, {
-                onNone: () => existing.onboarding_rules_role_id,
-                onSome: (v) => v,
-              });
-              const onboarding_locale = Option.getOrElse(
+            Effect.let('nextFields', ({ existing }) => ({
+              name: Option.getOrElse(payload.name, () => existing.name),
+              rules_channel_id: Option.getOrElse(
+                payload.rulesChannelId,
+                () => existing.rules_channel_id,
+              ),
+              onboarding_rules_role_id: Option.getOrElse(
+                payload.onboardingRulesRoleId,
+                () => existing.onboarding_rules_role_id,
+              ),
+              onboarding_locale: Option.getOrElse(
                 payload.onboardingLocale,
                 () => existing.onboarding_locale,
-              );
-              const welcome_channel_id = Option.match(payload.welcomeChannelId, {
-                onNone: () => existing.welcome_channel_id,
-                onSome: (v) => v,
-              });
-              const name = Option.getOrElse(payload.name, () => existing.name);
-              return Effect.succeed({
-                name,
-                rules_channel_id,
-                onboarding_rules_role_id,
-                onboarding_locale,
-                welcome_channel_id,
-              });
-            }),
+              ),
+              welcome_channel_id: Option.getOrElse(
+                payload.welcomeChannelId,
+                () => existing.welcome_channel_id,
+              ),
+              achievement_channel_id: Option.getOrElse(
+                payload.achievementChannelId,
+                () => existing.achievement_channel_id,
+              ),
+            })),
             Effect.bind('updated', ({ existing, nextFields }) =>
               teams.update({
                 id: teamId,
                 name: nextFields.name,
-                description: Option.match(payload.description, {
-                  onNone: () => existing.description,
-                  onSome: (v) => v,
-                }),
-                sport: Option.match(payload.sport, {
-                  onNone: () => existing.sport,
-                  onSome: (v) => v,
-                }),
-                logo_url: Option.match(payload.logoUrl, {
-                  onNone: () => existing.logo_url,
-                  onSome: (v) => v,
-                }),
+                description: Option.getOrElse(payload.description, () => existing.description),
+                sport: Option.getOrElse(payload.sport, () => existing.sport),
+                logo_url: Option.getOrElse(payload.logoUrl, () => existing.logo_url),
                 welcome_channel_id: nextFields.welcome_channel_id,
-                system_log_channel_id: Option.match(payload.systemLogChannelId, {
-                  onNone: () => existing.system_log_channel_id,
-                  onSome: (v) => v,
-                }),
-                welcome_message_template: Option.match(payload.welcomeMessageTemplate, {
-                  onNone: () => existing.welcome_message_template,
-                  onSome: (v) => v,
-                }),
+                achievement_channel_id: nextFields.achievement_channel_id,
+                system_log_channel_id: Option.getOrElse(
+                  payload.systemLogChannelId,
+                  () => existing.system_log_channel_id,
+                ),
+                welcome_message_template: Option.getOrElse(
+                  payload.welcomeMessageTemplate,
+                  () => existing.welcome_message_template,
+                ),
                 rules_channel_id: nextFields.rules_channel_id,
                 onboarding_rules_role_id: nextFields.onboarding_rules_role_id,
                 onboarding_locale: nextFields.onboarding_locale,

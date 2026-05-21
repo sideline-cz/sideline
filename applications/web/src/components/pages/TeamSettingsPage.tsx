@@ -137,6 +137,9 @@ export function TeamSettingsPage({
   const [systemLogChannel, setSystemLogChannel] = React.useState(
     Option.getOrElse(teamInfo.systemLogChannelId, () => NONE_VALUE),
   );
+  const [achievementChannel, setAchievementChannel] = React.useState(
+    Option.getOrElse(teamInfo.achievementChannelId, () => NONE_VALUE),
+  );
   const [welcomeTemplate, setWelcomeTemplate] = React.useState(
     Option.getOrElse(teamInfo.welcomeMessageTemplate, () => ''),
   );
@@ -168,6 +171,7 @@ export function TeamSettingsPage({
   const hasWelcomeChanges =
     welcomeChannel !== Option.getOrElse(teamInfo.welcomeChannelId, () => NONE_VALUE) ||
     systemLogChannel !== Option.getOrElse(teamInfo.systemLogChannelId, () => NONE_VALUE) ||
+    achievementChannel !== Option.getOrElse(teamInfo.achievementChannelId, () => NONE_VALUE) ||
     welcomeTemplate !== Option.getOrElse(teamInfo.welcomeMessageTemplate, () => '');
 
   const welcomePreview = React.useMemo(() => {
@@ -237,6 +241,7 @@ export function TeamSettingsPage({
             logoUrl: Option.some(logoUrl.trim() ? Option.some(logoUrl.trim()) : Option.none()),
             welcomeChannelId: Option.none(),
             systemLogChannelId: Option.none(),
+            achievementChannelId: Option.none(),
             welcomeMessageTemplate: Option.none(),
             rulesChannelId: Option.none(),
             onboardingRulesRoleId: Option.none(),
@@ -344,6 +349,7 @@ export function TeamSettingsPage({
             logoUrl: Option.none(),
             welcomeChannelId: Option.some(channelToOption(welcomeChannel)),
             systemLogChannelId: Option.some(channelToOption(systemLogChannel)),
+            achievementChannelId: Option.some(channelToOption(achievementChannel)),
             welcomeMessageTemplate: Option.some(
               welcomeTemplate.trim() ? Option.some(welcomeTemplate.trim()) : Option.none(),
             ),
@@ -364,6 +370,7 @@ export function TeamSettingsPage({
     teamInfo.teamId,
     welcomeChannel,
     systemLogChannel,
+    achievementChannel,
     welcomeTemplate,
     channelToOption,
     run,
@@ -384,6 +391,7 @@ export function TeamSettingsPage({
             logoUrl: Option.none(),
             welcomeChannelId: Option.none(),
             systemLogChannelId: Option.none(),
+            achievementChannelId: Option.none(),
             welcomeMessageTemplate: Option.none(),
             rulesChannelId: Option.some(channelToOption(onboardingRulesChannel)),
             onboardingRulesRoleId: Option.some(channelToOption(onboardingRole)),
@@ -1011,6 +1019,27 @@ export function TeamSettingsPage({
                   pinnedValues={[NONE_VALUE]}
                   options={[
                     { value: NONE_VALUE, label: tr('teamSettings_channelNone') },
+                    ...discordChannels
+                      .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
+                      .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
+                  ]}
+                />
+              </div>
+              <div>
+                <label htmlFor='achievement-channel' className='text-sm font-medium mb-1 block'>
+                  {tr('teamSettings_achievementChannel')}
+                </label>
+                <p className='text-xs text-muted-foreground mb-2'>
+                  {tr('teamSettings_achievementChannelHelp')}
+                </p>
+                <SearchableSelect
+                  id='achievement-channel'
+                  value={achievementChannel}
+                  onValueChange={setAchievementChannel}
+                  placeholder={tr('teamSettings_achievementChannelDisabled')}
+                  pinnedValues={[NONE_VALUE]}
+                  options={[
+                    { value: NONE_VALUE, label: tr('teamSettings_achievementChannelDisabled') },
                     ...discordChannels
                       .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
                       .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),

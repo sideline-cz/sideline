@@ -33,7 +33,7 @@ export const constructEvent = (
       team_member_id: row.team_member_id,
       achievement_slug: row.achievement_slug,
       discord_user_id: row.discord_user_id,
-      welcome_channel_id: row.welcome_channel_id,
+      achievement_channel_id: row.achievement_channel_id,
       discord_role_id: row.discord_role_id,
     }),
   );

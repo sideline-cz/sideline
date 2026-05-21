@@ -69,6 +69,7 @@ export const mockTeamInfo = {
   logoUrl: null,
   guildId: '987654321',
   welcomeChannelId: null,
+  achievementChannelId: null,
   systemLogChannelId: null,
   welcomeMessageTemplate: null,
   rulesChannelId: null,

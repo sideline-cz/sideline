@@ -10,6 +10,7 @@ const makeInsert = (overrides?: {
   readonly name?: string;
   readonly guild_id?: Discord.Snowflake;
   readonly created_by?: User.UserId;
+  readonly achievement_channel_id?: Option.Option<Discord.Snowflake>;
 }): typeof Team.Team.insert.Type => ({
   name: 'Test Team',
   guild_id: '123456789012345678' as Discord.Snowflake,
@@ -24,6 +25,7 @@ const makeInsert = (overrides?: {
   welcome_message_template: Option.none(),
   rules_channel_id: Option.none(),
   overview_channel_id: Option.none(),
+  achievement_channel_id: Option.none(),
   onboarding_rules_role_id: Option.none(),
   onboarding_rules_prompt_id: Option.none(),
   onboarding_locale: 'en',
@@ -171,6 +173,7 @@ describe('TeamsRepository', () => {
               sport: Option.some('football'),
               logo_url: Option.none(),
               welcome_channel_id: Option.none(),
+              achievement_channel_id: Option.none(),
               system_log_channel_id: Option.none(),
               welcome_message_template: Option.none(),
               rules_channel_id: Option.none(),
@@ -190,5 +193,87 @@ describe('TeamsRepository', () => {
       ),
       Effect.provide(TestLayer),
     ),
+  );
+
+  it.effect(
+    'update round-trips achievement_channel_id — Some value is persisted and returned',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userId', () => createTestUser),
+        Effect.bind('inserted', ({ userId }) =>
+          TeamsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.insert(
+                makeInsert({
+                  name: 'Achievement Channel Team',
+                  guild_id: '222222222222222222' as Discord.Snowflake,
+                  created_by: userId,
+                }),
+              ),
+            ),
+          ),
+        ),
+        Effect.bind('updated', ({ inserted }) =>
+          TeamsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.update({
+                id: inserted.id,
+                name: 'Achievement Channel Team',
+                description: Option.none(),
+                sport: Option.none(),
+                logo_url: Option.none(),
+                welcome_channel_id: Option.none(),
+                achievement_channel_id: Option.some('999000000000000001'),
+                system_log_channel_id: Option.none(),
+                welcome_message_template: Option.none(),
+                rules_channel_id: Option.none(),
+                onboarding_rules_role_id: Option.none(),
+                onboarding_locale: 'en',
+              }),
+            ),
+          ),
+        ),
+        Effect.tap(({ updated }) =>
+          Effect.sync(() => {
+            expect(Option.isSome(updated.achievement_channel_id)).toBe(true);
+            expect(Option.getOrThrow(updated.achievement_channel_id)).toBe('999000000000000001');
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'insert round-trips achievement_channel_id — Some value persists through INSERT and findById',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userId', () => createTestUser),
+        Effect.bind('inserted', ({ userId }) =>
+          TeamsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.insert(
+                makeInsert({
+                  name: 'Achievement Insert Team',
+                  guild_id: '333333333333333333' as Discord.Snowflake,
+                  created_by: userId,
+                  achievement_channel_id: Option.some('123000000000000001' as Discord.Snowflake),
+                }),
+              ),
+            ),
+          ),
+        ),
+        Effect.bind('found', ({ inserted }) =>
+          TeamsRepository.asEffect().pipe(Effect.andThen((repo) => repo.findById(inserted.id))),
+        ),
+        Effect.tap(({ found }) =>
+          Effect.sync(() => {
+            expect(Option.isSome(found)).toBe(true);
+            const team = Option.getOrThrow(found);
+            expect(Option.isSome(team.achievement_channel_id)).toBe(true);
+            expect(Option.getOrThrow(team.achievement_channel_id)).toBe('123000000000000001');
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
   );
 });

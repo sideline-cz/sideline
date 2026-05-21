@@ -24,6 +24,7 @@ const mockTeamInfoWithOnboarding = (onboardingOverrides: Record<string, unknown>
   logoUrl: null,
   guildId: '987654321',
   welcomeChannelId: '111111111111111111',
+  achievementChannelId: null,
   systemLogChannelId: null,
   welcomeMessageTemplate: null,
   // New onboarding fields

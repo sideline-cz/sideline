@@ -16,6 +16,7 @@ const TeamUpdateInput = Schema.Struct({
   rules_channel_id: Schema.OptionFromNullOr(Schema.String),
   onboarding_rules_role_id: Schema.OptionFromNullOr(Schema.String),
   onboarding_locale: Onboarding.OnboardingLocale,
+  achievement_channel_id: Schema.OptionFromNullOr(Schema.String),
 });
 
 class PendingOnboardingSyncRow extends Schema.Class<PendingOnboardingSyncRow>(
@@ -47,8 +48,8 @@ const make = Effect.gen(function* () {
     Request: Team.Team.insert,
     Result: Team.Team,
     execute: (input) => sql`
-      INSERT INTO teams (name, guild_id, description, sport, logo_url, created_by, welcome_channel_id)
-      VALUES (${input.name}, ${input.guild_id}, ${input.description}, ${input.sport}, ${input.logo_url}, ${input.created_by}, ${input.welcome_channel_id})
+      INSERT INTO teams (name, guild_id, description, sport, logo_url, created_by, welcome_channel_id, achievement_channel_id)
+      VALUES (${input.name}, ${input.guild_id}, ${input.description}, ${input.sport}, ${input.logo_url}, ${input.created_by}, ${input.welcome_channel_id}, ${input.achievement_channel_id})
       RETURNING *
     `,
   });
@@ -98,6 +99,7 @@ const make = Effect.gen(function* () {
         rules_channel_id = ${input.rules_channel_id},
         onboarding_rules_role_id = ${input.onboarding_rules_role_id},
         onboarding_locale = ${input.onboarding_locale},
+        achievement_channel_id = ${input.achievement_channel_id},
         updated_at = now()
       WHERE id = ${input.id}
       RETURNING *
@@ -116,6 +118,7 @@ const make = Effect.gen(function* () {
     readonly rules_channel_id: Option.Option<string>;
     readonly onboarding_rules_role_id: Option.Option<string>;
     readonly onboarding_locale: Onboarding.OnboardingLocale;
+    readonly achievement_channel_id: Option.Option<string>;
   }) =>
     updateTeamQuery(input).pipe(
       catchSqlErrors,

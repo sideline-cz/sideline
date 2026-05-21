@@ -89,6 +89,7 @@ let teamState: {
   system_log_channel_id: Option.Option<Discord.Snowflake>;
   welcome_message_template: Option.Option<string>;
   rules_channel_id: Option.Option<Discord.Snowflake>;
+  achievement_channel_id: Option.Option<Discord.Snowflake>;
   onboarding_rules_role_id: Option.Option<Discord.Snowflake>;
   onboarding_rules_prompt_id: Option.Option<Discord.Snowflake>;
   onboarding_locale: 'en' | 'cs';
@@ -112,6 +113,7 @@ const resetTeamState = () => {
     system_log_channel_id: Option.none(),
     welcome_message_template: Option.none(),
     rules_channel_id: Option.some(RULES_CHANNEL_ID),
+    achievement_channel_id: Option.none(),
     onboarding_rules_role_id: Option.some(RULES_ROLE_ID),
     onboarding_rules_prompt_id: Option.none(),
     onboarding_locale: 'en',
@@ -235,6 +237,8 @@ const MockTeamsRepositoryLayer = Layer.succeed(TeamsRepository, {
       teamState.onboarding_rules_role_id = input.onboarding_rules_role_id;
     if ('onboarding_locale' in input) teamState.onboarding_locale = input.onboarding_locale;
     if ('welcome_channel_id' in input) teamState.welcome_channel_id = input.welcome_channel_id;
+    if ('achievement_channel_id' in input)
+      teamState.achievement_channel_id = input.achievement_channel_id;
     if ('name' in input) teamState.name = input.name;
 
     // Simulate the no-op detection + auto-flip
@@ -609,6 +613,21 @@ describe('PATCH /teams/:id/settings — discord_channel_training change', () => 
 
     expect(response.status).toBe(200);
     expect(teamState.onboarding_sync_status).toBe('done');
+  });
+});
+
+describe('PATCH /teams/:id — achievementChannelId does NOT trigger onboarding sync', () => {
+  it('updating only achievementChannelId does NOT enqueue an onboarding sync', async () => {
+    currentMembership = managerMembership;
+    teamState.onboarding_sync_status = 'done';
+
+    const response = await patchTeam({
+      achievementChannelId: '111111111111111111',
+    });
+
+    expect(response.status).toBe(200);
+    expect(teamState.onboarding_sync_status).toBe('done');
+    expect(syncPendingCalls).toHaveLength(0);
   });
 });
 

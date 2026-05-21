@@ -7,24 +7,30 @@ import { retryPolicy } from '~/rest/utils.js';
 const grantRole = (event: AchievementRpcEvents.AchievementEarnedEvent, roleId: string) =>
   Effect.Do.pipe(
     Effect.bind('rest', () => DiscordREST.asEffect()),
-    Effect.tap(({ rest }) =>
+    Effect.bind('granted', ({ rest }) =>
+      // Order: short-circuit 404 BEFORE retrying. A missing role is a permanent
+      // failure, so retrying with exponential backoff would only add latency and
+      // spam warning logs. retryPolicy still applies to other transient errors.
       rest.addGuildMemberRole(event.guild_id, event.discord_user_id, roleId).pipe(
-        Effect.retry(retryPolicy),
+        Effect.as(true),
         Effect.catchTag('ErrorResponse', (err) =>
           err.response.status === 404
             ? Effect.logWarning(
                 `Achievement role ${roleId} not found (404) in guild ${event.guild_id}, skipping role grant`,
-              )
+              ).pipe(Effect.as(false))
             : Effect.fail(err),
         ),
+        Effect.retry(retryPolicy),
       ),
     ),
-    Effect.tap(() =>
-      Effect.logInfo(
-        `Granted achievement role ${roleId} to user ${event.discord_user_id} in guild ${event.guild_id}`,
-      ),
+    Effect.tap(({ granted }) =>
+      granted
+        ? Effect.logInfo(
+            `Granted achievement role ${roleId} to user ${event.discord_user_id} in guild ${event.guild_id}`,
+          )
+        : Effect.void,
     ),
-    Effect.asVoid,
+    Effect.map(({ granted }) => granted),
   );
 
 const postEmbed = (
@@ -51,15 +57,18 @@ const postEmbed = (
         roles: roleId !== undefined ? [roleId] : [],
       };
 
+      // Order: short-circuit 404 BEFORE retrying. A deleted channel is a
+      // permanent failure — retrying would only delay the worker. retryPolicy
+      // still applies to other transient errors.
       return rest.createMessage(channelId, { content, embeds: [embed], allowed_mentions }).pipe(
-        Effect.retry(retryPolicy),
         Effect.catchTag('ErrorResponse', (err) =>
           err.response.status === 404
             ? Effect.logWarning(
-                `Achievement welcome channel ${channelId} not found (404) in guild ${event.guild_id}, skipping embed`,
+                `Achievement channel ${channelId} not found (404) in guild ${event.guild_id}, skipping embed`,
               )
             : Effect.fail(err),
         ),
+        Effect.retry(retryPolicy),
       );
     }),
     Effect.tap(() =>
@@ -72,24 +81,33 @@ const postEmbed = (
 
 export const handleAchievementEarned = (event: AchievementRpcEvents.AchievementEarnedEvent) =>
   Effect.Do.pipe(
-    Effect.bind('roleGranted', () =>
+    // grantedRoleId is Some(roleId) only if a role was configured AND successfully granted.
+    Effect.bind('grantedRoleId', () =>
       Option.match(event.discord_role_id, {
-        onNone: () => Effect.succeed(false),
-        onSome: (roleId) => grantRole(event, roleId).pipe(Effect.as(true)),
+        onNone: () => Effect.succeed(Option.none<string>()),
+        onSome: (roleId) =>
+          grantRole(event, roleId).pipe(
+            Effect.map((granted) => (granted ? Option.some(roleId) : Option.none<string>())),
+          ),
       }),
     ),
-    Effect.tap(({ roleGranted }) =>
-      Option.match(event.welcome_channel_id, {
-        onNone: () => Effect.void,
-        onSome: (channelId) => postEmbed(event, channelId, roleGranted),
+    Effect.tap(({ grantedRoleId }) =>
+      Option.match(event.achievement_channel_id, {
+        onNone: () =>
+          Option.match(grantedRoleId, {
+            onNone: () =>
+              Option.isNone(event.discord_role_id)
+                ? Effect.logInfo(
+                    `No role or channel configured for achievement ${event.achievement_slug} in guild ${event.guild_id}, nothing to do`,
+                  )
+                : Effect.void,
+            onSome: (roleId) =>
+              Effect.logInfo(
+                `Granted achievement role ${roleId}; skipped embed (achievement channel not configured) for guild ${event.guild_id}`,
+              ),
+          }),
+        onSome: (channelId) => postEmbed(event, channelId, Option.isSome(grantedRoleId)),
       }),
-    ),
-    Effect.tap(() =>
-      Option.isNone(event.discord_role_id) && Option.isNone(event.welcome_channel_id)
-        ? Effect.logInfo(
-            `No role or channel configured for achievement ${event.achievement_slug} in guild ${event.guild_id}, nothing to do`,
-          )
-        : Effect.void,
     ),
     Effect.asVoid,
   );

@@ -14,7 +14,7 @@ export class AchievementEarnedEvent extends Schema.TaggedClass<AchievementEarned
     team_member_id: TeamMember.TeamMemberId,
     achievement_slug: Achievement.AchievementSlug,
     discord_user_id: Discord.Snowflake,
-    welcome_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    achievement_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
     discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
   },
 ) {}
