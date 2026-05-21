@@ -331,6 +331,7 @@ Returns the team's public profile information.
 | `logoUrl` | `string \| null` | Yes | URL to team logo |
 | `guildId` | `Snowflake` | No | Linked Discord guild ID |
 | `welcomeChannelId` | `Snowflake \| null` | Yes | Discord channel where the bot posts welcome embeds for new members |
+| `achievementChannelId` | `Snowflake \| null` | Yes | Discord channel where the bot posts achievement congratulatory embeds; null means notifications are disabled |
 | `systemLogChannelId` | `Snowflake \| null` | Yes | Private Discord channel where the bot logs every member join |
 | `welcomeMessageTemplate` | `string \| null` | Yes | Template string for the welcome embed description (max 500 characters; supports `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, `{teamName}`) |
 
@@ -364,6 +365,7 @@ Updates the team's profile information. All fields are optional.
 | `sport` | `string \| null` | No | Max 50 characters; null clears the field | Sport or activity type |
 | `logoUrl` | `string \| null` | No | Max 2048 characters; null clears the field | URL to team logo |
 | `welcomeChannelId` | `Snowflake \| null` | No | null clears the field | Discord channel for welcome embeds |
+| `achievementChannelId` | `Snowflake \| null` | No | null disables achievement notifications | Discord channel for achievement congratulatory embeds |
 | `systemLogChannelId` | `Snowflake \| null` | No | null clears the field | Private Discord channel for join logs |
 | `welcomeMessageTemplate` | `string \| null` | No | Max 500 characters; null clears the field | Template for welcome embed description |
 

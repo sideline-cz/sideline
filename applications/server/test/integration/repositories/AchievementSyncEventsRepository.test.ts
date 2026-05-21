@@ -47,6 +47,7 @@ const createTeam = (
   guildId: Discord.Snowflake,
   createdBy: User.UserId,
   welcomeChannelId: Option.Option<Discord.Snowflake> = Option.none(),
+  achievementChannelId: Option.Option<Discord.Snowflake> = Option.none(),
 ) =>
   TeamsRepository.asEffect().pipe(
     Effect.andThen((repo) =>
@@ -64,6 +65,7 @@ const createTeam = (
         welcome_message_template: Option.none(),
         rules_channel_id: Option.none(),
         overview_channel_id: Option.none(),
+        achievement_channel_id: achievementChannelId,
         onboarding_rules_role_id: Option.none(),
         onboarding_rules_prompt_id: Option.none(),
         onboarding_locale: 'en',
@@ -121,13 +123,14 @@ describe('AchievementSyncEventsRepository', () => {
     ),
   );
 
-  it.effect('findUnprocessed returns events with welcome_channel_id JOINed from teams', () =>
+  it.effect('findUnprocessed returns events with achievement_channel_id JOINed from teams', () =>
     Effect.Do.pipe(
       Effect.bind('userId', () => createUser('500000000000000002', 'sync-evt-user-2')),
       Effect.bind('team', ({ userId }) =>
         createTeam(
           '502020202020202020' as Discord.Snowflake,
           userId,
+          Option.none(),
           Option.some('600000000000000001' as Discord.Snowflake),
         ),
       ),
@@ -146,8 +149,36 @@ describe('AchievementSyncEventsRepository', () => {
         Effect.sync(() => {
           expect(events).toHaveLength(1);
           const evt = events[0]!;
-          expect(Option.isSome(evt.welcome_channel_id)).toBe(true);
-          expect(Option.getOrNull(evt.welcome_channel_id)).toBe('600000000000000001');
+          expect(Option.isSome(evt.achievement_channel_id)).toBe(true);
+          expect(Option.getOrNull(evt.achievement_channel_id)).toBe('600000000000000001');
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('findUnprocessed returns achievement_channel_id=None when team has it disabled', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('500000000000000008', 'sync-evt-user-8')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('508080808080808080' as Discord.Snowflake, userId, Option.none(), Option.none()),
+      ),
+      Effect.bind('tm', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.tap(({ team, tm }) =>
+        AchievementSyncEventsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.emit(team.id, tm.id, 'streak_30')),
+        ),
+      ),
+      Effect.bind('events', () =>
+        AchievementSyncEventsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findUnprocessed(10)),
+        ),
+      ),
+      Effect.tap(({ events }) =>
+        Effect.sync(() => {
+          expect(events).toHaveLength(1);
+          const evt = events[0]!;
+          expect(Option.isNone(evt.achievement_channel_id)).toBe(true);
         }),
       ),
       Effect.provide(TestLayer),

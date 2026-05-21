@@ -23,7 +23,7 @@ export class AchievementSyncEventRow extends Schema.Class<AchievementSyncEventRo
   team_member_id: TeamMember.TeamMemberId,
   achievement_slug: Achievement.AchievementSlug,
   discord_user_id: Discord.Snowflake,
-  welcome_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  achievement_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
 }) {}
 
@@ -60,7 +60,7 @@ const make = Effect.gen(function* () {
       SELECT
         ase.id, ase.team_id, ase.guild_id, ase.team_member_id, ase.achievement_slug,
         u.discord_id AS discord_user_id,
-        t.welcome_channel_id AS welcome_channel_id,
+        t.achievement_channel_id AS achievement_channel_id,
         arm.discord_role_id AS discord_role_id
       FROM achievement_sync_events ase
       JOIN team_members tm ON tm.id = ase.team_member_id

@@ -446,6 +446,8 @@ Rules:
 
 This footgun bit `TeamsRepository.insert` once already: `welcome_channel_id` was added to `Team.Team.insert` and the API handler, but the column list still read `(name, guild_id, description, sport, logo_url, created_by)` — every team created post-migration had `welcome_channel_id = NULL` despite the caller passing a value. Fix: extend both the column list and `VALUES` tuple in the same edit.
 
+Current state of `TeamsRepository.insertQuery` column list (`(name, guild_id, description, sport, logo_url, created_by, welcome_channel_id, achievement_channel_id)`): only `welcome_channel_id` and `achievement_channel_id` are persisted at INSERT time. `system_log_channel_id`, `rules_channel_id`, `overview_channel_id`, `welcome_message_template`, `onboarding_rules_role_id`, `onboarding_rules_prompt_id` are present on `Team.Team.insert` but **silently dropped** by the INSERT — they can only be set later via `teams.update(...)`. If a feature needs one of these populated at team-creation time, extend the column list and `VALUES` tuple in the same edit; do not assume the field round-trips because it compiles.
+
 Rules when adding a new column to a `Model.Class` that is INSERTed via hand-written SQL:
 
 1. **Grep for every hand-written `INSERT INTO <table>` in `src/repositories/`** and add the new column to both the column list and the `VALUES (...)` tuple. `SqlSchema` does not catch the mismatch.
@@ -573,6 +575,36 @@ Rules:
 5. **Document the endpoint in `docs/api.md` with `Required Permission: membership in the team (bearer token must belong to a team member)`** — never `finance:view` or any specific permission string. This is how API consumers learn the auth contract.
 
 Reference: `applications/server/src/api/finance.ts` (`myStatus`, `myPaymentHistory`).
+
+## PATCH Payload Merge: `Option.getOrElse` Over `Option.match`
+
+PATCH handlers that build a "full row to UPDATE" from `Schema.OptionFromOptional(...)` payload fields plus the existing DB row MUST use `Option.getOrElse(payload.x, () => existing.x)` — never the verbose `Option.match(payload.x, { onNone: () => existing.x, onSome: (v) => v })`. The two are semantically identical when the `onSome` branch is the identity function, but `getOrElse` is one line, reads top-down ("the value, falling back to existing"), and removes the visual noise that obscures which payload fields the handler actually touches.
+
+```typescript
+// ✓ Good — partial-PATCH merge using Option.getOrElse
+Effect.let('nextFields', ({ existing }) => ({
+  name: Option.getOrElse(payload.name, () => existing.name),
+  rules_channel_id: Option.getOrElse(payload.rulesChannelId, () => existing.rules_channel_id),
+  achievement_channel_id: Option.getOrElse(
+    payload.achievementChannelId,
+    () => existing.achievement_channel_id,
+  ),
+})),
+
+// ✗ Bad — Option.match where onSome is identity (use getOrElse instead)
+const welcome_channel_id = Option.match(payload.welcomeChannelId, {
+  onNone: () => existing.welcome_channel_id,
+  onSome: (v) => v,
+});
+```
+
+Reference: `applications/server/src/api/team.ts` (`updateTeamInfo` handler — every PATCH field uses `Option.getOrElse`).
+
+Rules:
+
+1. **Use `Option.getOrElse(opt, () => fallback)` when the `onSome` branch is the identity function `(v) => v`.** This is the "patch-or-keep" case for partial updates.
+2. **Keep `Option.match` only when `onSome` is non-trivial** — i.e. transforms `v`, runs an `Effect`, or branches on `v`'s value. The "bare `Effect.succeed` in `onSome`" case has its own helper (`Options.toEffect`) — see `packages/effect-lib/AGENTS.md`.
+3. **Do not lift a "patch-or-keep" merge into an `Effect.bind`** when no effectful work is needed. Use `Effect.let('nextFields', ({ existing }) => ({ ... }))` — `Effect.bind` would force the merged record to be wrapped in `Effect.succeed` and back, adding allocation for no benefit. `team.ts:updateTeamInfo` switched from `Effect.bind` returning `Effect.succeed({ ... })` to `Effect.let` for exactly this reason.
 
 ## Atomic Conditional UPDATE Pattern
 

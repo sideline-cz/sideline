@@ -185,6 +185,7 @@ erDiagram
         TEXT welcome_channel_id
         TEXT system_log_channel_id
         TEXT welcome_message_template
+        TEXT achievement_channel_id
     }
 
     team_members {

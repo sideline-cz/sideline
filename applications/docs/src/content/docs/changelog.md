@@ -5,6 +5,12 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-21 — Configurable achievement notification channel
+
+- Captains can now choose which Discord channel receives achievement congratulatory embeds. Go to **Team settings → Discord integration** and set the **Achievement channel** field.
+- Select **None** to stop posting achievement notifications entirely.
+- Teams that already had a welcome channel configured before this release continue to post achievement embeds there — no action is needed unless you want to change it.
+
 ## 2026-05-21 — Backdate and future-date activity log entries
 
 - You can now choose **any date** when logging a physical activity, instead of always using today. The limit is ±2 years from the current date.
@@ -105,7 +111,7 @@ This page lists user-visible changes to Sideline. For developer-level release no
 
 - Members now earn **achievements** automatically as they log physical activity. Milestones include first activity, activity count milestones (10, 50, 100), streak lengths (3, 7, 30 days), total duration milestones (600 and 3000 minutes), and per-type counts (25 gym sessions, 25 runs).
 - Achievements marked with a star ⭐ can be linked to a Discord role. When a member earns one of these achievements, the bot automatically grants the configured role on your team's Discord server.
-- The bot also posts a congratulatory embed in your team's **welcome channel** (if one is configured), tagging the member and the newly granted role.
+- The bot also posts a congratulatory embed in your team's **achievement channel** (if one is configured), tagging the member and the newly granted role. See the 2026-05-21 release for how to configure or disable this channel independently.
 - The `GET /teams/:teamId/members/:memberId/activity-stats` API endpoint now includes an `achievements` array listing each earned achievement and the time it was earned.
 - The `/makanicko stats` Discord command continues to show streak and count stats; the web app member profile shows the full achievement list.
 - Admins can configure which Discord roles are granted for achievement milestones in **Team settings → Achievements**.

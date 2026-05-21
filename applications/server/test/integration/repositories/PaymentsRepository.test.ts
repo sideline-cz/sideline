@@ -65,6 +65,7 @@ const createTeam = (guildId: Discord.Snowflake, createdBy: User.UserId) =>
         welcome_message_template: Option.none(),
         rules_channel_id: Option.none(),
         overview_channel_id: Option.none(),
+        achievement_channel_id: Option.none(),
         onboarding_rules_role_id: Option.none(),
         onboarding_rules_prompt_id: Option.none(),
         onboarding_locale: 'en',

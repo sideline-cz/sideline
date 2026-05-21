@@ -124,12 +124,13 @@ Top-level organisational unit tied one-to-one with a Discord guild.
 | `welcome_channel_id` | TEXT | — | — |
 | `system_log_channel_id` | TEXT | — | — |
 | `welcome_message_template` | TEXT | — | — |
+| `achievement_channel_id` | TEXT | — | — |
 
 **Indexes**: `idx_teams_guild_id` on `(guild_id)`
 
-**Notes**: `guild_id` was made NOT NULL and UNIQUE in migration `1741200000`. `description`, `sport`, and `logo_url` were added in migration `1743100000`. `welcome_channel_id`, `system_log_channel_id`, and `welcome_message_template` were added in migration `1746500000` to support the Discord welcome flow. `welcome_channel_id` is the Discord channel where the bot posts the member welcome embed when a new player joins via an invite; `system_log_channel_id` is a private captain-only channel where the bot logs every join (invite code, inviter, group); `welcome_message_template` is a template string (max 500 characters) supporting the placeholders `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, and `{teamName}`. Deleting a team cascades to all child tables.
+**Notes**: `guild_id` was made NOT NULL and UNIQUE in migration `1741200000`. `description`, `sport`, and `logo_url` were added in migration `1743100000`. `welcome_channel_id`, `system_log_channel_id`, and `welcome_message_template` were added in migration `1746500000` to support the Discord welcome flow. `welcome_channel_id` is the Discord channel where the bot posts the member welcome embed when a new player joins via an invite; `system_log_channel_id` is a private captain-only channel where the bot logs every join (invite code, inviter, group); `welcome_message_template` is a template string (max 500 characters) supporting the placeholders `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, and `{teamName}`. `achievement_channel_id` is the Discord channel where the bot posts achievement congratulatory embeds; added in migration `1786200000_add_achievement_channel`. Existing teams default to their `welcome_channel_id` (via migration backfill); captains can later set it to a different channel or clear it to disable achievement notifications entirely. Deleting a team cascades to all child tables.
 
-**INSERT fix**: The `TeamsRepository` `insert` statement was updated (alongside the achievement feature) to include `welcome_channel_id` in the explicit column list so that value is persisted at team-creation time.
+**INSERT fix**: The `TeamsRepository` `insert` statement was updated (alongside the achievement feature) to include `welcome_channel_id` and `achievement_channel_id` in the explicit column list so those values are persisted at team-creation time.
 
 ---
 
@@ -758,7 +759,7 @@ Outbox table driving achievement notifications in Discord. Polled by the bot's A
 
 **Indexes**: `idx_achievement_sync_unprocessed` — partial index on `(created_at) WHERE processed_at IS NULL`
 
-**Notes**: Added in migration `1778716800_create_achievements`. The bot's Achievement Sync worker polls `WHERE processed_at IS NULL ORDER BY created_at`, then for each event: optionally grants a Discord role (if an `achievement_role_mappings` row exists) and optionally posts a congratulatory embed to the team's `welcome_channel_id`. Both actions are resolved at SELECT time by joining to `teams`, `team_members`, `users`, and `achievement_role_mappings`. After successful processing, `processed_at` is set. Failures set `processed_at` and `error` — failed events are not automatically retried (same poison-pill prevention as `channel_sync_events`).
+**Notes**: Added in migration `1778716800_create_achievements`. The bot's Achievement Sync worker polls `WHERE processed_at IS NULL ORDER BY created_at`, then for each event: optionally grants a Discord role (if an `achievement_role_mappings` row exists) and optionally posts a congratulatory embed to the team's `achievement_channel_id`. Both actions are resolved at SELECT time by joining to `teams`, `team_members`, `users`, and `achievement_role_mappings`. After successful processing, `processed_at` is set. Failures set `processed_at` and `error` — failed events are not automatically retried (same poison-pill prevention as `channel_sync_events`).
 
 ---
 
@@ -1273,6 +1274,7 @@ All 78 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1784000000 | `introduce_treasurer_role` | Creates a built-in Treasurer role on every existing team; grants Treasurer `finance:view`, `finance:manage_fees`, `finance:record_payments`; backfills Admin with any missing finance perms; backfills Captain with `finance:view` |
 | 1785000000 | `payment_reminders` | Creates `payment_reminder_sync_events` and `payment_reminders_sent` tables; adds `idx_fee_assignments_due_at` index on `fee_assignments(due_at)`; adds `idx_payment_reminder_sync_events_unprocessed` partial index on `payment_reminder_sync_events(created_at) WHERE processed_at IS NULL` |
 | 1786000000 | `create_expenses` | Creates `expenses` table with CHECK constraints on `amount_minor > 0`, `spent_at` range, and `category` enum; adds `idx_expenses_team_spent_at` and `idx_expenses_team_category` indexes; creates `expense_history` audit table with `idx_expense_history_expense` index; creates `expenses_audit` trigger function and `expenses_audit_trg` AFTER INSERT OR UPDATE OR DELETE trigger on `expenses` |
+| 1786200000 | `add_achievement_channel` | Adds `achievement_channel_id TEXT` column to `teams`; backfills `achievement_channel_id = welcome_channel_id` for all existing rows so existing teams continue posting achievement embeds to their welcome channel by default |
 
 ### After Migrations (seed data)
 

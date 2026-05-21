@@ -18,6 +18,7 @@ export class TeamInfo extends Schema.Class<TeamInfo>('TeamInfo')({
   systemLogChannelId: Schema.OptionFromNullOr(Snowflake),
   welcomeMessageTemplate: Schema.OptionFromNullOr(Schema.String),
   rulesChannelId: Schema.OptionFromNullOr(Snowflake),
+  achievementChannelId: Schema.OptionFromNullOr(Snowflake),
   onboardingRulesRoleId: Schema.OptionFromNullOr(Snowflake),
   onboardingLocale: OnboardingLocale,
   onboardingSyncStatus: OnboardingSyncStatus,
@@ -40,6 +41,7 @@ export const UpdateTeamRequest = Schema.Struct({
     Schema.OptionFromNullOr(Schema.String.pipe(Schema.check(Schema.isMaxLength(2048)))),
   ),
   welcomeChannelId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),
+  achievementChannelId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),
   systemLogChannelId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),
   welcomeMessageTemplate: Schema.OptionFromOptional(
     Schema.OptionFromNullOr(Schema.String.pipe(Schema.check(Schema.isMaxLength(500)))),
