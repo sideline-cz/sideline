@@ -670,13 +670,7 @@ export function OnboardingPage({
                               >
                                 {tr('onboarding_back')}
                               </Button>
-                              <Button
-                                type='submit'
-                                disabled={
-                                  discordForm.formState.isSubmitting ||
-                                  !discordForm.watch('guildId')
-                                }
-                              >
+                              <Button type='submit' disabled={discordForm.formState.isSubmitting}>
                                 {discordForm.formState.isSubmitting
                                   ? tr('onboarding_creating')
                                   : tr('onboarding_create')}

@@ -344,6 +344,7 @@
   "event_locationUrlHelp": "Volitelné — odkaz na trasu, mapu nebo stránku místa. Vyžaduje text místa.",
   "event_locationUrlInvalid": "Musí být platná https:// URL.",
   "common_opensInNewTab": "Otevře se v nové kartě",
+  "common_backToDashboard": "Zpět na nástěnku",
   "event_eventDate": "Datum",
   "event_startTime": "Začátek",
   "event_endTime": "Konec",

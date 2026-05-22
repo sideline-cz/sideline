@@ -1,8 +1,8 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import { Discord, type OnboardingApi, type TeamOnboardingToken } from '@sideline/domain';
-import { useRouter } from '@tanstack/react-router';
+import { Link, useRouter } from '@tanstack/react-router';
 import { DateTime, Effect, Option, Schema } from 'effect';
-import { Copy, Link2 } from 'lucide-react';
+import { ArrowLeft, Copy, Link2 } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { Badge } from '~/components/ui/badge';
@@ -229,9 +229,18 @@ export function AdminOnboardingTokensPage({ tokens }: AdminOnboardingTokensPageP
 
   return (
     <div className='container mx-auto py-8 max-w-3xl space-y-8'>
-      <div>
-        <h1 className='text-2xl font-bold'>{tr('admin_onboarding_pageTitle')}</h1>
-        <p className='text-muted-foreground'>{tr('admin_onboarding_pageDescription')}</p>
+      <div className='space-y-3'>
+        <Link
+          to='/'
+          className='inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors'
+        >
+          <ArrowLeft className='size-4' />
+          {tr('common_backToDashboard')}
+        </Link>
+        <div>
+          <h1 className='text-2xl font-bold'>{tr('admin_onboarding_pageTitle')}</h1>
+          <p className='text-muted-foreground'>{tr('admin_onboarding_pageDescription')}</p>
+        </div>
       </div>
 
       {/* Create form */}

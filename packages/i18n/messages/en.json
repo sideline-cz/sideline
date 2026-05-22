@@ -327,6 +327,7 @@
   "event_locationUrlHelp": "Optional — link to directions, maps, or a venue page. Requires location text.",
   "event_locationUrlInvalid": "Must be a valid https:// URL.",
   "common_opensInNewTab": "Opens in a new tab",
+  "common_backToDashboard": "Back to dashboard",
   "event_eventDate": "Date",
   "event_startTime": "Start Time",
   "event_endTime": "End Time",
