@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-22 — Team onboarding flow
+
+- Global Sideline admins can now mint **one-time onboarding links** from **Administration → Team onboarding**. Each link is bound to a specific captain's Discord account and expires after a configurable window (24 hours, 3 days, or 7 days).
+- Captains who receive a link complete team setup in a two-step wizard: first they enter the team name, sport, description, and logo URL; then they link their Discord server and pick the welcome channel, system log channel, and language.
+- The link is shown only once at creation time. If the captain loses the link before using it, the global admin can revoke the token and issue a new one.
+- Token status (**Active / Used / Expired / Revoked**) is visible in the token list at **Administration → Team onboarding**.
+- The **Create team** page now shows a banner directing users without an onboarding link to contact a Sideline admin.
+- See [Team onboarding guide](/guides/team-onboarding/) and [Admin quick start](/quick-start/admins/#onboarding-new-teams-global-admin) for details.
+
 ## 2026-05-22 — Event date range display fix
 
 - Same-day events (start and end on the same date) now show the end time only, e.g. **2026-05-23 14:00 – 16:00**. Previously the end date was repeated unnecessarily.

@@ -47,6 +47,7 @@ import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { TeamOnboardingTokensRepository } from '~/repositories/TeamOnboardingTokensRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
@@ -90,6 +91,7 @@ const Repositories = Layer.mergeAll(
   GroupsRepository.Default,
   TrainingTypesRepository.Default,
   TeamInvitesRepository.Default,
+  TeamOnboardingTokensRepository.Default,
   InviteAcceptancesRepository.Default,
   AgeThresholdRepository.Default,
   NotificationsRepository.Default,

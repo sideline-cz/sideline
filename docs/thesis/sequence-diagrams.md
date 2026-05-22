@@ -1,6 +1,6 @@
 # Sideline — Core System Sequence Diagrams
 
-This document provides sequence diagrams for the nine core flows in the Sideline platform. Each diagram is accompanied by a brief description of the flow and its key design decisions. The diagrams use Mermaid `sequenceDiagram` syntax and are intended for inclusion in a bachelor's thesis.
+This document provides sequence diagrams for the eleven core flows in the Sideline platform. Each diagram is accompanied by a brief description of the flow and its key design decisions. The diagrams use Mermaid `sequenceDiagram` syntax and are intended for inclusion in a bachelor's thesis.
 
 ---
 
@@ -726,4 +726,57 @@ sequenceDiagram
 
         Note over NewUser: discordInviteUrl set → browser redirects to https://discord.gg/{code}<br/>(Bot generated a 1-use, 24-hour Discord invite via Invite/PendingAcceptances loop)
     end
+```
+
+---
+
+## 11. Team Onboarding — Global Admin Mints Token, Captain Completes Wizard
+
+A global admin mints a single-use onboarding token and sends the URL to the designated captain. The captain opens the URL in the browser, is shown the team identity form after authenticating via Discord OAuth, fills in team identity (step 1) and Discord setup (step 2), and submits. The server validates that the token is active, the authenticated user's Discord ID matches `bound_discord_id`, and the selected guild is not already claimed; it then creates the team, seeds built-in roles and the captain's membership, atomically marks the token consumed, and returns a `UserTeam` object. The captain is redirected to the team dashboard.
+
+```mermaid
+sequenceDiagram
+    participant GA as Global Admin (Browser)
+    participant Captain as Captain (Browser)
+    participant Server as API Server
+    participant DB as PostgreSQL
+    participant Discord as Discord OAuth
+
+    GA->>Server: POST /auth/onboarding/tokens<br/>Authorization: Bearer <ga_token><br/>{proposedName, boundDiscordId, ttl}
+    Note over Server: Verify caller Discord ID is in APP_GLOBAL_ADMIN_DISCORD_IDS
+    Server->>DB: INSERT team_onboarding_tokens<br/>{token_hash, proposed_name, bound_discord_id, created_by, expires_at}
+    DB-->>Server: token row
+    Server-->>GA: 201 Created — {plaintextToken, onboardingUrl, expiresAt}
+    Note over GA: URL is displayed once only.<br/>Admin copies it and sends to captain over Discord.
+
+    Captain->>Server: GET /auth/onboarding/tokens/{plaintextToken}/preview
+    Server->>DB: SELECT * FROM team_onboarding_tokens WHERE token_hash=SHA256(plaintextToken)
+    DB-->>Server: token row (consumed_at/revoked_at null, not expired)
+    Server-->>Captain: 200 OK — OnboardingTokenPreview {proposedName, boundDiscordId, expiresAt}
+
+    Note over Captain: Browser shows "Sign in to claim {proposedName}"
+    Captain->>Discord: Initiates Discord OAuth (diagram 1 flow)
+    Discord-->>Server: OAuth callback — session created
+    Server-->>Captain: 302 Redirect → /onboarding/{plaintextToken} (with session)
+
+    Note over Captain: Step 1 — Team identity form<br/>(name, description, sport, logoUrl)
+    Note over Captain: Step 2 — Discord setup form<br/>(guildId, welcomeChannelId, systemLogChannelId, onboardingLocale)
+
+    Captain->>Server: POST /auth/onboarding/tokens/{plaintextToken}/complete<br/>Authorization: Bearer <captain_token><br/>{name, description, sport, logoUrl, guildId, welcomeChannelId, systemLogChannelId, onboardingLocale}
+    Server->>DB: SELECT * FROM team_onboarding_tokens WHERE token_hash=SHA256(plaintextToken)
+    DB-->>Server: token row
+    Note over Server: Verify consumed_at/revoked_at null, not expired
+    Note over Server: Verify authenticated user discord_id = bound_discord_id
+    Server->>DB: SELECT id FROM teams WHERE guild_id=?
+    DB-->>Server: (no row — guild unclaimed)
+    Note over Server: Begin sql.withTransaction
+    Server->>DB: INSERT teams {name, guild_id, description, sport, logo_url, created_by,<br/>welcome_channel_id, system_log_channel_id, onboarding_locale,<br/>onboarding_sync_status='pending', ...all 16 columns}
+    DB-->>Server: team row {id: new_team_id}
+    Server->>DB: INSERT roles × 4 (Admin, Captain, Player, Treasurer) + role_permissions
+    Server->>DB: INSERT team_members {team_id, user_id}
+    Server->>DB: INSERT member_roles {team_member_id, role_id=Admin.id}
+    Server->>DB: UPDATE team_onboarding_tokens<br/>SET consumed_at=now(), consumed_by=?, resulting_team_id=?<br/>WHERE id=? AND consumed_at IS NULL AND revoked_at IS NULL
+    DB-->>Server: OK — commit transaction
+    Server-->>Captain: 201 Created — UserTeam {teamId, teamName, roleNames, permissions}
+    Note over Captain: Browser redirects to /teams/{teamId} dashboard
 ```

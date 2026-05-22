@@ -124,13 +124,21 @@ Top-level organisational unit tied one-to-one with a Discord guild.
 | `welcome_channel_id` | TEXT | — | — |
 | `system_log_channel_id` | TEXT | — | — |
 | `welcome_message_template` | TEXT | — | — |
+| `rules_channel_id` | TEXT | — | — |
+| `overview_channel_id` | TEXT | — | — |
 | `achievement_channel_id` | TEXT | — | — |
+| `onboarding_rules_role_id` | TEXT | — | — |
+| `onboarding_rules_prompt_id` | TEXT | — | — |
+| `onboarding_locale` | TEXT | NOT NULL | `'en'` |
+| `onboarding_synced_at` | TIMESTAMPTZ | — | — |
+| `onboarding_sync_status` | TEXT | NOT NULL | `'pending'` |
+| `onboarding_sync_error` | TEXT | — | — |
 
 **Indexes**: `idx_teams_guild_id` on `(guild_id)`
 
-**Notes**: `guild_id` was made NOT NULL and UNIQUE in migration `1741200000`. `description`, `sport`, and `logo_url` were added in migration `1743100000`. `welcome_channel_id`, `system_log_channel_id`, and `welcome_message_template` were added in migration `1746500000` to support the Discord welcome flow. `welcome_channel_id` is the Discord channel where the bot posts the member welcome embed when a new player joins via an invite; `system_log_channel_id` is a private captain-only channel where the bot logs every join (invite code, inviter, group); `welcome_message_template` is a template string (max 500 characters) supporting the placeholders `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, and `{teamName}`. `achievement_channel_id` is the Discord channel where the bot posts achievement congratulatory embeds; added in migration `1786200000_add_achievement_channel`. Existing teams default to their `welcome_channel_id` (via migration backfill); captains can later set it to a different channel or clear it to disable achievement notifications entirely. Deleting a team cascades to all child tables.
+**Notes**: `guild_id` was made NOT NULL and UNIQUE in migration `1741200000`. `description`, `sport`, and `logo_url` were added in migration `1743100000`. `welcome_channel_id`, `system_log_channel_id`, and `welcome_message_template` were added in migration `1746500000` to support the Discord welcome flow. `welcome_channel_id` is the Discord channel where the bot posts the member welcome embed when a new player joins via an invite; `system_log_channel_id` is a private captain-only channel where the bot logs every join (invite code, inviter, group); `welcome_message_template` is a template string (max 500 characters) supporting the placeholders `{memberMention}`, `{memberName}`, `{inviterMention}`, `{inviterName}`, `{groupName}`, and `{teamName}`. `achievement_channel_id` is the Discord channel where the bot posts achievement congratulatory embeds. `rules_channel_id` is the Discord channel the bot posts the rules/onboarding prompt into. `overview_channel_id` is the Discord channel used for the team overview embed; maintained by the bot's channel-sync worker. `onboarding_rules_role_id` is the Discord role granted to members after completing the onboarding rules flow. `onboarding_rules_prompt_id` is the Discord message ID of the rules prompt posted by the bot. `onboarding_locale` is the locale for automated Discord messages (`'en'` or `'cs'`). `onboarding_sync_status` tracks the background rules-sync job (`'pending'`, `'syncing'`, `'done'`, `'failed'`). `onboarding_sync_error` holds a JSON error detail when sync fails. Deleting a team cascades to all child tables.
 
-**INSERT fix**: The `TeamsRepository` `insert` statement was updated (alongside the achievement feature) to include `welcome_channel_id` and `achievement_channel_id` in the explicit column list so those values are persisted at team-creation time.
+**INSERT fix**: The `TeamsRepository` `insertQuery` was updated on the team-onboarding branch to explicitly list all 16 insertable columns (including all `onboarding_*` fields and Discord channel columns), ensuring every value passed by `provisionNewTeam` is persisted.
 
 ---
 
@@ -247,6 +255,30 @@ Archive of teams that existed before mandatory guild linking was enforced (migra
 | `created_at` | TIMESTAMPTZ | NOT NULL | — |
 
 **Notes**: No auto-generated ID; the original `teams.id` is preserved. No `updated_at` or `guild_id`. This table is append-only and never queried by normal application flows — it exists solely to retain a historical record.
+
+---
+
+#### `team_onboarding_tokens`
+
+Single-use tokens minted by global admins that allow a designated captain to complete the team setup wizard.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `token_hash` | TEXT | NOT NULL, UNIQUE | — |
+| `proposed_name` | TEXT | NOT NULL | — |
+| `bound_discord_id` | TEXT | NOT NULL | — |
+| `created_by` | UUID | NOT NULL, FK → `users(id)` | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `expires_at` | TIMESTAMPTZ | NOT NULL | — |
+| `consumed_at` | TIMESTAMPTZ | — | — |
+| `consumed_by` | UUID | FK → `users(id)` ON DELETE SET NULL | — |
+| `resulting_team_id` | UUID | FK → `teams(id)` ON DELETE SET NULL | — |
+| `revoked_at` | TIMESTAMPTZ | — | — |
+
+**Indexes**: `idx_team_onboarding_tokens_bound_discord_id` — partial index on `(bound_discord_id) WHERE consumed_at IS NULL AND revoked_at IS NULL`
+
+**Notes**: Added in migration `1747700000_create_team_onboarding_tokens`. `token_hash` is the SHA-256 hex digest of the plaintext token; only the hash is persisted — the plaintext is shown to the admin once and then discarded. `bound_discord_id` is the Discord user snowflake of the captain this token is restricted to; only that Discord account can complete the wizard. `proposed_name` is the suggested team name shown in the wizard (the captain may change it). `expires_at` is set at creation time based on the chosen TTL (`24h`, `72h`, or `7d`). Token lifecycle state (`active`, `consumed`, `expired`, `revoked`) is derived at query time: a token is active if `consumed_at`, `revoked_at`, and expiry are all clear. `created_by` is the `users.id` of the global admin who minted the token. `consumed_by` is set to the captain's `users.id` when the wizard completes; `resulting_team_id` is set to the newly created team's ID. Both nullable FK columns use `ON DELETE SET NULL` so audit history is preserved if the user or team is later deleted.
 
 ---
 

@@ -16,7 +16,7 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 | **Admin** | A team member holding the built-in `Admin` role. Holds the full permission set including `team:manage`, `team:invite`, `member:remove`, `role:manage`, `training-type:create`, `training-type:delete`, `finance:view`, `finance:manage_fees`, and `finance:record_payments`, in addition to all Captain permissions. |
 | **Treasurer** | A team member holding the built-in `Treasurer` role. Holds `finance:view`, `finance:manage_fees`, and `finance:record_payments`. Used to delegate finance authority without elevating the member to Captain or Admin. |
 | **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination). Receives RPC calls from the server to synchronise Discord roles and channels. |
-| **Global Admin** | A user whose Discord ID is listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. |
+| **Global Admin** | A user whose Discord ID is listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. Can also mint, list, and revoke team onboarding tokens, enabling new teams to be set up by a designated captain without requiring a pre-existing Sideline account. |
 | **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes, sending RSVP reminder notifications before events, auto-logging attendance from RSVP data, evaluating age-threshold rules to move members between groups, and queuing payment reminder DMs for members with upcoming or overdue fee assignments. |
 
 ---
@@ -34,12 +34,15 @@ flowchart LR
     TR(["Treasurer"])
     BOT(["Discord Bot"])
     SYS(["System (Cron)"])
+    GLA(["Global Admin"])
 
     subgraph AUTH["Authentication & Onboarding"]
         UC_LOGIN["Login via Discord OAuth2"]
         UC_ACCEPT_INVITE["Accept Team Invite"]
         UC_COMPLETE_PROFILE["Complete Profile"]
         UC_CREATE_TEAM["Create Team"]
+        UC_MINT_TOKEN["Mint Onboarding Token"]
+        UC_COMPLETE_ONBOARDING["Complete Team Onboarding Wizard"]
     end
 
     subgraph TEAM["Team Management"]
@@ -118,6 +121,9 @@ flowchart LR
 
     UA --> UC_LOGIN
     UA --> UC_ACCEPT_INVITE
+    UA --> UC_COMPLETE_ONBOARDING
+
+    GLA --> UC_MINT_TOKEN
 
     PL --> UC_COMPLETE_PROFILE
     PL --> UC_CREATE_TEAM
@@ -782,4 +788,31 @@ The following structured descriptions cover the most significant use cases in th
 | **Main Flow** | 1. The actor navigates to **Team → Finances** (`/teams/:teamId/finances`). The page loads with the **Overview** tab active by default. 2. The web app calls `GET /teams/:teamId/finances/balance-summary` (optionally with `from`/`to` query parameters). 3. The server aggregates total income (sum of non-voided payments) and total expenses (sum of expense `amount_minor`) per currency and returns a `BalanceSummary[]` array. 4. The page displays Income, Expenses, and Net balance KPI tiles per currency. |
 | **Postcondition** | The actor sees a per-currency breakdown of total income, total expenses, and the resulting net balance for the team. |
 | **Alternate Flow** | If the actor applies a date range filter, only payments and expenses within that range are included in the summary. |
-| **Notes** | The net figure may be negative when expenses exceed income. The query excludes voided payments at the SQL level (`WHERE voided_at IS NULL` on payments), so no explicit filtering is needed in the handler. |
+
+---
+
+### UC-20: Global Admin Onboards a New Team (Mint Token)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Global Admin |
+| **Precondition** | The global admin is authenticated. Their Discord ID is listed in `APP_GLOBAL_ADMIN_DISCORD_IDS`. They have the Discord user ID of the intended captain. |
+| **Main Flow** | 1. The global admin navigates to **Administration → Team onboarding** in the web app. 2. The admin fills in the **Create onboarding link** form: proposed team name, captain's Discord user ID, and TTL (`24h`, `72h`, or `7d`). 3. On submit the web app calls `POST /auth/onboarding/tokens`. 4. The server verifies the caller is a global admin, inserts a `team_onboarding_tokens` row (storing only the SHA-256 hash of the generated token) with `expires_at = now() + ttl`, and returns the plaintext token and full URL. 5. The URL is displayed once only; the admin copies it and sends it to the captain over Discord. 6. The **Existing tokens** list (via `GET /auth/onboarding/tokens`) shows the new token as **Active** alongside any earlier tokens and their statuses. 7. If the admin wishes to cancel an unused link they click **Revoke** next to its row; the web app calls `DELETE /auth/onboarding/tokens/:tokenId`, setting `revoked_at = now()`. |
+| **Postcondition** | A single-use `team_onboarding_tokens` row exists with `consumed_at`, `revoked_at` both null and `expires_at` in the future. Only the designated captain's Discord account can use the link. The plaintext token is not stored by the server after creation. |
+| **Alternate Flow** | The revoke endpoint silently no-ops if the token is already revoked (the UPDATE WHERE clause requires `revoked_at IS NULL`). |
+| **Notes** | This use case replaces the self-service `POST /auth/create-team` flow for new teams that need to be bootstrapped externally. The `createTeam` page shows a banner directing would-be new teams to request an onboarding link instead. |
+
+---
+
+### UC-21: Captain Completes Team Onboarding Wizard
+
+| Field | Detail |
+|---|---|
+| **Actor** | Unauthenticated User (prospective captain who received an onboarding link) |
+| **Precondition** | The global admin has minted an active, non-expired token bound to the captain's Discord ID (see UC-20). The captain has not previously completed the wizard with this token. |
+| **Main Flow** | 1. The captain opens the onboarding URL (`/onboarding/:plaintextToken`) in a browser. 2. The web app calls `GET /auth/onboarding/tokens/:plaintextToken/preview` (no auth required). The server hashes the plaintext token, looks up the row, and returns `proposedName`, `boundDiscordId`, and `expiresAt`. 3. The page shows a "Sign in to claim {proposedName}" CTA. The captain authenticates via Discord OAuth (diagram 1). 4. After login the web app redirects back to `/onboarding/:plaintextToken`. Step 1 of the wizard is shown — **Team identity** (name, description, sport, logo URL). The name is pre-filled from `proposedName`. 5. The captain fills in step 1 and clicks **Next**. Step 2 is shown — **Discord setup** (guild picker, welcome channel, system log channel, onboardingLocale). 6. The captain completes step 2 and clicks **Create team**. The web app calls `POST /auth/onboarding/tokens/:plaintextToken/complete` with the combined form payload. 7. The server verifies the token is still active and unexpired, checks `authenticated_user.discord_id = token.bound_discord_id`, checks the selected `guild_id` is not already claimed by another team, then inside a single database transaction creates the team (all 16 columns), four built-in roles with their default permissions, and a team-member row for the captain with the Admin role, and atomically marks the token consumed (`consumed_at = now()`, `consumed_by`, `resulting_team_id`). 8. The server returns a `UserTeam` object. The web app redirects the captain to the team dashboard (`/teams/:teamId`). |
+| **Postcondition** | A new team exists with the captain as its first Admin. The `team_onboarding_tokens` row has `consumed_at` set. The token URL is no longer usable. |
+| **Alternate Flow A** | If the token is expired at step 2, the server returns `410 OnboardingTokenExpired`; the page shows an expiry error with instructions to contact the global admin. |
+| **Alternate Flow B** | If the authenticated captain's Discord ID does not match `bound_discord_id`, the server returns `403 OnboardingWrongCaptain`; the page shows an error asking the captain to sign in with the correct Discord account. |
+| **Alternate Flow C** | If the selected Discord guild is already linked to another Sideline team, the server returns `409 OnboardingGuildAlreadyClaimed`; the form shows an inline error on the guild picker. |
+| **Notes** | The wizard is a two-step form rendered entirely client-side; no intermediate server calls are made between steps. The token is consumed atomically inside `sql.withTransaction` — a network failure or race is rolled back. |

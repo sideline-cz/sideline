@@ -4,15 +4,35 @@ import { Array, Data, Effect, Option, Schema } from 'effect';
 import { HomePage } from '~/components/pages/HomePage';
 import {
   clearPendingInvite,
+  clearPendingOnboarding,
   finishLogin,
   getLastTeamId,
   getLogin,
   getPendingInvite,
+  getPendingOnboarding,
 } from '~/lib/auth';
 import { client } from '../lib/client';
 import { Redirect } from '../lib/runtime';
 
 class SkipError extends Data.TaggedError('SkipError') {}
+
+const redirectIfPendingOnboarding = getPendingOnboarding.pipe(
+  Effect.tap(() => clearPendingOnboarding),
+  Effect.flatMap((pending) =>
+    Option.isSome(pending)
+      ? Effect.fail(Redirect.make({ to: '/onboarding/$token', params: { token: pending.value } }))
+      : Effect.void,
+  ),
+);
+
+const redirectIfPendingInvite = getPendingInvite.pipe(
+  Effect.tap(() => clearPendingInvite),
+  Effect.flatMap((pending) =>
+    Option.isSome(pending)
+      ? Effect.fail(Redirect.make({ to: '/invite/$code', params: { code: pending.value } }))
+      : Effect.void,
+  ),
+);
 
 export const Route = createFileRoute('/')({
   component: HomeRoute,
@@ -35,14 +55,8 @@ export const Route = createFileRoute('/')({
           onNone: () => Effect.fail(new SkipError()),
         }),
       ),
-      Effect.flatMap(() => getPendingInvite),
-      Effect.tap(() => clearPendingInvite),
-      Effect.flatMap((pendingInvite) =>
-        Option.match(pendingInvite, {
-          onSome: (code) => Effect.fail(Redirect.make({ to: '/invite/$code', params: { code } })),
-          onNone: () => Effect.void,
-        }),
-      ),
+      Effect.flatMap(() => redirectIfPendingOnboarding),
+      Effect.flatMap(() => redirectIfPendingInvite),
       Effect.flatMap(() => client),
       Effect.flatMap((c) => c.auth.myTeams()),
       Effect.catchTag(['Unauthorized', 'BadRequest', 'HttpClientError', 'SchemaError'], () =>

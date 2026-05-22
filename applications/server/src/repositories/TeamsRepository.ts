@@ -48,8 +48,20 @@ const make = Effect.gen(function* () {
     Request: Team.Team.insert,
     Result: Team.Team,
     execute: (input) => sql`
-      INSERT INTO teams (name, guild_id, description, sport, logo_url, created_by, welcome_channel_id, achievement_channel_id)
-      VALUES (${input.name}, ${input.guild_id}, ${input.description}, ${input.sport}, ${input.logo_url}, ${input.created_by}, ${input.welcome_channel_id}, ${input.achievement_channel_id})
+      INSERT INTO teams (
+        name, guild_id, description, sport, logo_url, created_by,
+        welcome_channel_id, system_log_channel_id, welcome_message_template,
+        rules_channel_id, overview_channel_id, achievement_channel_id,
+        onboarding_rules_role_id, onboarding_rules_prompt_id,
+        onboarding_locale, onboarding_sync_status
+      )
+      VALUES (
+        ${input.name}, ${input.guild_id}, ${input.description}, ${input.sport}, ${input.logo_url}, ${input.created_by},
+        ${input.welcome_channel_id}, ${input.system_log_channel_id}, ${input.welcome_message_template},
+        ${input.rules_channel_id}, ${input.overview_channel_id}, ${input.achievement_channel_id},
+        ${input.onboarding_rules_role_id}, ${input.onboarding_rules_prompt_id},
+        ${input.onboarding_locale}, ${input.onboarding_sync_status}
+      )
       RETURNING *
     `,
   });

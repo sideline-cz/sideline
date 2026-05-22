@@ -59,6 +59,7 @@ import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { MockTeamOnboardingTokensRepositoryLayer } from '../mocks/onboardingMocks.js';
 import { MockTranslationsLayers } from '../mocks/translationMocks.js';
 
 // ---------------------------------------------------------------------------
@@ -607,6 +608,7 @@ const TestLayer = ApiLive.pipe(
 )
   .pipe(Layer.provide(Layer.succeed(ExpensesRepository, buildNoop('api/ExpensesRepository'))))
   .pipe(Layer.provide(MockTranslationsLayers))
+  .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
   .pipe(Layer.provide(BotInfoStore.Default));
 
 // ---------------------------------------------------------------------------

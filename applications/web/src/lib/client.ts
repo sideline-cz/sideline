@@ -16,6 +16,7 @@ import {
   Invite,
   LeaderboardApi,
   NotificationApi,
+  OnboardingApi,
   RoleApi,
   Roster,
   TeamApi,
@@ -63,6 +64,7 @@ class ClientApi extends HttpApi.make('api')
   .add(TrainingTypeApi.TrainingTypeApiGroup)
   .add(Translations.TranslationsApiGroup)
   .add(VersionApi.VersionApiGroup)
+  .add(OnboardingApi.OnboardingApiGroup)
   .add(WeeklySummaryApi.WeeklySummaryApiGroup) {}
 
 export const client = ClientConfig.asEffect().pipe(

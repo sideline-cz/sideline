@@ -34,6 +34,8 @@ export * as LeaderboardApi from './api/LeaderboardApi.js';
 
 export * as NotificationApi from './api/NotificationApi.js';
 
+export * as OnboardingApi from './api/OnboardingApi.js';
+
 /**
  * Field state classification for cross-field schema filters.
  *
@@ -138,6 +140,8 @@ export * as Team from './models/Team.js';
 export * as TeamInvite from './models/TeamInvite.js';
 
 export * as TeamMember from './models/TeamMember.js';
+
+export * as TeamOnboardingToken from './models/TeamOnboardingToken.js';
 
 export * as TeamSettings from './models/TeamSettings.js';
 

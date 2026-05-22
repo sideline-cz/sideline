@@ -1,0 +1,65 @@
+---
+title: Team onboarding
+description: How to use an onboarding link to claim your team and complete initial setup.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+A Sideline admin gives you a one-time **onboarding link**. Follow this guide to use it and finish setting up your team.
+
+## What you need
+
+- The onboarding link sent by your Sideline administrator.
+- A Discord account that matches the one the admin bound the link to.
+- Administrator or **Manage Server** permission on the Discord server you want to link.
+
+## Steps
+
+<Steps>
+
+1. **Open the onboarding link.**
+
+   Click or paste the URL the admin sent you. The page shows the proposed team name. If the link is invalid, expired, consumed, or revoked, you will see a clear error message — ask the admin to generate a new one.
+
+2. **Sign in with Discord.**
+
+   Click **Sign in with Discord** and authorise Sideline. You must use the Discord account the admin specified when creating the link. If you sign in with a different account, the flow stops with a "This link is for a different captain" error.
+
+3. **Fill in the team identity (step 1 of 2).**
+
+   - **Team name** — pre-filled with the admin's suggested name. You can change it.
+   - **Description** — optional short summary of the team.
+   - **Sport** — the sport your team plays.
+   - **Logo URL** — paste a public `https://` URL to your team's logo image.
+
+   Click **Next** to continue.
+
+4. **Configure Discord (step 2 of 2).**
+
+   - **Discord server** — select the server you want to link. Only servers where the Sideline bot is already installed and where you hold sufficient permissions appear in the list.
+   - **Welcome channel** — the channel where the bot greets new members when they join. This channel is visible to all members.
+   - **System log channel** — a channel visible only to captains where the bot logs join events. Keep this private.
+   - **Language** — pick the language Sideline uses for automated messages on this server.
+
+   Click **Create team** to finish.
+
+5. **You're done.**
+
+   Sideline creates the team, assigns you the Admin role, and links the Discord server. Click **Go to team dashboard** to start managing your team.
+
+</Steps>
+
+<Aside type="caution" title="One-time use">
+  Each onboarding link works exactly once. After you complete setup, the link is consumed and cannot be reused. If you need to restart the process, ask your Sideline administrator for a new link.
+</Aside>
+
+## Error reference
+
+| Error | Cause | Action |
+|---|---|---|
+| Link not found | The URL is wrong or was never issued | Ask the admin for a new link |
+| Link expired | The link was not used within its expiry window | Ask the admin for a new link |
+| Team already set up | The link was already consumed | If you need access, ask the captain to invite you |
+| Link revoked | The admin manually revoked the link | Ask the admin for a new link |
+| This link is for a different captain | You signed in with the wrong Discord account | Sign in with the account the admin specified |
+| Another team is already linked to this Discord server | The selected guild is already in use | Use a different Discord server, or ask the admin |

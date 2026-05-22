@@ -16,6 +16,7 @@ import {
   Shield,
   Trophy,
   UserCog,
+  UserPlus,
   Users,
   UsersRound,
   Wallet,
@@ -248,6 +249,18 @@ export function AppSidebar({ user, teams, activeTeam, onLogout, ...props }: AppS
             <SidebarGroupLabel>Admin</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={!!matchRoute({ to: '/admin/onboarding-tokens', fuzzy: false })}
+                    tooltip={tr('admin_onboarding_pageTitle')}
+                  >
+                    <Link to='/admin/onboarding-tokens'>
+                      <UserPlus />
+                      <span>{tr('admin_onboarding_pageTitle')}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild

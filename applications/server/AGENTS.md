@@ -440,13 +440,64 @@ Rules:
 3. **The `markProcessed` RPC payload carries `deliveredAt: DateTime.Utc`** (set by the bot to `DateTime.nowUnsafe()` immediately after the Discord call returns). Do not let the server fill it in — only the bot knows whether delivery succeeded.
 4. Only use this pattern when "delivered" has a clear, single meaning. For multi-stage outboxes (e.g. channel sync, which emits, creates, then later updates) keep the existing two-RPC / `attempts`-counted patterns documented above.
 
+## Team Provisioning: `provisionNewTeam(...)` Helper
+
+The single source of truth for "create a team row + seed roles + add the creator as Admin" is `src/utils/provisionNewTeam.ts`. Both `auth.createTeam` (legacy, deprecated) and `onboarding.completeOnboarding` (new) delegate to this helper. Never re-implement the team-creation steps inline in a new handler — always go through `provisionNewTeam`.
+
+### Contract
+
+```typescript
+provisionNewTeam({
+  payload: ProvisionNewTeamPayload, // name, guildId, description, sport, logoUrl,
+                                    // welcomeChannelId, systemLogChannelId, onboardingLocale
+  currentUserId: User.UserId,
+  markConsumed?: (teamId: Team.TeamId) => Effect.Effect<Option.Option<unknown>, never, never>,
+}): Effect.Effect<
+  Auth.UserTeam,
+  MemberAlreadyExistsError | OnboardingApi.OnboardingTokenAlreadyConsumed, // ← `OnboardingTokenAlreadyConsumed` only when `markConsumed` is provided
+  TeamsRepository | RolesRepository | TeamMembersRepository | SqlClient.SqlClient
+>
+```
+
+What the helper does, in a single `sql.withTransaction(...)`:
+
+1. `teams.insert(...)` — creates the row with `onboarding_sync_status = 'pending'`, `onboarding_synced_at = None`, all other onboarding fields defaulted to `None`.
+2. `roles.seedTeamRolesWithPermissions(team.id)` — seeds all built-in roles (Admin / Captain / Treasurer / Player).
+3. `members.addMember({ team_id, user_id: currentUserId, active: true })` — adds the creator as a member.
+4. `members.assignRole(newMember.id, adminRole.id)` — grants the creator the Admin role.
+5. If `markConsumed` is provided, calls it as the **last step inside the transaction**. The callback returns `Effect<Option<unknown>>` — `Option.none` means the precondition failed (token already consumed/revoked by a concurrent caller); the helper then fails with `OnboardingApi.OnboardingTokenAlreadyConsumed` and the entire transaction is rolled back.
+
+### Rules
+
+1. **Use `provisionNewTeam` for every code path that creates a new team.** Inline-reimplementing the four steps above (insert team / seed roles / add member / assign Admin) is forbidden — it duplicates the transaction boundary and the Admin-role discovery logic.
+2. **Pass `markConsumed` only when the caller owns a token / acceptance row that must be atomically consumed with the team creation.** `OnboardingApiLive.completeOnboarding` passes a closure that calls `tokens.markConsumed(validToken.id, { consumed_by, resulting_team_id: teamId })`. The legacy `auth.createTeam` omits `markConsumed` entirely — its overload narrows the error union back to `MemberAlreadyExistsError` only.
+3. **The `markConsumed` callback MUST return `Option<unknown>`** (`Some` = won the race, `None` = lost). Returning `Effect.fail` from inside the callback bypasses the helper's `OnboardingTokenAlreadyConsumed` mapping and surfaces an opaque defect — always express precondition-failure as `Option.none`.
+4. **Pre-flight checks belong in the handler, not the helper.** The handler validates the token state, checks `bound_discord_id` matches the caller, and checks `findByGuildId(guildId)` is `None` before calling `provisionNewTeam`. The helper only owns the transactional create + token-consume.
+5. **`SqlErrors.catchUniqueViolation(...)` belongs at the call site,** not in the helper — different callers map the unique-violation defect to different domain errors (e.g. `OnboardingGuildAlreadyClaimed` from the onboarding endpoint). The helper itself never catches unique violations.
+
+Reference: `applications/server/src/utils/provisionNewTeam.ts`, `applications/server/src/api/onboarding.ts` (`completeOnboarding`), `applications/server/src/api/auth.ts` (`createTeam`, deprecated).
+
+## Token-Hash-At-Rest For Capability URLs
+
+Single-use capability tokens that travel in a URL path (e.g. `team_onboarding_tokens.token_hash`) MUST be stored as a SHA-256 hex digest of the plaintext, never as the plaintext itself. The plaintext is generated once with `crypto.randomBytes(32).toString('base64url')`, returned to the operator exactly once at mint time, and never persisted server-side.
+
+Reference: `applications/server/src/utils/onboardingToken.ts` (`generateOnboardingToken` + `hashToken`) and `TeamOnboardingTokensRepository` (`token_hash` column, `findByHash` lookup).
+
+### Rules
+
+1. **The repository stores `token_hash`, never `token`.** Every lookup is via `findByHash(hashToken(plaintext))` — there is no `findByPlaintext` method. A DB leak exposes hashes, not redeemable URLs.
+2. **`generateOnboardingToken()` returns `{ token, hash }` exactly once.** The handler inserts the hash, builds the onboarding URL with the plaintext, returns the URL in the response, and lets the plaintext drop out of memory. Never log the plaintext.
+3. **Use 256 bits of entropy** (`randomBytes(32)` → 43 base64url chars). Do not shorten — the URL is the only credential, and the hash collision space must be cryptographically large.
+4. **The hash is deterministic SHA-256, not bcrypt/argon2.** Capability tokens have full entropy and short lifetimes, so a fast hash is correct — the threat model is "leaked DB dump" (defeated by hashing at all), not "low-entropy password" (which is what slow hashes defend against).
+5. **Use `Schema.String` (not the plaintext-token type) for the `:plaintextToken` URL param.** Validation is "does `findByHash` return `Some`?", not a regex on the URL segment — leaking the format constraints would help attackers narrow brute-force attempts.
+
 ## Hand-written INSERT / UPDATE Column Lists
 
 `SqlSchema.findOne({ Request: Model.insert, ... })` validates the **input shape**, but the column list and `VALUES (...)` tuple inside the raw `sql\`INSERT INTO ... \`` template are hand-written. The schema does **not** cross-check that every field on the `insert` variant appears in the SQL — fields present on the schema but absent from the column list are silently dropped at write time and the query still succeeds (returning the row with the DB default / NULL for the missing column).
 
 This footgun bit `TeamsRepository.insert` once already: `welcome_channel_id` was added to `Team.Team.insert` and the API handler, but the column list still read `(name, guild_id, description, sport, logo_url, created_by)` — every team created post-migration had `welcome_channel_id = NULL` despite the caller passing a value. Fix: extend both the column list and `VALUES` tuple in the same edit.
 
-Current state of `TeamsRepository.insertQuery` column list (`(name, guild_id, description, sport, logo_url, created_by, welcome_channel_id, achievement_channel_id)`): only `welcome_channel_id` and `achievement_channel_id` are persisted at INSERT time. `system_log_channel_id`, `rules_channel_id`, `overview_channel_id`, `welcome_message_template`, `onboarding_rules_role_id`, `onboarding_rules_prompt_id` are present on `Team.Team.insert` but **silently dropped** by the INSERT — they can only be set later via `teams.update(...)`. If a feature needs one of these populated at team-creation time, extend the column list and `VALUES` tuple in the same edit; do not assume the field round-trips because it compiles.
+Current state of `TeamsRepository.insertQuery` column list: all 16 non-generated columns are now persisted at INSERT time — `name`, `guild_id`, `description`, `sport`, `logo_url`, `created_by`, `welcome_channel_id`, `system_log_channel_id`, `welcome_message_template`, `rules_channel_id`, `overview_channel_id`, `achievement_channel_id`, `onboarding_rules_role_id`, `onboarding_rules_prompt_id`, `onboarding_locale`, `onboarding_sync_status`. (`created_at`/`updated_at` keep DB defaults; `id` is generated; `onboarding_synced_at`/`onboarding_sync_error` default to NULL.) The 16-column round-trip is verified by an integration test in `TeamsRepository.test.ts`.
 
 Rules when adding a new column to a `Model.Class` that is INSERTed via hand-written SQL:
 

@@ -1,6 +1,6 @@
 import type { Auth } from '@sideline/domain';
 import { Option } from 'effect';
-import { Plus } from 'lucide-react';
+import { Info, Plus } from 'lucide-react';
 import React from 'react';
 import { LanguageSwitcher } from '~/components/organisms/LanguageSwitcher';
 import { Button } from '~/components/ui/button';
@@ -87,6 +87,12 @@ export function CreateTeamPage({
       </header>
 
       <main className='flex flex-1 flex-col items-center px-6 pt-16 pb-24'>
+        <div className='w-full max-w-lg mb-4'>
+          <div className='flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950 px-4 py-3 text-sm text-blue-800 dark:text-blue-200'>
+            <Info className='size-4 mt-0.5 shrink-0' />
+            <span>{tr('createTeam_adminInvitedBanner')}</span>
+          </div>
+        </div>
         <Card className='w-full max-w-lg'>
           <CardHeader className='text-center'>
             <div className='flex justify-center mb-2'>

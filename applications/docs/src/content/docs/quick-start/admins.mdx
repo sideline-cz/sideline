@@ -1,6 +1,6 @@
 ---
 title: Quick start for Admins
-description: Connect Sideline to your Discord server, invite the bot, and set up permissions.
+description: Connect Sideline to your Discord server, invite the bot, set up permissions, and onboard new teams.
 ---
 
 import { Steps, Aside, CardGrid, LinkCard } from '@astrojs/starlight/components';
@@ -52,9 +52,62 @@ Once the bot is installed and linked:
 - Players join via your invite links; Sideline matches them to Discord accounts.
 - If someone leaves your Discord server, their roster entry stays (archived), so attendance history is preserved.
 
+---
+
+## Onboarding new teams (Global Admin)
+
+If you are a **global Sideline admin** (your Discord ID is listed in `APP_GLOBAL_ADMIN_DISCORD_IDS`), you can mint one-time **onboarding links** that let a designated captain complete their team's setup without needing a Sideline account first.
+
+### Mint an onboarding link
+
+<Steps>
+
+1. Navigate to **Administration → Team onboarding** in the web app.
+
+2. Click **Create onboarding link** and fill in the form:
+
+   | Field | Description |
+   |---|---|
+   | **Proposed team name** | Suggested name for the team. The captain can change it during setup. |
+   | **Captain's Discord user ID** | Only this Discord account can use the link. See below for how to find it. |
+   | **Link expires after** | Choose 24 hours, 3 days, or 7 days. The link cannot be used after it expires. |
+
+3. Click **Create link**. The link is shown **once only** — copy it immediately and send it to the captain over Discord.
+
+</Steps>
+
+<Aside type="caution" title="One-time display">
+  The generated URL is shown only at creation time. Sideline does not store the full URL. If you lose it, revoke the token and create a new one.
+</Aside>
+
+### Find a captain's Discord user ID
+
+1. Open Discord and go to **User Settings → Advanced**.
+2. Enable **Developer Mode**.
+3. Right-click (or long-press on mobile) the captain's profile anywhere in Discord.
+4. Select **Copy User ID**.
+
+The ID is a long numeric string, for example `123456789012345678`.
+
+### Manage existing tokens
+
+The **Existing tokens** list shows all tokens with their status:
+
+| Status | Meaning |
+|---|---|
+| **Active** | The link can still be used. |
+| **Used** | The captain completed onboarding; the link is consumed. |
+| **Expired** | The expiry window passed before the captain used it. |
+| **Revoked** | A global admin manually revoked the link. |
+
+To cancel an unused link, click **Revoke** next to it and confirm.
+
+---
+
 ## Next steps
 
 <CardGrid>
+  <LinkCard title="Team onboarding (captain guide)" href="/guides/team-onboarding/" />
   <LinkCard title="Discord integration" href="/guides/discord-integration/" />
   <LinkCard title="Invite members" href="/guides/invite-members/" />
   <LinkCard title="Notifications" href="/guides/notifications/" />

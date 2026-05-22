@@ -80,3 +80,11 @@ export const getPendingDiscordJoin = get(PENDING_DISCORD_JOIN).pipe(
 );
 
 export const clearPendingDiscordJoin = remove(PENDING_DISCORD_JOIN);
+
+const PENDING_ONBOARDING = 'pending-onboarding';
+
+export const setPendingOnboarding = (token: string) => set(PENDING_ONBOARDING, token);
+
+export const getPendingOnboarding = get(PENDING_ONBOARDING);
+
+export const clearPendingOnboarding = remove(PENDING_ONBOARDING);

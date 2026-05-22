@@ -18,6 +18,7 @@ import { ICalApiLive } from '~/api/ical.js';
 import { InviteApiLive } from '~/api/invite.js';
 import { LeaderboardApiLive } from '~/api/leaderboard.js';
 import { NotificationApiLive } from '~/api/notification.js';
+import { OnboardingApiLive } from '~/api/onboarding.js';
 import { RoleApiLive } from '~/api/role.js';
 import { RosterApiLive } from '~/api/roster.js';
 import { TeamApiLive } from '~/api/team.js';
@@ -46,6 +47,7 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
     Layer.provide(ICalApiLive),
     Layer.provide(InviteApiLive),
     Layer.provide(NotificationApiLive),
+    Layer.provide(OnboardingApiLive),
     Layer.provide(RosterApiLive),
     Layer.provide(RoleApiLive),
   )

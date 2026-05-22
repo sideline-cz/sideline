@@ -29,6 +29,7 @@ export default defineConfig({
       APP_ORIGIN: 'localhost',
       OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
       OTEL_SERVICE_NAME: 'sideline-server',
+      APP_GLOBAL_ADMIN_DISCORD_IDS: '900000000000000001',
     },
   },
 });

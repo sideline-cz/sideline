@@ -34,6 +34,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Finance](#23-finance)
    - [Version](#24-version)
    - [Expenses](#25-expenses)
+   - [Team Onboarding](#26-team-onboarding)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -64,6 +65,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
 | 403 | Authenticated but forbidden |
 | 404 | Resource not found |
 | 409 | Conflict (duplicate, resource in use, etc.) |
+| 410 | Gone (resource expired or permanently revoked) |
 
 ---
 
@@ -4497,6 +4499,172 @@ Returns a per-currency breakdown of total income (fee payments) versus total exp
 
 ---
 
+### 26. Team Onboarding
+
+**Source:** `packages/domain/src/api/OnboardingApi.ts`
+**Prefix:** `/auth`
+
+Provides the global-admin token-management surface and the public captain-facing onboarding wizard. Token creation, listing, and revocation require the caller to be a global admin (`isGlobalAdmin = true`). The preview endpoint is unauthenticated (the plaintext token in the URL acts as the credential). Completing onboarding requires the captain to be authenticated via Discord OAuth.
+
+---
+
+#### `POST /auth/onboarding/tokens`
+
+Creates a new single-use onboarding token.
+
+**Auth:** Bearer token (AuthMiddleware) + `isGlobalAdmin`
+
+**Request Body:** `CreateOnboardingTokenRequest`
+
+| Field | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `proposedName` | `string` | Yes | 1–100 characters | Suggested name for the team (captain can change it) |
+| `boundDiscordId` | `string` | Yes | Valid Discord snowflake | Discord user ID of the captain who may use this link |
+| `ttl` | `"24h" \| "72h" \| "7d"` | Yes | One of three string values | Token expiry window |
+
+**Response:** `201 Created` — `CreateOnboardingTokenResponse`
+
+| Field | Type | Description |
+|---|---|---|
+| `plaintextToken` | `string` | The raw token value embedded in the onboarding URL (shown only once) |
+| `onboardingUrl` | `string` | The full one-time URL to send to the captain |
+| `expiresAt` | `string` (ISO 8601) | When the token expires |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `Unauthorized` | 401 | No valid session |
+| `OnboardingForbidden` | 403 | Caller is not a global admin |
+
+---
+
+#### `GET /auth/onboarding/tokens`
+
+Lists all onboarding tokens with their current status.
+
+**Auth:** Bearer token (AuthMiddleware) + `isGlobalAdmin`
+
+**Response:** `200 OK` — `OnboardingTokenListItem[]`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | `TeamOnboardingTokenId` (string) | No | Token record ID (UUID) |
+| `proposedName` | `string` | No | Proposed team name set at creation |
+| `boundDiscordId` | `string` | No | Discord user ID the token is bound to |
+| `status` | `'active' \| 'consumed' \| 'expired' \| 'revoked'` | No | Current lifecycle state (derived at query time) |
+| `createdAt` | `string` (ISO 8601) | No | When the token was created |
+| `expiresAt` | `string` (ISO 8601) | No | When the token expires |
+| `consumedAt` | `string \| null` | Yes | When the captain completed onboarding (null if not yet used) |
+| `consumedBy` | `UserId \| null` | Yes | User ID of the captain who consumed the token |
+| `resultingTeamId` | `TeamId \| null` | Yes | ID of the team created from this token |
+| `createdByUsername` | `string` | No | Discord username of the global admin who minted the token |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `Unauthorized` | 401 | No valid session |
+| `OnboardingForbidden` | 403 | Caller is not a global admin |
+
+---
+
+#### `DELETE /auth/onboarding/tokens/:tokenId`
+
+Revokes an active onboarding token.
+
+**Auth:** Bearer token (AuthMiddleware) + `isGlobalAdmin`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `tokenId` | `TeamOnboardingTokenId` (string) | UUID of the token record to revoke |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `Unauthorized` | 401 | No valid session |
+| `OnboardingForbidden` | 403 | Caller is not a global admin |
+| `OnboardingTokenNotFound` | 404 | Token does not exist |
+
+---
+
+#### `GET /auth/onboarding/tokens/:plaintextToken/preview`
+
+Validates a token and returns its public metadata. Used by the onboarding wizard to display the proposed team name and check validity before the captain authenticates.
+
+**Auth:** None
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `plaintextToken` | `string` | The raw token value from the onboarding URL |
+
+**Response:** `200 OK` — `OnboardingTokenPreview`
+
+| Field | Type | Description |
+|---|---|---|
+| `proposedName` | `string` | Proposed team name |
+| `boundDiscordId` | `string` | Discord user ID the token is bound to |
+| `expiresAt` | `string` (ISO 8601) | When the token expires |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `OnboardingTokenNotFound` | 404 | Token does not exist |
+| `OnboardingTokenExpired` | 410 | Token TTL has elapsed |
+| `OnboardingTokenRevoked` | 410 | Token was revoked by a global admin |
+| `OnboardingTokenAlreadyConsumed` | 409 | Token was already used to complete onboarding |
+
+---
+
+#### `POST /auth/onboarding/tokens/:plaintextToken/complete`
+
+Completes the onboarding wizard. Creates the team inside a transaction alongside built-in roles and the captain's membership, then marks the token consumed atomically. The calling user's Discord ID must match `boundDiscordId`.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `plaintextToken` | `string` | The raw token value from the onboarding URL |
+
+**Request Body:** `CompleteOnboardingRequest`
+
+| Field | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `name` | `string` | Yes | 1–100 characters | Team name |
+| `description` | `string \| null` | No | — | Team description |
+| `sport` | `string \| null` | No | — | Sport |
+| `logoUrl` | `string \| null` | No | Max 2048 characters; public `https://` only (SSRF-guarded) | Logo URL |
+| `guildId` | `Snowflake` (string) | Yes | Valid Discord snowflake | Discord guild to link |
+| `welcomeChannelId` | `Snowflake \| null` | No | — | Welcome channel ID |
+| `systemLogChannelId` | `Snowflake \| null` | No | — | System log channel ID |
+| `onboardingLocale` | `"en" \| "cs"` | Yes | — | Default locale for automated messages on this server |
+
+**Response:** `201 Created` — `UserTeam` (see `GET /auth/me/teams` for field descriptions)
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `Unauthorized` | 401 | No valid session |
+| `OnboardingTokenNotFound` | 404 | Token does not exist |
+| `OnboardingTokenExpired` | 410 | Token has expired |
+| `OnboardingTokenAlreadyConsumed` | 409 | Token was already consumed |
+| `OnboardingTokenRevoked` | 410 | Token was revoked |
+| `OnboardingWrongCaptain` | 403 | Authenticated user's Discord ID does not match `boundDiscordId` |
+| `OnboardingGuildAlreadyClaimed` | 409 | The selected Discord guild is already linked to another team |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -4717,3 +4885,10 @@ The following table consolidates all error tags across all API groups.
 | `ExpenseForbidden` | 403 | Expenses | Missing required finance permission (`finance:view` for reads, `finance:manage_fees` for writes) |
 | `ExpenseNotFound` | 404 | Expenses | Expense does not exist or does not belong to this team |
 | `InvalidExpenseAmount` | 400 | Expenses | `amountMinor` is zero or negative, or `currency` was supplied without `amountMinor` on a partial update |
+| `OnboardingForbidden` | 403 | Team Onboarding | Caller is not a global admin (mint/list/revoke token endpoints) |
+| `OnboardingTokenNotFound` | 404 | Team Onboarding | Token does not exist |
+| `OnboardingTokenExpired` | 410 | Team Onboarding | Token TTL has elapsed |
+| `OnboardingTokenAlreadyConsumed` | 409 | Team Onboarding | Token was already used to complete onboarding |
+| `OnboardingTokenRevoked` | 410 | Team Onboarding | Token was manually revoked by a global admin |
+| `OnboardingWrongCaptain` | 403 | Team Onboarding | Authenticated user's Discord ID does not match the token's `boundDiscordId` |
+| `OnboardingGuildAlreadyClaimed` | 409 | Team Onboarding | Another team is already linked to the selected Discord guild |

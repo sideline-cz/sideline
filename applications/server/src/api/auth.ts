@@ -31,12 +31,12 @@ import { env, globalAdminDiscordIds } from '~/env.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
-import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { provisionNewTeam } from '~/utils/provisionNewTeam.js';
 
 class AuthError extends Schema.TaggedErrorClass<AuthError>()('AuthError', {
   error: Schema.Literal('auth_failed'),
@@ -288,7 +288,6 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
     Effect.bind('sessions', () => SessionsRepository.asEffect()),
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('teams', () => TeamsRepository.asEffect()),
-    Effect.bind('roles', () => RolesRepository.asEffect()),
     Effect.bind('botGuilds', () => BotGuildsRepository.asEffect()),
     Effect.bind('oauthConnections', () => OAuthConnectionsRepository.asEffect()),
     Effect.bind('pendingGuildJoins', () => PendingGuildJoinsRepository.asEffect()),
@@ -299,7 +298,6 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
         sessions,
         members,
         teams,
-        roles,
         botGuilds,
         oauthConnections,
         pendingGuildJoins,
@@ -553,72 +551,31 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
               Effect.catchTag('RatelimitedResponse', () => Effect.fail(new Auth.Unauthorized())),
             ),
           )
+          /**
+           * @deprecated Use `OnboardingApi.completeOnboarding` instead.
+           * This endpoint remains for backwards compatibility only.
+           */
           .handle('createTeam', ({ payload }) =>
             Effect.Do.pipe(
               Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
-              Effect.bind('team', ({ currentUser }) =>
-                teams.insert({
-                  name: payload.name,
-                  guild_id: payload.guildId,
-                  description: Option.none(),
-                  sport: Option.none(),
-                  logo_url: Option.none(),
-                  created_by: currentUser.id,
-                  created_at: undefined,
-                  updated_at: undefined,
-                  welcome_channel_id: Option.none(),
-                  achievement_channel_id: Option.none(),
-                  system_log_channel_id: Option.none(),
-                  welcome_message_template: Option.none(),
-                  rules_channel_id: Option.none(),
-                  overview_channel_id: Option.none(),
-                  onboarding_rules_role_id: Option.none(),
-                  onboarding_rules_prompt_id: Option.none(),
-                  onboarding_locale: 'en',
-                  onboarding_synced_at: Option.none(),
-                  onboarding_sync_status: 'pending',
-                  onboarding_sync_error: Option.none(),
+              Effect.flatMap(({ currentUser }) =>
+                provisionNewTeam({
+                  payload: {
+                    name: payload.name,
+                    guildId: payload.guildId,
+                    description: Option.none(),
+                    sport: Option.none(),
+                    logoUrl: Option.none(),
+                    welcomeChannelId: Option.none(),
+                    systemLogChannelId: Option.none(),
+                    onboardingLocale: 'en',
+                  },
+                  currentUserId: currentUser.id,
                 }),
-              ),
-              Effect.bind('seededRoles', ({ team }) => roles.seedTeamRolesWithPermissions(team.id)),
-              Effect.bind('adminRole', ({ seededRoles }) =>
-                pipe(
-                  seededRoles,
-                  Array.findFirst((r) => r.name === 'Admin'),
-                  Option.match({
-                    onNone: () => Effect.fail(new Auth.Unauthorized()),
-                    onSome: Effect.succeed,
-                  }),
-                ),
-              ),
-              Effect.bind('newMember', ({ team, currentUser }) =>
-                members.addMember({
-                  team_id: team.id,
-                  user_id: currentUser.id,
-                  active: true,
-                  joined_at: undefined,
-                }),
-              ),
-              Effect.tap(({ newMember, adminRole }) =>
-                members.assignRole(newMember.id, adminRole.id),
-              ),
-              Effect.map(
-                ({ team }) =>
-                  new Auth.UserTeam({
-                    teamId: team.id,
-                    teamName: team.name,
-                    logoUrl: team.logo_url,
-                    roleNames: ['Admin'],
-                    permissions: [...Role.defaultPermissions.Admin],
-                  }),
               ),
               Effect.catchTag(
                 'MemberAlreadyExistsError',
                 LogicError.withMessage(() => 'Unexpected duplicate member during team creation'),
-              ),
-              Effect.catchTag(
-                'NoSuchElementError',
-                LogicError.withMessage(() => 'Failed creating team — no row returned'),
               ),
             ),
           )
