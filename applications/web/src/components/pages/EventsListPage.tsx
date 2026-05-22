@@ -27,7 +27,7 @@ import {
   SelectValue,
 } from '~/components/ui/select';
 import { Textarea } from '~/components/ui/textarea';
-import { dateOnlyToUtc, formatEventDateRange, formatUtcTime, localToUtc } from '~/lib/datetime';
+import { dateOnlyToUtc, formatEventDateRange, formatUtcTime, localToUtc } from '~/lib/datetime.js';
 import { DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import {
   DAY_ORDER,

@@ -7,8 +7,8 @@ This page lists user-visible changes to Sideline. For developer-level release no
 
 ## 2026-05-22 — Event date range display fix
 
-- Same-day events (start and end on the same date) now show the end time only, e.g. **14:00 – 16:00**. Previously the end date was repeated unnecessarily.
-- Multi-day events continue to show the full end date alongside the end time, e.g. **Fri 23 May 09:00 – Sat 24 May 18:00**.
+- Same-day events (start and end on the same date) now show the end time only, e.g. **2026-05-23 14:00 – 16:00**. Previously the end date was repeated unnecessarily.
+- Multi-day events continue to show the full end date alongside the end time, e.g. **2026-05-23 09:00 – 2026-05-24 18:00**.
 - The fix applies to the event list, the event detail page, and the week-view calendar cards.
 
 ## 2026-05-21 — Configurable achievement notification channel

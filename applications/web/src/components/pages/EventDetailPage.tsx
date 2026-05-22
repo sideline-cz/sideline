@@ -34,7 +34,7 @@ import {
   formatLocalTime,
   formatUtcTime,
   localToUtc,
-} from '~/lib/datetime';
+} from '~/lib/datetime.js';
 import { DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import { eventStatusClasses, eventStatusLabels, eventTypeLabels } from '~/lib/event-labels';
 import { toGroupOptions } from '~/lib/group-options';

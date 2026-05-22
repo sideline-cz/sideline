@@ -16,7 +16,7 @@ import {
   navigateMonth,
   navigateWeek,
 } from '~/lib/calendar-utils';
-import { formatEventDateRange, formatLocalTime } from '~/lib/datetime';
+import { formatEventDateRange, formatLocalTime } from '~/lib/datetime.js';
 import {
   buildTrainingTypeColorMap,
   getEventColor,
