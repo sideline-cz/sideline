@@ -27,13 +27,7 @@ import {
   SelectValue,
 } from '~/components/ui/select';
 import { Textarea } from '~/components/ui/textarea';
-import {
-  dateOnlyToUtc,
-  formatLocalDate,
-  formatLocalTime,
-  formatUtcTime,
-  localToUtc,
-} from '~/lib/datetime';
+import { dateOnlyToUtc, formatEventDateRange, formatUtcTime, localToUtc } from '~/lib/datetime.js';
 import { DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import {
   DAY_ORDER,
@@ -953,51 +947,53 @@ export function EventsListPage({
               <p className='text-muted-foreground'>{tr('event_noEvents')}</p>
             ) : (
               <div className='flex flex-col gap-2'>
-                {events.map((event) => (
-                  <Link
-                    key={event.eventId}
-                    to='/teams/$teamId/events/$eventId'
-                    params={{ teamId, eventId: event.eventId }}
-                    className='flex items-start gap-3 rounded-lg border p-3 hover:bg-accent transition-colors'
-                  >
-                    <div className='flex size-10 shrink-0 flex-col items-center justify-center rounded-md bg-muted text-xs'>
-                      <span className='font-semibold leading-none'>
-                        {new Date(Number(DateTime.toEpochMillis(event.startAt))).getDate()}
-                      </span>
-                      <span className='text-muted-foreground leading-none mt-0.5'>
-                        {new Date(Number(DateTime.toEpochMillis(event.startAt))).toLocaleDateString(
-                          undefined,
-                          { month: 'short' },
-                        )}
-                      </span>
-                    </div>
-                    <div className='min-w-0 flex-1'>
-                      <div className='flex items-center gap-1.5 mb-0.5'>
-                        <p className='font-medium truncate text-sm'>{event.title}</p>
-                        {Option.isSome(event.seriesId) && (
-                          <span className='text-[10px] text-muted-foreground'>
-                            {tr('event_recurring')}
-                          </span>
-                        )}
-                      </div>
-                      <div className='flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground'>
-                        <span>{eventTypeLabels[event.eventType]()}</span>
-                        <span>·</span>
-                        <span>{formatLocalDate(event.startAt)}</span>
-                        <span className='hidden sm:inline'>
-                          {formatLocalTime(event.startAt)}
-                          {event.endAt.pipe(
-                            Option.map((v) => ` - ${formatLocalTime(v)}`),
-                            Option.getOrElse(() => ''),
-                          )}
+                {events.map((event) => {
+                  const { startDate, startTime, end } = formatEventDateRange(
+                    event.startAt,
+                    event.endAt,
+                  );
+                  return (
+                    <Link
+                      key={event.eventId}
+                      to='/teams/$teamId/events/$eventId'
+                      params={{ teamId, eventId: event.eventId }}
+                      className='flex items-start gap-3 rounded-lg border p-3 hover:bg-accent transition-colors'
+                    >
+                      <div className='flex size-10 shrink-0 flex-col items-center justify-center rounded-md bg-muted text-xs'>
+                        <span className='font-semibold leading-none'>
+                          {new Date(Number(DateTime.toEpochMillis(event.startAt))).getDate()}
+                        </span>
+                        <span className='text-muted-foreground leading-none mt-0.5'>
+                          {new Date(
+                            Number(DateTime.toEpochMillis(event.startAt)),
+                          ).toLocaleDateString(undefined, { month: 'short' })}
                         </span>
                       </div>
-                    </div>
-                    <span className={`text-xs shrink-0 ${eventStatusClasses[event.status]}`}>
-                      {eventStatusLabels[event.status]()}
-                    </span>
-                  </Link>
-                ))}
+                      <div className='min-w-0 flex-1'>
+                        <div className='flex items-center gap-1.5 mb-0.5'>
+                          <p className='font-medium truncate text-sm'>{event.title}</p>
+                          {Option.isSome(event.seriesId) && (
+                            <span className='text-[10px] text-muted-foreground'>
+                              {tr('event_recurring')}
+                            </span>
+                          )}
+                        </div>
+                        <div className='flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground'>
+                          <span>{eventTypeLabels[event.eventType]()}</span>
+                          <span>·</span>
+                          <span>{startDate}</span>
+                          <span className='hidden sm:inline'>
+                            {startTime}
+                            {Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })}
+                          </span>
+                        </div>
+                      </div>
+                      <span className={`text-xs shrink-0 ${eventStatusClasses[event.status]}`}>
+                        {eventStatusLabels[event.status]()}
+                      </span>
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </div>

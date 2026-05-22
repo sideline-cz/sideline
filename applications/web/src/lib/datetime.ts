@@ -1,4 +1,4 @@
-import { DateTime } from 'effect';
+import { DateTime, Option } from 'effect';
 
 /**
  * Interpret a date + time string pair in the browser's local timezone
@@ -33,6 +33,40 @@ export const formatLocalTime = (dt: DateTime.Utc): string => {
   const h = String(d.getHours()).padStart(2, '0');
   const mi = String(d.getMinutes()).padStart(2, '0');
   return `${h}:${mi}`;
+};
+
+/**
+ * Format an event's start/end range using the browser's local timezone.
+ * - `startDate`, `startTime` — start formatted as YYYY-MM-DD and HH:mm
+ * - `end` — `None` when no end is provided; otherwise:
+ *     - same local calendar day → `Some('HH:mm')`
+ *     - different local calendar day → `Some('YYYY-MM-DD HH:mm')`
+ * - `sameDay` — `true` when there is no end OR the end falls on the same local
+ *   calendar day as the start. Comparison is on LOCAL calendar date so an
+ *   event that crosses midnight in the viewer's tz counts as multi-day.
+ */
+export const formatEventDateRange = (
+  startAt: DateTime.Utc,
+  endAt: Option.Option<DateTime.Utc>,
+): {
+  startDate: string;
+  startTime: string;
+  end: Option.Option<string>;
+  sameDay: boolean;
+} => {
+  const startDate = formatLocalDate(startAt);
+  const startTime = formatLocalTime(startAt);
+
+  return Option.match(endAt, {
+    onNone: () => ({ startDate, startTime, end: Option.none<string>(), sameDay: true }),
+    onSome: (e) => {
+      const endDate = formatLocalDate(e);
+      const endTime = formatLocalTime(e);
+      const sameDay = startDate === endDate;
+      const end = Option.some(sameDay ? endTime : `${endDate} ${endTime}`);
+      return { startDate, startTime, end, sameDay };
+    },
+  });
 };
 
 /** Format a UTC DateTime as HH:mm in UTC (for storing time-of-day values). */

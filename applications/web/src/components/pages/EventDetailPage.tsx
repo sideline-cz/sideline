@@ -2,7 +2,7 @@ import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { EventApi, EventRsvpApi, GroupApi, TrainingTypeApi } from '@sideline/domain';
 import { Discord, Event, EventSeries, GroupModel, Team, TrainingType } from '@sideline/domain';
 import { Link, useNavigate, useRouter } from '@tanstack/react-router';
-import { Effect, Option, Schema } from 'effect';
+import { type DateTime, Effect, Option, Schema } from 'effect';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 
@@ -28,7 +28,13 @@ import {
   SelectValue,
 } from '~/components/ui/select';
 import { Textarea } from '~/components/ui/textarea';
-import { formatLocalDate, formatLocalTime, formatUtcTime, localToUtc } from '~/lib/datetime';
+import {
+  formatEventDateRange,
+  formatLocalDate,
+  formatLocalTime,
+  formatUtcTime,
+  localToUtc,
+} from '~/lib/datetime.js';
 import { DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import { eventStatusClasses, eventStatusLabels, eventTypeLabels } from '~/lib/event-labels';
 import { toGroupOptions } from '~/lib/group-options';
@@ -90,6 +96,41 @@ interface EventDetailPageProps {
   nonResponders: ReadonlyArray<EventRsvpApi.NonResponderEntry>;
   groups: ReadonlyArray<GroupApi.GroupInfo>;
 }
+
+interface EventDateRangeProps {
+  startAt: DateTime.Utc;
+  endAt: Option.Option<DateTime.Utc>;
+  labelStart: string;
+  labelEnd: string;
+}
+
+const EventDateRange = ({ startAt, endAt, labelStart, labelEnd }: EventDateRangeProps) => {
+  const { startDate, startTime, end, sameDay } = formatEventDateRange(startAt, endAt);
+  const start = `${startDate} ${startTime}`;
+  if (sameDay) {
+    return (
+      <p>
+        <span className='text-sm font-medium'>{labelStart}: </span>
+        {start}
+        {Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })}
+      </p>
+    );
+  }
+  return (
+    <>
+      <p>
+        <span className='text-sm font-medium'>{labelStart}: </span>
+        {start}
+      </p>
+      {Option.isSome(end) && (
+        <p>
+          <span className='text-sm font-medium'>{labelEnd}: </span>
+          {end.value}
+        </p>
+      )}
+    </>
+  );
+};
 
 export function EventDetailPage({
   teamId,
@@ -730,17 +771,12 @@ export function EventDetailPage({
                       {eventDetail.trainingTypeName.value}
                     </p>
                   )}
-                <p>
-                  <span className='text-sm font-medium'>{tr('event_startDate')}: </span>
-                  {formatLocalDate(eventDetail.startAt)} {formatLocalTime(eventDetail.startAt)}
-                </p>
-                {Option.isSome(eventDetail.endAt) && (
-                  <p>
-                    <span className='text-sm font-medium'>{tr('event_endDate')}: </span>
-                    {formatLocalDate(eventDetail.endAt.value)}{' '}
-                    {formatLocalTime(eventDetail.endAt.value)}
-                  </p>
-                )}
+                <EventDateRange
+                  startAt={eventDetail.startAt}
+                  endAt={eventDetail.endAt}
+                  labelStart={tr('event_startDate')}
+                  labelEnd={tr('event_endDate')}
+                />
                 {Option.isSome(eventDetail.location) && (
                   <p>
                     <span className='text-sm font-medium'>{tr('event_location')}: </span>
