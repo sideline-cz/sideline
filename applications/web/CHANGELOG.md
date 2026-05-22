@@ -1,5 +1,17 @@
 # @sideline/web
 
+## 0.13.4
+
+### Patch Changes
+
+- [#323](https://github.com/maxa-ondrej/sideline/pull/323) [`f1fd0cd`](https://github.com/maxa-ondrej/sideline/commit/f1fd0cda5578907f85e49efdb240fd48adb9f070) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Achievement notifications are now posted to a configurable per-team Achievement channel. Existing teams continue posting to their welcome channel by default; set the channel to "None" on the team settings page to disable achievement notifications.
+
+- [#325](https://github.com/maxa-ondrej/sideline/pull/325) [`ad72f98`](https://github.com/maxa-ondrej/sideline/commit/ad72f9845d5f4ebc5272dbbafe7f258dfccbf538) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Event date displays now show the full end date only when it differs from the start date. Same-day events show the end time only, while multi-day events show both the full end date and end time so the duration stays unambiguous.
+
+- Updated dependencies [[`f1fd0cd`](https://github.com/maxa-ondrej/sideline/commit/f1fd0cda5578907f85e49efdb240fd48adb9f070)]:
+  - @sideline/domain@0.19.4
+  - @sideline/i18n@0.5.3
+
 ## 0.13.3
 
 ### Patch Changes
