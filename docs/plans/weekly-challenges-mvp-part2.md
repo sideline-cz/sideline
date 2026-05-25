@@ -44,31 +44,31 @@ Server-side guarantees relevant to the processor:
 
 All paths absolute.
 
-1. `/Users/ondrej.maxa/Projects/sideline/applications/bot/src/rcp/weeklyChallenge/index.ts`
-2. `/Users/ondrej.maxa/Projects/sideline/applications/bot/src/rcp/weeklyChallenge/ProcessorService.ts`
-3. `/Users/ondrej.maxa/Projects/sideline/applications/bot/src/rcp/weeklyChallenge/handleWeeklyChallengeReady.ts`
-4. `/Users/ondrej.maxa/Projects/sideline/applications/bot/src/rest/weeklyChallenge/buildWeeklyChallengeEmbed.ts`
-5. `/Users/ondrej.maxa/Projects/sideline/applications/bot/test/rest/weeklyChallenge/buildWeeklyChallengeEmbed.test.ts`
-6. `/Users/ondrej.maxa/Projects/sideline/applications/bot/test/rcp/weeklyChallenge/ProcessorService.test.ts` (consolidated processor + handler tests)
+1. `applications/bot/src/rcp/weeklyChallenge/index.ts`
+2. `applications/bot/src/rcp/weeklyChallenge/ProcessorService.ts`
+3. `applications/bot/src/rcp/weeklyChallenge/handleWeeklyChallengeReady.ts`
+4. `applications/bot/src/rest/weeklyChallenge/buildWeeklyChallengeEmbed.ts`
+5. `applications/bot/test/rest/weeklyChallenge/buildWeeklyChallengeEmbed.test.ts`
+6. `applications/bot/test/rcp/weeklyChallenge/ProcessorService.test.ts` (consolidated processor + handler tests)
 
 ## 4. Files to modify
 
 All paths absolute.
 
-1. `/Users/ondrej.maxa/Projects/sideline/applications/bot/src/rcp/index.ts` — re-export `WeeklyChallengeSyncService`.
-2. `/Users/ondrej.maxa/Projects/sideline/applications/bot/src/index.ts` — re-export `WeeklyChallengeSyncService` (mirrors `WeeklySummarySyncService` on line 16).
-3. `/Users/ondrej.maxa/Projects/sideline/applications/bot/src/AppLive.ts` — add `WeeklyChallengeSyncService.Default` to the `Layer.mergeAll(...)` block (after `WeeklySummarySyncService.Default` on line 31).
-4. `/Users/ondrej.maxa/Projects/sideline/applications/bot/src/Bot.ts`:
+1. `applications/bot/src/rcp/index.ts` — re-export `WeeklyChallengeSyncService`.
+2. `applications/bot/src/index.ts` — re-export `WeeklyChallengeSyncService` (mirrors `WeeklySummarySyncService` on line 16).
+3. `applications/bot/src/AppLive.ts` — add `WeeklyChallengeSyncService.Default` to the `Layer.mergeAll(...)` block (after `WeeklySummarySyncService.Default` on line 31).
+4. `applications/bot/src/Bot.ts`:
    - Add `WeeklyChallengeSyncService` to the import list (after `WeeklySummarySyncService` on line 20).
    - `Effect.bind('weeklyChallenge', () => WeeklyChallengeSyncService.asEffect())` after the `weeklySummary` bind on line 57.
    - Destructure `weeklyChallenge` in the `Effect.andThen` block (between lines 61-73).
    - Add `pollLoop(weeklyChallenge.processTick)` to the `Effect.all([...])` array (after `pollLoop(weeklySummary.processTick)` on line 86).
    - Append `| WeeklyChallengeSyncService` to the hand-maintained type-union tail at lines 96-112 (specifically after `| WeeklySummarySyncService` on line 111).
-5. `/Users/ondrej.maxa/Projects/sideline/applications/bot/src/env.ts` — add optional `WEB_URL` env var mirroring `LOG_LEVEL` (line 28).
-6. `/Users/ondrej.maxa/Projects/sideline/applications/bot/test/Bot.test.ts` — add `MockWeeklyChallengeSyncServiceLayer` and provide it (mirrors lines 94-97 for `WeeklySummarySyncService`).
-7. `/Users/ondrej.maxa/Projects/sideline/packages/i18n/messages/cs.json` — add 7 keys (Czech values, primary).
-8. `/Users/ondrej.maxa/Projects/sideline/packages/i18n/messages/en.json` — add the same 7 keys (English fallback).
-9. `/Users/ondrej.maxa/Projects/sideline/docker-compose.yaml` — add `WEB_URL: ${SERVICE_URL_PROXY}` to the `bot:` service env block (after line 70, matching the `web:` service line 86). Note as a deploy-coordination follow-up: production env in Coolify must define `SERVICE_URL_PROXY` for the bot too (it already does for web).
+5. `applications/bot/src/env.ts` — add optional `WEB_URL` env var mirroring `LOG_LEVEL` (line 28).
+6. `applications/bot/test/Bot.test.ts` — add `MockWeeklyChallengeSyncServiceLayer` and provide it (mirrors lines 94-97 for `WeeklySummarySyncService`).
+7. `packages/i18n/messages/cs.json` — add 7 keys (Czech values, primary).
+8. `packages/i18n/messages/en.json` — add the same 7 keys (English fallback).
+9. `docker-compose.yaml` — add `WEB_URL: ${SERVICE_URL_PROXY}` to the `bot:` service env block (after line 70, matching the `web:` service line 86). Note as a deploy-coordination follow-up: production env in Coolify must define `SERVICE_URL_PROXY` for the bot too (it already does for web).
 
 ## 5. Per-file specification
 

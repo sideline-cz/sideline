@@ -30,18 +30,26 @@ export const handleWeeklyChallengeReady = (
       // retry policy — the server-side 5-attempt cap eventually terminates them
       // by ceasing to return the row.
       //
-      // NOTE: on 404 the handler returns Effect.void. The outer Effect.catchAll in
+      // NOTE: on 404 the handler returns Effect.void. The outer Effect.catch in
       // ProcessorService will NOT fire, so the row is marked PROCESSED, not
       // failed. This matches the achievement & weekly-summary precedent — a
       // permanently-gone channel cannot be retried into existence, so further
       // attempts would be wasted.
-      // Effect.suspend is required here: in Effect v4, calling rest.createMessage(...)
-      // eagerly creates a fixed Effect value. Effect.retry re-executes the same Effect
-      // description — without suspend, it would replay the same frozen value rather than
-      // re-calling createMessage. Effect.suspend defers the call so each retry invokes
-      // createMessage afresh (the canonical handleAchievementEarned pattern uses
-      // Effect.suspend for the same reason).
+      //
+      // Effect.suspend is required here: in Effect v4, Effect.retry re-executes
+      // the same Effect description. Without Effect.suspend, rest.createMessage(...)
+      // is called eagerly and produces a fixed value; retries replay that frozen
+      // value rather than re-invoking createMessage. Effect.suspend defers the call
+      // so each retry actually re-invokes createMessage. handleAchievementEarned
+      // does NOT use Effect.suspend, so its retry-on-5xx path has a latent bug
+      // (no retry-count test exists there). This handler uses Effect.suspend based
+      // on empirical testing with Effect v4 beta.
       return Effect.suspend(() => rest.createMessage(event.channelId, { embeds: [embed] })).pipe(
+        Effect.tap(() =>
+          Effect.logInfo(
+            `Posted weekly challenge embed to channel ${event.channelId} for team ${event.teamId}`,
+          ),
+        ),
         Effect.catchTag('ErrorResponse', (err) =>
           err.response.status === 404
             ? Effect.logWarning(
@@ -52,10 +60,5 @@ export const handleWeeklyChallengeReady = (
         Effect.retry(retryPolicy),
       );
     }),
-    Effect.tap(() =>
-      Effect.logInfo(
-        `Posted weekly challenge embed to channel ${event.channelId} for team ${event.teamId}`,
-      ),
-    ),
     Effect.asVoid,
   );

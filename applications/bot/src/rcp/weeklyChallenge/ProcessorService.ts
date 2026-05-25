@@ -16,7 +16,20 @@ const isRec = (v: unknown): v is Record<string, unknown> =>
 // Converts an unknown error from the Discord REST layer into a loggable string.
 // Extracts structured fields (_tag, response.status, code) when present so
 // operators can correlate errors to specific Discord API failure modes.
+//
+// Check order:
+//   1. string  → return as-is
+//   2. Error   → name + message (+ cause). JSON.stringify(new Error) returns '{}'
+//                because Error.message/stack are non-enumerable — avoid it.
+//   3. tagged object with response.status (ErrorResponse) → structured path
+//   4. tagged object (other Effect error) → tag + JSON
+//   5. fallback → String()
 const formatError = (err: unknown): string => {
+  if (typeof err === 'string') return err;
+  if (err instanceof Error) {
+    const cause = err.cause !== undefined ? ` (caused by: ${String(err.cause)})` : '';
+    return `${err.name}: ${err.message}${cause}`;
+  }
   if (isRec(err)) {
     const tag = typeof err._tag === 'string' ? err._tag : 'Error';
     const resp = err.response;

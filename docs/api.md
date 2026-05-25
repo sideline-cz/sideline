@@ -4793,7 +4793,7 @@ Drains the `weekly_challenge_sync_events` outbox. Each Monday at 09:00 local tea
 | `WeeklyChallenge/MarkWeeklyChallengeProcessed` | `eventId`, `deliveredAt` | Marks an event as successfully delivered; records the delivery timestamp |
 | `WeeklyChallenge/MarkWeeklyChallengeFailed` | `eventId`, `error` | Records a delivery failure and increments the attempt counter; server enforces a 5-attempt cap |
 
-`UnprocessedWeeklyChallengeEvent` fields: `id`, `team_id`, `channel_id` (Discord channel snowflake), `kind` (`"throwing" | "sport"`), `title`, `description` (optional), `weekStartDate` (`YYYY-MM-DD`), `weekEndDate` (`YYYY-MM-DD`).
+`UnprocessedWeeklyChallengeEvent` fields: `id` (`UUIDString`), `teamId` (`TeamId`), `challengeId` (`WeeklyChallengeId`), `channelId` (`Discord.Snowflake`), `scheduledFor` (`DateTime.Utc`), `attempts` (`Int`), `title` (`WeeklyChallengeTitle`), `kind` (`"throwing" | "sport"`), `description` (`Option<WeeklyChallengeDescription>` — `OptionFromNullOr`, absent when `null`), `weekStartDate` (`string`, `YYYY-MM-DD`), `weekEndDate` (`string`, `YYYY-MM-DD`).
 
 #### WeeklySummary
 

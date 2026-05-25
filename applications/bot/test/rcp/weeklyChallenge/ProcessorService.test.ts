@@ -419,4 +419,30 @@ describe('WeeklyChallenge ProcessorService — processTick', () => {
     const failCall = rpcCalls.MarkFailed[0] as any;
     expect(failCall.error).toBe('something went wrong');
   }, 15_000);
+
+  it('formatError: native Error instance → MarkFailed.error contains name and message, not "{}"', async () => {
+    // JSON.stringify(new Error('msg')) returns '{}' because Error.message and
+    // Error.stack are non-enumerable. The formatError function must use the
+    // err instanceof Error branch instead of falling through to JSON.stringify.
+    const event = makeEvent({ kind: 'throwing' });
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc([event]);
+    const { calls: restCalls, layer: restLayer } = makeRest({
+      createMessage: (...args: any[]) => {
+        restCalls.createMessage.push(args);
+        return Effect.fail(new Error('network timeout') as any);
+      },
+    });
+
+    await expect(runProcessTick(rpcLayer, restLayer)).resolves.not.toThrow();
+
+    expect(rpcCalls.MarkFailed).toHaveLength(1);
+    const failCall = rpcCalls.MarkFailed[0] as any;
+    expect(typeof failCall.error).toBe('string');
+    // Must NOT be '{}' (the JSON.stringify of a native Error)
+    expect(failCall.error).not.toBe('{}');
+    // Must contain the error message
+    expect(failCall.error).toContain('network timeout');
+    // Must contain the name (e.g. 'Error:')
+    expect(failCall.error).toContain('Error');
+  }, 15_000);
 });

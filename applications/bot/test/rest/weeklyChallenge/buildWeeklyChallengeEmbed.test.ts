@@ -140,7 +140,7 @@ describe('buildWeeklyChallengeEmbed', () => {
     const DESCRIPTION = 'Hoď frisbee co nejdál, výhra patří nejlepšímu!';
     const embed = buildWeeklyChallengeEmbed({
       ...baseInput,
-      description: Option.some(DESCRIPTION as any),
+      description: Option.some(DESCRIPTION),
     });
 
     const fields = embed.fields ?? [];
