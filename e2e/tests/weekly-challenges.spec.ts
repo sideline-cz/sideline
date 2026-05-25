@@ -43,14 +43,14 @@ function makeListResponseWithChallenge(completed: boolean) {
       {
         challenge: {
           id: CHALLENGE_ID,
-          teamId: TEAM_ID,
-          weekStartDate: CURRENT_MONDAY,
+          team_id: TEAM_ID,
+          week_start_date: CURRENT_MONDAY,
           kind: 'throwing',
           title: 'E2E test challenge',
           description: null,
-          createdBy: MEMBER_ID,
-          createdAt: CURRENT_MONDAY,
-          updatedAt: CURRENT_MONDAY,
+          created_by: MEMBER_ID,
+          created_at: CURRENT_MONDAY,
+          updated_at: CURRENT_MONDAY,
         },
         completedMemberIds: completed ? [MEMBER_ID] : [],
         isActive: true,
@@ -62,14 +62,14 @@ function makeListResponseWithChallenge(completed: boolean) {
 function makeCreatedChallenge() {
   return {
     id: CHALLENGE_ID,
-    teamId: TEAM_ID,
-    weekStartDate: CURRENT_MONDAY,
+    team_id: TEAM_ID,
+    week_start_date: CURRENT_MONDAY,
     kind: 'throwing',
     title: 'E2E test challenge',
     description: null,
-    createdBy: MEMBER_ID,
-    createdAt: CURRENT_MONDAY,
-    updatedAt: CURRENT_MONDAY,
+    created_by: MEMBER_ID,
+    created_at: CURRENT_MONDAY,
+    updated_at: CURRENT_MONDAY,
   };
 }
 
