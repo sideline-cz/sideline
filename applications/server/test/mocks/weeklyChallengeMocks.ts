@@ -12,10 +12,18 @@ export const MockWeeklyChallengeRepositoryLayer = Layer.succeed(WeeklyChallengeR
   create: () => Effect.die(new Error('MockWeeklyChallengeRepository.create not implemented')),
   updateTitleDescription: () =>
     Effect.die(new Error('MockWeeklyChallengeRepository.updateTitleDescription not implemented')),
-  delete: () => Effect.void,
-  markCompleted: () => Effect.void,
-  unmarkCompleted: () => Effect.void,
-  enqueueAnnouncementEvent: () => Effect.void,
+  delete: () =>
+    Effect.die(new Error('MockWeeklyChallengeRepositoryLayer: delete called unexpectedly')),
+  markCompleted: () =>
+    Effect.die(new Error('MockWeeklyChallengeRepositoryLayer: markCompleted called unexpectedly')),
+  unmarkCompleted: () =>
+    Effect.die(
+      new Error('MockWeeklyChallengeRepositoryLayer: unmarkCompleted called unexpectedly'),
+    ),
+  enqueueAnnouncementEvent: () =>
+    Effect.die(
+      new Error('MockWeeklyChallengeRepositoryLayer: enqueueAnnouncementEvent called unexpectedly'),
+    ),
   listUnprocessedDueEvents: () => Effect.succeed([]),
   markProcessed: () => Effect.void,
   markFailed: () => Effect.void,

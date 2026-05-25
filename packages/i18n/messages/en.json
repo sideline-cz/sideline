@@ -1394,6 +1394,7 @@
   "challenges_error_notActive": "You can only mark completion for the current week.",
   "challenges_error_alreadyExists": "A challenge for that week already exists.",
   "challenges_error_outOfRange": "Date must be in the range current week … +8 weeks.",
+  "challenges_error_generic": "An unexpected error occurred. Please try again.",
   "challenges_success_created": "Challenge created.",
   "challenges_success_updated": "Challenge updated.",
   "challenges_success_deleted": "Challenge deleted."

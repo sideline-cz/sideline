@@ -144,6 +144,10 @@ export function NewChallengeDialog({
             setIsSubmitting(false);
             return;
           }
+          // Unrecognized error tag — show generic error and keep dialog open
+          setInlineError(tr('challenges_error_generic'));
+          setIsSubmitting(false);
+          return;
         }
       }
       onCreated();

@@ -1394,6 +1394,7 @@
   "challenges_error_notActive": "Označit splnění jde jen u aktuálního týdne.",
   "challenges_error_alreadyExists": "Pro tento týden už výzva existuje.",
   "challenges_error_outOfRange": "Datum musí být v rozsahu aktuální týden … +8 týdnů.",
+  "challenges_error_generic": "Nastala neočekávaná chyba. Zkuste to prosím znovu.",
   "challenges_success_created": "Výzva vytvořena.",
   "challenges_success_updated": "Výzva upravena.",
   "challenges_success_deleted": "Výzva smazána."

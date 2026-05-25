@@ -17,9 +17,12 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/challenges'
             params: { teamId },
             query: { limit: Option.none() },
           }),
-          members: api.roster
-            .listMembers({ params: { teamId } })
-            .pipe(Effect.catch(() => Effect.succeed<ReadonlyArray<Roster.RosterPlayer>>([]))),
+          members: api.roster.listMembers({ params: { teamId } }).pipe(
+            Effect.tapError((err) =>
+              Effect.logWarning('Roster fetch failed, showing empty member list', err),
+            ),
+            Effect.catch(() => Effect.succeed<ReadonlyArray<Roster.RosterPlayer>>([])),
+          ),
         }),
       ),
       warnAndCatchAll,

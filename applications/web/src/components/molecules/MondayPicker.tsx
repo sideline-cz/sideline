@@ -96,7 +96,9 @@ export function MondayPicker({
       const formatted = `${year}-${month}-${day}`;
 
       // Convert team-TZ Monday to a UTC-midnight Date for range comparison
-      const [y, m, dd] = formatted.split('-').map(Number) as [number, number, number];
+      const parts = formatted.split('-').map(Number);
+      if (parts.length !== 3 || parts.some(Number.isNaN)) return true;
+      const [y, m, dd] = parts;
       const utcDate = new Date(Date.UTC(y, m - 1, dd));
       if (isBefore(utcDate, currentMonday)) return true;
       if (isAfter(utcDate, maxMonday)) return true;

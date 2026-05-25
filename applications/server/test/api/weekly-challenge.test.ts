@@ -12,7 +12,7 @@
 //     ApiLive construction may fail with a missing-service error
 
 import type { Auth, Role, Team, TeamMember } from '@sideline/domain';
-import { WeeklyChallenge } from '@sideline/domain';
+import { WeeklyChallenge, WeeklyChallengeApi } from '@sideline/domain';
 import { OAuth2Tokens } from 'arctic';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { HttpClient, HttpClientResponse, HttpRouter, HttpServer } from 'effect/unstable/http';
@@ -259,8 +259,9 @@ const buildNoop = (tag: string, extra: Record<string, any> = {}): never =>
 const MockWeeklyChallengeRepositoryLayer = Layer.succeed(WeeklyChallengeRepository, {
   _tag: 'api/WeeklyChallengeRepository' as const,
 
-  listForTeam: (teamId: string, teamTz: string, _limit?: number) => {
-    const rows = Array.from(challengesStore.values()).filter((r) => r.team_id === teamId);
+  listForTeam: (teamId: string, teamTz: string, limit?: number) => {
+    const all = Array.from(challengesStore.values()).filter((r) => r.team_id === teamId);
+    const rows = limit !== undefined ? all.slice(0, limit) : all;
     const views = rows.map(makeWeeklyChallengeView);
     return Effect.succeed({
       team: { id: teamId as Team.TeamId, timezone: teamTz },
@@ -293,9 +294,7 @@ const MockWeeklyChallengeRepositoryLayer = Layer.succeed(WeeklyChallengeReposito
         r.week_start_date.getTime() === input.week_start_date.getTime(),
     );
     if (duplicate) {
-      const { WeeklyChallengeAlreadyExistsForWeek } =
-        require('@sideline/domain').WeeklyChallengeApi;
-      return Effect.fail(new WeeklyChallengeAlreadyExistsForWeek());
+      return Effect.fail(new WeeklyChallengeApi.WeeklyChallengeAlreadyExistsForWeek());
     }
     challengesStore.set(id, row);
     return Effect.succeed(row);
@@ -304,8 +303,7 @@ const MockWeeklyChallengeRepositoryLayer = Layer.succeed(WeeklyChallengeReposito
   updateTitleDescription: (challengeId: string, title: string, description: any) => {
     const row = challengesStore.get(challengeId);
     if (!row) {
-      const { WeeklyChallengeNotFound } = require('@sideline/domain').WeeklyChallengeApi;
-      return Effect.fail(new WeeklyChallengeNotFound());
+      return Effect.fail(new WeeklyChallengeApi.WeeklyChallengeNotFound());
     }
     const updated = {
       ...row,
@@ -314,7 +312,7 @@ const MockWeeklyChallengeRepositoryLayer = Layer.succeed(WeeklyChallengeReposito
       updated_at: FROZEN_UTC,
     };
     challengesStore.set(challengeId, updated);
-    return Effect.succeed(updated);
+    return Effect.succeed(makeWeeklyChallengeView(updated).challenge);
   },
 
   delete: (challengeId: string) => {
@@ -323,18 +321,17 @@ const MockWeeklyChallengeRepositoryLayer = Layer.succeed(WeeklyChallengeReposito
     return Effect.void;
   },
 
-  markCompleted: (challengeId: string, memberId: string, _teamTz: string) => {
+  markCompleted: (challengeId: string, memberId: string, teamTz: string) => {
+    void teamTz; // accepted but unused in mock — real repo uses it for active-week check
     const row = challengesStore.get(challengeId);
     if (!row) {
-      const { WeeklyChallengeNotFound } = require('@sideline/domain').WeeklyChallengeApi;
-      return Effect.fail(new WeeklyChallengeNotFound());
+      return Effect.fail(new WeeklyChallengeApi.WeeklyChallengeNotFound());
     }
     // Active check: compare row's week_start_date to the frozen current Monday
     const rowDateStr = row.week_start_date.toISOString().slice(0, 10);
     const currentMondayStr = '2026-03-09';
     if (rowDateStr !== currentMondayStr) {
-      const { WeeklyChallengeNotActive } = require('@sideline/domain').WeeklyChallengeApi;
-      return Effect.fail(new WeeklyChallengeNotActive());
+      return Effect.fail(new WeeklyChallengeApi.WeeklyChallengeNotActive());
     }
     const members = completionsStore.get(challengeId) ?? new Set<string>();
     members.add(memberId);
@@ -342,17 +339,16 @@ const MockWeeklyChallengeRepositoryLayer = Layer.succeed(WeeklyChallengeReposito
     return Effect.void;
   },
 
-  unmarkCompleted: (challengeId: string, memberId: string, _teamTz: string) => {
+  unmarkCompleted: (challengeId: string, memberId: string, teamTz: string) => {
+    void teamTz; // accepted but unused in mock — real repo uses it for active-week check
     const row = challengesStore.get(challengeId);
     if (!row) {
-      const { WeeklyChallengeNotFound } = require('@sideline/domain').WeeklyChallengeApi;
-      return Effect.fail(new WeeklyChallengeNotFound());
+      return Effect.fail(new WeeklyChallengeApi.WeeklyChallengeNotFound());
     }
     const rowDateStr = row.week_start_date.toISOString().slice(0, 10);
     const currentMondayStr = '2026-03-09';
     if (rowDateStr !== currentMondayStr) {
-      const { WeeklyChallengeNotActive } = require('@sideline/domain').WeeklyChallengeApi;
-      return Effect.fail(new WeeklyChallengeNotActive());
+      return Effect.fail(new WeeklyChallengeApi.WeeklyChallengeNotActive());
     }
     const members = completionsStore.get(challengeId);
     if (members) {

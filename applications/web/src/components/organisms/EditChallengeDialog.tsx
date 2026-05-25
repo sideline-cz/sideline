@@ -62,8 +62,17 @@ export function EditChallengeDialog({
       onSaved();
       onOpenChange(false);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      setSubmitError(message || tr('challenges_error_notFound'));
+      const tag =
+        err !== null && typeof err === 'object' && '_tag' in err
+          ? String((err as { _tag: unknown })._tag)
+          : null;
+      const message =
+        tag === 'WeeklyChallengeNotFound'
+          ? tr('challenges_error_notFound')
+          : tag === 'WeeklyChallengeForbidden'
+            ? tr('challenges_error_forbidden')
+            : tr('challenges_error_generic');
+      setSubmitError(message);
       setIsSubmitting(false);
     }
   };

@@ -60,8 +60,14 @@ export const WeeklyChallengeApiLive = HttpApiBuilder.group(Api, 'weeklyChallenge
             ),
             Effect.bind('teamSettings', () => settings.findByTeamId(teamId)),
             Effect.let('teamTz', ({ teamSettings }) => resolveTeamTimezone(teamSettings)),
-            Effect.bind('listResult', ({ teamTz }) =>
-              challenges.listForTeam(teamId, teamTz, Option.getOrUndefined(query.limit)),
+            Effect.let('limitArg', () =>
+              Option.match(query.limit, {
+                onNone: () => undefined,
+                onSome: (n) => Math.max(1, Math.min(52, n)),
+              }),
+            ),
+            Effect.bind('listResult', ({ teamTz, limitArg }) =>
+              challenges.listForTeam(teamId, teamTz, limitArg),
             ),
             Effect.let('canCreate', ({ membership }) => hasPermission(membership, 'team:manage')),
             Effect.let('currentMemberId', ({ membership }) =>
@@ -166,25 +172,10 @@ export const WeeklyChallengeApiLive = HttpApiBuilder.group(Api, 'weeklyChallenge
             Effect.tap(({ existing }) =>
               existing.team_id !== teamId ? Effect.fail(notFound) : Effect.void,
             ),
-            Effect.tap(() =>
+            Effect.bind('updated', () =>
               challenges.updateTitleDescription(challengeId, payload.title, payload.description),
             ),
-            Effect.map(
-              ({ existing }) =>
-                // Re-construct a properly-typed WeeklyChallenge for encoding.
-                // See createChallenge for the rationale.
-                new WeeklyChallenge.WeeklyChallenge({
-                  id: challengeId,
-                  team_id: teamId,
-                  week_start_date: existing.week_start_date,
-                  kind: existing.kind,
-                  title: payload.title,
-                  description: payload.description,
-                  created_by: existing.created_by,
-                  created_at: DateTime.makeUnsafe(existing.created_at),
-                  updated_at: DateTime.nowUnsafe(),
-                }),
-            ),
+            Effect.map(({ updated }) => updated),
           ),
         )
         .handle('deleteChallenge', ({ params: { teamId, challengeId } }) =>

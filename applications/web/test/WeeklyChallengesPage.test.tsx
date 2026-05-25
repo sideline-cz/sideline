@@ -243,7 +243,7 @@ describe('WeeklyChallengesPage', () => {
 
   it('useIsMobile=true renders List view, not Grid', async () => {
     const { useIsMobile } = await import('~/hooks/use-mobile.js');
-    (useIsMobile as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    vi.mocked(useIsMobile).mockReturnValue(true);
 
     render(<WeeklyChallengesPage {...defaultProps} challenges={[makeChallengeView()]} />);
 
