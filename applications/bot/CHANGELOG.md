@@ -1,5 +1,17 @@
 # @sideline/bot
 
+## 0.15.0
+
+### Minor Changes
+
+- [#332](https://github.com/maxa-ondrej/sideline/pull/332) [`fbc2627`](https://github.com/maxa-ondrej/sideline/commit/fbc2627fd07a378f1a11c6ae3d1ec3b4a2fe83e7) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add Discord bot processor for Weekly Challenges (Part 2/3 of Týdenní výzvy). The bot now drains the `weekly_challenge_sync_events` outbox introduced in Part 1 and posts a localized announcement embed in the team's announcement channel when the captain-scheduled week begins (Monday 09:00 in the team's timezone). Embeds are color-coded (emerald 🥏 for throwing challenges, amber 🏃 for sport) with inline `Druh` and `Týden` fields, an optional description, and an optional deep-link URL (controlled by the new optional `WEB_URL` env var). When Discord returns 404 (channel deleted) the row is marked processed with an audit log; other Discord errors retry with exponential backoff and surface as `MarkFailed` so the server-side 5-attempt cap can terminate them. Adds 7 new `weeklyChallenge_embed_*` i18n keys in cs/en. The web UI and user-facing HTTP API will land in Part 3.
+
+### Patch Changes
+
+- Updated dependencies [[`7fe28e8`](https://github.com/maxa-ondrej/sideline/commit/7fe28e84facfe9b4bef5b70c8627710fea5eb690), [`d7513dc`](https://github.com/maxa-ondrej/sideline/commit/d7513dc8615ea3b28d905493c050d461adc8a4c9), [`fbc2627`](https://github.com/maxa-ondrej/sideline/commit/fbc2627fd07a378f1a11c6ae3d1ec3b4a2fe83e7), [`e953389`](https://github.com/maxa-ondrej/sideline/commit/e9533899780a0983329bbb8acdd159c4f1e71cc8)]:
+  - @sideline/domain@0.20.0
+  - @sideline/i18n@0.6.0
+
 ## 0.14.2
 
 ### Patch Changes

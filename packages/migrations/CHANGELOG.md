@@ -1,5 +1,13 @@
 # @sideline/migrations
 
+## 0.15.0
+
+### Minor Changes
+
+- [#326](https://github.com/maxa-ondrej/sideline/pull/326) [`7fe28e8`](https://github.com/maxa-ondrej/sideline/commit/7fe28e84facfe9b4bef5b70c8627710fea5eb690) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add an admin-mediated team onboarding flow. Global admins now mint single-use, time-limited onboarding links bound to a specific Discord user; captains complete team setup (identity, Discord server, channels) via a 2-step wizard that authenticates with their bound Discord account. Team provisioning runs in a SQL transaction so the token is only consumed if the team is fully provisioned. As part of this work, `TeamsRepository.insertQuery` now persists all 16 team columns (previously silently dropped 6).
+
+- [#331](https://github.com/maxa-ondrej/sideline/pull/331) [`d7513dc`](https://github.com/maxa-ondrej/sideline/commit/d7513dc8615ea3b28d905493c050d461adc8a4c9) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add backend foundation for Weekly Challenges (Týdenní výzvy). Captains can create one challenge per week per team with a kind discriminator (`throwing` or `sport`), title, and optional description; team members can self-mark completion on the current ISO week only. Includes 3 new tables (`weekly_challenges`, `weekly_challenge_completions`, `weekly_challenge_sync_events`), domain schemas, RPC group with 5 typed error tags, repository with transactional FOR UPDATE mark/unmark, timezone-aware Monday-date helpers, and an outbox table populated at create time so the bot can announce the challenge on its start Monday at 09:00 team-local. The Discord bot drain and web UI will land in follow-up PRs.
+
 ## 0.14.2
 
 ### Patch Changes
