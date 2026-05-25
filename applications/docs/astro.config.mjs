@@ -88,6 +88,10 @@ export default defineConfig({
               label: 'Calendar subscription (iCal)',
               slug: 'guides/calendar-subscription',
             },
+            {
+              label: 'Weekly challenges',
+              slug: 'guides/weekly-challenges',
+            },
           ],
         },
         {

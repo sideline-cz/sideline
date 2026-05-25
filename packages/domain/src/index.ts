@@ -59,6 +59,8 @@ export * as Translations from './api/Translations.js';
 
 export * as VersionApi from './api/VersionApi.js';
 
+export * as WeeklyChallengeApi from './api/WeeklyChallengeApi.js';
+
 export * as WeeklySummaryApi from './api/WeeklySummaryApi.js';
 
 export * as Achievement from './models/Achievement.js';

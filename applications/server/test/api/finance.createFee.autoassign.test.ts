@@ -61,6 +61,7 @@ import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from '../mocks/onboardingMocks.js';
 import { MockTranslationsLayers } from '../mocks/translationMocks.js';
+import { MockWeeklyChallengeRepositoryLayer } from '../mocks/weeklyChallengeMocks.js';
 
 // ---------------------------------------------------------------------------
 // Test IDs
@@ -609,6 +610,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(Layer.succeed(ExpensesRepository, buildNoop('api/ExpensesRepository'))))
   .pipe(Layer.provide(MockTranslationsLayers))
   .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+  .pipe(Layer.provide(MockWeeklyChallengeRepositoryLayer))
   .pipe(Layer.provide(BotInfoStore.Default));
 
 // ---------------------------------------------------------------------------

@@ -657,6 +657,30 @@ Rules:
 2. **Keep `Option.match` only when `onSome` is non-trivial** — i.e. transforms `v`, runs an `Effect`, or branches on `v`'s value. The "bare `Effect.succeed` in `onSome`" case has its own helper (`Options.toEffect`) — see `packages/effect-lib/AGENTS.md`.
 3. **Do not lift a "patch-or-keep" merge into an `Effect.bind`** when no effectful work is needed. Use `Effect.let('nextFields', ({ existing }) => ({ ... }))` — `Effect.bind` would force the merged record to be wrapped in `Effect.succeed` and back, adding allocation for no benefit. `team.ts:updateTeamInfo` switched from `Effect.bind` returning `Effect.succeed({ ... })` to `Effect.let` for exactly this reason.
 
+## HttpApi Query Parameters Must Be Consumed Or Removed
+
+When an endpoint declares a query parameter via `Schema.OptionFromOptional(...)` (or any other shape) on the domain `HttpApiEndpoint`, the server handler MUST destructure and use it. A declared-but-unused query parameter is a contract bug: the client believes it can constrain the response (e.g. `?limit=20`) but the server silently ignores it, returning the full result set. Reviewers see only the schema declaration in the diff and assume the wiring is complete.
+
+```typescript
+// ✗ Bad — `limit` declared on the endpoint, never destructured
+.handle('listChallenges', ({ params: { teamId } }) =>
+  challenges.listForTeam(teamId, teamTz),
+)
+
+// ✓ Good — `limit` destructured and threaded through
+.handle('listChallenges', ({ params: { teamId }, query }) =>
+  challenges.listForTeam(teamId, teamTz, Option.getOrUndefined(query.limit)),
+)
+
+// ✓ Also acceptable — if the parameter is not actually needed, remove the schema declaration in the same PR
+```
+
+Rules:
+
+1. **Every `Schema.OptionFromOptional` query field on an endpoint MUST appear in the handler's destructure or the handler's body.** Grep `query\.<fieldName>` in the handler file before marking the endpoint complete.
+2. **`Option.getOrUndefined(query.x)` is the canonical way to pass an `Option`-typed query param into a repository method that takes a default-parameter (e.g. `(teamId, teamTz, limit = 12)`).** Do not pre-resolve the default in the handler — keep the default value next to the SQL `LIMIT` clause in the repository.
+3. **If a query param turns out to be unnecessary,** remove the field from the domain `HttpApi*` schema in the same PR as removing the handler reference — never leave a declared-but-dead parameter on the public contract.
+
 ## Atomic Conditional UPDATE Pattern
 
 When a state transition must be race-free (e.g. "claim if not yet claimed", "mark started if still active"), encode the precondition in the `WHERE` clause and use `RETURNING id` to detect whether the row was updated. Use `SqlSchema.findOneOption` so callers receive `Option<{ id }>` — `Option.isSome` means "we won the race", `Option.isNone` means "preconditions failed (already claimed / cancelled / wrong member / not found)".
@@ -854,3 +878,16 @@ See `packages/migrations/AGENTS.md` → "Per-Row Audit Trigger With Application-
 ## Testing
 
 Tests go in `test/` directory. When adding new repositories, add corresponding mock implementations to all test files that compose `AppLive` (e.g., `MockChannelSyncEventsRepository`).
+
+### HttpApi Mock-Layer Cascade
+
+Every test file that provides `ApiLive` (directly or transitively) MUST provide a mock layer for **every** repository that any `HttpApiBuilder.group(...)` registered in `ApiLive` depends on — even repositories the test does not exercise. Adding a new group to `ApiLive` without updating every existing `ApiLive`-providing test produces a missing-service runtime error at layer construction, not a compile error.
+
+Reference: `applications/server/test/mocks/weeklyChallengeMocks.ts` is the canonical noop-mock shape. Every method returns the type's safe empty value (`Effect.succeed(Option.none())`, `Effect.succeed([])`, `Effect.void`); methods whose success type is non-trivial (e.g. `create` returning a domain model) return `Effect.die(new Error('Mock<X>.create not implemented'))` so a test that accidentally exercises an unimplemented path fails loudly instead of returning a partially-constructed value.
+
+Rules:
+
+1. **When adding a new `HttpApiBuilder.group(...)` and wiring it into `ApiLive`,** create `test/mocks/<feature>Mocks.ts` exporting a `Mock<Repo>Layer` in the same PR, and add it to every test file that currently provides `ApiLive`. Grep `Layer.provideMerge(ApiLive)` and `Layer.provide(ApiLive)` to find the full call-site list.
+2. **Noop mocks use `Effect.succeed(<empty>)` for read methods and `Effect.die(...)` for non-trivial writes** (any method whose success type is a domain model, not `void`). Read methods that return `Option` succeed with `Option.none()`; read methods that return `ReadonlyArray` succeed with `[]`; void-returning writes succeed with `Effect.void`.
+3. **Cast the mock object with `as never`** (matching the existing files) — the repository's `ServiceMap.Service` tag carries a private brand that cannot be reconstructed in test code.
+4. **Mock objects must build the canonical domain model via its constructor, not as a plain camelCase literal.** `new WeeklyChallenge.WeeklyChallengeView({ challenge: new WeeklyChallenge.WeeklyChallenge({ ... }), completedMemberIds: [], isActive: false })` — NOT `{ challenge: { id: '...', weekStartDate: '...' }, ... }`. The HTTP handler encodes the response through the schema; a string-shaped literal fails encoding and tempts a "fix" that bypasses schema encoding entirely. Build mocks via the same constructors the production code uses.

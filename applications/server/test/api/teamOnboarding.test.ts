@@ -51,6 +51,7 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import { WeeklyChallengeRepository } from '~/repositories/WeeklyChallengeRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
@@ -438,6 +439,7 @@ const MockNoopLayers = Layer.mergeAll(
   noopMockLayer(EventSyncEventsRepository),
   noopMockLayer(AgeThresholdRepository),
   noopMockLayer(OAuthConnectionsRepository),
+  noopMockLayer(WeeklyChallengeRepository),
   noopMockLayer(AgeCheckService),
   noopMockLayer(AchievementRoleMappingsRepository),
   noopMockLayer(AchievementSettingsRepository),

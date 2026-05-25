@@ -14,6 +14,7 @@ import {
   Rss,
   Settings,
   Shield,
+  Target,
   Trophy,
   UserCog,
   UserPlus,
@@ -73,6 +74,12 @@ function getTeamNavGroups(
           title: tr('event_events'),
           icon: Calendar,
           to: '/teams/$teamId/events',
+          params: { teamId },
+        },
+        {
+          title: tr('challenges_navTitle'),
+          icon: Target,
+          to: '/teams/$teamId/challenges',
           params: { teamId },
         },
         {

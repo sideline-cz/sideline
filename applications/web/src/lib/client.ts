@@ -24,6 +24,7 @@ import {
   TrainingTypeApi,
   Translations,
   VersionApi,
+  WeeklyChallengeApi,
   WeeklySummaryApi,
 } from '@sideline/domain';
 import { Effect, Option, ServiceMap } from 'effect';
@@ -65,7 +66,8 @@ class ClientApi extends HttpApi.make('api')
   .add(Translations.TranslationsApiGroup)
   .add(VersionApi.VersionApiGroup)
   .add(OnboardingApi.OnboardingApiGroup)
-  .add(WeeklySummaryApi.WeeklySummaryApiGroup) {}
+  .add(WeeklySummaryApi.WeeklySummaryApiGroup)
+  .add(WeeklyChallengeApi.WeeklyChallengeApiGroup) {}
 
 export const client = ClientConfig.asEffect().pipe(
   Effect.flatMap(({ baseUrl }) =>

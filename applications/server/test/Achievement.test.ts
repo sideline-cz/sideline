@@ -59,6 +59,7 @@ import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from './mocks/onboardingMocks.js';
 import { MockTranslationsLayers } from './mocks/translationMocks.js';
+import { MockWeeklyChallengeRepositoryLayer } from './mocks/weeklyChallengeMocks.js';
 
 // ---------------------------------------------------------------------------
 // Test constants
@@ -730,6 +731,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockFinanceLayers))
   .pipe(Layer.provide(MockTranslationsLayers))
   .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+  .pipe(Layer.provide(MockWeeklyChallengeRepositoryLayer))
   .pipe(Layer.provide(BotInfoStore.Default));
 
 // ---------------------------------------------------------------------------

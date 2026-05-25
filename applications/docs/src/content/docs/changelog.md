@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-25 — Weekly challenges web UI and HTTP API
+
+- **Captains** can now create, edit, and delete weekly challenges directly from the web app. Go to **Team → Weekly challenges** (`/teams/{teamId}/challenges`) and click **Nová týdenní výzva**.
+- Each challenge has a **kind** (Házecí / Sportovní), a title (max 120 characters), an optional description, and a target week. At most one challenge can exist per team per week.
+- **Members** tick off their own completion for the current week's challenge directly on the same page. The grid shows all members across the last 12 weeks with their completion status. Completed cells show **Splněno ✓**; past and future weeks are read-only.
+- On desktop, the page renders as a sticky-column grid (weeks as columns, members as rows). On mobile, each challenge is shown as a vertical card.
+- The challenges page is linked from the team sidebar navigation.
+- API integrators: six new endpoints are available under `GET/POST /teams/{teamId}/weekly-challenges`, `PATCH/DELETE /teams/{teamId}/weekly-challenges/{challengeId}`, and `POST/DELETE /teams/{teamId}/weekly-challenges/{challengeId}/complete`. See the [API overview](/api/overview/) for details.
+
 ## 2026-05-25 — Weekly challenge Discord announcements
 
 - Every Monday at 09:00 in your team's configured timezone, the bot now posts a **weekly challenge embed** to a Discord channel of your choice.

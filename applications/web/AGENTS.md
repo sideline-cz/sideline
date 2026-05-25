@@ -714,6 +714,76 @@ Rules:
 4. **Co-locate `<name>.test.ts` next to `<name>.ts`.** The test file imports the function directly and tests with plain object literals — no `render`, no `screen`, no mocks. `vitest.config.ts` already includes `src/**/*.test.ts` in the project glob.
 5. **Call helpers from components/pages, not from loaders.** Loaders return raw API data; the page/component runs the helper to derive sorted/KPI'd views on each render.
 
+## Time-Sensitive Data: Timezone Correctness, Stale-Response Toggles, Focus Refetch
+
+Features that operate on **team-scoped calendar dates** (weekly challenges' Monday rollover, future event-of-the-week, scheduled announcements) must follow three rules together. The bugs they prevent are silent, only manifest for users whose browser timezone differs from the team's `team_settings.timezone`, and only trigger at the rollover boundary — they will not appear in local dev.
+
+### Server Is The Single Source Of Truth For "Current Week / Today"
+
+The server-side helper `currentTeamMondayDateString(teamTz)` (in `applications/server/src/helpers/weeklyChallenge.ts`) is the canonical computation of "the Monday of the current ISO week, expressed as a `YYYY-MM-DD` string in the team's IANA timezone". The web client MUST NEVER recompute "current week" using browser-local `Date` arithmetic.
+
+Rules:
+
+1. **Never call `Date.getDay()`, `Date.getDate()`, `Date.getMonth()`, or `Date.getFullYear()` to determine "current week" / "is this row the active week".** These all read in the browser's local timezone — a captain in `America/Los_Angeles` viewing a `Europe/Prague` team sees Monday-midnight-Prague as Sunday-evening-LA, and any "is this row this week?" check computed client-side will be off by one day at the rollover boundary.
+2. **Trust the server's `isActive` flag.** The `WeeklyChallengeView` returned by the server includes an `isActive: boolean` field that is the result of `currentTeamMondayDateString(teamTz) === weekStartDateString(row.week_start_date, teamTz)` evaluated server-side. The web client renders the row as "active" iff `view.isActive === true` — no client-side recomputation.
+3. **For string-comparison "is row X this week?" inside web code, compare ISO date strings, never `Date` instances.** `row.weekStartDate.split('T')[0] === serverProvidedCurrentMonday` is the correct shape. `new Date(row.weekStartDate).getTime() === new Date(serverProvidedCurrentMonday).getTime()` is wrong — it re-introduces the browser-TZ interpretation.
+4. **Inside `MondayPicker` and any other "is this Monday selectable?" component, identify Mondays via `Intl.DateTimeFormat('en-CA', { timeZone: teamTz, weekday: 'short' })`,** NOT `date.getDay() === 1`. The `getDay()` form reads the captain's browser timezone; a Monday in Prague is a Sunday in LA at the wrong hour. Reference: `applications/web/src/components/molecules/MondayPicker.tsx` (`isDisabled` callback builds `tzParts` via `Intl.DateTimeFormat` with `timeZone: teamTz` before any weekday/range comparison).
+5. **The team timezone arrives as a prop or loader-data field;** never read `Intl.DateTimeFormat().resolvedOptions().timeZone` (browser timezone) as a substitute. If the team's timezone is unknown at the call site, that is a bug in the loader, not a reason to fall back to browser-local.
+
+### `window.focus` → `router.invalidate()` For Calendar-Boundary Pages
+
+Pages that render data whose semantics change at a calendar boundary (the page was loaded before Monday 00:00 in the team's timezone; the user comes back after the boundary) MUST re-fetch on `window.focus` so the `isActive` flag and "current week" highlight stay correct without a manual refresh.
+
+```typescript
+const router = useRouter();
+React.useEffect(() => {
+  const handleFocus = () => router.invalidate();
+  window.addEventListener('focus', handleFocus);
+  return () => window.removeEventListener('focus', handleFocus);
+}, [router]);
+```
+
+Reference: `applications/web/src/components/pages/WeeklyChallengesPage.tsx`.
+
+Rules:
+
+1. **Use `window.addEventListener('focus', ...)`, not `'visibilitychange'`.** Focus fires when the user returns to the tab; visibilitychange fires on every minor tab change and would cause excessive re-fetching.
+2. **Always pair the listener with a cleanup function** in the `useEffect` return. A missing cleanup leaks the listener on every navigation.
+3. **The effect's only dependency is `router`** — adding loader data, team id, or "is active" derived state would re-bind the listener on every render.
+4. **Only add this listener to pages with calendar-boundary semantics.** Adding it everywhere produces unnecessary server load — most pages do not change meaning at midnight.
+
+### Stale-Response Handling In Debounced Optimistic Toggles
+
+When a row exposes a toggle (e.g. "mark this week's challenge complete") with optimistic UI and debounce, the component MUST track in-flight requests by a monotonic id and ignore any response whose id is not the most recent. Without this, a slow successful response from click N can clobber a faster failed rollback from click N+1.
+
+Reference: `applications/web/src/components/molecules/ChallengeCompletionCell.tsx`.
+
+The pattern (4 refs + 1 state slot):
+
+| Ref / state | Purpose |
+|------|---------|
+| `displayCompleted: useState<boolean>` | The optimistic UI state shown to the user. |
+| `inFlightRequestIdRef: useRef<number>` | Monotonic counter; bumped on every click. |
+| `optimisticStateRef: useRef<boolean>` | The state the user most recently intended (last toggle). |
+| `serverStateRef: useRef<boolean>` | The last server-confirmed state. Initial value mirrors the `isCompleted` prop. |
+| `timerRef: useRef<ReturnType<typeof setTimeout> \| null>` | The active debounce handle. |
+
+On click:
+1. Clear `timerRef` (cancel any pending request).
+2. Increment `inFlightRequestIdRef.current` and capture the new value as `requestId`.
+3. Toggle `optimisticStateRef.current` and `setDisplayCompleted(nextState)`.
+4. Schedule the API call inside `setTimeout(..., 400)`. In the `then`/`catch` handlers, FIRST check `if (inFlightRequestIdRef.current !== requestId) return;` — any non-latest response is silently ignored.
+5. On error of the latest request, roll back to `serverStateRef.current` (NOT to the pre-click value), update `optimisticStateRef`, `setDisplayCompleted`, and surface a toast via `onError`.
+
+Rules:
+
+1. **Roll back to `serverStateRef.current`, not to the captured pre-click optimistic value.** Mid-burst clicks can leave the optimistic state two-or-more flips ahead of the server; rolling back to the pre-click optimistic value preserves a state the server never confirmed. The only safe rollback is to the last server-confirmed truth.
+2. **Stale-response detection runs in BOTH the success and error branches.** A late success that fires after a newer click would overwrite `serverStateRef` with the wrong truth; an early error from an older click would roll back optimistic state the user has since corrected. Both branches must short-circuit on `inFlightRequestIdRef.current !== requestId`.
+3. **Sync `displayCompleted` / `optimisticStateRef` / `serverStateRef` from the `isCompleted` prop in a `useEffect`.** After `router.invalidate()` reloads the data, the new prop value is the new server truth — all three slots must adopt it.
+4. **Debounce window is 400ms.** Shorter windows produce visible flicker on intentional double-toggles; longer windows make the feature feel unresponsive. Do not parameterise the value — pick 400ms or change every site in lockstep.
+5. **Cleanup the timer on unmount** (`useEffect(() => () => clearTimeout(timerRef.current), [])`). A pending request firing after unmount is benign for the API but produces a React warning about state updates on unmounted components.
+6. **This pattern does NOT solve in-flight cancellation** — two clicks farther apart than the debounce window can still race on the server. The mitigation is the `router.invalidate()` call after the toggle resolves (the server's response is the final truth). Do not add `AbortController` integration without first validating that the API client supports it end-to-end.
+
 ## Testing React Components
 
 Web app tests use **jsdom** environment (configured in `vitest.config.ts`). A setup file (`test/setup.ts`) calls `cleanup()` from `@testing-library/react` after each test.

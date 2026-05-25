@@ -1,6 +1,21 @@
 import { cleanup } from '@testing-library/react';
 import React from 'react';
-import { afterEach, vi } from 'vitest';
+import { afterEach, beforeAll, vi } from 'vitest';
+
+// Ensure localStorage is available in jsdom tests (needed by @sideline/i18n/runtime)
+beforeAll(() => {
+  if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') {
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: {
+        getItem: vi.fn(() => null),
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+        clear: vi.fn(),
+      },
+      writable: true,
+    });
+  }
+});
 
 afterEach(() => {
   cleanup();

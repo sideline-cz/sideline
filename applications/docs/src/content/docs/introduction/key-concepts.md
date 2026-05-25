@@ -60,3 +60,7 @@ The record that ties a specific fee to a specific member. An assignment tracks h
 ## Payment
 
 Money received against a fee assignment. Payments are recorded by admins or treasurers (anyone with `finance:record_payments`) and can be voided if entered in error. The voided record is kept for auditing. See the [Finances guide](/guides/finances/) for the full workflow.
+
+## Weekly challenge
+
+A shared goal set by a captain for a single ISO week (Monday–Sunday). A challenge has a **kind** (Házecí / throwing or Sportovní / sport), a title, and an optional description. Each member marks their own completion during the active week. At most one challenge can exist per team per week. See the [Weekly challenges guide](/guides/weekly-challenges/) for instructions.

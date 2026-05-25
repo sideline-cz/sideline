@@ -106,6 +106,16 @@ flowchart LR
         UC_NOTIFICATIONS["View & Mark Notifications"]
     end
 
+    subgraph CHALLENGES["Weekly Challenges"]
+        UC_LIST_CHALLENGES["View Weekly Challenges"]
+        UC_CREATE_CHALLENGE["Create Weekly Challenge"]
+        UC_EDIT_CHALLENGE["Edit Weekly Challenge"]
+        UC_DELETE_CHALLENGE["Delete Weekly Challenge"]
+        UC_MARK_COMPLETE["Mark Challenge Complete"]
+        UC_UNMARK_COMPLETE["Unmark Challenge Complete"]
+        UC_BOT_POST_CHALLENGE["Post Weekly Challenge Embed"]
+    end
+
     subgraph FINANCE["Finance"]
         UC_VIEW_FINANCE["View Finance Overview"]
         UC_MANAGE_FEES["Create / Update / Archive Fees"]
@@ -141,7 +151,13 @@ flowchart LR
     PL --> UC_VIEW_MY_STATUS
     PL --> UC_PAYMENT_REMINDER
     PL --> UC_PAYMENT_ICAL
+    PL --> UC_LIST_CHALLENGES
+    PL --> UC_MARK_COMPLETE
+    PL --> UC_UNMARK_COMPLETE
 
+    CP --> UC_CREATE_CHALLENGE
+    CP --> UC_EDIT_CHALLENGE
+    CP --> UC_DELETE_CHALLENGE
     CP --> UC_EDIT_MEMBER
     CP --> UC_MANAGE_ROSTER
     CP --> UC_CREATE_EVENT
@@ -184,6 +200,7 @@ flowchart LR
     BOT --> UC_BOT_FINANCE_STATUS
     BOT --> UC_BOT_INFO
     BOT --> UC_PAYMENT_REMINDER
+    BOT --> UC_BOT_POST_CHALLENGE
 
     SYS --> UC_CREATE_EVENT
     SYS --> UC_START_EVENT
@@ -557,6 +574,42 @@ flowchart LR
     SYS --> UC_POST_EMBED
 ```
 
+### 3.9 Weekly Challenges
+
+Weekly challenges give captains a structured way to set a recurring physical or skill goal for the team. Captains create a challenge for a specific ISO week (Monday–Sunday); members mark their own completion during that week. The bot posts a challenge embed on Monday morning to a configured Discord channel.
+
+```mermaid
+flowchart LR
+    PL(["Player / Member"])
+    CP(["Captain"])
+    BOT(["Discord Bot"])
+
+    subgraph CHALLENGE_MGMT["Challenge Management (Captain)"]
+        UC_LIST["List Challenges\n(GET /teams/:teamId/weekly-challenges?limit=12)\nreturns WeeklyChallengeListResponse\nwith completion grid"]
+        UC_CREATE["Create Challenge\n(POST /teams/:teamId/weekly-challenges)\nweekStart · kind · title · description\nrequires: team:manage"]
+        UC_EDIT["Edit Challenge\n(PATCH /teams/:teamId/weekly-challenges/:challengeId)\ntitle · description\nrequires: team:manage"]
+        UC_DELETE["Delete Challenge\n(DELETE /teams/:teamId/weekly-challenges/:challengeId)\ncascades completions\nrequires: team:manage"]
+    end
+
+    subgraph COMPLETION["Completion (Member)"]
+        UC_MARK["Mark Complete\n(POST /teams/:teamId/weekly-challenges/:challengeId/complete)\nonly allowed during active week"]
+        UC_UNMARK["Unmark Complete\n(DELETE /teams/:teamId/weekly-challenges/:challengeId/complete)\nonly allowed during active week"]
+    end
+
+    subgraph BOT_SYNC["Discord Announcement"]
+        UC_BOT_EMBED["Post Weekly Challenge Embed\n(WeeklyChallenge/GetUnprocessedWeeklyChallengeEvents)\ndrains weekly_challenge_sync_events outbox\nposted at 09:00 team-TZ on challenge Monday"]
+    end
+
+    PL --> UC_LIST
+    PL --> UC_MARK
+    PL --> UC_UNMARK
+    CP --> UC_LIST
+    CP --> UC_CREATE
+    CP --> UC_EDIT
+    CP --> UC_DELETE
+    BOT --> UC_BOT_EMBED
+```
+
 ---
 
 ## 4. Use Case Descriptions
@@ -816,3 +869,30 @@ The following structured descriptions cover the most significant use cases in th
 | **Alternate Flow B** | If the authenticated captain's Discord ID does not match `bound_discord_id`, the server returns `403 OnboardingWrongCaptain`; the page shows an error asking the captain to sign in with the correct Discord account. |
 | **Alternate Flow C** | If the selected Discord guild is already linked to another Sideline team, the server returns `409 OnboardingGuildAlreadyClaimed`; the form shows an inline error on the guild picker. |
 | **Notes** | The wizard is a two-step form rendered entirely client-side; no intermediate server calls are made between steps. The token is consumed atomically inside `sql.withTransaction` — a network failure or race is rolled back. |
+
+---
+
+### UC-22: Captain Creates / Edits / Deletes a Weekly Challenge
+
+| Field | Detail |
+|---|---|
+| **Actor** | Captain (or any member holding `team:manage`) |
+| **Precondition** | The actor is authenticated and holds `team:manage` permission on the target team. |
+| **Main Flow — Create** | 1. The captain navigates to **Team → Weekly challenges** (`/teams/:teamId/challenges`). 2. The page loads via `GET /teams/:teamId/weekly-challenges?limit=12`. The response includes `canCreate: true` and the last 12 weeks of challenges with per-member completion data. 3. The captain clicks **Nová týdenní výzva** (New weekly challenge). 4. A form collects: week start date (Monday, ±1 week), kind (`throwing` or `sport`), title (max 120 chars), and optional description (max 2000 chars). 5. On submit the web app calls `POST /teams/:teamId/weekly-challenges`. 6. The server validates `weekStart` is a Monday within the allowed window, checks uniqueness on `(team_id, week_start_date)`, inserts the `weekly_challenges` row, and schedules a `weekly_challenge_sync_events` row for team-TZ 09:00 on the challenge's Monday. |
+| **Main Flow — Edit** | The captain opens the challenge's edit form and changes the title and/or description. The web app calls `PATCH /teams/:teamId/weekly-challenges/:challengeId`. The week, kind, and completion records are unchanged. |
+| **Main Flow — Delete** | The captain clicks **Smazat výzvu** and confirms. The web app calls `DELETE /teams/:teamId/weekly-challenges/:challengeId`. The server cascades to `weekly_challenge_completions` and to any pending `weekly_challenge_sync_events`. |
+| **Postcondition — Create** | A new `weekly_challenges` row exists. A `weekly_challenge_sync_events` outbox row is scheduled so the bot will post the embed on Monday morning. |
+| **Postcondition — Delete** | The challenge row, all completion records, and any undelivered sync events are removed. |
+| **Alternate Flow** | If a challenge already exists for the chosen week, the API returns `409 WeeklyChallengeAlreadyExistsForWeek`. If the week is outside the ±1-week window, the API returns `422 WeeklyChallengeWeekOutOfRange`. |
+
+---
+
+### UC-23: Member Marks / Unmarks Weekly Challenge Complete
+
+| Field | Detail |
+|---|---|
+| **Actor** | Player (any active team member) |
+| **Precondition** | The actor is an active team member. A weekly challenge exists for the current ISO week (determined using the team's configured timezone). |
+| **Main Flow** | 1. The member opens **Team → Weekly challenges** (`/teams/:teamId/challenges`). 2. The page displays the challenge grid: weeks as columns (newest left), members as rows. The active week's column is highlighted. 3. The member clicks the tick cell in the active week's column for their row. The web app calls `POST /teams/:teamId/weekly-challenges/:challengeId/complete`. 4. The server inserts a `weekly_challenge_completions` row for `(challenge_id, member_id)`. The cell updates to show the completed state (Splněno ✓). 5. To undo, the member clicks the tick again. The web app calls `DELETE /teams/:teamId/weekly-challenges/:challengeId/complete`. The completion row is removed. |
+| **Postcondition** | The member's completion state for the current week is toggled. All other viewers of the challenges page see the updated grid on their next load. |
+| **Alternate Flow** | If the challenge's week is not the current week (checked server-side using the team timezone), the API returns `409 WeeklyChallengeNotActive` and the UI shows an error. Tick cells for past and future weeks are rendered as read-only in the web UI. |

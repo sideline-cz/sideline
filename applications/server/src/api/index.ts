@@ -26,6 +26,7 @@ import { TeamSettingsApiLive } from '~/api/team-settings.js';
 import { TrainingTypeApiLive } from '~/api/training-type.js';
 import { TranslationsApiLive } from '~/api/translations.js';
 import { VersionApiLive } from '~/api/version.js';
+import { WeeklyChallengeApiLive } from '~/api/weekly-challenge.js';
 import { WeeklySummaryApiLive } from '~/api/weekly-summary.js';
 
 export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.json' })
@@ -57,6 +58,7 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
     Layer.provide(TrainingTypeApiLive),
     Layer.provide(TranslationsApiLive),
     Layer.provide(VersionApiLive),
+    Layer.provide(WeeklyChallengeApiLive),
     Layer.provide(WeeklySummaryApiLive),
   );
 

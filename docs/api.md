@@ -35,6 +35,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Version](#24-version)
    - [Expenses](#25-expenses)
    - [Team Onboarding](#26-team-onboarding)
+   - [Weekly Challenge](#27-weekly-challenge)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -4665,6 +4666,207 @@ Completes the onboarding wizard. Creates the team inside a transaction alongside
 
 ---
 
+### 27. Weekly Challenge
+
+**Source:** `packages/domain/src/api/WeeklyChallengeApi.ts`
+
+Manages weekly challenges for a team. Captains create, edit, and delete challenges. Any team member can mark or unmark their own completion for the current week. The list endpoint returns the last 12 weeks of challenges together with a completion grid for all members.
+
+---
+
+#### `GET /teams/:teamId/weekly-challenges`
+
+Returns the weekly challenge list with per-member completion data.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Query Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `limit` | `integer` | No | Maximum number of challenges to return (defaults to 12) |
+
+**Response:** `200 OK` — `WeeklyChallengeListResponse`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `team.id` | `TeamId` | No | Team ID |
+| `team.timezone` | `string` | No | Team timezone (IANA name, e.g. `Europe/Prague`) — used by the UI to determine the current week |
+| `canCreate` | `boolean` | No | Whether the authenticated user may create challenges (`team:manage` permission) |
+| `currentMemberId` | `TeamMemberId \| null` | Yes | The authenticated user's team member ID; `null` when the user is not an active member |
+| `challenges` | `WeeklyChallengeView[]` | No | List of challenges, newest week first |
+
+Each `WeeklyChallengeView`:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `challenge.id` | `WeeklyChallengeId` (string) | No | Challenge ID |
+| `challenge.team_id` | `TeamId` | No | Team ID |
+| `challenge.week_start_date` | `string` (ISO 8601 date) | No | Monday date for the challenge's week |
+| `challenge.kind` | `"throwing" \| "sport"` | No | Challenge kind |
+| `challenge.title` | `string` | No | Challenge title (max 120 characters) |
+| `challenge.description` | `string \| null` | Yes | Optional description (max 2000 characters) |
+| `challenge.created_by` | `TeamMemberId` | No | Member who created the challenge |
+| `challenge.created_at` | `string` (ISO 8601) | No | Creation timestamp |
+| `challenge.updated_at` | `string` (ISO 8601) | No | Last update timestamp |
+| `completedMemberIds` | `TeamMemberId[]` | No | IDs of members who have marked this challenge complete for its week |
+| `isActive` | `boolean` | No | Whether the challenge's week is the current week (determined using the team's timezone) |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `WeeklyChallengeForbidden` | 403 | Not a member of this team |
+
+---
+
+#### `POST /teams/:teamId/weekly-challenges`
+
+Creates a new weekly challenge.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `team:manage`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `CreateWeeklyChallengeRequest`
+
+| Field | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `weekStart` | `string` (ISO 8601 date) | Yes | Must be a Monday; not more than one week in the past or more than one week in the future | Start date of the challenge's week |
+| `kind` | `"throwing" \| "sport"` | Yes | One of the enum values | Challenge kind |
+| `title` | `string` | Yes | 1–120 characters | Challenge title |
+| `description` | `string \| null` | Yes | Max 2000 characters; null for no description | Optional description |
+
+**Response:** `201 Created` — `WeeklyChallenge`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `WeeklyChallengeForbidden` | 403 | Missing `team:manage` permission |
+| `WeeklyChallengeAlreadyExistsForWeek` | 409 | A challenge already exists for the given `weekStart` |
+| `WeeklyChallengeWeekOutOfRange` | 422 | `weekStart` is more than one week in the past or future, or is not a Monday |
+
+---
+
+#### `PATCH /teams/:teamId/weekly-challenges/:challengeId`
+
+Updates the title and/or description of a weekly challenge.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `team:manage`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `challengeId` | `WeeklyChallengeId` (string) | Challenge ID |
+
+**Request Body:** `UpdateWeeklyChallengeRequest`
+
+| Field | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `title` | `string` | Yes | 1–120 characters | New challenge title |
+| `description` | `string \| null` | Yes | Max 2000 characters; null clears the description | New description |
+
+**Response:** `200 OK` — `WeeklyChallenge`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `WeeklyChallengeForbidden` | 403 | Missing `team:manage` permission |
+| `WeeklyChallengeNotFound` | 404 | Challenge does not exist in this team |
+
+---
+
+#### `DELETE /teams/:teamId/weekly-challenges/:challengeId`
+
+Deletes a weekly challenge and all its completion records.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `team:manage`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `challengeId` | `WeeklyChallengeId` (string) | Challenge ID |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `WeeklyChallengeForbidden` | 403 | Missing `team:manage` permission |
+| `WeeklyChallengeNotFound` | 404 | Challenge does not exist in this team |
+
+---
+
+#### `POST /teams/:teamId/weekly-challenges/:challengeId/complete`
+
+Marks the authenticated member's completion of a challenge for its week.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `challengeId` | `WeeklyChallengeId` (string) | Challenge ID |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `WeeklyChallengeForbidden` | 403 | Not a member of this team |
+| `WeeklyChallengeNotFound` | 404 | Challenge does not exist in this team |
+| `WeeklyChallengeNotActive` | 409 | The challenge's week is not the current week |
+
+---
+
+#### `DELETE /teams/:teamId/weekly-challenges/:challengeId/complete`
+
+Removes the authenticated member's completion mark for a challenge.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `challengeId` | `WeeklyChallengeId` (string) | Challenge ID |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `WeeklyChallengeForbidden` | 403 | Not a member of this team |
+| `WeeklyChallengeNotFound` | 404 | Challenge does not exist in this team |
+| `WeeklyChallengeNotActive` | 409 | The challenge's week is not the current week |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -4904,3 +5106,8 @@ The following table consolidates all error tags across all API groups.
 | `OnboardingTokenRevoked` | 410 | Team Onboarding | Token was manually revoked by a global admin |
 | `OnboardingWrongCaptain` | 403 | Team Onboarding | Authenticated user's Discord ID does not match the token's `boundDiscordId` |
 | `OnboardingGuildAlreadyClaimed` | 409 | Team Onboarding | Another team is already linked to the selected Discord guild |
+| `WeeklyChallengeForbidden` | 403 | Weekly Challenge | Not a member of the team, or missing `team:manage` permission for write operations |
+| `WeeklyChallengeNotFound` | 404 | Weekly Challenge | Challenge does not exist or does not belong to this team |
+| `WeeklyChallengeNotActive` | 409 | Weekly Challenge | Mark/unmark attempted on a challenge whose week is not the current week |
+| `WeeklyChallengeAlreadyExistsForWeek` | 409 | Weekly Challenge | A challenge already exists for the given `weekStart` |
+| `WeeklyChallengeWeekOutOfRange` | 422 | Weekly Challenge | `weekStart` is not a Monday, or is more than one week outside the allowed window |

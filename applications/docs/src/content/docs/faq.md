@@ -47,6 +47,22 @@ Common causes:
 
 Events are only posted to the groups they target, so you should only see events you're actually invited to. If you're seeing extra posts, check with your captain — you may be assigned to groups you shouldn't be.
 
+## Weekly challenges
+
+### How do I mark a challenge done?
+
+Open **Team → Weekly challenges** in the sidebar. Find your row in the grid (or your card on mobile) and click the tick cell in the current week's column. The cell updates to show **Splněno ✓**. Click it again to undo.
+
+You can only mark the **current week's** challenge. The current week is calculated using your team's configured timezone.
+
+### Can my captain mark the challenge done for me?
+
+No. Each member marks their own completion. If you marked it by mistake, click the cell again to unmark it.
+
+### Why can't I tick a past week's challenge?
+
+Completion is only allowed during the challenge's week. Past and future weeks are read-only in the grid.
+
 ## For captains
 
 ### Can I RSVP on behalf of a player?

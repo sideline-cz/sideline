@@ -5,7 +5,7 @@ import {
   WeeklyChallenge,
   WeeklyChallengeRpcGroup,
 } from '@sideline/domain';
-import { SqlErrors } from '@sideline/effect-lib';
+import { LogicError, SqlErrors } from '@sideline/effect-lib';
 import { DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import {
@@ -290,7 +290,7 @@ const make = Effect.gen(function* () {
               existing.push(c.member_id);
               byChallenge.set(c.challenge_id, existing);
             }
-            return rows.map((row) => {
+            const challenges = rows.map((row) => {
               // `week_start_date` is a Postgres `DATE` (UTC-midnight when
               // materialised as a JS Date). Compare its UTC calendar day to
               // the team's current Monday — using the team timezone here
@@ -303,6 +303,7 @@ const make = Effect.gen(function* () {
                 isActive,
               });
             });
+            return { team: { id: teamId, timezone: teamTz }, challenges };
           }),
         );
       }),
@@ -327,7 +328,9 @@ const make = Effect.gen(function* () {
       SqlErrors.catchUniqueViolation(() => new WeeklyChallengeAlreadyExistsForWeek()),
       catchSqlErrors,
       // INSERT ... RETURNING always returns exactly one row; treat NoSuchElement as a defect.
-      Effect.orDie,
+      Effect.catchTag('NoSuchElementError', () =>
+        LogicError.die('Weekly challenge insert returned no row'),
+      ),
       Effect.map(toWeeklyChallenge),
     );
 
@@ -340,16 +343,8 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
       Effect.flatMap(
         Option.match({
-          onNone: () =>
-            Effect.fail(new WeeklyChallengeNotFound()) as Effect.Effect<
-              WeeklyChallenge.WeeklyChallenge,
-              WeeklyChallengeRpcGroup.WeeklyChallengeNotFound
-            >,
-          onSome: (row) =>
-            Effect.succeed(toWeeklyChallenge(row)) as Effect.Effect<
-              WeeklyChallenge.WeeklyChallenge,
-              WeeklyChallengeRpcGroup.WeeklyChallengeNotFound
-            >,
+          onNone: () => Effect.fail(new WeeklyChallengeNotFound()),
+          onSome: (row) => Effect.succeed(toWeeklyChallenge(row)),
         }),
       ),
     );

@@ -1229,6 +1229,68 @@ Append-only audit log for the `expenses` table. Populated automatically by the `
 
 ---
 
+### 13. Weekly Challenges
+
+#### `weekly_challenges`
+
+A team-scoped challenge issued for a specific ISO week. Each challenge targets a single Monday–Sunday window and has a kind (`throwing` or `sport`), a title (1–120 characters), and an optional description (max 2000 characters). Uniqueness on `(team_id, week_start_date)` ensures at most one challenge per team per week.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `week_start_date` | DATE | NOT NULL | — |
+| `kind` | TEXT | NOT NULL, CHECK (`'throwing'`, `'sport'`) | — |
+| `title` | TEXT | NOT NULL, CHECK (length 1–120) | — |
+| `description` | TEXT | CHECK (length ≤ 2000) | — |
+| `created_by` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE RESTRICT | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(team_id, week_start_date)`
+
+**Indexes**: `idx_weekly_challenges_team_week` on `(team_id, week_start_date DESC)`
+
+**Notes**: Added in migration `1787000000_create_weekly_challenges`. `week_start_date` must be a Monday. `created_by` uses `ON DELETE RESTRICT` so the creating member record cannot be deleted while the challenge exists.
+
+---
+
+#### `weekly_challenge_completions`
+
+Records which team members have marked a challenge complete for its week. Composite primary key `(challenge_id, member_id)` prevents double-completion. Both FK columns cascade on delete, so removing a challenge or deactivating a member cleans up completion records automatically.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `challenge_id` | UUID | NOT NULL, PK (part 1), FK → `weekly_challenges(id)` ON DELETE CASCADE | — |
+| `member_id` | UUID | NOT NULL, PK (part 2), FK → `team_members(id)` ON DELETE CASCADE | — |
+
+**Notes**: Added in migration `1787000000_create_weekly_challenges`. No `created_at` column — the row's existence is the only fact recorded.
+
+---
+
+#### `weekly_challenge_sync_events`
+
+Outbox table consumed by the bot's Weekly Challenge Sync worker. One row is inserted (by the server) for each challenge at team-TZ 09:00 on the challenge's start Monday so the bot can post the weekly embed without requiring a bot-side cron. `attempts` and `last_error` support retry logic; `processed_at` and `delivered_at` track progress.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `challenge_id` | UUID | NOT NULL, FK → `weekly_challenges(id)` ON DELETE CASCADE | — |
+| `channel_id` | TEXT | NOT NULL | — |
+| `scheduled_for` | TIMESTAMPTZ | NOT NULL | — |
+| `attempts` | INT | NOT NULL | `0` |
+| `last_error` | TEXT | — | `NULL` |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `processed_at` | TIMESTAMPTZ | — | `NULL` |
+| `delivered_at` | TIMESTAMPTZ | — | `NULL` |
+
+**Indexes**: partial index `idx_weekly_challenge_sync_events_due` on `(team_id, scheduled_for) WHERE processed_at IS NULL` for efficient bot polling.
+
+**Notes**: Added in migration `1787000000_create_weekly_challenges`. The server enforces a 5-attempt cap before giving up. `processed_at` is set once the event is picked up; `delivered_at` is set only on successful Discord delivery.
+
+---
+
 ## Migration History
 
 All 78 migration files in `packages/migrations/src/before/` plus 1 after-migration.

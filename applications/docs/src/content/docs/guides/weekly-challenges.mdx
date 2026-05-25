@@ -1,0 +1,76 @@
+---
+title: Weekly challenges
+description: How captains create weekly challenges and how members mark them complete.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Weekly challenges give your team a shared goal for the week — a throwing drill, a fitness activity, or any other team-defined task. Captains set the challenge; members tick it off when they complete it.
+
+## Where to find the challenges page
+
+Go to **Team → Weekly challenges** in the left sidebar. The URL is `/teams/{teamId}/challenges`.
+
+The page shows a grid of the last 12 weeks. On desktop, weeks run left-to-right with the most recent week on the left and a sticky first column showing member names. On mobile, each challenge appears as a vertical card.
+
+## For captains — managing challenges
+
+### Create a challenge
+
+<Steps>
+
+1. Click **Nová týdenní výzva** (New weekly challenge) at the top of the challenges page.
+2. Choose the target week. You can set a challenge up to one week in the past or one week ahead of the current week.
+3. Choose the **Druh** (kind): **Házecí** (throwing) or **Sportovní** (sport).
+4. Enter a **title** (required, max 120 characters).
+5. Optionally add a **description** (max 2000 characters).
+6. Click **Save**.
+
+</Steps>
+
+Only one challenge can exist per team per week. If a challenge already exists for the chosen week, the form shows an error.
+
+### Edit a challenge
+
+Click **Upravit text** (Edit text) next to a challenge to update its title and description. The kind and week cannot be changed after creation.
+
+### Delete a challenge
+
+Click **Smazat výzvu** (Delete challenge) and confirm. Deleting a challenge removes all member completion records for that week as well.
+
+<Aside type="caution">
+Deletion is permanent. All completion data for the challenge is also removed.
+</Aside>
+
+### Discord announcements
+
+When a challenge is created, the bot schedules a Discord embed to be posted at **09:00** in your team's configured timezone on the Monday the challenge starts. The embed shows the challenge title, kind, and the week's date range.
+
+Configure the delivery channel in **Team settings → Discord integration → Weekly challenge channel**.
+
+## For members — marking challenges complete
+
+The current week's challenge column is highlighted. To mark your own completion:
+
+1. Find your row in the grid (or your card on mobile).
+2. Click the tick cell in the current week's column. Your cell updates to show **Splněno ✓**.
+
+To undo, click the completed cell again.
+
+<Aside>
+You can only mark or unmark the **current week's** challenge. Past and future weeks are read-only. The current week is calculated using your team's configured timezone.
+</Aside>
+
+## Frequently asked questions
+
+**Can a captain mark completion on behalf of a member?**
+
+No. Each member marks their own completion. Completion is personal — it reflects the member's own effort.
+
+**What happens to old challenges?**
+
+Completed challenges stay in the grid for the last 12 weeks. Older challenges roll off the visible window automatically. Deleting a challenge removes it immediately regardless of age.
+
+**Can there be more than one challenge per week?**
+
+No. At most one challenge per team per week is allowed.
