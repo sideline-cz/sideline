@@ -148,7 +148,9 @@ export * as TeamSettings from './models/TeamSettings.js';
 export * as TrainingType from './models/TrainingType.js';
 
 export * as User from './models/User.js';
+
 export * as WeeklyChallenge from './models/WeeklyChallenge.js';
+
 /**
  * Shared payload schema for the weekly_summary_sync_events queue.
  * The cron encodes this; the bot handler decodes it.
