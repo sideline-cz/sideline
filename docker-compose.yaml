@@ -68,6 +68,7 @@ services:
       APP_ORIGIN: ${SERVICE_FQDN_PROXY}
       OTEL_EXPORTER_OTLP_ENDPOINT: https://otelcollectorhttp-ccogw4cogg00wwowc0s4c0cs.majksa.net/
       OTEL_SERVICE_NAME: sideline-bot
+      WEB_URL: ${SERVICE_URL_PROXY}
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:9000/health" ]
       interval: 30s

@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-25 — Weekly challenge Discord announcements
+
+- Every Monday at 09:00 in your team's configured timezone, the bot now posts a **weekly challenge embed** to a Discord channel of your choice.
+- The embed shows the challenge title, its kind (**Házecí** for throwing / **Sportovní** for sport), and the week date range. When a description is provided it is shown as an additional field.
+- Throwing challenges use an emerald-green embed; sport challenges use amber.
+- When `WEB_URL` is configured on the bot, the embed title links directly to **Team → Weekly challenges** in the web app.
+- Configure the channel in **Team settings → Discord integration → Weekly challenge channel**. When no channel is set the bot skips the team — enabling the feature is opt-in.
+
 ## 2026-05-22 — Team onboarding flow
 
 - Global Sideline admins can now mint **one-time onboarding links** from **Administration → Team onboarding**. Each link is bound to a specific captain's Discord account and expires after a configurable window (24 hours, 3 days, or 7 days).

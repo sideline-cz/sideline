@@ -219,6 +219,7 @@ Build stages:
 | `APP_ORIGIN` | Yes | — | Origin hostname, used as OTEL resource attribute |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Yes | — | OTLP HTTP endpoint for telemetry export |
 | `OTEL_SERVICE_NAME` | Yes | — | Service name reported to the telemetry backend (e.g. `sideline-bot`) |
+| `WEB_URL` | No | — | Public base URL of the web frontend (e.g. `https://sideline.example.com`). When set, the bot includes a deep-link to `/teams/{teamId}/challenges` in weekly challenge embeds. In production this is set to `${SERVICE_URL_PROXY}` via `docker-compose.yaml`. |
 
 ### 3.3 Proxy (runtime environment, from `docker-compose.yaml`)
 

@@ -1340,5 +1340,13 @@
   "onboarding_validation_teamNameTooLong": "Název je příliš dlouhý (max 100 znaků).",
   "onboarding_validation_descriptionTooLong": "Popis je příliš dlouhý (max 140 znaků).",
   "onboarding_validation_guildRequired": "Vyberte prosím Discord server.",
-  "onboarding_validation_logoUrlInvalid": "Logo musí být platná veřejná https:// URL."
+  "onboarding_validation_logoUrlInvalid": "Logo musí být platná veřejná https:// URL.",
+
+  "weeklyChallenge_embed_title_throwing": "🥏 Nová házecí výzva: {title}",
+  "weeklyChallenge_embed_title_sport": "🏃 Nová sportovní výzva: {title}",
+  "weeklyChallenge_embed_field_kind": "Druh",
+  "weeklyChallenge_embed_field_week": "Týden",
+  "weeklyChallenge_embed_kind_throwing": "🥏 Házecí",
+  "weeklyChallenge_embed_kind_sport": "🏃 Sportovní",
+  "weeklyChallenge_embed_footer": "Sideline · Týdenní výzva"
 }

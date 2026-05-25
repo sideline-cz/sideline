@@ -4783,6 +4783,18 @@ Drains the `discord_role_provision_events` outbox. When an admin selects `auto_c
 
 `UnprocessedRoleProvisionEvent` fields: `id`, `team_id`, `guild_id`, `kind` (`"builtin_achievement" | "custom_achievement"`), `ref_id` (slug or UUID), `desired_name` (role name to create/find).
 
+#### WeeklyChallenge
+
+Drains the `weekly_challenge_sync_events` outbox. Each Monday at 09:00 local team time the server inserts one row per team (for the current week's challenge); the bot's Weekly Challenge Sync worker picks it up, builds an embed, posts it to the configured Discord channel, and marks the event delivered.
+
+| Method | Payload / Returns | Description |
+|---|---|---|
+| `WeeklyChallenge/GetUnprocessedWeeklyChallengeEvents` | — → `UnprocessedWeeklyChallengeEvent[]` | Polls for outbox events that have not yet been delivered (no client-side limit) |
+| `WeeklyChallenge/MarkWeeklyChallengeProcessed` | `eventId`, `deliveredAt` | Marks an event as successfully delivered; records the delivery timestamp |
+| `WeeklyChallenge/MarkWeeklyChallengeFailed` | `eventId`, `error` | Records a delivery failure and increments the attempt counter; server enforces a 5-attempt cap |
+
+`UnprocessedWeeklyChallengeEvent` fields: `id` (`UUIDString`), `teamId` (`TeamId`), `challengeId` (`WeeklyChallengeId`), `channelId` (`Discord.Snowflake`), `scheduledFor` (`DateTime.Utc`), `attempts` (`Int`), `title` (`WeeklyChallengeTitle`), `kind` (`"throwing" | "sport"`), `description` (`Option<WeeklyChallengeDescription>` — `OptionFromNullOr`, absent when `null`), `weekStartDate` (`string`, `YYYY-MM-DD`), `weekEndDate` (`string`, `YYYY-MM-DD`).
+
 #### WeeklySummary
 
 Drains the `weekly_summary_sync_events` outbox. Each Sunday at 20:00 local team time the server cron inserts one row per team; the bot's Weekly Summary worker picks it up, builds the embed, posts it to the configured Discord channel, and marks the event delivered.
