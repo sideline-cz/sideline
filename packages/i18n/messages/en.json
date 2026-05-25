@@ -1340,5 +1340,13 @@
   "onboarding_validation_teamNameTooLong": "Team name is too long (max 100 characters).",
   "onboarding_validation_descriptionTooLong": "Description is too long (max 140 characters).",
   "onboarding_validation_guildRequired": "Please select a Discord server.",
-  "onboarding_validation_logoUrlInvalid": "Logo must be a valid public https:// URL."
+  "onboarding_validation_logoUrlInvalid": "Logo must be a valid public https:// URL.",
+
+  "weeklyChallenge_embed_title_throwing": "🥏 New throwing challenge: {title}",
+  "weeklyChallenge_embed_title_sport": "🏃 New sport challenge: {title}",
+  "weeklyChallenge_embed_field_kind": "Kind",
+  "weeklyChallenge_embed_field_week": "Week",
+  "weeklyChallenge_embed_kind_throwing": "🥏 Throwing",
+  "weeklyChallenge_embed_kind_sport": "🏃 Sport",
+  "weeklyChallenge_embed_footer": "Sideline · Weekly challenge"
 }

@@ -55,6 +55,40 @@ src/
 
 Follows the **AppLive + run.ts** pattern.
 
+### Folder Naming Conventions
+
+| Path | Holds | Rule |
+|------|-------|------|
+| `src/rcp/<feature>/` | Sync-event processors (`ProcessorService.ts`, `handle*.ts`). | Folder is named `rcp`, NOT `rpc` — historical typo carried through every feature. Do NOT rename, split, or alias. New sync workers go under `src/rcp/<feature>/`. |
+| `src/rest/<feature>/` | Discord-REST-calling helpers and embed builders (`build<Name>Embed.ts`, send/edit helpers). | Embed builders MUST live here, NEVER under `src/rcp/`. The processor in `src/rcp/<feature>/` imports the embed builder from `src/rest/<feature>/`, never the reverse. |
+| `test/rcp/<feature>/` | Tests for the matching processor. | Mirrors `src/rcp/<feature>/` 1:1. |
+
+## Discord REST Retry Pattern
+
+Every bot handler that calls `rest.<method>(...)` and wraps it in `Effect.retry(retryPolicy)` MUST defer the REST call with `Effect.suspend`. In Effect v4 beta, `rest.createMessage(channelId, body)` evaluates eagerly and returns a fixed `Effect` value — `Effect.retry` re-runs that same frozen description instead of re-invoking the function. The result is that the API call fires exactly once even though the retry policy schedules N attempts.
+
+### Canonical Shape
+
+```ts
+Effect.suspend(() => rest.createMessage(channelId, { embeds })).pipe(
+  Effect.catchTag('ErrorResponse', (err) =>
+    err.response.status === 404
+      ? Effect.logWarning(`Channel ${channelId} not found (404), skipping`)
+      : Effect.fail(err),
+  ),
+  Effect.retry(retryPolicy),
+);
+```
+
+### Rules
+
+1. **Always wrap `rest.<method>(...)` in `Effect.suspend(() => ...)`** when the call sits inside `Effect.retry(...)`. The single exception is `rest.addGuildMemberRole` and other REST methods that are themselves thunked by dfx — when unsure, default to `Effect.suspend`; the cost of an extra suspension is negligible.
+2. **`Effect.catchTag(...)` MUST come BEFORE `Effect.retry(...)` in the pipe.** A permanent error (`404`, `50001`, `50013`) should short-circuit the retry; with the reverse order, retry burns its full attempt budget (4 attempts) before `catchTag` ever sees the failure. Reference: the canonical layout in `src/rcp/weeklyChallenge/handleWeeklyChallengeReady.ts` and `src/rcp/achievement/handleAchievementEarned.ts`.
+3. **Latent-bug references** (do not copy these — they pre-date this rule):
+   - `src/rcp/weeklySummary/handleWeeklySummaryReady.ts` has `retry` BEFORE `catchTag` AND lacks `Effect.suspend`. When next touched, hoist `catchTag` above `retry` and wrap the call in `Effect.suspend(() => ...)`.
+   - `src/rcp/achievement/handleAchievementEarned.ts` has the correct catchTag/retry order but lacks `Effect.suspend`. When next touched, add the suspend wrapper.
+4. **Test the retry count.** A handler test that exercises a non-404 `ErrorResponse` MUST assert `rest.<method>` was called exactly `1 + Schedule.recurs(N)` times (4 for the standard `retryPolicy`). Without this assertion, the suspend bug regresses silently. Reference: the `403/50001` and `403/50013` tests in `applications/bot/test/rcp/weeklyChallenge/ProcessorService.test.ts` assert `createMessage.length === 4`.
+
 ## Gateway Event Handlers (`src/events/index.ts`)
 
 Gateway event handlers react to Discord gateway dispatch events (e.g. `GuildCreate`, `ChannelDelete`, `GuildMemberAdd`). All handlers are defined in `src/events/index.ts` and registered via `gateway.handleDispatch`.
@@ -548,6 +582,35 @@ Used by `/event list` and the overview show button (`overview-show`). Instead of
 #### Coach claim / release buttons
 
 `ClaimButton` and `UnclaimButton` (`src/interactions/claim.ts`) are matched via `Ix.idStartsWith('claim:')` and `Ix.idStartsWith('unclaim:')`. The `custom_id` format is `claim:{team_id}:{event_id}` and `unclaim:{team_id}:{event_id}` — parsed positionally by `data.custom_id.split(':')`. Both handlers respond with `DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE` (ephemeral), fork the RPC call (`Event/ClaimTraining` / `Event/UnclaimTraining`) in the background via `Effect.forkDetach`, and edit the original webhook message with the localized result. RPC error tags are mapped to localized strings via `Effect.catchTag`: `ClaimAlreadyClaimed` → `bot_claim_already_claimed_by`, `ClaimNotOwnerGroupMember` → `bot_claim_not_owner`, `ClaimEventInactive` / `ClaimEventNotFound` / `ClaimNotTraining` → `bot_claim_event_cancelled`, `ClaimNotClaimer` → `bot_claim_release_not_claimer`.
+
+## Environment Variables (`src/env.ts`)
+
+The bot uses `@t3-oss/env-core` + Effect `Schema.toStandardSchemaV1` for env decoding. Every var must declare a Schema (no raw `process.env.X` access in production code — always import `env` from `~/env.js`).
+
+### Optional Env Var Pattern
+
+For an optional string env var that should decode to `Option<string>` (absent or empty → `Option.none()`), use `Schema.OptionFromNullishOr(Schema.NonEmptyString)`. This is the canonical shape — `WEB_URL` and `LOG_LEVEL` both follow it:
+
+```ts
+WEB_URL: Schema.toStandardSchemaV1(Schema.OptionFromNullishOr(Schema.NonEmptyString)),
+LOG_LEVEL: Schema.toStandardSchemaV1(Schema.OptionFromNullishOr(Schemas.LogLevelFromString)),
+```
+
+Rules:
+
+1. **Always decode to `Option<T>` for optional env vars.** Never use `string | undefined` — downstream handlers must `Option.match` explicitly, never `if (env.X !== undefined)`.
+2. **Use `Schemas.Optional(() => default)` from `@sideline/effect-lib` only when a fallback DEFAULT exists** (e.g. `HEALTH_PORT` defaults to `9000`, `RPC_PREFIX` defaults to `''`). Never combine `Optional(() => default)` with `OptionFromNullishOr` — the two are mutually exclusive shapes.
+3. **`emptyStringAsUndefined: true` is set on `createEnv`.** An env var set to `""` decodes to `Option.none()`, not `Option.some("")`. Producer-side code (Docker compose, GitHub Actions) may rely on this — never flip the flag.
+
+### Mocking `~/env.js` in Tests
+
+`@t3-oss/env-core` runs its decode once at module load and freezes the result. `vi.stubEnv('WEB_URL', '...')` AFTER the test file has imported anything that transitively imports `~/env.js` has no effect on what the production code reads. To toggle env values per test:
+
+1. Declare a mutable ref at module top with the desired shape (e.g. `let mockWebUrl: Option.Option<string> = Option.none();`).
+2. Call `vi.mock('~/env.js', factory)` BEFORE any non-type production imports. `vi.mock` is hoisted by Vitest to the top of the file, so the factory runs before `~/env.js` is evaluated. Inside the factory, return `{ env: new Proxy(...) }` whose getter reads the mutable ref.
+3. In `afterEach`, reset the ref to its default.
+
+Canonical example: `applications/bot/test/rcp/weeklyChallenge/ProcessorService.test.ts`. Do not reach for `vi.stubEnv` or `process.env.X = '...'` for bot env vars — both are no-ops against the frozen `env` object.
 
 ## Test File Imports — Static Only
 

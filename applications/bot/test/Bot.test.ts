@@ -13,6 +13,7 @@ import {
   OnboardingSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
+  WeeklyChallengeSyncService,
   WeeklySummarySyncService,
 } from '~/rcp/index.js';
 import { InviteCache } from '~/services/InviteCache.js';
@@ -91,6 +92,10 @@ const MockRoleProvisionSyncServiceLayer = Layer.succeed(RoleProvisionSyncService
   processTick: Effect.void,
 } as never);
 
+const MockWeeklyChallengeSyncServiceLayer = Layer.succeed(WeeklyChallengeSyncService, {
+  processTick: Effect.void,
+} as never);
+
 const MockWeeklySummarySyncServiceLayer = Layer.succeed(WeeklySummarySyncService, {
   processTick: Effect.void,
 } as never);
@@ -136,6 +141,7 @@ describe('Bot', () => {
       MockOnboardingSyncServiceLayer,
       MockAchievementSyncServiceLayer,
       MockRoleProvisionSyncServiceLayer,
+      MockWeeklyChallengeSyncServiceLayer,
       MockWeeklySummarySyncServiceLayer,
       MockFinanceSyncServiceLayer,
       MockOnboardingRoleCacheLayer,

@@ -37,6 +37,18 @@ This package owns the **translation message catalogue** for the monorepo. The ac
 
 `MessageFn` signature: `(inputs?: Record<string, unknown>, options?: { locale?: 'en' | 'cs' }) => string`.
 
+## Translation Value Conventions
+
+### Category / Kind Labels Bake In Their Emoji
+
+Translation keys that label a discriminator (kind, category, status) and resolve to a short user-visible noun may bake the emoji into the value itself. Reference: `weeklyChallenge_embed_kind_throwing` → `"🥏 Házecí"` / `"🥏 Throwing"`, `weeklyChallenge_embed_kind_sport` → `"🏃 Sportovní"` / `"🏃 Sport"`. The emoji is part of the localized value, not a separate constant.
+
+Rules:
+
+1. **Bot embed builders and web components MUST NOT prefix another emoji** when consuming such keys. A `KIND_EMOJI: Record<Kind, string>` lookup table at the call site doubles the emoji and is forbidden — read the key as-is and render it.
+2. **When adding a new discriminator-label key**, decide once at key-creation time whether the emoji belongs in the value (preferred for short labels) or stays at the call site (preferred when the same label is reused in plain-text contexts without emoji). Mixing both for the same key family is forbidden — every `<feature>_embed_kind_*` sibling must agree.
+3. **English and Czech values must agree on the emoji.** If `cs.json` puts `🥏` at the start, `en.json` must put the same `🥏` at the start. Drift breaks visual parity across locales.
+
 ### Rules When Modifying `pack.js`
 
 1. **`scripts/pack.js` runs in the same `build` script as Paraglide** (`paraglide-js compile ... && node scripts/pack.js`). Never split them — `registry.js` depends on `messages.js` already existing in `dist/`.

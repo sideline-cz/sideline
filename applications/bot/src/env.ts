@@ -26,6 +26,7 @@ export const env = createEnv({
     ),
     SERVER_URL: Schema.NonEmptyString.pipe(Schema.toStandardSchemaV1),
     LOG_LEVEL: Schema.toStandardSchemaV1(Schema.OptionFromNullishOr(Schemas.LogLevelFromString)),
+    WEB_URL: Schema.toStandardSchemaV1(Schema.OptionFromNullishOr(Schema.NonEmptyString)),
     APP_ENV: Schema.NonEmptyString.pipe(Schema.toStandardSchemaV1),
     APP_ORIGIN: Schema.NonEmptyString.pipe(Schema.toStandardSchemaV1),
     OTEL_EXPORTER_OTLP_ENDPOINT: Schema.NonEmptyString.pipe(Schema.toStandardSchemaV1),

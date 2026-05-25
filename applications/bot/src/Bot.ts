@@ -17,6 +17,7 @@ import {
   OnboardingSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
+  WeeklyChallengeSyncService,
   WeeklySummarySyncService,
 } from './index.js';
 
@@ -54,6 +55,7 @@ export const program = Effect.Do.pipe(
   Effect.bind('onboarding', () => OnboardingSyncService.asEffect()),
   Effect.bind('achievements', () => AchievementSyncService.asEffect()),
   Effect.bind('roleProvision', () => RoleProvisionSyncService.asEffect()),
+  Effect.bind('weeklyChallenge', () => WeeklyChallengeSyncService.asEffect()),
   Effect.bind('weeklySummary', () => WeeklySummarySyncService.asEffect()),
   Effect.bind('finance', () => FinanceSyncService.asEffect()),
   Effect.tap(() => Effect.logInfo('Bot connected to Discord')),
@@ -68,6 +70,7 @@ export const program = Effect.Do.pipe(
       onboarding,
       achievements,
       roleProvision,
+      weeklyChallenge,
       weeklySummary,
       finance,
     }) =>
@@ -83,6 +86,7 @@ export const program = Effect.Do.pipe(
           pollLoop(onboarding.processTick),
           pollLoop(achievements.processTick),
           pollLoop(roleProvision.processTick),
+          pollLoop(weeklyChallenge.processTick),
           pollLoop(weeklySummary.processTick),
           pollLoop(finance.processTick),
           recoverDeletedMessages,
@@ -108,5 +112,6 @@ export const program = Effect.Do.pipe(
   | OnboardingSyncService
   | AchievementSyncService
   | RoleProvisionSyncService
+  | WeeklyChallengeSyncService
   | WeeklySummarySyncService
 >;

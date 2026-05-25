@@ -668,9 +668,9 @@ Calls `Guild/UpsertChannel` RPC to update the channel's name and metadata in the
 
 ## RPC Sync Workers
 
-Seven background worker loops run continuously inside the bot process. Six of them (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those six loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`) and fetch up to **50 events per poll** (`POLL_BATCH_SIZE = 50`). The seventh (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation.
+Eight background worker loops run continuously inside the bot process. Seven of them (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync, Weekly Challenge Sync) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those seven loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`). Most outbox workers fetch up to **50 events per poll** (`POLL_BATCH_SIZE = 50`); the Weekly Challenge worker has no client-side cap (the server-side query is currently unbounded, acceptable because at most one challenge per team per week bounds the backlog). The eighth worker (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation.
 
-The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, `event_sync_events`, `achievement_sync_events`, `discord_role_provision_events`, and `payment_reminder_sync_events`; the bot drains those queues.
+The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, `event_sync_events`, `achievement_sync_events`, `discord_role_provision_events`, `payment_reminder_sync_events`, and `weekly_challenge_sync_events`; the bot drains those queues.
 
 > **Note on directory name:** The source files for these workers live under `applications/bot/src/rcp/`. This is a typo in the codebase; the intended name is `rpc`. The import paths and class names (`RoleSyncService`, `ChannelSyncService`, `EventSyncService`) all reflect the intended `rpc` meaning.
 
@@ -876,6 +876,48 @@ Each embed includes four fields: **Fee** (fee name), **Amount** (total charge), 
 
 ---
 
+### Weekly Challenge Sync Worker
+
+**Service class:** `ProcessorService` (`applications/bot/src/rcp/weeklyChallenge/ProcessorService.ts`)
+
+**Polling RPC:** `WeeklyChallenge/GetUnprocessedWeeklyChallengeEvents`
+
+**Polling interval:** 5 seconds (`pollLoop` in `Bot.ts`).
+
+The server's weekly challenge cron inserts rows into the `weekly_challenge_sync_events` outbox table each Monday at 09:00 local team time (one row per team, for the current week's challenge). The Weekly Challenge Sync worker drains this outbox and posts an embed to the configured Discord channel.
+
+**Events processed:**
+
+| Event type | Handler file | Discord action |
+|-----------|-------------|----------------|
+| `weekly_challenge_ready` | `handleWeeklyChallengeReady.ts` | Builds a rich embed via `buildWeeklyChallengeEmbed` and posts it to the event's `channelId` via `rest.createMessage`. If the channel returns HTTP 404, the event is marked processed (not failed) and a warning is logged — a deleted channel cannot be retried into existence. Other Discord errors are retried via `retryPolicy`; the server-side 5-attempt cap on the outbox row terminates permanently failing rows. |
+
+**Embed layout:**
+
+| Element | Detail |
+|---------|--------|
+| Title | Kind-prefixed: `🥏 New throwing challenge: {title}` or `🏃 New sport challenge: {title}` |
+| Color | Emerald (`#10b981`) for `throwing`; amber (`#f59e0b`) for `sport` |
+| Fields | Inline `Druh` (kind label: `🥏 Házecí` or `🏃 Sportovní`) and `Týden` (`YYYY-MM-DD – YYYY-MM-DD`) |
+| Description field | Optional; shown only when `description` is present |
+| Footer | `Sideline · Týdenní výzva` |
+| URL | Deep-link to `/teams/{teamId}/challenges` when `WEB_URL` is set in the bot's environment |
+
+**Locale note:** the embed is rendered in Czech (`cs`) for the MVP. Per-team locale support (via `team.onboarding_locale`) is planned for a later release.
+
+**Lifecycle RPCs:**
+- `WeeklyChallenge/MarkWeeklyChallengeProcessed` — called with `{ eventId, deliveredAt }` after the embed is posted successfully.
+- `WeeklyChallenge/MarkWeeklyChallengeFailed` — called with `{ eventId, error }` on any processing error; the server's 5-attempt cap prevents infinite retries.
+
+**Concurrency:** events are processed sequentially (`concurrency: 1`). The expected backlog is at most one row per team per week, so the cap is not a bottleneck.
+
+**Source files:**
+- `applications/bot/src/rcp/weeklyChallenge/ProcessorService.ts`
+- `applications/bot/src/rcp/weeklyChallenge/handleWeeklyChallengeReady.ts`
+- `applications/bot/src/rest/weeklyChallenge/buildWeeklyChallengeEmbed.ts`
+
+---
+
 ## Startup Tasks
 
 In addition to the poll loops, the bot runs one-off tasks at startup (after the gateway connection is established). These tasks are composed alongside the poll loops with `concurrency: 'unbounded'` in `Bot.ts`.
@@ -1009,6 +1051,14 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `RoleProvision/MarkProcessed` | Acknowledge a successful Discord role provision |
 | `RoleProvision/MarkFailed` | Record a provision failure (sets `processed_at`; event is not retried) |
 
+### WeeklyChallenge group (`WeeklyChallenge/`)
+
+| Method | Purpose |
+|--------|---------|
+| `WeeklyChallenge/GetUnprocessedWeeklyChallengeEvents` | Poll for pending `weekly_challenge_sync_events` outbox rows (no client-side limit) |
+| `WeeklyChallenge/MarkWeeklyChallengeProcessed` | Acknowledge successful processing; payload: `{ eventId, deliveredAt }` |
+| `WeeklyChallenge/MarkWeeklyChallengeFailed` | Record a processing failure and increment the attempt counter; payload: `{ eventId, error }` |
+
 ### Finance group (`Finance/`)
 
 | Method | Payload / Returns | Description |
@@ -1044,5 +1094,6 @@ For the canonical reference including all services, see `docs/deployment.md` (cr
 | `DISCORD_GATEWAY_INTENTS` | No | `Guilds \| GuildMembers` (513) | Bitmask of gateway intents to request |
 | `RPC_PREFIX` | No | `""` | URL path prefix prepended to all RPC calls |
 | `LOG_LEVEL` | No | — | Minimum log level (`DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`) |
+| `WEB_URL` | No | — | Public base URL of the web frontend (e.g. `https://sideline.example.com`). When set, weekly challenge embeds include a deep-link button to `/teams/{teamId}/challenges`. |
 
 Source: `applications/bot/src/env.ts`
