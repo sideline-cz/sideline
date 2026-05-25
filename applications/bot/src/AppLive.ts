@@ -12,6 +12,7 @@ import {
   OnboardingSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
+  TeamChallengeSyncService,
   WeeklyChallengeSyncService,
   WeeklySummarySyncService,
 } from '~/rcp/index.js';
@@ -29,6 +30,7 @@ const SyncLive = Layer.mergeAll(
   GuildJoinSyncService.Default,
   InviteGeneratorService.Default,
   OnboardingSyncService.Default,
+  TeamChallengeSyncService.Default,
   WeeklyChallengeSyncService.Default,
   WeeklySummarySyncService.Default,
 ).pipe(

@@ -7,6 +7,7 @@ import { InviteGeneratorService } from './inviteGenerator/index.js';
 import { OnboardingSyncService } from './onboarding/index.js';
 import { RoleSyncService } from './role/index.js';
 import { RoleProvisionSyncService } from './roleProvision/index.js';
+import { TeamChallengeSyncService } from './teamChallenge/index.js';
 import { WeeklyChallengeSyncService } from './weeklyChallenge/index.js';
 import { WeeklySummarySyncService } from './weeklySummary/index.js';
 
@@ -20,6 +21,7 @@ export {
   OnboardingSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
+  TeamChallengeSyncService,
   WeeklyChallengeSyncService,
   WeeklySummarySyncService,
 };

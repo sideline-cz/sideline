@@ -13,6 +13,7 @@ import {
   OnboardingSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
+  TeamChallengeSyncService,
   WeeklyChallengeSyncService,
   WeeklySummarySyncService,
 } from '~/rcp/index.js';
@@ -92,6 +93,10 @@ const MockRoleProvisionSyncServiceLayer = Layer.succeed(RoleProvisionSyncService
   processTick: Effect.void,
 } as never);
 
+const MockTeamChallengeSyncServiceLayer = Layer.succeed(TeamChallengeSyncService, {
+  processTick: Effect.void,
+} as never);
+
 const MockWeeklyChallengeSyncServiceLayer = Layer.succeed(WeeklyChallengeSyncService, {
   processTick: Effect.void,
 } as never);
@@ -141,6 +146,7 @@ describe('Bot', () => {
       MockOnboardingSyncServiceLayer,
       MockAchievementSyncServiceLayer,
       MockRoleProvisionSyncServiceLayer,
+      MockTeamChallengeSyncServiceLayer,
       MockWeeklyChallengeSyncServiceLayer,
       MockWeeklySummarySyncServiceLayer,
       MockFinanceSyncServiceLayer,

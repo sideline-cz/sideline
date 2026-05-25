@@ -67,6 +67,7 @@ import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from './mocks/onboardingMocks.js';
+import { MockTeamChallengeRepositoryLayer } from './mocks/teamChallengeMocks.js';
 import { MockTranslationsLayers } from './mocks/translationMocks.js';
 import { MockWeeklyChallengeRepositoryLayer } from './mocks/weeklyChallengeMocks.js';
 
@@ -960,6 +961,7 @@ const buildTestLayer = (
     .pipe(Layer.provide(MockTranslationsLayers))
     .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
     .pipe(Layer.provide(MockWeeklyChallengeRepositoryLayer))
+    .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
     .pipe(Layer.provide(BotInfoStore.Default));
 
 const makeSettingsLayer = (findByTeamId: () => Effect.Effect<Option.Option<unknown>>) =>
@@ -1186,6 +1188,7 @@ describe('B2 — createGroup emits channel_created regardless of create_discord_
       .pipe(Layer.provide(MockTranslationsLayers))
       .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
       .pipe(Layer.provide(MockWeeklyChallengeRepositoryLayer))
+      .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
       .pipe(Layer.provide(BotInfoStore.Default));
 
     const _app = HttpRouter.toWebHandler(customLayer);

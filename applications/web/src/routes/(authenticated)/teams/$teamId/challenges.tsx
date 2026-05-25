@@ -1,4 +1,4 @@
-import { type Roster, Team, WeeklyChallenge, type WeeklyChallengeApi } from '@sideline/domain';
+import { type Roster, Team, TeamChallenge, type TeamChallengeApi } from '@sideline/domain';
 import { createFileRoute, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import { WeeklyChallengesPage } from '~/components/pages/WeeklyChallengesPage';
@@ -13,7 +13,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/challenges'
     return ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         Effect.all({
-          challengeList: api.weeklyChallenge.listChallenges({
+          challengeList: api.teamChallenge.listChallenges({
             params: { teamId },
             query: { limit: Option.none() },
           }),
@@ -37,20 +37,21 @@ function ChallengesRoute() {
   const run = useRun();
   const router = useRouter();
 
-  const challengeList: WeeklyChallengeApi.WeeklyChallengeListResponse = data.challengeList;
+  const challengeList: TeamChallengeApi.TeamChallengeListResponse = data.challengeList;
   const members: ReadonlyArray<Roster.RosterPlayer> = data.members;
 
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
 
-  // Map WeeklyChallengeView[] to page-level plain objects. Branded ids
-  // (TeamId, TeamMemberId, WeeklyChallengeId, WeeklyChallengeTitle) are
+  // Map TeamChallengeView[] to page-level plain objects. Branded ids
+  // (TeamId, TeamMemberId, TeamChallengeId, TeamChallengeTitle) are
   // assignable to `string` without explicit casts.
   const challenges = challengeList.challenges.map((view) => ({
     challenge: {
       id: view.challenge.id,
       teamId: view.challenge.team_id,
-      // week_start_date is a Date — convert to ISO string for the page
-      weekStartDate: view.challenge.week_start_date.toISOString(),
+      // start_date / end_date are Date objects — convert to ISO string for the page
+      startDate: view.challenge.start_date.toISOString(),
+      endDate: view.challenge.end_date.toISOString(),
       kind: view.challenge.kind,
       title: view.challenge.title,
       description: Option.getOrNull(view.challenge.description),
@@ -69,19 +70,18 @@ function ChallengesRoute() {
   const currentMemberId: string | null = Option.getOrNull(challengeList.currentMemberId);
 
   const handleMarkComplete = async (challengeId: string) => {
-    const challengeIdBranded = Schema.decodeSync(WeeklyChallenge.WeeklyChallengeId)(challengeId);
+    const challengeIdBranded = Schema.decodeSync(TeamChallenge.TeamChallengeId)(challengeId);
     await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
-        api.weeklyChallenge.markCompleted({
+        api.teamChallenge.markCompleted({
           params: { teamId: teamIdBranded, challengeId: challengeIdBranded },
         }),
       ),
       Effect.catchTags({
-        WeeklyChallengeNotActive: () =>
+        TeamChallengeNotActive: () =>
           Effect.fail(ClientError.make(tr('challenges_error_notActive'))),
-        WeeklyChallengeNotFound: () =>
-          Effect.fail(ClientError.make(tr('challenges_error_notFound'))),
-        WeeklyChallengeForbidden: () =>
+        TeamChallengeNotFound: () => Effect.fail(ClientError.make(tr('challenges_error_notFound'))),
+        TeamChallengeForbidden: () =>
           Effect.fail(ClientError.make(tr('challenges_error_forbidden'))),
       }),
       // Catch remaining network/HTTP errors with a generic message
@@ -94,19 +94,18 @@ function ChallengesRoute() {
   };
 
   const handleUnmarkComplete = async (challengeId: string) => {
-    const challengeIdBranded = Schema.decodeSync(WeeklyChallenge.WeeklyChallengeId)(challengeId);
+    const challengeIdBranded = Schema.decodeSync(TeamChallenge.TeamChallengeId)(challengeId);
     await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
-        api.weeklyChallenge.unmarkCompleted({
+        api.teamChallenge.unmarkCompleted({
           params: { teamId: teamIdBranded, challengeId: challengeIdBranded },
         }),
       ),
       Effect.catchTags({
-        WeeklyChallengeNotActive: () =>
+        TeamChallengeNotActive: () =>
           Effect.fail(ClientError.make(tr('challenges_error_notActive'))),
-        WeeklyChallengeNotFound: () =>
-          Effect.fail(ClientError.make(tr('challenges_error_notFound'))),
-        WeeklyChallengeForbidden: () =>
+        TeamChallengeNotFound: () => Effect.fail(ClientError.make(tr('challenges_error_notFound'))),
+        TeamChallengeForbidden: () =>
           Effect.fail(ClientError.make(tr('challenges_error_forbidden'))),
       }),
       // Catch remaining network/HTTP errors with a generic message
@@ -119,12 +118,12 @@ function ChallengesRoute() {
   };
 
   const handleCreateChallenge = async (formData: {
-    weekStart: Date;
-    kind: WeeklyChallenge.WeeklyChallengeKind;
+    startDate: Date;
+    endDate: Date;
+    kind: TeamChallenge.TeamChallengeKind;
     title: string;
     description: string | null;
   }): Promise<{ _tag?: string } | undefined> => {
-    // Per plan §9 risk 5: weekStart is already UTC-midnight from MondayPicker
     // Inline-displayable errors (AlreadyExists, OutOfRange) are returned as tagged objects
     // so NewChallengeDialog can show them inline without a toast.
     // Truly generic errors (Forbidden) go through run() to show a toast.
@@ -132,10 +131,11 @@ function ChallengesRoute() {
 
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
-        api.weeklyChallenge.createChallenge({
+        api.teamChallenge.createChallenge({
           params: { teamId: teamIdBranded },
           payload: {
-            weekStart: formData.weekStart,
+            startDate: formData.startDate,
+            endDate: formData.endDate,
             kind: formData.kind,
             title: formData.title,
             description: formData.description ? Option.some(formData.description) : Option.none(),
@@ -144,16 +144,16 @@ function ChallengesRoute() {
       ),
       Effect.catchTags({
         // Inline errors: set tag for dialog, use SilentClientError to suppress toast
-        WeeklyChallengeAlreadyExistsForWeek: (e) => {
+        TeamChallengeAlreadyExistsForWeek: (e) => {
           inlineError = { _tag: e._tag };
           return Effect.fail(new SilentClientError({ message: e._tag }));
         },
-        WeeklyChallengeWeekOutOfRange: (e) => {
+        TeamChallengeStartDateOutOfRange: (e) => {
           inlineError = { _tag: e._tag };
           return Effect.fail(new SilentClientError({ message: e._tag }));
         },
         // Generic error: toast via run()
-        WeeklyChallengeForbidden: () =>
+        TeamChallengeForbidden: () =>
           Effect.fail(new ClientError({ message: tr('challenges_error_forbidden') })),
       }),
       // Catch remaining network/HTTP errors with a generic message
@@ -173,17 +173,16 @@ function ChallengesRoute() {
   };
 
   const handleDeleteChallenge = async (challengeId: string) => {
-    const challengeIdBranded = Schema.decodeSync(WeeklyChallenge.WeeklyChallengeId)(challengeId);
+    const challengeIdBranded = Schema.decodeSync(TeamChallenge.TeamChallengeId)(challengeId);
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
-        api.weeklyChallenge.deleteChallenge({
+        api.teamChallenge.deleteChallenge({
           params: { teamId: teamIdBranded, challengeId: challengeIdBranded },
         }),
       ),
       Effect.catchTags({
-        WeeklyChallengeNotFound: () =>
-          Effect.fail(ClientError.make(tr('challenges_error_notFound'))),
-        WeeklyChallengeForbidden: () =>
+        TeamChallengeNotFound: () => Effect.fail(ClientError.make(tr('challenges_error_notFound'))),
+        TeamChallengeForbidden: () =>
           Effect.fail(ClientError.make(tr('challenges_error_forbidden'))),
       }),
       // Catch remaining network/HTTP errors with a generic message
@@ -201,10 +200,10 @@ function ChallengesRoute() {
     challengeId: string,
     formData: { title: string; description: string | null },
   ) => {
-    const challengeIdBranded = Schema.decodeSync(WeeklyChallenge.WeeklyChallengeId)(challengeId);
+    const challengeIdBranded = Schema.decodeSync(TeamChallenge.TeamChallengeId)(challengeId);
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
-        api.weeklyChallenge.updateChallenge({
+        api.teamChallenge.updateChallenge({
           params: { teamId: teamIdBranded, challengeId: challengeIdBranded },
           payload: {
             title: formData.title,
@@ -213,9 +212,8 @@ function ChallengesRoute() {
         }),
       ),
       Effect.catchTags({
-        WeeklyChallengeNotFound: () =>
-          Effect.fail(ClientError.make(tr('challenges_error_notFound'))),
-        WeeklyChallengeForbidden: () =>
+        TeamChallengeNotFound: () => Effect.fail(ClientError.make(tr('challenges_error_notFound'))),
+        TeamChallengeForbidden: () =>
           Effect.fail(ClientError.make(tr('challenges_error_forbidden'))),
       }),
       // Catch remaining network/HTTP errors with a generic message

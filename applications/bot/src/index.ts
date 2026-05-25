@@ -13,6 +13,7 @@ export {
   OnboardingSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
+  TeamChallengeSyncService,
   WeeklyChallengeSyncService,
   WeeklySummarySyncService,
 } from '~/rcp/index.js';

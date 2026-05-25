@@ -1,4 +1,4 @@
-import type { WeeklyChallenge } from '@sideline/domain';
+import type { TeamChallenge } from '@sideline/domain';
 import { useRouter } from '@tanstack/react-router';
 import React from 'react';
 import { toast } from 'sonner';
@@ -9,13 +9,14 @@ import { Button } from '~/components/ui/button';
 import { useIsMobile } from '~/hooks/use-mobile.js';
 import { tr } from '~/lib/translations.js';
 
-type WeeklyChallengeKind = WeeklyChallenge.WeeklyChallengeKind;
+type TeamChallengeKind = TeamChallenge.TeamChallengeKind;
 
 interface Challenge {
   id: string;
   teamId: string;
-  weekStartDate: string;
-  kind: WeeklyChallengeKind;
+  startDate: string;
+  endDate: string;
+  kind: TeamChallengeKind;
   title: string;
   description: string | null;
   createdBy: string;
@@ -47,8 +48,9 @@ export interface WeeklyChallengesPageProps {
     data: { title: string; description: string | null },
   ) => Promise<void>;
   onCreateChallenge?: (data: {
-    weekStart: Date;
-    kind: WeeklyChallengeKind;
+    startDate: Date;
+    endDate: Date;
+    kind: TeamChallengeKind;
     title: string;
     description: string | null;
   }) => Promise<{ _tag?: string } | undefined>;
@@ -83,8 +85,8 @@ export function WeeklyChallengesPage({
     return () => window.removeEventListener('focus', handleFocus);
   }, [router]);
 
-  const existingWeekStarts = challenges.map((v) => {
-    const d = v.challenge.weekStartDate;
+  const existingStartDates = challenges.map((v) => {
+    const d = v.challenge.startDate;
     // Normalise to YYYY-MM-DD
     return d.split('T')[0];
   });
@@ -153,7 +155,7 @@ export function WeeklyChallengesPage({
           onOpenChange={setNewDialogOpen}
           teamId={teamId}
           teamTimezone={teamTimezone}
-          existingWeekStarts={existingWeekStarts}
+          existingStartDates={existingStartDates}
           onCreated={handleCreated}
           onSubmit={onCreateChallenge}
         />

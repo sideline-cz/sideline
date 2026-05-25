@@ -1,6 +1,5 @@
-import type { WeeklyChallenge } from '@sideline/domain';
+import type { TeamChallenge } from '@sideline/domain';
 import React from 'react';
-import { MondayPicker } from '~/components/molecules/MondayPicker.js';
 import { Button } from '~/components/ui/button';
 import {
   Dialog,
@@ -16,68 +15,51 @@ import { ToggleGroup, ToggleGroupItem } from '~/components/ui/toggle-group';
 import { tr } from '~/lib/translations.js';
 import { cn } from '~/lib/utils';
 
-type WeeklyChallengeKind = WeeklyChallenge.WeeklyChallengeKind;
+type TeamChallengeKind = TeamChallenge.TeamChallengeKind;
 
 export interface NewChallengeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   teamId: string;
   teamTimezone: string;
-  existingWeekStarts: string[];
+  existingStartDates: string[];
   onCreated: () => void;
   onSubmit?: (data: {
-    weekStart: Date;
-    kind: WeeklyChallengeKind;
+    startDate: Date;
+    endDate: Date;
+    kind: TeamChallengeKind;
     title: string;
     description: string | null;
   }) => Promise<{ _tag?: string } | undefined>;
 }
 
 /**
- * Returns the next available Monday (i.e. not in existingWeekStarts) starting
- * from the current Monday in the team timezone.
- *
- * Per plan §9 risk 5: construct as UTC-midnight of the local Monday.
+ * Returns today's date as a YYYY-MM-DD string in the given IANA timezone.
  */
-function getNextAvailableMonday(teamTz: string, existingWeekStarts: string[]): Date {
-  const formatter = new Intl.DateTimeFormat('en-CA', {
+function todayInTz(teamTz: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
     timeZone: teamTz,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-    weekday: 'short',
-  });
-  const now = new Date();
-  const parts = formatter.formatToParts(now);
-  const year = Number(parts.find((p) => p.type === 'year')?.value ?? 0);
-  const month = Number(parts.find((p) => p.type === 'month')?.value ?? 1) - 1;
-  const day = Number(parts.find((p) => p.type === 'day')?.value ?? 1);
-  const weekday = parts.find((p) => p.type === 'weekday')?.value ?? 'Mon';
-  const weekdayMap: Record<string, number> = {
-    Sun: 0,
-    Mon: 1,
-    Tue: 2,
-    Wed: 3,
-    Thu: 4,
-    Fri: 5,
-    Sat: 6,
-  };
-  const dow = weekdayMap[weekday] ?? 1;
-  const offset = dow === 0 ? 6 : dow - 1;
-  const mondayDay = day - offset;
-  const currentMonday = new Date(Date.UTC(year, month, mondayDay));
+  }).format(new Date());
+}
 
-  // Find the next Monday not in existingWeekStarts (within 8 weeks)
-  for (let w = 0; w <= 8; w++) {
-    const candidate = new Date(currentMonday);
-    candidate.setUTCDate(candidate.getUTCDate() + w * 7);
-    const dateStr = `${candidate.getUTCFullYear()}-${String(candidate.getUTCMonth() + 1).padStart(2, '0')}-${String(candidate.getUTCDate()).padStart(2, '0')}`;
-    if (!existingWeekStarts.includes(dateStr)) {
-      return candidate;
-    }
-  }
-  // Fallback: current monday
-  return currentMonday;
+/**
+ * Adds days to a YYYY-MM-DD date string.
+ */
+function addDays(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number) as [number, number, number];
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Parses a YYYY-MM-DD string as a UTC-midnight Date.
+ */
+function parseDateStr(str: string): Date {
+  const [y, m, d] = str.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d));
 }
 
 export function NewChallengeDialog({
@@ -85,17 +67,17 @@ export function NewChallengeDialog({
   onOpenChange,
   teamId: _teamId,
   teamTimezone,
-  existingWeekStarts,
+  existingStartDates: _existingStartDates,
   onCreated,
   onSubmit,
 }: NewChallengeDialogProps) {
-  const defaultMonday = React.useMemo(
-    () => getNextAvailableMonday(teamTimezone, existingWeekStarts),
-    [teamTimezone, existingWeekStarts],
-  );
+  const today = React.useMemo(() => todayInTz(teamTimezone), [teamTimezone]);
+  const defaultStart = today;
+  const defaultEnd = addDays(today, 6);
 
-  const [kind, setKind] = React.useState<WeeklyChallengeKind>('throwing');
-  const [weekStart, setWeekStart] = React.useState<Date | undefined>(defaultMonday);
+  const [kind, setKind] = React.useState<TeamChallengeKind>('throwing');
+  const [startDateStr, setStartDateStr] = React.useState<string>(defaultStart);
+  const [endDateStr, setEndDateStr] = React.useState<string>(defaultEnd);
   const [title, setTitle] = React.useState('');
   const [description, setDescription] = React.useState('');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -104,22 +86,33 @@ export function NewChallengeDialog({
   // Reset state when dialog opens
   React.useEffect(() => {
     if (open) {
+      const t = todayInTz(teamTimezone);
       setKind('throwing');
-      setWeekStart(getNextAvailableMonday(teamTimezone, existingWeekStarts));
+      setStartDateStr(t);
+      setEndDateStr(addDays(t, 6));
       setTitle('');
       setDescription('');
       setIsSubmitting(false);
       setInlineError(null);
     }
-  }, [open, teamTimezone, existingWeekStarts]);
+  }, [open, teamTimezone]);
+
+  // When startDate changes, keep endDate >= startDate
+  const handleStartDateChange = (value: string) => {
+    setStartDateStr(value);
+    if (endDateStr < value) {
+      setEndDateStr(value);
+    }
+  };
 
   const isTitleValid = title.length > 0 && title.length <= 120;
   const isTitleTooLong = title.length > 120;
-  const isSubmitDisabled = !isTitleValid || !weekStart || isSubmitting;
+  const isDateRangeValid = startDateStr <= endDateStr;
+  const isSubmitDisabled = !isTitleValid || !isDateRangeValid || isSubmitting;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitDisabled || !weekStart) return;
+    if (isSubmitDisabled) return;
 
     setIsSubmitting(true);
     setInlineError(null);
@@ -127,19 +120,20 @@ export function NewChallengeDialog({
     try {
       if (onSubmit) {
         const result = await onSubmit({
-          weekStart,
+          startDate: parseDateStr(startDateStr),
+          endDate: parseDateStr(endDateStr),
           kind,
           title,
           description: description || null,
         });
         if (result && typeof result === 'object' && '_tag' in result) {
           const tag = result._tag;
-          if (tag === 'WeeklyChallengeAlreadyExistsForWeek') {
+          if (tag === 'TeamChallengeAlreadyExistsForWeek') {
             setInlineError(tr('challenges_error_alreadyExists'));
             setIsSubmitting(false);
             return;
           }
-          if (tag === 'WeeklyChallengeWeekOutOfRange') {
+          if (tag === 'TeamChallengeStartDateOutOfRange') {
             setInlineError(tr('challenges_error_outOfRange'));
             setIsSubmitting(false);
             return;
@@ -154,9 +148,9 @@ export function NewChallengeDialog({
       onOpenChange(false);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message.includes('WeeklyChallengeAlreadyExistsForWeek')) {
+      if (message.includes('TeamChallengeAlreadyExistsForWeek')) {
         setInlineError(tr('challenges_error_alreadyExists'));
-      } else if (message.includes('WeeklyChallengeWeekOutOfRange')) {
+      } else if (message.includes('TeamChallengeStartDateOutOfRange')) {
         setInlineError(tr('challenges_error_outOfRange'));
       } else {
         setInlineError(tr('challenges_error_forbidden'));
@@ -191,18 +185,35 @@ export function NewChallengeDialog({
             </ToggleGroup>
           </div>
 
-          {/* Week picker */}
+          {/* Start date */}
           <div className='flex flex-col gap-1.5'>
-            <Label>{tr('challenges_newDialog_weekLabel')}</Label>
-            <p className='text-xs text-muted-foreground'>{tr('challenges_newDialog_weekHelp')}</p>
-            <div className='border rounded-md overflow-hidden'>
-              <MondayPicker
-                teamTz={teamTimezone}
-                existingWeekStarts={existingWeekStarts}
-                value={weekStart}
-                onChange={setWeekStart}
-              />
-            </div>
+            <Label htmlFor='challenge-start-date'>
+              {tr('challenges_newDialog_startDateLabel')}
+            </Label>
+            <p className='text-xs text-muted-foreground'>
+              {tr('challenges_newDialog_startDateHelp')}
+            </p>
+            <Input
+              id='challenge-start-date'
+              type='date'
+              value={startDateStr}
+              onChange={(e) => handleStartDateChange(e.target.value)}
+            />
+          </div>
+
+          {/* End date */}
+          <div className='flex flex-col gap-1.5'>
+            <Label htmlFor='challenge-end-date'>{tr('challenges_newDialog_endDateLabel')}</Label>
+            <p className='text-xs text-muted-foreground'>
+              {tr('challenges_newDialog_endDateHelp')}
+            </p>
+            <Input
+              id='challenge-end-date'
+              type='date'
+              value={endDateStr}
+              min={startDateStr}
+              onChange={(e) => setEndDateStr(e.target.value)}
+            />
             {inlineError && <p className='text-sm text-destructive'>{inlineError}</p>}
           </div>
 

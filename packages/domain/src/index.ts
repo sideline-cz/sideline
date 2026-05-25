@@ -51,6 +51,8 @@ export * as Roster from './api/Roster.js';
 
 export * as TeamApi from './api/TeamApi.js';
 
+export * as TeamChallengeApi from './api/TeamChallengeApi.js';
+
 export * as TeamSettingsApi from './api/TeamSettingsApi.js';
 
 export * as TrainingTypeApi from './api/TrainingTypeApi.js';
@@ -139,6 +141,8 @@ export * as Session from './models/Session.js';
 
 export * as Team from './models/Team.js';
 
+export * as TeamChallenge from './models/TeamChallenge.js';
+
 export * as TeamInvite from './models/TeamInvite.js';
 
 export * as TeamMember from './models/TeamMember.js';
@@ -179,6 +183,10 @@ export * as RoleRpcGroup from './rpc/role/RoleRpcGroup.js';
 export * as RoleRpcModels from './rpc/role/RoleRpcModels.js';
 export * as RoleProvisionRpcGroup from './rpc/roleProvision/RoleProvisionRpcGroup.js';
 export * as SyncRpcs from './rpc/SyncRpcs.js';
+
+export * as TeamChallengeRpcGroup from './rpc/teamChallenge/TeamChallengeRpcGroup.js';
+
+export * as TeamChallengeSyncEvents from './rpc/teamChallenge/TeamChallengeSyncEvents.js';
 
 export * as WeeklyChallengeRpcGroup from './rpc/weeklyChallenge/WeeklyChallengeRpcGroup.js';
 

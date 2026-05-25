@@ -51,6 +51,7 @@ import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepositor
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
+import { TeamChallengeRepository } from '~/repositories/TeamChallengeRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import type { MembershipWithRole } from '~/repositories/TeamMembersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -504,6 +505,28 @@ const MockHttpClientLayer = Layer.succeed(
 // Full test layer (mirrors expenses.test.ts)
 // ---------------------------------------------------------------------------
 
+const MockTeamChallengeRepositoryLayer = Layer.succeed(TeamChallengeRepository, {
+  _tag: 'api/TeamChallengeRepository' as const,
+  listForTeam: () => Effect.succeed({ team: { id: 'noop', timezone: 'UTC' }, challenges: [] }),
+  findById: () => Effect.succeed(Option.none()),
+  create: () => Effect.die(new Error('MockTeamChallengeRepository.create not implemented')),
+  updateTitleDescription: () =>
+    Effect.die(new Error('MockTeamChallengeRepository.updateTitleDescription not implemented')),
+  delete: () =>
+    Effect.die(new Error('MockTeamChallengeRepositoryLayer: delete called unexpectedly')),
+  markCompleted: () =>
+    Effect.die(new Error('MockTeamChallengeRepositoryLayer: markCompleted called unexpectedly')),
+  unmarkCompleted: () =>
+    Effect.die(new Error('MockTeamChallengeRepositoryLayer: unmarkCompleted called unexpectedly')),
+  enqueueAnnouncementEvent: () =>
+    Effect.die(
+      new Error('MockTeamChallengeRepositoryLayer: enqueueAnnouncementEvent called unexpectedly'),
+    ),
+  listUnprocessedDueEvents: () => Effect.succeed([]),
+  markProcessed: () => Effect.void,
+  markFailed: () => Effect.void,
+} as never);
+
 const MockCoreLayers = Layer.mergeAll(
   MockDiscordOAuthLayer,
   MockUsersRepositoryLayer,
@@ -513,6 +536,7 @@ const MockCoreLayers = Layer.mergeAll(
   MockTeamSettingsRepositoryLayer,
   MockHttpClientLayer,
   MockWeeklyChallengeRepositoryLayer,
+  MockTeamChallengeRepositoryLayer,
   MockExpensesRepositoryLayer,
 );
 

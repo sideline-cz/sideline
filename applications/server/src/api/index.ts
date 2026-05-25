@@ -22,6 +22,7 @@ import { OnboardingApiLive } from '~/api/onboarding.js';
 import { RoleApiLive } from '~/api/role.js';
 import { RosterApiLive } from '~/api/roster.js';
 import { TeamApiLive } from '~/api/team.js';
+import { TeamChallengeApiLive } from '~/api/team-challenge.js';
 import { TeamSettingsApiLive } from '~/api/team-settings.js';
 import { TrainingTypeApiLive } from '~/api/training-type.js';
 import { TranslationsApiLive } from '~/api/translations.js';
@@ -54,6 +55,7 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
   )
   .pipe(
     Layer.provide(TeamApiLive),
+    Layer.provide(TeamChallengeApiLive),
     Layer.provide(TeamSettingsApiLive),
     Layer.provide(TrainingTypeApiLive),
     Layer.provide(TranslationsApiLive),

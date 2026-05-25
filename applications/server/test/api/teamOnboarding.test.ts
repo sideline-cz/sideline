@@ -44,6 +44,7 @@ import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepositor
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
+import { TeamChallengeRepository } from '~/repositories/TeamChallengeRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import type { MembershipWithRole } from '~/repositories/TeamMembersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -440,6 +441,7 @@ const MockNoopLayers = Layer.mergeAll(
   noopMockLayer(AgeThresholdRepository),
   noopMockLayer(OAuthConnectionsRepository),
   noopMockLayer(WeeklyChallengeRepository),
+  noopMockLayer(TeamChallengeRepository),
   noopMockLayer(AgeCheckService),
   noopMockLayer(AchievementRoleMappingsRepository),
   noopMockLayer(AchievementSettingsRepository),

@@ -1,7 +1,7 @@
-import type { WeeklyChallenge } from '@sideline/domain';
+import type { TeamChallenge } from '@sideline/domain';
 import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import React from 'react';
-import { WeekRangeLabel } from '~/components/atoms/WeekRangeLabel.js';
+import { DateRangeLabel } from '~/components/atoms/DateRangeLabel.js';
 import { ChallengeCompletionCell } from '~/components/molecules/ChallengeCompletionCell.js';
 import { ChallengeKindBadge } from '~/components/molecules/ChallengeKindBadge.js';
 import { EditChallengeDialog } from '~/components/organisms/EditChallengeDialog.js';
@@ -25,13 +25,14 @@ import {
 import { tr } from '~/lib/translations.js';
 import { cn } from '~/lib/utils';
 
-type WeeklyChallengeKind = WeeklyChallenge.WeeklyChallengeKind;
+type TeamChallengeKind = TeamChallenge.TeamChallengeKind;
 
 interface Challenge {
   id: string;
   teamId: string;
-  weekStartDate: string;
-  kind: WeeklyChallengeKind;
+  startDate: string;
+  endDate: string;
+  kind: TeamChallengeKind;
   title: string;
   description: string | null;
   createdBy: string;
@@ -89,8 +90,7 @@ export function WeeklyChallengesGrid({
     () =>
       [...challenges].sort(
         (a, b) =>
-          new Date(a.challenge.weekStartDate).getTime() -
-          new Date(b.challenge.weekStartDate).getTime(),
+          new Date(a.challenge.startDate).getTime() - new Date(b.challenge.startDate).getTime(),
       ),
     [challenges],
   );
@@ -105,17 +105,17 @@ export function WeeklyChallengesGrid({
     return null;
   }
 
-  // Derive "current week" from the server-provided isActive flag (B3: avoids browser-TZ bug).
-  // The server already knows the team timezone and marks exactly one challenge isActive.
+  // Derive "active" challenge from the server-provided isActive flag (avoids browser-TZ bug).
+  // The server already knows the team timezone and computes isActive correctly.
   const activeView = sortedChallenges.find((v) => v.isActive);
-  const activeWeekStart = activeView?.challenge.weekStartDate.split('T')[0] ?? null;
+  const activeStartDate = activeView?.challenge.startDate.split('T')[0] ?? null;
 
   const isChallengeCurrentWeek = (view: ChallengeView) => view.isActive;
 
   const isChallengeInPast = (view: ChallengeView) => {
-    if (activeWeekStart === null) return false;
-    const d = view.challenge.weekStartDate.split('T')[0];
-    return d < activeWeekStart;
+    if (activeStartDate === null) return false;
+    const d = view.challenge.startDate.split('T')[0];
+    return d < activeStartDate;
   };
 
   const handleDeleteConfirm = async () => {
@@ -146,7 +146,10 @@ export function WeeklyChallengesGrid({
                     )}
                   >
                     <div className='flex flex-col items-center gap-1'>
-                      <WeekRangeLabel weekStartDate={view.challenge.weekStartDate} />
+                      <DateRangeLabel
+                        startDate={view.challenge.startDate}
+                        endDate={view.challenge.endDate}
+                      />
                       <ChallengeKindBadge kind={view.challenge.kind} />
                       {isCurrentWeek && (
                         <span className='text-xs font-normal text-primary'>

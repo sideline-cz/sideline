@@ -111,7 +111,8 @@ type WeeklyChallengeKind = 'throwing' | 'sport';
 type Challenge = {
   id: WeeklyChallengeId;
   teamId: string;
-  weekStartDate: string;
+  startDate: string;
+  endDate: string;
   kind: WeeklyChallengeKind;
   title: string;
   description: string | null;
@@ -152,7 +153,8 @@ function makeChallenge(overrides: Partial<Challenge> = {}): Challenge {
   return {
     id: 'challenge-001',
     teamId: TEAM_ID,
-    weekStartDate: CURRENT_MONDAY,
+    startDate: CURRENT_MONDAY,
+    endDate: '2026-03-15T00:00:00.000Z',
     kind: 'throwing',
     title: 'Test Challenge',
     description: null,
@@ -550,7 +552,7 @@ describe('NewChallengeDialog', () => {
     onOpenChange: (open: boolean) => void;
     teamId: string;
     teamTimezone: string;
-    existingWeekStarts: string[];
+    existingStartDates: string[];
     onCreated: () => void;
   };
 
@@ -559,7 +561,7 @@ describe('NewChallengeDialog', () => {
     onOpenChange: vi.fn(),
     teamId: TEAM_ID,
     teamTimezone: 'Europe/Prague',
-    existingWeekStarts: [],
+    existingStartDates: [],
     onCreated: vi.fn(),
   };
 
