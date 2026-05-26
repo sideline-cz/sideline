@@ -26,6 +26,7 @@ export const Permission = Schema.Literals([
   'finance:view',
   'finance:manage_fees',
   'finance:record_payments',
+  'challenge:manage',
 ]);
 export type Permission = typeof Permission.Type;
 
@@ -54,6 +55,7 @@ export const defaultPermissions: Record<string, ReadonlyArray<Permission>> = {
     'finance:view',
     'finance:manage_fees',
     'finance:record_payments',
+    'challenge:manage',
   ],
   Captain: [
     'roster:view',
@@ -69,6 +71,7 @@ export const defaultPermissions: Record<string, ReadonlyArray<Permission>> = {
     'event:cancel',
     'group:manage',
     'finance:view',
+    'challenge:manage',
   ],
   Player: ['roster:view', 'member:view'],
   Treasurer: ['finance:view', 'finance:manage_fees', 'finance:record_payments'],

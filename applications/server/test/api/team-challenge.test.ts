@@ -74,7 +74,7 @@ const TEST_CAPTAIN_MEMBER_ID = '00000000-0000-0000-0003-000000000011' as TeamMem
 const TEST_MEMBER_MEMBER_ID = '00000000-0000-0000-0003-000000000012' as TeamMember.TeamMemberId;
 
 const CAPTAIN_PERMISSIONS: readonly Role.Permission[] = [
-  'team:manage',
+  'challenge:manage',
   'member:view',
   'member:edit',
 ];

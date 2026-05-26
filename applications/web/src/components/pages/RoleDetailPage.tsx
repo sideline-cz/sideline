@@ -30,6 +30,7 @@ const permissionLabels: Record<Role.Permission, () => string> = {
   'finance:view': () => tr('role_perm_financeView'),
   'finance:manage_fees': () => tr('role_perm_financeManageFees'),
   'finance:record_payments': () => tr('role_perm_financeRecordPayments'),
+  'challenge:manage': () => tr('role_perm_challengeManage'),
 };
 
 interface RoleDetailPageProps {

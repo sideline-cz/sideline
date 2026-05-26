@@ -65,7 +65,9 @@ export const TeamChallengeApiLive = HttpApiBuilder.group(Api, 'teamChallenge', (
             Effect.bind('listResult', ({ teamTz, limitArg }) =>
               challenges.listForTeam(teamId, teamTz, limitArg),
             ),
-            Effect.let('canCreate', ({ membership }) => hasPermission(membership, 'team:manage')),
+            Effect.let('canCreate', ({ membership }) =>
+              hasPermission(membership, 'challenge:manage'),
+            ),
             Effect.let('currentMemberId', ({ membership }) =>
               membership.active ? Option.some(membership.id) : Option.none(),
             ),
@@ -86,7 +88,9 @@ export const TeamChallengeApiLive = HttpApiBuilder.group(Api, 'teamChallenge', (
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
-            Effect.tap(({ membership }) => requirePermission(membership, 'team:manage', forbidden)),
+            Effect.tap(({ membership }) =>
+              requirePermission(membership, 'challenge:manage', forbidden),
+            ),
             Effect.bind('teamSettings', () => settings.findByTeamId(teamId)),
             Effect.let('teamTz', ({ teamSettings }) => resolveTeamTimezone(teamSettings)),
             Effect.tap(({ teamTz }) => {
@@ -151,7 +155,9 @@ export const TeamChallengeApiLive = HttpApiBuilder.group(Api, 'teamChallenge', (
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
-            Effect.tap(({ membership }) => requirePermission(membership, 'team:manage', forbidden)),
+            Effect.tap(({ membership }) =>
+              requirePermission(membership, 'challenge:manage', forbidden),
+            ),
             Effect.bind('existing', () =>
               challenges
                 .findById(challengeId)
@@ -172,7 +178,9 @@ export const TeamChallengeApiLive = HttpApiBuilder.group(Api, 'teamChallenge', (
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
-            Effect.tap(({ membership }) => requirePermission(membership, 'team:manage', forbidden)),
+            Effect.tap(({ membership }) =>
+              requirePermission(membership, 'challenge:manage', forbidden),
+            ),
             Effect.bind('existing', () =>
               challenges
                 .findById(challengeId)

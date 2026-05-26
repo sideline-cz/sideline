@@ -776,6 +776,7 @@
   "role_perm_financeView": "View Finance",
   "role_perm_financeManageFees": "Manage Fees",
   "role_perm_financeRecordPayments": "Record Payments",
+  "role_perm_challengeManage": "Manage Challenges",
   "bot_claim_message_title": "Coach needed: {title}",
   "bot_claim_button": "Claim training",
   "bot_unclaim_button": "Release",

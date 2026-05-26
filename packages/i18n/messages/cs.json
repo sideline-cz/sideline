@@ -776,6 +776,7 @@
   "role_perm_financeView": "Zobrazit finance",
   "role_perm_financeManageFees": "Spravovat poplatky",
   "role_perm_financeRecordPayments": "Zaznamenat platby",
+  "role_perm_challengeManage": "Spravovat výzvy",
   "bot_claim_message_title": "Trénink potřebuje trenéra: {title}",
   "bot_claim_button": "Vzít trénink",
   "bot_unclaim_button": "Uvolnit",
