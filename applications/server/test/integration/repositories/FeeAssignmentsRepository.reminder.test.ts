@@ -538,40 +538,27 @@ describe('FeeAssignmentsRepository — findReminderCandidates', () => {
   );
 
   it.effect('excludes assignments for inactive (removed) team members', () =>
-    Effect.Do.pipe(
-      Effect.bind('ownerId', () => createUser('920000000000000013', 'rem-owner-13')),
-      Effect.bind('team', ({ ownerId }) =>
-        createTeam('921300000000000000' as Discord.Snowflake, ownerId),
-      ),
-      Effect.bind('fee', ({ team }) => createFee(team.id)),
-      Effect.bind('member', ({ team, ownerId }) => addMember(team.id, ownerId)),
-      Effect.bind('now', () => Effect.sync(() => new Date())),
-      Effect.tap(({ team, now }) => upsertTeamSettings(team.id, toHHMM(now))),
-      Effect.bind('assignment', ({ fee, member, now }) =>
-        createAssignment(fee.id, (member as any).id, now),
-      ),
+    Effect.gen(function* () {
+      const ownerId = yield* createUser('920000000000000013', 'rem-owner-13');
+      const team = yield* createTeam('921300000000000000' as Discord.Snowflake, ownerId);
+      const fee = yield* createFee(team.id);
+      const member = yield* addMember(team.id, ownerId);
+      const now = yield* Effect.sync(() => new Date());
+      yield* upsertTeamSettings(team.id, toHHMM(now));
+      const assignment = yield* createAssignment(fee.id, (member as any).id, now);
       // Deactivate the member (simulate removal)
-      Effect.tap(({ team, member }) =>
-        TeamMembersRepository.asEffect().pipe(
-          Effect.andThen((repo) =>
-            repo.deactivateMemberByIds(team.id, (member as any).id as TeamMember.TeamMemberId),
-          ),
+      yield* TeamMembersRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.deactivateMemberByIds(team.id, (member as any).id as TeamMember.TeamMemberId),
         ),
-      ),
-      Effect.bind('candidates', ({ now }) =>
-        FeeAssignmentsRepository.asEffect().pipe(
-          Effect.andThen((repo) => repo.findReminderCandidates(now)),
-        ),
-      ),
-      Effect.tap(({ candidates, assignment }) =>
-        Effect.sync(() => {
-          const match = candidates.find((c) => c.assignment_id === assignment.id);
-          // Inactive member must NOT appear as reminder candidate
-          expect(match).toBeUndefined();
-        }),
-      ),
-      Effect.provide(TestLayer),
-    ),
+      );
+      const candidates = yield* FeeAssignmentsRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findReminderCandidates(now)),
+      );
+      const match = candidates.find((c) => c.assignment_id === assignment.id);
+      // Inactive member must NOT appear as reminder candidate
+      expect(match).toBeUndefined();
+    }).pipe(Effect.provide(TestLayer)),
   );
 
   it.effect(
