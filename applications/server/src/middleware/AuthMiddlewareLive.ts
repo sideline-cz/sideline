@@ -1,8 +1,8 @@
 import { Auth } from '@sideline/domain';
-import { DateTime, Effect, Layer, Option, Redacted, type ServiceMap } from 'effect';
-import { globalAdminDiscordIds } from '~/env.js';
+import { Effect, Layer, Option, Redacted, type ServiceMap } from 'effect';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import { toCurrentUser } from '~/utils/toCurrentUser.js';
 
 export const AuthMiddlewareLive = Layer.effect(
   Auth.AuthMiddleware,
@@ -26,21 +26,7 @@ export const AuthMiddlewareLive = Layer.effect(
                 if (Option.isNone(userOpt)) {
                   return Effect.fail(new Auth.Unauthorized());
                 }
-                const user = userOpt.value;
-                return Effect.succeed(
-                  new Auth.CurrentUser({
-                    id: user.id,
-                    discordId: user.discord_id,
-                    username: user.username,
-                    avatar: user.avatar,
-                    isProfileComplete: user.is_profile_complete,
-                    name: user.name,
-                    birthDate: Option.map(user.birth_date, DateTime.formatIsoDateUtc),
-                    gender: user.gender,
-                    locale: user.locale,
-                    isGlobalAdmin: globalAdminDiscordIds.has(user.discord_id),
-                  }),
-                );
+                return Effect.succeed(toCurrentUser(userOpt.value));
               }),
             );
           }),

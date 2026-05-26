@@ -235,4 +235,116 @@ describe('UsersRepository', () => {
       Effect.provide(TestLayer),
     ),
   );
+
+  // ---------------------------------------------------------------------------
+  // TDD: first registered user = global admin
+  // ---------------------------------------------------------------------------
+
+  it.effect('first user gets is_global_admin = true', () =>
+    Effect.gen(function* () {
+      const repo = yield* UsersRepository.asEffect();
+      const user = yield* repo.upsertFromDiscord({
+        discord_id: '555000000000000001',
+        username: 'firstuser',
+        avatar: Option.none(),
+        discord_nickname: Option.none(),
+        discord_display_name: Option.none(),
+      });
+      expect(user.is_global_admin).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('second user gets is_global_admin = false', () =>
+    Effect.gen(function* () {
+      const repo = yield* UsersRepository.asEffect();
+
+      // Insert first user (should become global admin)
+      const userA = yield* repo.upsertFromDiscord({
+        discord_id: '555000000000000002',
+        username: 'usera',
+        avatar: Option.none(),
+        discord_nickname: Option.none(),
+        discord_display_name: Option.none(),
+      });
+
+      // Insert second user (should NOT be global admin)
+      const userB = yield* repo.upsertFromDiscord({
+        discord_id: '555000000000000003',
+        username: 'userb',
+        avatar: Option.none(),
+        discord_nickname: Option.none(),
+        discord_display_name: Option.none(),
+      });
+
+      // Read back user A to confirm their flag was preserved
+      const foundA = yield* repo.findById(userA.id);
+      const readA = Option.getOrThrow(foundA);
+
+      expect(readA.is_global_admin).toBe(true);
+      expect(userB.is_global_admin).toBe(false);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('re-login of first user keeps is_global_admin = true and updates username', () =>
+    Effect.gen(function* () {
+      const repo = yield* UsersRepository.asEffect();
+
+      // Insert user A for the first time
+      yield* repo.upsertFromDiscord({
+        discord_id: '555000000000000004',
+        username: 'original-name',
+        avatar: Option.none(),
+        discord_nickname: Option.none(),
+        discord_display_name: Option.none(),
+      });
+
+      // Re-login of user A with a changed username (ON CONFLICT path)
+      const reLoggedIn = yield* repo.upsertFromDiscord({
+        discord_id: '555000000000000004',
+        username: 'updated-name',
+        avatar: Option.none(),
+        discord_nickname: Option.none(),
+        discord_display_name: Option.none(),
+      });
+
+      expect(reLoggedIn.is_global_admin).toBe(true);
+      expect(reLoggedIn.username).toBe('updated-name');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('re-login of second user keeps is_global_admin = false', () =>
+    Effect.gen(function* () {
+      const repo = yield* UsersRepository.asEffect();
+
+      // User A registers first
+      yield* repo.upsertFromDiscord({
+        discord_id: '555000000000000005',
+        username: 'usera-second-test',
+        avatar: Option.none(),
+        discord_nickname: Option.none(),
+        discord_display_name: Option.none(),
+      });
+
+      // User B registers second
+      yield* repo.upsertFromDiscord({
+        discord_id: '555000000000000006',
+        username: 'userb-second-test',
+        avatar: Option.none(),
+        discord_nickname: Option.none(),
+        discord_display_name: Option.none(),
+      });
+
+      // User B re-logs in with updated username
+      const userBReLogin = yield* repo.upsertFromDiscord({
+        discord_id: '555000000000000006',
+        username: 'userb-second-test-updated',
+        avatar: Option.none(),
+        discord_nickname: Option.none(),
+        discord_display_name: Option.none(),
+      });
+
+      expect(userBReLogin.is_global_admin).toBe(false);
+      expect(userBReLogin.username).toBe('userb-second-test-updated');
+    }).pipe(Effect.provide(TestLayer)),
+  );
 });

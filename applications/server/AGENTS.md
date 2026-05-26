@@ -627,6 +627,31 @@ Rules:
 
 Reference: `applications/server/src/api/finance.ts` (`myStatus`, `myPaymentHistory`).
 
+## Membership Lookups Default To Active-Only
+
+`TeamMembersRepository.findMembershipByIds(teamId, userId, options?)` and `TeamMembersRepository.findByUser(userId)` filter `AND tm.active = true` in their SQL by default. A row with `active = false` (a removed user) is invisible to every caller that does not explicitly opt in.
+
+```typescript
+// ✓ Default — active-only. `requireMembership`, every notification/fee/permission gate.
+members.findMembershipByIds(teamId, userId)
+// → Option.none() when the row exists but is inactive.
+
+// ✓ Opt-in — inactive rows visible. Use ONLY for reactivation-or-create flows.
+members.findMembershipByIds(teamId, userId, { includeInactive: true })
+// → Option.some(membership) where `membership.active === false` for a removed user.
+```
+
+Rules:
+
+1. **The default `findMembershipByIds(teamId, userId)` (no options) is the correct call for every authorization gate** — `requireMembership`, every `requirePermission`, every "is this caller a member" check. A removed user must surface as `Option.none()` so the gate returns `forbidden` (403).
+2. **Pass `{ includeInactive: true }` only when the handler's purpose is to decide between addMember / reactivateMember / reject.** Currently exactly three call sites need this: `invite.joinViaInvite`, `auth.autoJoinTeams`, and `rpc/guild.RegisterMember`. Do not add a fourth without documenting why the reactivation branch belongs there.
+3. **`findByUser(userId)` has no `includeInactive` option and never will.** It backs `GET /auth/me/teams` (the team switcher), which must hide teams the user has been removed from. Add a new method (e.g. `findAllByUserIncludingInactive`) before relaxing the SQL filter on `findByUser`.
+4. **`requireMembership` (`src/api/permissions.ts`) calls `findMembershipByIds` without options.** Every endpoint that gates on membership inherits the active-only filter for free — never re-implement the gate by calling `findMembershipByIds(..., { includeInactive: true })` and then checking `membership.active` in handler code.
+5. **The deactivation-is-terminal invariant in `auth.autoJoinTeams`.** When `findMembershipByIds(..., { includeInactive: true })` returns `Some` (active OR inactive), the handler returns `Option.none<Auth.UserTeam>()` and does NOT call `addMember` or `reactivateMember`. A user who was removed from a team is NEVER silently auto-rejoined on the next OAuth login — re-entry must go through an explicit invite via `invite.joinViaInvite`, which is the only path that calls `reactivateMember`.
+6. **Fee/payment queries that JOIN `team_members` filter `AND tm.active = true` directly in SQL** (see `FeeAssignmentsRepository.findReminderCandidates` and `findUnpaidAssignmentsForUser`). A removed member's outstanding fees must not appear in payment reminders, my-payments lists, or unpaid-assignment scans. When adding a new repository query that JOINs `team_members` to surface user-facing data, add the same predicate.
+
+Reference: `applications/server/src/repositories/TeamMembersRepository.ts` (`findMembershipQuery`, `findByUserQuery`), `applications/server/src/api/auth.ts` (`autoJoinTeams`), `applications/server/src/api/invite.ts` (`joinViaInvite`), `applications/server/src/rpc/guild/index.ts` (`RegisterMember`).
+
 ## PATCH Payload Merge: `Option.getOrElse` Over `Option.match`
 
 PATCH handlers that build a "full row to UPDATE" from `Schema.OptionFromOptional(...)` payload fields plus the existing DB row MUST use `Option.getOrElse(payload.x, () => existing.x)` — never the verbose `Option.match(payload.x, { onNone: () => existing.x, onSome: (v) => v })`. The two are semantically identical when the `onSome` branch is the identity function, but `getOrElse` is one line, reads top-down ("the value, falling back to existing"), and removes the visual noise that obscures which payload fields the handler actually touches.
@@ -704,23 +729,26 @@ Rules:
 2. The handler that consumes the `Option` must, on `None`, re-read the row to distinguish which precondition failed and map to the appropriate typed error (e.g. `ClaimEventNotFound` vs `ClaimAlreadyClaimed` vs `ClaimEventInactive`)
 3. Used by: `EventsRepository.claimTraining` / `unclaimTraining` (claim race), `EventsRepository.markEventStarted` (start race), `EventRsvpsRepository` upserts
 
-## Global Admin Authorization (`APP_GLOBAL_ADMIN_DISCORD_IDS`)
+## Global Admin Authorization (`users.is_global_admin` + `APP_GLOBAL_ADMIN_DISCORD_IDS`)
 
-Some HTTP endpoints (translations CMS, future cross-team operator tools) must be restricted to a small allow-list of Sideline operators that is **not** modelled per-team in the database. The mechanism is an env-driven Discord-id allow-list materialized into a per-request boolean on `CurrentUser`.
+Some HTTP endpoints (translations CMS, onboarding-token tools, future cross-team operator tools) must be restricted to Sideline operators that are **not** modelled per-team in the database. Global-admin status has two additive sources, OR-combined into a per-request boolean on `CurrentUser`: a persisted `users.is_global_admin` DB flag and an env-driven Discord-id allow-list.
 
 | Component | File | Behaviour |
 |-----------|------|-----------|
-| Env var | `APP_GLOBAL_ADMIN_DISCORD_IDS` | Comma-separated list of Discord user ids. Empty / unset → no global admins. |
+| DB column | `users.is_global_admin` (`packages/migrations/src/before/1787300000_add_user_global_admin.ts`) | Persisted `boolean`. Bootstrapped to `true` for the first registered user (see below); otherwise `false`. |
+| Env var | `APP_GLOBAL_ADMIN_DISCORD_IDS` | Comma-separated list of Discord user ids. Empty / unset → no env-granted global admins. Additive OR on top of the DB flag, kept for backward compatibility. |
 | Parsed set | `globalAdminDiscordIds` in `src/env.ts` | `ReadonlySet<string>` materialized once at module load — trimmed entries, empty strings filtered. |
-| Per-request flag | `Auth.CurrentUser.isGlobalAdmin` | Set in `AuthMiddlewareLive` by checking `globalAdminDiscordIds.has(user.discord_id)`. |
+| Resolution helper | `toCurrentUser(user)` in `src/utils/toCurrentUser.ts` | Single source that builds `Auth.CurrentUser` from a `User.User` row, setting `isGlobalAdmin = user.is_global_admin \|\| globalAdminDiscordIds.has(user.discord_id)`. |
+| Per-request flag | `Auth.CurrentUser.isGlobalAdmin` | Produced by `toCurrentUser` at every `CurrentUser` construction site: `AuthMiddlewareLive` and the three `src/api/auth.ts` handlers (locale update, admin profile update, profile completion). Never construct `Auth.CurrentUser` inline. |
+| First-user bootstrap | `UsersRepository.upsertFromDiscord` | The insert sets `is_global_admin = (NOT EXISTS (SELECT 1 FROM users))`, so the first registered user becomes a global admin. `ON CONFLICT` omits `is_global_admin`, so subsequent logins never promote/demote it. |
 | Handler guard | `requireGlobalAdmin(forbidden)` in `src/utils/requireGlobalAdmin.ts` | Reads `Auth.CurrentUserContext`; on `isGlobalAdmin === false`, fails with the caller-supplied `forbidden` error. |
 
 Rules:
 
 1. **Use `requireGlobalAdmin(new <Resource>Forbidden())` as the FIRST step** of any admin-only handler — before reading payload, before DB lookups. Returning 403 on permission must not leak existence information about the target row.
 2. **The endpoint's domain error must be a dedicated `<Resource>Forbidden` tag bound to HTTP 403** via `HttpApiSchema.status(403)`. Do not reuse `Auth.Unauthorized` — that is reserved for "no valid session" (401), not "session valid but insufficient privilege".
-3. **Never check `discord_id` against the env set inside a handler.** Always go through `currentUser.isGlobalAdmin` (set by middleware) so the resolution rule lives in exactly one place.
-4. **Changing the allow-list is a redeploy.** `globalAdminDiscordIds` is computed at module load from `process.env` — there is no hot-reload path. Document the env var in `docs/deployment.md` when adding a new admin-only endpoint.
+3. **Never check `discord_id` against the env set inside a handler, and never construct `Auth.CurrentUser` inline.** Always build it via `toCurrentUser` and always read `currentUser.isGlobalAdmin`, so the resolution rule (DB flag OR env allow-list) lives in exactly one place.
+4. **Env allow-list changes require a redeploy; DB-flag changes take effect on the user's next request.** `globalAdminDiscordIds` is computed at module load from `process.env` — there is no hot-reload path. `users.is_global_admin` is read per-request via `toCurrentUser`. Document the env var in `docs/deployment.md` when adding a new admin-only endpoint.
 5. **Do not use the global-admin flag for team-scoped operations.** Captain/member permissions on a team are checked via `requirePermission(membership, '<perm>', forbidden)` from the membership repository — global admin does NOT implicitly grant team permissions and must not be made to.
 
 Reference: `src/api/translations.ts` (every mutating endpoint starts with `Effect.tap(() => requireGlobalAdmin(forbidden))`).

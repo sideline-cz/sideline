@@ -1403,5 +1403,9 @@
   "challenges_error_generic": "Nastala neočekávaná chyba. Zkuste to prosím znovu.",
   "challenges_success_created": "Výzva vytvořena.",
   "challenges_success_updated": "Výzva upravena.",
-  "challenges_success_deleted": "Výzva smazána."
+  "challenges_success_deleted": "Výzva smazána.",
+  "noTeam_pageTitle": "Bez týmu",
+  "noTeam_title": "Zatím nejsi v žádném týmu",
+  "noTeam_description": "Týmy zakládá kapitán nebo trenér. Požádej je, aby tě přidali do týmu.",
+  "noTeam_removedBanner": "Už nejsi členem žádného týmu."
 }

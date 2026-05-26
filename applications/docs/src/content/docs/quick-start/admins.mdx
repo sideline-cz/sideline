@@ -56,7 +56,16 @@ Once the bot is installed and linked:
 
 ## Onboarding new teams (Global Admin)
 
-If you are a **global Sideline admin** (your Discord ID is listed in `APP_GLOBAL_ADMIN_DISCORD_IDS`), you can mint one-time **onboarding links** that let a designated captain complete their team's setup without needing a Sideline account first.
+If you are a **global Sideline admin**, you can mint one-time **onboarding links** that let a designated captain complete their team's setup without needing a Sideline account first.
+
+A user is a global admin when **either** of the following is true:
+
+- Their account has the global-admin flag set in the database. The **first person to sign in** to a fresh Sideline installation receives this flag automatically.
+- Their Discord ID is listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable (useful for adding admins without a code change or for pre-existing deployments).
+
+<Aside type="tip" title="First-time setup">
+  On a brand-new installation, just sign in with Discord. You will be recognised as the global admin immediately and redirected to **Administration → Team onboarding** where you can start issuing onboarding links.
+</Aside>
 
 ### Mint an onboarding link
 

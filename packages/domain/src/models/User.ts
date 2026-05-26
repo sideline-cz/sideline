@@ -25,5 +25,6 @@ export class User extends Model.Class<User>('User')({
   locale: Locale,
   created_at: Model.DateTimeInsertFromDate,
   is_profile_complete: Schema.Boolean,
+  is_global_admin: Schema.Boolean,
   updated_at: Model.DateTimeUpdateFromDate,
 }) {}

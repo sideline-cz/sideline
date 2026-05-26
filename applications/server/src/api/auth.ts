@@ -27,7 +27,7 @@ import { HttpClient, HttpClientRequest } from 'effect/unstable/http';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { Redirect } from '~/api/index.js';
-import { env, globalAdminDiscordIds } from '~/env.js';
+import { env } from '~/env.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
@@ -37,6 +37,7 @@ import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { provisionNewTeam } from '~/utils/provisionNewTeam.js';
+import { toCurrentUser } from '~/utils/toCurrentUser.js';
 
 class AuthError extends Schema.TaggedErrorClass<AuthError>()('AuthError', {
   error: Schema.Literal('auth_failed'),
@@ -386,21 +387,7 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
                 }),
               ),
 
-              Effect.map(
-                ({ updated }) =>
-                  new Auth.CurrentUser({
-                    id: updated.id,
-                    discordId: updated.discord_id,
-                    username: updated.username,
-                    avatar: updated.avatar,
-                    isProfileComplete: updated.is_profile_complete,
-                    name: updated.name,
-                    birthDate: Option.map(updated.birth_date, DateTime.formatIsoDateUtc),
-                    gender: updated.gender,
-                    locale: updated.locale,
-                    isGlobalAdmin: globalAdminDiscordIds.has(updated.discord_id),
-                  }),
-              ),
+              Effect.map(({ updated }) => toCurrentUser(updated)),
               Effect.catchTag(
                 'NoSuchElementError',
                 LogicError.withMessage(() => 'Failed updating locale — no row returned'),
@@ -419,21 +406,7 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
                 }),
               ),
 
-              Effect.map(
-                ({ updated }) =>
-                  new Auth.CurrentUser({
-                    id: updated.id,
-                    discordId: updated.discord_id,
-                    username: updated.username,
-                    avatar: updated.avatar,
-                    isProfileComplete: updated.is_profile_complete,
-                    name: updated.name,
-                    birthDate: Option.map(updated.birth_date, DateTime.formatIsoDateUtc),
-                    gender: updated.gender,
-                    locale: updated.locale,
-                    isGlobalAdmin: globalAdminDiscordIds.has(updated.discord_id),
-                  }),
-              ),
+              Effect.map(({ updated }) => toCurrentUser(updated)),
               Effect.catchTag(
                 'NoSuchElementError',
                 LogicError.withMessage(() => 'Failed updating admin profile — no row returned'),
@@ -452,21 +425,7 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
                 }),
               ),
 
-              Effect.map(
-                ({ updated }) =>
-                  new Auth.CurrentUser({
-                    id: updated.id,
-                    discordId: updated.discord_id,
-                    username: updated.username,
-                    avatar: updated.avatar,
-                    isProfileComplete: updated.is_profile_complete,
-                    name: updated.name,
-                    birthDate: Option.map(updated.birth_date, DateTime.formatIsoDateUtc),
-                    gender: updated.gender,
-                    locale: updated.locale,
-                    isGlobalAdmin: globalAdminDiscordIds.has(updated.discord_id),
-                  }),
-              ),
+              Effect.map(({ updated }) => toCurrentUser(updated)),
               Effect.catchTag(
                 'NoSuchElementError',
                 LogicError.withMessage(() => 'Failed completing user profile — no row returned'),
@@ -581,7 +540,7 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
           )
           .handle('autoJoinTeams', () => {
             const tryJoinTeam = (team: Team.Team, userId: User.UserId) =>
-              members.findMembershipByIds(team.id, userId).pipe(
+              members.findMembershipByIds(team.id, userId, { includeInactive: true }).pipe(
                 Effect.flatMap(
                   Option.match({
                     onNone: () =>

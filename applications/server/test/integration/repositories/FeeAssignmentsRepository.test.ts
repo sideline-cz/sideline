@@ -484,3 +484,81 @@ describe('FeeAssignmentsRepository — findByTeamMember', () => {
     ),
   );
 });
+
+// ---------------------------------------------------------------------------
+// TDD: Handle removing user — findUnpaidAssignmentsForUser active-only filter
+// ---------------------------------------------------------------------------
+// These tests verify that after the bug fix, findUnpaidAssignmentsForUser
+// does NOT return unpaid assignments for deactivated members.
+
+const deactivateTeamMember = (teamId: Team.TeamId, memberId: string) =>
+  TeamMembersRepository.asEffect().pipe(
+    Effect.andThen((repo) =>
+      repo.deactivateMemberByIds(
+        teamId,
+        memberId as import('@sideline/domain').TeamMember.TeamMemberId,
+      ),
+    ),
+  );
+
+describe('FeeAssignmentsRepository — findUnpaidAssignmentsForUser (Handle removing user)', () => {
+  it.effect(
+    'unpaid assignments excluded when membership is inactive — returns empty array after deactivation',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('920000000000000001', 'inactive-fee-user-1');
+        const team = yield* createTeam('920100000000000000' as Discord.Snowflake, userId);
+        const fee = yield* createFee(team.id, 1000);
+        const member = yield* addMember(team.id, userId);
+        // Assign the fee
+        yield* FeeAssignmentsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.bulkInsert({
+              feeId: fee.id,
+              memberIds: [(member as any).id],
+              amountMinorOverride: Option.none(),
+              dueAtOverride: Option.some(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+            }),
+          ),
+        );
+        // Verify assignment is visible while active
+        const beforeDeactivation = yield* FeeAssignmentsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findUnpaidAssignmentsForUser(userId)),
+        );
+        // Before deactivation: assignment must be visible
+        expect(beforeDeactivation.length).toBeGreaterThanOrEqual(1);
+        // Deactivate the membership
+        yield* deactivateTeamMember(team.id, (member as any).id);
+        // After deactivation: assignment must be hidden
+        const afterDeactivation = yield* FeeAssignmentsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findUnpaidAssignmentsForUser(userId)),
+        );
+        // After the fix: inactive member's fees must NOT appear
+        expect(afterDeactivation).toHaveLength(0);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('unpaid assignments included when membership is active — regression guard', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('920000000000000002', 'active-fee-user-2');
+      const team = yield* createTeam('920200000000000000' as Discord.Snowflake, userId);
+      const fee = yield* createFee(team.id, 2000);
+      const member = yield* addMember(team.id, userId);
+      yield* FeeAssignmentsRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.bulkInsert({
+            feeId: fee.id,
+            memberIds: [(member as any).id],
+            amountMinorOverride: Option.none(),
+            dueAtOverride: Option.some(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+          }),
+        ),
+      );
+      const result = yield* FeeAssignmentsRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findUnpaidAssignmentsForUser(userId)),
+      );
+      // Active member's unpaid fees should be visible
+      expect(result.length).toBeGreaterThanOrEqual(1);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});

@@ -202,7 +202,7 @@ Build stages:
 | `APP_ORIGIN` | Yes | — | Origin hostname (e.g. `sideline-preview.majksa.net`), used as OTEL resource attribute |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Yes | — | OTLP HTTP endpoint for telemetry export |
 | `OTEL_SERVICE_NAME` | Yes | — | Service name reported to the telemetry backend (e.g. `sideline-server`) |
-| `APP_GLOBAL_ADMIN_DISCORD_IDS` | No | `''` | Comma-separated list of Discord user snowflake IDs that are granted global-admin access. Global admins can read and write translation overrides via the `/api/translations` endpoints and access the `/admin/translations` page in the web app. Empty or unset means no users have global-admin access. Example: `123456789012345678,987654321098765432` |
+| `APP_GLOBAL_ADMIN_DISCORD_IDS` | No | `''` | Comma-separated list of Discord user snowflake IDs that are granted global-admin access. A user is a global admin when **either** their `users.is_global_admin` DB flag is `true` **or** their Discord ID appears in this list — the two sources are combined with OR. The first user to register on a fresh database is automatically promoted via the DB flag. This env list exists for backward compatibility and for bootstrap scenarios where the DB flag cannot yet be set. Empty or unset means no env-list admins, but DB-flagged users still have access. Example: `123456789012345678,987654321098765432` |
 
 ### 3.2 Bot (`applications/bot/src/env.ts`)
 

@@ -238,7 +238,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                   }),
                 ),
                 Effect.bind('existingMembership', ({ user }) =>
-                  deps.members.findMembershipByIds(team.id, user.id),
+                  deps.members.findMembershipByIds(team.id, user.id, { includeInactive: true }),
                 ),
                 Effect.bind('newMember', ({ existingMembership, user }) => {
                   if (Option.isSome(existingMembership) && existingMembership.value.active) {

@@ -63,7 +63,7 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
               ),
             ),
             Effect.bind('existing', ({ user, invite }) =>
-              members.findMembershipByIds(invite.team_id, user.id),
+              members.findMembershipByIds(invite.team_id, user.id, { includeInactive: true }),
             ),
             Effect.tap(({ existing }) =>
               Option.isSome(existing) && existing.value.active

@@ -11,6 +11,7 @@ import {
   getPendingInvite,
   getPendingOnboarding,
 } from '~/lib/auth';
+import { resolveNoTeamRedirect } from '~/lib/auth/resolveNoTeamRedirect.js';
 import { client } from '../lib/client';
 import { Redirect } from '../lib/runtime';
 
@@ -80,9 +81,13 @@ export const Route = createFileRoute('/')({
       Effect.flatMap((team) =>
         Effect.fail(Redirect.make({ to: '/teams/$teamId', params: { teamId: team.teamId } })),
       ),
-      Effect.catchTag('NoSuchElementError', () =>
-        Effect.fail(Redirect.make({ to: '/create-team' })),
-      ),
+      Effect.catchTag('NoSuchElementError', () => {
+        const isGlobalAdmin = Option.exists(context.userOption, (u) => u.isGlobalAdmin);
+        const target: Redirect = Redirect.make(
+          resolveNoTeamRedirect({ isGlobalAdmin, hasOtherTeams: false, wasViewing: false }),
+        );
+        return Effect.fail(target);
+      }),
       Effect.catchTag('SkipError', () => Effect.void),
       context.run,
     ),

@@ -3252,7 +3252,7 @@ Marks a single notification as read.
 
 | Tag | Status | When |
 |---|---|---|
-| `NotificationForbidden` | 403 | Notification does not belong to the authenticated user |
+| `NotificationForbidden` | 403 | Notification does not belong to the authenticated user, or the user is no longer an active member of the notification's team |
 | `NotificationNotFound` | 404 | Notification does not exist |
 
 ---
@@ -5045,7 +5045,7 @@ The following table consolidates all error tags across all API groups.
 | `ActivityLogForbidden` | 403 | Activity Log | Not authorized for this member's logs |
 | `ActivityStatsForbidden` | 403 | Activity Stats | Not authorized for this member's stats |
 | `LeaderboardForbidden` | 403 | Leaderboard | Not a member of this team |
-| `NotificationForbidden` | 403 | Notification | Not a member of the team |
+| `NotificationForbidden` | 403 | Notification | Notification does not belong to the authenticated user, or the user is no longer an active member of the notification's team |
 | `ActivityLogMemberInactive` | 403 | Activity Log | Member has been deactivated |
 | `ActivityLogAutoSourceForbidden` | 403 | Activity Log | Attempted to edit/delete an auto-logged entry |
 | `ActivityLogInvalidLoggedAtDate` | 400 | Activity Log | `loggedAtDate` is not a valid `YYYY-MM-DD` date or is outside the ±2-year window |

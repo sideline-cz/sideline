@@ -50,6 +50,8 @@ export const getLastTeamId = get(LAST_TEAM);
 
 export const setLastTeamId = (teamId: string) => set(LAST_TEAM, teamId);
 
+export const clearLastTeamId = remove(LAST_TEAM);
+
 export interface PendingDiscordJoin {
   readonly acceptanceId: string;
   readonly teamId: string;

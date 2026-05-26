@@ -981,3 +981,399 @@ describe('Invite API', () => {
     expect(body.inviterName).toBeDefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// TDD: Handle removing user — invite re-join behaviour
+// ---------------------------------------------------------------------------
+// These tests verify the NEW behaviour introduced by the "Handle removing user" bug fix:
+//   - A previously-removed user (active=false membership exists) re-joins via invite
+//     → should call reactivateMember (NOT addMember) and return a JoinResult
+//   - Already-active user → AlreadyMember (regression guard)
+//   - Never-member → addMember path (regression guard)
+//
+// The mock layer for this suite tracks reactivateMember vs addMember calls.
+
+describe('Invite API — removed-user re-join (TDD: Handle removing user)', () => {
+  // We build a dedicated mini-test-setup for these cases to isolate the
+  // reactivateMember vs addMember behaviour without touching the shared handler.
+
+  const REJOIN_TEAM_ID = '00000000-0000-0000-0000-000000000011' as Team.TeamId;
+  const REJOIN_USER_ID = '00000000-0000-0000-0000-000000000003' as Auth.UserId;
+  const REJOIN_PLAYER_ROLE_ID = '00000000-0000-0000-0000-000000000051' as Role.RoleId;
+  const REJOIN_MEMBER_ID = '00000000-0000-0000-0000-000000000021' as TeamMember.TeamMemberId;
+
+  const rejoinUser = {
+    id: REJOIN_USER_ID,
+    discord_id: '99999',
+    username: 'rejoinuser',
+    avatar: Option.none(),
+    is_profile_complete: true,
+    name: Option.none(),
+    birth_date: Option.none(),
+    gender: Option.none(),
+    locale: 'en' as const,
+    discord_display_name: Option.none(),
+    created_at: DateTime.nowUnsafe(),
+    updated_at: DateTime.nowUnsafe(),
+  };
+
+  // Track which methods were called during the test run
+  let reactivateCalled = false;
+  let addMemberCalled = false;
+
+  // Inactive membership (the "was removed" state)
+  const inactiveMembership: MembershipWithRole = {
+    id: REJOIN_MEMBER_ID,
+    team_id: REJOIN_TEAM_ID,
+    user_id: REJOIN_USER_ID,
+    active: false,
+    role_names: [],
+    permissions: [],
+  };
+
+  const rejoinSessions = new Map<string, Auth.UserId>();
+  rejoinSessions.set('rejoin-token', REJOIN_USER_ID);
+
+  // Mock members repo that has an inactive membership for the rejoin user
+  const makeRejoinMembersLayer = (existingMembership: Option.Option<MembershipWithRole>) =>
+    Layer.succeed(TeamMembersRepository, {
+      _tag: 'api/TeamMembersRepository',
+      addMember: (_input: any) => {
+        addMemberCalled = true;
+        return Effect.succeed({
+          id: REJOIN_MEMBER_ID,
+          team_id: REJOIN_TEAM_ID,
+          user_id: REJOIN_USER_ID,
+          active: true,
+          jersey_number: Option.none(),
+          joined_at: DateTime.nowUnsafe(),
+        });
+      },
+      reactivateMember: (_memberId: any) => {
+        reactivateCalled = true;
+        return Effect.succeed({
+          id: REJOIN_MEMBER_ID,
+          team_id: REJOIN_TEAM_ID,
+          user_id: REJOIN_USER_ID,
+          active: true,
+          jersey_number: Option.none(),
+          joined_at: DateTime.nowUnsafe(),
+        });
+      },
+      findMembershipByIds: (
+        _teamId: Team.TeamId,
+        _userId: Auth.UserId,
+        options?: { includeInactive?: boolean },
+      ) => {
+        // The fixed code calls findMembershipByIds with { includeInactive: true }
+        // so that removed users are found for the reactivation path
+        if (options?.includeInactive === true) {
+          return Effect.succeed(existingMembership);
+        }
+        // Without the option, only active memberships are visible
+        if (Option.isSome(existingMembership) && existingMembership.value.active === false) {
+          return Effect.succeed(Option.none());
+        }
+        return Effect.succeed(existingMembership);
+      },
+      findByTeam: () => Effect.succeed([]),
+      findByUser: () => Effect.succeed([]),
+      findRosterByTeam: () => Effect.succeed([]),
+      findRosterMemberByIds: () => Effect.succeed(Option.none()),
+      deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
+      getPlayerRoleId: () => Effect.succeed(Option.some({ id: REJOIN_PLAYER_ROLE_ID })),
+      assignRole: () => Effect.void,
+      unassignRole: () => Effect.void,
+      setJerseyNumber: () => Effect.void,
+    } as any);
+
+  // Session mock that recognises 'rejoin-token'
+  const RejoinSessionsLayer = Layer.succeed(SessionsRepository, {
+    _tag: 'api/SessionsRepository',
+    create: (input: { token: string; user_id: Auth.UserId }) => {
+      rejoinSessions.set(input.token, input.user_id);
+      return Effect.succeed({
+        id: 'session-rejoin',
+        user_id: input.user_id,
+        token: input.token,
+        expires_at: DateTime.nowUnsafe(),
+        created_at: DateTime.nowUnsafe(),
+      });
+    },
+    findByToken: (token: string) => {
+      const userId = rejoinSessions.get(token);
+      if (!userId) return Effect.succeed(Option.none());
+      return Effect.succeed(
+        Option.some({
+          id: 'session-rejoin',
+          user_id: userId,
+          token,
+          expires_at: DateTime.nowUnsafe(),
+          created_at: DateTime.nowUnsafe(),
+        }),
+      );
+    },
+    deleteByToken: () => Effect.void,
+  } as any);
+
+  // Users mock that knows about the rejoin user
+  const RejoinUsersLayer = Layer.succeed(UsersRepository, {
+    _tag: 'api/UsersRepository',
+    findById: (id: Auth.UserId) => {
+      if (id === REJOIN_USER_ID) return Effect.succeed(Option.some(rejoinUser));
+      if (id === TEST_ADMIN_ID) return Effect.succeed(Option.some(testAdmin));
+      return Effect.succeed(Option.none());
+    },
+    findByDiscordId: () => Effect.succeed(Option.none()),
+    upsertFromDiscord: () => Effect.succeed(rejoinUser),
+    completeProfile: () => Effect.succeed(rejoinUser),
+    updateLocale: () => Effect.succeed(rejoinUser),
+    updateAdminProfile: () => Effect.succeed(rejoinUser),
+  } as any);
+
+  // Invite pointing to REJOIN_TEAM_ID
+  const rejoinInvitesStore = new Map<string, InviteRecord>();
+  rejoinInvitesStore.set('rejoin-invite', {
+    id: '00000000-0000-0000-0000-000000000035' as TeamInvite.TeamInviteId,
+    team_id: REJOIN_TEAM_ID,
+    code: 'rejoin-invite',
+    active: true,
+    created_by: TEST_ADMIN_ID,
+    created_at: DateTime.nowUnsafe(),
+    expires_at: Option.none(),
+    group_id: Option.none(),
+  });
+
+  const RejoinTeamInvitesLayer = Layer.succeed(TeamInvitesRepository, {
+    _tag: 'api/TeamInvitesRepository',
+    findByCode: (code: string) => {
+      const invite = rejoinInvitesStore.get(code);
+      if (invite?.active) return Effect.succeed(Option.some(invite));
+      return Effect.succeed(Option.none());
+    },
+    findByCodeWithContext: (code: string) => {
+      const invite = rejoinInvitesStore.get(code);
+      if (!invite?.active) return Effect.succeed(Option.none());
+      return Effect.succeed(
+        Option.some({
+          ...invite,
+          group_name: Option.none<string>(),
+          inviter_username: 'adminuser',
+          inviter_discord_id: Option.some('67890'),
+          team_name: 'Rejoin Test Team',
+        }),
+      );
+    },
+    findByTeam: () => Effect.succeed([]),
+    listForTeam: () => Effect.succeed([]),
+    create: () =>
+      Effect.succeed({
+        id: '00000000-0000-0000-0000-000000000035' as TeamInvite.TeamInviteId,
+        team_id: REJOIN_TEAM_ID,
+        code: 'rejoin-invite',
+        active: true,
+        created_by: TEST_ADMIN_ID,
+        created_at: DateTime.nowUnsafe(),
+        expires_at: Option.none(),
+        group_id: Option.none(),
+      }),
+    deactivateByTeam: () => Effect.void,
+    deactivateByTeamExcept: () => Effect.void,
+  } as any);
+
+  const RejoinTeamsLayer = Layer.succeed(TeamsRepository, {
+    _tag: 'api/TeamsRepository',
+    findById: (id: Team.TeamId) => {
+      if (id === REJOIN_TEAM_ID)
+        return Effect.succeed(
+          Option.some({
+            id: REJOIN_TEAM_ID,
+            name: 'Rejoin Test Team',
+            guild_id: '777777777777777777',
+            created_by: TEST_ADMIN_ID,
+            created_at: DateTime.nowUnsafe(),
+            updated_at: DateTime.nowUnsafe(),
+          }),
+        );
+      if (id === TEST_TEAM_ID) return Effect.succeed(Option.some(testTeam));
+      return Effect.succeed(Option.none());
+    },
+    insert: () => Effect.succeed(testTeam),
+    findByGuildId: () => Effect.succeed(Option.none()),
+  } as any);
+
+  const buildRejoinLayer = (existingMembership: Option.Option<MembershipWithRole>) =>
+    ApiLive.pipe(
+      Layer.provideMerge(AuthMiddlewareLive),
+      Layer.provideMerge(HttpServer.layerServices),
+      Layer.provide(MockDiscordOAuthLayer),
+      Layer.provide(RejoinUsersLayer),
+      Layer.provide(RejoinSessionsLayer),
+      Layer.provide(RejoinTeamsLayer),
+      Layer.provide(makeRejoinMembersLayer(existingMembership)),
+      Layer.provide(
+        Layer.merge(
+          Layer.merge(
+            Layer.merge(MockRostersRepositoryLayer, MockActivityLogsRepositoryLayer),
+            MockActivityTypesRepositoryLayer,
+          ),
+          MockLeaderboardRepositoryLayer,
+        ),
+      ),
+      Layer.provide(MockRolesRepositoryLayer),
+      Layer.provide(MockGroupsRepositoryLayer),
+      Layer.provide(MockTrainingTypesRepositoryLayer),
+      Layer.provide(
+        Layer.merge(
+          RejoinTeamInvitesLayer,
+          Layer.merge(
+            Layer.succeed(PendingGuildJoinsRepository, {
+              _tag: 'api/PendingGuildJoinsRepository',
+              enqueue: () => Effect.void,
+              listPending: () => Effect.succeed([]),
+              markDone: () => Effect.void,
+              markFailed: () => Effect.void,
+              requeueFailedForUser: () => Effect.void,
+            } as never),
+            Layer.succeed(InviteAcceptancesRepository, {
+              _tag: 'api/InviteAcceptancesRepository',
+              create: ({ team_invite_id, user_id }: { team_invite_id: string; user_id: string }) =>
+                Effect.succeed({
+                  id: `${team_invite_id}:${user_id}`,
+                  team_invite_id,
+                  user_id,
+                  discord_code: Option.none(),
+                  discord_code_error_code: Option.none(),
+                  discord_code_error_detail: Option.none(),
+                  created_at: DateTime.nowUnsafe(),
+                  generated_at: Option.none(),
+                }),
+              findById: () => Effect.succeed(Option.none()),
+              findPending: () => Effect.succeed([]),
+              setDiscordCode: () => Effect.void,
+              markFailed: () => Effect.void,
+              findByDiscordCodeWithContext: () => Effect.succeed(Option.none()),
+            } as never),
+          ),
+        ),
+      ),
+      Layer.provide(MockHttpClientLayer),
+      Layer.provide(MockAgeCheckServiceLayer),
+      Layer.provide(MockAgeThresholdRepositoryLayer),
+      Layer.provide(
+        Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer),
+      ),
+      Layer.provide(
+        Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
+      ),
+      Layer.provide(
+        Layer.merge(MockDiscordChannelMappingRepositoryLayer, MockICalTokensRepositoryLayer),
+      ),
+      Layer.provide(
+        Layer.merge(
+          Layer.merge(
+            Layer.merge(
+              Layer.merge(
+                Layer.merge(
+                  Layer.merge(MockEventsRepositoryLayer, MockEventRsvpsRepositoryLayer),
+                  MockBotGuildsRepositoryLayer,
+                ),
+                Layer.merge(MockDiscordChannelsRepositoryLayer, MockDiscordRolesRepositoryLayer),
+              ),
+              MockEventSeriesRepositoryLayer,
+            ),
+            Layer.succeed(TeamSettingsRepository, {
+              _tag: 'api/TeamSettingsRepository',
+              findByTeam: () => Effect.succeed(Option.none()),
+              findByTeamId: () => Effect.succeed(Option.none()),
+              upsertSettings: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+              upsert: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+              getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),
+              getHorizonDays: () => Effect.succeed(30),
+            } as any),
+          ),
+          MockOAuthConnectionsRepositoryLayer,
+        ),
+      ),
+      Layer.provide(MockAchievementAdminLayers),
+    )
+      .pipe(Layer.provide(MockFinanceLayers))
+      .pipe(Layer.provide(MockTranslationsLayers))
+      .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+      .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
+      .pipe(Layer.provide(BotInfoStore.Default));
+
+  it('removed user re-joins via invite — reactivateMember is called, NOT addMember, returns JoinResult', async () => {
+    reactivateCalled = false;
+    addMemberCalled = false;
+
+    const rejoinApp = HttpRouter.toWebHandler(buildRejoinLayer(Option.some(inactiveMembership)));
+    const rejoinHandler = rejoinApp.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await rejoinHandler(
+      new Request('http://localhost/invite/rejoin-invite/join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer rejoin-token' },
+      }),
+    );
+
+    await rejoinApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.teamId).toBe(REJOIN_TEAM_ID);
+    // The fix: reactivateMember must be called, not addMember
+    expect(reactivateCalled).toBe(true);
+    expect(addMemberCalled).toBe(false);
+  });
+
+  it('already-active user gets AlreadyMember (409) — regression guard', async () => {
+    reactivateCalled = false;
+    addMemberCalled = false;
+
+    const activeMembership2: MembershipWithRole = {
+      ...inactiveMembership,
+      active: true,
+    };
+
+    const rejoinApp = HttpRouter.toWebHandler(buildRejoinLayer(Option.some(activeMembership2)));
+    const rejoinHandler = rejoinApp.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await rejoinHandler(
+      new Request('http://localhost/invite/rejoin-invite/join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer rejoin-token' },
+      }),
+    );
+
+    await rejoinApp.dispose();
+
+    expect(response.status).toBe(409);
+    // Neither should be called — we fail before reaching the join logic
+    expect(reactivateCalled).toBe(false);
+    expect(addMemberCalled).toBe(false);
+  });
+
+  it('never-member user calls addMember + assignRole, returns JoinResult — regression guard', async () => {
+    reactivateCalled = false;
+    addMemberCalled = false;
+
+    const rejoinApp = HttpRouter.toWebHandler(buildRejoinLayer(Option.none()));
+    const rejoinHandler = rejoinApp.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await rejoinHandler(
+      new Request('http://localhost/invite/rejoin-invite/join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer rejoin-token' },
+      }),
+    );
+
+    await rejoinApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.teamId).toBe(REJOIN_TEAM_ID);
+    expect(addMemberCalled).toBe(true);
+    expect(reactivateCalled).toBe(false);
+  });
+});

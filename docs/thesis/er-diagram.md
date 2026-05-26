@@ -137,6 +137,7 @@ erDiagram
         TEXT gender
         TEXT locale
         BOOLEAN is_profile_complete
+        BOOLEAN is_global_admin
         TEXT discord_nickname
         TEXT discord_display_name
         TIMESTAMPTZ created_at

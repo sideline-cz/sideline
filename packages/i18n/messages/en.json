@@ -1403,5 +1403,9 @@
   "challenges_error_generic": "An unexpected error occurred. Please try again.",
   "challenges_success_created": "Challenge created.",
   "challenges_success_updated": "Challenge updated.",
-  "challenges_success_deleted": "Challenge deleted."
+  "challenges_success_deleted": "Challenge deleted.",
+  "noTeam_pageTitle": "No team",
+  "noTeam_title": "You're not on a team yet",
+  "noTeam_description": "Teams are set up by your captain or coach. Contact them to be added to a team.",
+  "noTeam_removedBanner": "You're no longer a member of your team."
 }

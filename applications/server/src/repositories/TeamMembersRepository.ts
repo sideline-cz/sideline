@@ -12,6 +12,7 @@ export class MemberAlreadyExistsError extends Schema.TaggedErrorClass<MemberAlre
 const MembershipQuery = Schema.Struct({
   team_id: Schema.String,
   user_id: Schema.String,
+  include_inactive: Schema.Boolean,
 });
 
 const RosterMemberQuery = Schema.Struct({
@@ -128,7 +129,9 @@ const make = Effect.gen(function* () {
                      ) all_perms), ''
                    ) AS permissions
             FROM team_members tm
-            WHERE tm.team_id = ${input.team_id} AND tm.user_id = ${input.user_id}`,
+            WHERE tm.team_id = ${input.team_id}
+              AND tm.user_id = ${input.user_id}
+              AND (${input.include_inactive} OR tm.active = true)`,
   });
 
   const findByTeamQuery = SqlSchema.findAll({
@@ -185,7 +188,7 @@ const make = Effect.gen(function* () {
                      ) all_perms), ''
                    ) AS permissions
             FROM team_members tm
-            WHERE tm.user_id = ${userId}`,
+            WHERE tm.user_id = ${userId} AND tm.active = true`,
   });
 
   const findByUser = (userId: string) => findByUserQuery(userId).pipe(catchSqlErrors);
@@ -284,8 +287,16 @@ const make = Effect.gen(function* () {
 
   const findById = (id: TeamMember.TeamMemberId) => findByIdQuery(id).pipe(catchSqlErrors);
 
-  const findMembershipByIds = (teamId: Team.TeamId, userId: User.UserId) =>
-    findMembershipQuery({ team_id: teamId, user_id: userId }).pipe(catchSqlErrors);
+  const findMembershipByIds = (
+    teamId: Team.TeamId,
+    userId: User.UserId,
+    options?: { includeInactive?: boolean },
+  ) =>
+    findMembershipQuery({
+      team_id: teamId,
+      user_id: userId,
+      include_inactive: options?.includeInactive === true,
+    }).pipe(catchSqlErrors);
 
   const findRosterMemberByIds = (teamId: Team.TeamId, memberId: TeamMember.TeamMemberId) =>
     findRosterMemberQuery({ team_id: teamId, member_id: memberId }).pipe(catchSqlErrors);

@@ -2,6 +2,7 @@ import { Effect } from 'effect';
 import { client } from '~/lib/client';
 
 export {
+  clearLastTeamId,
   clearPendingDiscordJoin,
   clearPendingInvite,
   clearPendingOnboarding,

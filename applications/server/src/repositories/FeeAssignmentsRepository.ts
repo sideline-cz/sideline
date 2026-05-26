@@ -326,7 +326,7 @@ const make = Effect.gen(function* () {
         FROM fee_assignment_status_v v
         JOIN fee_assignments fa ON fa.id = v.assignment_id
         JOIN fees f ON f.id = fa.fee_id
-        JOIN team_members tm ON tm.id = fa.team_member_id
+        JOIN team_members tm ON tm.id = fa.team_member_id AND tm.active = true
         JOIN users u ON u.id = tm.user_id
         JOIN teams t ON t.id = tm.team_id
         JOIN team_settings ts ON ts.team_id = tm.team_id
@@ -383,7 +383,7 @@ const make = Effect.gen(function* () {
         COALESCE(ts.timezone, 'UTC') AS team_timezone
       FROM fee_assignment_status_v v
       JOIN fee_assignments fa ON fa.id = v.assignment_id
-      JOIN team_members tm ON tm.id = fa.team_member_id
+      JOIN team_members tm ON tm.id = fa.team_member_id AND tm.active = true
       JOIN users u ON u.id = tm.user_id
       JOIN teams t ON t.id = tm.team_id
       LEFT JOIN team_settings ts ON ts.team_id = t.id

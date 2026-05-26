@@ -46,12 +46,17 @@ const make = Effect.gen(function* () {
 
   const findById = (id: User.UserId) => findByIdQuery(id).pipe(catchSqlErrors);
 
+  // First-user promotion: NOT EXISTS is evaluated before the new row is inserted,
+  // so the very first user in an empty table gets is_global_admin = true. ON CONFLICT
+  // deliberately omits is_global_admin so subsequent logins never demote/promote it.
+  // Two simultaneous first-registrations under READ COMMITTED could both get true —
+  // accepted as a negligible race on a brand-new database.
   const upsertFromDiscordQuery = SqlSchema.findOne({
     Request: UpsertDiscordInput,
     Result: User.User,
     execute: (input) => sql`
-      INSERT INTO users (discord_id, username, avatar, discord_nickname, discord_display_name)
-      VALUES (${input.discord_id}, ${input.username}, ${input.avatar}, ${input.discord_nickname}, ${input.discord_display_name})
+      INSERT INTO users (discord_id, username, avatar, discord_nickname, discord_display_name, is_global_admin)
+      VALUES (${input.discord_id}, ${input.username}, ${input.avatar}, ${input.discord_nickname}, ${input.discord_display_name}, (NOT EXISTS (SELECT 1 FROM users)))
       ON CONFLICT (discord_id) DO UPDATE SET
         username = ${input.username},
         avatar = ${input.avatar},

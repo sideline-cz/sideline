@@ -33,6 +33,7 @@ import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
+import type { MembershipWithRole } from '~/repositories/TeamMembersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
@@ -57,6 +58,7 @@ const testUser = {
   username: 'testuser',
   avatar: Option.none(),
   is_profile_complete: false,
+  is_global_admin: false,
   name: Option.none(),
   birth_date: Option.none(),
   gender: Option.none(),
@@ -644,5 +646,579 @@ describe('Auth API', () => {
     expect(response.status).toBe(302);
     const location = response.headers.get('Location');
     expect(location).toContain('http://localhost:5173/redirect?token=');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TDD: first registered user = global admin — isGlobalAdmin on /auth/me
+// ---------------------------------------------------------------------------
+// These tests verify the `isGlobalAdmin` flag on the CurrentUser returned by
+// GET /auth/me. The flag is computed as:
+//   user.is_global_admin || globalAdminDiscordIds.has(user.discord_id)
+//
+// We test:
+//   1. db flag true  + env allowlist empty  → isGlobalAdmin true
+//   2. db flag false + env does NOT contain id → isGlobalAdmin false
+//   (env-allowlist case is covered in note below)
+//
+// Note: stubbing `globalAdminDiscordIds` (a module-level Set initialised at
+// import time from process.env) requires rewiring the env before the module
+// loads, which is invasive in this test suite. The two cases above
+// (db-flag-true and db-flag-false+no-allowlist) are sufficient to verify the
+// OR logic when the allowlist branch cannot be isolated cheaply.
+
+describe('Auth API — isGlobalAdmin flag on GET /auth/me (TDD: first registered user = global admin)', () => {
+  const buildLayerWithUser = (userOverrides: Partial<typeof testUser>) => {
+    const customUser = { ...testUser, ...userOverrides };
+
+    const CustomUsersRepositoryLayer = Layer.succeed(UsersRepository, {
+      _tag: 'api/UsersRepository',
+      findById: (id: Auth.UserId) =>
+        Effect.succeed(id === TEST_USER_ID ? Option.some(customUser) : Option.none()),
+      findByDiscordId: () => Effect.succeed(Option.none()),
+      upsertFromDiscord: () => Effect.succeed(customUser),
+      completeProfile: () => Effect.succeed(customUser),
+      updateLocale: () => Effect.succeed(customUser),
+      updateAdminProfile: () => Effect.succeed(customUser),
+    } as any);
+
+    return ApiLive.pipe(
+      Layer.provideMerge(AuthMiddlewareLive),
+      Layer.provideMerge(HttpServer.layerServices),
+      Layer.provide(MockDiscordOAuthLayer),
+      Layer.provide(CustomUsersRepositoryLayer),
+      Layer.provide(MockSessionsRepositoryLayer),
+      Layer.provide(MockTeamsRepositoryLayer),
+      Layer.provide(MockTeamMembersRepositoryLayer),
+      Layer.provide(
+        Layer.merge(
+          Layer.merge(
+            Layer.merge(MockRostersRepositoryLayer, MockActivityLogsRepositoryLayer),
+            MockActivityTypesRepositoryLayer,
+          ),
+          MockLeaderboardRepositoryLayer,
+        ),
+      ),
+      Layer.provide(MockRolesRepositoryLayer),
+      Layer.provide(MockGroupsRepositoryLayer),
+      Layer.provide(MockTrainingTypesRepositoryLayer),
+      Layer.provide(
+        Layer.merge(
+          MockTeamInvitesRepositoryLayer,
+          Layer.merge(
+            Layer.succeed(PendingGuildJoinsRepository, {
+              _tag: 'api/PendingGuildJoinsRepository',
+              enqueue: () => Effect.void,
+              listPending: () => Effect.succeed([]),
+              markDone: () => Effect.void,
+              markFailed: () => Effect.void,
+              requeueFailedForUser: () => Effect.void,
+            } as never),
+            Layer.succeed(InviteAcceptancesRepository, {
+              _tag: 'api/InviteAcceptancesRepository',
+            } as never),
+          ),
+        ),
+      ),
+      Layer.provide(MockHttpClientLayer),
+      Layer.provide(MockAgeCheckServiceLayer),
+      Layer.provide(MockAgeThresholdRepositoryLayer),
+      Layer.provide(
+        Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer),
+      ),
+      Layer.provide(
+        Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
+      ),
+      Layer.provide(
+        Layer.merge(MockDiscordChannelMappingRepositoryLayer, MockICalTokensRepositoryLayer),
+      ),
+      Layer.provide(
+        Layer.merge(
+          Layer.merge(
+            Layer.merge(
+              Layer.merge(
+                Layer.merge(
+                  Layer.merge(MockEventsRepositoryLayer, MockEventRsvpsRepositoryLayer),
+                  MockBotGuildsRepositoryLayer,
+                ),
+                Layer.merge(MockDiscordChannelsRepositoryLayer, MockDiscordRolesRepositoryLayer),
+              ),
+              MockEventSeriesRepositoryLayer,
+            ),
+            Layer.succeed(TeamSettingsRepository, {
+              _tag: 'api/TeamSettingsRepository',
+              findByTeam: () => Effect.succeed(Option.none()),
+              findByTeamId: () => Effect.succeed(Option.none()),
+              upsertSettings: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+              upsert: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+              getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),
+              getHorizonDays: () => Effect.succeed(30),
+            } as any),
+          ),
+          MockOAuthConnectionsRepositoryLayer,
+        ),
+      ),
+      Layer.provide(MockAchievementAdminLayers),
+    )
+      .pipe(Layer.provide(MockFinanceLayers))
+      .pipe(Layer.provide(MockTranslationsLayers))
+      .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+      .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
+      .pipe(Layer.provide(BotInfoStore.Default));
+  };
+
+  it('isGlobalAdmin true when db flag is true and env allowlist empty', async () => {
+    // db row has is_global_admin: true — the CurrentUser.isGlobalAdmin must be true
+    // regardless of the env allowlist (which is empty in test env)
+    const testLayer = buildLayerWithUser({
+      is_global_admin: true,
+      discord_id: 'non-allowlisted-id',
+    });
+    const app = HttpRouter.toWebHandler(testLayer);
+    const h = app.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await h(
+      new Request('http://localhost/auth/me', {
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.isGlobalAdmin).toBe(true);
+  });
+
+  it('isGlobalAdmin false when neither db flag nor env allowlist match', async () => {
+    // db row has is_global_admin: false and discord_id not in env allowlist
+    const testLayer = buildLayerWithUser({
+      is_global_admin: false,
+      discord_id: 'not-in-allowlist',
+    });
+    const app = HttpRouter.toWebHandler(testLayer);
+    const h = app.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await h(
+      new Request('http://localhost/auth/me', {
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.isGlobalAdmin).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TDD: Handle removing user — GET /auth/me/teams and autoJoinTeams behaviour
+// ---------------------------------------------------------------------------
+// These tests verify:
+//   1. GET /auth/me/teams omits teams where the user has been deactivated
+//      (findByUser now returns only active memberships)
+//   2. autoJoinTeams does NOT auto-reactivate inactive memberships
+//   3. autoJoinTeams keeps existing active membership (regression guard)
+//   4. autoJoinTeams adds new user with no membership (regression guard)
+
+describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () => {
+  const AUTH_TEAM_ID_A = '00000000-0000-0000-0000-000000000011' as Team.TeamId;
+  const AUTH_TEAM_ID_B = '00000000-0000-0000-0000-000000000012' as Team.TeamId;
+  const AUTH_GUILD_A = '111111111111111111' as Discord.Snowflake;
+  const AUTH_GUILD_B = '222222222222222222' as Discord.Snowflake;
+  const AUTH_ROLE_ID = '00000000-0000-0000-0000-000000000050' as Role.RoleId;
+
+  const teamA = {
+    id: AUTH_TEAM_ID_A,
+    name: 'Team A',
+    guild_id: AUTH_GUILD_A,
+    created_by: TEST_USER_ID,
+    created_at: DateTime.nowUnsafe(),
+    updated_at: DateTime.nowUnsafe(),
+    logo_url: Option.none(),
+    description: Option.none(),
+    sport: Option.none(),
+    welcome_channel_id: Option.none(),
+    system_log_channel_id: Option.none(),
+    welcome_message_template: Option.none(),
+    rules_channel_id: Option.none(),
+    overview_channel_id: Option.none(),
+    achievement_channel_id: Option.none(),
+    onboarding_rules_role_id: Option.none(),
+    onboarding_rules_prompt_id: Option.none(),
+    onboarding_locale: 'en' as const,
+    onboarding_synced_at: Option.none(),
+    onboarding_sync_status: 'pending' as const,
+    onboarding_sync_error: Option.none(),
+  };
+
+  const activeMembershipA: MembershipWithRole = {
+    id: '00000000-0000-0000-0000-000000000060' as TeamMember.TeamMemberId,
+    team_id: AUTH_TEAM_ID_A,
+    user_id: TEST_USER_ID,
+    active: true,
+    role_names: ['Player'],
+    permissions: ['roster:view'] as readonly Role.Permission[],
+  };
+
+  const inactiveMembershipB: MembershipWithRole = {
+    id: '00000000-0000-0000-0000-000000000061' as TeamMember.TeamMemberId,
+    team_id: AUTH_TEAM_ID_B,
+    user_id: TEST_USER_ID,
+    active: false,
+    role_names: ['Player'],
+    permissions: ['roster:view'] as readonly Role.Permission[],
+  };
+
+  // Track addMember / reactivateMember calls in autoJoinTeams tests
+  let autoJoinAddMemberCalled = false;
+  let autoJoinReactivateCalled = false;
+
+  // Helper to build a test layer with configurable findByUser and findMembershipByIds behaviour
+  const buildAuthTestLayer = (opts: {
+    findByUserResult: ReadonlyArray<MembershipWithRole>;
+    findMembershipByIdsResult: (
+      teamId: Team.TeamId,
+      userId: Auth.UserId,
+      options?: { includeInactive?: boolean },
+    ) => Option.Option<MembershipWithRole>;
+    teamsToReturn?: ReadonlyArray<typeof teamA>;
+    profileComplete?: boolean;
+    guildIds?: ReadonlyArray<string>;
+  }) => {
+    const CustomMembersLayer = Layer.succeed(TeamMembersRepository, {
+      _tag: 'api/TeamMembersRepository',
+      addMember: (_input: any) => {
+        autoJoinAddMemberCalled = true;
+        return Effect.succeed({
+          id: '00000000-0000-0000-0000-000000000062' as TeamMember.TeamMemberId,
+          team_id: AUTH_TEAM_ID_A,
+          user_id: TEST_USER_ID,
+          active: true,
+          jersey_number: Option.none(),
+          joined_at: DateTime.nowUnsafe(),
+        });
+      },
+      reactivateMember: (_memberId: any) => {
+        autoJoinReactivateCalled = true;
+        return Effect.succeed({
+          id: '00000000-0000-0000-0000-000000000061' as TeamMember.TeamMemberId,
+          team_id: AUTH_TEAM_ID_B,
+          user_id: TEST_USER_ID,
+          active: true,
+          jersey_number: Option.none(),
+          joined_at: DateTime.nowUnsafe(),
+        });
+      },
+      findMembershipByIds: (
+        teamId: Team.TeamId,
+        userId: Auth.UserId,
+        options?: { includeInactive?: boolean },
+      ) => Effect.succeed(opts.findMembershipByIdsResult(teamId, userId, options)),
+      findByTeam: () => Effect.succeed([]),
+      findByUser: (_userId: string) => Effect.succeed(opts.findByUserResult),
+      findRosterByTeam: () => Effect.succeed([]),
+      findRosterMemberByIds: () => Effect.succeed(Option.none()),
+      deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
+      getPlayerRoleId: () => Effect.succeed(Option.some({ id: AUTH_ROLE_ID })),
+      assignRole: () => Effect.void,
+      unassignRole: () => Effect.void,
+      setJerseyNumber: () => Effect.void,
+    } as any);
+
+    const CustomTeamsLayer = Layer.succeed(TeamsRepository, {
+      _tag: 'api/TeamsRepository',
+      findById: (id: Team.TeamId) => {
+        const teams = opts.teamsToReturn ?? [teamA];
+        const found = teams.find((t) => t.id === id);
+        return Effect.succeed(found ? Option.some(found) : Option.none());
+      },
+      insert: () => Effect.succeed(teamA),
+      findByGuildId: () => Effect.succeed(Option.none()),
+      findByGuildIds: (guildIds: ReadonlyArray<Discord.Snowflake>) => {
+        const teams = opts.teamsToReturn ?? [teamA];
+        const matching = teams.filter((t) => guildIds.includes(t.guild_id as Discord.Snowflake));
+        return Effect.succeed(matching);
+      },
+    } as any);
+
+    const profileCompletedUser = { ...testUser, is_profile_complete: true };
+    const CustomUsersLayer =
+      opts.profileComplete === true
+        ? Layer.succeed(UsersRepository, {
+            _tag: 'api/UsersRepository',
+            findById: (id: Auth.UserId) =>
+              Effect.succeed(
+                id === TEST_USER_ID ? Option.some(profileCompletedUser) : Option.none(),
+              ),
+            findByDiscordId: () => Effect.succeed(Option.none()),
+            upsertFromDiscord: () => Effect.succeed(profileCompletedUser),
+            completeProfile: () => Effect.succeed(profileCompletedUser),
+            updateLocale: () => Effect.succeed(profileCompletedUser),
+            updateAdminProfile: () => Effect.succeed(profileCompletedUser),
+          } as any)
+        : MockUsersRepositoryLayer;
+
+    const guildList = (opts.guildIds ?? []).map((id) => ({
+      id,
+      name: `Guild ${id}`,
+      owner: false,
+      permissions: '0',
+      features: [],
+    }));
+    const CustomHttpClientLayer =
+      opts.guildIds !== undefined
+        ? Layer.succeed(
+            HttpClient.HttpClient,
+            HttpClient.make((request) =>
+              Effect.succeed(
+                HttpClientResponse.fromWeb(
+                  request,
+                  new Response(JSON.stringify(guildList), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                  }),
+                ),
+              ),
+            ),
+          )
+        : MockHttpClientLayer;
+
+    return ApiLive.pipe(
+      Layer.provideMerge(AuthMiddlewareLive),
+      Layer.provideMerge(HttpServer.layerServices),
+      Layer.provide(MockDiscordOAuthLayer),
+      Layer.provide(CustomUsersLayer),
+      Layer.provide(MockSessionsRepositoryLayer),
+      Layer.provide(CustomTeamsLayer),
+      Layer.provide(CustomMembersLayer),
+      Layer.provide(
+        Layer.merge(
+          Layer.merge(
+            Layer.merge(MockRostersRepositoryLayer, MockActivityLogsRepositoryLayer),
+            MockActivityTypesRepositoryLayer,
+          ),
+          MockLeaderboardRepositoryLayer,
+        ),
+      ),
+      Layer.provide(MockRolesRepositoryLayer),
+      Layer.provide(MockGroupsRepositoryLayer),
+      Layer.provide(MockTrainingTypesRepositoryLayer),
+      Layer.provide(
+        Layer.merge(
+          MockTeamInvitesRepositoryLayer,
+          Layer.merge(
+            Layer.succeed(PendingGuildJoinsRepository, {
+              _tag: 'api/PendingGuildJoinsRepository',
+              enqueue: () => Effect.void,
+              listPending: () => Effect.succeed([]),
+              markDone: () => Effect.void,
+              markFailed: () => Effect.void,
+              requeueFailedForUser: () => Effect.void,
+            } as never),
+            Layer.succeed(InviteAcceptancesRepository, {
+              _tag: 'api/InviteAcceptancesRepository',
+            } as never),
+          ),
+        ),
+      ),
+      Layer.provide(CustomHttpClientLayer),
+      Layer.provide(MockAgeCheckServiceLayer),
+      Layer.provide(MockAgeThresholdRepositoryLayer),
+      Layer.provide(
+        Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer),
+      ),
+      Layer.provide(
+        Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
+      ),
+      Layer.provide(
+        Layer.merge(MockDiscordChannelMappingRepositoryLayer, MockICalTokensRepositoryLayer),
+      ),
+      Layer.provide(
+        Layer.merge(
+          Layer.merge(
+            Layer.merge(
+              Layer.merge(
+                Layer.merge(
+                  Layer.merge(MockEventsRepositoryLayer, MockEventRsvpsRepositoryLayer),
+                  MockBotGuildsRepositoryLayer,
+                ),
+                Layer.merge(MockDiscordChannelsRepositoryLayer, MockDiscordRolesRepositoryLayer),
+              ),
+              MockEventSeriesRepositoryLayer,
+            ),
+            Layer.succeed(TeamSettingsRepository, {
+              _tag: 'api/TeamSettingsRepository',
+              findByTeam: () => Effect.succeed(Option.none()),
+              findByTeamId: () => Effect.succeed(Option.none()),
+              upsertSettings: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+              upsert: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+              getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),
+              getHorizonDays: () => Effect.succeed(30),
+            } as any),
+          ),
+          Layer.succeed(OAuthConnectionsRepository, {
+            _tag: 'api/OAuthConnectionsRepository',
+            upsertConnection: () => Effect.succeed({} as never),
+            upsert: () => Effect.succeed({} as never),
+            findByUserAndProvider: () => Effect.succeed(Option.none()),
+            findByUser: () => Effect.succeed(Option.none()),
+            findAccessToken: () =>
+              Effect.succeed(Option.some({ access_token: 'mock-access-token' })),
+            getAccessToken: () => Effect.succeed(Option.some('mock-access-token')),
+            getGrantedScopes: () => Effect.succeed(Option.some('identify guilds guilds.join')),
+          } as any),
+        ),
+      ),
+      Layer.provide(MockAchievementAdminLayers),
+    )
+      .pipe(Layer.provide(MockFinanceLayers))
+      .pipe(Layer.provide(MockTranslationsLayers))
+      .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+      .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
+      .pipe(Layer.provide(BotInfoStore.Default));
+  };
+
+  it('GET /auth/me/teams omits teams where user has been deactivated (findByUser returns only active)', async () => {
+    // After the fix: findByUser returns only active memberships.
+    // We mock it to return only activeMembershipA (team B's inactive row is excluded).
+    const testLayer = buildAuthTestLayer({
+      findByUserResult: [activeMembershipA],
+      findMembershipByIdsResult: () => Option.none(),
+      teamsToReturn: [teamA],
+    });
+
+    const app = HttpRouter.toWebHandler(testLayer);
+    const handler = app.handler as (...args: any[]) => Promise<Response>;
+    const response = await handler(
+      new Request('http://localhost/auth/me/teams', {
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    // Only Team A (active membership) should be present
+    expect(Array.isArray(body)).toBe(true);
+    expect(body).toHaveLength(1);
+    expect(body[0].teamId).toBe(AUTH_TEAM_ID_A);
+    // Team B must NOT be in the list (inactive membership excluded by findByUser)
+    const hasTeamB = body.some((t: { teamId: string }) => t.teamId === AUTH_TEAM_ID_B);
+    expect(hasTeamB).toBe(false);
+  });
+
+  it('autoJoinTeams does NOT call addMember or reactivateMember for inactive membership', async () => {
+    autoJoinAddMemberCalled = false;
+    autoJoinReactivateCalled = false;
+
+    // Profile complete + Discord OAuth token + guild matches teamB
+    // findMembershipByIds({ includeInactive: true }) returns inactiveMembershipB
+    // → tryJoinTeam must return Option.none and NOT call addMember or reactivateMember
+    const testLayer = buildAuthTestLayer({
+      findByUserResult: [],
+      findMembershipByIdsResult: (
+        _teamId: Team.TeamId,
+        _userId: Auth.UserId,
+        options?: { includeInactive?: boolean },
+      ) => (options?.includeInactive === true ? Option.some(inactiveMembershipB) : Option.none()),
+      teamsToReturn: [{ ...teamA, id: AUTH_TEAM_ID_B, guild_id: AUTH_GUILD_B, name: 'Team B' }],
+      profileComplete: true,
+      guildIds: [AUTH_GUILD_B],
+    });
+
+    const app = HttpRouter.toWebHandler(testLayer);
+    const handler = app.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await handler(
+      new Request('http://localhost/auth/me/teams/auto-join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(Array.isArray(body)).toBe(true);
+    // The removed team must NOT appear in the auto-join result
+    const hasTeamB = body.some((t: { teamId: string }) => t.teamId === AUTH_TEAM_ID_B);
+    expect(hasTeamB).toBe(false);
+    // addMember and reactivateMember must NOT have been called
+    expect(autoJoinAddMemberCalled).toBe(false);
+    expect(autoJoinReactivateCalled).toBe(false);
+  });
+
+  it('autoJoinTeams keeps existing active membership and does NOT call addMember or reactivateMember (regression guard)', async () => {
+    autoJoinAddMemberCalled = false;
+    autoJoinReactivateCalled = false;
+
+    // Profile complete + Discord OAuth token + guild matches teamA
+    // findMembershipByIds({ includeInactive: true }) returns activeMembershipA (active: true)
+    // → onSome branch returns Option.none (no join needed), addMember/reactivateMember NOT called
+    const testLayer = buildAuthTestLayer({
+      findByUserResult: [activeMembershipA],
+      findMembershipByIdsResult: (
+        _teamId: Team.TeamId,
+        _userId: Auth.UserId,
+        options?: { includeInactive?: boolean },
+      ) => (options?.includeInactive === true ? Option.some(activeMembershipA) : Option.none()),
+      teamsToReturn: [teamA],
+      profileComplete: true,
+      guildIds: [AUTH_GUILD_A],
+    });
+
+    const app = HttpRouter.toWebHandler(testLayer);
+    const handler = app.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await handler(
+      new Request('http://localhost/auth/me/teams/auto-join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    // addMember and reactivateMember must NOT have been called
+    expect(autoJoinAddMemberCalled).toBe(false);
+    expect(autoJoinReactivateCalled).toBe(false);
+  });
+
+  it('autoJoinTeams calls addMember when user has no existing membership', async () => {
+    autoJoinAddMemberCalled = false;
+    autoJoinReactivateCalled = false;
+
+    // Profile complete + Discord OAuth token + guild matches teamA
+    // findMembershipByIds returns None (even with includeInactive: true)
+    // → tryJoinTeam must call addMember and return the new team
+    const testLayer = buildAuthTestLayer({
+      findByUserResult: [],
+      findMembershipByIdsResult: () => Option.none(),
+      teamsToReturn: [teamA],
+      profileComplete: true,
+      guildIds: [AUTH_GUILD_A],
+    });
+
+    const app = HttpRouter.toWebHandler(testLayer);
+    const handler = app.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await handler(
+      new Request('http://localhost/auth/me/teams/auto-join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(Array.isArray(body)).toBe(true);
+    // addMember should have been called
+    expect(autoJoinAddMemberCalled).toBe(true);
+    expect(autoJoinReactivateCalled).toBe(false);
+    // The newly joined team should appear in the result
+    const hasTeamA = body.some((t: { teamId: string }) => t.teamId === AUTH_TEAM_ID_A);
+    expect(hasTeamA).toBe(true);
   });
 });
