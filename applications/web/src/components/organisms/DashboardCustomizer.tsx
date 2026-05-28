@@ -1,8 +1,12 @@
 import { DashboardLayoutApi } from '@sideline/domain';
 import { LayoutDashboard } from 'lucide-react';
 import React from 'react';
-import type { Layout, LayoutItem } from 'react-grid-layout';
-import { GridLayout, useContainerWidth } from 'react-grid-layout';
+import {
+  type Layout,
+  type LayoutItem,
+  ReactGridLayout,
+  WidthProvider,
+} from 'react-grid-layout/legacy';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent } from '~/components/ui/card';
 import { Switch } from '~/components/ui/switch';
@@ -16,6 +20,8 @@ interface DashboardCustomizerProps {
   onSave?: (widgets: DashboardLayoutApi.DashboardWidget[]) => Promise<void>;
   widgetRegistry: Record<string, React.ReactNode>;
 }
+
+const SizedGridLayout = WidthProvider(ReactGridLayout);
 
 const WIDGET_LABELS: Record<string, string> = {
   stats: 'dashboard_widget_stats',
@@ -69,30 +75,27 @@ interface DashboardGridProps {
 }
 
 function DashboardGrid({ working, widgetRegistry, isEditing, onLayoutChange }: DashboardGridProps) {
-  const { width, containerRef } = useContainerWidth({
-    initialWidth: 1200,
-    measureBeforeMount: false,
-  });
   const rglLayout = widgetsToLayout(working.filter((w) => w.visible));
 
   return (
-    <div ref={containerRef} className='w-full'>
-      <GridLayout
-        layout={rglLayout}
-        width={width}
-        gridConfig={{ cols: 12, rowHeight: 80 }}
-        dragConfig={{ enabled: isEditing, bounded: false, threshold: 3 }}
-        resizeConfig={{ enabled: isEditing, handles: ['se'] }}
-        onLayoutChange={onLayoutChange}
-        className={isEditing ? 'rgl-edit-mode' : undefined}
-      >
-        {working
-          .filter((w) => w.visible)
-          .map((w) => (
-            <div key={w.id}>{widgetRegistry[w.id]}</div>
-          ))}
-      </GridLayout>
-    </div>
+    <SizedGridLayout
+      layout={rglLayout}
+      cols={12}
+      rowHeight={80}
+      margin={[16, 16]}
+      isDraggable={isEditing}
+      isResizable={isEditing}
+      resizeHandles={['se']}
+      onLayoutChange={onLayoutChange}
+      className={isEditing ? 'rgl-edit-mode' : undefined}
+      draggableCancel='button, a, input, [role="switch"]'
+    >
+      {working
+        .filter((w) => w.visible)
+        .map((w) => (
+          <div key={w.id}>{widgetRegistry[w.id]}</div>
+        ))}
+    </SizedGridLayout>
   );
 }
 

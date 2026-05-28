@@ -56,9 +56,11 @@ vi.mock('@tanstack/react-router', () => ({
 }));
 
 // Mock react-grid-layout to avoid jsdom layout issues
-vi.mock('react-grid-layout', () => ({
-  GridLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  useContainerWidth: () => ({ width: 1200, containerRef: { current: null }, mounted: false }),
+vi.mock('react-grid-layout/legacy', () => ({
+  ReactGridLayout: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid='rgl-grid'>{children}</div>
+  ),
+  WidthProvider: (Component: React.ComponentType<unknown>) => Component,
 }));
 
 // ---------------------------------------------------------------------------
