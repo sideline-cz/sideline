@@ -1,4 +1,4 @@
-// Tests for the redesigned DashboardCustomizer.
+// Tests for the redesigned DashboardCustomizer (fixed CSS grid with resize-only model).
 //
 // Component contract:
 //   DashboardCustomizer({
@@ -10,8 +10,9 @@
 //
 // Behaviour:
 //   - "Customize" button enters edit mode; aside panel appears with one Switch per widget
+//   - No drag handles — layout positions are fixed, only height is user-configurable
 //   - Toggling a Switch updates local working copy but does NOT call onSave
-//   - Reset sets working copy back to DEFAULT (4 visible with default positions)
+//   - Reset sets working copy back to DEFAULT (4 visible with default heights)
 //   - Save calls onSave exactly once then exits edit mode
 //   - Save failure stays in edit mode (error state shown)
 //   - Cancel exits edit mode without calling onSave
@@ -55,14 +56,6 @@ vi.mock('@tanstack/react-router', () => ({
   ),
 }));
 
-// Mock react-grid-layout to avoid jsdom layout issues
-vi.mock('react-grid-layout/legacy', () => ({
-  ReactGridLayout: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid='rgl-grid'>{children}</div>
-  ),
-  WidthProvider: (Component: React.ComponentType<unknown>) => Component,
-}));
-
 // ---------------------------------------------------------------------------
 // Dynamic imports (after mocks)
 // ---------------------------------------------------------------------------
@@ -73,16 +66,16 @@ const { DashboardCustomizer } = await import('~/components/organisms/DashboardCu
 // Helpers / fixtures
 // ---------------------------------------------------------------------------
 
-type DashboardWidget = { id: string; visible: boolean; x: number; y: number; w: number; h: number };
+type DashboardWidget = { id: string; visible: boolean; height: number };
 type DashboardLayout = { widgets: ReadonlyArray<DashboardWidget> };
 
 function makeDefaultLayout(): DashboardLayout {
   return {
     widgets: [
-      { id: 'stats', visible: true, x: 0, y: 0, w: 12, h: 2 },
-      { id: 'upcomingEvents', visible: true, x: 0, y: 2, w: 8, h: 4 },
-      { id: 'activity', visible: true, x: 8, y: 2, w: 4, h: 2 },
-      { id: 'teamManagement', visible: true, x: 8, y: 4, w: 4, h: 2 },
+      { id: 'stats', visible: true, height: 140 },
+      { id: 'upcomingEvents', visible: true, height: 280 },
+      { id: 'activity', visible: true, height: 200 },
+      { id: 'teamManagement', visible: true, height: 260 },
     ],
   };
 }
@@ -90,10 +83,10 @@ function makeDefaultLayout(): DashboardLayout {
 function makePartialLayout(): DashboardLayout {
   return {
     widgets: [
-      { id: 'stats', visible: false, x: 0, y: 0, w: 12, h: 2 },
-      { id: 'upcomingEvents', visible: true, x: 0, y: 2, w: 8, h: 4 },
-      { id: 'activity', visible: false, x: 8, y: 2, w: 4, h: 2 },
-      { id: 'teamManagement', visible: true, x: 8, y: 4, w: 4, h: 2 },
+      { id: 'stats', visible: false, height: 140 },
+      { id: 'upcomingEvents', visible: true, height: 280 },
+      { id: 'activity', visible: false, height: 200 },
+      { id: 'teamManagement', visible: true, height: 260 },
     ],
   };
 }
@@ -128,6 +121,52 @@ describe('DashboardCustomizer — initial state (not in edit mode)', () => {
     expect(screen.queryByRole('switch')).toBeNull();
     expect(screen.queryByText('Widgets')).toBeNull();
   });
+
+  it('renders visible widget content in idle state', () => {
+    const onSave = vi.fn();
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
+    );
+
+    expect(screen.getByText('Stats Widget')).not.toBeNull();
+    expect(screen.getByText('Upcoming Events Widget')).not.toBeNull();
+  });
+
+  it('does not render hidden widget content in idle state', () => {
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makePartialLayout() as any}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
+    );
+
+    // stats is hidden in partial layout
+    expect(screen.queryByText('Stats Widget')).toBeNull();
+    // upcomingEvents is visible
+    expect(screen.getByText('Upcoming Events Widget')).not.toBeNull();
+  });
+
+  it('renders widgets in a grid container in idle state', () => {
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
+    );
+
+    // All visible widgets present
+    expect(screen.getByText('Stats Widget')).not.toBeNull();
+    expect(screen.getByText('Upcoming Events Widget')).not.toBeNull();
+    expect(screen.getByText('Activity Widget')).not.toBeNull();
+    expect(screen.getByText('Team Management Widget')).not.toBeNull();
+  });
 });
 
 describe('DashboardCustomizer — entering edit mode', () => {
@@ -155,6 +194,26 @@ describe('DashboardCustomizer — entering edit mode', () => {
     expect(switches.length).toBe(4);
   });
 
+  it('does NOT render drag handles in edit mode (no drag-and-drop)', async () => {
+    const onSave = vi.fn();
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Customize'));
+    });
+
+    // No drag handles should be rendered
+    const dragHandles = screen.queryAllByRole('button', { name: /Drag/i });
+    expect(dragHandles.length).toBe(0);
+  });
+
   it('Save and Cancel buttons are visible in edit mode', async () => {
     const onSave = vi.fn();
     render(
@@ -172,6 +231,24 @@ describe('DashboardCustomizer — entering edit mode', () => {
 
     expect(screen.getByText('Save')).not.toBeNull();
     expect(screen.getByText('Cancel')).not.toBeNull();
+  });
+
+  it('Reset layout button is visible in edit mode', async () => {
+    const onSave = vi.fn();
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Customize'));
+    });
+
+    expect(screen.getByText('Reset layout')).not.toBeNull();
   });
 });
 
@@ -291,6 +368,41 @@ describe('DashboardCustomizer — Reset', () => {
     // onSave should NOT have been called
     expect(onSave).not.toHaveBeenCalled();
   });
+
+  it('Reset restores DEFAULT_LAYOUT heights in working copy', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makePartialLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Customize'));
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Reset layout'));
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save'));
+    });
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledTimes(1);
+    });
+
+    // Saved widgets should have DEFAULT heights
+    const savedWidgets = onSave.mock.calls[0][0] as DashboardWidget[];
+    const statsWidget = savedWidgets.find((w) => w.id === 'stats');
+    expect(statsWidget?.height).toBe(140);
+    const upcomingWidget = savedWidgets.find((w) => w.id === 'upcomingEvents');
+    expect(upcomingWidget?.height).toBe(280);
+  });
 });
 
 describe('DashboardCustomizer — Save', () => {
@@ -387,6 +499,42 @@ describe('DashboardCustomizer — Save', () => {
     const errorEl = screen.queryByText('Failed to save layout');
     expect(errorEl).not.toBeNull();
   });
+
+  it('Save failure preserves the working copy', async () => {
+    const onSave = vi.fn().mockRejectedValue(new Error('Network error'));
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Customize'));
+    });
+
+    // Toggle the first switch off
+    const switches = screen.getAllByRole('switch');
+    await act(async () => {
+      fireEvent.click(switches[0]);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save'));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Save')).not.toBeNull();
+    });
+
+    // The working copy switch should still be unchecked (change preserved)
+    const switchesAfter = screen.getAllByRole('switch');
+    const firstState =
+      switchesAfter[0].getAttribute('aria-checked') ?? switchesAfter[0].getAttribute('data-state');
+    expect(['false', 'unchecked']).toContain(firstState);
+  });
 });
 
 describe('DashboardCustomizer — Cancel', () => {
@@ -421,5 +569,59 @@ describe('DashboardCustomizer — Cancel', () => {
 
     // onSave must NOT have been called
     expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
+describe('DashboardCustomizer — all-hidden empty state', () => {
+  it('shows empty state when all widgets are hidden', () => {
+    const allHiddenLayout: DashboardLayout = {
+      widgets: [
+        { id: 'stats', visible: false, height: 140 },
+        { id: 'upcomingEvents', visible: false, height: 280 },
+        { id: 'activity', visible: false, height: 200 },
+        { id: 'teamManagement', visible: false, height: 260 },
+      ],
+    };
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={allHiddenLayout as any}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
+    );
+
+    const emptyState =
+      document.querySelector('[data-testid="dashboard-empty-state"]') ??
+      screen.queryByText('All widgets hidden');
+    expect(emptyState).not.toBeNull();
+  });
+
+  it('shows empty state in edit mode when all widgets are toggled off', async () => {
+    const onSave = vi.fn();
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Customize'));
+    });
+
+    // Toggle all switches off
+    const switches = screen.getAllByRole('switch');
+    for (const sw of switches) {
+      await act(async () => {
+        fireEvent.click(sw);
+      });
+    }
+
+    const emptyState =
+      document.querySelector('[data-testid="dashboard-empty-state"]') ??
+      screen.queryByText('All widgets hidden');
+    expect(emptyState).not.toBeNull();
   });
 });

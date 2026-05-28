@@ -1,6 +1,6 @@
 // Tests for DashboardLayoutApi domain shapes.
-// Covers: DashboardWidget decode (including required x/y/w/h), DashboardLayout round-trip,
-// DASHBOARD_WIDGET_ORDER canonical ordering, DEFAULT_LAYOUT positions.
+// Covers: DashboardWidget decode (including required height), DashboardLayout round-trip,
+// DASHBOARD_WIDGET_ORDER canonical ordering, DEFAULT_LAYOUT heights.
 
 import { describe, expect, it } from '@effect/vitest';
 import { Schema } from 'effect';
@@ -16,7 +16,7 @@ function defaultEntry(
 }
 
 // ---------------------------------------------------------------------------
-// DashboardWidget — decode (with x/y/w/h required)
+// DashboardWidget — decode (with height required)
 // ---------------------------------------------------------------------------
 
 describe('DashboardWidget — decode', () => {
@@ -25,17 +25,11 @@ describe('DashboardWidget — decode', () => {
     const result = Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
       id: 'stats',
       visible: true,
-      x: entry.x,
-      y: entry.y,
-      w: entry.w,
-      h: entry.h,
+      height: entry.height,
     });
     expect(result.id).toBe('stats');
     expect(result.visible).toBe(true);
-    expect(result.x).toBe(entry.x);
-    expect(result.y).toBe(entry.y);
-    expect(result.w).toBe(entry.w);
-    expect(result.h).toBe(entry.h);
+    expect(result.height).toBe(entry.height);
   });
 
   it('decodes {id:"upcomingEvents"} using DEFAULT_LAYOUT entry successfully', () => {
@@ -43,17 +37,11 @@ describe('DashboardWidget — decode', () => {
     const result = Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
       id: 'upcomingEvents',
       visible: false,
-      x: entry.x,
-      y: entry.y,
-      w: entry.w,
-      h: entry.h,
+      height: entry.height,
     });
     expect(result.id).toBe('upcomingEvents');
     expect(result.visible).toBe(false);
-    expect(result.x).toBe(entry.x);
-    expect(result.y).toBe(entry.y);
-    expect(result.w).toBe(entry.w);
-    expect(result.h).toBe(entry.h);
+    expect(result.height).toBe(entry.height);
   });
 
   it('decodes {id:"activity"} using DEFAULT_LAYOUT entry successfully', () => {
@@ -61,13 +49,11 @@ describe('DashboardWidget — decode', () => {
     const result = Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
       id: 'activity',
       visible: true,
-      x: entry.x,
-      y: entry.y,
-      w: entry.w,
-      h: entry.h,
+      height: entry.height,
     });
     expect(result.id).toBe('activity');
     expect(result.visible).toBe(true);
+    expect(result.height).toBe(entry.height);
   });
 
   it('decodes {id:"teamManagement"} using DEFAULT_LAYOUT entry successfully', () => {
@@ -75,13 +61,11 @@ describe('DashboardWidget — decode', () => {
     const result = Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
       id: 'teamManagement',
       visible: true,
-      x: entry.x,
-      y: entry.y,
-      w: entry.w,
-      h: entry.h,
+      height: entry.height,
     });
     expect(result.id).toBe('teamManagement');
     expect(result.visible).toBe(true);
+    expect(result.height).toBe(entry.height);
   });
 
   it('FAILS to decode {id:"awaitingRsvp",visible:true,...} — not a valid widget id', () => {
@@ -89,10 +73,7 @@ describe('DashboardWidget — decode', () => {
       Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
         id: 'awaitingRsvp',
         visible: true,
-        x: 0,
-        y: 0,
-        w: 12,
-        h: 2,
+        height: 200,
       }),
     ).toThrow();
   });
@@ -102,58 +83,16 @@ describe('DashboardWidget — decode', () => {
       Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
         id: 'unknown',
         visible: true,
-        x: 0,
-        y: 0,
-        w: 12,
-        h: 2,
+        height: 200,
       }),
     ).toThrow();
   });
 
-  it('FAILS to decode when missing x field', () => {
+  it('FAILS to decode when missing height field', () => {
     expect(() =>
       Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
         id: 'stats',
         visible: true,
-        y: 0,
-        w: 12,
-        h: 2,
-      }),
-    ).toThrow();
-  });
-
-  it('FAILS to decode when missing y field', () => {
-    expect(() =>
-      Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
-        id: 'stats',
-        visible: true,
-        x: 0,
-        w: 12,
-        h: 2,
-      }),
-    ).toThrow();
-  });
-
-  it('FAILS to decode when missing w field', () => {
-    expect(() =>
-      Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
-        id: 'stats',
-        visible: true,
-        x: 0,
-        y: 0,
-        h: 2,
-      }),
-    ).toThrow();
-  });
-
-  it('FAILS to decode when missing h field', () => {
-    expect(() =>
-      Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
-        id: 'stats',
-        visible: true,
-        x: 0,
-        y: 0,
-        w: 12,
       }),
     ).toThrow();
   });
@@ -162,10 +101,7 @@ describe('DashboardWidget — decode', () => {
     expect(() =>
       Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
         id: 'stats',
-        x: 0,
-        y: 0,
-        w: 12,
-        h: 2,
+        height: 140,
       }),
     ).toThrow();
   });
@@ -174,10 +110,7 @@ describe('DashboardWidget — decode', () => {
     expect(() =>
       Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
         visible: true,
-        x: 0,
-        y: 0,
-        w: 12,
-        h: 2,
+        height: 140,
       }),
     ).toThrow();
   });
@@ -188,17 +121,13 @@ describe('DashboardWidget — decode', () => {
 // ---------------------------------------------------------------------------
 
 describe('DashboardLayout — round-trip encode/decode', () => {
-  it('round-trips a DashboardLayout with all 4 valid widgets including x/y/w/h', () => {
-    // Use DEFAULT_LAYOUT values so the test stays in sync with the canonical defaults
+  it('round-trips a DashboardLayout with all 4 valid widgets including height', () => {
     const entries = DashboardLayoutApi.DEFAULT_LAYOUT;
     const input = {
       widgets: entries.map((e, idx) => ({
         id: e.id,
         visible: idx !== 2, // activity hidden for variety
-        x: e.x,
-        y: e.y,
-        w: e.w,
-        h: e.h,
+        height: e.height,
       })),
     };
 
@@ -209,17 +138,14 @@ describe('DashboardLayout — round-trip encode/decode', () => {
     expect(encoded.widgets).toHaveLength(4);
     expect(encoded.widgets[0].id).toBe('stats');
     expect(encoded.widgets[0].visible).toBe(true);
-    expect(encoded.widgets[0].x).toBe(entries[0].x);
-    expect(encoded.widgets[0].y).toBe(entries[0].y);
-    expect(encoded.widgets[0].w).toBe(entries[0].w);
-    expect(encoded.widgets[0].h).toBe(entries[0].h);
+    expect(encoded.widgets[0].height).toBe(entries[0].height);
     expect(encoded.widgets[1].id).toBe('upcomingEvents');
+    expect(encoded.widgets[1].height).toBe(entries[1].height);
     expect(encoded.widgets[2].id).toBe('activity');
     expect(encoded.widgets[2].visible).toBe(false);
-    expect(encoded.widgets[2].x).toBe(entries[2].x);
+    expect(encoded.widgets[2].height).toBe(entries[2].height);
     expect(encoded.widgets[3].id).toBe('teamManagement');
-    expect(encoded.widgets[3].x).toBe(entries[3].x);
-    expect(encoded.widgets[3].y).toBe(entries[3].y);
+    expect(encoded.widgets[3].height).toBe(entries[3].height);
   });
 
   it('round-trips an empty widgets array', () => {
@@ -257,7 +183,7 @@ describe('DASHBOARD_WIDGET_ORDER', () => {
 });
 
 // ---------------------------------------------------------------------------
-// DEFAULT_LAYOUT — positions and visibility
+// DEFAULT_LAYOUT — heights and visibility
 // ---------------------------------------------------------------------------
 
 describe('DEFAULT_LAYOUT', () => {
@@ -265,40 +191,28 @@ describe('DEFAULT_LAYOUT', () => {
     expect(DashboardLayoutApi.DEFAULT_LAYOUT).toHaveLength(4);
   });
 
-  it('stats is full-width at top (x:0,y:0,w:12,h:14)', () => {
+  it('stats has height 140', () => {
     const stats = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'stats');
     expect(stats).toBeDefined();
-    expect(stats?.x).toBe(0);
-    expect(stats?.y).toBe(0);
-    expect(stats?.w).toBe(12);
-    expect(stats?.h).toBe(14);
+    expect(stats?.height).toBe(140);
   });
 
-  it('upcomingEvents spans 8 columns at y:14 (x:0,y:14,w:8,h:28)', () => {
+  it('upcomingEvents has height 280', () => {
     const ev = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'upcomingEvents');
     expect(ev).toBeDefined();
-    expect(ev?.x).toBe(0);
-    expect(ev?.y).toBe(14);
-    expect(ev?.w).toBe(8);
-    expect(ev?.h).toBe(28);
+    expect(ev?.height).toBe(280);
   });
 
-  it('activity spans 4 columns at x:8 (x:8,y:14,w:4,h:20)', () => {
+  it('activity has height 200', () => {
     const act = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'activity');
     expect(act).toBeDefined();
-    expect(act?.x).toBe(8);
-    expect(act?.y).toBe(14);
-    expect(act?.w).toBe(4);
-    expect(act?.h).toBe(20);
+    expect(act?.height).toBe(200);
   });
 
-  it('teamManagement spans 4 columns at x:8,y:34 (x:8,y:34,w:4,h:26)', () => {
+  it('teamManagement has height 260', () => {
     const tm = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'teamManagement');
     expect(tm).toBeDefined();
-    expect(tm?.x).toBe(8);
-    expect(tm?.y).toBe(34);
-    expect(tm?.w).toBe(4);
-    expect(tm?.h).toBe(26);
+    expect(tm?.height).toBe(260);
   });
 
   it('all entries are visible by default', () => {
@@ -337,7 +251,7 @@ describe('DashboardWidgetId — literal set', () => {
 // ---------------------------------------------------------------------------
 
 describe('UpdateDashboardLayoutPayload — decode', () => {
-  it('decodes a valid payload with 2 widgets (including x/y/w/h)', () => {
+  it('decodes a valid payload with 2 widgets (including height)', () => {
     const statsEntry = defaultEntry('stats');
     const activityEntry = defaultEntry('activity');
     const result = Schema.decodeUnknownSync(DashboardLayoutApi.UpdateDashboardLayoutPayload)({
@@ -345,18 +259,12 @@ describe('UpdateDashboardLayoutPayload — decode', () => {
         {
           id: 'stats',
           visible: true,
-          x: statsEntry.x,
-          y: statsEntry.y,
-          w: statsEntry.w,
-          h: statsEntry.h,
+          height: statsEntry.height,
         },
         {
           id: 'activity',
           visible: false,
-          x: activityEntry.x,
-          y: activityEntry.y,
-          w: activityEntry.w,
-          h: activityEntry.h,
+          height: activityEntry.height,
         },
       ],
     });
@@ -366,7 +274,7 @@ describe('UpdateDashboardLayoutPayload — decode', () => {
   it('rejects a payload with an invalid widget id', () => {
     expect(() =>
       Schema.decodeUnknownSync(DashboardLayoutApi.UpdateDashboardLayoutPayload)({
-        widgets: [{ id: 'awaitingRsvp', visible: true, x: 0, y: 0, w: 12, h: 2 }],
+        widgets: [{ id: 'awaitingRsvp', visible: true, height: 200 }],
       }),
     ).toThrow();
   });

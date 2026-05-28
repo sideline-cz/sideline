@@ -3,9 +3,8 @@
 // normalizeWidgets:
 //   - Deduplicates by id (keeps first occurrence)
 //   - Drops unknown ids
-//   - Appends missing canonical widgets below existing ones (using DEFAULT_LAYOUT positions offset)
+//   - Appends missing canonical widgets with default heights from DEFAULT_LAYOUT
 //   - Preserves visible:false on existing widgets
-//   - Fills in missing position fields with defaults from DEFAULT_LAYOUT
 
 import { describe, expect, it } from '@effect/vitest';
 import { DashboardLayoutApi } from '@sideline/domain';
@@ -26,10 +25,7 @@ const w = (
   return new DashboardLayoutApi.DashboardWidget({
     id,
     visible,
-    x: entry.x,
-    y: entry.y,
-    w: entry.w,
-    h: entry.h,
+    height: entry.height,
   });
 };
 
@@ -38,7 +34,7 @@ const w = (
 // ---------------------------------------------------------------------------
 
 describe('normalizeWidgets — empty input', () => {
-  it('empty [] → all 4 canonical widgets visible with DEFAULT_LAYOUT positions', () => {
+  it('empty [] → all 4 canonical widgets visible with DEFAULT_LAYOUT heights', () => {
     const result = normalizeWidgets([]);
     expect(result).toHaveLength(4);
     expect(result[0].id).toBe('stats');
@@ -47,10 +43,7 @@ describe('normalizeWidgets — empty input', () => {
     expect(result[3].id).toBe('teamManagement');
     for (const widget of result) {
       expect(widget.visible).toBe(true);
-      expect(typeof widget.x).toBe('number');
-      expect(typeof widget.y).toBe('number');
-      expect(typeof widget.w).toBe('number');
-      expect(typeof widget.h).toBe('number');
+      expect(typeof widget.height).toBe('number');
     }
   });
 });
@@ -114,14 +107,11 @@ describe('normalizeWidgets — partial input', () => {
     }
   });
 
-  it('appended missing widgets have position fields', () => {
+  it('appended missing widgets have height field', () => {
     const input = [w('stats', true)];
     const result = normalizeWidgets(input);
     for (const widget of result) {
-      expect(typeof widget.x).toBe('number');
-      expect(typeof widget.y).toBe('number');
-      expect(typeof widget.w).toBe('number');
-      expect(typeof widget.h).toBe('number');
+      expect(typeof widget.height).toBe('number');
     }
   });
 });
@@ -156,10 +146,7 @@ describe('normalizeWidgets — drop unknown ids', () => {
       {
         id: 'awaitingRsvp',
         visible: true,
-        x: 0,
-        y: 0,
-        w: 12,
-        h: 2,
+        height: 200,
       } as unknown as DashboardLayoutApi.DashboardWidget,
       w('stats', true),
     ];
@@ -189,23 +176,31 @@ describe('normalizeWidgets — preserves visible:false', () => {
   });
 });
 
-describe('normalizeWidgets — missing position fields filled from DEFAULT_LAYOUT', () => {
-  it('fills x/y/w/h from DEFAULT_LAYOUT for widgets missing those fields (legacy)', () => {
-    // Simulate a legacy widget missing position fields
-    const legacyWidget = {
-      id: 'stats' as DashboardLayoutApi.DashboardWidgetId,
-      visible: true,
-      x: 0,
-      y: 0,
-      w: 12,
-      h: 2,
-    } as DashboardLayoutApi.DashboardWidget;
-    const result = normalizeWidgets([legacyWidget]);
+describe('normalizeWidgets — height field preserved', () => {
+  it('preserves the input height for widgets that have one', () => {
+    const customHeight = 350;
+    const input = [
+      new DashboardLayoutApi.DashboardWidget({
+        id: 'stats',
+        visible: true,
+        height: customHeight,
+      }),
+    ];
+    const result = normalizeWidgets(input);
     const stats = result.find((r) => r.id === 'stats');
     expect(stats).toBeDefined();
-    expect(typeof stats?.x).toBe('number');
-    expect(typeof stats?.y).toBe('number');
-    expect(typeof stats?.w).toBe('number');
-    expect(typeof stats?.h).toBe('number');
+    expect(stats?.height).toBe(customHeight);
+  });
+
+  it('appended missing widgets use DEFAULT_LAYOUT height', () => {
+    const input = [w('stats', true)];
+    const result = normalizeWidgets(input);
+    for (const widget of result) {
+      const defaultH = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === widget.id)?.height;
+      if (widget.id !== 'stats') {
+        // Appended widgets should use default height
+        expect(widget.height).toBe(defaultH);
+      }
+    }
   });
 });

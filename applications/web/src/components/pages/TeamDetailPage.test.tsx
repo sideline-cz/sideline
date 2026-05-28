@@ -9,7 +9,7 @@
 //   })
 //
 // Behaviour:
-//   - Renders configurable widgets in grid when visible:true
+//   - Renders configurable widgets in layout order when visible:true
 //   - A widget with visible:false is NOT rendered
 //   - Pinned banners (AwaitingRsvp, OutstandingPayments) render regardless of layout
 //   - All configurable hidden → empty-state element present inside configurable region
@@ -105,14 +105,6 @@ vi.mock('~/lib/datetime', () => ({
   formatLocalTime: () => '10:00',
 }));
 
-// Mock react-grid-layout to avoid jsdom layout issues
-vi.mock('react-grid-layout/legacy', () => ({
-  ReactGridLayout: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid='rgl-grid'>{children}</div>
-  ),
-  WidthProvider: (Component: React.ComponentType<unknown>) => Component,
-}));
-
 // ---------------------------------------------------------------------------
 // Dynamic imports (after mocks)
 // ---------------------------------------------------------------------------
@@ -146,10 +138,7 @@ type MyFinanceStatus = {
 type DashboardWidget = {
   id: string;
   visible: boolean;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+  height: number;
 };
 type DashboardLayout = { widgets: ReadonlyArray<DashboardWidget> };
 
@@ -249,10 +238,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('renders 4 widgets in layout.widgets order when all are visible', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'teamManagement', visible: true, x: 8, y: 4, w: 4, h: 2 },
-        { id: 'activity', visible: true, x: 8, y: 2, w: 4, h: 2 },
-        { id: 'upcomingEvents', visible: true, x: 0, y: 2, w: 8, h: 4 },
-        { id: 'stats', visible: true, x: 0, y: 0, w: 12, h: 2 },
+        { id: 'teamManagement', visible: true, height: 260 },
+        { id: 'activity', visible: true, height: 200 },
+        { id: 'upcomingEvents', visible: true, height: 280 },
+        { id: 'stats', visible: true, height: 140 },
       ],
     };
     render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} layout={layout as any} />);
@@ -267,10 +256,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('a widget with visible:false is NOT rendered', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'stats', visible: false, x: 0, y: 0, w: 12, h: 2 },
-        { id: 'upcomingEvents', visible: true, x: 0, y: 2, w: 8, h: 4 },
-        { id: 'activity', visible: true, x: 8, y: 2, w: 4, h: 2 },
-        { id: 'teamManagement', visible: true, x: 8, y: 4, w: 4, h: 2 },
+        { id: 'stats', visible: false, height: 140 },
+        { id: 'upcomingEvents', visible: true, height: 280 },
+        { id: 'activity', visible: true, height: 200 },
+        { id: 'teamManagement', visible: true, height: 260 },
       ],
     };
     render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} layout={layout as any} />);
@@ -286,10 +275,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('pinned AwaitingRsvp banner renders regardless of layout', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'stats', visible: false, x: 0, y: 0, w: 12, h: 2 },
-        { id: 'upcomingEvents', visible: false, x: 0, y: 2, w: 8, h: 4 },
-        { id: 'activity', visible: false, x: 8, y: 2, w: 4, h: 2 },
-        { id: 'teamManagement', visible: false, x: 8, y: 4, w: 4, h: 2 },
+        { id: 'stats', visible: false, height: 140 },
+        { id: 'upcomingEvents', visible: false, height: 280 },
+        { id: 'activity', visible: false, height: 200 },
+        { id: 'teamManagement', visible: false, height: 260 },
       ],
     };
     const dashboard = {
@@ -316,10 +305,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('pinned OutstandingPayments banner renders regardless of layout', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'stats', visible: false, x: 0, y: 0, w: 12, h: 2 },
-        { id: 'upcomingEvents', visible: false, x: 0, y: 2, w: 8, h: 4 },
-        { id: 'activity', visible: false, x: 8, y: 2, w: 4, h: 2 },
-        { id: 'teamManagement', visible: false, x: 8, y: 4, w: 4, h: 2 },
+        { id: 'stats', visible: false, height: 140 },
+        { id: 'upcomingEvents', visible: false, height: 280 },
+        { id: 'activity', visible: false, height: 200 },
+        { id: 'teamManagement', visible: false, height: 260 },
       ],
     };
     const myStatus: MyFinanceStatus[] = [
@@ -347,10 +336,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('all configurable widgets hidden → empty-state element inside configurable region, banners still present', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'stats', visible: false, x: 0, y: 0, w: 12, h: 2 },
-        { id: 'upcomingEvents', visible: false, x: 0, y: 2, w: 8, h: 4 },
-        { id: 'activity', visible: false, x: 8, y: 2, w: 4, h: 2 },
-        { id: 'teamManagement', visible: false, x: 8, y: 4, w: 4, h: 2 },
+        { id: 'stats', visible: false, height: 140 },
+        { id: 'upcomingEvents', visible: false, height: 280 },
+        { id: 'activity', visible: false, height: 200 },
+        { id: 'teamManagement', visible: false, height: 260 },
       ],
     };
     render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} layout={layout as any} />);

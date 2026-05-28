@@ -1,12 +1,6 @@
 import { DashboardLayoutApi } from '@sideline/domain';
 import { LayoutDashboard } from 'lucide-react';
 import React from 'react';
-import {
-  type Layout,
-  type LayoutItem,
-  ReactGridLayout,
-  WidthProvider,
-} from 'react-grid-layout/legacy';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent } from '~/components/ui/card';
 import { Switch } from '~/components/ui/switch';
@@ -21,8 +15,6 @@ interface DashboardCustomizerProps {
   widgetRegistry: Record<string, React.ReactNode>;
 }
 
-const SizedGridLayout = WidthProvider(ReactGridLayout);
-
 const WIDGET_LABELS: Record<string, string> = {
   stats: 'dashboard_widget_stats',
   upcomingEvents: 'dashboard_widget_upcomingEvents',
@@ -30,119 +22,57 @@ const WIDGET_LABELS: Record<string, string> = {
   teamManagement: 'dashboard_widget_teamManagement',
 };
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function widgetsToLayout(widgets: ReadonlyArray<DashboardLayoutApi.DashboardWidget>): Layout {
-  return widgets.map((w) => ({
-    i: w.id,
-    x: w.x,
-    y: w.y,
-    w: w.w,
-    h: w.h,
-  }));
-}
-
-function mergeLayoutIntoWidgets(
-  widgets: DashboardLayoutApi.DashboardWidget[],
-  layout: Layout,
-): DashboardLayoutApi.DashboardWidget[] {
-  const byId = new Map<string, LayoutItem>(layout.map((item) => [item.i, item]));
-  return widgets.map((w) => {
-    const item = byId.get(w.id);
-    if (!item) return w;
-    return new DashboardLayoutApi.DashboardWidget({
-      id: w.id,
-      visible: w.visible,
-      x: item.x,
-      y: item.y,
-      w: item.w,
-      h: item.h,
-    });
-  });
-}
+// Grid span classes per widget id
+const WIDGET_SPAN: Record<DashboardLayoutApi.DashboardWidgetId, string> = {
+  stats: 'lg:col-span-3',
+  upcomingEvents: 'lg:col-span-2',
+  activity: 'lg:col-span-1',
+  teamManagement: 'lg:col-span-1',
+};
 
 // ---------------------------------------------------------------------------
-// Grid renderer (shared between edit and view modes)
+// ResizableWidgetContainer
 // ---------------------------------------------------------------------------
 
-const ROW_HEIGHT = 10;
-
-interface DashboardGridProps {
-  working: DashboardLayoutApi.DashboardWidget[];
-  widgetRegistry: Record<string, React.ReactNode>;
+interface ResizableWidgetContainerProps {
+  widget: DashboardLayoutApi.DashboardWidget;
   isEditing: boolean;
-  onLayoutChange: (layout: Layout) => void;
-  onResizeStop?: (layout: Layout, oldItem: LayoutItem | null, newItem: LayoutItem | null) => void;
-  userResized: Set<string>;
+  onHeightChange: (height: number) => void;
+  children: React.ReactNode;
 }
 
-function DashboardGrid({
-  working,
-  widgetRegistry,
+function ResizableWidgetContainer({
+  widget,
   isEditing,
-  onLayoutChange,
-  onResizeStop,
-  userResized,
-}: DashboardGridProps) {
-  const rglLayout = widgetsToLayout(working.filter((w) => w.visible));
-  const widgetRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
+  onHeightChange,
+  children,
+}: ResizableWidgetContainerProps) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    const observers = new Map<string, ResizeObserver>();
-    for (const item of rglLayout) {
-      if (userResized.has(item.i)) continue;
-      const wrapperDiv = widgetRefs.current.get(item.i);
-      if (!wrapperDiv) continue;
-      const inner = wrapperDiv.firstElementChild;
-      if (!(inner instanceof HTMLElement)) continue;
-      const observer = new ResizeObserver(() => {
-        const natural = inner.getBoundingClientRect().height;
-        if (natural <= 0) return;
-        const fitH = Math.max(1, Math.ceil(natural / ROW_HEIGHT));
-        if (fitH !== item.h) {
-          onLayoutChange(rglLayout.map((it) => (it.i === item.i ? { ...it, h: fitH } : it)));
-        }
-      });
-      observer.observe(inner);
-      observers.set(item.i, observer);
-    }
-    return () => {
-      for (const observer of observers.values()) {
-        observer.disconnect();
-      }
-    };
-  }, [rglLayout, userResized, onLayoutChange]);
+    if (!isEditing) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      const h = el.getBoundingClientRect().height;
+      if (h > 0) onHeightChange(h);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isEditing, onHeightChange]);
 
   return (
-    <SizedGridLayout
-      layout={rglLayout}
-      cols={12}
-      rowHeight={ROW_HEIGHT}
-      margin={[16, 16]}
-      isDraggable={isEditing}
-      isResizable={isEditing}
-      resizeHandles={['se']}
-      onLayoutChange={onLayoutChange}
-      onResizeStop={onResizeStop}
-      className={isEditing ? 'rgl-edit-mode' : undefined}
-      draggableCancel='button, a, input, [role="switch"]'
+    <div
+      ref={containerRef}
+      style={{
+        height: `${widget.height}px`,
+        overflow: 'hidden',
+        resize: isEditing ? 'vertical' : 'none',
+      }}
+      className='w-full h-full'
     >
-      {working
-        .filter((w) => w.visible)
-        .map((w) => (
-          <div
-            key={w.id}
-            ref={(el) => {
-              if (el) widgetRefs.current.set(w.id, el);
-              else widgetRefs.current.delete(w.id);
-            }}
-          >
-            {widgetRegistry[w.id]}
-          </div>
-        ))}
-    </SizedGridLayout>
+      {children}
+    </div>
   );
 }
 
@@ -159,9 +89,7 @@ export function DashboardCustomizer({
   const [working, setWorking] = React.useState<DashboardLayoutApi.DashboardWidget[]>([]);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
-  const [userResized, setUserResized] = React.useState<Set<string>>(new Set());
 
-  // Visible widgets derived from the appropriate source
   const activeWidgets = editMode ? working : [...layout.widgets];
   const allHidden = activeWidgets.every((w) => !w.visible);
 
@@ -183,11 +111,18 @@ export function DashboardCustomizer({
           ? new DashboardLayoutApi.DashboardWidget({
               id: w.id,
               visible: !w.visible,
-              x: w.x,
-              y: w.y,
-              w: w.w,
-              h: w.h,
+              height: w.height,
             })
+          : w,
+      ),
+    );
+  };
+
+  const handleHeightChange = (id: string, height: number) => {
+    setWorking((prev) =>
+      prev.map((w) =>
+        w.id === id
+          ? new DashboardLayoutApi.DashboardWidget({ id: w.id, visible: w.visible, height })
           : w,
       ),
     );
@@ -195,20 +130,6 @@ export function DashboardCustomizer({
 
   const resetLayout = () => {
     setWorking([...DEFAULT_LAYOUT.widgets]);
-    setUserResized(new Set());
-  };
-
-  const handleLayoutChange = (newLayout: Layout) => {
-    setWorking((prev) => mergeLayoutIntoWidgets(prev, newLayout));
-  };
-
-  const handleResizeStop = (
-    _layout: Layout,
-    _oldItem: LayoutItem | null,
-    newItem: LayoutItem | null,
-  ) => {
-    if (newItem === null) return;
-    setUserResized((prev) => new Set([...prev, newItem.i]));
   };
 
   const handleSave = async () => {
@@ -226,7 +147,7 @@ export function DashboardCustomizer({
   };
 
   // ---------------------------------------------------------------------------
-  // Render: configurable region wrapper
+  // Render helpers
   // ---------------------------------------------------------------------------
 
   const emptyState = (
@@ -238,10 +159,34 @@ export function DashboardCustomizer({
     </Card>
   );
 
+  const renderGrid = (widgets: DashboardLayoutApi.DashboardWidget[], isEditing: boolean) => {
+    const visibleWidgets = widgets.filter((w) => w.visible);
+    if (visibleWidgets.length === 0) return emptyState;
+
+    return (
+      <div className='grid grid-cols-1 lg:grid-cols-3 gap-6'>
+        {visibleWidgets.map((w) => (
+          <div key={w.id} className={WIDGET_SPAN[w.id]}>
+            <ResizableWidgetContainer
+              widget={w}
+              isEditing={isEditing}
+              onHeightChange={(h) => handleHeightChange(w.id, h)}
+            >
+              {widgetRegistry[w.id]}
+            </ResizableWidgetContainer>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // ---------------------------------------------------------------------------
+  // Idle mode
+  // ---------------------------------------------------------------------------
+
   if (!editMode) {
     return (
       <div className='flex flex-col gap-4'>
-        {/* Customize entry point — only shown when editing is allowed */}
         {onSave !== undefined && (
           <div className='flex justify-end'>
             <Button variant='outline' size='sm' onClick={enterEditMode}>
@@ -249,45 +194,19 @@ export function DashboardCustomizer({
             </Button>
           </div>
         )}
-
-        {/* Read-only grid or empty state */}
-        {allHidden ? (
-          emptyState
-        ) : (
-          <DashboardGrid
-            working={activeWidgets as DashboardLayoutApi.DashboardWidget[]}
-            widgetRegistry={widgetRegistry}
-            isEditing={false}
-            onLayoutChange={() => {
-              /* read-only: no-op */
-            }}
-            userResized={new Set()}
-          />
-        )}
+        {allHidden ? emptyState : renderGrid(activeWidgets, false)}
       </div>
     );
   }
 
+  // ---------------------------------------------------------------------------
   // Edit mode: grid + aside panel side-by-side (stacked on mobile)
+  // ---------------------------------------------------------------------------
+
   return (
     <div className='flex flex-col gap-6 lg:flex-row'>
       {/* Grid area */}
-      <div className='flex-1 min-w-0'>
-        {allHidden ? (
-          <div className='flex items-center justify-center py-10 text-sm text-muted-foreground'>
-            {tr('dashboard_allWidgetsHidden')}
-          </div>
-        ) : (
-          <DashboardGrid
-            working={working}
-            widgetRegistry={widgetRegistry}
-            isEditing={true}
-            onLayoutChange={handleLayoutChange}
-            onResizeStop={handleResizeStop}
-            userResized={userResized}
-          />
-        )}
-      </div>
+      <div className='flex-1 min-w-0'>{renderGrid(working, true)}</div>
 
       {/* Aside panel */}
       <aside className='lg:w-64 flex flex-col gap-4 rounded-lg border bg-card p-4'>

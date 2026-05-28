@@ -21,31 +21,25 @@ export const DASHBOARD_WIDGET_ORDER = [
 export class DashboardWidget extends Schema.Class<DashboardWidget>('DashboardWidget')({
   id: DashboardWidgetId,
   visible: Schema.Boolean,
-  x: Schema.Number,
-  y: Schema.Number,
-  w: Schema.Number,
-  h: Schema.Number,
+  height: Schema.Number,
 }) {}
 
 export interface DefaultLayoutEntry {
   id: DashboardWidgetId;
   visible: boolean;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+  height: number;
 }
 
-// 12-column grid defaults (rowHeight=10px, margin=[16,16])
-// stats:          h=14 → ~140px  (4 stat tiles)
-// upcomingEvents: h=28 → ~280px  (event list)
-// activity:       h=20 → ~200px  (3 detail rows)
-// teamManagement: h=26 → ~260px  (8 nav links)
+// Sensible pixel-height defaults for the vertical-stack layout.
+// stats:          140px  (4 stat tiles)
+// upcomingEvents: 280px  (event list)
+// activity:       200px  (3 detail rows)
+// teamManagement: 260px  (8 nav links)
 export const DEFAULT_LAYOUT: ReadonlyArray<DefaultLayoutEntry> = [
-  { id: 'stats', visible: true, x: 0, y: 0, w: 12, h: 14 },
-  { id: 'upcomingEvents', visible: true, x: 0, y: 14, w: 8, h: 28 },
-  { id: 'activity', visible: true, x: 8, y: 14, w: 4, h: 20 },
-  { id: 'teamManagement', visible: true, x: 8, y: 34, w: 4, h: 26 },
+  { id: 'stats', visible: true, height: 140 },
+  { id: 'upcomingEvents', visible: true, height: 280 },
+  { id: 'activity', visible: true, height: 200 },
+  { id: 'teamManagement', visible: true, height: 260 },
 ] as const;
 
 export class DashboardLayout extends Schema.Class<DashboardLayout>('DashboardLayout')({

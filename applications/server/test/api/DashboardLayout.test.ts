@@ -35,7 +35,7 @@ const MEMBER_PERMISSIONS: readonly Role.Permission[] = ['member:view'];
 
 const now = DateTime.nowUnsafe();
 
-type StoredWidget = { id: string; visible: boolean; x: number; y: number; w: number; h: number };
+type StoredWidget = { id: string; visible: boolean; height: number };
 
 let layoutStore: Map<string, ReadonlyArray<StoredWidget>>;
 
@@ -188,10 +188,7 @@ const MockDashboardLayoutsRepositoryLayer = Layer.succeed(DashboardLayoutsReposi
     const serialized: StoredWidget[] = widgets.map((w) => ({
       id: w.id,
       visible: w.visible,
-      x: w.x,
-      y: w.y,
-      w: w.w,
-      h: w.h,
+      height: w.height,
     }));
     layoutStore.set(layoutKey(userId, teamId), serialized);
     return Effect.succeed({ widgets: serialized as any });
@@ -291,17 +288,18 @@ describe('DashboardLayout API — getDashboardLayout', () => {
     expect(body.widgets[1].id).toBe('upcomingEvents');
     expect(body.widgets[2].id).toBe('activity');
     expect(body.widgets[3].id).toBe('teamManagement');
-    // Position fields present
-    expect(typeof body.widgets[0].x).toBe('number');
-    expect(typeof body.widgets[0].y).toBe('number');
-    expect(typeof body.widgets[0].w).toBe('number');
-    expect(typeof body.widgets[0].h).toBe('number');
+    // Height field present
+    expect(typeof body.widgets[0].height).toBe('number');
+    expect(body.widgets[0].height).toBe(140);
+    expect(body.widgets[1].height).toBe(280);
+    expect(body.widgets[2].height).toBe(200);
+    expect(body.widgets[3].height).toBe(260);
   });
 
   it('GET → 200 with normalized result when stored partial/legacy row exists', async () => {
-    // Pre-seed a partial layout (only 1 widget stored, with positions)
+    // Pre-seed a partial layout (only 1 widget stored, with height)
     layoutStore.set(layoutKey(TEST_MEMBER_USER_ID, TEST_TEAM_ID), [
-      { id: 'teamManagement', visible: false, x: 8, y: 4, w: 4, h: 2 },
+      { id: 'teamManagement', visible: false, height: 260 },
     ]);
 
     const response = await handler(
@@ -316,8 +314,8 @@ describe('DashboardLayout API — getDashboardLayout', () => {
     // The stored widget comes first
     expect(body.widgets[0].id).toBe('teamManagement');
     expect(body.widgets[0].visible).toBe(false);
-    // Position fields must be present
-    expect(typeof body.widgets[0].x).toBe('number');
+    // Height field must be present
+    expect(typeof body.widgets[0].height).toBe('number');
   });
 
   it('GET → 403 DashboardLayoutForbidden for non-member of team', async () => {
@@ -342,13 +340,13 @@ describe('DashboardLayout API — getDashboardLayout', () => {
 // ---------------------------------------------------------------------------
 
 describe('DashboardLayout API — updateDashboardLayout', () => {
-  it('PUT → 200 persists & returns normalized widgets with position fields', async () => {
+  it('PUT → 200 persists & returns normalized widgets with height fields', async () => {
     const payload = {
       widgets: [
-        { id: 'activity', visible: false, x: 8, y: 2, w: 4, h: 2 },
-        { id: 'stats', visible: true, x: 0, y: 0, w: 12, h: 2 },
-        { id: 'upcomingEvents', visible: true, x: 0, y: 2, w: 8, h: 4 },
-        { id: 'teamManagement', visible: true, x: 8, y: 4, w: 4, h: 2 },
+        { id: 'activity', visible: false, height: 200 },
+        { id: 'stats', visible: true, height: 140 },
+        { id: 'upcomingEvents', visible: true, height: 280 },
+        { id: 'teamManagement', visible: true, height: 260 },
       ],
     };
 
@@ -367,12 +365,9 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
     expect(Array.isArray(body.widgets)).toBe(true);
     // Should contain all 4 widgets
     expect(body.widgets).toHaveLength(4);
-    // Position fields present
+    // Height fields present
     for (const w of body.widgets) {
-      expect(typeof w.x).toBe('number');
-      expect(typeof w.y).toBe('number');
-      expect(typeof w.w).toBe('number');
-      expect(typeof w.h).toBe('number');
+      expect(typeof w.height).toBe('number');
     }
     // Persisted — verify store was written
     const stored = layoutStore.get(layoutKey(TEST_MEMBER_USER_ID, TEST_TEAM_ID));
@@ -381,7 +376,7 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
 
   it('PUT → 200 normalizes partial payload (fills in missing widgets)', async () => {
     const payload = {
-      widgets: [{ id: 'stats', visible: false, x: 0, y: 0, w: 12, h: 2 }],
+      widgets: [{ id: 'stats', visible: false, height: 140 }],
     };
 
     const response = await handler(
@@ -403,13 +398,41 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
     expect(statsWidget.visible).toBe(false);
   });
 
+  it('PUT persists custom height values', async () => {
+    const payload = {
+      widgets: [
+        { id: 'stats', visible: true, height: 350 },
+        { id: 'upcomingEvents', visible: true, height: 500 },
+        { id: 'activity', visible: true, height: 200 },
+        { id: 'teamManagement', visible: true, height: 260 },
+      ],
+    };
+
+    const response = await handler(
+      new Request(putLayoutUrl(), {
+        method: 'PUT',
+        headers: {
+          Authorization: 'Bearer member-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const statsWidget = body.widgets.find((w: any) => w.id === 'stats');
+    expect(statsWidget?.height).toBe(350);
+    const upcomingWidget = body.widgets.find((w: any) => w.id === 'upcomingEvents');
+    expect(upcomingWidget?.height).toBe(500);
+  });
+
   it('PUT → 403 DashboardLayoutForbidden for non-member of team', async () => {
     const payload = {
       widgets: [
-        { id: 'stats', visible: true, x: 0, y: 0, w: 12, h: 2 },
-        { id: 'upcomingEvents', visible: true, x: 0, y: 2, w: 8, h: 4 },
-        { id: 'activity', visible: true, x: 8, y: 2, w: 4, h: 2 },
-        { id: 'teamManagement', visible: true, x: 8, y: 4, w: 4, h: 2 },
+        { id: 'stats', visible: true, height: 140 },
+        { id: 'upcomingEvents', visible: true, height: 280 },
+        { id: 'activity', visible: true, height: 200 },
+        { id: 'teamManagement', visible: true, height: 260 },
       ],
     };
 
@@ -430,7 +453,7 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
 
   it('PUT → 401 when no auth token provided', async () => {
     const payload = {
-      widgets: [{ id: 'stats', visible: true, x: 0, y: 0, w: 12, h: 2 }],
+      widgets: [{ id: 'stats', visible: true, height: 140 }],
     };
 
     const response = await handler(
@@ -445,7 +468,7 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
 
   it('PUT → 400 when payload contains an invalid widget id', async () => {
     const payload = {
-      widgets: [{ id: 'awaitingRsvp', visible: true, x: 0, y: 0, w: 12, h: 2 }],
+      widgets: [{ id: 'awaitingRsvp', visible: true, height: 200 }],
     };
 
     const response = await handler(

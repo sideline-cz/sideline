@@ -7,10 +7,7 @@ export const DEFAULT_LAYOUT: DashboardLayoutApi.DashboardLayout =
         new DashboardLayoutApi.DashboardWidget({
           id: entry.id,
           visible: entry.visible,
-          x: entry.x,
-          y: entry.y,
-          w: entry.w,
-          h: entry.h,
+          height: entry.height,
         }),
     ),
   });

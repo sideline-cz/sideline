@@ -19,46 +19,13 @@ export const DEFAULT_LAYOUT: ReadonlyArray<DashboardLayoutApi.DashboardWidget> =
       new DashboardLayoutApi.DashboardWidget({
         id: entry.id,
         visible: entry.visible,
-        x: entry.x,
-        y: entry.y,
-        w: entry.w,
-        h: entry.h,
+        height: entry.height,
       }),
   );
 
 // ---------------------------------------------------------------------------
 // normalizeWidgets
 // ---------------------------------------------------------------------------
-
-/**
- * Minimum sensible h/w values for the current rowHeight=10 grid. Stored widgets
- * with smaller dimensions are legacy data from an earlier rowHeight=80 scale
- * and would render as unusable tiny cells; we restore canonical positions for
- * those widgets. Anything >= these thresholds is preserved (real user resizes).
- */
-const MIN_H = 5;
-const MIN_W = 2;
-
-const defaultEntryById = new Map<
-  DashboardLayoutApi.DashboardWidgetId,
-  DashboardLayoutApi.DefaultLayoutEntry
->(DashboardLayoutApi.DEFAULT_LAYOUT.map((entry) => [entry.id, entry]));
-
-const restoreIfTooSmall = (
-  widget: DashboardLayoutApi.DashboardWidget,
-): DashboardLayoutApi.DashboardWidget => {
-  if (widget.h >= MIN_H && widget.w >= MIN_W) return widget;
-  const defaults = defaultEntryById.get(widget.id);
-  if (!defaults) return widget;
-  return new DashboardLayoutApi.DashboardWidget({
-    id: widget.id,
-    visible: widget.visible,
-    x: defaults.x,
-    y: defaults.y,
-    w: defaults.w,
-    h: defaults.h,
-  });
-};
 
 export const normalizeWidgets = (
   input: ReadonlyArray<DashboardLayoutApi.DashboardWidget>,
@@ -73,27 +40,19 @@ export const normalizeWidgets = (
     if (!validIds.has(widget.id)) continue;
     if (seen.has(widget.id)) continue;
     seen.add(widget.id);
-    result.push(restoreIfTooSmall(widget));
+    result.push(widget);
   }
 
-  // Compute max y+h of existing widgets to place missing ones below
-  const maxBottom = result.length > 0 ? Math.max(...result.map((w) => w.y + w.h)) : 0;
-  let nextY = maxBottom;
-
-  // Append any missing canonical widgets using DEFAULT_LAYOUT positions (offset below existing)
+  // Append any missing canonical widgets using DEFAULT_LAYOUT heights
   for (const defaultEntry of DashboardLayoutApi.DEFAULT_LAYOUT) {
     if (!seen.has(defaultEntry.id)) {
       result.push(
         new DashboardLayoutApi.DashboardWidget({
           id: defaultEntry.id,
           visible: defaultEntry.visible,
-          x: defaultEntry.x,
-          y: nextY,
-          w: defaultEntry.w,
-          h: defaultEntry.h,
+          height: defaultEntry.height,
         }),
       );
-      nextY += defaultEntry.h;
       seen.add(defaultEntry.id);
     }
   }

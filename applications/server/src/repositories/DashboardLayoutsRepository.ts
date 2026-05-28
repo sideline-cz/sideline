@@ -8,9 +8,9 @@ import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 // Node-pg automatically parses JSONB columns into JS objects, so we use
 // Schema.Array(DashboardWidget) directly (no JSON string parsing needed).
 //
-// LegacyDashboardWidgetRow is lenient: x/y/w/h are optional so that rows
-// stored before the layout-grid migration can still be read back.
-// normalizeWidgets in the API layer fills in the missing positions.
+// LegacyDashboardWidgetRow is lenient: height is optional (legacy rows from
+// the grid era stored x/y/w/h instead). On read, we fall back to the
+// canonical height from DEFAULT_LAYOUT so old rows don't break the load.
 // ---------------------------------------------------------------------------
 
 class LegacyDashboardWidgetRow extends Schema.Class<LegacyDashboardWidgetRow>(
@@ -18,10 +18,7 @@ class LegacyDashboardWidgetRow extends Schema.Class<LegacyDashboardWidgetRow>(
 )({
   id: DashboardLayoutApi.DashboardWidgetId,
   visible: Schema.Boolean,
-  x: Schema.OptionFromOptionalKey(Schema.Number),
-  y: Schema.OptionFromOptionalKey(Schema.Number),
-  w: Schema.OptionFromOptionalKey(Schema.Number),
-  h: Schema.OptionFromOptionalKey(Schema.Number),
+  height: Schema.OptionFromOptionalKey(Schema.Number),
 }) {}
 
 class DashboardLayoutLegacyRow extends Schema.Class<DashboardLayoutLegacyRow>(
@@ -33,6 +30,11 @@ class DashboardLayoutLegacyRow extends Schema.Class<DashboardLayoutLegacyRow>(
 class DashboardLayoutRow extends Schema.Class<DashboardLayoutRow>('DashboardLayoutRow')({
   widgets: Schema.Array(DashboardLayoutApi.DashboardWidget),
 }) {}
+
+// Default height lookup for legacy backfill
+const defaultHeightById = new Map<DashboardLayoutApi.DashboardWidgetId, number>(
+  DashboardLayoutApi.DEFAULT_LAYOUT.map((entry) => [entry.id, entry.height]),
+);
 
 // ---------------------------------------------------------------------------
 // make
@@ -73,10 +75,8 @@ const make = Effect.gen(function* () {
               new DashboardLayoutApi.DashboardWidget({
                 id: w.id,
                 visible: w.visible,
-                x: Option.getOrElse(w.x, () => 0),
-                y: Option.getOrElse(w.y, () => 0),
-                w: Option.getOrElse(w.w, () => 1),
-                h: Option.getOrElse(w.h, () => 1),
+                // Backfill height for legacy rows that stored x/y/w/h instead
+                height: Option.getOrElse(w.height, () => defaultHeightById.get(w.id) ?? 200),
               }),
           ),
         })),
@@ -96,10 +96,7 @@ const make = Effect.gen(function* () {
         widgets.map((w) => ({
           id: w.id,
           visible: w.visible,
-          x: w.x,
-          y: w.y,
-          w: w.w,
-          h: w.h,
+          height: w.height,
         })),
       ),
     }).pipe(
