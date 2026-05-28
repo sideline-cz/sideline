@@ -15,6 +15,8 @@ import {
   Zap,
 } from 'lucide-react';
 import type React from 'react';
+import type { Layout } from 'react-grid-layout';
+import { GridLayout, useContainerWidth } from 'react-grid-layout';
 import { EventLocation } from '~/components/atoms/EventLocation.js';
 import { DashboardCustomizer } from '~/components/organisms/DashboardCustomizer.js';
 import type { MyFinanceStatus } from '~/components/organisms/OutstandingPaymentsBanner.js';
@@ -27,17 +29,8 @@ import { DEFAULT_LAYOUT } from '~/lib/dashboardLayout.js';
 import { formatLocalTime } from '~/lib/datetime';
 import { tr } from '~/lib/translations.js';
 
-// WidgetId mirrors DashboardLayoutApi.DashboardWidgetId — kept here so the
-// registry Record type is closed without importing from the domain package.
+// WidgetId mirrors DashboardLayoutApi.DashboardWidgetId
 type WidgetId = 'stats' | 'upcomingEvents' | 'activity' | 'teamManagement';
-
-// Per-widget CSS grid span classes for the 3-column responsive grid.
-const WIDGET_SPAN: Record<WidgetId, string> = {
-  stats: 'lg:col-span-3',
-  upcomingEvents: 'lg:col-span-2',
-  activity: 'lg:col-span-1',
-  teamManagement: 'lg:col-span-1',
-};
 
 interface TeamDetailPageProps {
   teamId: string;
@@ -424,6 +417,44 @@ function TeamManagementCard({ teamId }: { teamId: string }) {
   );
 }
 
+// -- Read-only grid (non-edit mode) --
+
+interface ReadOnlyGridProps {
+  effectiveLayout: DashboardLayoutApi.DashboardLayout;
+  widgetRegistry: Record<WidgetId, React.ReactNode>;
+}
+
+function ReadOnlyGrid({ effectiveLayout, widgetRegistry }: ReadOnlyGridProps) {
+  const { width, containerRef, mounted } = useContainerWidth();
+  const visibleWidgets = effectiveLayout.widgets.filter((w) => w.visible);
+
+  const rglLayout: Layout = visibleWidgets.map((w) => ({
+    i: w.id,
+    x: w.x,
+    y: w.y,
+    w: w.w,
+    h: w.h,
+  }));
+
+  return (
+    <div ref={containerRef} className='w-full'>
+      {mounted && (
+        <GridLayout
+          layout={rglLayout}
+          width={width}
+          gridConfig={{ cols: 12, rowHeight: 80 }}
+          dragConfig={{ enabled: false, bounded: false, threshold: 3 }}
+          resizeConfig={{ enabled: false, handles: ['se'] }}
+        >
+          {visibleWidgets.map((w) => (
+            <div key={w.id}>{widgetRegistry[w.id as WidgetId]}</div>
+          ))}
+        </GridLayout>
+      )}
+    </div>
+  );
+}
+
 // -- Main page component --
 
 export function TeamDetailPage({
@@ -455,19 +486,6 @@ export function TeamDetailPage({
     teamManagement: <TeamManagementCard key='teamManagement' teamId={teamId} />,
   };
 
-  const visibleWidgets = effectiveLayout.widgets
-    .filter((w) => w.visible)
-    .map((w) => {
-      const id = w.id as WidgetId;
-      const spanClass = WIDGET_SPAN[id] ?? 'lg:col-span-1';
-      return (
-        <div key={id} className={spanClass}>
-          {widgetRegistry[id]}
-        </div>
-      );
-    })
-    .filter(Boolean);
-
   const allHidden = effectiveLayout.widgets.every((w) => !w.visible);
 
   return (
@@ -476,7 +494,12 @@ export function TeamDetailPage({
       <div className='flex items-center justify-between gap-2'>
         <h1 className='text-2xl font-bold'>{tr('dashboard_title')}</h1>
         {userId !== undefined && onSaveLayout !== undefined && (
-          <DashboardCustomizer teamId={teamId} layout={effectiveLayout} onSave={onSaveLayout} />
+          <DashboardCustomizer
+            teamId={teamId}
+            layout={effectiveLayout}
+            onSave={onSaveLayout}
+            widgetRegistry={widgetRegistry}
+          />
         )}
       </div>
 
@@ -486,21 +509,17 @@ export function TeamDetailPage({
       {/* Outstanding payments banner - shown when player has outstanding fees */}
       <OutstandingPaymentsBanner teamId={teamId} groups={myStatus} />
 
-      {/* Configurable widget region — responsive 3-column grid */}
-      <div className='grid grid-cols-1 lg:grid-cols-3 gap-6'>
-        {allHidden ? (
-          <div className='lg:col-span-3'>
-            <Card data-testid='dashboard-empty-state'>
-              <CardContent className='flex flex-col items-center justify-center gap-3 py-10 text-center'>
-                <LayoutDashboard className='size-8 text-muted-foreground/40' />
-                <p className='text-sm text-muted-foreground'>{tr('dashboard_allWidgetsHidden')}</p>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          visibleWidgets
-        )}
-      </div>
+      {/* Configurable widget region — react-grid-layout (read-only outside edit mode) */}
+      {allHidden ? (
+        <Card data-testid='dashboard-empty-state'>
+          <CardContent className='flex flex-col items-center justify-center gap-3 py-10 text-center'>
+            <LayoutDashboard className='size-8 text-muted-foreground/40' />
+            <p className='text-sm text-muted-foreground'>{tr('dashboard_allWidgetsHidden')}</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <ReadOnlyGrid effectiveLayout={effectiveLayout} widgetRegistry={widgetRegistry} />
+      )}
     </div>
   );
 }

@@ -1,21 +1,20 @@
-// TDD mode — tests written BEFORE DashboardCustomizer.tsx implementation exists.
-// These tests WILL FAIL until the developer implements:
-//   applications/web/src/components/organisms/DashboardCustomizer.tsx
+// Tests for the redesigned DashboardCustomizer.
 //
 // Component contract:
 //   DashboardCustomizer({
 //     teamId: string;
 //     layout: DashboardLayout;                 ← current persisted layout
 //     onSave: (widgets: DashboardWidget[]) => Promise<void>  ← calls updateDashboardLayout API
+//     widgetRegistry: Record<string, React.ReactNode>
 //   })
 //
 // Behaviour:
-//   - "Customize" button enters edit mode: per-widget Switch + drag handle per row
+//   - "Customize" button enters edit mode; aside panel appears with one Switch per widget
 //   - Toggling a Switch updates local working copy but does NOT call onSave
-//   - Drag handle allows keyboard reorder via dnd-kit keyboard sensor
-//   - Reset sets working copy back to DEFAULT (4 visible in canonical order)
+//   - Reset sets working copy back to DEFAULT (4 visible with default positions)
 //   - Save calls onSave exactly once then exits edit mode
 //   - Save failure stays in edit mode (error state shown)
+//   - Cancel exits edit mode without calling onSave
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -29,15 +28,16 @@ vi.mock('~/lib/translations.js', () => ({
     const map: Record<string, string> = {
       dashboard_customize: 'Customize',
       dashboard_customizer_title: 'Customize dashboard',
+      dashboard_customizer_panelTitle: 'Widgets',
       dashboard_customizer_save: 'Save',
       dashboard_customizer_cancel: 'Cancel',
-      dashboard_customizer_reset: 'Reset',
-      dashboard_customizer_dragHandle: 'Reorder {widget}',
+      dashboard_customizer_reset: 'Reset layout',
       dashboard_customizer_saveError: 'Failed to save layout',
       dashboard_widget_stats: 'Stats',
       dashboard_widget_upcomingEvents: 'Upcoming events',
       dashboard_widget_activity: 'Activity',
       dashboard_widget_teamManagement: 'Team management',
+      dashboard_allWidgetsHidden: 'All widgets hidden',
     };
     const raw = map[key] ?? key;
     if (params) {
@@ -55,6 +55,12 @@ vi.mock('@tanstack/react-router', () => ({
   ),
 }));
 
+// Mock react-grid-layout to avoid jsdom layout issues
+vi.mock('react-grid-layout', () => ({
+  GridLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  useContainerWidth: () => ({ width: 1200, containerRef: { current: null }, mounted: false }),
+}));
+
 // ---------------------------------------------------------------------------
 // Dynamic imports (after mocks)
 // ---------------------------------------------------------------------------
@@ -65,16 +71,16 @@ const { DashboardCustomizer } = await import('~/components/organisms/DashboardCu
 // Helpers / fixtures
 // ---------------------------------------------------------------------------
 
-type DashboardWidget = { id: string; visible: boolean };
+type DashboardWidget = { id: string; visible: boolean; x: number; y: number; w: number; h: number };
 type DashboardLayout = { widgets: ReadonlyArray<DashboardWidget> };
 
 function makeDefaultLayout(): DashboardLayout {
   return {
     widgets: [
-      { id: 'stats', visible: true },
-      { id: 'upcomingEvents', visible: true },
-      { id: 'activity', visible: true },
-      { id: 'teamManagement', visible: true },
+      { id: 'stats', visible: true, x: 0, y: 0, w: 12, h: 2 },
+      { id: 'upcomingEvents', visible: true, x: 0, y: 2, w: 8, h: 4 },
+      { id: 'activity', visible: true, x: 8, y: 2, w: 4, h: 2 },
+      { id: 'teamManagement', visible: true, x: 8, y: 4, w: 4, h: 2 },
     ],
   };
 }
@@ -82,15 +88,22 @@ function makeDefaultLayout(): DashboardLayout {
 function makePartialLayout(): DashboardLayout {
   return {
     widgets: [
-      { id: 'stats', visible: false },
-      { id: 'upcomingEvents', visible: true },
-      { id: 'activity', visible: false },
-      { id: 'teamManagement', visible: true },
+      { id: 'stats', visible: false, x: 0, y: 0, w: 12, h: 2 },
+      { id: 'upcomingEvents', visible: true, x: 0, y: 2, w: 8, h: 4 },
+      { id: 'activity', visible: false, x: 8, y: 2, w: 4, h: 2 },
+      { id: 'teamManagement', visible: true, x: 8, y: 4, w: 4, h: 2 },
     ],
   };
 }
 
 const TEAM_ID = 'team-customizer-001';
+
+const WIDGET_REGISTRY = {
+  stats: <div>Stats Widget</div>,
+  upcomingEvents: <div>Upcoming Events Widget</div>,
+  activity: <div>Activity Widget</div>,
+  teamManagement: <div>Team Management Widget</div>,
+};
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -100,21 +113,31 @@ describe('DashboardCustomizer — initial state (not in edit mode)', () => {
   it('renders a "Customize" button in idle state', () => {
     const onSave = vi.fn();
     render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
     );
 
     expect(screen.getByText('Customize')).not.toBeNull();
-    // Switches and drag handles should NOT be visible yet
+    // Aside panel should NOT be visible yet
     expect(screen.queryByRole('switch')).toBeNull();
-    expect(screen.queryByRole('button', { name: /reorder/i })).toBeNull();
+    expect(screen.queryByText('Widgets')).toBeNull();
   });
 });
 
 describe('DashboardCustomizer — entering edit mode', () => {
-  it('clicking "Customize" enters edit mode with Switch + drag handle for each widget', async () => {
+  it('clicking "Customize" enters edit mode with the aside panel and one Switch per widget', async () => {
     const onSave = vi.fn();
     render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
     );
 
     const customizeBtn = screen.getByText('Customize');
@@ -122,19 +145,23 @@ describe('DashboardCustomizer — entering edit mode', () => {
       fireEvent.click(customizeBtn);
     });
 
+    // Aside panel title should be visible
+    expect(screen.getByText('Widgets')).not.toBeNull();
+
     // In edit mode, Switches should render (one per widget = 4)
     const switches = screen.getAllByRole('switch');
     expect(switches.length).toBe(4);
-
-    // Per-row drag handle buttons should render (4 total — one per widget)
-    const dragHandles = screen.getAllByRole('button', { name: /reorder/i });
-    expect(dragHandles.length).toBe(4);
   });
 
   it('Save and Cancel buttons are visible in edit mode', async () => {
     const onSave = vi.fn();
     render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
     );
 
     await act(async () => {
@@ -150,7 +177,12 @@ describe('DashboardCustomizer — toggling a Switch', () => {
   it('toggling a Switch updates local working copy but does NOT call onSave', async () => {
     const onSave = vi.fn();
     render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
     );
 
     await act(async () => {
@@ -169,7 +201,12 @@ describe('DashboardCustomizer — toggling a Switch', () => {
   it('toggling a switch reflects in working copy (checked state changes)', async () => {
     const onSave = vi.fn();
     render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
     );
 
     await act(async () => {
@@ -195,7 +232,12 @@ describe('DashboardCustomizer — toggling a Switch', () => {
   it('a widget that starts as visible:false has an unchecked switch', async () => {
     const onSave = vi.fn();
     render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makePartialLayout() as any} onSave={onSave} />,
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makePartialLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
     );
 
     await act(async () => {
@@ -210,76 +252,16 @@ describe('DashboardCustomizer — toggling a Switch', () => {
   });
 });
 
-describe('DashboardCustomizer — keyboard drag-and-drop reorder', () => {
-  it('keyboard: space to pick up, ArrowDown to move, space to drop reorders the working copy', async () => {
-    const onSave = vi.fn();
-    render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('Customize'));
-    });
-
-    // Get drag handle for first widget ("Stats")
-    const dragHandles = screen.getAllByRole('button', { name: /reorder/i });
-    const firstHandle = dragHandles[0];
-
-    // Verify initial order: first widget is Stats
-    expect(firstHandle.getAttribute('aria-label')).toBe('Reorder Stats');
-
-    // Pick up (space), move down (ArrowDown), drop (space)
-    await act(async () => {
-      firstHandle.focus();
-      fireEvent.keyDown(firstHandle, { key: ' ', code: 'Space' });
-    });
-    await act(async () => {
-      fireEvent.keyDown(firstHandle, { key: 'ArrowDown', code: 'ArrowDown' });
-    });
-    await act(async () => {
-      fireEvent.keyDown(firstHandle, { key: ' ', code: 'Space' });
-    });
-
-    // onSave should NOT have been called (reorder only updates working copy)
-    expect(onSave).not.toHaveBeenCalled();
-
-    // The component should still be in edit mode (Save button still visible)
-    expect(screen.getByText('Save')).not.toBeNull();
-  });
-
-  it('keyboard reorder does not call onSave', async () => {
-    const onSave = vi.fn();
-    render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('Customize'));
-    });
-
-    const dragHandles = screen.getAllByRole('button', { name: /reorder/i });
-    const firstHandle = dragHandles[0];
-
-    await act(async () => {
-      firstHandle.focus();
-      fireEvent.keyDown(firstHandle, { key: ' ', code: 'Space' });
-    });
-    await act(async () => {
-      fireEvent.keyDown(firstHandle, { key: 'ArrowDown', code: 'ArrowDown' });
-    });
-    await act(async () => {
-      fireEvent.keyDown(firstHandle, { key: ' ', code: 'Space' });
-    });
-
-    expect(onSave).not.toHaveBeenCalled();
-  });
-});
-
 describe('DashboardCustomizer — Reset', () => {
   it('Reset button sets working copy back to DEFAULT (4 visible)', async () => {
     const onSave = vi.fn();
     render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makePartialLayout() as any} onSave={onSave} />,
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makePartialLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
     );
 
     await act(async () => {
@@ -292,7 +274,7 @@ describe('DashboardCustomizer — Reset', () => {
       switches[0].getAttribute('aria-checked') ?? switches[0].getAttribute('data-state');
     expect(['false', 'unchecked']).toContain(firstStateBefore);
 
-    const resetBtn = screen.getByText('Reset');
+    const resetBtn = screen.getByText('Reset layout');
     await act(async () => {
       fireEvent.click(resetBtn);
     });
@@ -313,7 +295,12 @@ describe('DashboardCustomizer — Save', () => {
   it('clicking Save calls onSave exactly once then exits edit mode', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
     );
 
     await act(async () => {
@@ -338,7 +325,12 @@ describe('DashboardCustomizer — Save', () => {
   it('Save calls onSave with the current working copy widgets', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
     );
 
     await act(async () => {
@@ -368,7 +360,12 @@ describe('DashboardCustomizer — Save', () => {
   it('Save failure stays in edit mode and shows error', async () => {
     const onSave = vi.fn().mockRejectedValue(new Error('Network error'));
     render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
     );
 
     await act(async () => {
@@ -394,7 +391,12 @@ describe('DashboardCustomizer — Cancel', () => {
   it('Cancel discards changes and exits edit mode without calling onSave', async () => {
     const onSave = vi.fn();
     render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+      />,
     );
 
     await act(async () => {

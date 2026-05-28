@@ -7,7 +7,28 @@ import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 // Row schema
 // Node-pg automatically parses JSONB columns into JS objects, so we use
 // Schema.Array(DashboardWidget) directly (no JSON string parsing needed).
+//
+// LegacyDashboardWidgetRow is lenient: x/y/w/h are optional so that rows
+// stored before the layout-grid migration can still be read back.
+// normalizeWidgets in the API layer fills in the missing positions.
 // ---------------------------------------------------------------------------
+
+class LegacyDashboardWidgetRow extends Schema.Class<LegacyDashboardWidgetRow>(
+  'LegacyDashboardWidgetRow',
+)({
+  id: DashboardLayoutApi.DashboardWidgetId,
+  visible: Schema.Boolean,
+  x: Schema.OptionFromOptionalKey(Schema.Number),
+  y: Schema.OptionFromOptionalKey(Schema.Number),
+  w: Schema.OptionFromOptionalKey(Schema.Number),
+  h: Schema.OptionFromOptionalKey(Schema.Number),
+}) {}
+
+class DashboardLayoutLegacyRow extends Schema.Class<DashboardLayoutLegacyRow>(
+  'DashboardLayoutLegacyRow',
+)({
+  widgets: Schema.Array(LegacyDashboardWidgetRow),
+}) {}
 
 class DashboardLayoutRow extends Schema.Class<DashboardLayoutRow>('DashboardLayoutRow')({
   widgets: Schema.Array(DashboardLayoutApi.DashboardWidget),
@@ -22,7 +43,7 @@ const make = Effect.gen(function* () {
 
   const _findByUserTeam = SqlSchema.findOneOption({
     Request: Schema.Struct({ user_id: Auth.UserId, team_id: Team.TeamId }),
-    Result: DashboardLayoutRow,
+    Result: DashboardLayoutLegacyRow,
     execute: (input) =>
       sql`SELECT widgets FROM dashboard_layouts WHERE user_id = ${input.user_id} AND team_id = ${input.team_id}`,
   });
@@ -47,7 +68,17 @@ const make = Effect.gen(function* () {
     _findByUserTeam({ user_id: userId, team_id: teamId }).pipe(
       Effect.map(
         Option.map((row) => ({
-          widgets: row.widgets,
+          widgets: row.widgets.map(
+            (w) =>
+              new DashboardLayoutApi.DashboardWidget({
+                id: w.id,
+                visible: w.visible,
+                x: Option.getOrElse(w.x, () => 0),
+                y: Option.getOrElse(w.y, () => 0),
+                w: Option.getOrElse(w.w, () => 1),
+                h: Option.getOrElse(w.h, () => 1),
+              }),
+          ),
         })),
       ),
       catchSqlErrors,
@@ -61,7 +92,16 @@ const make = Effect.gen(function* () {
     _upsert({
       user_id: userId,
       team_id: teamId,
-      widgets_json: JSON.stringify(widgets.map((w) => ({ id: w.id, visible: w.visible }))),
+      widgets_json: JSON.stringify(
+        widgets.map((w) => ({
+          id: w.id,
+          visible: w.visible,
+          x: w.x,
+          y: w.y,
+          w: w.w,
+          h: w.h,
+        })),
+      ),
     }).pipe(
       Effect.map((row) => ({
         widgets: row.widgets,

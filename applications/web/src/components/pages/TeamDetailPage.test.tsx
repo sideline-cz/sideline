@@ -1,13 +1,6 @@
-// TDD mode — tests written BEFORE the configurable dashboard implementation exists.
-// These tests WILL FAIL until:
-//   - TeamDetailPage.tsx is updated to accept layout prop and conditionally render widgets
-//   - DashboardCustomizer.tsx is implemented (see separate test file)
-//   - DEFAULT_LAYOUT constant is exported from dashboard-layout.ts (or similar)
+// Tests for TeamDetailPage with configurable dashboard layout.
 //
-// Extends the existing banner integration tests with new layout-driven widget tests.
-// The existing banner tests are preserved below.
-//
-// New TeamDetailPage contract additions:
+// New TeamDetailPage contract:
 //   TeamDetailPage({
 //     teamId: string;
 //     dashboard: DashboardApi.DashboardResponse | undefined;
@@ -15,12 +8,12 @@
 //     layout?: DashboardLayoutApi.DashboardLayout;   ← NEW prop
 //   })
 //
-// New behaviour:
-//   - Renders configurable widgets (stats/upcomingEvents/activity/teamManagement) in layout.widgets order
-//   - A widget with visible:false is NOT rendered in the configurable region
+// Behaviour:
+//   - Renders configurable widgets in grid when visible:true
+//   - A widget with visible:false is NOT rendered
 //   - Pinned banners (AwaitingRsvp, OutstandingPayments) render regardless of layout
 //   - All configurable hidden → empty-state element present inside configurable region
-//   - layout undefined → falls back to DEFAULT (all 4 visible in canonical order)
+//   - layout undefined → falls back to DEFAULT (all 4 visible)
 
 import { render, screen } from '@testing-library/react';
 import { DateTime, Option } from 'effect';
@@ -55,7 +48,9 @@ vi.mock('~/lib/translations.js', () => ({
       dashboard_notRanked: 'Not ranked',
       dashboard_longestStreak: 'Longest streak',
       dashboard_totalDuration: 'Total duration',
+      dashboard_allWidgetsHidden: 'All widgets hidden',
       dashboard_noWidgets: 'No widgets visible',
+      dashboard_customize: 'Customize',
       team_members: 'Members',
       team_rosters: 'Rosters',
       team_roles: 'Roles',
@@ -110,6 +105,14 @@ vi.mock('~/lib/datetime', () => ({
   formatLocalTime: () => '10:00',
 }));
 
+// Mock react-grid-layout to avoid jsdom layout issues
+vi.mock('react-grid-layout', () => ({
+  GridLayout: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid='rgl-grid'>{children}</div>
+  ),
+  useContainerWidth: () => ({ width: 1200, containerRef: { current: null }, mounted: true }),
+}));
+
 // ---------------------------------------------------------------------------
 // Dynamic imports (after mocks)
 // ---------------------------------------------------------------------------
@@ -140,7 +143,14 @@ type MyFinanceStatus = {
   totalOutstandingMinor: number;
 };
 
-type DashboardWidget = { id: string; visible: boolean };
+type DashboardWidget = {
+  id: string;
+  visible: boolean;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
 type DashboardLayout = { widgets: ReadonlyArray<DashboardWidget> };
 
 // ---------------------------------------------------------------------------
@@ -239,10 +249,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('renders 4 widgets in layout.widgets order when all are visible', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'teamManagement', visible: true },
-        { id: 'activity', visible: true },
-        { id: 'upcomingEvents', visible: true },
-        { id: 'stats', visible: true },
+        { id: 'teamManagement', visible: true, x: 8, y: 4, w: 4, h: 2 },
+        { id: 'activity', visible: true, x: 8, y: 2, w: 4, h: 2 },
+        { id: 'upcomingEvents', visible: true, x: 0, y: 2, w: 8, h: 4 },
+        { id: 'stats', visible: true, x: 0, y: 0, w: 12, h: 2 },
       ],
     };
     render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} layout={layout as any} />);
@@ -257,10 +267,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('a widget with visible:false is NOT rendered', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'stats', visible: false },
-        { id: 'upcomingEvents', visible: true },
-        { id: 'activity', visible: true },
-        { id: 'teamManagement', visible: true },
+        { id: 'stats', visible: false, x: 0, y: 0, w: 12, h: 2 },
+        { id: 'upcomingEvents', visible: true, x: 0, y: 2, w: 8, h: 4 },
+        { id: 'activity', visible: true, x: 8, y: 2, w: 4, h: 2 },
+        { id: 'teamManagement', visible: true, x: 8, y: 4, w: 4, h: 2 },
       ],
     };
     render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} layout={layout as any} />);
@@ -276,10 +286,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('pinned AwaitingRsvp banner renders regardless of layout', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'stats', visible: false },
-        { id: 'upcomingEvents', visible: false },
-        { id: 'activity', visible: false },
-        { id: 'teamManagement', visible: false },
+        { id: 'stats', visible: false, x: 0, y: 0, w: 12, h: 2 },
+        { id: 'upcomingEvents', visible: false, x: 0, y: 2, w: 8, h: 4 },
+        { id: 'activity', visible: false, x: 8, y: 2, w: 4, h: 2 },
+        { id: 'teamManagement', visible: false, x: 8, y: 4, w: 4, h: 2 },
       ],
     };
     const dashboard = {
@@ -306,10 +316,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('pinned OutstandingPayments banner renders regardless of layout', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'stats', visible: false },
-        { id: 'upcomingEvents', visible: false },
-        { id: 'activity', visible: false },
-        { id: 'teamManagement', visible: false },
+        { id: 'stats', visible: false, x: 0, y: 0, w: 12, h: 2 },
+        { id: 'upcomingEvents', visible: false, x: 0, y: 2, w: 8, h: 4 },
+        { id: 'activity', visible: false, x: 8, y: 2, w: 4, h: 2 },
+        { id: 'teamManagement', visible: false, x: 8, y: 4, w: 4, h: 2 },
       ],
     };
     const myStatus: MyFinanceStatus[] = [
@@ -337,10 +347,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('all configurable widgets hidden → empty-state element inside configurable region, banners still present', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'stats', visible: false },
-        { id: 'upcomingEvents', visible: false },
-        { id: 'activity', visible: false },
-        { id: 'teamManagement', visible: false },
+        { id: 'stats', visible: false, x: 0, y: 0, w: 12, h: 2 },
+        { id: 'upcomingEvents', visible: false, x: 0, y: 2, w: 8, h: 4 },
+        { id: 'activity', visible: false, x: 8, y: 2, w: 4, h: 2 },
+        { id: 'teamManagement', visible: false, x: 8, y: 4, w: 4, h: 2 },
       ],
     };
     render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} layout={layout as any} />);
@@ -348,7 +358,7 @@ describe('TeamDetailPage — configurable layout', () => {
     // An empty-state element should exist inside the configurable region
     const emptyState =
       document.querySelector('[data-testid="dashboard-empty-state"]') ??
-      screen.queryByText('No widgets visible');
+      screen.queryByText('All widgets hidden');
     expect(emptyState).not.toBeNull();
   });
 

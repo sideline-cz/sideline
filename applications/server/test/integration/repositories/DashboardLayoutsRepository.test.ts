@@ -73,13 +73,28 @@ const createTeam = (guildId: Discord.Snowflake, createdBy: User.UserId) =>
   );
 
 const makeWidgets = (): ReadonlyArray<DashboardLayoutApi.DashboardWidget> =>
-  DashboardLayoutApi.DASHBOARD_WIDGET_ORDER.map(
-    (id) => new DashboardLayoutApi.DashboardWidget({ id, visible: true }),
+  DashboardLayoutApi.DEFAULT_LAYOUT.map(
+    (entry) =>
+      new DashboardLayoutApi.DashboardWidget({
+        id: entry.id,
+        visible: entry.visible,
+        x: entry.x,
+        y: entry.y,
+        w: entry.w,
+        h: entry.h,
+      }),
   );
 
 const makePartialWidgets = (): ReadonlyArray<DashboardLayoutApi.DashboardWidget> => [
-  new DashboardLayoutApi.DashboardWidget({ id: 'teamManagement', visible: false }),
-  new DashboardLayoutApi.DashboardWidget({ id: 'stats', visible: true }),
+  new DashboardLayoutApi.DashboardWidget({
+    id: 'teamManagement',
+    visible: false,
+    x: 8,
+    y: 4,
+    w: 4,
+    h: 2,
+  }),
+  new DashboardLayoutApi.DashboardWidget({ id: 'stats', visible: true, x: 0, y: 0, w: 12, h: 2 }),
 ];
 
 // ---------------------------------------------------------------------------

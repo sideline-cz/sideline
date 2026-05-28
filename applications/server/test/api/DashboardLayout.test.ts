@@ -1,11 +1,5 @@
-// TDD mode — tests written BEFORE DashboardLayoutApiLive implementation exists.
-// These tests WILL FAIL until the developer implements:
-//   applications/server/src/api/dashboard-layout.ts  (DashboardLayoutApiLive)
-//   applications/server/src/repositories/DashboardLayoutsRepository.ts
-//
-// The test uses the HttpRouter.toWebHandler approach (matching expenses.test.ts)
-// with a focused TestLayer that includes only the new DashboardLayout API plus
-// required auth/team/member mocks.
+// Tests for DashboardLayoutApiLive handler.
+// Uses an in-memory mock for DashboardLayoutsRepository.
 
 import type { Auth, DashboardLayoutApi, Role, Team, TeamMember } from '@sideline/domain';
 import { OAuth2Tokens } from 'arctic';
@@ -41,7 +35,9 @@ const MEMBER_PERMISSIONS: readonly Role.Permission[] = ['member:view'];
 
 const now = DateTime.nowUnsafe();
 
-let layoutStore: Map<string, ReadonlyArray<{ id: string; visible: boolean }>>;
+type StoredWidget = { id: string; visible: boolean; x: number; y: number; w: number; h: number };
+
+let layoutStore: Map<string, ReadonlyArray<StoredWidget>>;
 
 const resetStores = () => {
   layoutStore = new Map();
@@ -182,16 +178,23 @@ const MockDashboardLayoutsRepositoryLayer = Layer.succeed(DashboardLayoutsReposi
   findByUserTeam: (userId: Auth.UserId, teamId: Team.TeamId) => {
     const stored = layoutStore.get(layoutKey(userId, teamId));
     if (!stored) return Effect.succeed(Option.none());
-    return Effect.succeed(Option.some({ widgets: stored }));
+    return Effect.succeed(Option.some({ widgets: stored as any }));
   },
   upsert: (
     userId: Auth.UserId,
     teamId: Team.TeamId,
     widgets: ReadonlyArray<DashboardLayoutApi.DashboardWidget>,
   ) => {
-    const serialized = widgets.map((w) => ({ id: w.id, visible: w.visible }));
+    const serialized: StoredWidget[] = widgets.map((w) => ({
+      id: w.id,
+      visible: w.visible,
+      x: w.x,
+      y: w.y,
+      w: w.w,
+      h: w.h,
+    }));
     layoutStore.set(layoutKey(userId, teamId), serialized);
-    return Effect.succeed({ widgets: serialized });
+    return Effect.succeed({ widgets: serialized as any });
   },
 } as any);
 
@@ -240,11 +243,6 @@ let handler: (...args: any) => Promise<Response>;
 let dispose: () => Promise<void>;
 
 beforeAll(() => {
-  // The handler group (DashboardLayoutApiLive) is bound to the real full `Api`
-  // identity, while this focused test builds an isolated `test-api`. They match
-  // at runtime (HttpApiBuilder registers groups by name), but the type-checker
-  // sees the leftover ApiGroup<"test-api"> requirement. Narrow the layer type to
-  // satisfy toWebHandler — runtime behaviour is correct (all cases below pass).
   const app = HttpRouter.toWebHandler(
     TestLayer as unknown as Parameters<typeof HttpRouter.toWebHandler>[0],
   );
@@ -293,12 +291,17 @@ describe('DashboardLayout API — getDashboardLayout', () => {
     expect(body.widgets[1].id).toBe('upcomingEvents');
     expect(body.widgets[2].id).toBe('activity');
     expect(body.widgets[3].id).toBe('teamManagement');
+    // Position fields present
+    expect(typeof body.widgets[0].x).toBe('number');
+    expect(typeof body.widgets[0].y).toBe('number');
+    expect(typeof body.widgets[0].w).toBe('number');
+    expect(typeof body.widgets[0].h).toBe('number');
   });
 
   it('GET → 200 with normalized result when stored partial/legacy row exists', async () => {
-    // Pre-seed a partial layout (only 1 widget stored)
+    // Pre-seed a partial layout (only 1 widget stored, with positions)
     layoutStore.set(layoutKey(TEST_MEMBER_USER_ID, TEST_TEAM_ID), [
-      { id: 'teamManagement', visible: false },
+      { id: 'teamManagement', visible: false, x: 8, y: 4, w: 4, h: 2 },
     ]);
 
     const response = await handler(
@@ -308,11 +311,13 @@ describe('DashboardLayout API — getDashboardLayout', () => {
     );
     expect(response.status).toBe(200);
     const body = await response.json();
-    // normalizeWidgets should fill in the missing 3 visible widgets
+    // normalizeWidgets should fill in the missing 3 widgets
     expect(body.widgets).toHaveLength(4);
     // The stored widget comes first
     expect(body.widgets[0].id).toBe('teamManagement');
     expect(body.widgets[0].visible).toBe(false);
+    // Position fields must be present
+    expect(typeof body.widgets[0].x).toBe('number');
   });
 
   it('GET → 403 DashboardLayoutForbidden for non-member of team', async () => {
@@ -337,13 +342,13 @@ describe('DashboardLayout API — getDashboardLayout', () => {
 // ---------------------------------------------------------------------------
 
 describe('DashboardLayout API — updateDashboardLayout', () => {
-  it('PUT → 200 persists & returns normalized widgets', async () => {
+  it('PUT → 200 persists & returns normalized widgets with position fields', async () => {
     const payload = {
       widgets: [
-        { id: 'activity', visible: false },
-        { id: 'stats', visible: true },
-        { id: 'upcomingEvents', visible: true },
-        { id: 'teamManagement', visible: true },
+        { id: 'activity', visible: false, x: 8, y: 2, w: 4, h: 2 },
+        { id: 'stats', visible: true, x: 0, y: 0, w: 12, h: 2 },
+        { id: 'upcomingEvents', visible: true, x: 0, y: 2, w: 8, h: 4 },
+        { id: 'teamManagement', visible: true, x: 8, y: 4, w: 4, h: 2 },
       ],
     };
 
@@ -362,6 +367,13 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
     expect(Array.isArray(body.widgets)).toBe(true);
     // Should contain all 4 widgets
     expect(body.widgets).toHaveLength(4);
+    // Position fields present
+    for (const w of body.widgets) {
+      expect(typeof w.x).toBe('number');
+      expect(typeof w.y).toBe('number');
+      expect(typeof w.w).toBe('number');
+      expect(typeof w.h).toBe('number');
+    }
     // Persisted — verify store was written
     const stored = layoutStore.get(layoutKey(TEST_MEMBER_USER_ID, TEST_TEAM_ID));
     expect(stored).toBeDefined();
@@ -369,7 +381,7 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
 
   it('PUT → 200 normalizes partial payload (fills in missing widgets)', async () => {
     const payload = {
-      widgets: [{ id: 'stats', visible: false }],
+      widgets: [{ id: 'stats', visible: false, x: 0, y: 0, w: 12, h: 2 }],
     };
 
     const response = await handler(
@@ -394,10 +406,10 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
   it('PUT → 403 DashboardLayoutForbidden for non-member of team', async () => {
     const payload = {
       widgets: [
-        { id: 'stats', visible: true },
-        { id: 'upcomingEvents', visible: true },
-        { id: 'activity', visible: true },
-        { id: 'teamManagement', visible: true },
+        { id: 'stats', visible: true, x: 0, y: 0, w: 12, h: 2 },
+        { id: 'upcomingEvents', visible: true, x: 0, y: 2, w: 8, h: 4 },
+        { id: 'activity', visible: true, x: 8, y: 2, w: 4, h: 2 },
+        { id: 'teamManagement', visible: true, x: 8, y: 4, w: 4, h: 2 },
       ],
     };
 
@@ -418,7 +430,7 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
 
   it('PUT → 401 when no auth token provided', async () => {
     const payload = {
-      widgets: [{ id: 'stats', visible: true }],
+      widgets: [{ id: 'stats', visible: true, x: 0, y: 0, w: 12, h: 2 }],
     };
 
     const response = await handler(
@@ -433,7 +445,7 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
 
   it('PUT → 400 when payload contains an invalid widget id', async () => {
     const payload = {
-      widgets: [{ id: 'awaitingRsvp', visible: true }],
+      widgets: [{ id: 'awaitingRsvp', visible: true, x: 0, y: 0, w: 12, h: 2 }],
     };
 
     const response = await handler(

@@ -1,23 +1,7 @@
-import type { DragEndEvent } from '@dnd-kit/core';
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from '@dnd-kit/core';
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 import { DashboardLayoutApi } from '@sideline/domain';
-import { GripVertical } from 'lucide-react';
 import React from 'react';
+import type { Layout, LayoutItem } from 'react-grid-layout';
+import { GridLayout, useContainerWidth } from 'react-grid-layout';
 import { Button } from '~/components/ui/button';
 import { Switch } from '~/components/ui/switch';
 import { DEFAULT_LAYOUT } from '~/lib/dashboardLayout.js';
@@ -27,6 +11,7 @@ interface DashboardCustomizerProps {
   teamId: string;
   layout: DashboardLayoutApi.DashboardLayout;
   onSave: (widgets: DashboardLayoutApi.DashboardWidget[]) => Promise<void>;
+  widgetRegistry: Record<string, React.ReactNode>;
 }
 
 const WIDGET_LABELS: Record<string, string> = {
@@ -36,58 +21,90 @@ const WIDGET_LABELS: Record<string, string> = {
   teamManagement: 'dashboard_widget_teamManagement',
 };
 
-interface SortableWidgetRowProps {
-  widget: DashboardLayoutApi.DashboardWidget;
-  index: number;
-  onToggle: (index: number) => void;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function widgetsToLayout(widgets: ReadonlyArray<DashboardLayoutApi.DashboardWidget>): Layout {
+  return widgets.map((w) => ({
+    i: w.id,
+    x: w.x,
+    y: w.y,
+    w: w.w,
+    h: w.h,
+  }));
 }
 
-function SortableWidgetRow({ widget, index, onToggle }: SortableWidgetRowProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: widget.id,
+function mergeLayoutIntoWidgets(
+  widgets: DashboardLayoutApi.DashboardWidget[],
+  layout: Layout,
+): DashboardLayoutApi.DashboardWidget[] {
+  const byId = new Map<string, LayoutItem>(layout.map((item) => [item.i, item]));
+  return widgets.map((w) => {
+    const item = byId.get(w.id);
+    if (!item) return w;
+    return new DashboardLayoutApi.DashboardWidget({
+      id: w.id,
+      visible: w.visible,
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h,
+    });
   });
+}
 
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
+// ---------------------------------------------------------------------------
+// Grid renderer (shared between edit and view modes)
+// ---------------------------------------------------------------------------
 
-  const widgetName = tr(WIDGET_LABELS[widget.id] ?? widget.id);
+interface DashboardGridProps {
+  working: DashboardLayoutApi.DashboardWidget[];
+  widgetRegistry: Record<string, React.ReactNode>;
+  isEditing: boolean;
+  onLayoutChange: (layout: Layout) => void;
+}
+
+function DashboardGrid({ working, widgetRegistry, isEditing, onLayoutChange }: DashboardGridProps) {
+  const { width, containerRef, mounted } = useContainerWidth();
+  const rglLayout = widgetsToLayout(working.filter((w) => w.visible));
 
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className='flex items-center gap-2 rounded-lg border px-3 py-2'
-    >
-      <button
-        type='button'
-        className='cursor-grab touch-none text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-        aria-label={tr('dashboard_customizer_dragHandle').replace('{widget}', widgetName)}
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical className='size-4' />
-      </button>
-      <span className='flex-1 text-sm font-medium'>{widgetName}</span>
-      <Switch checked={widget.visible} onCheckedChange={() => onToggle(index)} />
+    <div ref={containerRef} className='w-full'>
+      {mounted && (
+        <GridLayout
+          layout={rglLayout}
+          width={width}
+          gridConfig={{ cols: 12, rowHeight: 80 }}
+          dragConfig={{ enabled: isEditing, bounded: false, threshold: 3 }}
+          resizeConfig={{ enabled: isEditing, handles: ['se'] }}
+          onLayoutChange={onLayoutChange}
+          className={isEditing ? 'rgl-edit-mode' : undefined}
+        >
+          {working
+            .filter((w) => w.visible)
+            .map((w) => (
+              <div key={w.id}>{widgetRegistry[w.id]}</div>
+            ))}
+        </GridLayout>
+      )}
     </div>
   );
 }
 
-export function DashboardCustomizer({ layout, onSave }: DashboardCustomizerProps) {
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+export function DashboardCustomizer({ layout, onSave, widgetRegistry }: DashboardCustomizerProps) {
   const [editMode, setEditMode] = React.useState(false);
   const [working, setWorking] = React.useState<DashboardLayoutApi.DashboardWidget[]>([]);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    }),
-  );
+  const allHidden = editMode
+    ? working.every((w) => !w.visible)
+    : layout.widgets.every((w) => !w.visible);
 
   const enterEditMode = () => {
     setWorking([...layout.widgets]);
@@ -100,27 +117,29 @@ export function DashboardCustomizer({ layout, onSave }: DashboardCustomizerProps
     setSaveError(null);
   };
 
-  const toggleVisible = (index: number) => {
+  const toggleVisible = (id: string) => {
     setWorking((prev) =>
-      prev.map((w, i) =>
-        i === index ? new DashboardLayoutApi.DashboardWidget({ id: w.id, visible: !w.visible }) : w,
+      prev.map((w) =>
+        w.id === id
+          ? new DashboardLayoutApi.DashboardWidget({
+              id: w.id,
+              visible: !w.visible,
+              x: w.x,
+              y: w.y,
+              w: w.w,
+              h: w.h,
+            })
+          : w,
       ),
     );
   };
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (over && active.id !== over.id) {
-      setWorking((prev) => {
-        const oldIndex = prev.findIndex((w) => w.id === active.id);
-        const newIndex = prev.findIndex((w) => w.id === over.id);
-        return arrayMove(prev, oldIndex, newIndex);
-      });
-    }
-  };
-
   const resetLayout = () => {
     setWorking([...DEFAULT_LAYOUT.widgets]);
+  };
+
+  const handleLayoutChange = (newLayout: Layout) => {
+    setWorking((prev) => mergeLayoutIntoWidgets(prev, newLayout));
   };
 
   const handleSave = async () => {
@@ -145,35 +164,50 @@ export function DashboardCustomizer({ layout, onSave }: DashboardCustomizerProps
   }
 
   return (
-    <div className='flex flex-col gap-4'>
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={working.map((w) => w.id)} strategy={verticalListSortingStrategy}>
-          <div className='flex flex-col gap-2'>
-            {working.map((widget, index) => (
-              <SortableWidgetRow
-                key={widget.id}
-                widget={widget}
-                index={index}
-                onToggle={toggleVisible}
-              />
-            ))}
+    <div className='flex flex-col gap-6 lg:flex-row'>
+      {/* Grid area */}
+      <div className='flex-1 min-w-0'>
+        {allHidden ? (
+          <div className='flex items-center justify-center py-10 text-sm text-muted-foreground'>
+            {tr('dashboard_allWidgetsHidden')}
           </div>
-        </SortableContext>
-      </DndContext>
-
-      <div className='flex items-center gap-2 flex-wrap'>
-        <Button variant='outline' size='sm' onClick={resetLayout}>
-          {tr('dashboard_customizer_reset')}
-        </Button>
-        <Button variant='outline' size='sm' onClick={cancelEditMode}>
-          {tr('dashboard_customizer_cancel')}
-        </Button>
-        <Button size='sm' onClick={handleSave} disabled={saving}>
-          {tr('dashboard_customizer_save')}
-        </Button>
+        ) : (
+          <DashboardGrid
+            working={working}
+            widgetRegistry={widgetRegistry}
+            isEditing={true}
+            onLayoutChange={handleLayoutChange}
+          />
+        )}
       </div>
 
-      {saveError && <p className='text-sm text-destructive'>{saveError}</p>}
+      {/* Aside panel */}
+      <aside className='lg:w-56 flex flex-col gap-4 rounded-lg border bg-card p-4'>
+        <h2 className='font-semibold text-sm'>{tr('dashboard_customizer_panelTitle')}</h2>
+        <div className='flex flex-col gap-3'>
+          {working.map((widget) => {
+            const widgetName = tr(WIDGET_LABELS[widget.id] ?? widget.id);
+            return (
+              <div key={widget.id} className='flex items-center gap-2 justify-between'>
+                <span className='text-sm'>{widgetName}</span>
+                <Switch checked={widget.visible} onCheckedChange={() => toggleVisible(widget.id)} />
+              </div>
+            );
+          })}
+        </div>
+        <div className='flex flex-col gap-2'>
+          <Button variant='outline' size='sm' onClick={resetLayout}>
+            {tr('dashboard_customizer_reset')}
+          </Button>
+          <Button variant='outline' size='sm' onClick={cancelEditMode}>
+            {tr('dashboard_customizer_cancel')}
+          </Button>
+          <Button size='sm' onClick={handleSave} disabled={saving}>
+            {tr('dashboard_customizer_save')}
+          </Button>
+        </div>
+        {saveError && <p className='text-sm text-destructive'>{saveError}</p>}
+      </aside>
     </div>
   );
 }

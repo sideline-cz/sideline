@@ -21,7 +21,28 @@ export const DASHBOARD_WIDGET_ORDER = [
 export class DashboardWidget extends Schema.Class<DashboardWidget>('DashboardWidget')({
   id: DashboardWidgetId,
   visible: Schema.Boolean,
+  x: Schema.Number,
+  y: Schema.Number,
+  w: Schema.Number,
+  h: Schema.Number,
 }) {}
+
+export interface DefaultLayoutEntry {
+  id: DashboardWidgetId;
+  visible: boolean;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+// 12-column grid defaults
+export const DEFAULT_LAYOUT: ReadonlyArray<DefaultLayoutEntry> = [
+  { id: 'stats', visible: true, x: 0, y: 0, w: 12, h: 2 },
+  { id: 'upcomingEvents', visible: true, x: 0, y: 2, w: 8, h: 4 },
+  { id: 'activity', visible: true, x: 8, y: 2, w: 4, h: 2 },
+  { id: 'teamManagement', visible: true, x: 8, y: 4, w: 4, h: 2 },
+] as const;
 
 export class DashboardLayout extends Schema.Class<DashboardLayout>('DashboardLayout')({
   widgets: Schema.Array(DashboardWidget),

@@ -23,7 +23,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/')({
           api.dashboard.getDashboard({ params: { teamId } }),
           api.finance.myStatus({ params: { teamId } }).pipe(
             Effect.tapError((e) => Effect.logWarning('Failed to load my finance status', e)),
-            Effect.catch(() => Effect.succeed([] as ReadonlyArray<FinanceApi.MyFinanceStatus>)),
+            Effect.catch(() => Effect.succeed<ReadonlyArray<FinanceApi.MyFinanceStatus>>([])),
           ),
           api.dashboardLayout.getDashboardLayout({ params: { teamId } }).pipe(
             Effect.tapError((e) => Effect.logWarning('Failed to load dashboard layout', e)),

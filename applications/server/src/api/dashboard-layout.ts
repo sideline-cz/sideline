@@ -10,12 +10,20 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 const forbidden = new DashboardLayoutApi.Forbidden();
 
 // ---------------------------------------------------------------------------
-// Default layout
+// Default layout (mirrors domain DEFAULT_LAYOUT)
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_LAYOUT: ReadonlyArray<DashboardLayoutApi.DashboardWidget> =
-  DashboardLayoutApi.DASHBOARD_WIDGET_ORDER.map(
-    (id) => new DashboardLayoutApi.DashboardWidget({ id, visible: true }),
+  DashboardLayoutApi.DEFAULT_LAYOUT.map(
+    (entry) =>
+      new DashboardLayoutApi.DashboardWidget({
+        id: entry.id,
+        visible: entry.visible,
+        x: entry.x,
+        y: entry.y,
+        w: entry.w,
+        h: entry.h,
+      }),
   );
 
 // ---------------------------------------------------------------------------
@@ -38,10 +46,25 @@ export const normalizeWidgets = (
     result.push(widget);
   }
 
-  // Append any missing canonical widgets as visible:true in canonical order
-  for (const id of DashboardLayoutApi.DASHBOARD_WIDGET_ORDER) {
-    if (!seen.has(id)) {
-      result.push(new DashboardLayoutApi.DashboardWidget({ id, visible: true }));
+  // Compute max y+h of existing widgets to place missing ones below
+  const maxBottom = result.length > 0 ? Math.max(...result.map((w) => w.y + w.h)) : 0;
+  let nextY = maxBottom;
+
+  // Append any missing canonical widgets using DEFAULT_LAYOUT positions (offset below existing)
+  for (const defaultEntry of DashboardLayoutApi.DEFAULT_LAYOUT) {
+    if (!seen.has(defaultEntry.id)) {
+      result.push(
+        new DashboardLayoutApi.DashboardWidget({
+          id: defaultEntry.id,
+          visible: defaultEntry.visible,
+          x: defaultEntry.x,
+          y: nextY,
+          w: defaultEntry.w,
+          h: defaultEntry.h,
+        }),
+      );
+      nextY += defaultEntry.h;
+      seen.add(defaultEntry.id);
     }
   }
 
