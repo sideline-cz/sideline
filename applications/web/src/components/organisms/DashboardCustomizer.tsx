@@ -16,7 +16,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { DashboardLayoutApi } from '@sideline/domain';
-import { LayoutDashboard } from 'lucide-react';
+import { GripVertical, LayoutDashboard } from 'lucide-react';
 import React from 'react';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent } from '~/components/ui/card';
@@ -65,9 +65,9 @@ function SortableWidgetCell({
   children,
 }: SortableWidgetCellProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
-    id: widget.id,
-  });
+  const widgetName = tr(WIDGET_LABELS[widget.id] ?? widget.id);
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition } =
+    useSortable({ id: widget.id });
 
   React.useEffect(() => {
     if (!isEditing) return;
@@ -88,15 +88,11 @@ function SortableWidgetCell({
       }
     : {};
 
-  // Only attach dnd attributes/listeners in edit mode
-  const dndProps = isEditing ? { ...attributes, ...listeners } : {};
-
   return (
     <div
       ref={isEditing ? setNodeRef : undefined}
       style={style}
       className={colSpanClass(widget.colSpan)}
-      {...dndProps}
     >
       <div
         ref={containerRef}
@@ -105,8 +101,20 @@ function SortableWidgetCell({
           overflow: 'hidden',
           resize: isEditing ? 'vertical' : 'none',
         }}
-        className={`w-full h-full ${isEditing ? 'dashboard-resizable' : ''}`}
+        className={`relative w-full h-full ${isEditing ? 'dashboard-resizable' : ''}`}
       >
+        {isEditing && (
+          <button
+            type='button'
+            ref={setActivatorNodeRef}
+            {...attributes}
+            {...listeners}
+            aria-label={tr('dashboard_customizer_dragHandle', { widget: widgetName })}
+            className='dashboard-drag-handle absolute top-2 left-2 z-10 inline-flex items-center justify-center size-7 rounded-md bg-primary text-primary-foreground shadow cursor-grab active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-ring'
+          >
+            <GripVertical className='size-4' />
+          </button>
+        )}
         {children}
       </div>
     </div>

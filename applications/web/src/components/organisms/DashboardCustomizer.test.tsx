@@ -34,6 +34,7 @@ vi.mock('~/lib/translations.js', () => ({
       dashboard_customizer_cancel: 'Cancel',
       dashboard_customizer_reset: 'Reset layout',
       dashboard_customizer_saveError: 'Failed to save layout',
+      dashboard_customizer_dragHandle: 'Reorder {widget}',
       dashboard_customizer_widthFor: 'Width for {widget}',
       dashboard_customizer_widthOption1: 'Narrow',
       dashboard_customizer_widthOption2: 'Medium',
@@ -198,7 +199,7 @@ describe('DashboardCustomizer — entering edit mode', () => {
     expect(switches.length).toBe(4);
   });
 
-  it('does NOT render drag handles in edit mode (no drag-and-drop)', async () => {
+  it('renders a drag handle per visible widget in edit mode', async () => {
     const onSave = vi.fn();
     render(
       <DashboardCustomizer
@@ -213,9 +214,9 @@ describe('DashboardCustomizer — entering edit mode', () => {
       fireEvent.click(screen.getByText('Customize'));
     });
 
-    // No drag handles should be rendered
-    const dragHandles = screen.queryAllByRole('button', { name: /Drag/i });
-    expect(dragHandles.length).toBe(0);
+    // One drag handle per visible widget (4 by default)
+    const dragHandles = screen.queryAllByRole('button', { name: /Reorder/i });
+    expect(dragHandles.length).toBe(4);
   });
 
   it('Save and Cancel buttons are visible in edit mode', async () => {

@@ -190,36 +190,24 @@ code {
 }
 
 /* Themed native resize handle (WebKit / Chrome / Safari / Edge).
- * We can't fully replace the handle on Firefox, but the dashed outline
- * and bottom grab-pill still signal resizability there. */
+ * Hide the default scribble and let the ::after pseudo-element draw a clean
+ * triangular indicator below. Firefox doesn't honour ::-webkit-resizer, but
+ * the dashed outline + corner indicator still signal resizability. */
 .dashboard-resizable::-webkit-resizer {
-  background-color: var(--primary);
-  background-image: linear-gradient(
-    135deg,
-    transparent 0%,
-    transparent 30%,
-    var(--primary-foreground) 30%,
-    var(--primary-foreground) 40%,
-    transparent 40%,
-    transparent 55%,
-    var(--primary-foreground) 55%,
-    var(--primary-foreground) 65%,
-    transparent 65%
-  );
-  border-radius: 0 0 var(--radius) 0;
+  background: transparent;
 }
 
-/* Bottom-center grab hint — a small pill drawn over the widget's bottom edge.
- * Pure decoration so pointer events pass through to the resizer beneath. */
+/* Bottom-right corner indicator — a small primary-colored triangle pointing
+ * outward from the corner. Pointer-events: none so the underlying native
+ * resize handle still receives drag events. */
 .dashboard-resizable::after {
   content: "";
   position: absolute;
-  left: 50%;
-  bottom: 4px;
-  transform: translateX(-50%);
-  width: 36px;
-  height: 4px;
-  border-radius: 9999px;
-  background-color: var(--primary);
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 0 0 var(--radius) 0;
+  background: linear-gradient(135deg, transparent 50%, var(--primary) 50%);
   pointer-events: none;
 }

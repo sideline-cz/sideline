@@ -1415,6 +1415,7 @@
   "dashboard_customizer_cancel": "Cancel",
   "dashboard_customizer_reset": "Reset layout",
   "dashboard_customizer_saveError": "Failed to save layout",
+  "dashboard_customizer_dragHandle": "Reorder {widget}",
   "dashboard_customizer_widthFor": "Width for {widget}",
   "dashboard_customizer_widthOption1": "Narrow",
   "dashboard_customizer_widthOption2": "Medium",
