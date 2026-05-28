@@ -6,13 +6,22 @@ import { describe, expect, it } from '@effect/vitest';
 import { Schema } from 'effect';
 import * as DashboardLayoutApi from '~/api/DashboardLayoutApi.js';
 
+/** Look up a DEFAULT_LAYOUT entry by id; throws if missing (keeps tests strict). */
+function defaultEntry(
+  id: DashboardLayoutApi.DashboardWidgetId,
+): DashboardLayoutApi.DefaultLayoutEntry {
+  const entry = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === id);
+  if (!entry) throw new Error(`DEFAULT_LAYOUT missing entry for ${id}`);
+  return entry;
+}
+
 // ---------------------------------------------------------------------------
 // DashboardWidget — decode (with x/y/w/h required)
 // ---------------------------------------------------------------------------
 
 describe('DashboardWidget — decode', () => {
   it('decodes a fully valid widget using DEFAULT_LAYOUT stats entry', () => {
-    const entry = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'stats')!;
+    const entry = defaultEntry('stats');
     const result = Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
       id: 'stats',
       visible: true,
@@ -30,7 +39,7 @@ describe('DashboardWidget — decode', () => {
   });
 
   it('decodes {id:"upcomingEvents"} using DEFAULT_LAYOUT entry successfully', () => {
-    const entry = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'upcomingEvents')!;
+    const entry = defaultEntry('upcomingEvents');
     const result = Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
       id: 'upcomingEvents',
       visible: false,
@@ -48,7 +57,7 @@ describe('DashboardWidget — decode', () => {
   });
 
   it('decodes {id:"activity"} using DEFAULT_LAYOUT entry successfully', () => {
-    const entry = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'activity')!;
+    const entry = defaultEntry('activity');
     const result = Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
       id: 'activity',
       visible: true,
@@ -62,7 +71,7 @@ describe('DashboardWidget — decode', () => {
   });
 
   it('decodes {id:"teamManagement"} using DEFAULT_LAYOUT entry successfully', () => {
-    const entry = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'teamManagement')!;
+    const entry = defaultEntry('teamManagement');
     const result = Schema.decodeUnknownSync(DashboardLayoutApi.DashboardWidget)({
       id: 'teamManagement',
       visible: true,
@@ -256,40 +265,40 @@ describe('DEFAULT_LAYOUT', () => {
     expect(DashboardLayoutApi.DEFAULT_LAYOUT).toHaveLength(4);
   });
 
-  it('stats is full-width at top (x:0,y:0,w:12,h:3)', () => {
+  it('stats is full-width at top (x:0,y:0,w:12,h:14)', () => {
     const stats = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'stats');
     expect(stats).toBeDefined();
     expect(stats?.x).toBe(0);
     expect(stats?.y).toBe(0);
     expect(stats?.w).toBe(12);
-    expect(stats?.h).toBe(3);
+    expect(stats?.h).toBe(14);
   });
 
-  it('upcomingEvents spans 8 columns at y:3 (x:0,y:3,w:8,h:6)', () => {
+  it('upcomingEvents spans 8 columns at y:14 (x:0,y:14,w:8,h:28)', () => {
     const ev = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'upcomingEvents');
     expect(ev).toBeDefined();
     expect(ev?.x).toBe(0);
-    expect(ev?.y).toBe(3);
+    expect(ev?.y).toBe(14);
     expect(ev?.w).toBe(8);
-    expect(ev?.h).toBe(6);
+    expect(ev?.h).toBe(28);
   });
 
-  it('activity spans 4 columns at x:8 (x:8,y:3,w:4,h:3)', () => {
+  it('activity spans 4 columns at x:8 (x:8,y:14,w:4,h:20)', () => {
     const act = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'activity');
     expect(act).toBeDefined();
     expect(act?.x).toBe(8);
-    expect(act?.y).toBe(3);
+    expect(act?.y).toBe(14);
     expect(act?.w).toBe(4);
-    expect(act?.h).toBe(3);
+    expect(act?.h).toBe(20);
   });
 
-  it('teamManagement spans 4 columns at x:8,y:6 (x:8,y:6,w:4,h:4)', () => {
+  it('teamManagement spans 4 columns at x:8,y:34 (x:8,y:34,w:4,h:26)', () => {
     const tm = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'teamManagement');
     expect(tm).toBeDefined();
     expect(tm?.x).toBe(8);
-    expect(tm?.y).toBe(6);
+    expect(tm?.y).toBe(34);
     expect(tm?.w).toBe(4);
-    expect(tm?.h).toBe(4);
+    expect(tm?.h).toBe(26);
   });
 
   it('all entries are visible by default', () => {
@@ -329,8 +338,8 @@ describe('DashboardWidgetId — literal set', () => {
 
 describe('UpdateDashboardLayoutPayload — decode', () => {
   it('decodes a valid payload with 2 widgets (including x/y/w/h)', () => {
-    const statsEntry = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'stats')!;
-    const activityEntry = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'activity')!;
+    const statsEntry = defaultEntry('stats');
+    const activityEntry = defaultEntry('activity');
     const result = Schema.decodeUnknownSync(DashboardLayoutApi.UpdateDashboardLayoutPayload)({
       widgets: [
         {

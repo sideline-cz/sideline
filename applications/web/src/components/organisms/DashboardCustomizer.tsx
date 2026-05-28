@@ -67,33 +67,80 @@ function mergeLayoutIntoWidgets(
 // Grid renderer (shared between edit and view modes)
 // ---------------------------------------------------------------------------
 
+const ROW_HEIGHT = 10;
+
 interface DashboardGridProps {
   working: DashboardLayoutApi.DashboardWidget[];
   widgetRegistry: Record<string, React.ReactNode>;
   isEditing: boolean;
   onLayoutChange: (layout: Layout) => void;
+  onResizeStop?: (layout: Layout, oldItem: LayoutItem | null, newItem: LayoutItem | null) => void;
+  userResized: Set<string>;
 }
 
-function DashboardGrid({ working, widgetRegistry, isEditing, onLayoutChange }: DashboardGridProps) {
+function DashboardGrid({
+  working,
+  widgetRegistry,
+  isEditing,
+  onLayoutChange,
+  onResizeStop,
+  userResized,
+}: DashboardGridProps) {
   const rglLayout = widgetsToLayout(working.filter((w) => w.visible));
+  const widgetRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
+
+  React.useEffect(() => {
+    const observers = new Map<string, ResizeObserver>();
+    for (const item of rglLayout) {
+      if (userResized.has(item.i)) continue;
+      const wrapperDiv = widgetRefs.current.get(item.i);
+      if (!wrapperDiv) continue;
+      const inner = wrapperDiv.firstElementChild;
+      if (!(inner instanceof HTMLElement)) continue;
+      const observer = new ResizeObserver(() => {
+        const natural = inner.getBoundingClientRect().height;
+        if (natural <= 0) return;
+        const fitH = Math.max(1, Math.ceil(natural / ROW_HEIGHT));
+        if (fitH !== item.h) {
+          onLayoutChange(rglLayout.map((it) => (it.i === item.i ? { ...it, h: fitH } : it)));
+        }
+      });
+      observer.observe(inner);
+      observers.set(item.i, observer);
+    }
+    return () => {
+      for (const observer of observers.values()) {
+        observer.disconnect();
+      }
+    };
+  }, [rglLayout, userResized, onLayoutChange]);
 
   return (
     <SizedGridLayout
       layout={rglLayout}
       cols={12}
-      rowHeight={80}
+      rowHeight={ROW_HEIGHT}
       margin={[16, 16]}
       isDraggable={isEditing}
       isResizable={isEditing}
       resizeHandles={['se']}
       onLayoutChange={onLayoutChange}
+      onResizeStop={onResizeStop}
       className={isEditing ? 'rgl-edit-mode' : undefined}
       draggableCancel='button, a, input, [role="switch"]'
     >
       {working
         .filter((w) => w.visible)
         .map((w) => (
-          <div key={w.id}>{widgetRegistry[w.id]}</div>
+          <div
+            key={w.id}
+            ref={(el) => {
+              if (el) widgetRefs.current.set(w.id, el);
+              else widgetRefs.current.delete(w.id);
+            }}
+          >
+            {widgetRegistry[w.id]}
+          </div>
         ))}
     </SizedGridLayout>
   );
@@ -112,6 +159,7 @@ export function DashboardCustomizer({
   const [working, setWorking] = React.useState<DashboardLayoutApi.DashboardWidget[]>([]);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const [userResized, setUserResized] = React.useState<Set<string>>(new Set());
 
   // Visible widgets derived from the appropriate source
   const activeWidgets = editMode ? working : [...layout.widgets];
@@ -147,10 +195,20 @@ export function DashboardCustomizer({
 
   const resetLayout = () => {
     setWorking([...DEFAULT_LAYOUT.widgets]);
+    setUserResized(new Set());
   };
 
   const handleLayoutChange = (newLayout: Layout) => {
     setWorking((prev) => mergeLayoutIntoWidgets(prev, newLayout));
+  };
+
+  const handleResizeStop = (
+    _layout: Layout,
+    _oldItem: LayoutItem | null,
+    newItem: LayoutItem | null,
+  ) => {
+    if (newItem === null) return;
+    setUserResized((prev) => new Set([...prev, newItem.i]));
   };
 
   const handleSave = async () => {
@@ -203,6 +261,7 @@ export function DashboardCustomizer({
             onLayoutChange={() => {
               /* read-only: no-op */
             }}
+            userResized={new Set()}
           />
         )}
       </div>
@@ -224,6 +283,8 @@ export function DashboardCustomizer({
             widgetRegistry={widgetRegistry}
             isEditing={true}
             onLayoutChange={handleLayoutChange}
+            onResizeStop={handleResizeStop}
+            userResized={userResized}
           />
         )}
       </div>
