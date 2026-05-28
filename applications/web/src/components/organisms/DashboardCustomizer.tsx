@@ -69,7 +69,7 @@ function ResizableWidgetContainer({
         overflow: 'hidden',
         resize: isEditing ? 'vertical' : 'none',
       }}
-      className='w-full h-full'
+      className={`w-full h-full ${isEditing ? 'dashboard-resizable' : ''}`}
     >
       {children}
     </div>
