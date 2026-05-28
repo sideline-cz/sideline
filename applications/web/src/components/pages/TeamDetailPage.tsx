@@ -31,6 +31,14 @@ import { tr } from '~/lib/translations.js';
 // registry Record type is closed without importing from the domain package.
 type WidgetId = 'stats' | 'upcomingEvents' | 'activity' | 'teamManagement';
 
+// Per-widget CSS grid span classes for the 3-column responsive grid.
+const WIDGET_SPAN: Record<WidgetId, string> = {
+  stats: 'lg:col-span-3',
+  upcomingEvents: 'lg:col-span-2',
+  activity: 'lg:col-span-1',
+  teamManagement: 'lg:col-span-1',
+};
+
 interface TeamDetailPageProps {
   teamId: string;
   userId?: string;
@@ -449,7 +457,15 @@ export function TeamDetailPage({
 
   const visibleWidgets = effectiveLayout.widgets
     .filter((w) => w.visible)
-    .map((w) => widgetRegistry[w.id as WidgetId])
+    .map((w) => {
+      const id = w.id as WidgetId;
+      const spanClass = WIDGET_SPAN[id] ?? 'lg:col-span-1';
+      return (
+        <div key={id} className={spanClass}>
+          {widgetRegistry[id]}
+        </div>
+      );
+    })
     .filter(Boolean);
 
   const allHidden = effectiveLayout.widgets.every((w) => !w.visible);
@@ -470,15 +486,17 @@ export function TeamDetailPage({
       {/* Outstanding payments banner - shown when player has outstanding fees */}
       <OutstandingPaymentsBanner teamId={teamId} groups={myStatus} />
 
-      {/* Configurable widget region */}
-      <div className='flex flex-col gap-6 max-w-4xl mx-auto w-full'>
+      {/* Configurable widget region — responsive 3-column grid */}
+      <div className='grid grid-cols-1 lg:grid-cols-3 gap-6'>
         {allHidden ? (
-          <Card data-testid='dashboard-empty-state'>
-            <CardContent className='flex flex-col items-center justify-center gap-3 py-10 text-center'>
-              <LayoutDashboard className='size-8 text-muted-foreground/40' />
-              <p className='text-sm text-muted-foreground'>{tr('dashboard_allWidgetsHidden')}</p>
-            </CardContent>
-          </Card>
+          <div className='lg:col-span-3'>
+            <Card data-testid='dashboard-empty-state'>
+              <CardContent className='flex flex-col items-center justify-center gap-3 py-10 text-center'>
+                <LayoutDashboard className='size-8 text-muted-foreground/40' />
+                <p className='text-sm text-muted-foreground'>{tr('dashboard_allWidgetsHidden')}</p>
+              </CardContent>
+            </Card>
+          </div>
         ) : (
           visibleWidgets
         )}

@@ -10,9 +10,9 @@
 //   })
 //
 // Behaviour:
-//   - "Customize" button enters edit mode: per-widget Switch + Move up/down buttons render
+//   - "Customize" button enters edit mode: per-widget Switch + drag handle per row
 //   - Toggling a Switch updates local working copy but does NOT call onSave
-//   - Move up/down reorders working copy; buttons disabled at boundaries
+//   - Drag handle allows keyboard reorder via dnd-kit keyboard sensor
 //   - Reset sets working copy back to DEFAULT (4 visible in canonical order)
 //   - Save calls onSave exactly once then exits edit mode
 //   - Save failure stays in edit mode (error state shown)
@@ -25,22 +25,25 @@ import { describe, expect, it, vi } from 'vitest';
 // ---------------------------------------------------------------------------
 
 vi.mock('~/lib/translations.js', () => ({
-  tr: (key: string) => {
+  tr: (key: string, params?: Record<string, string>) => {
     const map: Record<string, string> = {
       dashboard_customize: 'Customize',
       dashboard_customizer_title: 'Customize dashboard',
       dashboard_customizer_save: 'Save',
       dashboard_customizer_cancel: 'Cancel',
       dashboard_customizer_reset: 'Reset',
-      dashboard_customizer_moveUp: 'Move up',
-      dashboard_customizer_moveDown: 'Move down',
+      dashboard_customizer_dragHandle: 'Reorder {widget}',
       dashboard_customizer_saveError: 'Failed to save layout',
       dashboard_widget_stats: 'Stats',
       dashboard_widget_upcomingEvents: 'Upcoming events',
       dashboard_widget_activity: 'Activity',
       dashboard_widget_teamManagement: 'Team management',
     };
-    return map[key] ?? key;
+    const raw = map[key] ?? key;
+    if (params) {
+      return raw.replace(/\{(\w+)\}/g, (_: string, k: string) => params[k] ?? `{${k}}`);
+    }
+    return raw;
   },
   setTranslationOverrides: vi.fn(),
 }));
@@ -101,14 +104,14 @@ describe('DashboardCustomizer — initial state (not in edit mode)', () => {
     );
 
     expect(screen.getByText('Customize')).not.toBeNull();
-    // Switches and move buttons should NOT be visible yet
+    // Switches and drag handles should NOT be visible yet
     expect(screen.queryByRole('switch')).toBeNull();
-    expect(screen.queryByText('Move up')).toBeNull();
+    expect(screen.queryByRole('button', { name: /reorder/i })).toBeNull();
   });
 });
 
 describe('DashboardCustomizer — entering edit mode', () => {
-  it('clicking "Customize" enters edit mode with Switch + Move up/down for each widget', async () => {
+  it('clicking "Customize" enters edit mode with Switch + drag handle for each widget', async () => {
     const onSave = vi.fn();
     render(
       <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
@@ -123,11 +126,9 @@ describe('DashboardCustomizer — entering edit mode', () => {
     const switches = screen.getAllByRole('switch');
     expect(switches.length).toBe(4);
 
-    // Per-row Move up/down buttons should render (4 each = one per widget)
-    const moveUpButtons = screen.getAllByRole('button', { name: /move up/i });
-    const moveDownButtons = screen.getAllByRole('button', { name: /move down/i });
-    expect(moveUpButtons.length).toBe(4);
-    expect(moveDownButtons.length).toBe(4);
+    // Per-row drag handle buttons should render (4 total — one per widget)
+    const dragHandles = screen.getAllByRole('button', { name: /reorder/i });
+    expect(dragHandles.length).toBe(4);
   });
 
   it('Save and Cancel buttons are visible in edit mode', async () => {
@@ -209,8 +210,8 @@ describe('DashboardCustomizer — toggling a Switch', () => {
   });
 });
 
-describe('DashboardCustomizer — Move up/down', () => {
-  it('first widget "Move up" button is disabled', async () => {
+describe('DashboardCustomizer — keyboard drag-and-drop reorder', () => {
+  it('keyboard: space to pick up, ArrowDown to move, space to drop reorders the working copy', async () => {
     const onSave = vi.fn();
     render(
       <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
@@ -220,52 +221,57 @@ describe('DashboardCustomizer — Move up/down', () => {
       fireEvent.click(screen.getByText('Customize'));
     });
 
-    const moveUpButtons = screen.getAllByRole('button', { name: /move up/i });
-    expect(moveUpButtons.length).toBeGreaterThan(0);
-    // First widget's Move up should be disabled
-    const firstMoveUp = moveUpButtons[0];
-    expect(firstMoveUp).toHaveProperty('disabled', true);
-  });
+    // Get drag handle for first widget ("Stats")
+    const dragHandles = screen.getAllByRole('button', { name: /reorder/i });
+    const firstHandle = dragHandles[0];
 
-  it('last widget "Move down" button is disabled', async () => {
-    const onSave = vi.fn();
-    render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
-    );
+    // Verify initial order: first widget is Stats
+    expect(firstHandle.getAttribute('aria-label')).toBe('Reorder Stats');
 
+    // Pick up (space), move down (ArrowDown), drop (space)
     await act(async () => {
-      fireEvent.click(screen.getByText('Customize'));
+      firstHandle.focus();
+      fireEvent.keyDown(firstHandle, { key: ' ', code: 'Space' });
+    });
+    await act(async () => {
+      fireEvent.keyDown(firstHandle, { key: 'ArrowDown', code: 'ArrowDown' });
+    });
+    await act(async () => {
+      fireEvent.keyDown(firstHandle, { key: ' ', code: 'Space' });
     });
 
-    const moveDownButtons = screen.getAllByRole('button', { name: /move down/i });
-    expect(moveDownButtons.length).toBeGreaterThan(0);
-    // Last widget's Move down should be disabled
-    const lastMoveDown = moveDownButtons[moveDownButtons.length - 1];
-    expect(lastMoveDown).toHaveProperty('disabled', true);
-  });
-
-  it('clicking "Move down" on first widget reorders working copy', async () => {
-    const onSave = vi.fn();
-    render(
-      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('Customize'));
-    });
-
-    // Get the first non-disabled Move down button (first widget)
-    const moveDownButtons = screen.getAllByRole('button', { name: /move down/i });
-    const firstMoveDown = moveDownButtons[0];
-
-    await act(async () => {
-      fireEvent.click(firstMoveDown);
-    });
-
-    // onSave should NOT have been called
+    // onSave should NOT have been called (reorder only updates working copy)
     expect(onSave).not.toHaveBeenCalled();
-    // The component should still be in edit mode
+
+    // The component should still be in edit mode (Save button still visible)
     expect(screen.getByText('Save')).not.toBeNull();
+  });
+
+  it('keyboard reorder does not call onSave', async () => {
+    const onSave = vi.fn();
+    render(
+      <DashboardCustomizer teamId={TEAM_ID} layout={makeDefaultLayout() as any} onSave={onSave} />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Customize'));
+    });
+
+    const dragHandles = screen.getAllByRole('button', { name: /reorder/i });
+    const firstHandle = dragHandles[0];
+
+    await act(async () => {
+      firstHandle.focus();
+      fireEvent.keyDown(firstHandle, { key: ' ', code: 'Space' });
+    });
+    await act(async () => {
+      fireEvent.keyDown(firstHandle, { key: 'ArrowDown', code: 'ArrowDown' });
+    });
+    await act(async () => {
+      fireEvent.keyDown(firstHandle, { key: ' ', code: 'Space' });
+    });
+
+    expect(onSave).not.toHaveBeenCalled();
   });
 });
 
