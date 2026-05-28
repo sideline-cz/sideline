@@ -1230,7 +1230,27 @@ Append-only audit log for the `expenses` table. Populated automatically by the `
 
 ---
 
-### 13. Weekly Challenges
+### 13. Dashboard Layouts
+
+#### `dashboard_layouts`
+
+Stores per-user, per-team dashboard widget layout preferences. The row is created or replaced when a user saves their layout via `PUT /teams/:teamId/dashboard-layout`. When no row exists, the API returns the default layout (all four widgets visible in canonical order).
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `user_id` | UUID | NOT NULL, FK → `users(id)` ON DELETE CASCADE | — |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `widgets` | JSONB | NOT NULL | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Primary Key**: `(user_id, team_id)` — one layout row per user per team.
+
+**Notes**: Added in migration `1787400000_create_dashboard_layouts`. `widgets` is a JSONB array of `{ id: string, visible: boolean }` objects. The server normalises the value on both read and write: unknown widget IDs are dropped, duplicates are removed, and any missing canonical widgets (`stats`, `upcomingEvents`, `activity`, `teamManagement`) are appended as visible. This means old or forward-compat payloads are always safe to store.
+
+---
+
+### 14. Weekly Challenges
 
 #### `weekly_challenges`
 
@@ -1294,7 +1314,7 @@ Outbox table consumed by the bot's Weekly Challenge Sync worker. One row is inse
 
 ## Migration History
 
-All 78 migration files in `packages/migrations/src/before/` plus 1 after-migration.
+All 86 migration files in `packages/migrations/src/before/` plus 1 after-migration.
 
 ### Before Migrations (schema changes)
 
@@ -1372,6 +1392,8 @@ All 78 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1786200000 | `add_achievement_channel` | Adds `achievement_channel_id TEXT` column to `teams`; backfills `achievement_channel_id = welcome_channel_id` for all existing rows so existing teams continue posting achievement embeds to their welcome channel by default |
 | 1787200000 | `add_challenge_manage_permission` | Backfills `challenge:manage` into `role_permissions` for every existing built-in Admin and Captain role; uses `ON CONFLICT DO NOTHING` to be idempotent |
 | 1787000000 | `create_weekly_challenges` | Creates `weekly_challenges` (id, team_id FK CASCADE, week_start_date DATE, kind CHECK `'throwing'`/`'sport'`, title TEXT CHECK len 1–120, description TEXT CHECK len ≤2000, created_by FK team_members RESTRICT, created_at, updated_at; UNIQUE (team_id, week_start_date)); creates `weekly_challenge_completions` (PK (challenge_id, member_id) with both cascading); creates `weekly_challenge_sync_events` outbox table (id PK, team_id FK CASCADE, challenge_id FK CASCADE, channel_id TEXT, scheduled_for TIMESTAMPTZ, attempts INT, last_error TEXT, created_at, processed_at, delivered_at); adds index `idx_weekly_challenges_team_week` on `(team_id, week_start_date DESC)` and partial index `idx_weekly_challenge_sync_events_due` on `(team_id, scheduled_for) WHERE processed_at IS NULL`. Sync events are scheduled at the captain's team-TZ 09:00 on the challenge's start Monday so the bot can drain them without a cron. |
+| 1787300000 | `add_user_global_admin` | Adds `is_global_admin BOOLEAN NOT NULL DEFAULT false` to `users`; backfills `false` for all existing rows. The first user to register on a fresh database is promoted automatically during the OAuth upsert via a `NOT EXISTS` sub-select. |
+| 1787400000 | `create_dashboard_layouts` | Creates `dashboard_layouts` (user_id FK → users CASCADE, team_id FK → teams CASCADE, widgets JSONB NOT NULL, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ; PK (user_id, team_id)). Stores per-user per-team widget layout preferences for the configurable team dashboard. |
 
 ### After Migrations (seed data)
 

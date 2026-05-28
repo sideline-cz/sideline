@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-05-28 — Configurable team dashboard
+
+- You can now personalise the widgets shown on your team dashboard. Open the **Customise dashboard** panel on any team dashboard page to reorder and show or hide the four widgets: **Stats**, **Upcoming events**, **Activity**, and **Team management**.
+- Use the **Move up** / **Move down** buttons to change the order, and the toggle switch on each row to hide a widget you don't use.
+- Click **Save** to apply your changes. The dashboard refreshes immediately.
+- Your layout is personal — changing it does not affect other team members. Each team has an independent layout, so you can configure them differently.
+- Pinned banners (such as outstanding fee warnings) always appear above the widget area and are not affected by layout settings.
+- API integrators: two new endpoints are available — `GET /teams/{teamId}/dashboard-layout` and `PUT /teams/{teamId}/dashboard-layout`. Both require team membership. See the [API overview](/api/overview/) for details.
+
 ## 2026-05-26 — Automatic global-admin promotion for first registered user
 
 - The very first person to sign in to a fresh Sideline installation is now automatically granted **global-admin** access. No environment variable change is needed for self-hosted deployments — the bootstrap admin can immediately mint onboarding links and access the admin pages.

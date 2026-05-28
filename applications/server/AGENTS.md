@@ -440,6 +440,66 @@ Rules:
 3. **The `markProcessed` RPC payload carries `deliveredAt: DateTime.Utc`** (set by the bot to `DateTime.nowUnsafe()` immediately after the Discord call returns). Do not let the server fill it in — only the bot knows whether delivery succeeded.
 4. Only use this pattern when "delivered" has a clear, single meaning. For multi-stage outboxes (e.g. channel sync, which emits, creates, then later updates) keep the existing two-RPC / `attempts`-counted patterns documented above.
 
+## Per-User/Team Preferences (`(user_id, team_id)` JSONB Row)
+
+Per-user, per-team UI preferences that have no cross-row relationships (e.g. dashboard widget layout, future notification mute lists, future sidebar collapse state) live in a dedicated table keyed by the composite `PRIMARY KEY (user_id, team_id)`, with the preference body stored as a single `JSONB NOT NULL` column. Both ids are `ON DELETE CASCADE` so removing a user or a team automatically purges the row.
+
+Reference implementation: `dashboard_layouts` table (migration `1787400000_create_dashboard_layouts.ts`) + `DashboardLayoutsRepository` (`findByUserTeam` + `upsert`) + `src/api/dashboard-layout.ts`.
+
+### Schema Shape
+
+```sql
+CREATE TABLE <resource>_preferences (
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  <body>  JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, team_id)
+)
+```
+
+### Rules
+
+1. **The composite primary key is `(user_id, team_id)` — never add a synthetic `id UUID`.** The natural key uniquely identifies the row; a surrogate would only invite ambiguous `findById` lookups.
+2. **Reads return `Option<Body>`; the "no row yet" case is a defaulted-on-the-server response, never a 404.** The API handler resolves `Option.none()` to a `DEFAULT_*` value defined in the handler module (see `DEFAULT_LAYOUT` in `src/api/dashboard-layout.ts`). The client never distinguishes "never saved" from "saved as default".
+3. **Writes use `INSERT ... ON CONFLICT (user_id, team_id) DO UPDATE SET <body> = EXCLUDED.<body>, updated_at = now() RETURNING <body>`** through `SqlSchema.findOne` — there is no separate `insert` / `update`. The handler upserts unconditionally.
+4. **Pre-encode the JSONB column to a string** with `JSON.stringify(...)` and bind via `${input.body_json}::jsonb`. Do not pass the un-encoded class instance — `jsonb` requires a JSON string. Node-pg automatically parses JSONB columns back to JS objects on read, so the row schema uses `Schema.Array(Widget)` (or `Schema.Struct`) directly with no `Schema.parseJson` wrapper.
+5. **Authorization is `requireMembership(...)`, not `requirePermission(...)`.** A preference is caller-scoped data — every team member may CRUD their own row regardless of permissions. Never accept a `userId` from the URL or payload — bind it from `Auth.CurrentUserContext` so a member cannot read or overwrite another member's preferences.
+
+## Server-Side Normalization Of Stored Preference Payloads
+
+When a JSONB preference payload references domain literals that may grow over time (e.g. `DashboardWidgetId` adds a new widget; a notification-mute set adds a new channel kind), the server MUST run a **`normalize` pure function on BOTH read and write** that (1) drops unknown ids, (2) dedupes repeated ids, (3) appends any missing canonical ids with a sensible default in a fixed canonical order. The function lives next to the API handler (e.g. `normalizeWidgets` in `src/api/dashboard-layout.ts`) and is unit-tested independently.
+
+```typescript
+export const normalizeWidgets = (
+  input: ReadonlyArray<DashboardLayoutApi.DashboardWidget>,
+): ReadonlyArray<DashboardLayoutApi.DashboardWidget> => {
+  const validIds = new Set(DashboardLayoutApi.DASHBOARD_WIDGET_ORDER);
+  const seen = new Set<DashboardLayoutApi.DashboardWidgetId>();
+  const result: DashboardLayoutApi.DashboardWidget[] = [];
+
+  for (const widget of input) {
+    if (!validIds.has(widget.id)) continue; // drop unknown (stale literal)
+    if (seen.has(widget.id)) continue;       // dedupe
+    seen.add(widget.id);
+    result.push(widget);
+  }
+  for (const id of DashboardLayoutApi.DASHBOARD_WIDGET_ORDER) {
+    if (!seen.has(id)) result.push(new DashboardLayoutApi.DashboardWidget({ id, visible: true }));
+  }
+  return result;
+};
+```
+
+Rules:
+
+1. **Run `normalize` on the GET handler's mapped result** (after `Option.match` resolves the row) AND on the PUT handler before `upsert(...)` — never trust the stored payload OR the client payload. A row written by an old server version may contain stale ids; a client built against an old domain schema may omit new ids.
+2. **The canonical id order is a `const`-tuple exported from `packages/domain/`** (e.g. `DASHBOARD_WIDGET_ORDER`). The normalizer iterates that tuple to append missing entries; the order is the client's default display order.
+3. **"Missing" entries are appended as visible/enabled by default,** not hidden — a user who upgrades to a version that adds a new widget sees it without opening settings. Hiding-by-default would orphan new features behind discovery.
+4. **The normalizer is a pure synchronous function** (no `Effect`, no DB access). Place it in the handler file alongside the route definitions and export it for unit testing. Unit test the four cases: drop-unknown, dedupe, append-missing, preserve-existing-order.
+5. **Do not version the stored payload** (`{ version: 1, widgets: [...] }`). The normalizer makes the payload schema self-healing — a forward/backward-compatible literal set is cheaper than a migration on every additive change.
+
 ## Team Provisioning: `provisionNewTeam(...)` Helper
 
 The single source of truth for "create a team row + seed roles + add the creator as Admin" is `src/utils/provisionNewTeam.ts`. Both `auth.createTeam` (legacy, deprecated) and `onboarding.completeOnboarding` (new) delegate to this helper. Never re-implement the team-creation steps inline in a new handler — always go through `provisionNewTeam`.

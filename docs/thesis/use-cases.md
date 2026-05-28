@@ -116,6 +116,11 @@ flowchart LR
         UC_BOT_POST_CHALLENGE["Post Weekly Challenge Embed"]
     end
 
+    subgraph DASHBOARD_LAYOUT["Dashboard Layout"]
+        UC_GET_LAYOUT["View Dashboard Layout\n(GET /teams/:teamId/dashboard-layout)"]
+        UC_SAVE_LAYOUT["Save Dashboard Layout\n(PUT /teams/:teamId/dashboard-layout)"]
+    end
+
     subgraph FINANCE["Finance"]
         UC_VIEW_FINANCE["View Finance Overview"]
         UC_MANAGE_FEES["Create / Update / Archive Fees"]
@@ -154,6 +159,8 @@ flowchart LR
     PL --> UC_LIST_CHALLENGES
     PL --> UC_MARK_COMPLETE
     PL --> UC_UNMARK_COMPLETE
+    PL --> UC_GET_LAYOUT
+    PL --> UC_SAVE_LAYOUT
 
     CP --> UC_CREATE_CHALLENGE
     CP --> UC_EDIT_CHALLENGE
@@ -610,6 +617,21 @@ flowchart LR
     BOT --> UC_BOT_EMBED
 ```
 
+### 3.10 Dashboard Layout Customisation
+
+Each team member can personalise their team dashboard by reordering and showing or hiding the four available widgets (`stats`, `upcomingEvents`, `activity`, `teamManagement`). The layout is stored per user per team; other members are not affected. Pinned banners (e.g. outstanding payments) always render above the configurable region regardless of widget settings.
+
+```mermaid
+flowchart LR
+    PL(["Player / Member"])
+
+    UC_GET["Fetch Dashboard Layout\n(GET /teams/:teamId/dashboard-layout)\nreturns normalised widget list\ndefault = all 4 widgets visible"]
+    UC_SAVE["Save Dashboard Layout\n(PUT /teams/:teamId/dashboard-layout)\nwidgets: array of {id, visible}\nnormalised server-side before persist"]
+
+    PL --> UC_GET
+    PL --> UC_SAVE
+```
+
 ---
 
 ## 4. Use Case Descriptions
@@ -896,3 +918,15 @@ The following structured descriptions cover the most significant use cases in th
 | **Main Flow** | 1. The member opens **Team → Weekly challenges** (`/teams/:teamId/challenges`). 2. The page displays the challenge grid: weeks as columns (newest left), members as rows. The active week's column is highlighted. 3. The member clicks the tick cell in the active week's column for their row. The web app calls `POST /teams/:teamId/weekly-challenges/:challengeId/complete`. 4. The server inserts a `weekly_challenge_completions` row for `(challenge_id, member_id)`. The cell updates to show the completed state (Splněno ✓). 5. To undo, the member clicks the tick again. The web app calls `DELETE /teams/:teamId/weekly-challenges/:challengeId/complete`. The completion row is removed. |
 | **Postcondition** | The member's completion state for the current week is toggled. All other viewers of the challenges page see the updated grid on their next load. |
 | **Alternate Flow** | If the challenge's week is not the current week (checked server-side using the team timezone), the API returns `409 WeeklyChallengeNotActive` and the UI shows an error. Tick cells for past and future weeks are rendered as read-only in the web UI. |
+
+---
+
+### UC-24: Customise Personal Team Dashboard
+
+| Field | Detail |
+|---|---|
+| **Actor** | Player (any active team member) |
+| **Precondition** | The actor is an authenticated, active member of the team. |
+| **Main Flow** | 1. The actor navigates to the team dashboard (`/teams/:teamId`). The page loads via `GET /teams/:teamId/dashboard-layout` to determine widget order and visibility. If no row exists the server returns all four widgets visible in canonical order. 2. The actor opens the **Customise dashboard** panel. The panel lists the four widgets (`stats`, `upcomingEvents`, `activity`, `teamManagement`) with their current order and a visibility toggle for each. 3. The actor reorders widgets using the **Move up** / **Move down** controls and toggles visibility using the switches. 4. The actor clicks **Save**. The web app calls `PUT /teams/:teamId/dashboard-layout` with the updated `widgets` array. 5. The server normalises the payload (deduplicates, drops unknown IDs, appends missing widgets as visible), upserts the `dashboard_layouts` row, and returns the normalised layout. 6. The page calls `router.invalidate()` to refresh the dashboard with the updated layout. |
+| **Postcondition** | The actor's `dashboard_layouts` row is upserted. On the next load the dashboard renders widgets in the saved order, hiding any that were toggled off. Other team members' layouts are unaffected. |
+| **Notes** | Pinned banners (e.g. outstanding fee warnings) always render above the configurable widget region and are not affected by layout settings. The layout is per-user per-team — each member of the same team can have a different configuration. |

@@ -36,6 +36,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Expenses](#25-expenses)
    - [Team Onboarding](#26-team-onboarding)
    - [Weekly Challenge](#27-weekly-challenge)
+   - [Dashboard Layout](#28-dashboard-layout)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -4867,6 +4868,81 @@ Removes the authenticated member's completion mark for a challenge.
 
 ---
 
+### 28. Dashboard Layout
+
+**Source:** `packages/domain/src/api/DashboardLayoutApi.ts`
+
+Manages the per-user, per-team widget layout for the team dashboard. Each user has an independent layout per team. If no row is stored, the server returns the default layout (all four widgets visible in canonical order).
+
+---
+
+#### `GET /teams/:teamId/dashboard-layout`
+
+Returns the authenticated user's current dashboard widget layout for the team.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Response:** `200 OK` — `DashboardLayout`
+
+| Field | Type | Description |
+|---|---|---|
+| `widgets` | `DashboardWidget[]` | Ordered list of dashboard widgets with visibility flags |
+
+`DashboardWidget`:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `'stats' \| 'upcomingEvents' \| 'activity' \| 'teamManagement'` | Widget identifier |
+| `visible` | `boolean` | Whether the widget is shown on the dashboard |
+
+**Normalization:** The server normalises the stored value on read — it deduplicates, drops unknown widget IDs, and appends any missing canonical widgets as visible. This means the response is always the complete set of four widgets in a stable order even if the stored payload was created by an older client.
+
+**Default:** When no layout row exists for the user/team pair, all four widgets are returned as visible in canonical order (`stats`, `upcomingEvents`, `activity`, `teamManagement`).
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `DashboardLayoutForbidden` | 403 | Not a member of this team |
+
+---
+
+#### `PUT /teams/:teamId/dashboard-layout`
+
+Saves the authenticated user's dashboard widget layout for the team.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `UpdateDashboardLayoutPayload`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `widgets` | `DashboardWidget[]` | Yes | New widget order and visibility state |
+
+**Response:** `200 OK` — `DashboardLayout` (same shape as `GET`; server returns the normalised result after saving)
+
+**Normalization:** The server applies the same normalization as `GET` before persisting — unknown IDs are dropped, duplicates are removed, and missing widgets are appended as visible.
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `DashboardLayoutForbidden` | 403 | Not a member of this team |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -5111,3 +5187,4 @@ The following table consolidates all error tags across all API groups.
 | `WeeklyChallengeNotActive` | 409 | Weekly Challenge | Mark/unmark attempted on a challenge whose week is not the current week |
 | `WeeklyChallengeAlreadyExistsForWeek` | 409 | Weekly Challenge | A challenge already exists for the given `weekStart` |
 | `WeeklyChallengeWeekOutOfRange` | 422 | Weekly Challenge | `weekStart` is not a Monday, or is more than one week outside the allowed window |
+| `DashboardLayoutForbidden` | 403 | Dashboard Layout | Not a member of this team |

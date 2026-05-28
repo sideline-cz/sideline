@@ -1407,5 +1407,20 @@
   "noTeam_pageTitle": "No team",
   "noTeam_title": "You're not on a team yet",
   "noTeam_description": "Teams are set up by your captain or coach. Contact them to be added to a team.",
-  "noTeam_removedBanner": "You're no longer a member of your team."
+  "noTeam_removedBanner": "You're no longer a member of your team.",
+  "dashboard_customize": "Customize",
+  "dashboard_customizer_title": "Customize dashboard",
+  "dashboard_customizer_save": "Save",
+  "dashboard_customizer_cancel": "Cancel",
+  "dashboard_customizer_reset": "Reset",
+  "dashboard_customizer_moveUp": "Move up",
+  "dashboard_customizer_moveDown": "Move down",
+  "dashboard_customizer_saveError": "Failed to save layout",
+  "dashboard_widget_stats": "Stats",
+  "dashboard_widget_upcomingEvents": "Upcoming events",
+  "dashboard_widget_activity": "Activity",
+  "dashboard_widget_teamManagement": "Team management",
+  "dashboard_allWidgetsHidden": "No widgets visible",
+  "dashboard_layoutSaved": "Dashboard layout saved.",
+  "dashboard_layoutSaveFailed": "Failed to save dashboard layout."
 }

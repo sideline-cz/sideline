@@ -65,6 +65,7 @@ import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from './mocks/onboardingMocks.js';
 import { MockTeamChallengeRepositoryLayer } from './mocks/teamChallengeMocks.js';
@@ -960,6 +961,7 @@ const buildTestLayer = (
     .pipe(Layer.provide(MockTranslationsLayers))
     .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
     .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
+    .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
     .pipe(Layer.provide(BotInfoStore.Default));
 
 const makeSettingsLayer = (findByTeamId: () => Effect.Effect<Option.Option<unknown>>) =>
@@ -1186,6 +1188,7 @@ describe('B2 — createGroup emits channel_created regardless of create_discord_
       .pipe(Layer.provide(MockTranslationsLayers))
       .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
       .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
+      .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
       .pipe(Layer.provide(BotInfoStore.Default));
 
     const _app = HttpRouter.toWebHandler(customLayer);

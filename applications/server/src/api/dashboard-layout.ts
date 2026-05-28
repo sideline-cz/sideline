@@ -1,0 +1,103 @@
+import { Auth, DashboardLayoutApi } from '@sideline/domain';
+import { LogicError } from '@sideline/effect-lib';
+import { Effect, Option } from 'effect';
+import { HttpApiBuilder } from 'effect/unstable/httpapi';
+import { Api } from '~/api/api.js';
+import { requireMembership } from '~/api/permissions.js';
+import { DashboardLayoutsRepository } from '~/repositories/DashboardLayoutsRepository.js';
+import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+
+const forbidden = new DashboardLayoutApi.Forbidden();
+
+// ---------------------------------------------------------------------------
+// Default layout
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_LAYOUT: ReadonlyArray<DashboardLayoutApi.DashboardWidget> =
+  DashboardLayoutApi.DASHBOARD_WIDGET_ORDER.map(
+    (id) => new DashboardLayoutApi.DashboardWidget({ id, visible: true }),
+  );
+
+// ---------------------------------------------------------------------------
+// normalizeWidgets
+// ---------------------------------------------------------------------------
+
+export const normalizeWidgets = (
+  input: ReadonlyArray<DashboardLayoutApi.DashboardWidget>,
+): ReadonlyArray<DashboardLayoutApi.DashboardWidget> => {
+  const validIds = new Set<DashboardLayoutApi.DashboardWidgetId>(
+    DashboardLayoutApi.DASHBOARD_WIDGET_ORDER,
+  );
+  const seen = new Set<DashboardLayoutApi.DashboardWidgetId>();
+  const result: DashboardLayoutApi.DashboardWidget[] = [];
+
+  for (const widget of input) {
+    if (!validIds.has(widget.id)) continue;
+    if (seen.has(widget.id)) continue;
+    seen.add(widget.id);
+    result.push(widget);
+  }
+
+  // Append any missing canonical widgets as visible:true in canonical order
+  for (const id of DashboardLayoutApi.DASHBOARD_WIDGET_ORDER) {
+    if (!seen.has(id)) {
+      result.push(new DashboardLayoutApi.DashboardWidget({ id, visible: true }));
+    }
+  }
+
+  return result;
+};
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
+
+export const DashboardLayoutApiLive = HttpApiBuilder.group(Api, 'dashboardLayout', (handlers) =>
+  Effect.Do.pipe(
+    Effect.bind('members', () => TeamMembersRepository.asEffect()),
+    Effect.bind('layouts', () => DashboardLayoutsRepository.asEffect()),
+    Effect.map(({ members, layouts }) =>
+      handlers
+        .handle('getDashboardLayout', ({ params: { teamId } }) =>
+          Effect.Do.pipe(
+            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+            Effect.tap(({ currentUser }) =>
+              requireMembership(members, teamId, currentUser.id, forbidden),
+            ),
+            Effect.bind('row', ({ currentUser }) => layouts.findByUserTeam(currentUser.id, teamId)),
+            Effect.map(({ row }) =>
+              Option.match(row, {
+                onNone: () => new DashboardLayoutApi.DashboardLayout({ widgets: DEFAULT_LAYOUT }),
+                onSome: (r) =>
+                  new DashboardLayoutApi.DashboardLayout({
+                    widgets: normalizeWidgets(r.widgets),
+                  }),
+              }),
+            ),
+          ),
+        )
+        .handle('updateDashboardLayout', ({ params: { teamId }, payload }) =>
+          Effect.Do.pipe(
+            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+            Effect.tap(({ currentUser }) =>
+              requireMembership(members, teamId, currentUser.id, forbidden),
+            ),
+            Effect.let('normalized', () => normalizeWidgets(payload.widgets)),
+            Effect.bind('row', ({ currentUser, normalized }) =>
+              layouts.upsert(currentUser.id, teamId, normalized),
+            ),
+            Effect.map(
+              ({ normalized }) =>
+                new DashboardLayoutApi.DashboardLayout({
+                  widgets: normalized,
+                }),
+            ),
+            Effect.catchTag(
+              'NoSuchElementError',
+              LogicError.withMessage(() => 'Dashboard layout upsert returned no row'),
+            ),
+          ),
+        ),
+    ),
+  ),
+);

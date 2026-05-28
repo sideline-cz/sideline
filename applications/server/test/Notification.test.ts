@@ -55,6 +55,7 @@ import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from './mocks/onboardingMocks.js';
 import { MockTeamChallengeRepositoryLayer } from './mocks/teamChallengeMocks.js';
@@ -591,6 +592,7 @@ const buildNotificationTestLayer = (
     .pipe(Layer.provide(MockTranslationsLayers))
     .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
     .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
+    .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
     .pipe(Layer.provide(BotInfoStore.Default));
 };
 

@@ -1,19 +1,26 @@
-// TDD mode — tests written BEFORE TeamDetailPage.tsx is updated to accept myStatus.
+// TDD mode — tests written BEFORE the configurable dashboard implementation exists.
 // These tests WILL FAIL until:
-//   - TeamDetailPage.tsx is updated to accept myStatus prop and render OutstandingPaymentsBanner
-//   - OutstandingPaymentsBanner.tsx is implemented
+//   - TeamDetailPage.tsx is updated to accept layout prop and conditionally render widgets
+//   - DashboardCustomizer.tsx is implemented (see separate test file)
+//   - DEFAULT_LAYOUT constant is exported from dashboard-layout.ts (or similar)
 //
-// Component contract (updated):
+// Extends the existing banner integration tests with new layout-driven widget tests.
+// The existing banner tests are preserved below.
+//
+// New TeamDetailPage contract additions:
 //   TeamDetailPage({
 //     teamId: string;
 //     dashboard: DashboardApi.DashboardResponse | undefined;
-//     myStatus?: ReadonlyArray<MyFinanceStatus>;   ← NEW prop
+//     myStatus?: ReadonlyArray<MyFinanceStatus>;
+//     layout?: DashboardLayoutApi.DashboardLayout;   ← NEW prop
 //   })
 //
 // New behaviour:
-//   - Renders <OutstandingPaymentsBanner> after <AwaitingRsvpBanner>
-//   - Banner absent when myStatus is empty or undefined
-//   - Existing dashboard widgets still render (smoke test)
+//   - Renders configurable widgets (stats/upcomingEvents/activity/teamManagement) in layout.widgets order
+//   - A widget with visible:false is NOT rendered in the configurable region
+//   - Pinned banners (AwaitingRsvp, OutstandingPayments) render regardless of layout
+//   - All configurable hidden → empty-state element present inside configurable region
+//   - layout undefined → falls back to DEFAULT (all 4 visible in canonical order)
 
 import { render, screen } from '@testing-library/react';
 import { DateTime, Option } from 'effect';
@@ -48,6 +55,7 @@ vi.mock('~/lib/translations.js', () => ({
       dashboard_notRanked: 'Not ranked',
       dashboard_longestStreak: 'Longest streak',
       dashboard_totalDuration: 'Total duration',
+      dashboard_noWidgets: 'No widgets visible',
       team_members: 'Members',
       team_rosters: 'Rosters',
       team_roles: 'Roles',
@@ -132,6 +140,9 @@ type MyFinanceStatus = {
   totalOutstandingMinor: number;
 };
 
+type DashboardWidget = { id: string; visible: boolean };
+type DashboardLayout = { widgets: ReadonlyArray<DashboardWidget> };
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -172,14 +183,13 @@ function makePendingAssignment(id: string): FeeAssignmentView {
 const TEAM_ID = 'team-1';
 
 // ---------------------------------------------------------------------------
-// Tests
+// Existing banner integration tests (preserved unchanged)
 // ---------------------------------------------------------------------------
 
 describe('TeamDetailPage — banner integration', () => {
   it('banner absent when myStatus is empty', () => {
     render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} myStatus={[]} />);
 
-    // The outstanding payments banner should NOT be present
     const banner =
       document.querySelector('[data-variant="amber"]') ??
       document.querySelector('[data-variant="red"]');
@@ -203,11 +213,9 @@ describe('TeamDetailPage — banner integration', () => {
         totalOutstandingMinor: 5000,
       },
     ];
-    const dashboard = makeDashboard();
 
-    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard} myStatus={myStatus} />);
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} myStatus={myStatus} />);
 
-    // Outstanding banner should be rendered
     const banner =
       document.querySelector('[data-variant="amber"]') ??
       document.querySelector('[data-variant="red"]');
@@ -217,11 +225,140 @@ describe('TeamDetailPage — banner integration', () => {
   it('existing dashboard widgets still render (smoke test)', () => {
     render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} myStatus={[]} />);
 
-    // Activity summary section should render
     expect(screen.getByText('Activity summary')).not.toBeNull();
-    // Team management section
     expect(screen.getByText('Team management')).not.toBeNull();
-    // Stat cards
     expect(screen.getByText('Current streak')).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NEW: configurable layout tests
+// ---------------------------------------------------------------------------
+
+describe('TeamDetailPage — configurable layout', () => {
+  it('renders 4 widgets in layout.widgets order when all are visible', () => {
+    const layout: DashboardLayout = {
+      widgets: [
+        { id: 'teamManagement', visible: true },
+        { id: 'activity', visible: true },
+        { id: 'upcomingEvents', visible: true },
+        { id: 'stats', visible: true },
+      ],
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} layout={layout as any} />);
+
+    // All 4 should be present in DOM
+    expect(screen.getByText('Team management')).not.toBeNull();
+    expect(screen.getByText('Activity summary')).not.toBeNull();
+    expect(screen.getByText('Upcoming events')).not.toBeNull();
+    expect(screen.getByText('Current streak')).not.toBeNull();
+  });
+
+  it('a widget with visible:false is NOT rendered', () => {
+    const layout: DashboardLayout = {
+      widgets: [
+        { id: 'stats', visible: false },
+        { id: 'upcomingEvents', visible: true },
+        { id: 'activity', visible: true },
+        { id: 'teamManagement', visible: true },
+      ],
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} layout={layout as any} />);
+
+    // 'stats' widget (Current streak label) should NOT be rendered
+    expect(screen.queryByText('Current streak')).toBeNull();
+    // Others still render
+    expect(screen.getByText('Upcoming events')).not.toBeNull();
+    expect(screen.getByText('Activity summary')).not.toBeNull();
+    expect(screen.getByText('Team management')).not.toBeNull();
+  });
+
+  it('pinned AwaitingRsvp banner renders regardless of layout', () => {
+    const layout: DashboardLayout = {
+      widgets: [
+        { id: 'stats', visible: false },
+        { id: 'upcomingEvents', visible: false },
+        { id: 'activity', visible: false },
+        { id: 'teamManagement', visible: false },
+      ],
+    };
+    const dashboard = {
+      ...makeDashboard(),
+      awaitingRsvp: [
+        {
+          eventId: 'evt-1' as any,
+          title: 'Training Session',
+          eventType: 'training' as any,
+          startAt: DateTime.fromDateUnsafe(new Date('2025-12-01T10:00:00Z')),
+          endAt: Option.none(),
+          location: Option.none(),
+          locationUrl: Option.none(),
+          myRsvp: Option.none(),
+        },
+      ],
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} layout={layout as any} />);
+
+    // AwaitingRsvp banner must still be present
+    expect(screen.getByText('Awaiting RSVP')).not.toBeNull();
+  });
+
+  it('pinned OutstandingPayments banner renders regardless of layout', () => {
+    const layout: DashboardLayout = {
+      widgets: [
+        { id: 'stats', visible: false },
+        { id: 'upcomingEvents', visible: false },
+        { id: 'activity', visible: false },
+        { id: 'teamManagement', visible: false },
+      ],
+    };
+    const myStatus: MyFinanceStatus[] = [
+      {
+        currency: 'CZK',
+        assignments: [makePendingAssignment('x')],
+        totalOutstandingMinor: 5000,
+      },
+    ];
+    render(
+      <TeamDetailPage
+        teamId={TEAM_ID}
+        dashboard={makeDashboard()}
+        layout={layout as any}
+        myStatus={myStatus}
+      />,
+    );
+
+    const banner =
+      document.querySelector('[data-variant="amber"]') ??
+      document.querySelector('[data-variant="red"]');
+    expect(banner).not.toBeNull();
+  });
+
+  it('all configurable widgets hidden → empty-state element inside configurable region, banners still present', () => {
+    const layout: DashboardLayout = {
+      widgets: [
+        { id: 'stats', visible: false },
+        { id: 'upcomingEvents', visible: false },
+        { id: 'activity', visible: false },
+        { id: 'teamManagement', visible: false },
+      ],
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} layout={layout as any} />);
+
+    // An empty-state element should exist inside the configurable region
+    const emptyState =
+      document.querySelector('[data-testid="dashboard-empty-state"]') ??
+      screen.queryByText('No widgets visible');
+    expect(emptyState).not.toBeNull();
+  });
+
+  it('layout undefined → falls back to DEFAULT (all 4 visible in canonical order)', () => {
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} />);
+
+    // All 4 configurable widgets should be visible (DEFAULT)
+    expect(screen.getByText('Current streak')).not.toBeNull();
+    expect(screen.getByText('Upcoming events')).not.toBeNull();
+    expect(screen.getByText('Activity summary')).not.toBeNull();
+    expect(screen.getByText('Team management')).not.toBeNull();
   });
 });

@@ -58,6 +58,7 @@ import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { MockDashboardLayoutsRepositoryLayer } from '../../mocks/dashboardLayoutMocks.js';
 import { MockTranslationsLayers } from '../../mocks/translationMocks.js';
 
 // ---------------------------------------------------------------------------
@@ -671,6 +672,7 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(StubRepositoriesLayer),
 )
   .pipe(Layer.provide(MockTranslationsLayers))
+  .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
   .pipe(Layer.provide(BotInfoStore.Default));
 
 // ---------------------------------------------------------------------------

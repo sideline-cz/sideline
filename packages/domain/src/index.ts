@@ -14,6 +14,8 @@ export * as Auth from './api/Auth.js';
 
 export * as DashboardApi from './api/DashboardApi.js';
 
+export * as DashboardLayoutApi from './api/DashboardLayoutApi.js';
+
 export * as EventApi from './api/EventApi.js';
 
 export * as EventRsvpApi from './api/EventRsvpApi.js';

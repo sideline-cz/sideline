@@ -6,6 +6,7 @@ import {
   AgeThresholdApi,
   Auth,
   DashboardApi,
+  DashboardLayoutApi,
   EventApi,
   EventRsvpApi,
   EventSeriesApi,
@@ -61,5 +62,6 @@ export const Api = HttpApi.make('api')
     Translations.TranslationsApiGroup,
     VersionApi.VersionApiGroup,
     WeeklySummaryApi.WeeklySummaryApiGroup,
+    DashboardLayoutApi.DashboardLayoutApiGroup,
   )
   .prefix(env.API_PREFIX as '/${string}');

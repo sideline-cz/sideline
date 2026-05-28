@@ -1,4 +1,4 @@
-import type { DashboardApi } from '@sideline/domain';
+import type { DashboardApi, DashboardLayoutApi } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import { DateTime, Option } from 'effect';
 import {
@@ -7,26 +7,37 @@ import {
   ChevronRight,
   Clock,
   Flame,
+  LayoutDashboard,
   MapPin,
   Settings,
   Trophy,
   Users,
   Zap,
 } from 'lucide-react';
+import type React from 'react';
 import { EventLocation } from '~/components/atoms/EventLocation.js';
+import { DashboardCustomizer } from '~/components/organisms/DashboardCustomizer.js';
 import type { MyFinanceStatus } from '~/components/organisms/OutstandingPaymentsBanner.js';
 import { OutstandingPaymentsBanner } from '~/components/organisms/OutstandingPaymentsBanner.js';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
 import { Skeleton } from '~/components/ui/skeleton';
+import { DEFAULT_LAYOUT } from '~/lib/dashboardLayout.js';
 import { formatLocalTime } from '~/lib/datetime';
 import { tr } from '~/lib/translations.js';
 
+// WidgetId mirrors DashboardLayoutApi.DashboardWidgetId — kept here so the
+// registry Record type is closed without importing from the domain package.
+type WidgetId = 'stats' | 'upcomingEvents' | 'activity' | 'teamManagement';
+
 interface TeamDetailPageProps {
   teamId: string;
+  userId?: string;
   dashboard: DashboardApi.DashboardResponse | undefined;
   myStatus?: ReadonlyArray<MyFinanceStatus>;
+  layout?: DashboardLayoutApi.DashboardLayout;
+  onSaveLayout?: (widgets: DashboardLayoutApi.DashboardWidget[]) => Promise<void>;
 }
 
 const formatDuration = (minutes: number): string => {
@@ -407,7 +418,14 @@ function TeamManagementCard({ teamId }: { teamId: string }) {
 
 // -- Main page component --
 
-export function TeamDetailPage({ teamId, dashboard, myStatus = [] }: TeamDetailPageProps) {
+export function TeamDetailPage({
+  teamId,
+  userId,
+  dashboard,
+  myStatus = [],
+  layout,
+  onSaveLayout,
+}: TeamDetailPageProps) {
   if (!dashboard) {
     return (
       <div className='space-y-6'>
@@ -418,30 +436,52 @@ export function TeamDetailPage({ teamId, dashboard, myStatus = [] }: TeamDetailP
   }
 
   const { upcomingEvents, awaitingRsvp, activitySummary } = dashboard;
+  const effectiveLayout = layout ?? DEFAULT_LAYOUT;
+
+  const widgetRegistry: Record<WidgetId, React.ReactNode> = {
+    stats: <StatCards key='stats' activitySummary={activitySummary} />,
+    upcomingEvents: (
+      <UpcomingEventsCard key='upcomingEvents' teamId={teamId} events={upcomingEvents} />
+    ),
+    activity: <ActivityCard key='activity' activitySummary={activitySummary} teamId={teamId} />,
+    teamManagement: <TeamManagementCard key='teamManagement' teamId={teamId} />,
+  };
+
+  const visibleWidgets = effectiveLayout.widgets
+    .filter((w) => w.visible)
+    .map((w) => widgetRegistry[w.id as WidgetId])
+    .filter(Boolean);
+
+  const allHidden = effectiveLayout.widgets.every((w) => !w.visible);
 
   return (
     <div className='space-y-6'>
-      {/* Top stats row - always visible, gives instant overview */}
-      <StatCards activitySummary={activitySummary} />
+      {/* Page header with title and customizer entry point */}
+      <div className='flex items-center justify-between gap-2'>
+        <h1 className='text-2xl font-bold'>{tr('dashboard_title')}</h1>
+        {userId !== undefined && onSaveLayout !== undefined && (
+          <DashboardCustomizer teamId={teamId} layout={effectiveLayout} onSave={onSaveLayout} />
+        )}
+      </div>
 
-      {/* Awaiting RSVP banner - urgent items at the top, visually distinct */}
+      {/* Pinned banners - always rendered regardless of layout */}
       <AwaitingRsvpBanner teamId={teamId} events={awaitingRsvp} />
 
       {/* Outstanding payments banner - shown when player has outstanding fees */}
       <OutstandingPaymentsBanner teamId={teamId} groups={myStatus} />
 
-      {/* Main content grid */}
-      <div className='grid grid-cols-1 gap-6 lg:grid-cols-3'>
-        {/* Upcoming events takes 2/3 on large screens - primary content */}
-        <div className='lg:col-span-2'>
-          <UpcomingEventsCard teamId={teamId} events={upcomingEvents} />
-        </div>
-
-        {/* Sidebar column - activity + management */}
-        <div className='flex flex-col gap-6'>
-          <ActivityCard activitySummary={activitySummary} teamId={teamId} />
-          <TeamManagementCard teamId={teamId} />
-        </div>
+      {/* Configurable widget region */}
+      <div className='flex flex-col gap-6 max-w-4xl mx-auto w-full'>
+        {allHidden ? (
+          <Card data-testid='dashboard-empty-state'>
+            <CardContent className='flex flex-col items-center justify-center gap-3 py-10 text-center'>
+              <LayoutDashboard className='size-8 text-muted-foreground/40' />
+              <p className='text-sm text-muted-foreground'>{tr('dashboard_allWidgetsHidden')}</p>
+            </CardContent>
+          </Card>
+        ) : (
+          visibleWidgets
+        )}
       </div>
     </div>
   );
