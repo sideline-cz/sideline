@@ -17,6 +17,7 @@ import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelEventDividersRepository } from '~/repositories/ChannelEventDividersRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
+import { DashboardLayoutsRepository } from '~/repositories/DashboardLayoutsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
@@ -119,6 +120,7 @@ const Repositories = Layer.mergeAll(
   AchievementSyncEventsRepository.Default,
   AchievementSettingsRepository.Default,
   CustomAchievementsRepository.Default,
+  DashboardLayoutsRepository.Default,
   DiscordRoleProvisionEventsRepository.Default,
   TeamChallengeRepository.Default,
   WeeklySummaryRepository.Default,
