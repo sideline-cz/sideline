@@ -156,6 +156,8 @@ type DashboardWidget = {
   visible: boolean;
   height: number;
   colSpan: number;
+  x: number;
+  y: number;
 };
 type DashboardLayout = { widgets: ReadonlyArray<DashboardWidget> };
 
@@ -255,10 +257,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('renders 4 widgets in layout.widgets order when all are visible', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'teamManagement', visible: true, height: 260, colSpan: 1 },
-        { id: 'activity', visible: true, height: 200, colSpan: 1 },
-        { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2 },
-        { id: 'stats', visible: true, height: 140, colSpan: 3 },
+        { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 8, y: 34 },
+        { id: 'activity', visible: true, height: 200, colSpan: 1, x: 8, y: 14 },
+        { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 0, y: 14 },
+        { id: 'stats', visible: true, height: 140, colSpan: 3, x: 0, y: 0 },
       ],
     };
     render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} layout={layout as any} />);
@@ -273,10 +275,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('a widget with visible:false is NOT rendered', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'stats', visible: false, height: 140, colSpan: 3 },
-        { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2 },
-        { id: 'activity', visible: true, height: 200, colSpan: 1 },
-        { id: 'teamManagement', visible: true, height: 260, colSpan: 1 },
+        { id: 'stats', visible: false, height: 140, colSpan: 3, x: 0, y: 0 },
+        { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 0, y: 14 },
+        { id: 'activity', visible: true, height: 200, colSpan: 1, x: 8, y: 14 },
+        { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 8, y: 34 },
       ],
     };
     render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} layout={layout as any} />);
@@ -292,10 +294,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('pinned AwaitingRsvp banner renders regardless of layout', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'stats', visible: false, height: 140, colSpan: 3 },
-        { id: 'upcomingEvents', visible: false, height: 280, colSpan: 2 },
-        { id: 'activity', visible: false, height: 200, colSpan: 1 },
-        { id: 'teamManagement', visible: false, height: 260, colSpan: 1 },
+        { id: 'stats', visible: false, height: 140, colSpan: 3, x: 0, y: 0 },
+        { id: 'upcomingEvents', visible: false, height: 280, colSpan: 2, x: 0, y: 14 },
+        { id: 'activity', visible: false, height: 200, colSpan: 1, x: 8, y: 14 },
+        { id: 'teamManagement', visible: false, height: 260, colSpan: 1, x: 8, y: 34 },
       ],
     };
     const dashboard = {
@@ -322,10 +324,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('pinned OutstandingPayments banner renders regardless of layout', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'stats', visible: false, height: 140, colSpan: 3 },
-        { id: 'upcomingEvents', visible: false, height: 280, colSpan: 2 },
-        { id: 'activity', visible: false, height: 200, colSpan: 1 },
-        { id: 'teamManagement', visible: false, height: 260, colSpan: 1 },
+        { id: 'stats', visible: false, height: 140, colSpan: 3, x: 0, y: 0 },
+        { id: 'upcomingEvents', visible: false, height: 280, colSpan: 2, x: 0, y: 14 },
+        { id: 'activity', visible: false, height: 200, colSpan: 1, x: 8, y: 14 },
+        { id: 'teamManagement', visible: false, height: 260, colSpan: 1, x: 8, y: 34 },
       ],
     };
     const myStatus: MyFinanceStatus[] = [
@@ -353,10 +355,10 @@ describe('TeamDetailPage — configurable layout', () => {
   it('all configurable widgets hidden → empty-state element inside configurable region, banners still present', () => {
     const layout: DashboardLayout = {
       widgets: [
-        { id: 'stats', visible: false, height: 140, colSpan: 3 },
-        { id: 'upcomingEvents', visible: false, height: 280, colSpan: 2 },
-        { id: 'activity', visible: false, height: 200, colSpan: 1 },
-        { id: 'teamManagement', visible: false, height: 260, colSpan: 1 },
+        { id: 'stats', visible: false, height: 140, colSpan: 3, x: 0, y: 0 },
+        { id: 'upcomingEvents', visible: false, height: 280, colSpan: 2, x: 0, y: 14 },
+        { id: 'activity', visible: false, height: 200, colSpan: 1, x: 8, y: 14 },
+        { id: 'teamManagement', visible: false, height: 260, colSpan: 1, x: 8, y: 34 },
       ],
     };
     render(<TeamDetailPage teamId={TEAM_ID} dashboard={makeDashboard()} layout={layout as any} />);

@@ -27,11 +27,15 @@ describe('DashboardWidget — decode', () => {
       visible: true,
       height: entry.height,
       colSpan: entry.colSpan,
+      x: entry.x,
+      y: entry.y,
     });
     expect(result.id).toBe('stats');
     expect(result.visible).toBe(true);
     expect(result.height).toBe(entry.height);
     expect(result.colSpan).toBe(entry.colSpan);
+    expect(result.x).toBe(entry.x);
+    expect(result.y).toBe(entry.y);
   });
 
   it('decodes {id:"upcomingEvents"} using DEFAULT_LAYOUT entry successfully', () => {
@@ -41,11 +45,15 @@ describe('DashboardWidget — decode', () => {
       visible: false,
       height: entry.height,
       colSpan: entry.colSpan,
+      x: entry.x,
+      y: entry.y,
     });
     expect(result.id).toBe('upcomingEvents');
     expect(result.visible).toBe(false);
     expect(result.height).toBe(entry.height);
     expect(result.colSpan).toBe(entry.colSpan);
+    expect(result.x).toBe(entry.x);
+    expect(result.y).toBe(entry.y);
   });
 
   it('decodes {id:"activity"} using DEFAULT_LAYOUT entry successfully', () => {
@@ -55,11 +63,15 @@ describe('DashboardWidget — decode', () => {
       visible: true,
       height: entry.height,
       colSpan: entry.colSpan,
+      x: entry.x,
+      y: entry.y,
     });
     expect(result.id).toBe('activity');
     expect(result.visible).toBe(true);
     expect(result.height).toBe(entry.height);
     expect(result.colSpan).toBe(entry.colSpan);
+    expect(result.x).toBe(entry.x);
+    expect(result.y).toBe(entry.y);
   });
 
   it('decodes {id:"teamManagement"} using DEFAULT_LAYOUT entry successfully', () => {
@@ -69,11 +81,15 @@ describe('DashboardWidget — decode', () => {
       visible: true,
       height: entry.height,
       colSpan: entry.colSpan,
+      x: entry.x,
+      y: entry.y,
     });
     expect(result.id).toBe('teamManagement');
     expect(result.visible).toBe(true);
     expect(result.height).toBe(entry.height);
     expect(result.colSpan).toBe(entry.colSpan);
+    expect(result.x).toBe(entry.x);
+    expect(result.y).toBe(entry.y);
   });
 
   it('decodes colSpan 1 (minimum valid)', () => {
@@ -82,6 +98,8 @@ describe('DashboardWidget — decode', () => {
       visible: true,
       height: 140,
       colSpan: 1,
+      x: 0,
+      y: 0,
     });
     expect(result.colSpan).toBe(1);
   });
@@ -92,6 +110,8 @@ describe('DashboardWidget — decode', () => {
       visible: true,
       height: 140,
       colSpan: 3,
+      x: 0,
+      y: 0,
     });
     expect(result.colSpan).toBe(3);
   });
@@ -103,6 +123,8 @@ describe('DashboardWidget — decode', () => {
         visible: true,
         height: 140,
         colSpan: 0,
+        x: 0,
+        y: 0,
       }),
     ).toThrow();
   });
@@ -114,6 +136,8 @@ describe('DashboardWidget — decode', () => {
         visible: true,
         height: 140,
         colSpan: 4,
+        x: 0,
+        y: 0,
       }),
     ).toThrow();
   });
@@ -124,6 +148,8 @@ describe('DashboardWidget — decode', () => {
         id: 'stats',
         visible: true,
         height: 140,
+        x: 0,
+        y: 0,
       }),
     ).toThrow();
   });
@@ -135,6 +161,8 @@ describe('DashboardWidget — decode', () => {
         visible: true,
         height: 200,
         colSpan: 1,
+        x: 0,
+        y: 0,
       }),
     ).toThrow();
   });
@@ -146,6 +174,8 @@ describe('DashboardWidget — decode', () => {
         visible: true,
         height: 200,
         colSpan: 1,
+        x: 0,
+        y: 0,
       }),
     ).toThrow();
   });
@@ -156,6 +186,8 @@ describe('DashboardWidget — decode', () => {
         id: 'stats',
         visible: true,
         colSpan: 3,
+        x: 0,
+        y: 0,
       }),
     ).toThrow();
   });
@@ -166,6 +198,8 @@ describe('DashboardWidget — decode', () => {
         id: 'stats',
         height: 140,
         colSpan: 3,
+        x: 0,
+        y: 0,
       }),
     ).toThrow();
   });
@@ -176,6 +210,8 @@ describe('DashboardWidget — decode', () => {
         visible: true,
         height: 140,
         colSpan: 3,
+        x: 0,
+        y: 0,
       }),
     ).toThrow();
   });
@@ -194,6 +230,8 @@ describe('DashboardLayout — round-trip encode/decode', () => {
         visible: idx !== 2, // activity hidden for variety
         height: e.height,
         colSpan: e.colSpan,
+        x: e.x,
+        y: e.y,
       })),
     };
 
@@ -206,16 +244,24 @@ describe('DashboardLayout — round-trip encode/decode', () => {
     expect(encoded.widgets[0].visible).toBe(true);
     expect(encoded.widgets[0].height).toBe(entries[0].height);
     expect(encoded.widgets[0].colSpan).toBe(entries[0].colSpan);
+    expect(encoded.widgets[0].x).toBe(entries[0].x);
+    expect(encoded.widgets[0].y).toBe(entries[0].y);
     expect(encoded.widgets[1].id).toBe('upcomingEvents');
     expect(encoded.widgets[1].height).toBe(entries[1].height);
     expect(encoded.widgets[1].colSpan).toBe(entries[1].colSpan);
+    expect(encoded.widgets[1].x).toBe(entries[1].x);
+    expect(encoded.widgets[1].y).toBe(entries[1].y);
     expect(encoded.widgets[2].id).toBe('activity');
     expect(encoded.widgets[2].visible).toBe(false);
     expect(encoded.widgets[2].height).toBe(entries[2].height);
     expect(encoded.widgets[2].colSpan).toBe(entries[2].colSpan);
+    expect(encoded.widgets[2].x).toBe(entries[2].x);
+    expect(encoded.widgets[2].y).toBe(entries[2].y);
     expect(encoded.widgets[3].id).toBe('teamManagement');
     expect(encoded.widgets[3].height).toBe(entries[3].height);
     expect(encoded.widgets[3].colSpan).toBe(entries[3].colSpan);
+    expect(encoded.widgets[3].x).toBe(entries[3].x);
+    expect(encoded.widgets[3].y).toBe(entries[3].y);
   });
 
   it('round-trips an empty widgets array', () => {
@@ -310,6 +356,30 @@ describe('DEFAULT_LAYOUT', () => {
     const tm = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'teamManagement');
     expect(tm?.colSpan).toBe(1);
   });
+
+  it('stats has x=0, y=0', () => {
+    const stats = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'stats');
+    expect(stats?.x).toBe(0);
+    expect(stats?.y).toBe(0);
+  });
+
+  it('upcomingEvents has x=0, y=14', () => {
+    const ev = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'upcomingEvents');
+    expect(ev?.x).toBe(0);
+    expect(ev?.y).toBe(14);
+  });
+
+  it('activity has x=8, y=14', () => {
+    const act = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'activity');
+    expect(act?.x).toBe(8);
+    expect(act?.y).toBe(14);
+  });
+
+  it('teamManagement has x=8, y=34', () => {
+    const tm = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'teamManagement');
+    expect(tm?.x).toBe(8);
+    expect(tm?.y).toBe(34);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -351,12 +421,16 @@ describe('UpdateDashboardLayoutPayload — decode', () => {
           visible: true,
           height: statsEntry.height,
           colSpan: statsEntry.colSpan,
+          x: statsEntry.x,
+          y: statsEntry.y,
         },
         {
           id: 'activity',
           visible: false,
           height: activityEntry.height,
           colSpan: activityEntry.colSpan,
+          x: activityEntry.x,
+          y: activityEntry.y,
         },
       ],
     });
@@ -366,7 +440,7 @@ describe('UpdateDashboardLayoutPayload — decode', () => {
   it('rejects a payload with an invalid widget id', () => {
     expect(() =>
       Schema.decodeUnknownSync(DashboardLayoutApi.UpdateDashboardLayoutPayload)({
-        widgets: [{ id: 'awaitingRsvp', visible: true, height: 200, colSpan: 1 }],
+        widgets: [{ id: 'awaitingRsvp', visible: true, height: 200, colSpan: 1, x: 0, y: 0 }],
       }),
     ).toThrow();
   });

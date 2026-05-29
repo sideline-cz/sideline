@@ -21,6 +21,8 @@ export const DEFAULT_LAYOUT: ReadonlyArray<DashboardLayoutApi.DashboardWidget> =
         visible: entry.visible,
         height: entry.height,
         colSpan: entry.colSpan,
+        x: entry.x,
+        y: entry.y,
       }),
   );
 
@@ -34,6 +36,12 @@ const clampColSpan = (value: number): 1 | 2 | 3 => {
   if (value >= 3) return 3;
   return 2;
 };
+
+/** Clamp x to [0, 11]. */
+const clampX = (value: number): number => Math.max(0, Math.min(11, value));
+
+/** Clamp y to [0, 999]. */
+const clampY = (value: number): number => Math.max(0, Math.min(999, value));
 
 /**
  * Minimum sensible pixel height for a dashboard widget. Anything below this is
@@ -72,11 +80,13 @@ export const normalizeWidgets = (
         visible: widget.visible,
         height: resolveHeight(widget),
         colSpan: clampColSpan(widget.colSpan),
+        x: clampX(widget.x),
+        y: clampY(widget.y),
       }),
     );
   }
 
-  // Append any missing canonical widgets using DEFAULT_LAYOUT heights and colSpan
+  // Append any missing canonical widgets using DEFAULT_LAYOUT heights, colSpan, x, y
   for (const defaultEntry of DashboardLayoutApi.DEFAULT_LAYOUT) {
     if (!seen.has(defaultEntry.id)) {
       result.push(
@@ -85,6 +95,8 @@ export const normalizeWidgets = (
           visible: defaultEntry.visible,
           height: defaultEntry.height,
           colSpan: defaultEntry.colSpan,
+          x: defaultEntry.x,
+          y: defaultEntry.y,
         }),
       );
       seen.add(defaultEntry.id);

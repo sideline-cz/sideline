@@ -80,6 +80,8 @@ const makeWidgets = (): ReadonlyArray<DashboardLayoutApi.DashboardWidget> =>
         visible: entry.visible,
         height: entry.height,
         colSpan: entry.colSpan,
+        x: entry.x,
+        y: entry.y,
       }),
   );
 
@@ -92,12 +94,16 @@ const makePartialWidgets = (): ReadonlyArray<DashboardLayoutApi.DashboardWidget>
       visible: false,
       height: tm.height,
       colSpan: tm.colSpan,
+      x: tm.x,
+      y: tm.y,
     }),
     new DashboardLayoutApi.DashboardWidget({
       id: 'stats',
       visible: true,
       height: stats.height,
       colSpan: stats.colSpan,
+      x: stats.x,
+      y: stats.y,
     }),
   ];
 };

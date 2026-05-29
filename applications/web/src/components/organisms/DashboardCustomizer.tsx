@@ -36,25 +36,15 @@ const WIDGET_LABELS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 function widgetsToLayout(widgets: ReadonlyArray<DashboardLayoutApi.DashboardWidget>): Layout {
-  const visible = widgets.filter((w) => w.visible);
-  const items: LayoutItem[] = [];
-  let cursorX = 0;
-  let cursorY = 0;
-  for (const w of visible) {
-    const itemW = Math.max(1, Math.min(12, w.colSpan * 4));
-    const itemH = Math.max(1, Math.round(w.height / ROW_HEIGHT));
-    if (cursorX + itemW > 12) {
-      cursorX = 0;
-      cursorY += 1;
-    }
-    items.push({ i: w.id, x: cursorX, y: cursorY, w: itemW, h: itemH });
-    cursorX += itemW;
-    if (cursorX >= 12) {
-      cursorX = 0;
-      cursorY += 1;
-    }
-  }
-  return items;
+  return widgets
+    .filter((w) => w.visible)
+    .map((w) => ({
+      i: w.id,
+      x: w.x,
+      y: w.y,
+      w: Math.max(1, Math.min(12, w.colSpan * 4)),
+      h: Math.max(1, Math.round(w.height / ROW_HEIGHT)),
+    }));
 }
 
 function applyLayoutToWidgets(
@@ -76,6 +66,8 @@ function applyLayoutToWidgets(
         new DashboardLayoutApi.DashboardWidget({
           id: widget.id,
           visible: true,
+          x: item.x,
+          y: item.y,
           height: item.h * ROW_HEIGHT,
           colSpan: Math.max(1, Math.min(3, Math.round(item.w / 4))),
         }),
@@ -132,6 +124,8 @@ export function DashboardCustomizer({
               visible: !w.visible,
               height: w.height,
               colSpan: w.colSpan,
+              x: w.x,
+              y: w.y,
             })
           : w,
       );
@@ -141,11 +135,10 @@ export function DashboardCustomizer({
       if (!widget) return prev;
       // Currently visible → becoming hidden → drop from layout
       if (widget.visible) return prev.filter((item) => item.i !== id);
-      // Currently hidden → becoming visible → append at bottom of grid
+      // Currently hidden → becoming visible → restore stored x/y
       const itemW = Math.max(1, Math.min(12, widget.colSpan * 4));
       const itemH = Math.max(1, Math.round(widget.height / ROW_HEIGHT));
-      const maxY = prev.length === 0 ? 0 : Math.max(...prev.map((item) => item.y + item.h));
-      return [...prev, { i: id, x: 0, y: maxY, w: itemW, h: itemH }];
+      return [...prev, { i: id, x: widget.x, y: widget.y, w: itemW, h: itemH }];
     });
   };
 

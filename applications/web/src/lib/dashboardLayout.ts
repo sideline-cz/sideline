@@ -9,6 +9,8 @@ export const DEFAULT_LAYOUT: DashboardLayoutApi.DashboardLayout =
           visible: entry.visible,
           height: entry.height,
           colSpan: entry.colSpan,
+          x: entry.x,
+          y: entry.y,
         }),
     ),
   });

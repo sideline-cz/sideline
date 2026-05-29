@@ -20,6 +20,8 @@ class LegacyDashboardWidgetRow extends Schema.Class<LegacyDashboardWidgetRow>(
   visible: Schema.Boolean,
   height: Schema.OptionFromOptionalKey(Schema.Number),
   colSpan: Schema.OptionFromOptionalKey(Schema.Number),
+  x: Schema.OptionFromOptionalKey(Schema.Number),
+  y: Schema.OptionFromOptionalKey(Schema.Number),
 }) {}
 
 class DashboardLayoutLegacyRow extends Schema.Class<DashboardLayoutLegacyRow>(
@@ -40,6 +42,16 @@ const defaultHeightById = new Map<DashboardLayoutApi.DashboardWidgetId, number>(
 // Default colSpan lookup for legacy backfill
 const defaultColSpanById = new Map<DashboardLayoutApi.DashboardWidgetId, number>(
   DashboardLayoutApi.DEFAULT_LAYOUT.map((entry) => [entry.id, entry.colSpan]),
+);
+
+// Default x lookup for legacy backfill
+const defaultXById = new Map<DashboardLayoutApi.DashboardWidgetId, number>(
+  DashboardLayoutApi.DEFAULT_LAYOUT.map((entry) => [entry.id, entry.x]),
+);
+
+// Default y lookup for legacy backfill
+const defaultYById = new Map<DashboardLayoutApi.DashboardWidgetId, number>(
+  DashboardLayoutApi.DEFAULT_LAYOUT.map((entry) => [entry.id, entry.y]),
 );
 
 // ---------------------------------------------------------------------------
@@ -85,6 +97,9 @@ const make = Effect.gen(function* () {
                 height: Option.getOrElse(w.height, () => defaultHeightById.get(w.id) ?? 200),
                 // Backfill colSpan for legacy rows that predate this field
                 colSpan: Option.getOrElse(w.colSpan, () => defaultColSpanById.get(w.id) ?? 1),
+                // Backfill x/y for legacy rows that predate this field
+                x: Option.getOrElse(w.x, () => defaultXById.get(w.id) ?? 0),
+                y: Option.getOrElse(w.y, () => defaultYById.get(w.id) ?? 0),
               }),
           ),
         })),
@@ -106,6 +121,8 @@ const make = Effect.gen(function* () {
           visible: w.visible,
           height: w.height,
           colSpan: w.colSpan,
+          x: w.x,
+          y: w.y,
         })),
       ),
     }).pipe(

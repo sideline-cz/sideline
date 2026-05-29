@@ -27,6 +27,8 @@ const w = (
     visible,
     height: entry.height,
     colSpan: entry.colSpan,
+    x: entry.x,
+    y: entry.y,
   });
 };
 
@@ -148,6 +150,9 @@ describe('normalizeWidgets — drop unknown ids', () => {
         id: 'awaitingRsvp',
         visible: true,
         height: 200,
+        colSpan: 1,
+        x: 0,
+        y: 0,
       } as unknown as DashboardLayoutApi.DashboardWidget,
       w('stats', true),
     ];
@@ -186,6 +191,8 @@ describe('normalizeWidgets — height field preserved', () => {
         visible: true,
         height: customHeight,
         colSpan: 3,
+        x: 0,
+        y: 0,
       }),
     ];
     const result = normalizeWidgets(input);
@@ -235,6 +242,8 @@ describe('normalizeWidgets — colSpan field', () => {
         visible: true,
         height: entry.height,
         colSpan: 0,
+        x: entry.x,
+        y: entry.y,
       } as unknown as DashboardLayoutApi.DashboardWidget,
     ];
     const result = normalizeWidgets(input);
@@ -250,6 +259,8 @@ describe('normalizeWidgets — colSpan field', () => {
         visible: true,
         height: entry.height,
         colSpan: 5,
+        x: entry.x,
+        y: entry.y,
       } as unknown as DashboardLayoutApi.DashboardWidget,
     ];
     const result = normalizeWidgets(input);

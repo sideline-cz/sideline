@@ -76,16 +76,23 @@ const { DashboardCustomizer } = await import('~/components/organisms/DashboardCu
 // Helpers / fixtures
 // ---------------------------------------------------------------------------
 
-type DashboardWidget = { id: string; visible: boolean; height: number; colSpan: number };
+type DashboardWidget = {
+  id: string;
+  visible: boolean;
+  height: number;
+  colSpan: number;
+  x: number;
+  y: number;
+};
 type DashboardLayout = { widgets: ReadonlyArray<DashboardWidget> };
 
 function makeDefaultLayout(): DashboardLayout {
   return {
     widgets: [
-      { id: 'stats', visible: true, height: 140, colSpan: 3 },
-      { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2 },
-      { id: 'activity', visible: true, height: 200, colSpan: 1 },
-      { id: 'teamManagement', visible: true, height: 260, colSpan: 1 },
+      { id: 'stats', visible: true, height: 140, colSpan: 3, x: 0, y: 0 },
+      { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 0, y: 14 },
+      { id: 'activity', visible: true, height: 200, colSpan: 1, x: 8, y: 14 },
+      { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 8, y: 34 },
     ],
   };
 }
@@ -93,10 +100,10 @@ function makeDefaultLayout(): DashboardLayout {
 function makePartialLayout(): DashboardLayout {
   return {
     widgets: [
-      { id: 'stats', visible: false, height: 140, colSpan: 3 },
-      { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2 },
-      { id: 'activity', visible: false, height: 200, colSpan: 1 },
-      { id: 'teamManagement', visible: true, height: 260, colSpan: 1 },
+      { id: 'stats', visible: false, height: 140, colSpan: 3, x: 0, y: 0 },
+      { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 0, y: 14 },
+      { id: 'activity', visible: false, height: 200, colSpan: 1, x: 8, y: 14 },
+      { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 8, y: 34 },
     ],
   };
 }
@@ -546,10 +553,10 @@ describe('DashboardCustomizer — all-hidden empty state', () => {
   it('shows empty state when all widgets are hidden', () => {
     const allHiddenLayout: DashboardLayout = {
       widgets: [
-        { id: 'stats', visible: false, height: 140, colSpan: 3 },
-        { id: 'upcomingEvents', visible: false, height: 280, colSpan: 2 },
-        { id: 'activity', visible: false, height: 200, colSpan: 1 },
-        { id: 'teamManagement', visible: false, height: 260, colSpan: 1 },
+        { id: 'stats', visible: false, height: 140, colSpan: 3, x: 0, y: 0 },
+        { id: 'upcomingEvents', visible: false, height: 280, colSpan: 2, x: 0, y: 14 },
+        { id: 'activity', visible: false, height: 200, colSpan: 1, x: 8, y: 14 },
+        { id: 'teamManagement', visible: false, height: 260, colSpan: 1, x: 8, y: 34 },
       ],
     };
     render(
