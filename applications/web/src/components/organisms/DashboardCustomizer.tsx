@@ -44,6 +44,11 @@ function widgetsToLayout(widgets: ReadonlyArray<DashboardLayoutApi.DashboardWidg
       y: w.y,
       w: Math.max(1, Math.min(12, w.colSpan * 4)),
       h: Math.max(1, Math.round(w.height / ROW_HEIGHT)),
+      // Allow widgets to shrink down to a single grid row. Without explicit
+      // minH/minW, RGL falls back to internal defaults that can refuse very
+      // small heights and bounce the user's drag back to a larger size.
+      minH: 1,
+      minW: 1,
     }));
 }
 
@@ -205,7 +210,7 @@ export function DashboardCustomizer({
         {visibleWidgets.map((w) => (
           <div
             key={w.id}
-            className='h-full w-full overflow-hidden rounded-lg box-border [&>*]:h-full [&>*]:w-full'
+            className='h-full w-full min-h-0 min-w-0 overflow-hidden rounded-lg box-border [&>*]:h-full [&>*]:w-full [&>*]:min-h-0 [&>*]:min-w-0'
           >
             {widgetRegistry[w.id]}
           </div>
