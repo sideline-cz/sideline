@@ -189,11 +189,17 @@ export function DashboardCustomizer({
         isDraggable={isEditing}
         isResizable={isEditing}
         resizeHandles={['se']}
+        compactType={null}
+        preventCollision={false}
         draggableCancel='button, a, input, [role="switch"], select'
-        onLayoutChange={(newLayout) => {
-          if (isEditing) {
-            setEditLayout(newLayout);
-          }
+        // Only commit the layout on drag/resize STOP — not on every intermediate
+        // RGL re-compute. The continuous `onLayoutChange` ticks during a drag
+        // were re-flowing the prop and snapping the user's size back.
+        onDragStop={(newLayout) => {
+          if (isEditing) setEditLayout(newLayout);
+        }}
+        onResizeStop={(newLayout) => {
+          if (isEditing) setEditLayout(newLayout);
         }}
       >
         {visibleWidgets.map((w) => (
