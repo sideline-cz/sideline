@@ -100,14 +100,18 @@ export function DashboardCustomizer({
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
 
-  // When edit mode is turned ON by the parent, initialize working copy + editLayout
+  // When edit mode is turned ON by the parent, snapshot the current layout once.
+  // We intentionally do NOT re-run when `layout.widgets` changes — the parent re-renders
+  // with a fresh array reference on every render, and re-snapshotting would discard the
+  // user's in-progress drag/resize edits on every keystroke.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: snapshot-on-enter is the design
   React.useEffect(() => {
     if (editMode) {
       setWorking([...layout.widgets]);
       setEditLayout(widgetsToLayout(layout.widgets));
       setSaveError(null);
     }
-  }, [editMode, layout.widgets]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editMode]);
 
   const activeWidgets = editMode ? working : [...layout.widgets];
   const allHidden = activeWidgets.every((w) => !w.visible);
