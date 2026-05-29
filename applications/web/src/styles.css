@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 @import "tw-animate-css";
+@import "react-grid-layout/css/styles.css";
+@import "react-resizable/css/styles.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -174,40 +176,36 @@ code {
 }
 
 /* ---------------------------------------------------------------------------
- * Dashboard customizer — resizable widget affordance
- *
- * Native CSS `resize: vertical` puts a tiny grey handle in the bottom-right
- * corner that's hard to spot on a dark theme. Make resizable widgets clearly
- * visible: dashed ring + a styled, themed `::-webkit-resizer`.
+ * Dashboard customizer — react-grid-layout resize handle affordance
  * ------------------------------------------------------------------------- */
 
-.dashboard-resizable {
-  position: relative;
-  border-radius: var(--radius);
-  /* Theme-aware via `--primary` (light + dark are handled by the root vars). */
-  outline: 1px dashed var(--primary);
-  outline-offset: 2px;
+/* Override RGL's default base64 background image for the resize handle. */
+.react-grid-item > .react-resizable-handle {
+  background-image: none;
 }
 
-/* Themed native resize handle (WebKit / Chrome / Safari / Edge).
- * Hide the default scribble and let the ::after pseudo-element draw a clean
- * triangular indicator below. Firefox doesn't honour ::-webkit-resizer, but
- * the dashed outline + corner indicator still signal resizability. */
-.dashboard-resizable::-webkit-resizer {
-  background: transparent;
-}
-
-/* Bottom-right corner indicator — a small primary-colored triangle pointing
- * outward from the corner. Pointer-events: none so the underlying native
- * resize handle still receives drag events. */
-.dashboard-resizable::after {
+/* Draw a clean corner indicator using primary theme color. */
+.react-grid-item > .react-resizable-handle::after {
   content: "";
   position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 14px;
-  height: 14px;
-  border-radius: 0 0 var(--radius) 0;
-  background: linear-gradient(135deg, transparent 50%, var(--primary) 50%);
-  pointer-events: none;
+  right: 4px;
+  bottom: 4px;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid var(--primary);
+  border-bottom: 2px solid var(--primary);
+  border-bottom-right-radius: 2px;
+}
+
+/* Visible dashed outline on items while editing */
+.dashboard-grid-editing .react-grid-item {
+  outline: 1px dashed var(--primary);
+  outline-offset: -2px;
+  border-radius: var(--radius);
+}
+
+/* Distinct visual when actively dragging */
+.dashboard-grid-editing .react-grid-item.react-draggable-dragging {
+  z-index: 5;
+  cursor: grabbing;
 }

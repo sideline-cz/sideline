@@ -35,6 +35,24 @@ const clampColSpan = (value: number): 1 | 2 | 3 => {
   return 2;
 };
 
+/**
+ * Minimum sensible pixel height for a dashboard widget. Anything below this is
+ * almost certainly stale data from an earlier schema revision (e.g. row-units
+ * stored as a small integer). Snap such values back to the canonical default
+ * height for that widget so the dashboard never renders as unusable thin strips.
+ */
+const MIN_HEIGHT_PX = 60;
+
+const defaultEntryById = new Map<
+  DashboardLayoutApi.DashboardWidgetId,
+  DashboardLayoutApi.DefaultLayoutEntry
+>(DashboardLayoutApi.DEFAULT_LAYOUT.map((entry) => [entry.id, entry]));
+
+const resolveHeight = (widget: DashboardLayoutApi.DashboardWidget): number => {
+  if (widget.height >= MIN_HEIGHT_PX) return widget.height;
+  return defaultEntryById.get(widget.id)?.height ?? MIN_HEIGHT_PX;
+};
+
 export const normalizeWidgets = (
   input: ReadonlyArray<DashboardLayoutApi.DashboardWidget>,
 ): ReadonlyArray<DashboardLayoutApi.DashboardWidget> => {
@@ -52,7 +70,7 @@ export const normalizeWidgets = (
       new DashboardLayoutApi.DashboardWidget({
         id: widget.id,
         visible: widget.visible,
-        height: widget.height,
+        height: resolveHeight(widget),
         colSpan: clampColSpan(widget.colSpan),
       }),
     );

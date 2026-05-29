@@ -1,4 +1,4 @@
-// Tests for the redesigned DashboardCustomizer (fixed CSS grid with resize-only model).
+// Tests for the redesigned DashboardCustomizer (react-grid-layout based).
 //
 // Component contract:
 //   DashboardCustomizer({
@@ -10,7 +10,7 @@
 //
 // Behaviour:
 //   - "Customize" button enters edit mode; aside panel appears with one Switch per widget
-//   - No drag handles — layout positions are fixed, only height is user-configurable
+//   - No width selectors — width is controlled by dragging RGL resize handle
 //   - Toggling a Switch updates local working copy but does NOT call onSave
 //   - Reset sets working copy back to DEFAULT (4 visible with default heights)
 //   - Save calls onSave exactly once then exits edit mode
@@ -34,11 +34,6 @@ vi.mock('~/lib/translations.js', () => ({
       dashboard_customizer_cancel: 'Cancel',
       dashboard_customizer_reset: 'Reset layout',
       dashboard_customizer_saveError: 'Failed to save layout',
-      dashboard_customizer_dragHandle: 'Reorder {widget}',
-      dashboard_customizer_widthFor: 'Width for {widget}',
-      dashboard_customizer_widthOption1: 'Narrow',
-      dashboard_customizer_widthOption2: 'Medium',
-      dashboard_customizer_widthOption3: 'Wide',
       dashboard_widget_stats: 'Stats',
       dashboard_widget_upcomingEvents: 'Upcoming events',
       dashboard_widget_activity: 'Activity',
@@ -59,6 +54,13 @@ vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
     <a {...props}>{children}</a>
   ),
+}));
+
+vi.mock('react-grid-layout/legacy', () => ({
+  ReactGridLayout: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid='rgl-grid'>{children}</div>
+  ),
+  WidthProvider: (Component: React.ComponentType<unknown>) => Component,
 }));
 
 // ---------------------------------------------------------------------------
@@ -197,26 +199,6 @@ describe('DashboardCustomizer — entering edit mode', () => {
     // In edit mode, Switches should render (one per widget = 4)
     const switches = screen.getAllByRole('switch');
     expect(switches.length).toBe(4);
-  });
-
-  it('renders a drag handle per visible widget in edit mode', async () => {
-    const onSave = vi.fn();
-    render(
-      <DashboardCustomizer
-        teamId={TEAM_ID}
-        layout={makeDefaultLayout() as any}
-        onSave={onSave}
-        widgetRegistry={WIDGET_REGISTRY}
-      />,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('Customize'));
-    });
-
-    // One drag handle per visible widget (4 by default)
-    const dragHandles = screen.queryAllByRole('button', { name: /Reorder/i });
-    expect(dragHandles.length).toBe(4);
   });
 
   it('Save and Cancel buttons are visible in edit mode', async () => {
@@ -576,138 +558,6 @@ describe('DashboardCustomizer — Cancel', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 });
-
-describe('DashboardCustomizer — colSpan grid classes', () => {
-  it('stats widget cell has lg:col-span-3 class in idle mode', () => {
-    render(
-      <DashboardCustomizer
-        teamId={TEAM_ID}
-        layout={makeDefaultLayout() as any}
-        widgetRegistry={WIDGET_REGISTRY}
-      />,
-    );
-
-    // stats has colSpan:3, so it should have lg:col-span-3
-    const statsEl = screen.getByText('Stats Widget');
-    // Walk up to find the grid cell div
-    const cellDiv = statsEl.closest('.lg\\:col-span-3');
-    expect(cellDiv).not.toBeNull();
-  });
-
-  it('upcomingEvents widget cell has lg:col-span-2 class in idle mode', () => {
-    render(
-      <DashboardCustomizer
-        teamId={TEAM_ID}
-        layout={makeDefaultLayout() as any}
-        widgetRegistry={WIDGET_REGISTRY}
-      />,
-    );
-
-    const upcomingEl = screen.getByText('Upcoming Events Widget');
-    const cellDiv = upcomingEl.closest('.lg\\:col-span-2');
-    expect(cellDiv).not.toBeNull();
-  });
-
-  it('activity widget cell has lg:col-span-1 class in idle mode', () => {
-    render(
-      <DashboardCustomizer
-        teamId={TEAM_ID}
-        layout={makeDefaultLayout() as any}
-        widgetRegistry={WIDGET_REGISTRY}
-      />,
-    );
-
-    const activityEl = screen.getByText('Activity Widget');
-    const cellDiv = activityEl.closest('.lg\\:col-span-1');
-    expect(cellDiv).not.toBeNull();
-  });
-});
-
-describe('DashboardCustomizer — colSpan width selector', () => {
-  it('renders width toggle groups for each widget in edit mode', async () => {
-    const onSave = vi.fn();
-    render(
-      <DashboardCustomizer
-        teamId={TEAM_ID}
-        layout={makeDefaultLayout() as any}
-        onSave={onSave}
-        widgetRegistry={WIDGET_REGISTRY}
-      />,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('Customize'));
-    });
-
-    // Each widget should have width option buttons
-    expect(screen.getAllByText('Narrow').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Medium').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Wide').length).toBeGreaterThan(0);
-  });
-
-  it('clicking a width option updates working colSpan and does not call onSave', async () => {
-    const onSave = vi.fn();
-    render(
-      <DashboardCustomizer
-        teamId={TEAM_ID}
-        layout={makeDefaultLayout() as any}
-        onSave={onSave}
-        widgetRegistry={WIDGET_REGISTRY}
-      />,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('Customize'));
-    });
-
-    // Click the first "Narrow" option (stats widget, currently colSpan 3 = Wide)
-    const narrowButtons = screen.getAllByText('Narrow');
-    await act(async () => {
-      fireEvent.click(narrowButtons[0]);
-    });
-
-    // onSave should NOT have been called
-    expect(onSave).not.toHaveBeenCalled();
-  });
-
-  it('Save passes updated colSpan to onSave', async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined);
-    render(
-      <DashboardCustomizer
-        teamId={TEAM_ID}
-        layout={makeDefaultLayout() as any}
-        onSave={onSave}
-        widgetRegistry={WIDGET_REGISTRY}
-      />,
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('Customize'));
-    });
-
-    // Click "Narrow" for stats (first widget, currently Wide=3)
-    const narrowButtons = screen.getAllByText('Narrow');
-    await act(async () => {
-      fireEvent.click(narrowButtons[0]);
-    });
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('Save'));
-    });
-
-    await waitFor(() => {
-      expect(onSave).toHaveBeenCalledTimes(1);
-    });
-
-    const savedWidgets = onSave.mock.calls[0][0] as DashboardWidget[];
-    const statsWidget = savedWidgets.find((w) => w.id === 'stats');
-    expect(statsWidget?.colSpan).toBe(1);
-  });
-});
-
-// TODO: Drag-and-drop keyboard reorder tests are skipped because testing dnd-kit
-// in jsdom is fragile — pointer/keyboard events do not reliably simulate sortable
-// drag operations. Cover with Playwright E2E tests instead.
 
 describe('DashboardCustomizer — all-hidden empty state', () => {
   it('shows empty state when all widgets are hidden', () => {
