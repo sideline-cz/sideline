@@ -1,8 +1,6 @@
 @import "tailwindcss";
 
 @import "tw-animate-css";
-@import "react-grid-layout/css/styles.css";
-@import "react-resizable/css/styles.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -173,57 +171,4 @@ code {
 .overflow-x-auto,
 .overflow-auto {
   overscroll-behavior: contain;
-}
-
-/* ---------------------------------------------------------------------------
- * Dashboard customizer — react-grid-layout resize handle affordance
- * ------------------------------------------------------------------------- */
-
-/* Override RGL's default base64 background image for the resize handle. */
-.react-grid-item > .react-resizable-handle {
-  background-image: none;
-}
-
-/* Draw a clean corner indicator using primary theme color. */
-.react-grid-item > .react-resizable-handle::after {
-  content: "";
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 10px;
-  height: 10px;
-  border-right: 2px solid var(--primary);
-  border-bottom: 2px solid var(--primary);
-  border-bottom-right-radius: 2px;
-}
-
-/* Visible dashed outline on items while editing */
-.dashboard-grid-editing .react-grid-item {
-  outline: 1px dashed var(--primary);
-  outline-offset: -2px;
-  border-radius: var(--radius);
-}
-
-/* Distinct visual when actively dragging */
-.dashboard-grid-editing .react-grid-item.react-draggable-dragging {
-  z-index: 5;
-  cursor: grabbing;
-}
-
-/* Force the widget content to obey the grid item's configured height.
- * Without this, widgets whose natural content is taller than the user's chosen
- * height stretch the grid item back out (min-content / flex-min-height
- * behavior) — making the height the user dragged to "snap back" larger.
- * The grid item box and its content are pinned to the exact height RGL sets,
- * and any overflow is clipped. */
-.react-grid-item {
-  overflow: hidden;
-}
-.react-grid-item > *:not(.react-resizable-handle) {
-  height: 100%;
-  width: 100%;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  box-sizing: border-box;
 }

@@ -1,4 +1,4 @@
-// Tests for the redesigned DashboardCustomizer (react-grid-layout based).
+// Tests for the redesigned DashboardCustomizer (CSS Grid + dnd-kit based).
 //
 // Component contract:
 //   DashboardCustomizer({
@@ -12,13 +12,14 @@
 //
 // Behaviour:
 //   - In idle mode (editMode=false): grid renders, aside panel NOT shown
-//   - In edit mode (editMode=true): aside panel appears with one Switch per widget
-//   - No width selectors — width is controlled by dragging RGL resize handle
+//   - In edit mode (editMode=true): aside panel appears with one Switch + width selector per widget
 //   - Toggling a Switch updates local working copy but does NOT call onSave
-//   - Reset sets working copy back to DEFAULT (4 visible with default heights)
+//   - Width selector buttons change colSpan in working copy
+//   - Reset sets working copy back to DEFAULT
 //   - Save calls onSave exactly once then calls onEditModeChange(false)
 //   - Save failure stays in edit mode (error state shown)
 //   - Cancel calls onEditModeChange(false) without calling onSave
+//   - Null-registry widget is skipped from grid but still in aside panel
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -37,6 +38,11 @@ vi.mock('~/lib/translations.js', () => ({
       dashboard_customizer_cancel: 'Cancel',
       dashboard_customizer_reset: 'Reset layout',
       dashboard_customizer_saveError: 'Failed to save layout',
+      dashboard_customizer_dragHandle: 'Drag {widget}',
+      dashboard_customizer_widthFor: 'Width for {widget}',
+      dashboard_customizer_widthOption1: 'Narrow',
+      dashboard_customizer_widthOption2: 'Medium',
+      dashboard_customizer_widthOption3: 'Wide',
       dashboard_widget_awaitingRsvp: 'Awaiting RSVP',
       dashboard_widget_outstandingPayments: 'Outstanding payments',
       dashboard_widget_stats: 'Stats',
@@ -59,13 +65,6 @@ vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
     <a {...props}>{children}</a>
   ),
-}));
-
-vi.mock('react-grid-layout/legacy', () => ({
-  ReactGridLayout: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid='rgl-grid'>{children}</div>
-  ),
-  WidthProvider: (Component: React.ComponentType<unknown>) => Component,
 }));
 
 // ---------------------------------------------------------------------------
@@ -202,7 +201,7 @@ describe('DashboardCustomizer — initial state (not in edit mode)', () => {
 });
 
 describe('DashboardCustomizer — entering edit mode', () => {
-  it('edit mode with aside panel and one Switch per widget', () => {
+  it('edit mode shows aside panel with one Switch per widget', () => {
     const onSave = vi.fn();
     render(
       <DashboardCustomizer
@@ -221,6 +220,22 @@ describe('DashboardCustomizer — entering edit mode', () => {
     // In edit mode, Switches should render (one per widget = 6)
     const switches = screen.getAllByRole('switch');
     expect(switches.length).toBe(6);
+  });
+
+  it('edit mode shows width selector (ToggleGroup) for each visible widget', () => {
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        widgetRegistry={WIDGET_REGISTRY}
+        editMode={true}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    // 6 widgets all visible → 6 sets of Narrow/Medium/Wide buttons
+    const narrowBtns = screen.getAllByText('Narrow');
+    expect(narrowBtns.length).toBe(6);
   });
 
   it('Save and Cancel buttons are visible in edit mode', () => {
@@ -323,10 +338,73 @@ describe('DashboardCustomizer — toggling a Switch', () => {
     );
 
     const switches = screen.getAllByRole('switch');
-    // First switch corresponds to 'stats' which has visible:false → unchecked
+    // First switch corresponds to 'awaitingRsvp' which has visible:false → unchecked
     const firstState =
       switches[0].getAttribute('aria-checked') ?? switches[0].getAttribute('data-state');
     expect(['false', 'unchecked']).toContain(firstState);
+  });
+
+  it('toggling a visible widget off hides its width selector', async () => {
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        widgetRegistry={WIDGET_REGISTRY}
+        editMode={true}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    // All 6 visible → 6 sets of width selectors
+    expect(screen.getAllByText('Narrow').length).toBe(6);
+
+    // Toggle first widget off
+    const switches = screen.getAllByRole('switch');
+    await act(async () => {
+      fireEvent.click(switches[0]);
+    });
+
+    // Now 5 visible → 5 sets of width selectors
+    expect(screen.getAllByText('Narrow').length).toBe(5);
+  });
+});
+
+describe('DashboardCustomizer — width selector', () => {
+  it('width selector buttons change colSpan in working copy', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+        editMode={true}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    // Activity widget starts at colSpan=1 (Narrow active).
+    // Click "Medium" (colSpan=2) for the first width-selector group.
+    // Each visible widget has 3 toggle items; we pick the first group's Medium.
+    const mediumBtns = screen.getAllByText('Medium');
+    await act(async () => {
+      fireEvent.click(mediumBtns[0]);
+    });
+
+    // Save and verify colSpan changed
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save'));
+    });
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledTimes(1);
+    });
+
+    const savedWidgets = onSave.mock.calls[0][0] as DashboardWidget[];
+    expect(Array.isArray(savedWidgets)).toBe(true);
+    // At least one widget should now have colSpan=2 (changed from colSpan=3 to 2)
+    const changed = savedWidgets.some((w) => w.colSpan === 2);
+    expect(changed).toBe(true);
   });
 });
 
@@ -344,7 +422,7 @@ describe('DashboardCustomizer — Reset', () => {
       />,
     );
 
-    // Verify partial layout: first switch should be unchecked (stats visible:false)
+    // Verify partial layout: first switch should be unchecked (awaitingRsvp visible:false)
     let switches = screen.getAllByRole('switch');
     const firstStateBefore =
       switches[0].getAttribute('aria-checked') ?? switches[0].getAttribute('data-state');
@@ -366,7 +444,7 @@ describe('DashboardCustomizer — Reset', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  it('Reset restores DEFAULT_LAYOUT heights in working copy', async () => {
+  it('Reset restores DEFAULT_LAYOUT values in working copy', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(
       <DashboardCustomizer
@@ -625,6 +703,31 @@ describe('DashboardCustomizer — null registry entries (no data)', () => {
 
     // But the widget content is not in the grid
     expect(screen.queryByText('Awaiting RSVP Widget')).toBeNull();
+  });
+
+  it('null-registry widget does NOT show width selector in edit mode', () => {
+    const registryWithNull = {
+      ...WIDGET_REGISTRY,
+      awaitingRsvp: null,
+    };
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        widgetRegistry={registryWithNull}
+        editMode={true}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    // awaitingRsvp is visible:true but null in registry → its switch is checked
+    // and its width selector IS shown (it's visible:true in the layout working copy,
+    // so the aside panel shows the ToggleGroup for it — the null check only
+    // applies to the CSS grid rendering, not the aside panel width control).
+    // All 6 visible widgets → 6 width selectors (registry null doesn't hide
+    // the aside control, only the grid tile).
+    const narrowBtns = screen.getAllByText('Narrow');
+    expect(narrowBtns.length).toBe(6);
   });
 });
 

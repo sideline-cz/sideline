@@ -88,13 +88,6 @@ vi.mock('~/lib/finance/formatMoney.js', () => ({
   formatMoney: (minor: number, currency: string) => `${minor / 100} ${currency}`,
 }));
 
-vi.mock('react-grid-layout/legacy', () => ({
-  ReactGridLayout: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid='rgl-grid'>{children}</div>
-  ),
-  WidthProvider: (Component: React.ComponentType<unknown>) => Component,
-}));
-
 // Stub TanStack router Link
 vi.mock('@tanstack/react-router', () => ({
   Link: ({

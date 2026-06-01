@@ -1,17 +1,29 @@
+import {
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  rectSortingStrategy,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { DashboardLayoutApi } from '@sideline/domain';
-import { LayoutDashboard } from 'lucide-react';
+import { GripVertical, LayoutDashboard } from 'lucide-react';
 import React from 'react';
-import type { Layout, LayoutItem } from 'react-grid-layout/legacy';
-import { ReactGridLayout, WidthProvider } from 'react-grid-layout/legacy';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent } from '~/components/ui/card';
 import { Switch } from '~/components/ui/switch';
+import { ToggleGroup, ToggleGroupItem } from '~/components/ui/toggle-group';
 import { DEFAULT_LAYOUT } from '~/lib/dashboardLayout.js';
 import { tr } from '~/lib/translations.js';
-
-const SizedGridLayout = WidthProvider(ReactGridLayout);
-
-const ROW_HEIGHT = 10;
 
 interface DashboardCustomizerProps {
   teamId: string;
@@ -20,7 +32,7 @@ interface DashboardCustomizerProps {
   onSave?: (widgets: DashboardLayoutApi.DashboardWidget[]) => Promise<void>;
   /**
    * A null entry means the widget has no data to display right now.
-   * Null-entry widgets are excluded from the RGL grid (no empty rectangle),
+   * Null-entry widgets are excluded from the CSS grid (no empty rectangle),
    * but their toggles remain visible in the edit-mode aside panel.
    */
   widgetRegistry: Record<string, React.ReactNode | null>;
@@ -39,53 +51,69 @@ const WIDGET_LABELS: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Layout conversion helpers
+// CSS Grid column helpers
 // ---------------------------------------------------------------------------
 
-function widgetsToLayout(widgets: ReadonlyArray<DashboardLayoutApi.DashboardWidget>): Layout {
-  return widgets
-    .filter((w) => w.visible)
-    .map((w) => ({
-      i: w.id,
-      x: w.x,
-      y: w.y,
-      w: Math.max(1, Math.min(12, w.colSpan * 4)),
-      h: Math.max(1, Math.round(w.height / ROW_HEIGHT)),
-      // Allow widgets to shrink down to a single grid row. Without explicit
-      // minH/minW, RGL falls back to internal defaults that can refuse very
-      // small heights and bounce the user's drag back to a larger size.
-      minH: 1,
-      minW: 1,
-    }));
+function colSpanClass(c: number): string {
+  if (c >= 3) return 'lg:col-span-12';
+  if (c === 2) return 'lg:col-span-8';
+  return 'lg:col-span-4';
 }
 
-function applyLayoutToWidgets(
-  widgets: DashboardLayoutApi.DashboardWidget[],
-  layout: Layout,
-): DashboardLayoutApi.DashboardWidget[] {
-  const byId = new Map(layout.map((item) => [item.i, item]));
-  // Visible widgets in their new order, then hidden widgets appended in original order
-  const visible = widgets
-    .filter((w) => w.visible)
-    .map((w) => ({ widget: w, item: byId.get(w.id) }))
-    .filter(
-      (entry): entry is { widget: DashboardLayoutApi.DashboardWidget; item: LayoutItem } =>
-        entry.item !== undefined,
-    )
-    .sort((a, b) => a.item.y - b.item.y || a.item.x - b.item.x)
-    .map(
-      ({ widget, item }) =>
-        new DashboardLayoutApi.DashboardWidget({
-          id: widget.id,
-          visible: true,
-          x: item.x,
-          y: item.y,
-          height: item.h * ROW_HEIGHT,
-          colSpan: Math.max(1, Math.min(3, Math.round(item.w / 4))),
-        }),
-    );
-  const hidden = widgets.filter((w) => !w.visible);
-  return [...visible, ...hidden];
+// ---------------------------------------------------------------------------
+// Sortable widget wrapper
+// ---------------------------------------------------------------------------
+
+function SortableWidget({
+  widget,
+  isEditing,
+  registryNode,
+}: {
+  widget: DashboardLayoutApi.DashboardWidget;
+  isEditing: boolean;
+  registryNode: React.ReactNode;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: widget.id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+  };
+  const widgetName = tr(WIDGET_LABELS[widget.id] ?? widget.id);
+
+  return (
+    <div ref={setNodeRef} style={style} className={`${colSpanClass(widget.colSpan)} relative`}>
+      {isEditing && (
+        <button
+          type='button'
+          ref={setActivatorNodeRef}
+          {...attributes}
+          {...listeners}
+          aria-label={tr('dashboard_customizer_dragHandle', { widget: widgetName })}
+          className='absolute top-2 left-2 z-10 inline-flex items-center justify-center size-7 rounded-md bg-primary text-primary-foreground shadow cursor-grab active:cursor-grabbing'
+        >
+          <GripVertical className='size-4' />
+        </button>
+      )}
+      <div
+        className={
+          isEditing
+            ? 'rounded-lg outline outline-1 outline-dashed outline-primary outline-offset-[-2px]'
+            : ''
+        }
+      >
+        {registryNode}
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -100,36 +128,37 @@ export function DashboardCustomizer({
   onEditModeChange,
 }: DashboardCustomizerProps) {
   const [working, setWorking] = React.useState<DashboardLayoutApi.DashboardWidget[]>([]);
-  const [editLayout, setEditLayout] = React.useState<Layout>([]);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
 
   // When edit mode is turned ON by the parent, snapshot the current layout once.
-  // We intentionally do NOT re-run when `layout.widgets` changes — the parent re-renders
-  // with a fresh array reference on every render, and re-snapshotting would discard the
-  // user's in-progress drag/resize edits on every keystroke.
   // biome-ignore lint/correctness/useExhaustiveDependencies: snapshot-on-enter is the design
   React.useEffect(() => {
     if (editMode) {
       setWorking([...layout.widgets]);
-      setEditLayout(widgetsToLayout(layout.widgets));
       setSaveError(null);
     }
   }, [editMode]);
 
-  const activeWidgets = editMode ? working : [...layout.widgets];
-  const allHidden = activeWidgets.every((w) => !w.visible);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
-  const cancelEditMode = () => {
-    onEditModeChange(false);
-    setSaveError(null);
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setWorking((prev) => {
+      const oldIndex = prev.findIndex((w) => w.id === active.id);
+      const newIndex = prev.findIndex((w) => w.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+      return arrayMove(prev, oldIndex, newIndex);
+    });
   };
 
   const toggleVisible = (id: string) => {
-    setWorking((prev) => {
-      const widget = prev.find((w) => w.id === id);
-      if (!widget) return prev;
-      return prev.map((w) =>
+    setWorking((prev) =>
+      prev.map((w) =>
         w.id === id
           ? new DashboardLayoutApi.DashboardWidget({
               id: w.id,
@@ -140,33 +169,42 @@ export function DashboardCustomizer({
               y: w.y,
             })
           : w,
-      );
-    });
-    setEditLayout((prev) => {
-      const widget = working.find((w) => w.id === id);
-      if (!widget) return prev;
-      // Currently visible → becoming hidden → drop from layout
-      if (widget.visible) return prev.filter((item) => item.i !== id);
-      // Currently hidden → becoming visible → restore stored x/y
-      const itemW = Math.max(1, Math.min(12, widget.colSpan * 4));
-      const itemH = Math.max(1, Math.round(widget.height / ROW_HEIGHT));
-      return [...prev, { i: id, x: widget.x, y: widget.y, w: itemW, h: itemH }];
-    });
+      ),
+    );
+  };
+
+  const handleColSpanChange = (id: string, colSpan: 1 | 2 | 3) => {
+    setWorking((prev) =>
+      prev.map((w) =>
+        w.id === id
+          ? new DashboardLayoutApi.DashboardWidget({
+              id: w.id,
+              visible: w.visible,
+              colSpan,
+              height: w.height,
+              x: w.x,
+              y: w.y,
+            })
+          : w,
+      ),
+    );
   };
 
   const resetLayout = () => {
     setWorking([...DEFAULT_LAYOUT.widgets]);
-    setEditLayout(widgetsToLayout(DEFAULT_LAYOUT.widgets));
+  };
+
+  const cancelEditMode = () => {
+    onEditModeChange(false);
+    setSaveError(null);
   };
 
   const handleSave = async () => {
     if (onSave === undefined) return;
     setSaving(true);
     setSaveError(null);
-    // Use editLayout (RGL's authoritative positions) when computing the final widgets
-    const finalWidgets = applyLayoutToWidgets(working, editLayout);
     try {
-      await onSave(finalWidgets);
+      await onSave(working);
       onEditModeChange(false);
     } catch {
       setSaveError(tr('dashboard_customizer_saveError'));
@@ -179,6 +217,8 @@ export function DashboardCustomizer({
   // Render helpers
   // ---------------------------------------------------------------------------
 
+  const activeWidgets = editMode ? working : [...layout.widgets];
+
   const emptyState = (
     <Card data-testid='dashboard-empty-state'>
       <CardContent className='flex flex-col items-center justify-center gap-3 py-10 text-center'>
@@ -189,61 +229,29 @@ export function DashboardCustomizer({
   );
 
   const renderGrid = (widgets: DashboardLayoutApi.DashboardWidget[], isEditing: boolean) => {
-    const visibleWidgets = widgets.filter((w) => w.visible);
-    // Also exclude widgets whose registry entry is null (no data to display)
-    const renderableWidgets = visibleWidgets.filter((w) => widgetRegistry[w.id] != null);
-    if (renderableWidgets.length === 0) return emptyState;
+    const visible = widgets.filter((w) => w.visible && widgetRegistry[w.id] != null);
+    if (visible.length === 0) return emptyState;
 
+    const ids = visible.map((w) => w.id);
     return (
-      <SizedGridLayout
-        layout={
-          isEditing
-            ? editLayout.filter((item) => renderableWidgets.some((w) => w.id === item.i))
-            : widgetsToLayout(renderableWidgets)
-        }
-        cols={12}
-        rowHeight={ROW_HEIGHT}
-        margin={[12, 12]}
-        isDraggable={isEditing}
-        isResizable={isEditing}
-        resizeHandles={['se']}
-        compactType='vertical'
-        preventCollision={false}
-        // useCSSTransforms=false makes RGL use top/left + width/height absolute
-        // positioning instead of CSS transforms. This eliminates a sizing
-        // interaction where transforms can bypass explicit height constraints,
-        // causing widgets to expand beyond their configured grid slot.
-        useCSSTransforms={false}
-        draggableCancel='button, a, input, [role="switch"], select'
-        // Only commit the layout on drag/resize STOP — not on every intermediate
-        // RGL re-compute. The continuous `onLayoutChange` ticks during a drag
-        // were re-flowing the prop and snapping the user's size back.
-        onDragStop={(newLayout) => {
-          if (isEditing) setEditLayout(newLayout);
-        }}
-        onResizeStop={(newLayout) => {
-          if (isEditing) setEditLayout(newLayout);
-        }}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={isEditing ? handleDragEnd : undefined}
       >
-        {renderableWidgets.map((w) => (
-          <div
-            key={w.id}
-            style={{
-              height: '100%',
-              width: '100%',
-              minHeight: 0,
-              minWidth: 0,
-              overflow: 'hidden',
-              boxSizing: 'border-box',
-              borderRadius: 'var(--radius)',
-            }}
-          >
-            <div style={{ height: '100%', width: '100%', minHeight: 0, overflow: 'hidden' }}>
-              {widgetRegistry[w.id]}
-            </div>
+        <SortableContext items={ids} strategy={rectSortingStrategy}>
+          <div className='grid grid-cols-1 lg:grid-cols-12 gap-4'>
+            {visible.map((w) => (
+              <SortableWidget
+                key={w.id}
+                widget={w}
+                isEditing={isEditing}
+                registryNode={widgetRegistry[w.id]}
+              />
+            ))}
           </div>
-        ))}
-      </SizedGridLayout>
+        </SortableContext>
+      </DndContext>
     );
   };
 
@@ -252,6 +260,7 @@ export function DashboardCustomizer({
   // ---------------------------------------------------------------------------
 
   if (!editMode) {
+    const allHidden = activeWidgets.every((w) => !w.visible || widgetRegistry[w.id] == null);
     return (
       <div className='flex flex-col gap-4'>
         {allHidden ? emptyState : renderGrid(activeWidgets, false)}
@@ -266,7 +275,7 @@ export function DashboardCustomizer({
   return (
     <div className='flex flex-col gap-6 lg:flex-row'>
       {/* Grid area */}
-      <div className='flex-1 min-w-0 dashboard-grid-editing'>{renderGrid(working, true)}</div>
+      <div className='flex-1 min-w-0'>{renderGrid(working, true)}</div>
 
       {/* Aside panel */}
       <aside className='lg:w-64 flex flex-col gap-4 rounded-lg border bg-card p-4'>
@@ -275,7 +284,7 @@ export function DashboardCustomizer({
           {working.map((widget) => {
             const widgetName = tr(WIDGET_LABELS[widget.id] ?? widget.id);
             return (
-              <div key={widget.id} className='flex flex-col gap-1'>
+              <div key={widget.id} className='flex flex-col gap-2'>
                 <div className='flex items-center gap-2 justify-between'>
                   <span className='text-sm'>{widgetName}</span>
                   <Switch
@@ -283,6 +292,30 @@ export function DashboardCustomizer({
                     onCheckedChange={() => toggleVisible(widget.id)}
                   />
                 </div>
+                {widget.visible && (
+                  <ToggleGroup
+                    type='single'
+                    value={String(widget.colSpan)}
+                    onValueChange={(val) => {
+                      if (val === '1' || val === '2' || val === '3') {
+                        handleColSpanChange(widget.id, Number(val) as 1 | 2 | 3);
+                      }
+                    }}
+                    aria-label={tr('dashboard_customizer_widthFor', { widget: widgetName })}
+                    className='justify-start'
+                    size='sm'
+                  >
+                    <ToggleGroupItem value='1' aria-label={tr('dashboard_customizer_widthOption1')}>
+                      {tr('dashboard_customizer_widthOption1')}
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value='2' aria-label={tr('dashboard_customizer_widthOption2')}>
+                      {tr('dashboard_customizer_widthOption2')}
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value='3' aria-label={tr('dashboard_customizer_widthOption3')}>
+                      {tr('dashboard_customizer_widthOption3')}
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                )}
               </div>
             );
           })}
