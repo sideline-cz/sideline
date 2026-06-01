@@ -51,13 +51,58 @@ const WIDGET_LABELS: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// CSS Grid column helpers
+// Explicit grid position computation
 // ---------------------------------------------------------------------------
 
-function colSpanClass(c: number): string {
-  if (c >= 3) return 'lg:col-span-12';
-  if (c === 2) return 'lg:col-span-8';
-  return 'lg:col-span-4';
+type PositionedWidget = {
+  widget: DashboardLayoutApi.DashboardWidget;
+  colStart: number; // 1..12
+  colEnd: number; // 2..13 (exclusive)
+  rowStart: number; // 1..N (compacted)
+};
+
+function computePositions(
+  widgets: ReadonlyArray<DashboardLayoutApi.DashboardWidget>,
+  widgetRegistry: Record<string, React.ReactNode | null>,
+): PositionedWidget[] {
+  // Walk ALL widgets (in array order) and assign canonical (row, col).
+  // Hidden / null-registry widgets still take a slot in this pass so that
+  // their visible siblings keep the columns they would have occupied.
+  let row = 1;
+  let col = 1;
+  const raw: Array<{
+    w: DashboardLayoutApi.DashboardWidget;
+    row: number;
+    colStart: number;
+    span: number;
+  }> = [];
+  for (const w of widgets) {
+    const span = Math.max(1, Math.min(12, w.colSpan * 4));
+    if (col + span - 1 > 12) {
+      row += 1;
+      col = 1;
+    }
+    raw.push({ w, row, colStart: col, span });
+    col += span;
+    if (col > 12) {
+      row += 1;
+      col = 1;
+    }
+  }
+
+  // Filter: keep only widgets that should render (visible AND have a non-null registry entry).
+  const filtered = raw.filter((p) => p.w.visible && widgetRegistry[p.w.id] != null);
+
+  // Renumber rows: every still-used row gets a new sequential number, collapsing empty rows.
+  const usedRows = Array.from(new Set(filtered.map((p) => p.row))).sort((a, b) => a - b);
+  const rowMap = new Map(usedRows.map((r, i) => [r, i + 1]));
+
+  return filtered.map((p) => ({
+    widget: p.w,
+    colStart: p.colStart,
+    colEnd: p.colStart + p.span,
+    rowStart: rowMap.get(p.row) ?? 1,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -65,14 +110,15 @@ function colSpanClass(c: number): string {
 // ---------------------------------------------------------------------------
 
 function SortableWidget({
-  widget,
+  position,
   isEditing,
   registryNode,
 }: {
-  widget: DashboardLayoutApi.DashboardWidget;
+  position: PositionedWidget;
   isEditing: boolean;
   registryNode: React.ReactNode;
 }) {
+  const { widget } = position;
   const {
     attributes,
     listeners,
@@ -82,15 +128,18 @@ function SortableWidget({
     transition,
     isDragging,
   } = useSortable({ id: widget.id });
-  const style: React.CSSProperties = {
+  const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.6 : 1,
-  };
+    '--dash-col-start': position.colStart,
+    '--dash-col-end': position.colEnd,
+    '--dash-row-start': position.rowStart,
+  } as React.CSSProperties;
   const widgetName = tr(WIDGET_LABELS[widget.id] ?? widget.id);
 
   return (
-    <div ref={setNodeRef} style={style} className={`${colSpanClass(widget.colSpan)} relative`}>
+    <div ref={setNodeRef} style={style} className='dashboard-grid-item relative'>
       {isEditing && (
         <button
           type='button'
@@ -229,10 +278,10 @@ export function DashboardCustomizer({
   );
 
   const renderGrid = (widgets: DashboardLayoutApi.DashboardWidget[], isEditing: boolean) => {
-    const visible = widgets.filter((w) => w.visible && widgetRegistry[w.id] != null);
-    if (visible.length === 0) return emptyState;
+    const positions = computePositions(widgets, widgetRegistry);
+    if (positions.length === 0) return emptyState;
 
-    const ids = visible.map((w) => w.id);
+    const ids = positions.map((p) => p.widget.id);
     return (
       <DndContext
         sensors={sensors}
@@ -241,12 +290,12 @@ export function DashboardCustomizer({
       >
         <SortableContext items={ids} strategy={rectSortingStrategy}>
           <div className='grid grid-cols-1 lg:grid-cols-12 gap-4'>
-            {visible.map((w) => (
+            {positions.map((pos) => (
               <SortableWidget
-                key={w.id}
-                widget={w}
+                key={pos.widget.id}
+                position={pos}
                 isEditing={isEditing}
-                registryNode={widgetRegistry[w.id]}
+                registryNode={widgetRegistry[pos.widget.id]}
               />
             ))}
           </div>
@@ -260,12 +309,7 @@ export function DashboardCustomizer({
   // ---------------------------------------------------------------------------
 
   if (!editMode) {
-    const allHidden = activeWidgets.every((w) => !w.visible || widgetRegistry[w.id] == null);
-    return (
-      <div className='flex flex-col gap-4'>
-        {allHidden ? emptyState : renderGrid(activeWidgets, false)}
-      </div>
-    );
+    return <div className='flex flex-col gap-4'>{renderGrid(activeWidgets, false)}</div>;
   }
 
   // ---------------------------------------------------------------------------

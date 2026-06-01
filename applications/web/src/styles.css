@@ -172,3 +172,14 @@ code {
 .overflow-auto {
   overscroll-behavior: contain;
 }
+
+/* On large screens, apply the explicit grid placement computed by the
+ * customizer. On smaller screens, widgets fall back to the default
+ * single-column stack (grid-cols-1) and these custom properties are ignored. */
+@media (min-width: 1024px) {
+  .dashboard-grid-item {
+    grid-column-start: var(--dash-col-start);
+    grid-column-end: var(--dash-col-end);
+    grid-row-start: var(--dash-row-start);
+  }
+}

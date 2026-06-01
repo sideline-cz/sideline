@@ -759,7 +759,7 @@ describe('DashboardCustomizer — all-hidden empty state', () => {
     expect(emptyState).not.toBeNull();
   });
 
-  it('shows empty state in edit mode when all widgets are toggled off', async () => {
+  it('shows empty state in edit mode when all widgets are toggled off — via computePositions returning empty list', async () => {
     const onSave = vi.fn();
     render(
       <DashboardCustomizer
@@ -784,5 +784,61 @@ describe('DashboardCustomizer — all-hidden empty state', () => {
       document.querySelector('[data-testid="dashboard-empty-state"]') ??
       screen.queryByText('All widgets hidden');
     expect(emptyState).not.toBeNull();
+  });
+});
+
+describe('DashboardCustomizer — explicit grid placement (no horizontal compaction)', () => {
+  it('hiding the first of two narrow widgets in the same row leaves the second widget column unchanged', async () => {
+    // Two narrow widgets (colSpan=1 → span=4) side by side in the same row.
+    // Widget A: col 1–5,  widget B: col 5–9
+    // After hiding A, B must still have --dash-col-start=5 (not slide to 1).
+    const twoWidgetLayout: DashboardLayout = {
+      widgets: [
+        { id: 'activity', visible: true, height: 200, colSpan: 1, x: 0, y: 0 },
+        { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 4, y: 0 },
+      ],
+    };
+    const twoWidgetRegistry = {
+      activity: <div data-testid='widget-a'>Activity Widget</div>,
+      teamManagement: <div data-testid='widget-b'>Team Management Widget</div>,
+    };
+
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={twoWidgetLayout as any}
+        widgetRegistry={twoWidgetRegistry}
+        editMode={true}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    // Find the grid item wrapping widget B before hiding A.
+    // The dashboard-grid-item div is the parent of the drag handle + content wrapper.
+    const widgetBContent = screen.getByTestId('widget-b');
+    // Walk up to the dashboard-grid-item container.
+    const widgetBContainer = widgetBContent.closest('.dashboard-grid-item') as HTMLElement;
+    expect(widgetBContainer).not.toBeNull();
+
+    const colStartBefore = widgetBContainer.style.getPropertyValue('--dash-col-start');
+    // With colSpan=1 → span=4: A occupies cols 1–5, B occupies cols 5–9 → colStart=5
+    expect(colStartBefore).toBe('5');
+
+    // Hide widget A by clicking its toggle switch.
+    const switches = screen.getAllByRole('switch');
+    // First switch in the aside panel corresponds to 'activity' (first in working array).
+    await act(async () => {
+      fireEvent.click(switches[0]);
+    });
+
+    // Widget B should still be rendered — and its column should be unchanged.
+    const widgetBContentAfter = screen.getByTestId('widget-b');
+    const widgetBContainerAfter = widgetBContentAfter.closest(
+      '.dashboard-grid-item',
+    ) as HTMLElement;
+    expect(widgetBContainerAfter).not.toBeNull();
+
+    const colStartAfter = widgetBContainerAfter.style.getPropertyValue('--dash-col-start');
+    expect(colStartAfter).toBe('5');
   });
 });
