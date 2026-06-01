@@ -61,44 +61,63 @@ type PositionedWidget = {
   rowStart: number; // 1..N (compacted)
 };
 
-function computePositions(
-  widgets: ReadonlyArray<DashboardLayoutApi.DashboardWidget>,
-  widgetRegistry: Record<string, React.ReactNode | null>,
-): PositionedWidget[] {
-  // Walk ALL widgets (in array order) and assign canonical (row, col).
-  // Hidden / null-registry widgets still take a slot in this pass so that
-  // their visible siblings keep the columns they would have occupied.
-  let row = 1;
-  let col = 1;
-  const raw: Array<{
-    w: DashboardLayoutApi.DashboardWidget;
+function packPositions(widgets: ReadonlyArray<DashboardLayoutApi.DashboardWidget>): Array<{
+  widget: DashboardLayoutApi.DashboardWidget;
+  row: number;
+  colStart: number;
+  span: number;
+}> {
+  const COLS = 12;
+  const columnBottoms = Array<number>(COLS).fill(0);
+  let lastUsedStartCol = 1;
+  const placed: Array<{
+    widget: DashboardLayoutApi.DashboardWidget;
     row: number;
     colStart: number;
     span: number;
   }> = [];
+
   for (const w of widgets) {
-    const span = Math.max(1, Math.min(12, w.colSpan * 4));
-    if (col + span - 1 > 12) {
-      row += 1;
-      col = 1;
+    const span = Math.max(1, Math.min(COLS, w.colSpan * 4));
+    let bestRow = Number.POSITIVE_INFINITY;
+    let bestCol = 1;
+    for (let startCol = 1; startCol + span - 1 <= COLS; startCol++) {
+      const rowNeeded = Math.max(...columnBottoms.slice(startCol - 1, startCol - 1 + span));
+      if (rowNeeded < bestRow) {
+        bestRow = rowNeeded;
+        bestCol = startCol;
+      } else if (rowNeeded === bestRow && startCol === lastUsedStartCol) {
+        // Tiebreaker: prefer the column where the previous widget was placed,
+        // so consecutive widgets continue to stack in the same column when possible.
+        bestCol = startCol;
+      }
     }
-    raw.push({ w, row, colStart: col, span });
-    col += span;
-    if (col > 12) {
-      row += 1;
-      col = 1;
+    placed.push({ widget: w, row: bestRow, colStart: bestCol, span });
+    for (let c = bestCol; c < bestCol + span; c++) {
+      columnBottoms[c - 1] = bestRow + 1;
     }
+    lastUsedStartCol = bestCol;
   }
+  return placed;
+}
+
+function computePositions(
+  widgets: ReadonlyArray<DashboardLayoutApi.DashboardWidget>,
+  widgetRegistry: Record<string, React.ReactNode | null>,
+): PositionedWidget[] {
+  // Walk ALL widgets (visible and hidden) using the column-aware first-fit packing
+  // algorithm so visible siblings keep their columns when something is hidden.
+  const raw = packPositions(widgets);
 
   // Filter: keep only widgets that should render (visible AND have a non-null registry entry).
-  const filtered = raw.filter((p) => p.w.visible && widgetRegistry[p.w.id] != null);
+  const filtered = raw.filter((p) => p.widget.visible && widgetRegistry[p.widget.id] != null);
 
   // Renumber rows: every still-used row gets a new sequential number, collapsing empty rows.
   const usedRows = Array.from(new Set(filtered.map((p) => p.row))).sort((a, b) => a - b);
   const rowMap = new Map(usedRows.map((r, i) => [r, i + 1]));
 
   return filtered.map((p) => ({
-    widget: p.w,
+    widget: p.widget,
     colStart: p.colStart,
     colEnd: p.colStart + p.span,
     rowStart: rowMap.get(p.row) ?? 1,

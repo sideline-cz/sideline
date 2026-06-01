@@ -788,6 +788,38 @@ describe('DashboardCustomizer — all-hidden empty state', () => {
 });
 
 describe('DashboardCustomizer — explicit grid placement (no horizontal compaction)', () => {
+  it('default 6-widget layout places stats and upcomingEvents at colStart=1, activity and teamManagement at colStart=9', () => {
+    // Default layout (all visible, all registry non-null):
+    //   awaitingRsvp(span12), outstandingPayments(span12), stats(span12),
+    //   upcomingEvents(span8), activity(span4), teamManagement(span4)
+    // Column-aware packing expects:
+    //   stats       → colStart=1  (spans full 12 cols)
+    //   upcomingEvents → colStart=1  (spans 8 cols, row below stats)
+    //   activity    → colStart=9  (spans 4 cols, fits in the free cols 9-12 beside upcomingEvents)
+    //   teamManagement → colStart=9  (stacks under activity via lastUsedStartCol tiebreaker)
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        widgetRegistry={WIDGET_REGISTRY}
+        editMode={false}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    const getColStart = (testId: string) => {
+      const content = screen.getByText(`${testId} Widget`);
+      const container = content.closest('.dashboard-grid-item') as HTMLElement;
+      expect(container).not.toBeNull();
+      return container.style.getPropertyValue('--dash-col-start');
+    };
+
+    expect(getColStart('Stats')).toBe('1');
+    expect(getColStart('Upcoming Events')).toBe('1');
+    expect(getColStart('Activity')).toBe('9');
+    expect(getColStart('Team Management')).toBe('9');
+  });
+
   it('hiding the first of two narrow widgets in the same row leaves the second widget column unchanged', async () => {
     // Two narrow widgets (colSpan=1 → span=4) side by side in the same row.
     // Widget A: col 1–5,  widget B: col 5–9
