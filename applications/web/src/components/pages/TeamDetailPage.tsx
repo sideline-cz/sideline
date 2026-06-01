@@ -444,16 +444,24 @@ export function TeamDetailPage({
   const { upcomingEvents, awaitingRsvp, activitySummary } = dashboard;
   const effectiveLayout = layout ?? DEFAULT_LAYOUT;
 
+  // Determine whether each banner has actionable data. When there is no data
+  // the registry entry is set to null so the DashboardCustomizer excludes the
+  // widget from the RGL grid entirely (no empty rectangle left behind).
+  const hasRsvp = awaitingRsvp.length > 0;
+  const hasOutstandingPayments = myStatus.some((g) => g.totalOutstandingMinor > 0);
+
   // NOTE: Banners are now part of the widget registry and can be toggled/repositioned
   // by the user via the customizer. This means a user who deliberately hides the
   // awaitingRsvp or outstandingPayments widget via the aside panel will NOT see
   // those banners even when there is actionable data (pending RSVPs / unpaid fees).
   // This is a deliberate user choice — they opted out of the reminder.
-  const widgetRegistry: Record<WidgetId, React.ReactNode> = {
-    awaitingRsvp: <AwaitingRsvpBanner key='awaitingRsvp' teamId={teamId} events={awaitingRsvp} />,
-    outstandingPayments: (
+  const widgetRegistry: Record<WidgetId, React.ReactNode | null> = {
+    awaitingRsvp: hasRsvp ? (
+      <AwaitingRsvpBanner key='awaitingRsvp' teamId={teamId} events={awaitingRsvp} />
+    ) : null,
+    outstandingPayments: hasOutstandingPayments ? (
       <OutstandingPaymentsBanner key='outstandingPayments' teamId={teamId} groups={myStatus} />
-    ),
+    ) : null,
     stats: <StatCards key='stats' activitySummary={activitySummary} />,
     upcomingEvents: (
       <UpcomingEventsCard key='upcomingEvents' teamId={teamId} events={upcomingEvents} />

@@ -18,7 +18,12 @@ interface DashboardCustomizerProps {
   layout: DashboardLayoutApi.DashboardLayout;
   /** When undefined, edit mode cannot be entered (read-only mode). */
   onSave?: (widgets: DashboardLayoutApi.DashboardWidget[]) => Promise<void>;
-  widgetRegistry: Record<string, React.ReactNode>;
+  /**
+   * A null entry means the widget has no data to display right now.
+   * Null-entry widgets are excluded from the RGL grid (no empty rectangle),
+   * but their toggles remain visible in the edit-mode aside panel.
+   */
+  widgetRegistry: Record<string, React.ReactNode | null>;
   /** Controlled edit mode — owned by the parent (TeamDetailPage). */
   editMode: boolean;
   onEditModeChange: (next: boolean) => void;
@@ -185,19 +190,30 @@ export function DashboardCustomizer({
 
   const renderGrid = (widgets: DashboardLayoutApi.DashboardWidget[], isEditing: boolean) => {
     const visibleWidgets = widgets.filter((w) => w.visible);
-    if (visibleWidgets.length === 0) return emptyState;
+    // Also exclude widgets whose registry entry is null (no data to display)
+    const renderableWidgets = visibleWidgets.filter((w) => widgetRegistry[w.id] != null);
+    if (renderableWidgets.length === 0) return emptyState;
 
     return (
       <SizedGridLayout
-        layout={isEditing ? editLayout : widgetsToLayout(widgets)}
+        layout={
+          isEditing
+            ? editLayout.filter((item) => renderableWidgets.some((w) => w.id === item.i))
+            : widgetsToLayout(renderableWidgets)
+        }
         cols={12}
         rowHeight={ROW_HEIGHT}
         margin={[12, 12]}
         isDraggable={isEditing}
         isResizable={isEditing}
         resizeHandles={['se']}
-        compactType={null}
+        compactType='vertical'
         preventCollision={false}
+        // useCSSTransforms=false makes RGL use top/left + width/height absolute
+        // positioning instead of CSS transforms. This eliminates a sizing
+        // interaction where transforms can bypass explicit height constraints,
+        // causing widgets to expand beyond their configured grid slot.
+        useCSSTransforms={false}
         draggableCancel='button, a, input, [role="switch"], select'
         // Only commit the layout on drag/resize STOP — not on every intermediate
         // RGL re-compute. The continuous `onLayoutChange` ticks during a drag
@@ -209,12 +225,22 @@ export function DashboardCustomizer({
           if (isEditing) setEditLayout(newLayout);
         }}
       >
-        {visibleWidgets.map((w) => (
+        {renderableWidgets.map((w) => (
           <div
             key={w.id}
-            className='h-full w-full min-h-0 min-w-0 overflow-hidden rounded-lg box-border [&>*]:h-full [&>*]:w-full [&>*]:min-h-0 [&>*]:min-w-0'
+            style={{
+              height: '100%',
+              width: '100%',
+              minHeight: 0,
+              minWidth: 0,
+              overflow: 'hidden',
+              boxSizing: 'border-box',
+              borderRadius: 'var(--radius)',
+            }}
           >
-            {widgetRegistry[w.id]}
+            <div style={{ height: '100%', width: '100%', minHeight: 0, overflow: 'hidden' }}>
+              {widgetRegistry[w.id]}
+            </div>
           </div>
         ))}
       </SizedGridLayout>

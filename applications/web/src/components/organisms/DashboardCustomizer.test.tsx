@@ -5,7 +5,7 @@
 //     teamId: string;
 //     layout: DashboardLayout;                 ← current persisted layout
 //     onSave: (widgets: DashboardWidget[]) => Promise<void>  ← calls updateDashboardLayout API
-//     widgetRegistry: Record<string, React.ReactNode>
+//     widgetRegistry: Record<string, React.ReactNode | null>
 //     editMode: boolean;                       ← controlled by parent (TeamDetailPage)
 //     onEditModeChange: (next: boolean) => void;
 //   })
@@ -554,6 +554,77 @@ describe('DashboardCustomizer — Cancel', () => {
 
     // onSave must NOT have been called
     expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
+describe('DashboardCustomizer — null registry entries (no data)', () => {
+  it('does not render a widget whose registry value is null even when visible:true', () => {
+    const registryWithNull = {
+      ...WIDGET_REGISTRY,
+      awaitingRsvp: null,
+    };
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        widgetRegistry={registryWithNull}
+        editMode={false}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    // awaitingRsvp has a null registry entry — must not appear in the grid
+    expect(screen.queryByText('Awaiting RSVP Widget')).toBeNull();
+    // Other widgets still render
+    expect(screen.getByText('Stats Widget')).not.toBeNull();
+  });
+
+  it('shows empty state when all visible widgets have null registry entries', () => {
+    const allNullRegistry = {
+      awaitingRsvp: null,
+      outstandingPayments: null,
+      stats: null,
+      upcomingEvents: null,
+      activity: null,
+      teamManagement: null,
+    };
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        widgetRegistry={allNullRegistry}
+        editMode={false}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    const emptyState =
+      document.querySelector('[data-testid="dashboard-empty-state"]') ??
+      screen.queryByText('All widgets hidden');
+    expect(emptyState).not.toBeNull();
+  });
+
+  it('still shows the switch for a null-registry widget in edit mode', () => {
+    const registryWithNull = {
+      ...WIDGET_REGISTRY,
+      awaitingRsvp: null,
+    };
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        widgetRegistry={registryWithNull}
+        editMode={true}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    // All 6 widget switches are present — including the null-registry one
+    const switches = screen.getAllByRole('switch');
+    expect(switches.length).toBe(6);
+
+    // But the widget content is not in the grid
+    expect(screen.queryByText('Awaiting RSVP Widget')).toBeNull();
   });
 });
 
