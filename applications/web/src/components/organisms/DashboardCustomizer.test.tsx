@@ -1,4 +1,4 @@
-// Tests for the redesigned DashboardCustomizer (CSS Grid + dnd-kit based).
+// Tests for the redesigned DashboardCustomizer (explicit row/column placement).
 //
 // Component contract:
 //   DashboardCustomizer({
@@ -12,14 +12,18 @@
 //
 // Behaviour:
 //   - In idle mode (editMode=false): grid renders, aside panel NOT shown
-//   - In edit mode (editMode=true): aside panel appears with one Switch + width selector per widget
+//   - In edit mode (editMode=true): aside panel appears with one Switch + row/col/width controls per widget
 //   - Toggling a Switch updates local working copy but does NOT call onSave
 //   - Width selector buttons change colSpan in working copy
+//   - Row input updates y in working copy
+//   - Column segmented control updates x in working copy
 //   - Reset sets working copy back to DEFAULT
 //   - Save calls onSave exactly once then calls onEditModeChange(false)
 //   - Save failure stays in edit mode (error state shown)
 //   - Cancel calls onEditModeChange(false) without calling onSave
 //   - Null-registry widget is skipped from grid but still in aside panel
+//   - Two widgets at same y end up in the same renumbered row
+//   - A widget with visible=false doesn't render in the grid
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -38,7 +42,8 @@ vi.mock('~/lib/translations.js', () => ({
       dashboard_customizer_cancel: 'Cancel',
       dashboard_customizer_reset: 'Reset layout',
       dashboard_customizer_saveError: 'Failed to save layout',
-      dashboard_customizer_dragHandle: 'Drag {widget}',
+      dashboard_customizer_rowFor: 'Row for {widget}',
+      dashboard_customizer_columnFor: 'Column for {widget}',
       dashboard_customizer_widthFor: 'Width for {widget}',
       dashboard_customizer_widthOption1: 'Narrow',
       dashboard_customizer_widthOption2: 'Medium',
@@ -90,12 +95,12 @@ type DashboardLayout = { widgets: ReadonlyArray<DashboardWidget> };
 function makeDefaultLayout(): DashboardLayout {
   return {
     widgets: [
-      { id: 'awaitingRsvp', visible: true, height: 80, colSpan: 3, x: 0, y: 0 },
-      { id: 'outstandingPayments', visible: true, height: 80, colSpan: 3, x: 0, y: 8 },
-      { id: 'stats', visible: true, height: 140, colSpan: 3, x: 0, y: 16 },
-      { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 0, y: 30 },
-      { id: 'activity', visible: true, height: 200, colSpan: 1, x: 8, y: 30 },
-      { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 8, y: 50 },
+      { id: 'awaitingRsvp', visible: true, height: 80, colSpan: 3, x: 1, y: 1 },
+      { id: 'outstandingPayments', visible: true, height: 80, colSpan: 3, x: 1, y: 2 },
+      { id: 'stats', visible: true, height: 140, colSpan: 3, x: 1, y: 3 },
+      { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 1, y: 4 },
+      { id: 'activity', visible: true, height: 200, colSpan: 1, x: 9, y: 4 },
+      { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 9, y: 5 },
     ],
   };
 }
@@ -103,12 +108,12 @@ function makeDefaultLayout(): DashboardLayout {
 function makePartialLayout(): DashboardLayout {
   return {
     widgets: [
-      { id: 'awaitingRsvp', visible: false, height: 80, colSpan: 3, x: 0, y: 0 },
-      { id: 'outstandingPayments', visible: false, height: 80, colSpan: 3, x: 0, y: 8 },
-      { id: 'stats', visible: false, height: 140, colSpan: 3, x: 0, y: 16 },
-      { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 0, y: 30 },
-      { id: 'activity', visible: false, height: 200, colSpan: 1, x: 8, y: 30 },
-      { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 8, y: 50 },
+      { id: 'awaitingRsvp', visible: false, height: 80, colSpan: 3, x: 1, y: 1 },
+      { id: 'outstandingPayments', visible: false, height: 80, colSpan: 3, x: 1, y: 2 },
+      { id: 'stats', visible: false, height: 140, colSpan: 3, x: 1, y: 3 },
+      { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 1, y: 4 },
+      { id: 'activity', visible: false, height: 200, colSpan: 1, x: 9, y: 4 },
+      { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 9, y: 5 },
     ],
   };
 }
@@ -197,6 +202,27 @@ describe('DashboardCustomizer — initial state (not in edit mode)', () => {
     expect(screen.getByText('Upcoming Events Widget')).not.toBeNull();
     expect(screen.getByText('Activity Widget')).not.toBeNull();
     expect(screen.getByText('Team Management Widget')).not.toBeNull();
+  });
+
+  it('a widget with visible=false does not render in the grid', () => {
+    const hiddenLayout: DashboardLayout = {
+      widgets: [
+        { id: 'stats', visible: false, height: 140, colSpan: 3, x: 1, y: 3 },
+        { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 1, y: 4 },
+      ],
+    };
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={hiddenLayout as any}
+        widgetRegistry={WIDGET_REGISTRY}
+        editMode={false}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Stats Widget')).toBeNull();
+    expect(screen.getByText('Upcoming Events Widget')).not.toBeNull();
   });
 });
 
@@ -405,6 +431,183 @@ describe('DashboardCustomizer — width selector', () => {
     // At least one widget should now have colSpan=2 (changed from colSpan=3 to 2)
     const changed = savedWidgets.some((w) => w.colSpan === 2);
     expect(changed).toBe(true);
+  });
+});
+
+describe('DashboardCustomizer — row control', () => {
+  it('changing the row input updates y in the working copy', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+        editMode={true}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    // Find the first row input (for awaitingRsvp, y=1)
+    const rowInputs = screen.getAllByRole('spinbutton');
+    expect(rowInputs.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      fireEvent.change(rowInputs[0], { target: { value: '7' } });
+    });
+
+    // Save and verify y changed
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save'));
+    });
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledTimes(1);
+    });
+
+    const savedWidgets = onSave.mock.calls[0][0] as DashboardWidget[];
+    const awaitingRsvp = savedWidgets.find((w) => w.id === 'awaitingRsvp');
+    expect(awaitingRsvp?.y).toBe(7);
+  });
+
+  it('two widgets at same y end up in the same renumbered row', () => {
+    const sameRowLayout: DashboardLayout = {
+      widgets: [
+        { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 1, y: 4 },
+        { id: 'activity', visible: true, height: 200, colSpan: 1, x: 9, y: 4 },
+      ],
+    };
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={sameRowLayout as any}
+        widgetRegistry={WIDGET_REGISTRY}
+        editMode={false}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    const upcomingEl = screen.getByText('Upcoming Events Widget');
+    const activityEl = screen.getByText('Activity Widget');
+
+    const upcomingContainer = upcomingEl.closest('.dashboard-grid-item') as HTMLElement;
+    const activityContainer = activityEl.closest('.dashboard-grid-item') as HTMLElement;
+
+    expect(upcomingContainer).not.toBeNull();
+    expect(activityContainer).not.toBeNull();
+
+    // Both have y=4, after renumbering both should be row 1
+    expect(upcomingContainer.style.getPropertyValue('--dash-row-start')).toBe('1');
+    expect(activityContainer.style.getPropertyValue('--dash-row-start')).toBe('1');
+  });
+});
+
+describe('DashboardCustomizer — column control', () => {
+  it('changing the column segmented control updates x in working copy', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        onSave={onSave}
+        widgetRegistry={WIDGET_REGISTRY}
+        editMode={true}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    // awaitingRsvp starts at x=1; click the "9" column button for the first widget
+    const nineButtons = screen.getAllByRole('radio', { name: '9' });
+    await act(async () => {
+      fireEvent.click(nineButtons[0]);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save'));
+    });
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledTimes(1);
+    });
+
+    const savedWidgets = onSave.mock.calls[0][0] as DashboardWidget[];
+    const awaitingRsvp = savedWidgets.find((w) => w.id === 'awaitingRsvp');
+    expect(awaitingRsvp?.x).toBe(9);
+  });
+});
+
+describe('DashboardCustomizer — explicit grid placement (x/y from widget data)', () => {
+  it('default layout places upcomingEvents at colStart=1 and activity at colStart=9', () => {
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={makeDefaultLayout() as any}
+        widgetRegistry={WIDGET_REGISTRY}
+        editMode={false}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    const getColStart = (label: string) => {
+      const content = screen.getByText(`${label} Widget`);
+      const container = content.closest('.dashboard-grid-item') as HTMLElement;
+      expect(container).not.toBeNull();
+      return container.style.getPropertyValue('--dash-col-start');
+    };
+
+    expect(getColStart('Stats')).toBe('1');
+    expect(getColStart('Upcoming Events')).toBe('1');
+    expect(getColStart('Activity')).toBe('9');
+    expect(getColStart('Team Management')).toBe('9');
+  });
+
+  it('hiding a widget with visible=false leaves the other widget column unchanged', async () => {
+    // Two narrow widgets (colSpan=1 → span=4) side by side in the same row.
+    // Widget A: x=1, widget B: x=5
+    const twoWidgetLayout: DashboardLayout = {
+      widgets: [
+        { id: 'activity', visible: true, height: 200, colSpan: 1, x: 1, y: 1 },
+        { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 5, y: 1 },
+      ],
+    };
+    const twoWidgetRegistry = {
+      activity: <div data-testid='widget-a'>Activity Widget</div>,
+      teamManagement: <div data-testid='widget-b'>Team Management Widget</div>,
+    };
+
+    render(
+      <DashboardCustomizer
+        teamId={TEAM_ID}
+        layout={twoWidgetLayout as any}
+        widgetRegistry={twoWidgetRegistry}
+        editMode={true}
+        onEditModeChange={vi.fn()}
+      />,
+    );
+
+    const widgetBContent = screen.getByTestId('widget-b');
+    const widgetBContainer = widgetBContent.closest('.dashboard-grid-item') as HTMLElement;
+    expect(widgetBContainer).not.toBeNull();
+
+    const colStartBefore = widgetBContainer.style.getPropertyValue('--dash-col-start');
+    // B has x=5 → colStart=5
+    expect(colStartBefore).toBe('5');
+
+    // Hide widget A by clicking its toggle switch.
+    const switches = screen.getAllByRole('switch');
+    await act(async () => {
+      fireEvent.click(switches[0]);
+    });
+
+    // Widget B should still be rendered — and its column should be unchanged.
+    const widgetBContentAfter = screen.getByTestId('widget-b');
+    const widgetBContainerAfter = widgetBContentAfter.closest(
+      '.dashboard-grid-item',
+    ) as HTMLElement;
+    expect(widgetBContainerAfter).not.toBeNull();
+
+    const colStartAfter = widgetBContainerAfter.style.getPropertyValue('--dash-col-start');
+    expect(colStartAfter).toBe('5');
   });
 });
 
@@ -735,12 +938,12 @@ describe('DashboardCustomizer — all-hidden empty state', () => {
   it('shows empty state when all widgets are hidden', () => {
     const allHiddenLayout: DashboardLayout = {
       widgets: [
-        { id: 'awaitingRsvp', visible: false, height: 80, colSpan: 3, x: 0, y: 0 },
-        { id: 'outstandingPayments', visible: false, height: 80, colSpan: 3, x: 0, y: 8 },
-        { id: 'stats', visible: false, height: 140, colSpan: 3, x: 0, y: 16 },
-        { id: 'upcomingEvents', visible: false, height: 280, colSpan: 2, x: 0, y: 30 },
-        { id: 'activity', visible: false, height: 200, colSpan: 1, x: 8, y: 30 },
-        { id: 'teamManagement', visible: false, height: 260, colSpan: 1, x: 8, y: 50 },
+        { id: 'awaitingRsvp', visible: false, height: 80, colSpan: 3, x: 1, y: 1 },
+        { id: 'outstandingPayments', visible: false, height: 80, colSpan: 3, x: 1, y: 2 },
+        { id: 'stats', visible: false, height: 140, colSpan: 3, x: 1, y: 3 },
+        { id: 'upcomingEvents', visible: false, height: 280, colSpan: 2, x: 1, y: 4 },
+        { id: 'activity', visible: false, height: 200, colSpan: 1, x: 9, y: 4 },
+        { id: 'teamManagement', visible: false, height: 260, colSpan: 1, x: 9, y: 5 },
       ],
     };
     render(
@@ -759,7 +962,7 @@ describe('DashboardCustomizer — all-hidden empty state', () => {
     expect(emptyState).not.toBeNull();
   });
 
-  it('shows empty state in edit mode when all widgets are toggled off — via computePositions returning empty list', async () => {
+  it('shows empty state in edit mode when all widgets are toggled off', async () => {
     const onSave = vi.fn();
     render(
       <DashboardCustomizer
@@ -784,93 +987,5 @@ describe('DashboardCustomizer — all-hidden empty state', () => {
       document.querySelector('[data-testid="dashboard-empty-state"]') ??
       screen.queryByText('All widgets hidden');
     expect(emptyState).not.toBeNull();
-  });
-});
-
-describe('DashboardCustomizer — explicit grid placement (no horizontal compaction)', () => {
-  it('default 6-widget layout places stats and upcomingEvents at colStart=1, activity and teamManagement at colStart=9', () => {
-    // Default layout (all visible, all registry non-null):
-    //   awaitingRsvp(span12), outstandingPayments(span12), stats(span12),
-    //   upcomingEvents(span8), activity(span4), teamManagement(span4)
-    // Column-aware packing expects:
-    //   stats       → colStart=1  (spans full 12 cols)
-    //   upcomingEvents → colStart=1  (spans 8 cols, row below stats)
-    //   activity    → colStart=9  (spans 4 cols, fits in the free cols 9-12 beside upcomingEvents)
-    //   teamManagement → colStart=9  (stacks under activity via lastUsedStartCol tiebreaker)
-    render(
-      <DashboardCustomizer
-        teamId={TEAM_ID}
-        layout={makeDefaultLayout() as any}
-        widgetRegistry={WIDGET_REGISTRY}
-        editMode={false}
-        onEditModeChange={vi.fn()}
-      />,
-    );
-
-    const getColStart = (testId: string) => {
-      const content = screen.getByText(`${testId} Widget`);
-      const container = content.closest('.dashboard-grid-item') as HTMLElement;
-      expect(container).not.toBeNull();
-      return container.style.getPropertyValue('--dash-col-start');
-    };
-
-    expect(getColStart('Stats')).toBe('1');
-    expect(getColStart('Upcoming Events')).toBe('1');
-    expect(getColStart('Activity')).toBe('9');
-    expect(getColStart('Team Management')).toBe('9');
-  });
-
-  it('hiding the first of two narrow widgets in the same row leaves the second widget column unchanged', async () => {
-    // Two narrow widgets (colSpan=1 → span=4) side by side in the same row.
-    // Widget A: col 1–5,  widget B: col 5–9
-    // After hiding A, B must still have --dash-col-start=5 (not slide to 1).
-    const twoWidgetLayout: DashboardLayout = {
-      widgets: [
-        { id: 'activity', visible: true, height: 200, colSpan: 1, x: 0, y: 0 },
-        { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 4, y: 0 },
-      ],
-    };
-    const twoWidgetRegistry = {
-      activity: <div data-testid='widget-a'>Activity Widget</div>,
-      teamManagement: <div data-testid='widget-b'>Team Management Widget</div>,
-    };
-
-    render(
-      <DashboardCustomizer
-        teamId={TEAM_ID}
-        layout={twoWidgetLayout as any}
-        widgetRegistry={twoWidgetRegistry}
-        editMode={true}
-        onEditModeChange={vi.fn()}
-      />,
-    );
-
-    // Find the grid item wrapping widget B before hiding A.
-    // The dashboard-grid-item div is the parent of the drag handle + content wrapper.
-    const widgetBContent = screen.getByTestId('widget-b');
-    // Walk up to the dashboard-grid-item container.
-    const widgetBContainer = widgetBContent.closest('.dashboard-grid-item') as HTMLElement;
-    expect(widgetBContainer).not.toBeNull();
-
-    const colStartBefore = widgetBContainer.style.getPropertyValue('--dash-col-start');
-    // With colSpan=1 → span=4: A occupies cols 1–5, B occupies cols 5–9 → colStart=5
-    expect(colStartBefore).toBe('5');
-
-    // Hide widget A by clicking its toggle switch.
-    const switches = screen.getAllByRole('switch');
-    // First switch in the aside panel corresponds to 'activity' (first in working array).
-    await act(async () => {
-      fireEvent.click(switches[0]);
-    });
-
-    // Widget B should still be rendered — and its column should be unchanged.
-    const widgetBContentAfter = screen.getByTestId('widget-b');
-    const widgetBContainerAfter = widgetBContentAfter.closest(
-      '.dashboard-grid-item',
-    ) as HTMLElement;
-    expect(widgetBContainerAfter).not.toBeNull();
-
-    const colStartAfter = widgetBContainerAfter.style.getPropertyValue('--dash-col-start');
-    expect(colStartAfter).toBe('5');
   });
 });

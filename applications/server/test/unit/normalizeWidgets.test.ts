@@ -206,8 +206,8 @@ describe('normalizeWidgets — height field preserved', () => {
         visible: true,
         height: customHeight,
         colSpan: 3,
-        x: 0,
-        y: 0,
+        x: 1,
+        y: 1,
       }),
     ];
     const result = normalizeWidgets(input);

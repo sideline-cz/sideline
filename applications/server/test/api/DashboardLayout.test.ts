@@ -315,19 +315,19 @@ describe('DashboardLayout API — getDashboardLayout', () => {
     expect(body.widgets[3].colSpan).toBe(2); // upcomingEvents
     expect(body.widgets[4].colSpan).toBe(1); // activity
     expect(body.widgets[5].colSpan).toBe(1); // teamManagement
-    // x/y fields match DEFAULT_LAYOUT positions
-    expect(body.widgets[0].x).toBe(0); // awaitingRsvp x
-    expect(body.widgets[0].y).toBe(0); // awaitingRsvp y
-    expect(body.widgets[1].x).toBe(0); // outstandingPayments x
-    expect(body.widgets[1].y).toBe(8); // outstandingPayments y
-    expect(body.widgets[2].x).toBe(0); // stats x
-    expect(body.widgets[2].y).toBe(16); // stats y
-    expect(body.widgets[3].x).toBe(0); // upcomingEvents x
-    expect(body.widgets[3].y).toBe(30); // upcomingEvents y
-    expect(body.widgets[4].x).toBe(8); // activity x
-    expect(body.widgets[4].y).toBe(30); // activity y
-    expect(body.widgets[5].x).toBe(8); // teamManagement x
-    expect(body.widgets[5].y).toBe(50); // teamManagement y
+    // x/y fields match DEFAULT_LAYOUT positions (1-indexed)
+    expect(body.widgets[0].x).toBe(1); // awaitingRsvp x
+    expect(body.widgets[0].y).toBe(1); // awaitingRsvp y
+    expect(body.widgets[1].x).toBe(1); // outstandingPayments x
+    expect(body.widgets[1].y).toBe(2); // outstandingPayments y
+    expect(body.widgets[2].x).toBe(1); // stats x
+    expect(body.widgets[2].y).toBe(3); // stats y
+    expect(body.widgets[3].x).toBe(1); // upcomingEvents x
+    expect(body.widgets[3].y).toBe(4); // upcomingEvents y
+    expect(body.widgets[4].x).toBe(9); // activity x
+    expect(body.widgets[4].y).toBe(4); // activity y
+    expect(body.widgets[5].x).toBe(9); // teamManagement x
+    expect(body.widgets[5].y).toBe(5); // teamManagement y
   });
 
   it('GET → 200 with normalized result when stored partial/legacy row exists', async () => {
@@ -377,12 +377,12 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
   it('PUT → 200 persists & returns normalized widgets with height fields', async () => {
     const payload = {
       widgets: [
-        { id: 'awaitingRsvp', visible: true, height: 80, colSpan: 3, x: 0, y: 0 },
-        { id: 'outstandingPayments', visible: true, height: 80, colSpan: 3, x: 0, y: 8 },
-        { id: 'activity', visible: false, height: 200, colSpan: 1, x: 8, y: 30 },
-        { id: 'stats', visible: true, height: 140, colSpan: 3, x: 0, y: 16 },
-        { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 0, y: 30 },
-        { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 8, y: 50 },
+        { id: 'awaitingRsvp', visible: true, height: 80, colSpan: 3, x: 1, y: 1 },
+        { id: 'outstandingPayments', visible: true, height: 80, colSpan: 3, x: 1, y: 2 },
+        { id: 'activity', visible: false, height: 200, colSpan: 1, x: 9, y: 4 },
+        { id: 'stats', visible: true, height: 140, colSpan: 3, x: 1, y: 3 },
+        { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 1, y: 4 },
+        { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 9, y: 5 },
       ],
     };
 
@@ -412,7 +412,7 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
 
   it('PUT → 200 normalizes partial payload (fills in missing widgets)', async () => {
     const payload = {
-      widgets: [{ id: 'stats', visible: false, height: 140, colSpan: 3, x: 0, y: 16 }],
+      widgets: [{ id: 'stats', visible: false, height: 140, colSpan: 3, x: 1, y: 3 }],
     };
 
     const response = await handler(
@@ -437,12 +437,12 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
   it('PUT persists custom height values', async () => {
     const payload = {
       widgets: [
-        { id: 'awaitingRsvp', visible: true, height: 80, colSpan: 3, x: 0, y: 0 },
-        { id: 'outstandingPayments', visible: true, height: 80, colSpan: 3, x: 0, y: 8 },
-        { id: 'stats', visible: true, height: 350, colSpan: 3, x: 0, y: 16 },
-        { id: 'upcomingEvents', visible: true, height: 500, colSpan: 2, x: 0, y: 30 },
-        { id: 'activity', visible: true, height: 200, colSpan: 1, x: 8, y: 30 },
-        { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 8, y: 50 },
+        { id: 'awaitingRsvp', visible: true, height: 80, colSpan: 3, x: 1, y: 1 },
+        { id: 'outstandingPayments', visible: true, height: 80, colSpan: 3, x: 1, y: 2 },
+        { id: 'stats', visible: true, height: 350, colSpan: 3, x: 1, y: 3 },
+        { id: 'upcomingEvents', visible: true, height: 500, colSpan: 2, x: 1, y: 4 },
+        { id: 'activity', visible: true, height: 200, colSpan: 1, x: 9, y: 4 },
+        { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 9, y: 5 },
       ],
     };
 
@@ -467,12 +467,12 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
   it('PUT persists custom colSpan values', async () => {
     const payload = {
       widgets: [
-        { id: 'awaitingRsvp', visible: true, height: 80, colSpan: 3, x: 0, y: 0 },
-        { id: 'outstandingPayments', visible: true, height: 80, colSpan: 3, x: 0, y: 8 },
-        { id: 'stats', visible: true, height: 140, colSpan: 1, x: 0, y: 16 },
-        { id: 'upcomingEvents', visible: true, height: 280, colSpan: 3, x: 0, y: 30 },
-        { id: 'activity', visible: true, height: 200, colSpan: 2, x: 8, y: 30 },
-        { id: 'teamManagement', visible: true, height: 260, colSpan: 2, x: 8, y: 50 },
+        { id: 'awaitingRsvp', visible: true, height: 80, colSpan: 3, x: 1, y: 1 },
+        { id: 'outstandingPayments', visible: true, height: 80, colSpan: 3, x: 1, y: 2 },
+        { id: 'stats', visible: true, height: 140, colSpan: 1, x: 1, y: 3 },
+        { id: 'upcomingEvents', visible: true, height: 280, colSpan: 3, x: 1, y: 4 },
+        { id: 'activity', visible: true, height: 200, colSpan: 2, x: 9, y: 4 },
+        { id: 'teamManagement', visible: true, height: 260, colSpan: 2, x: 9, y: 5 },
       ],
     };
 
@@ -497,12 +497,12 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
   it('PUT → 403 DashboardLayoutForbidden for non-member of team', async () => {
     const payload = {
       widgets: [
-        { id: 'awaitingRsvp', visible: true, height: 80, colSpan: 3, x: 0, y: 0 },
-        { id: 'outstandingPayments', visible: true, height: 80, colSpan: 3, x: 0, y: 8 },
-        { id: 'stats', visible: true, height: 140, colSpan: 3, x: 0, y: 16 },
-        { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 0, y: 30 },
-        { id: 'activity', visible: true, height: 200, colSpan: 1, x: 8, y: 30 },
-        { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 8, y: 50 },
+        { id: 'awaitingRsvp', visible: true, height: 80, colSpan: 3, x: 1, y: 1 },
+        { id: 'outstandingPayments', visible: true, height: 80, colSpan: 3, x: 1, y: 2 },
+        { id: 'stats', visible: true, height: 140, colSpan: 3, x: 1, y: 3 },
+        { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 1, y: 4 },
+        { id: 'activity', visible: true, height: 200, colSpan: 1, x: 9, y: 4 },
+        { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 9, y: 5 },
       ],
     };
 
@@ -523,7 +523,7 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
 
   it('PUT → 401 when no auth token provided', async () => {
     const payload = {
-      widgets: [{ id: 'stats', visible: true, height: 140, colSpan: 3, x: 0, y: 0 }],
+      widgets: [{ id: 'stats', visible: true, height: 140, colSpan: 3, x: 1, y: 1 }],
     };
 
     const response = await handler(
@@ -538,7 +538,7 @@ describe('DashboardLayout API — updateDashboardLayout', () => {
 
   it('PUT → 400 when payload contains an invalid widget id', async () => {
     const payload = {
-      widgets: [{ id: 'fakeUnknown', visible: true, height: 200, colSpan: 1, x: 0, y: 0 }],
+      widgets: [{ id: 'fakeUnknown', visible: true, height: 200, colSpan: 1, x: 1, y: 1 }],
     };
 
     const response = await handler(

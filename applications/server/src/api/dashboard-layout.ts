@@ -37,11 +37,11 @@ const clampColSpan = (value: number): 1 | 2 | 3 => {
   return 2;
 };
 
-/** Clamp x to [0, 11]. */
-const clampX = (value: number): number => Math.max(0, Math.min(11, value));
+/** Clamp x to [1, 12]. */
+const clampX = (value: number): number => Math.max(1, Math.min(12, value));
 
-/** Clamp y to [0, 999]. */
-const clampY = (value: number): number => Math.max(0, Math.min(999, value));
+/** Clamp y to [1, 999]. */
+const clampY = (value: number): number => Math.max(1, Math.min(999, value));
 
 /**
  * Minimum sensible pixel height for a dashboard widget. Anything below this is

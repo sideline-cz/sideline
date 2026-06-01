@@ -98,8 +98,8 @@ describe('DashboardWidget — decode', () => {
       visible: true,
       height: 140,
       colSpan: 1,
-      x: 0,
-      y: 0,
+      x: 1,
+      y: 1,
     });
     expect(result.colSpan).toBe(1);
   });
@@ -110,8 +110,8 @@ describe('DashboardWidget — decode', () => {
       visible: true,
       height: 140,
       colSpan: 3,
-      x: 0,
-      y: 0,
+      x: 1,
+      y: 1,
     });
     expect(result.colSpan).toBe(3);
   });
@@ -123,8 +123,8 @@ describe('DashboardWidget — decode', () => {
         visible: true,
         height: 140,
         colSpan: 0,
-        x: 0,
-        y: 0,
+        x: 1,
+        y: 1,
       }),
     ).toThrow();
   });
@@ -136,8 +136,8 @@ describe('DashboardWidget — decode', () => {
         visible: true,
         height: 140,
         colSpan: 4,
-        x: 0,
-        y: 0,
+        x: 1,
+        y: 1,
       }),
     ).toThrow();
   });
@@ -148,8 +148,8 @@ describe('DashboardWidget — decode', () => {
         id: 'stats',
         visible: true,
         height: 140,
-        x: 0,
-        y: 0,
+        x: 1,
+        y: 1,
       }),
     ).toThrow();
   });
@@ -197,8 +197,8 @@ describe('DashboardWidget — decode', () => {
         visible: true,
         height: 200,
         colSpan: 1,
-        x: 0,
-        y: 0,
+        x: 1,
+        y: 1,
       }),
     ).toThrow();
   });
@@ -210,8 +210,8 @@ describe('DashboardWidget — decode', () => {
         visible: true,
         height: 200,
         colSpan: 1,
-        x: 0,
-        y: 0,
+        x: 1,
+        y: 1,
       }),
     ).toThrow();
   });
@@ -222,8 +222,8 @@ describe('DashboardWidget — decode', () => {
         id: 'stats',
         visible: true,
         colSpan: 3,
-        x: 0,
-        y: 0,
+        x: 1,
+        y: 1,
       }),
     ).toThrow();
   });
@@ -234,8 +234,8 @@ describe('DashboardWidget — decode', () => {
         id: 'stats',
         height: 140,
         colSpan: 3,
-        x: 0,
-        y: 0,
+        x: 1,
+        y: 1,
       }),
     ).toThrow();
   });
@@ -246,8 +246,8 @@ describe('DashboardWidget — decode', () => {
         visible: true,
         height: 140,
         colSpan: 3,
-        x: 0,
-        y: 0,
+        x: 1,
+        y: 1,
       }),
     ).toThrow();
   });
@@ -428,40 +428,40 @@ describe('DEFAULT_LAYOUT', () => {
     expect(tm?.colSpan).toBe(1);
   });
 
-  it('awaitingRsvp has x=0, y=0', () => {
+  it('awaitingRsvp has x=1, y=1', () => {
     const entry = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'awaitingRsvp');
-    expect(entry?.x).toBe(0);
-    expect(entry?.y).toBe(0);
+    expect(entry?.x).toBe(1);
+    expect(entry?.y).toBe(1);
   });
 
-  it('outstandingPayments has x=0, y=8', () => {
+  it('outstandingPayments has x=1, y=2', () => {
     const entry = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'outstandingPayments');
-    expect(entry?.x).toBe(0);
-    expect(entry?.y).toBe(8);
+    expect(entry?.x).toBe(1);
+    expect(entry?.y).toBe(2);
   });
 
-  it('stats has x=0, y=16', () => {
+  it('stats has x=1, y=3', () => {
     const stats = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'stats');
-    expect(stats?.x).toBe(0);
-    expect(stats?.y).toBe(16);
+    expect(stats?.x).toBe(1);
+    expect(stats?.y).toBe(3);
   });
 
-  it('upcomingEvents has x=0, y=30', () => {
+  it('upcomingEvents has x=1, y=4', () => {
     const ev = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'upcomingEvents');
-    expect(ev?.x).toBe(0);
-    expect(ev?.y).toBe(30);
+    expect(ev?.x).toBe(1);
+    expect(ev?.y).toBe(4);
   });
 
-  it('activity has x=8, y=30', () => {
+  it('activity has x=9, y=4', () => {
     const act = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'activity');
-    expect(act?.x).toBe(8);
-    expect(act?.y).toBe(30);
+    expect(act?.x).toBe(9);
+    expect(act?.y).toBe(4);
   });
 
-  it('teamManagement has x=8, y=50', () => {
+  it('teamManagement has x=9, y=5', () => {
     const tm = DashboardLayoutApi.DEFAULT_LAYOUT.find((e) => e.id === 'teamManagement');
-    expect(tm?.x).toBe(8);
-    expect(tm?.y).toBe(50);
+    expect(tm?.x).toBe(9);
+    expect(tm?.y).toBe(5);
   });
 });
 
@@ -530,7 +530,7 @@ describe('UpdateDashboardLayoutPayload — decode', () => {
   it('rejects a payload with an invalid widget id', () => {
     expect(() =>
       Schema.decodeUnknownSync(DashboardLayoutApi.UpdateDashboardLayoutPayload)({
-        widgets: [{ id: 'fakeUnknown', visible: true, height: 200, colSpan: 1, x: 0, y: 0 }],
+        widgets: [{ id: 'fakeUnknown', visible: true, height: 200, colSpan: 1, x: 1, y: 1 }],
       }),
     ).toThrow();
   });

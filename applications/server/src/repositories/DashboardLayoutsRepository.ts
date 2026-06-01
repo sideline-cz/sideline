@@ -98,8 +98,8 @@ const make = Effect.gen(function* () {
                 // Backfill colSpan for legacy rows that predate this field
                 colSpan: Option.getOrElse(w.colSpan, () => defaultColSpanById.get(w.id) ?? 1),
                 // Backfill x/y for legacy rows that predate this field
-                x: Option.getOrElse(w.x, () => defaultXById.get(w.id) ?? 0),
-                y: Option.getOrElse(w.y, () => defaultYById.get(w.id) ?? 0),
+                x: Option.getOrElse(w.x, () => defaultXById.get(w.id) ?? 1),
+                y: Option.getOrElse(w.y, () => defaultYById.get(w.id) ?? 1),
               }),
           ),
         })),

@@ -27,8 +27,8 @@ export class DashboardWidget extends Schema.Class<DashboardWidget>('DashboardWid
   visible: Schema.Boolean,
   height: Schema.Number,
   colSpan: Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 3 }))),
-  x: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
-  y: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  x: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
+  y: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
 }) {}
 
 export interface DefaultLayoutEntry {
@@ -40,21 +40,20 @@ export interface DefaultLayoutEntry {
   y: number;
 }
 
-// Sensible pixel-height defaults for the vertical-stack layout.
-// awaitingRsvp:        x=0,  y=0,  colSpan=3, height=80   — full width (3 cols), banner-style
-// outstandingPayments: x=0,  y=8,  colSpan=3, height=80   — full width, slim, below RSVP
-// stats:               x=0,  y=16, colSpan=3, height=140  — full width (3 cols)
-// upcomingEvents:      x=0,  y=30, colSpan=2, height=280  — 2 cols
-// activity:            x=8,  y=30, colSpan=1, height=200  — 1 col
-// teamManagement:      x=8,  y=50, colSpan=1, height=260  — 1 col
-// (12-column grid, rowHeight=10)
+// Explicit grid positions (1-indexed CSS grid column lines, 1-indexed rows).
+// awaitingRsvp:        x=1,  y=1,  colSpan=3 — full width (3×4=12 cols), row 1
+// outstandingPayments: x=1,  y=2,  colSpan=3 — full width, row 2
+// stats:               x=1,  y=3,  colSpan=3 — full width, row 3
+// upcomingEvents:      x=1,  y=4,  colSpan=2 — cols 1-8, row 4
+// activity:            x=9,  y=4,  colSpan=1 — cols 9-12, row 4
+// teamManagement:      x=9,  y=5,  colSpan=1 — cols 9-12, row 5
 export const DEFAULT_LAYOUT: ReadonlyArray<DefaultLayoutEntry> = [
-  { id: 'awaitingRsvp', visible: true, height: 80, colSpan: 3, x: 0, y: 0 },
-  { id: 'outstandingPayments', visible: true, height: 80, colSpan: 3, x: 0, y: 8 },
-  { id: 'stats', visible: true, height: 140, colSpan: 3, x: 0, y: 16 },
-  { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 0, y: 30 },
-  { id: 'activity', visible: true, height: 200, colSpan: 1, x: 8, y: 30 },
-  { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 8, y: 50 },
+  { id: 'awaitingRsvp', visible: true, height: 80, colSpan: 3, x: 1, y: 1 },
+  { id: 'outstandingPayments', visible: true, height: 80, colSpan: 3, x: 1, y: 2 },
+  { id: 'stats', visible: true, height: 140, colSpan: 3, x: 1, y: 3 },
+  { id: 'upcomingEvents', visible: true, height: 280, colSpan: 2, x: 1, y: 4 },
+  { id: 'activity', visible: true, height: 200, colSpan: 1, x: 9, y: 4 },
+  { id: 'teamManagement', visible: true, height: 260, colSpan: 1, x: 9, y: 5 },
 ] as const;
 
 export class DashboardLayout extends Schema.Class<DashboardLayout>('DashboardLayout')({
