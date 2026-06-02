@@ -2,7 +2,7 @@ import type { CarpoolRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import type * as Discord from 'dfx/types';
 import type { Locale } from '~/locale.js';
-import { formatNameWithMention } from '~/rest/utils.js';
+import { formatName } from '~/rest/utils.js';
 
 /** Maximum number of cars to render to stay within Discord's 5-row × 5-button limit */
 const MAX_CARS_DISPLAYED = 10;
@@ -15,8 +15,7 @@ const COLOR_GREEN = 0x57f287;
 const COLOR_ORANGE = 0xe67e22;
 
 const renderMember = (member: CarpoolRpcModels.MemberDisplay): string =>
-  formatNameWithMention({
-    discord_id: member.discord_id,
+  formatName({
     name: member.name,
     nickname: member.nickname,
     display_name: member.display_name,

@@ -133,7 +133,7 @@ describe('buildCarpoolEmbed', () => {
     expect(reserveBtn?.disabled).toBe(true);
   });
 
-  it('member with all null name fields — renders mention/fallback, no throw', () => {
+  it('member with all null name fields — renders "Unknown" fallback, no throw', () => {
     const nullNameOwner = new CarpoolRpcModels.MemberDisplay({
       team_member_id: 'tm-null-name' as any,
       discord_id: Option.some('300000000000000001' as any),
@@ -156,11 +156,10 @@ describe('buildCarpoolEmbed', () => {
 
     const { embeds } = buildCarpoolEmbed(view, locale);
     expect(embeds).toHaveLength(1);
-    // Should render the mention or a fallback string
+    // formatName renders 'Unknown' when all name fields are None (no mention appended)
     const embedJson = JSON.stringify(embeds);
-    const hasMentionOrFallback =
-      embedJson.includes('<@300000000000000001>') || embedJson.includes('Unknown');
-    expect(hasMentionOrFallback).toBe(true);
+    expect(embedJson).toContain('Unknown');
+    expect(embedJson).not.toContain('<@300000000000000001>');
   });
 
   it('cars beyond display cap (~10) — extra cars not rendered', () => {

@@ -836,7 +836,6 @@
   "bot_carpool_err_carpool_not_found": "This carpool no longer exists.",
   "bot_carpool_err_thread_add_failed": "Could not add you to the car's thread, but your seat is reserved. You can leave using the 🚪 button.",
   "bot_carpool_err_generic": "Something went wrong. Please try again.",
-  "bot_carpool_driver_fallback": "Driver",
   "invites_title": "Invites",
   "invites_newInvite": "New Invite",
   "invites_noInvites": "No invites yet.",

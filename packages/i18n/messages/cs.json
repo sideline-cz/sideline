@@ -836,7 +836,6 @@
   "bot_carpool_err_carpool_not_found": "Tato doprava už neexistuje.",
   "bot_carpool_err_thread_add_failed": "Nepodařilo se tě přidat do vlákna auta, ale místo máš rezervované. Odejít můžeš tlačítkem 🚪.",
   "bot_carpool_err_generic": "Něco se nepovedlo. Zkus to prosím znovu.",
-  "bot_carpool_driver_fallback": "Řidič",
   "invites_title": "Pozvánky",
   "invites_newInvite": "Nová pozvánka",
   "invites_noInvites": "Zatím žádné pozvánky.",

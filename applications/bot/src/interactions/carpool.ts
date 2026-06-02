@@ -8,6 +8,7 @@ import { Array as Arr, Effect, Metric, Option, Schema } from 'effect';
 import { guildLocale, type Locale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { buildCarpoolEmbed } from '~/rest/carpool/buildCarpoolEmbed.js';
+import { formatName } from '~/rest/utils.js';
 import { interactionUserId } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
@@ -287,16 +288,10 @@ export const CarpoolAddModal = Ix.modalSubmit(
           const carId = addResult.car_id;
           const carIndex = carIndexInView(addResult.view, carId);
           const newCar = Arr.findFirst(addResult.view.cars, (c) => c.car_id === carId);
-          const ownerName = Option.flatMap(newCar, (car) =>
-            Arr.head(
-              Arr.getSomes([
-                car.owner.name,
-                car.owner.nickname,
-                car.owner.display_name,
-                car.owner.username,
-              ]),
-            ),
-          ).pipe(Option.getOrElse(() => m.bot_carpool_driver_fallback({}, { locale })));
+          const ownerName = Option.match(newCar, {
+            onNone: () => 'Unknown',
+            onSome: (car) => formatName(car.owner),
+          });
 
           // 1. Create the private thread
           const createThread = rest
