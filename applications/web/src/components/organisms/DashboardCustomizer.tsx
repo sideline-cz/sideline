@@ -81,18 +81,20 @@ function maxRow(
 }
 
 // ---------------------------------------------------------------------------
-// Placement helper — hybrid snap-up / push-down
+// Placement helper — hybrid snap-after / push-down
 // ---------------------------------------------------------------------------
 
 /**
  * Move widget `draggedId` to (newCol, targetRow).
  *
  * - If the target cell is EMPTY for the dragged widget's column range:
- *   gravitate UP and place at the first empty row from the top. Don't move
- *   any existing widget.
- * - If the target cell is OCCUPIED: place the dragged widget at `targetRow`
- *   exactly, and push each colliding sibling down by one row, recursively
- *   cascading further collisions below.
+ *   place the widget at the row IMMEDIATELY AFTER the last occupied row
+ *   above the drop target in this column. (So dropping below an existing
+ *   widget puts the dragged widget right below it; dropping far below a
+ *   stack puts the dragged widget right after the stack.)
+ * - If the target cell is OCCUPIED: place the dragged widget at the exact
+ *   `targetRow`, and push each colliding sibling down by one row,
+ *   recursively cascading further collisions below.
  */
 function placeAt(
   working: DashboardLayoutApi.DashboardWidget[],
@@ -135,12 +137,19 @@ function placeAt(
     return result;
   }
 
-  // EMPTY case: gravity-up to the first empty row from row 1.
-  let row = 1;
-  while (collidersAt(working, row).length > 0) {
-    row += 1;
-    if (row > 999) break;
+  // EMPTY case: snap to the row IMMEDIATELY AFTER the highest-row occupant
+  // above the drop target in this column range. If nothing's above, snap to row 1.
+  let lastOccupiedAbove = 0;
+  for (const w of working) {
+    if (w.id === draggedId || !w.visible) continue;
+    const wColEnd = w.x + w.colSpan;
+    const colOverlap = w.x < draggedColEnd && wColEnd > newCol;
+    if (colOverlap && w.y < targetRow && w.y > lastOccupiedAbove) {
+      lastOccupiedAbove = w.y;
+    }
   }
+  const finalRow = lastOccupiedAbove + 1;
+
   return working.map((w) =>
     w.id === draggedId
       ? new DashboardLayoutApi.DashboardWidget({
@@ -149,7 +158,7 @@ function placeAt(
           colSpan: w.colSpan,
           height: w.height,
           x: newCol as 1 | 2 | 3,
-          y: row,
+          y: finalRow,
         })
       : w,
   );
