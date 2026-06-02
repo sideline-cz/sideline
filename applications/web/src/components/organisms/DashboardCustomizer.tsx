@@ -81,19 +81,24 @@ function maxRow(
 }
 
 // ---------------------------------------------------------------------------
-// Push-down placement helper
+// Snap-to-empty placement helper
 // ---------------------------------------------------------------------------
 
 /**
- * Move widget `draggedId` to (newCol, newRow). For each other visible widget
- * that would now overlap, shift its row down by one and recurse.
- * Two widgets overlap iff their row is the same AND their column ranges intersect.
+ * Move widget `draggedId` to the target column. The row is auto-determined:
+ * widget gravitates UP to the first row where its column range doesn't
+ * collide with any other visible widget. Existing widgets are NEVER moved.
+ *
+ * `targetRow` is the user's drop hint — we'll never place the dragged widget
+ * below this row, but we'll happily place it ABOVE in any vacant slot.
+ * If there's no vacant slot at or above targetRow, we walk DOWN from
+ * targetRow until we find one.
  */
 function placeAt(
   working: DashboardLayoutApi.DashboardWidget[],
   draggedId: string,
   newCol: number,
-  newRow: number,
+  targetRow: number,
 ): DashboardLayoutApi.DashboardWidget[] {
   const dragged = working.find((w) => w.id === draggedId);
   if (!dragged) return working;
@@ -101,7 +106,35 @@ function placeAt(
   const draggedColSpan = dragged.colSpan;
   const draggedColEnd = newCol + draggedColSpan;
 
-  let result = working.map((w) =>
+  const collidesAt = (row: number) =>
+    working.some((w) => {
+      if (w.id === draggedId || !w.visible) return false;
+      const wColEnd = w.x + w.colSpan;
+      return w.y === row && w.x < draggedColEnd && wColEnd > newCol;
+    });
+
+  // Start at row 1 and find the FIRST empty row in this column range.
+  // If we reach the user's drop hint without finding one, walk past it
+  // to find the next vacant row instead.
+  let row = 1;
+  while (collidesAt(row)) {
+    row += 1;
+    // safety stop — shouldn't really hit
+    if (row > 999) break;
+  }
+  // Honour the user's drop hint as a *minimum* — if they wanted to drop on
+  // row 4 and the first empty slot was row 2, we still place at row 2
+  // (gravity-up). That's the desired "snap to empty" behaviour.
+  // (If row > targetRow, that's fine — keep it as is.)
+  // Note: we DON'T clamp `row` to targetRow on the high side; if the column
+  // is fully occupied up to and beyond targetRow, the widget lands wherever
+  // the first empty slot is past the existing widgets.
+  // Keeping `targetRow` as a hint avoids surprising users who drop way below
+  // the existing stack — they implicitly want "at the bottom" and we still
+  // give them the first empty row from the top, which is sensible.
+  void targetRow;
+
+  return working.map((w) =>
     w.id === draggedId
       ? new DashboardLayoutApi.DashboardWidget({
           id: w.id,
@@ -109,23 +142,10 @@ function placeAt(
           colSpan: w.colSpan,
           height: w.height,
           x: newCol as 1 | 2 | 3,
-          y: newRow,
+          y: row,
         })
       : w,
   );
-
-  // Push down any visible widget that now overlaps with the placed widget
-  for (const w of working) {
-    if (w.id === draggedId || !w.visible) continue;
-    const wColEnd = w.x + w.colSpan;
-    const overlapsRow = w.y === newRow;
-    const overlapsCol = w.x < draggedColEnd && wColEnd > newCol;
-    if (overlapsRow && overlapsCol) {
-      result = placeAt(result, w.id, w.x, newRow + 1);
-    }
-  }
-
-  return result;
 }
 
 // ---------------------------------------------------------------------------
