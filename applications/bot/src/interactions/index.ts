@@ -1,5 +1,14 @@
 import * as Ix from 'dfx/Interactions/index';
 import { AttendeesButton, AttendeesPageButton } from './attendees.js';
+import {
+  CarpoolAddButtonReg,
+  CarpoolAddModal,
+  CarpoolAssignButton,
+  CarpoolAssignPickSelect,
+  CarpoolLeaveButtonReg,
+  CarpoolRemoveButtonReg,
+  CarpoolReserveButtonReg,
+} from './carpool.js';
 import { ClaimButton, UnclaimButton } from './claim.js';
 import { EventCreateModal } from './event-create.js';
 import { EventCreateAutocomplete } from './event-create-autocomplete.js';
@@ -29,4 +38,11 @@ export const interactionBuilder = Ix.builder
   .add(EventCreateAutocomplete)
   .add(MakanickoLogAutocomplete)
   .add(ClaimButton)
-  .add(UnclaimButton);
+  .add(UnclaimButton)
+  .add(CarpoolAddButtonReg)
+  .add(CarpoolAddModal)
+  .add(CarpoolReserveButtonReg)
+  .add(CarpoolLeaveButtonReg)
+  .add(CarpoolRemoveButtonReg)
+  .add(CarpoolAssignButton)
+  .add(CarpoolAssignPickSelect);

@@ -5,6 +5,18 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-02 — Discord carpool board (/doprava)
+
+- Captains and admins can now post a live-updating **carpool board** in any Discord channel with the `/doprava` command (English alias: `/carpool`).
+- Any team member can **add a car** by clicking the **Add a car** button and entering the total capacity (1–8, driver included). The bot creates a private Discord thread for each car where the owner can manage their passengers.
+- Members **reserve a seat** using the per-car **Reserve** button on the public board. The bot adds them to the car's private thread automatically.
+- Car owners can **assign a passenger** from the private thread using a Discord user-select menu — useful when someone asks for a lift but cannot click the button themselves.
+- Members who no longer need a lift can **leave** their reserved seat via the **Leave** button that appears in the reservation confirmation.
+- Owners remove their car using the **Remove car** button in the private thread. All passengers are ejected and the thread is archived.
+- The board message updates live after every action.
+- New `carpool:manage` permission controls who can post a board. Admin and Captain roles receive this permission automatically — no manual configuration needed.
+- See the [Carpool board guide](/guides/carpool/) for full details.
+
 ## 2026-05-28 — Configurable team dashboard
 
 - You can now personalise the widgets shown on your team dashboard. Open the **Customise dashboard** panel on any team dashboard page to reorder and show or hide the four widgets: **Stats**, **Upcoming events**, **Activity**, and **Team management**.

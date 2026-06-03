@@ -315,11 +315,11 @@ Individual permission strings granted to a role.
 
 **Primary Key**: `(role_id, permission)`
 
-**Built-in permission values**: `team:manage`, `team:invite`, `roster:view`, `roster:manage`, `member:view`, `member:edit`, `member:remove`, `role:view`, `role:manage`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `training-type:delete`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `finance:manage_fees`, `finance:record_payments`
+**Built-in permission values**: `team:manage`, `team:invite`, `roster:view`, `roster:manage`, `member:view`, `member:edit`, `member:remove`, `role:view`, `role:manage`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `training-type:delete`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `finance:manage_fees`, `finance:record_payments`, `challenge:manage`, `carpool:manage`
 
 **Built-in role defaults**:
 - **Admin**: all permissions (see `defaultPermissions.Admin` in `packages/domain/src/models/Role.ts`)
-- **Captain**: `roster:view`, `roster:manage`, `member:view`, `member:edit`, `role:view`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`
+- **Captain**: `roster:view`, `roster:manage`, `member:view`, `member:edit`, `role:view`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `carpool:manage`
 - **Player**: `roster:view`, `member:view`
 - **Treasurer**: `finance:view`, `finance:manage_fees`, `finance:record_payments`
 
@@ -1312,6 +1312,72 @@ Outbox table consumed by the bot's Weekly Challenge Sync worker. One row is inse
 
 ---
 
+### 15. Carpools
+
+#### `carpools`
+
+Top-level record for a Discord carpool board. Each `/carpool` invocation creates one row. Optionally linked to an event via `event_id`. `discord_channel_id` identifies the channel where the board message was posted; `discord_message_id` is the ID of the public board message (populated after posting via `Carpool/SaveCarpoolMessageId`).
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `event_id` | UUID | FK → `events(id)` ON DELETE CASCADE | — |
+| `guild_id` | TEXT | NOT NULL | — |
+| `discord_channel_id` | TEXT | NOT NULL | — |
+| `discord_message_id` | TEXT | — | — |
+| `created_by` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE RESTRICT | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Notes**: Added in migration `1788000000_create_carpools`. `event_id` is nullable — a carpool board can be standalone (not tied to any event). `created_by` uses `ON DELETE RESTRICT` so the creator's member record cannot be deleted while the carpool exists.
+
+---
+
+#### `carpool_cars`
+
+One row per car offered by a member within a carpool. The owner is always counted as occupying one seat (seat #1); `capacity` is the total including the driver, so a car with `capacity = 4` has 3 passenger seats. A member can own at most one car per carpool (enforced by `UNIQUE (carpool_id, owner_team_member_id)`). `thread_id` is the Discord private thread ID for this car, populated after thread creation via `Carpool/SaveCarThreadId`.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `carpool_id` | UUID | NOT NULL, FK → `carpools(id)` ON DELETE CASCADE | — |
+| `owner_team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE RESTRICT | — |
+| `capacity` | INT | NOT NULL, CHECK (`capacity >= 1 AND capacity <= 8`) | — |
+| `thread_id` | TEXT | — | — |
+| `note` | VARCHAR(200) | — | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(carpool_id, owner_team_member_id)`
+
+**Indexes**: `idx_carpool_cars_carpool` on `(carpool_id)`
+
+**Notes**: Added in migration `1788000000_create_carpools`. `owner_team_member_id` uses `ON DELETE RESTRICT` to prevent deleting the owner's membership while their car record exists.
+
+---
+
+#### `carpool_seats`
+
+Records which team members have a seat in a car. The carpool owner is also recorded here as seat #1 automatically when the car is created. `assigned_by` is set when a car owner assigns the seat on behalf of a member (via `Carpool/AssignSeat`); it is NULL for self-reservations. The unique constraint `(carpool_id, team_member_id)` prevents a member from being in more than one car in the same carpool.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `car_id` | UUID | NOT NULL, FK → `carpool_cars(id)` ON DELETE CASCADE | — |
+| `carpool_id` | UUID | NOT NULL, FK → `carpools(id)` ON DELETE CASCADE | — |
+| `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE CASCADE | — |
+| `assigned_by` | UUID | FK → `team_members(id)` ON DELETE SET NULL | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(carpool_id, team_member_id)`
+
+**Indexes**: `idx_carpool_seats_car` on `(car_id)`
+
+**Notes**: Added in migration `1788000000_create_carpools`. Both `car_id` and `carpool_id` FK columns cascade on delete, so removing a car or a carpool automatically removes all seat records. `team_member_id` uses `ON DELETE CASCADE` so seat records are cleaned up when a member is removed. `assigned_by` uses `ON DELETE SET NULL` to preserve the seat record even if the assigning member is later removed.
+
+---
+
 ## Migration History
 
 All 86 migration files in `packages/migrations/src/before/` plus 1 after-migration.
@@ -1394,6 +1460,8 @@ All 86 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1787000000 | `create_weekly_challenges` | Creates `weekly_challenges` (id, team_id FK CASCADE, week_start_date DATE, kind CHECK `'throwing'`/`'sport'`, title TEXT CHECK len 1–120, description TEXT CHECK len ≤2000, created_by FK team_members RESTRICT, created_at, updated_at; UNIQUE (team_id, week_start_date)); creates `weekly_challenge_completions` (PK (challenge_id, member_id) with both cascading); creates `weekly_challenge_sync_events` outbox table (id PK, team_id FK CASCADE, challenge_id FK CASCADE, channel_id TEXT, scheduled_for TIMESTAMPTZ, attempts INT, last_error TEXT, created_at, processed_at, delivered_at); adds index `idx_weekly_challenges_team_week` on `(team_id, week_start_date DESC)` and partial index `idx_weekly_challenge_sync_events_due` on `(team_id, scheduled_for) WHERE processed_at IS NULL`. Sync events are scheduled at the captain's team-TZ 09:00 on the challenge's start Monday so the bot can drain them without a cron. |
 | 1787300000 | `add_user_global_admin` | Adds `is_global_admin BOOLEAN NOT NULL DEFAULT false` to `users`; backfills `false` for all existing rows. The first user to register on a fresh database is promoted automatically during the OAuth upsert via a `NOT EXISTS` sub-select. |
 | 1787400000 | `create_dashboard_layouts` | Creates `dashboard_layouts` (user_id FK → users CASCADE, team_id FK → teams CASCADE, widgets JSONB NOT NULL, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ; PK (user_id, team_id)). Stores per-user per-team widget layout preferences for the configurable team dashboard. |
+| 1788000000 | `create_carpools` | Creates `carpools`, `carpool_cars`, and `carpool_seats` tables (see section 15 below). Adds `idx_carpool_cars_carpool` on `carpool_cars(carpool_id)` and `idx_carpool_seats_car` on `carpool_seats(car_id)`. |
+| 1788000001 | `grant_carpool_manage_permission` | Backfills `carpool:manage` into `role_permissions` for every existing built-in Admin and Captain role; uses `ON CONFLICT DO NOTHING` to be idempotent. |
 
 ### After Migrations (seed data)
 
@@ -1436,8 +1504,8 @@ When a team is created, the application seeds four built-in roles:
 
 | Role | Permissions |
 |---|---|
-| Admin | All 20 permissions (including `finance:view`, `finance:manage_fees`, `finance:record_payments`) |
-| Captain | `roster:view`, `roster:manage`, `member:view`, `member:edit`, `role:view`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view` |
+| Admin | All 22 permissions (including `finance:view`, `finance:manage_fees`, `finance:record_payments`, `challenge:manage`, `carpool:manage`) |
+| Captain | `roster:view`, `roster:manage`, `member:view`, `member:edit`, `role:view`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `challenge:manage`, `carpool:manage` |
 | Player | `roster:view`, `member:view` |
 | Treasurer | `finance:view`, `finance:manage_fees`, `finance:record_payments` |
 

@@ -15,6 +15,11 @@ const MembershipQuery = Schema.Struct({
   include_inactive: Schema.Boolean,
 });
 
+const MembershipByDiscordQuery = Schema.Struct({
+  team_id: Team.TeamId,
+  discord_id: Discord.Snowflake,
+});
+
 const RosterMemberQuery = Schema.Struct({
   team_id: Schema.String,
   member_id: Schema.String,
@@ -132,6 +137,57 @@ const make = Effect.gen(function* () {
             WHERE tm.team_id = ${input.team_id}
               AND tm.user_id = ${input.user_id}
               AND (${input.include_inactive} OR tm.active = true)`,
+  });
+
+  const findMembershipByDiscordQuery = SqlSchema.findOneOption({
+    Request: MembershipByDiscordQuery,
+    Result: MembershipWithRole,
+    execute: (input) =>
+      sql`SELECT tm.id, tm.team_id, tm.user_id, tm.active,
+                   COALESCE(
+                     (SELECT string_agg(DISTINCT name, ',' ORDER BY name) FROM (
+                       SELECT r.name FROM member_roles mr JOIN roles r ON r.id = mr.role_id WHERE mr.team_member_id = tm.id
+                       UNION
+                       SELECT r.name FROM group_members gm
+                       JOIN LATERAL (
+                         WITH RECURSIVE ancestors AS (
+                           SELECT gm.group_id AS id
+                           UNION ALL
+                           SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
+                         )
+                         SELECT id FROM ancestors
+                       ) anc ON true
+                       JOIN role_groups rg ON rg.group_id = anc.id
+                       JOIN roles r ON r.id = rg.role_id
+                       WHERE gm.team_member_id = tm.id
+                     ) all_roles), ''
+                   ) AS role_names,
+                   COALESCE(
+                     (SELECT string_agg(DISTINCT perm, ',') FROM (
+                       SELECT rp.permission AS perm
+                       FROM member_roles mr JOIN role_permissions rp ON rp.role_id = mr.role_id
+                       WHERE mr.team_member_id = tm.id
+                       UNION
+                       SELECT rp.permission AS perm
+                       FROM group_members gm
+                       JOIN LATERAL (
+                         WITH RECURSIVE ancestors AS (
+                           SELECT gm.group_id AS id
+                           UNION ALL
+                           SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
+                         )
+                         SELECT id FROM ancestors
+                       ) anc ON true
+                       JOIN role_groups rg ON rg.group_id = anc.id
+                       JOIN role_permissions rp ON rp.role_id = rg.role_id
+                       WHERE gm.team_member_id = tm.id
+                     ) all_perms), ''
+                   ) AS permissions
+            FROM team_members tm
+            JOIN users u ON u.id = tm.user_id
+            WHERE tm.team_id = ${input.team_id}
+              AND u.discord_id = ${input.discord_id}
+              AND tm.active = true`,
   });
 
   const findByTeamQuery = SqlSchema.findAll({
@@ -298,6 +354,12 @@ const make = Effect.gen(function* () {
       include_inactive: options?.includeInactive === true,
     }).pipe(catchSqlErrors);
 
+  const findMembershipByDiscordAndTeam = (discordId: Discord.Snowflake, teamId: Team.TeamId) =>
+    findMembershipByDiscordQuery({
+      team_id: teamId,
+      discord_id: discordId,
+    }).pipe(catchSqlErrors);
+
   const findRosterMemberByIds = (teamId: Team.TeamId, memberId: TeamMember.TeamMemberId) =>
     findRosterMemberQuery({ team_id: teamId, member_id: memberId }).pipe(catchSqlErrors);
 
@@ -341,6 +403,7 @@ const make = Effect.gen(function* () {
     findByUser,
     findRosterByTeam,
     findMembershipByIds,
+    findMembershipByDiscordAndTeam,
     findRosterMemberByIds,
     deactivateMemberByIds,
     reactivateMember,

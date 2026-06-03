@@ -1,4 +1,5 @@
 import * as Ix from 'dfx/Interactions/index';
+import { CarpoolCommand } from '~/commands/carpool/index.js';
 import { EventCommand } from '~/commands/event/index.js';
 import { FinanceCommand } from '~/commands/finance/index.js';
 import { InfoCommand } from '~/commands/info/index.js';
@@ -10,4 +11,5 @@ export const commandBuilder = Ix.builder
   .add(MakanickoCommand)
   .add(FinanceCommand)
   .add(InfoCommand)
-  .add(SummonCommand);
+  .add(SummonCommand)
+  .add(CarpoolCommand);

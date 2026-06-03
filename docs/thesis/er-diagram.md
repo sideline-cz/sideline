@@ -118,6 +118,16 @@ erDiagram
 
     users ||--o{ dashboard_layouts : "configures"
     teams ||--o{ dashboard_layouts : "configures"
+
+    teams ||--o{ carpools : "organises"
+    carpools ||--o{ carpool_cars : "contains"
+    carpool_cars ||--o{ carpool_seats : "allocates"
+    carpools ||--o{ carpool_seats : "scopes"
+    team_members ||--o{ carpools : "creates"
+    team_members ||--o{ carpool_cars : "owns"
+    team_members ||--o{ carpool_seats : "occupies"
+    team_members o|--o{ carpool_seats : "assigns"
+    events o|--o{ carpools : "associated with"
 ```
 
 ---
@@ -1009,6 +1019,57 @@ erDiagram
 
 ---
 
+### Carpools
+
+`carpools` is the top-level board record created by `/carpool`. `carpool_cars` stores each car offered by a member; the owner is always seat #1 and capacity includes the driver. `carpool_seats` records every occupied seat (including the owner's). `assigned_by` is set when a car owner manually assigns a seat to another member rather than them self-reserving.
+
+```mermaid
+erDiagram
+    carpools {
+        UUID id PK
+        UUID team_id FK
+        UUID event_id FK
+        TEXT guild_id
+        TEXT discord_channel_id
+        TEXT discord_message_id
+        UUID created_by FK
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    carpool_cars {
+        UUID id PK
+        UUID carpool_id FK
+        UUID owner_team_member_id FK
+        INT capacity
+        TEXT thread_id
+        VARCHAR note
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    carpool_seats {
+        UUID id PK
+        UUID car_id FK
+        UUID carpool_id FK
+        UUID team_member_id FK
+        UUID assigned_by FK
+        TIMESTAMPTZ created_at
+    }
+
+    teams ||--o{ carpools : "organises"
+    events o|--o{ carpools : "associated with"
+    team_members ||--o{ carpools : "creates"
+    carpools ||--o{ carpool_cars : "contains"
+    team_members ||--o{ carpool_cars : "owns"
+    carpool_cars ||--o{ carpool_seats : "allocates"
+    carpools ||--o{ carpool_seats : "scopes"
+    team_members ||--o{ carpool_seats : "occupies"
+    team_members o|--o{ carpool_seats : "assigns"
+```
+
+---
+
 ## Entity Summary
 
 | Table | Description |
@@ -1069,3 +1130,6 @@ erDiagram
 | `weekly_challenge_completions` | Records which team members have completed a challenge for its week. Composite PK `(challenge_id, member_id)`; both columns cascade on delete. |
 | `weekly_challenge_sync_events` | Outbox records for the bot's Weekly Challenge Sync worker to post the weekly embed to a configured Discord channel. Scheduled at team-TZ 09:00 on the challenge's Monday. |
 | `dashboard_layouts` | Per-user per-team dashboard widget layout. Composite PK `(user_id, team_id)`; both columns cascade on delete. `widgets` JSONB holds the ordered widget list with visibility flags. |
+| `carpools` | Top-level record for a Discord carpool board posted by `/carpool`. Optionally linked to an event. Tracks the board message ID and the Discord channel. |
+| `carpool_cars` | Individual car offered by a team member within a carpool. Capacity 1–8 including the driver/owner. Tracks the optional private Discord thread ID. Unique on `(carpool_id, owner_team_member_id)`. |
+| `carpool_seats` | Individual seat record in a car. Owner always occupies seat #1. `assigned_by` is set for owner-assigned seats. Unique on `(carpool_id, team_member_id)` prevents double-booking across cars in the same carpool. |

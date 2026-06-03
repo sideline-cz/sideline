@@ -14,6 +14,7 @@ import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { CarpoolsRepository } from '~/repositories/CarpoolsRepository.js';
 import { ChannelEventDividersRepository } from '~/repositories/ChannelEventDividersRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
@@ -133,6 +134,7 @@ const Repositories = Layer.mergeAll(
   ExpensesRepository.Default,
   PaymentReminderSyncEventsRepository.Default,
   PaymentRemindersSentRepository.Default,
+  CarpoolsRepository.Default,
 );
 
 const AppLayer = Layer.mergeAll(

@@ -2,6 +2,7 @@ import { RpcGroup } from 'effect/unstable/rpc';
 import { AchievementRpcGroup } from './achievement/AchievementRpcGroup.js';
 import { ActivityRpcGroup } from './activity/ActivityRpcGroup.js';
 import { BotInfoRpcGroup } from './botInfo/BotInfoRpcGroup.js';
+import { CarpoolRpcGroup } from './carpool/CarpoolRpcGroup.js';
 import { ChannelRpcGroup } from './channel/ChannelRpcGroup.js';
 import { EventRpcGroup } from './event/EventRpcGroup.js';
 import { FinanceRpcGroup } from './finance/FinanceRpcGroup.js';
@@ -25,4 +26,5 @@ export class SyncRpcs extends RpcGroup.make().merge(
   TeamChallengeSyncEventsRpcGroup,
   FinanceRpcGroup,
   BotInfoRpcGroup,
+  CarpoolRpcGroup,
 ) {}

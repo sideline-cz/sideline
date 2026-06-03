@@ -1,0 +1,114 @@
+---
+title: Carpool board (/doprava)
+description: How to use the Discord carpool board to coordinate shared transport to events.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+The carpool board lets your team coordinate who is driving and who needs a lift — all inside Discord, with live updates. A captain posts the board once; members add cars and reserve seats using buttons.
+
+## Posting the board
+
+Only members with the `carpool:manage` permission (Admin and Captain by default) can post a board.
+
+<Steps>
+
+1. Go to the Discord channel where you want the board to appear.
+2. Type `/doprava` (or `/carpool` in English) and press Enter.
+3. The bot posts a public **Carpool board** embed in the channel with an **Add a car** button. Only you see the ephemeral "board created" confirmation — the embed itself is visible to everyone.
+
+</Steps>
+
+<Aside type="note" title="One board per command">
+  Each `/doprava` invocation creates a separate board. If you run the command twice you get two independent boards. There is no automatic cleanup of old boards.
+</Aside>
+
+## Adding a car
+
+Any team member (not just captains) can offer a lift by adding a car.
+
+<Steps>
+
+1. Click **Add a car** on the board embed.
+2. A small form appears. Enter the **capacity** — this is the total number of people the car fits, **including yourself as the driver**. For example, enter `4` if you can take yourself plus 3 passengers.
+3. Click **Submit**. The bot adds your car to the board and opens a **private thread** for your car.
+
+</Steps>
+
+The capacity must be between 1 and 8 (inclusive). You can only have one car per board.
+
+### Your car's private thread
+
+After you add a car the bot creates a private Discord thread — only you and the passengers in your car can see it. The thread contains two buttons:
+
+- **Assign passenger** — pick a team member from a Discord user-select menu to add them to your car on their behalf.
+- **Remove car** — remove your car entirely (see [Removing a car](#removing-a-car)).
+
+You are automatically added to the thread when the car is created.
+
+<Aside type="note" title="Thread creation">
+  If Discord cannot create the thread (for example, because of channel permissions), your car is still added to the board — it just won't have a private thread. Everything else continues to work normally.
+</Aside>
+
+## Reserving a seat
+
+Any team member can reserve an available seat in a car by clicking its **Reserve** button on the public board.
+
+- You are added to the car's private thread automatically so you can follow the driver's updates.
+- The board refreshes to show the updated passenger list.
+- You can be in at most one car per board. Clicking **Reserve** while you already have a seat in a different car on the same board will show an error.
+- The driver cannot reserve a seat in their own car.
+
+After reserving, an ephemeral confirmation appears with a **Leave** button in case you change your mind.
+
+## Leaving a car
+
+Click **Leave** in your reservation confirmation to release your seat.
+
+- You are removed from the car's private thread.
+- The board refreshes to show the updated passenger list.
+
+<Aside type="caution">
+  Car **owners cannot leave** their own car. To remove yourself from the board, use **Remove car** in the private thread instead.
+</Aside>
+
+## Assigning a passenger (owner only)
+
+If someone tells you they need a lift but cannot click the button themselves, you can add them manually from your car's private thread.
+
+<Steps>
+
+1. Open your car's private thread.
+2. Click **Assign passenger**.
+3. Select the team member from the user-select menu.
+4. Click **Submit**. The selected member is added to your car and to the thread.
+
+</Steps>
+
+The assigned member must be a Sideline team member on the same server. They will see the confirmation in the thread. They cannot be the car owner, and they cannot already have a seat in another car on the same board.
+
+## Removing a car
+
+Car owners can remove their car from the board at any time using the **Remove car** button in the private thread.
+
+- All passenger seats in the car are removed.
+- The private thread is archived and locked.
+- The public board refreshes to show the car is gone.
+
+<Aside type="caution">
+  Removing a car is permanent. Passengers are ejected from the thread and will need to reserve a seat in another car.
+</Aside>
+
+## Troubleshooting
+
+| Problem | Likely cause |
+|---------|--------------|
+| `/doprava` does not appear | You do not have the `carpool:manage` permission. Ask your captain or admin. |
+| "Car is full" error | All seats (including the driver's) are taken. Find another car. |
+| "Already in another car" error | You already have a seat in a different car on this board. Leave that car first. |
+| Cannot see the private thread | You haven't reserved a seat (or been assigned one) in that car yet. |
+
+## See also
+
+- [Discord integration](/guides/discord-integration/)
+- [Quick start for Captains](/quick-start/captains/)

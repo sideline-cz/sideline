@@ -15,7 +15,7 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 | **Captain** | A team member holding the built-in `Captain` role. Inherits all Player capabilities and additionally holds `roster:manage`, `member:edit`, `role:view`, `event:create`, `event:edit`, `event:cancel`, and `finance:view` permissions. |
 | **Admin** | A team member holding the built-in `Admin` role. Holds the full permission set including `team:manage`, `team:invite`, `member:remove`, `role:manage`, `training-type:create`, `training-type:delete`, `finance:view`, `finance:manage_fees`, and `finance:record_payments`, in addition to all Captain permissions. |
 | **Treasurer** | A team member holding the built-in `Treasurer` role. Holds `finance:view`, `finance:manage_fees`, and `finance:record_payments`. Used to delegate finance authority without elevating the member to Captain or Admin. |
-| **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination). Receives RPC calls from the server to synchronise Discord roles and channels. |
+| **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/carpool`, `/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination, carpool board buttons). Receives RPC calls from the server to synchronise Discord roles and channels. |
 | **Global Admin** | A user who is a global admin by either having the `users.is_global_admin` database flag set to `true` or having their Discord ID listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable (the two sources are ORed). The first user to register on a fresh database is automatically promoted via the DB flag. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. Can also mint, list, and revoke team onboarding tokens, enabling new teams to be set up by a designated captain without requiring a pre-existing Sideline account. A global admin with no team memberships is redirected to `/admin/onboarding-tokens` instead of `/no-team`. |
 | **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes, sending RSVP reminder notifications before events, auto-logging attendance from RSVP data, evaluating age-threshold rules to move members between groups, and queuing payment reminder DMs for members with upcoming or overdue fee assignments. |
 
@@ -100,6 +100,21 @@ flowchart LR
         UC_BOT_POST_EMBED["Post Event Embed"]
         UC_BOT_FINANCE_STATUS["View Finance Status via Bot"]
         UC_BOT_INFO["View Version Info via Bot"]
+        UC_BOT_CARPOOL["Post Carpool Board"]
+        UC_BOT_CARPOOL_ADD["Add Car to Carpool"]
+        UC_BOT_CARPOOL_RESERVE["Reserve Seat in Car"]
+        UC_BOT_CARPOOL_ASSIGN["Assign Seat to Member"]
+        UC_BOT_CARPOOL_LEAVE["Leave Car"]
+        UC_BOT_CARPOOL_REMOVE["Remove Own Car"]
+    end
+
+    subgraph CARPOOLS["Carpools"]
+        UC_CARPOOL_POST["Post Carpool Board\n(/carpool)"]
+        UC_CARPOOL_ADD_CAR["Add a Car"]
+        UC_CARPOOL_RESERVE_SEAT["Reserve a Seat"]
+        UC_CARPOOL_ASSIGN_SEAT["Assign Seat to Member"]
+        UC_CARPOOL_LEAVE_SEAT["Leave a Seat"]
+        UC_CARPOOL_REMOVE_CAR["Remove Own Car"]
     end
 
     subgraph NOTIFICATIONS["Notifications"]
@@ -173,6 +188,13 @@ flowchart LR
     CP --> UC_ASSIGN_ROLE
     CP --> UC_VIEW_FINANCE
     CP --> UC_VIEW_BALANCE
+    CP --> UC_CARPOOL_POST
+    CP --> UC_CARPOOL_ADD_CAR
+    CP --> UC_CARPOOL_ASSIGN_SEAT
+    CP --> UC_CARPOOL_REMOVE_CAR
+
+    PL --> UC_CARPOOL_RESERVE_SEAT
+    PL --> UC_CARPOOL_LEAVE_SEAT
 
     TR --> UC_VIEW_FINANCE
     TR --> UC_MANAGE_FEES
@@ -195,6 +217,10 @@ flowchart LR
     AD --> UC_VOID_PAYMENT
     AD --> UC_MANAGE_EXPENSES
     AD --> UC_VIEW_BALANCE
+    AD --> UC_CARPOOL_POST
+    AD --> UC_CARPOOL_ADD_CAR
+    AD --> UC_CARPOOL_ASSIGN_SEAT
+    AD --> UC_CARPOOL_REMOVE_CAR
 
     BOT --> UC_BOT_LIST
     BOT --> UC_BOT_OVERVIEW
@@ -208,6 +234,12 @@ flowchart LR
     BOT --> UC_BOT_INFO
     BOT --> UC_PAYMENT_REMINDER
     BOT --> UC_BOT_POST_CHALLENGE
+    BOT --> UC_BOT_CARPOOL
+    BOT --> UC_BOT_CARPOOL_ADD
+    BOT --> UC_BOT_CARPOOL_RESERVE
+    BOT --> UC_BOT_CARPOOL_ASSIGN
+    BOT --> UC_BOT_CARPOOL_LEAVE
+    BOT --> UC_BOT_CARPOOL_REMOVE
 
     SYS --> UC_CREATE_EVENT
     SYS --> UC_START_EVENT
