@@ -198,9 +198,11 @@ export function EditBuiltInSheet({
   const [saving, setSaving] = React.useState(false);
 
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewRequestIdRef = React.useRef(0);
 
   React.useEffect(() => {
     if (open) {
+      previewRequestIdRef.current += 1;
       setThreshold(String(achievement.effectiveThreshold));
       setPreviewState({ status: 'idle' });
       setConfirmedDestructive(false);
@@ -209,18 +211,21 @@ export function EditBuiltInSheet({
       setRoleId(Option.getOrElse(achievement.discordRoleId, () => ''));
       setSaving(false);
     } else {
+      previewRequestIdRef.current += 1;
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
     }
     return () => {
+      previewRequestIdRef.current += 1;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [open, achievement]);
 
   const fetchPreview = React.useCallback(
     (thresholdValue: number) => {
+      const requestId = ++previewRequestIdRef.current;
       setPreviewState({ status: 'loading' });
       setConfirmedDestructive(false);
       setShowAffected(false);
@@ -236,6 +241,7 @@ export function EditBuiltInSheet({
           run({}),
         )
         .then((result) => {
+          if (requestId !== previewRequestIdRef.current) return;
           if (Option.isSome(result)) {
             setPreviewState({
               status: 'loaded',
@@ -247,7 +253,10 @@ export function EditBuiltInSheet({
             setPreviewState({ status: 'error' });
           }
         })
-        .catch(() => setPreviewState({ status: 'error' }));
+        .catch(() => {
+          if (requestId !== previewRequestIdRef.current) return;
+          setPreviewState({ status: 'error' });
+        });
     },
     [teamId, slug, run],
   );

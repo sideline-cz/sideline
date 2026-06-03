@@ -98,10 +98,12 @@ export function MintedLinkDialog({
 }: MintedLinkDialogProps) {
   const [copied, setCopied] = React.useState(false);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyRequestIdRef = React.useRef(0);
 
   const handleCopy = React.useCallback(() => {
+    const requestId = ++copyRequestIdRef.current;
     copyToClipboard(url).then((ok) => {
-      if (!ok) return;
+      if (!ok || requestId !== copyRequestIdRef.current) return;
       if (timerRef.current) clearTimeout(timerRef.current);
       setCopied(true);
       timerRef.current = setTimeout(() => setCopied(false), 2000);
@@ -110,6 +112,7 @@ export function MintedLinkDialog({
 
   React.useEffect(() => {
     if (!open) {
+      copyRequestIdRef.current += 1;
       if (timerRef.current) clearTimeout(timerRef.current);
       setCopied(false);
     }

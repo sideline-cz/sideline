@@ -30,13 +30,22 @@ export function TeamInvitesPage({
   const { formatDate, formatDateTime } = useFormatDate();
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [copied, setCopied] = React.useState<string | null>(null);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
 
   const handleCopy = React.useCallback((code: string) => {
     const link = `${window.location.origin}/invite/${code}`;
     copyToClipboard(link).then((ok) => {
       if (!ok) return;
+      if (timerRef.current) clearTimeout(timerRef.current);
       setCopied(code);
-      setTimeout(() => setCopied(null), 2000);
+      timerRef.current = setTimeout(() => setCopied(null), 2000);
     });
   }, []);
 
