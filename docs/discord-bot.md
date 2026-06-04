@@ -937,6 +937,7 @@ Channel sync manages Discord channels and roles for Sideline groups. The Discord
 | `managed_channel_deleted` | `handleManagedDeleted.ts` | If a Discord channel ID is present, deletes the Discord channel via REST. Then calls `Channel/ClearManagedChannel`. (No HTTP endpoint currently emits this event in v1; handler kept for future use.) |
 | `managed_access_granted` | `handleManagedAccess.ts` (`handleManagedAccessGranted`) | Calls `setChannelAccessOverwrite` to apply a Discord permission overwrite on the channel for the given role at the specified `access_level` tier. |
 | `managed_access_revoked` | `handleManagedAccess.ts` (`handleManagedAccessRevoked`) | Calls `removeChannelAccessOverwrite` to delete the Discord permission overwrite for the given role on the channel. |
+| `discord_channel_archived` | `handleDiscordArchived.ts` | Moves the Discord-native channel to the archive category via `updateChannel { parent_id }`. **No delete-fallback** (the bot must never delete a channel it did not create). **No `Channel/ClearManagedChannel` call** (there is no `team_channels` row for `entity_type = 'discord'`). Move failures are caught and logged as warnings; the handler returns success so the event is still marked processed. |
 
 **Managed channel access tiers** (`applications/bot/src/rest/permissions.ts`):
 
@@ -1216,7 +1217,7 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Channel/UpdateRosterChannel` | Update the `discord_channel_id` on a roster's Sideline record |
 | `Channel/GetManagedChannel` | Look up the `team_id` and current `discord_channel_id` for a `team_channels` row |
 | `Channel/UpsertManagedChannel` | Persist the bot-provisioned Discord channel ID and back-fill any access grants that existed before the channel was provisioned |
-| `Channel/ClearManagedChannel` | Clear `discord_channel_id` on the `team_channels` row after archive or delete |
+| `Channel/ClearManagedChannel` | Clear `discord_channel_id` on the `team_channels` row after archive or delete (not called for `discord_channel_archived` events — `entity_type = 'discord'` has no `team_channels` row) |
 | `Channel/DeleteManagedChannel` | Hard-delete a `team_channels` row (reserved for future use; not yet emitted) |
 
 ### Event group (`Event/`)

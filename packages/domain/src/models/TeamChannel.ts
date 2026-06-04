@@ -1,5 +1,6 @@
 import { Schema } from 'effect';
 import { Model } from 'effect/unstable/schema';
+import { Snowflake } from '~/models/Discord.js';
 import { TeamId } from '~/models/Team.js';
 
 export const TeamChannelId = Schema.String.pipe(Schema.brand('TeamChannelId'));
@@ -12,7 +13,7 @@ export class TeamChannel extends Model.Class<TeamChannel>('TeamChannel')({
   category: Schema.OptionFromNullOr(Schema.String),
   position: Schema.Number,
   archived: Schema.Boolean,
-  discord_channel_id: Schema.OptionFromNullOr(Schema.String),
-  discord_role_id: Schema.OptionFromNullOr(Schema.String),
+  discord_channel_id: Schema.OptionFromNullOr(Snowflake),
+  discord_role_id: Schema.OptionFromNullOr(Snowflake),
   created_at: Model.DateTimeInsertFromDate,
 }) {}

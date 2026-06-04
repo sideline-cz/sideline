@@ -5,6 +5,13 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-04 — Channel management: full Discord channel list + archive any channel
+
+- **Team → Channels** now shows your team's _entire_ Discord channel list — not just channels Sideline created. Every text channel in your server is visible, grouped by its Discord category, so you can see and act on your whole Discord structure from one place.
+- Channels under the team's configured **archive category** are automatically shown with an *Archived* badge.
+- **Archive any Discord channel:** you can now move any channel — including ones you created manually in Discord — to the archive category directly from Sideline. The channel is moved, never deleted. Requires the archive category to be configured in **Team settings → Discord integration**.
+- The original channel management features remain: create, rename, control access, and archive Sideline-managed channels. Access management (per-group permission overwrites) is still limited to managed channels only.
+
 ## 2026-06-04 — Web-based Discord channel management
 
 - Admins and captains with the `group:manage` permission can now create, rename, archive, and control access for **managed Discord text channels** directly from the web app — no manual Discord configuration needed.

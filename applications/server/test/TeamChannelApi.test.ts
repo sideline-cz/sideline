@@ -74,6 +74,10 @@ const TEST_MEMBER_ID = '00000000-0000-0000-0005-000000000020' as TeamMember.Team
 const TEST_ADMIN_MEMBER_ID = '00000000-0000-0000-0005-000000000021' as TeamMember.TeamMemberId;
 const TEST_CHANNEL_ID = '00000000-0000-0000-0005-000000000030' as TeamChannel.TeamChannelId;
 const TEST_GUILD_ID = '888888888888888888' as Discord.Snowflake;
+const ARCHIVE_CATEGORY_ID = '777777777777777777' as Discord.Snowflake;
+const DISCORD_TEXT_CHANNEL_ID = '111111111111111111' as Discord.Snowflake;
+const DISCORD_VOICE_CHANNEL_ID = '222222222222222222' as Discord.Snowflake;
+const DISCORD_CATEGORY_CHANNEL_ID = '333333333333333333' as Discord.Snowflake;
 
 const ADMIN_PERMISSIONS: readonly Role.Permission[] = [
   'team:manage',
@@ -171,6 +175,11 @@ type ManagedSyncCall =
     }
   | { type: 'channel_archived'; teamChannelId: TeamChannel.TeamChannelId }
   | { type: 'channel_deleted'; teamChannelId: TeamChannel.TeamChannelId }
+  | {
+      type: 'discord_channel_archived';
+      discordChannelId: Discord.Snowflake;
+      archiveCategoryId: Discord.Snowflake;
+    }
   | { type: 'access_granted' }
   | { type: 'access_revoked' };
 
@@ -216,6 +225,18 @@ const MockChannelSyncEventsRepositoryLayer = Layer.succeed(ChannelSyncEventsRepo
   },
   emitManagedAccessRevokedBatch: () => {
     managedSyncCalls.push({ type: 'access_revoked' });
+    return Effect.void;
+  },
+  emitDiscordChannelArchived: (args: {
+    teamId: Team.TeamId;
+    discordChannelId: Discord.Snowflake;
+    archiveCategoryId: Discord.Snowflake;
+  }) => {
+    managedSyncCalls.push({
+      type: 'discord_channel_archived',
+      discordChannelId: args.discordChannelId,
+      archiveCategoryId: args.archiveCategoryId,
+    });
     return Effect.void;
   },
   emitMembersAddedBatch: () => Effect.void,
@@ -475,6 +496,7 @@ const buildLayer = (overrides?: {
   channelSyncLayer?: Layer.Layer<ChannelSyncEventsRepository>;
   teamSettingsLayer?: Layer.Layer<TeamSettingsRepository>;
   channelsLayer?: Layer.Layer<TeamChannelsRepository>;
+  discordChannelsLayer?: Layer.Layer<DiscordChannelsRepository>;
 }) =>
   ApiLive.pipe(
     Layer.provideMerge(AuthMiddlewareLive),
@@ -724,10 +746,13 @@ const buildLayer = (overrides?: {
                 overrides?.botGuildsLayer ?? MockBotGuildsRepositoryLayer,
               ),
               Layer.merge(
-                Layer.succeed(DiscordChannelsRepository, {
-                  syncChannels: () => Effect.void,
-                  findByGuildId: () => Effect.succeed([]),
-                } as any),
+                overrides?.discordChannelsLayer ??
+                  Layer.succeed(DiscordChannelsRepository, {
+                    syncChannels: () => Effect.void,
+                    findByGuildId: () => Effect.succeed([]),
+                    findManagedListByTeam: () => Effect.succeed([]),
+                    findByChannelId: () => Effect.succeed(Option.none()),
+                  } as any),
                 Layer.succeed(
                   DiscordRolesRepository,
                   new Proxy({} as any, { get: () => () => Effect.void }),
@@ -876,7 +901,10 @@ describe('listChannels', () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    const ch = body.channels.find((c: any) => c.channelId === id);
+    // Channels are now sourced from discord_channels (merged with team_channels).
+    // Since no discord rows are returned in this test, the managed channel appears via the merge.
+    // The new shape uses teamChannelId (Option) instead of the old channelId field.
+    const ch = body.channels.find((c: any) => c.teamChannelId === id);
     expect(ch).toBeDefined();
     expect(ch.accessCount).toBe(2);
   });
@@ -908,7 +936,8 @@ describe('createChannel', () => {
     expect(response.status).toBe(201);
     const body = await response.json();
     expect(body.name).toBe('announcements');
-    expect(body.channelId).toBeDefined();
+    // New shape: teamChannelId (Option) replaces the old channelId field
+    expect(body.teamChannelId).toBeDefined();
   });
 
   it('emits managed_channel_created sync event after insert', async () => {
@@ -1030,6 +1059,10 @@ describe('archiveChannel', () => {
     // Channel should be archived
     const ch = channelsStore.get(TEST_CHANNEL_ID);
     expect(ch?.archived).toBe(true);
+
+    // FIX 2(a): discord_channel_id must NOT be cleared on archive so the channel
+    // de-dups correctly in listChannels (the LEFT JOIN still matches).
+    expect(Option.isSome(ch?.discord_channel_id ?? Option.none())).toBe(true);
 
     // Sync event should be emitted
     const archivedCalls = managedSyncCalls.filter((c) => c.type === 'channel_archived');
@@ -1183,63 +1216,623 @@ describe('renameChannel', () => {
 });
 
 // ---------------------------------------------------------------------------
-// updateOrganization
+// listChannels — Discord merge and archived derivation
 // ---------------------------------------------------------------------------
 
-describe('updateOrganization', () => {
-  it('updates category and position, no sync event emitted', async () => {
-    channelsStore.set(TEST_CHANNEL_ID, {
-      id: TEST_CHANNEL_ID,
+describe('listChannels — Discord merge', () => {
+  it('merges discord rows with managed-only rows (no mirror)', async () => {
+    // Seed a managed team_channels row without a discord_channel_id (no mirror)
+    const managedId = '00000000-0000-0000-0005-managed000001' as TeamChannel.TeamChannelId;
+    channelsStore.set(managedId, {
+      id: managedId,
       team_id: TEST_TEAM_ID,
-      name: 'channel',
+      name: 'managed-only',
       category: Option.none(),
       position: 0,
       archived: false,
       discord_channel_id: Option.none(),
       discord_role_id: Option.none(),
     });
+    accessStore.set(managedId, [{ group_id: 'grp1', access_level: 'VIEW' }]);
 
-    const response = await handler(
-      new Request(
-        `http://localhost/teams/${TEST_TEAM_ID}/channels/${TEST_CHANNEL_ID}/organization`,
-        {
-          method: 'PATCH',
-          headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ category: 'Section A', position: 5 }),
-        },
-      ),
+    // Discord rows: text(0), voice(2), category(4)
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () =>
+        Effect.succeed([
+          {
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'general',
+            type: 0,
+            parent_id: Option.none(),
+            team_channel_id: Option.none(),
+            team_channel_archived: Option.none(),
+            access_count: 0,
+          },
+          {
+            channel_id: DISCORD_VOICE_CHANNEL_ID,
+            name: 'voice-chat',
+            type: 2,
+            parent_id: Option.none(),
+            team_channel_id: Option.none(),
+            team_channel_archived: Option.none(),
+            access_count: 0,
+          },
+          {
+            channel_id: DISCORD_CATEGORY_CHANNEL_ID,
+            name: 'Category A',
+            type: 4,
+            parent_id: Option.none(),
+            team_channel_id: Option.none(),
+            team_channel_archived: Option.none(),
+            access_count: 0,
+          },
+        ]),
+      findByChannelId: () => Effect.succeed(Option.none()),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/channels`, {
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
     );
+    await customApp.dispose();
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.position).toBe(5);
-    // No sync events for organization changes
-    expect(managedSyncCalls).toHaveLength(0);
+
+    // Response includes archiveCategoryId from settings
+    expect(body.archiveCategoryId).toBe(ARCHIVE_CATEGORY_ID);
+    expect(body.canManage).toBe(true);
+    expect(body.guildLinked).toBe(true);
+
+    // Should contain at least 4 channels (3 discord + 1 managed-without-mirror)
+    expect(body.channels.length).toBeGreaterThanOrEqual(4);
+
+    // Managed-without-mirror channel should appear with managed=true and discordChannelId=null
+    const managedOnly = body.channels.find((c: any) => c.teamChannelId === managedId);
+    expect(managedOnly).toBeDefined();
+    expect(managedOnly.managed).toBe(true);
+    expect(managedOnly.discordChannelId).toBeNull();
+    expect(managedOnly.accessCount).toBe(1);
+
+    // Discord text channel present with type passthrough
+    const textCh = body.channels.find((c: any) => c.discordChannelId === DISCORD_TEXT_CHANNEL_ID);
+    expect(textCh).toBeDefined();
+    expect(textCh.type).toBe(0);
+
+    // Discord voice channel present with type=2
+    const voiceCh = body.channels.find((c: any) => c.discordChannelId === DISCORD_VOICE_CHANNEL_ID);
+    expect(voiceCh).toBeDefined();
+    expect(voiceCh.type).toBe(2);
+
+    // Category row present with type=4
+    const catCh = body.channels.find(
+      (c: any) => c.discordChannelId === DISCORD_CATEGORY_CHANNEL_ID,
+    );
+    expect(catCh).toBeDefined();
+    expect(catCh.type).toBe(4);
   });
 
-  it('returns 403 for member without group:manage', async () => {
+  it('derives archived=true for a channel whose parent_id equals archiveCategoryId', async () => {
+    // A text channel parented under ARCHIVE_CATEGORY_ID → archived=true
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () =>
+        Effect.succeed([
+          {
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'archived-chan',
+            type: 0,
+            parent_id: Option.some(ARCHIVE_CATEGORY_ID),
+            team_channel_id: Option.none(),
+            team_channel_archived: Option.none(),
+            access_count: 0,
+          },
+          {
+            channel_id: DISCORD_VOICE_CHANNEL_ID,
+            name: 'active-chan',
+            type: 0,
+            parent_id: Option.none(),
+            team_channel_id: Option.none(),
+            team_channel_archived: Option.none(),
+            access_count: 0,
+          },
+        ]),
+      findByChannelId: () => Effect.succeed(Option.none()),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/channels`, {
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    const archivedCh = body.channels.find(
+      (c: any) => c.discordChannelId === DISCORD_TEXT_CHANNEL_ID,
+    );
+    expect(archivedCh).toBeDefined();
+    expect(archivedCh.archived).toBe(true);
+
+    const activeCh = body.channels.find(
+      (c: any) => c.discordChannelId === DISCORD_VOICE_CHANNEL_ID,
+    );
+    expect(activeCh).toBeDefined();
+    expect(activeCh.archived).toBe(false);
+  });
+
+  it('archived=false for all channels when no archive category configured', async () => {
+    const noArchiveSettingsLayer = Layer.succeed(TeamSettingsRepository, {
+      findByTeam: () => Effect.succeed(Option.none()),
+      findByTeamId: () =>
+        Effect.succeed(
+          Option.some({
+            team_id: TEST_TEAM_ID,
+            event_horizon_days: 30,
+            discord_archive_category_id: Option.none(),
+          }),
+        ),
+      upsertSettings: () => Effect.void,
+      upsert: () => Effect.void,
+      getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),
+      getHorizonDays: () => Effect.succeed(30),
+    } as any);
+
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () =>
+        Effect.succeed([
+          {
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'some-chan',
+            type: 0,
+            parent_id: Option.some(ARCHIVE_CATEGORY_ID), // would be archived if category configured
+            team_channel_id: Option.none(),
+            team_channel_archived: Option.none(),
+            access_count: 0,
+          },
+        ]),
+      findByChannelId: () => Effect.succeed(Option.none()),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(
+      buildLayer({
+        teamSettingsLayer: noArchiveSettingsLayer,
+        discordChannelsLayer: discordLayer,
+      }),
+    );
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/channels`, {
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.archiveCategoryId).toBeNull();
+
+    const ch = body.channels.find((c: any) => c.discordChannelId === DISCORD_TEXT_CHANNEL_ID);
+    expect(ch).toBeDefined();
+    expect(ch.archived).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// archiveDiscordChannel
+// ---------------------------------------------------------------------------
+
+describe('archiveDiscordChannel', () => {
+  const archiveUrl = `http://localhost/teams/${TEST_TEAM_ID}/discord-channels/${DISCORD_TEXT_CHANNEL_ID}/archive`;
+
+  it('happy path (unmanaged): emits emitDiscordChannelArchived, no managed writes', async () => {
+    // Provide a discord channel row for lookup — text, not in archive category
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () =>
+        Effect.succeed(
+          Option.some({
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'general',
+            type: 0,
+            parent_id: Option.none(),
+          }),
+        ),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(archiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(204);
+
+    // emitDiscordChannelArchived should have been called
+    const discordArchiveCalls = managedSyncCalls.filter(
+      (c) => c.type === 'discord_channel_archived',
+    ) as Array<{
+      type: 'discord_channel_archived';
+      discordChannelId: Discord.Snowflake;
+      archiveCategoryId: Discord.Snowflake;
+    }>;
+    expect(discordArchiveCalls).toHaveLength(1);
+    expect(discordArchiveCalls[0]?.discordChannelId).toBe(DISCORD_TEXT_CHANNEL_ID);
+    expect(discordArchiveCalls[0]?.archiveCategoryId).toBe(ARCHIVE_CATEGORY_ID);
+
+    // No managed archive calls
+    const managedArchiveCalls = managedSyncCalls.filter((c) => c.type === 'channel_archived');
+    expect(managedArchiveCalls).toHaveLength(0);
+  });
+
+  it('managed path: emits emitManagedChannelArchived (not emitDiscordChannelArchived)', async () => {
+    // Pre-seed managed team_channels row linked to DISCORD_TEXT_CHANNEL_ID
     channelsStore.set(TEST_CHANNEL_ID, {
       id: TEST_CHANNEL_ID,
       team_id: TEST_TEAM_ID,
-      name: 'channel',
+      name: 'managed-chan',
       category: Option.none(),
       position: 0,
       archived: false,
-      discord_channel_id: Option.none(),
+      discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
       discord_role_id: Option.none(),
     });
 
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () =>
+        Effect.succeed(
+          Option.some({
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'managed-chan',
+            type: 0,
+            parent_id: Option.none(),
+          }),
+        ),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(archiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(204);
+
+    // emitManagedChannelArchived emitted (managed archive path)
+    const managedArchiveCalls = managedSyncCalls.filter((c) => c.type === 'channel_archived');
+    expect(managedArchiveCalls).toHaveLength(1);
+
+    // emitDiscordChannelArchived NOT emitted
+    const discordArchiveCalls = managedSyncCalls.filter(
+      (c) => c.type === 'discord_channel_archived',
+    );
+    expect(discordArchiveCalls).toHaveLength(0);
+  });
+
+  it('no archive category configured → 409 ArchiveCategoryNotConfigured', async () => {
+    const noArchiveSettingsLayer = Layer.succeed(TeamSettingsRepository, {
+      findByTeam: () => Effect.succeed(Option.none()),
+      findByTeamId: () =>
+        Effect.succeed(
+          Option.some({
+            team_id: TEST_TEAM_ID,
+            event_horizon_days: 30,
+            discord_archive_category_id: Option.none(),
+          }),
+        ),
+      upsertSettings: () => Effect.void,
+      upsert: () => Effect.void,
+      getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),
+      getHorizonDays: () => Effect.succeed(30),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(
+      buildLayer({ teamSettingsLayer: noArchiveSettingsLayer }),
+    );
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(archiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(409);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('category-type channel (type=4) → 409 ChannelNotArchivable', async () => {
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () =>
+        Effect.succeed(
+          Option.some({
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'some-category',
+            type: 4,
+            parent_id: Option.none(),
+          }),
+        ),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(archiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(409);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('channel already in archive category → 409 ChannelNotArchivable', async () => {
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () =>
+        Effect.succeed(
+          Option.some({
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'already-archived',
+            type: 0,
+            // parent_id = archiveCategoryId → already archived
+            parent_id: Option.some(ARCHIVE_CATEGORY_ID),
+          }),
+        ),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(archiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(409);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('unknown discord channel → 404 ChannelNotFound', async () => {
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () => Effect.succeed(Option.none()),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(archiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(404);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('non-group:manage member → 403 ChannelForbidden, no emit', async () => {
     const response = await handler(
-      new Request(
-        `http://localhost/teams/${TEST_TEAM_ID}/channels/${TEST_CHANNEL_ID}/organization`,
-        {
-          method: 'PATCH',
-          headers: { Authorization: 'Bearer member-token', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ category: null, position: 0 }),
-        },
-      ),
+      new Request(archiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer member-token' },
+      }),
     );
 
     expect(response.status).toBe(403);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('FIX 4: already-archived managed channel → 409 ChannelNotArchivable, no re-emit', async () => {
+    // Seed a managed team_channels row that is already archived
+    const archivedManagedId = '00000000-0000-0000-0005-archived00001' as TeamChannel.TeamChannelId;
+    channelsStore.set(archivedManagedId, {
+      id: archivedManagedId,
+      team_id: TEST_TEAM_ID,
+      name: 'already-archived-managed',
+      category: Option.none(),
+      position: 0,
+      archived: true, // already archived
+      discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
+      discord_role_id: Option.none(),
+    });
+
+    // Discord row for the channel — parent_id is NOT the archive category
+    // (mid-sync: Discord hasn't moved it yet, but team_channels.archived=true)
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () =>
+        Effect.succeed(
+          Option.some({
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'already-archived-managed',
+            type: 0,
+            parent_id: Option.none(), // NOT in archive category yet
+          }),
+        ),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(archiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    // Must be 409 ChannelNotArchivable — not re-archived
+    expect(response.status).toBe(409);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listChannels — duplicate de-dup and mid-sync archived source-of-truth
+// ---------------------------------------------------------------------------
+
+describe('listChannels — archived managed channel regression', () => {
+  it('FIX 2+3: archived managed channel with discord_channel_id still set appears EXACTLY ONCE', async () => {
+    // Seed an archived managed team_channels row that still has discord_channel_id set
+    // (FIX 2(a): we no longer clear discord_channel_id on archive)
+    const archivedManagedId = '00000000-0000-0000-0005-archdup000001' as TeamChannel.TeamChannelId;
+    channelsStore.set(archivedManagedId, {
+      id: archivedManagedId,
+      team_id: TEST_TEAM_ID,
+      name: 'archived-managed',
+      category: Option.none(),
+      position: 0,
+      archived: true,
+      discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
+      discord_role_id: Option.none(),
+    });
+
+    // Discord row for the same channel; parent_id = archiveCategoryId (already moved)
+    // The LEFT JOIN in findManagedListByTeam will match tc row → team_channel_id is set.
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () =>
+        Effect.succeed([
+          {
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'archived-managed',
+            type: 0,
+            parent_id: Option.some(ARCHIVE_CATEGORY_ID),
+            team_channel_id: Option.some(archivedManagedId),
+            team_channel_archived: Option.some(true),
+            access_count: 0,
+          },
+        ]),
+      findByChannelId: () => Effect.succeed(Option.none()),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/channels`, {
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    // The channel must appear EXACTLY ONCE
+    const matches = body.channels.filter(
+      (c: any) =>
+        c.discordChannelId === DISCORD_TEXT_CHANNEL_ID || c.teamChannelId === archivedManagedId,
+    );
+    expect(matches).toHaveLength(1);
+
+    // It must be managed=true and archived=true
+    expect(matches[0].managed).toBe(true);
+    expect(matches[0].archived).toBe(true);
+  });
+
+  it('FIX 2(b): managed channel with team_channel_archived=true but discord parent_id != archiveCategoryId still reports archived=true (mid-sync)', async () => {
+    // Mid-sync: team_channels.archived=true but Discord hasn't moved the channel yet
+    const managedId = '00000000-0000-0000-0005-midsync00001' as TeamChannel.TeamChannelId;
+    channelsStore.set(managedId, {
+      id: managedId,
+      team_id: TEST_TEAM_ID,
+      name: 'mid-sync-channel',
+      category: Option.none(),
+      position: 0,
+      archived: true,
+      discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
+      discord_role_id: Option.none(),
+    });
+
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () =>
+        Effect.succeed([
+          {
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'mid-sync-channel',
+            type: 0,
+            parent_id: Option.none(), // NOT in archive category yet (mid-sync)
+            team_channel_id: Option.some(managedId),
+            team_channel_archived: Option.some(true), // team_channels.archived=true
+            access_count: 0,
+          },
+        ]),
+      findByChannelId: () => Effect.succeed(Option.none()),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/channels`, {
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    const ch = body.channels.find((c: any) => c.discordChannelId === DISCORD_TEXT_CHANNEL_ID);
+    expect(ch).toBeDefined();
+    // Must be archived even though parent_id != archiveCategoryId
+    expect(ch.archived).toBe(true);
+    expect(ch.managed).toBe(true);
   });
 });

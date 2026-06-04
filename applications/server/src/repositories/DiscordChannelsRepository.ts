@@ -1,4 +1,4 @@
-import { Discord } from '@sideline/domain';
+import { Discord, Team, TeamChannel } from '@sideline/domain';
 import { Array, Effect, Layer, type Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
@@ -8,6 +8,16 @@ class ChannelRow extends Schema.Class<ChannelRow>('ChannelRow')({
   name: Schema.String,
   type: Schema.Number,
   parent_id: Schema.OptionFromNullOr(Discord.Snowflake),
+}) {}
+
+class ManagedListRow extends Schema.Class<ManagedListRow>('ManagedListRow')({
+  channel_id: Discord.Snowflake,
+  name: Schema.String,
+  type: Schema.Number,
+  parent_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  team_channel_id: Schema.OptionFromNullOr(TeamChannel.TeamChannelId),
+  team_channel_archived: Schema.OptionFromNullOr(Schema.Boolean),
+  access_count: Schema.Number,
 }) {}
 
 const SyncInput = Schema.Struct({
@@ -121,12 +131,58 @@ const make = Effect.gen(function* () {
 
   const findByGuildId = (guildId: Discord.Snowflake) => selectByGuild(guildId).pipe(catchSqlErrors);
 
+  const selectManagedListByTeam = SqlSchema.findAll({
+    Request: Team.TeamId,
+    Result: ManagedListRow,
+    execute: (teamId) => sql`
+      SELECT
+        dc.channel_id,
+        dc.name,
+        dc.type,
+        dc.parent_id,
+        tc.id AS team_channel_id,
+        tc.archived AS team_channel_archived,
+        COALESCE(acc.access_count, 0) AS access_count
+      FROM teams t
+      JOIN discord_channels dc ON dc.guild_id = t.guild_id
+      LEFT JOIN team_channels tc
+        ON tc.discord_channel_id = dc.channel_id
+        AND tc.team_id = ${teamId}
+      LEFT JOIN (
+        SELECT tca.team_channel_id AS tc_id, COUNT(*)::int AS access_count
+        FROM team_channel_access tca
+        GROUP BY tca.team_channel_id
+      ) acc ON acc.tc_id = tc.id
+      WHERE t.id = ${teamId}
+      ORDER BY dc.name
+    `,
+  });
+
+  const selectByChannelId = SqlSchema.findOneOption({
+    Request: Schema.Struct({ guild_id: Discord.Snowflake, channel_id: Discord.Snowflake }),
+    Result: ChannelRow,
+    execute: (input) => sql`
+      SELECT channel_id, name, type, parent_id
+      FROM discord_channels
+      WHERE guild_id = ${input.guild_id}
+        AND channel_id = ${input.channel_id}
+    `,
+  });
+
+  const findManagedListByTeam = (teamId: Team.TeamId) =>
+    selectManagedListByTeam(teamId).pipe(catchSqlErrors);
+
+  const findByChannelId = (guildId: Discord.Snowflake, channelId: Discord.Snowflake) =>
+    selectByChannelId({ guild_id: guildId, channel_id: channelId }).pipe(catchSqlErrors);
+
   return {
     syncChannels,
     updateChannelName,
     deleteChannel,
     upsertChannel,
     findByGuildId,
+    findManagedListByTeam,
+    findByChannelId,
   };
 });
 

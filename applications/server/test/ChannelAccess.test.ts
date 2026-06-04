@@ -274,6 +274,7 @@ const makeChannelSyncLayer = () =>
     emitManagedChannelCreated: () => Effect.void,
     emitManagedChannelArchived: () => Effect.void,
     emitManagedChannelDeleted: () => Effect.void,
+    emitDiscordChannelArchived: () => Effect.void,
     emitManagedAccessGrantedBatch: (args: { entries: unknown[] }) => {
       if (args.entries.length > 0) grantedBatchCalls.push({ entries: args.entries });
       return Effect.void;
@@ -677,6 +678,8 @@ const buildFullLayer = (overrides?: {
                 Layer.succeed(DiscordChannelsRepository, {
                   syncChannels: () => Effect.void,
                   findByGuildId: () => Effect.succeed([]),
+                  findManagedListByTeam: () => Effect.succeed([]),
+                  findByChannelId: () => Effect.succeed(Option.none()),
                 } as any),
                 Layer.succeed(
                   DiscordRolesRepository,
@@ -861,7 +864,16 @@ describe('setAccess — diff logic', () => {
   });
 
   it('guild not linked: grants written, zero sync events emitted', async () => {
-    const _app = HttpRouter.toWebHandler(buildFullLayer({ guildLinked: false }));
+    // When guild is not linked we use discordChannelId=None so the handler genuinely
+    // skips all sync emission.  The guard in channel.ts is:
+    //   `if (discordChannelId === null) return Effect.void`
+    // The module-level grantedBatchCalls / revokedBatchCalls spy arrays (populated by
+    // makeChannelSyncLayer()) give us a clean assertion that no emit happened.
+    // Note: buildFullLayer() always calls makeChannelSyncLayer() which populates the
+    // module-level spy arrays, so assertions on those are meaningful here.
+    const _app = HttpRouter.toWebHandler(
+      buildFullLayer({ guildLinked: false, discordChannelId: Option.none() }),
+    );
     const customHandler: (...args: any) => Promise<Response> = _app.handler;
 
     try {
@@ -876,11 +888,10 @@ describe('setAccess — diff logic', () => {
       expect(response.status).toBe(200);
       // DB write still happens
       expect(upsertCalls).toHaveLength(1);
-      // No sync events because guild not linked — handler checks discordChannelId which is set
-      // but emitManagedAccessGrantedBatch skips if guild_id lookup returns none
-      // The mock always returns DISCORD_CHANNEL_ID so sync IS attempted; but the
-      // real emitter gate is the guild lookup inside ChannelSyncEventsRepository.
-      // In this test we verify the mock still records upserts (DB writes).
+      // Zero sync events because the channel has no discord_channel_id —
+      // the handler explicitly skips emit when discord_channel_id is null
+      expect(grantedBatchCalls).toHaveLength(0);
+      expect(revokedBatchCalls).toHaveLength(0);
     } finally {
       await _app.dispose();
     }

@@ -1,23 +1,26 @@
 ---
 title: Channel management
-description: Create and manage Discord text channels from the Sideline web app — no manual Discord setup needed.
+description: View, create, and manage Discord text channels from the Sideline web app — no manual Discord setup needed.
 ---
 
 import { Steps, Aside, Badge } from '@astrojs/starlight/components';
 
-Sideline can create and fully manage Discord text channels on your behalf. You control everything — channel names, categories, archive state, and who can read or write — from the web app. The bot applies the changes to Discord within seconds.
+Sideline gives you a unified view of your team's Discord channels and lets you manage them from the web app. The page shows every channel in your server — channels Sideline created as well as channels that already existed in Discord — grouped by their Discord category. You can archive any channel, and for Sideline-created channels you can also control access and rename them.
 
 **Required permission:** `group:manage` (Admin and Captain roles by default).
 
 ## Opening the channel list
 
-Go to **Team → Channels** in the sidebar. The page lists all managed channels for your team with their name, optional Sideline category, Discord link status, and the number of access grants.
+Go to **Team → Channels** in the sidebar. The page shows all channels for your team, pulled directly from Discord and grouped by category.
 
-The **Discord link status** column shows:
+Each channel entry shows:
 
-- A channel ID — the bot has successfully provisioned this channel in Discord.
-- *Pending* — the bot has not yet processed the creation event.
-- *Archived* — the channel has been archived; the Discord channel has been moved or deleted.
+- **Name** — the Discord channel name.
+- **Category** — the Discord category the channel belongs to (or the Sideline-side label for managed channels with no Discord category yet).
+- **Status** — indicates whether the channel is managed by Sideline, pending provisioning, or archived.
+- **Access grants** — the number of Sideline group grants (only shown for managed channels).
+
+Channels whose Discord parent category matches the team's configured **archive category** are shown with an *Archived* badge.
 
 ## Creating a channel
 
@@ -73,11 +76,9 @@ Click a channel name to open its detail sheet, then click **Rename**. Enter the 
   Renaming a channel updates the Sideline label only. The Discord channel name is **not** changed in v1. A bot-side rename handler is planned for a future release.
 </Aside>
 
-## Updating category and position
-
-Open a channel's detail sheet and click **Edit organisation**. Change the **category** label or the **position** number, then save. These fields affect the order and grouping in the Sideline channel list only — there is no Discord-side reordering in v1.
-
 ## Archiving a channel
+
+You can archive any channel shown in the list — whether Sideline created it or it already existed in Discord.
 
 <Steps>
 
@@ -87,13 +88,19 @@ Open a channel's detail sheet and click **Edit organisation**. Change the **cate
 
 </Steps>
 
-What happens next depends on your team settings:
+The bot moves the Discord channel to the **archive category** configured in **Team settings → Discord integration → Archive category**. The channel is not deleted — it simply moves into that category in your Discord server.
 
-- If **Team settings → Discord integration → Archive category** is set, the bot moves the Discord channel to that category in Discord.
-- If no archive category is configured, the bot deletes the Discord channel.
+<Aside type="caution" title="Archive category required for Discord-native channels">
+  Archiving a channel that Sideline did not create requires an archive category to be configured. If no archive category is set, the action is blocked with an error. For Sideline-created (managed) channels, archiving also works without an archive category by falling back to deletion of the Discord channel.
+</Aside>
 
-The channel remains visible in the Sideline channel list with an *Archived* badge. Its name can be reused for a new channel.
+The channel remains visible in the Sideline channel list with an *Archived* badge. For managed channels, the name can be reused for a new channel after archiving.
 
-## Relationship to auto-managed group channels
+## Managed vs Discord-native channels
 
-The channels on this page (**Team → Channels**) are *managed* channels — Sideline owns their full lifecycle. They are separate from the Discord channels that Sideline auto-creates when a group is provisioned (controlled by **Team settings → Create Discord channel on group**). Both types use the same underlying channel-sync pipeline but are tracked separately.
+The **Team → Channels** page shows two types of channels:
+
+- **Managed** (`managed = true`) — channels Sideline created. Sideline owns their full lifecycle: name, access, and archive state can all be controlled from the web app.
+- **Discord-native** (`managed = false`) — channels that already exist in your Discord server and are shown for visibility. You can archive them (move to the archive category), but you cannot rename them or set access grants from Sideline.
+
+The Discord channels that Sideline auto-creates when a group is provisioned (controlled by **Team settings → Create Discord channel on group**) are separate from managed channels and do not appear in this list — they are tracked under each group's settings.

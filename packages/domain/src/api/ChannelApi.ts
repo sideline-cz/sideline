@@ -1,6 +1,7 @@
 import { Schema } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
+import { Snowflake } from '~/models/Discord.js';
 import { GroupId } from '~/models/GroupModel.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamChannelId } from '~/models/TeamChannel.js';
@@ -12,22 +13,24 @@ export class ChannelAccessGrant extends Schema.Class<ChannelAccessGrant>('Channe
 }) {}
 
 export class ChannelInfo extends Schema.Class<ChannelInfo>('ChannelInfo')({
-  channelId: TeamChannelId,
+  discordChannelId: Schema.OptionFromNullOr(Snowflake),
+  teamChannelId: Schema.OptionFromNullOr(TeamChannelId),
   name: Schema.String,
   category: Schema.OptionFromNullOr(Schema.String),
-  position: Schema.Number,
+  managed: Schema.Boolean,
+  type: Schema.Number,
   archived: Schema.Boolean,
-  discordChannelId: Schema.OptionFromNullOr(Schema.String),
   accessCount: Schema.Number,
 }) {}
 
 export class ChannelDetail extends Schema.Class<ChannelDetail>('ChannelDetail')({
-  channelId: TeamChannelId,
+  discordChannelId: Schema.OptionFromNullOr(Snowflake),
+  teamChannelId: Schema.OptionFromNullOr(TeamChannelId),
   name: Schema.String,
   category: Schema.OptionFromNullOr(Schema.String),
-  position: Schema.Number,
+  managed: Schema.Boolean,
+  type: Schema.Number,
   archived: Schema.Boolean,
-  discordChannelId: Schema.OptionFromNullOr(Schema.String),
   accessCount: Schema.Number,
   grants: Schema.Array(ChannelAccessGrant),
 }) {}
@@ -35,6 +38,7 @@ export class ChannelDetail extends Schema.Class<ChannelDetail>('ChannelDetail')(
 export class ChannelListResponse extends Schema.Class<ChannelListResponse>('ChannelListResponse')({
   canManage: Schema.Boolean,
   guildLinked: Schema.Boolean,
+  archiveCategoryId: Schema.OptionFromNullOr(Snowflake),
   channels: Schema.Array(ChannelInfo),
 }) {}
 
@@ -48,12 +52,6 @@ export const RenameChannelRequest = Schema.Struct({
   name: Schema.NonEmptyString,
 });
 export type RenameChannelRequest = Schema.Schema.Type<typeof RenameChannelRequest>;
-
-export const UpdateOrganizationRequest = Schema.Struct({
-  category: Schema.OptionFromNullOr(Schema.String),
-  position: Schema.Number,
-});
-export type UpdateOrganizationRequest = Schema.Schema.Type<typeof UpdateOrganizationRequest>;
 
 export const SetChannelAccessRequest = Schema.Struct({
   grants: Schema.Array(ChannelAccessGrant),
@@ -72,6 +70,16 @@ export class ChannelNotFound extends Schema.TaggedErrorClass<ChannelNotFound>()(
 
 export class ChannelNameAlreadyTaken extends Schema.TaggedErrorClass<ChannelNameAlreadyTaken>()(
   'ChannelNameAlreadyTaken',
+  {},
+) {}
+
+export class ArchiveCategoryNotConfigured extends Schema.TaggedErrorClass<ArchiveCategoryNotConfigured>()(
+  'ArchiveCategoryNotConfigured',
+  {},
+) {}
+
+export class ChannelNotArchivable extends Schema.TaggedErrorClass<ChannelNotArchivable>()(
+  'ChannelNotArchivable',
   {},
 ) {}
 
@@ -117,17 +125,6 @@ export class ChannelApiGroup extends HttpApiGroup.make('channel')
     }).middleware(AuthMiddleware),
   )
   .add(
-    HttpApiEndpoint.patch('updateOrganization', '/teams/:teamId/channels/:channelId/organization', {
-      success: ChannelDetail,
-      error: [
-        ChannelForbidden.pipe(HttpApiSchema.status(403)),
-        ChannelNotFound.pipe(HttpApiSchema.status(404)),
-      ],
-      payload: UpdateOrganizationRequest,
-      params: { teamId: TeamId, channelId: TeamChannelId },
-    }).middleware(AuthMiddleware),
-  )
-  .add(
     HttpApiEndpoint.post('archiveChannel', '/teams/:teamId/channels/:channelId/archive', {
       success: Schema.Void.pipe(HttpApiSchema.status(204)),
       error: [
@@ -147,4 +144,20 @@ export class ChannelApiGroup extends HttpApiGroup.make('channel')
       payload: SetChannelAccessRequest,
       params: { teamId: TeamId, channelId: TeamChannelId },
     }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post(
+      'archiveDiscordChannel',
+      '/teams/:teamId/discord-channels/:discordChannelId/archive',
+      {
+        success: Schema.Void.pipe(HttpApiSchema.status(204)),
+        error: [
+          ArchiveCategoryNotConfigured.pipe(HttpApiSchema.status(409)),
+          ChannelNotArchivable.pipe(HttpApiSchema.status(409)),
+          ChannelForbidden.pipe(HttpApiSchema.status(403)),
+          ChannelNotFound.pipe(HttpApiSchema.status(404)),
+        ],
+        params: { teamId: TeamId, discordChannelId: Snowflake },
+      },
+    ).middleware(AuthMiddleware),
   ) {}

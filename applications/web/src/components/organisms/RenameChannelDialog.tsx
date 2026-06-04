@@ -1,5 +1,4 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
-import type { ChannelApi } from '@sideline/domain';
 import { Team, TeamChannel } from '@sideline/domain';
 import { useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
@@ -46,24 +45,26 @@ interface RenameChannelDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   teamId: string;
-  channel: ChannelApi.ChannelInfo;
+  teamChannelId: string;
+  channelName: string;
 }
 
 export function RenameChannelDialog({
   open,
   onOpenChange,
   teamId,
-  channel,
+  teamChannelId,
+  channelName,
 }: RenameChannelDialogProps) {
   const run = useRun();
   const router = useRouter();
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
-  const channelIdBranded = Schema.decodeSync(TeamChannel.TeamChannelId)(channel.channelId);
+  const channelIdBranded = Schema.decodeSync(TeamChannel.TeamChannelId)(teamChannelId);
 
   const form = useForm({
     resolver: standardSchemaResolver(Schema.toStandardSchemaV1(RenameChannelSchema)),
     mode: 'onChange',
-    defaultValues: { name: channel.name },
+    defaultValues: { name: channelName },
   });
 
   const nameValue = form.watch('name');
@@ -108,9 +109,9 @@ export function RenameChannelDialog({
                 <FormItem>
                   <FormLabel>{tr('channels_nameLabel')}</FormLabel>
                   <FormControl>
-                    <Input {...field} placeholder={channel.name} />
+                    <Input {...field} placeholder={channelName} />
                   </FormControl>
-                  {normalizedName && normalizedName !== normalizeChannelName(channel.name) && (
+                  {normalizedName && normalizedName !== normalizeChannelName(channelName) && (
                     <FormDescription>
                       {tr('channels_normalizedPreview', { name: normalizedName })}
                     </FormDescription>

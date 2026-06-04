@@ -223,7 +223,9 @@ Syncs groups to private Discord text channels with per-user permission overwrite
 | Bot service | `src/services/ChannelSyncService.ts` |
 | Mapping table | `discord_channel_mappings` (team_id + group_id → discord_channel_id) |
 
-`channel_sync_events.entity_type` is one of `group`, `roster`, or `managed`. The same `event_type` literals (`channel_created`, `channel_archived`, `channel_deleted`, `member_added`, `member_removed`) carry a different RPC event class per `entity_type` — `ProcessorService.ts` dispatches on the decoded RPC event `_tag`, not on `event_type`. `entity_type='managed'` events decode to the `Managed*` RPC event classes (see "Managed Channels" below); `channel_updated` and `channel_detached` are **never** emitted with `entity_type='managed'` (those `Match.when('managed', ...)` branches in `src/rpc/channel/events.ts` are impossible-state guards that fail with `EventPropertyMissing`).
+`channel_sync_events.entity_type` is one of `group`, `roster`, `managed`, or `discord`. The same `event_type` literals (`channel_created`, `channel_archived`, `channel_deleted`, `member_added`, `member_removed`) carry a different RPC event class per `entity_type` — `ProcessorService.ts` dispatches on the decoded RPC event `_tag`, not on `event_type`. `entity_type='managed'` events decode to the `Managed*` RPC event classes (see "Managed Channels" below); `channel_updated` and `channel_detached` are **never** emitted with `entity_type='managed'` (those `Match.when('managed', ...)` branches in `src/rpc/channel/events.ts` are impossible-state guards that fail with `EventPropertyMissing`). `entity_type='discord'` is valid **only** with `event_type='channel_archived'` (decodes to `DiscordChannelArchivedEvent`, handled by `handleDiscordArchived`); every other `event_type` for `discord` is an impossible-state guard that fails with `EventPropertyMissing`.
+
+Because `ProcessorService.ts` now exceeds the 20-argument `Match.type(...).pipe(...)` overload limit, the dispatcher is split into two chains: `actionMatcher` holds the first set of `Match.tag` arms and `action` pipes the remainder (`managed_access_revoked`, `discord_channel_archived`) before `Match.exhaustive`. Add new tags to whichever chain has room; never collapse them back into a single `pipe` past 20 arms.
 
 Event types: `channel_created`, `channel_updated`, `channel_deleted`, `channel_archived`, `channel_detached`, `member_added`, `member_removed`
 
@@ -312,6 +314,14 @@ Bot handlers (registered in `ProcessorService.ts` via `Match.tag`):
 | `managed_channel_deleted` | `src/rcp/channel/handleManagedDeleted.ts` | `deleteChannel`, then `Channel/ClearManagedChannel`. No endpoint currently emits this event (v1) — the handler exists for future use. |
 | `managed_access_granted` | `src/rcp/channel/handleManagedAccess.ts` (`handleManagedAccessGranted`) | `setChannelAccessOverwrite(discord_channel_id, discord_role_id, access_level)`. |
 | `managed_access_revoked` | `src/rcp/channel/handleManagedAccess.ts` (`handleManagedAccessRevoked`) | `removeChannelAccessOverwrite(discord_channel_id, discord_role_id)`. |
+| `discord_channel_archived` | `src/rcp/channel/handleDiscordArchived.ts` (`handleDiscordArchived`) | Move an arbitrary Discord channel (no `team_channels` row) to `archive_category_id` via `updateChannel({ parent_id })`. See asymmetry rules below. |
+
+`handleDiscordArchived` is for archiving channels Sideline did NOT create (`entity_type='discord'`). It differs from `handleManagedArchived` in two ways that MUST be preserved:
+
+1. **NO delete-fallback.** On `updateChannel` failure it logs a warning and stops — never delete a channel Sideline did not create. (`handleManagedArchived` may fall back to `deleteChannel` because Sideline created that channel.)
+2. **NO RPC ack.** There is no `team_channels` row to update, so it never calls `Channel/ClearManagedChannel` or any other ack RPC.
+
+When `event.discord_channel_id` is `None`, the handler is a no-op.
 
 Access tiers and Discord permission overwrites:
 

@@ -9,6 +9,7 @@ import { handleGroupArchived, handleRosterArchived } from './handleArchived.js';
 import { handleCreated } from './handleCreated.js';
 import { handleDeleted, handleRosterDeleted } from './handleDeleted.js';
 import { handleGroupDetached, handleRosterDetached } from './handleDetached.js';
+import { handleDiscordArchived } from './handleDiscordArchived.js';
 import { handleManagedAccessGranted, handleManagedAccessRevoked } from './handleManagedAccess.js';
 import { handleManagedArchived } from './handleManagedArchived.js';
 import { handleManagedCreated } from './handleManagedCreated.js';
@@ -18,31 +19,35 @@ import { handleMemberRemoved, handleRosterMemberRemoved } from './handleMemberRe
 import { handleRosterChannelCreated } from './handleRosterChannelCreated.js';
 import { handleGroupChannelUpdated, handleRosterChannelUpdated } from './handleUpdated.js';
 
+// Split into two pipe chains to stay within the 20-argument overload limit.
+const actionMatcher = Match.type<ChannelRpcEvents.UnprocessedChannelEvent>().pipe(
+  Match.tag('group_channel_created', handleCreated),
+  Match.tag('roster_channel_created', handleRosterChannelCreated),
+  Match.tag('group_channel_updated', handleGroupChannelUpdated),
+  Match.tag('roster_channel_updated', handleRosterChannelUpdated),
+  Match.tag('group_channel_deleted', handleDeleted),
+  Match.tag('roster_channel_deleted', handleRosterDeleted),
+  Match.tag('group_channel_archived', handleGroupArchived),
+  Match.tag('roster_channel_archived', handleRosterArchived),
+  Match.tag('group_channel_detached', handleGroupDetached),
+  Match.tag('roster_channel_detached', handleRosterDetached),
+  Match.tag('group_member_added', handleMemberAdded),
+  Match.tag('roster_member_added', handleRosterMemberAdded),
+  Match.tag('group_member_removed', handleMemberRemoved),
+  Match.tag('roster_member_removed', handleRosterMemberRemoved),
+  Match.tag('managed_channel_created', handleManagedCreated),
+  Match.tag('managed_channel_archived', handleManagedArchived),
+  Match.tag('managed_channel_deleted', handleManagedDeleted),
+  Match.tag('managed_access_granted', handleManagedAccessGranted),
+);
+
 const action: (
   event: ChannelRpcEvents.UnprocessedChannelEvent,
-) => Effect.Effect<void, unknown, SyncRpc | DiscordREST> =
-  Match.type<ChannelRpcEvents.UnprocessedChannelEvent>().pipe(
-    Match.tag('group_channel_created', handleCreated),
-    Match.tag('roster_channel_created', handleRosterChannelCreated),
-    Match.tag('group_channel_updated', handleGroupChannelUpdated),
-    Match.tag('roster_channel_updated', handleRosterChannelUpdated),
-    Match.tag('group_channel_deleted', handleDeleted),
-    Match.tag('roster_channel_deleted', handleRosterDeleted),
-    Match.tag('group_channel_archived', handleGroupArchived),
-    Match.tag('roster_channel_archived', handleRosterArchived),
-    Match.tag('group_channel_detached', handleGroupDetached),
-    Match.tag('roster_channel_detached', handleRosterDetached),
-    Match.tag('group_member_added', handleMemberAdded),
-    Match.tag('roster_member_added', handleRosterMemberAdded),
-    Match.tag('group_member_removed', handleMemberRemoved),
-    Match.tag('roster_member_removed', handleRosterMemberRemoved),
-    Match.tag('managed_channel_created', handleManagedCreated),
-    Match.tag('managed_channel_archived', handleManagedArchived),
-    Match.tag('managed_channel_deleted', handleManagedDeleted),
-    Match.tag('managed_access_granted', handleManagedAccessGranted),
-    Match.tag('managed_access_revoked', handleManagedAccessRevoked),
-    Match.exhaustive,
-  );
+) => Effect.Effect<void, unknown, SyncRpc | DiscordREST> = actionMatcher.pipe(
+  Match.tag('managed_access_revoked', handleManagedAccessRevoked),
+  Match.tag('discord_channel_archived', handleDiscordArchived),
+  Match.exhaustive,
+);
 
 /**
  * Returns true for errors that are permanent (i.e. retrying will not help):

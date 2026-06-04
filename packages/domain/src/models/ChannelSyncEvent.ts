@@ -24,7 +24,7 @@ export const ChannelCleanupMode = Schema.Literals(['nothing', 'delete', 'archive
 export type ChannelCleanupMode = typeof ChannelCleanupMode.Type;
 export type ChannelSyncEventType = typeof ChannelSyncEventType.Type;
 
-export const ChannelSyncEntityType = Schema.Literals(['group', 'roster', 'managed']);
+export const ChannelSyncEntityType = Schema.Literals(['group', 'roster', 'managed', 'discord']);
 export type ChannelSyncEntityType = typeof ChannelSyncEntityType.Type;
 
 export class ChannelSyncEvent extends Model.Class<ChannelSyncEvent>('ChannelSyncEvent')({

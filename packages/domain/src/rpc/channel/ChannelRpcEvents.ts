@@ -1,19 +1,24 @@
 import { Schema } from 'effect';
-import { ChannelSyncEvent, Discord, GroupModel, RosterModel, Team, TeamMember } from '~/index.js';
+import { ChannelSyncEventId } from '~/models/ChannelSyncEvent.js';
+import { Snowflake } from '~/models/Discord.js';
+import { GroupId } from '~/models/GroupModel.js';
+import { RosterId } from '~/models/RosterModel.js';
+import { TeamId } from '~/models/Team.js';
 import { TeamChannelId } from '~/models/TeamChannel.js';
 import { AccessLevel } from '~/models/TeamChannelAccess.js';
+import { TeamMemberId } from '~/models/TeamMember.js';
 
 // --- channel_created ---
 
 export class GroupChannelCreatedEvent extends Schema.TaggedClass<GroupChannelCreatedEvent>()(
   'group_channel_created',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    group_id: GroupModel.GroupId,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    group_id: GroupId,
     group_name: Schema.String,
-    existing_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    existing_channel_id: Schema.OptionFromNullOr(Snowflake),
     discord_channel_name: Schema.OptionFromNullOr(Schema.String),
     discord_role_name: Schema.String,
     discord_role_color: Schema.OptionFromNullOr(Schema.Number),
@@ -23,12 +28,12 @@ export class GroupChannelCreatedEvent extends Schema.TaggedClass<GroupChannelCre
 export class RosterChannelCreatedEvent extends Schema.TaggedClass<RosterChannelCreatedEvent>()(
   'roster_channel_created',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    roster_id: RosterModel.RosterId,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    roster_id: RosterId,
     roster_name: Schema.String,
-    existing_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    existing_channel_id: Schema.OptionFromNullOr(Snowflake),
     discord_channel_name: Schema.String,
     discord_role_name: Schema.String,
     discord_role_color: Schema.OptionFromNullOr(Schema.Number),
@@ -38,9 +43,9 @@ export class RosterChannelCreatedEvent extends Schema.TaggedClass<RosterChannelC
 export class ManagedChannelCreatedEvent extends Schema.TaggedClass<ManagedChannelCreatedEvent>()(
   'managed_channel_created',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
     team_channel_id: TeamChannelId,
     discord_channel_name: Schema.String,
   },
@@ -58,12 +63,12 @@ export type ChannelCreatedEvent = Schema.Schema.Type<typeof ChannelCreatedEvent>
 export class GroupChannelUpdatedEvent extends Schema.TaggedClass<GroupChannelUpdatedEvent>()(
   'group_channel_updated',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    group_id: GroupModel.GroupId,
-    discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
-    discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    group_id: GroupId,
+    discord_channel_id: Schema.OptionFromNullOr(Snowflake),
+    discord_role_id: Schema.OptionFromNullOr(Snowflake),
     discord_channel_name: Schema.String,
     discord_role_name: Schema.String,
     discord_role_color: Schema.OptionFromNullOr(Schema.Number),
@@ -73,12 +78,12 @@ export class GroupChannelUpdatedEvent extends Schema.TaggedClass<GroupChannelUpd
 export class RosterChannelUpdatedEvent extends Schema.TaggedClass<RosterChannelUpdatedEvent>()(
   'roster_channel_updated',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    roster_id: RosterModel.RosterId,
-    discord_channel_id: Discord.Snowflake,
-    discord_role_id: Discord.Snowflake,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    roster_id: RosterId,
+    discord_channel_id: Snowflake,
+    discord_role_id: Snowflake,
     discord_channel_name: Schema.String,
     discord_role_name: Schema.String,
     discord_role_color: Schema.OptionFromNullOr(Schema.Number),
@@ -96,47 +101,47 @@ export type ChannelUpdatedEvent = Schema.Schema.Type<typeof ChannelUpdatedEvent>
 export class GroupChannelDeletedEvent extends Schema.TaggedClass<GroupChannelDeletedEvent>()(
   'group_channel_deleted',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    group_id: GroupModel.GroupId,
-    discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
-    discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    group_id: GroupId,
+    discord_channel_id: Schema.OptionFromNullOr(Snowflake),
+    discord_role_id: Schema.OptionFromNullOr(Snowflake),
   },
 ) {}
 
 export class RosterChannelDeletedEvent extends Schema.TaggedClass<RosterChannelDeletedEvent>()(
   'roster_channel_deleted',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    roster_id: RosterModel.RosterId,
-    discord_channel_id: Discord.Snowflake,
-    discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    roster_id: RosterId,
+    discord_channel_id: Snowflake,
+    discord_role_id: Schema.OptionFromNullOr(Snowflake),
   },
 ) {}
 
 export class ManagedChannelDeletedEvent extends Schema.TaggedClass<ManagedChannelDeletedEvent>()(
   'managed_channel_deleted',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
     team_channel_id: TeamChannelId,
-    discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    discord_channel_id: Schema.OptionFromNullOr(Snowflake),
   },
 ) {}
 
 export class ManagedChannelAccessGrantedEvent extends Schema.TaggedClass<ManagedChannelAccessGrantedEvent>()(
   'managed_access_granted',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
     team_channel_id: TeamChannelId,
-    discord_channel_id: Discord.Snowflake,
-    discord_role_id: Discord.Snowflake,
+    discord_channel_id: Snowflake,
+    discord_role_id: Snowflake,
     access_level: AccessLevel,
   },
 ) {}
@@ -144,11 +149,11 @@ export class ManagedChannelAccessGrantedEvent extends Schema.TaggedClass<Managed
 export class ManagedChannelAccessRevokedEvent extends Schema.TaggedClass<ManagedChannelAccessRevokedEvent>()(
   'managed_access_revoked',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    discord_channel_id: Discord.Snowflake,
-    discord_role_id: Discord.Snowflake,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    discord_channel_id: Snowflake,
+    discord_role_id: Snowflake,
   },
 ) {}
 
@@ -164,38 +169,49 @@ export type ChannelDeletedEvent = Schema.Schema.Type<typeof ChannelDeletedEvent>
 export class GroupChannelArchivedEvent extends Schema.TaggedClass<GroupChannelArchivedEvent>()(
   'group_channel_archived',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    group_id: GroupModel.GroupId,
-    discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
-    discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
-    archive_category_id: Discord.Snowflake,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    group_id: GroupId,
+    discord_channel_id: Schema.OptionFromNullOr(Snowflake),
+    discord_role_id: Schema.OptionFromNullOr(Snowflake),
+    archive_category_id: Snowflake,
   },
 ) {}
 
 export class RosterChannelArchivedEvent extends Schema.TaggedClass<RosterChannelArchivedEvent>()(
   'roster_channel_archived',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    roster_id: RosterModel.RosterId,
-    discord_channel_id: Discord.Snowflake,
-    discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
-    archive_category_id: Discord.Snowflake,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    roster_id: RosterId,
+    discord_channel_id: Snowflake,
+    discord_role_id: Schema.OptionFromNullOr(Snowflake),
+    archive_category_id: Snowflake,
   },
 ) {}
 
 export class ManagedChannelArchivedEvent extends Schema.TaggedClass<ManagedChannelArchivedEvent>()(
   'managed_channel_archived',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
     team_channel_id: TeamChannelId,
-    discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
-    archive_category_id: Discord.Snowflake,
+    discord_channel_id: Schema.OptionFromNullOr(Snowflake),
+    archive_category_id: Snowflake,
+  },
+) {}
+
+export class DiscordChannelArchivedEvent extends Schema.TaggedClass<DiscordChannelArchivedEvent>()(
+  'discord_channel_archived',
+  {
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    discord_channel_id: Schema.OptionFromNullOr(Snowflake),
+    archive_category_id: Snowflake,
   },
 ) {}
 
@@ -203,6 +219,7 @@ export const ChannelArchivedEvent = Schema.Union([
   GroupChannelArchivedEvent,
   RosterChannelArchivedEvent,
   ManagedChannelArchivedEvent,
+  DiscordChannelArchivedEvent,
 ]);
 export type ChannelArchivedEvent = Schema.Schema.Type<typeof ChannelArchivedEvent>;
 
@@ -211,24 +228,24 @@ export type ChannelArchivedEvent = Schema.Schema.Type<typeof ChannelArchivedEven
 export class GroupChannelDetachedEvent extends Schema.TaggedClass<GroupChannelDetachedEvent>()(
   'group_channel_detached',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    group_id: GroupModel.GroupId,
-    discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
-    discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    group_id: GroupId,
+    discord_channel_id: Schema.OptionFromNullOr(Snowflake),
+    discord_role_id: Schema.OptionFromNullOr(Snowflake),
   },
 ) {}
 
 export class RosterChannelDetachedEvent extends Schema.TaggedClass<RosterChannelDetachedEvent>()(
   'roster_channel_detached',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    roster_id: RosterModel.RosterId,
-    discord_channel_id: Discord.Snowflake,
-    discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    roster_id: RosterId,
+    discord_channel_id: Snowflake,
+    discord_role_id: Schema.OptionFromNullOr(Snowflake),
   },
 ) {}
 
@@ -243,26 +260,26 @@ export type ChannelDetachedEvent = Schema.Schema.Type<typeof ChannelDetachedEven
 export class GroupMemberAddedEvent extends Schema.TaggedClass<GroupMemberAddedEvent>()(
   'group_member_added',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    group_id: GroupModel.GroupId,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    group_id: GroupId,
     group_name: Schema.String,
-    team_member_id: TeamMember.TeamMemberId,
-    discord_user_id: Discord.Snowflake,
+    team_member_id: TeamMemberId,
+    discord_user_id: Snowflake,
   },
 ) {}
 
 export class RosterMemberAddedEvent extends Schema.TaggedClass<RosterMemberAddedEvent>()(
   'roster_member_added',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    roster_id: RosterModel.RosterId,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    roster_id: RosterId,
     roster_name: Schema.String,
-    team_member_id: TeamMember.TeamMemberId,
-    discord_user_id: Discord.Snowflake,
+    team_member_id: TeamMemberId,
+    discord_user_id: Snowflake,
   },
 ) {}
 
@@ -277,24 +294,24 @@ export type ChannelMemberAddedEvent = Schema.Schema.Type<typeof ChannelMemberAdd
 export class GroupMemberRemovedEvent extends Schema.TaggedClass<GroupMemberRemovedEvent>()(
   'group_member_removed',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    group_id: GroupModel.GroupId,
-    team_member_id: TeamMember.TeamMemberId,
-    discord_user_id: Discord.Snowflake,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    group_id: GroupId,
+    team_member_id: TeamMemberId,
+    discord_user_id: Snowflake,
   },
 ) {}
 
 export class RosterMemberRemovedEvent extends Schema.TaggedClass<RosterMemberRemovedEvent>()(
   'roster_member_removed',
   {
-    id: ChannelSyncEvent.ChannelSyncEventId,
-    team_id: Team.TeamId,
-    guild_id: Discord.Snowflake,
-    roster_id: RosterModel.RosterId,
-    team_member_id: TeamMember.TeamMemberId,
-    discord_user_id: Discord.Snowflake,
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    roster_id: RosterId,
+    team_member_id: TeamMemberId,
+    discord_user_id: Snowflake,
   },
 ) {}
 
@@ -313,6 +330,7 @@ export const UnprocessedChannelEvent = Schema.Union([
   GroupChannelArchivedEvent,
   RosterChannelArchivedEvent,
   ManagedChannelArchivedEvent,
+  DiscordChannelArchivedEvent,
   GroupChannelDetachedEvent,
   RosterChannelDetachedEvent,
   ChannelMemberAddedEvent,

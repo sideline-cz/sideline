@@ -288,6 +288,116 @@ describe('constructEvent — managed member_removed (access revoked)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// channel_archived + entity_type='discord' → DiscordChannelArchivedEvent
+// ---------------------------------------------------------------------------
+
+describe('constructEvent — discord channel_archived', () => {
+  it('produces DiscordChannelArchivedEvent with discord_channel_id Some + archive_category_id', async () => {
+    const row = baseRow('channel_archived', 'discord', {
+      existing_channel_id: Option.some(DISCORD_CHANNEL_ID),
+      archive_category_id: Option.some(ARCHIVE_CATEGORY_ID),
+    });
+
+    const event = await run(constructEvent(row));
+
+    expect(event._tag).toBe('discord_channel_archived');
+    if (event._tag !== 'discord_channel_archived') return;
+    expect(Option.isSome(event.discord_channel_id)).toBe(true);
+    if (Option.isSome(event.discord_channel_id)) {
+      expect(event.discord_channel_id.value).toBe(DISCORD_CHANNEL_ID);
+    }
+    expect(event.archive_category_id).toBe(ARCHIVE_CATEGORY_ID);
+    expect(event.guild_id).toBe(GUILD_ID);
+  });
+
+  it('produces DiscordChannelArchivedEvent with discord_channel_id None when existing_channel_id absent', async () => {
+    const row = baseRow('channel_archived', 'discord', {
+      archive_category_id: Option.some(ARCHIVE_CATEGORY_ID),
+      // existing_channel_id stays Option.none()
+    });
+
+    const event = await run(constructEvent(row));
+
+    expect(event._tag).toBe('discord_channel_archived');
+    if (event._tag !== 'discord_channel_archived') return;
+    expect(Option.isNone(event.discord_channel_id)).toBe(true);
+    expect(event.archive_category_id).toBe(ARCHIVE_CATEGORY_ID);
+  });
+
+  it('fails with EventPropertyMissing when archive_category_id is absent', async () => {
+    const row = baseRow('channel_archived', 'discord', {
+      existing_channel_id: Option.some(DISCORD_CHANNEL_ID),
+      // archive_category_id stays Option.none()
+    });
+
+    const error = await runFail(constructEvent(row));
+
+    expect(error).toBeInstanceOf(EventPropertyMissing);
+    expect((error as EventPropertyMissing).property).toBe('archive_category_id');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Impossible-state guards: discord entity_type for non-channel_archived event_types
+// ---------------------------------------------------------------------------
+
+describe('constructEvent — impossible-state guards for discord entity_type', () => {
+  it('channel_created + discord → fails with EventPropertyMissing (impossible state)', async () => {
+    const row = baseRow('channel_created', 'discord');
+
+    const error = await runFail(constructEvent(row));
+
+    expect(error).toBeInstanceOf(EventPropertyMissing);
+    expect((error as EventPropertyMissing).property).toContain('discord');
+  });
+
+  it('channel_updated + discord → fails with EventPropertyMissing (impossible state)', async () => {
+    const row = baseRow('channel_updated', 'discord');
+
+    const error = await runFail(constructEvent(row));
+
+    expect(error).toBeInstanceOf(EventPropertyMissing);
+    expect((error as EventPropertyMissing).property).toContain('discord');
+  });
+
+  it('channel_deleted + discord → fails with EventPropertyMissing (impossible state)', async () => {
+    const row = baseRow('channel_deleted', 'discord');
+
+    const error = await runFail(constructEvent(row));
+
+    expect(error).toBeInstanceOf(EventPropertyMissing);
+    expect((error as EventPropertyMissing).property).toContain('discord');
+  });
+
+  it('member_added + discord → fails with EventPropertyMissing (impossible state)', async () => {
+    const row = baseRow('member_added', 'discord');
+
+    const error = await runFail(constructEvent(row));
+
+    expect(error).toBeInstanceOf(EventPropertyMissing);
+    expect((error as EventPropertyMissing).property).toContain('discord');
+  });
+
+  it('member_removed + discord → fails with EventPropertyMissing (impossible state)', async () => {
+    const row = baseRow('member_removed', 'discord');
+
+    const error = await runFail(constructEvent(row));
+
+    expect(error).toBeInstanceOf(EventPropertyMissing);
+    expect((error as EventPropertyMissing).property).toContain('discord');
+  });
+
+  it('channel_detached + discord → fails with EventPropertyMissing (impossible state)', async () => {
+    const row = baseRow('channel_detached', 'discord');
+
+    const error = await runFail(constructEvent(row));
+
+    expect(error).toBeInstanceOf(EventPropertyMissing);
+    expect((error as EventPropertyMissing).property).toContain('discord');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Impossible-state guards: channel_updated + managed, channel_detached + managed
 // ---------------------------------------------------------------------------
 

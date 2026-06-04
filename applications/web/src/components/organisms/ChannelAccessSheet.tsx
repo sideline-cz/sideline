@@ -40,7 +40,8 @@ interface ChannelAccessSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   teamId: string;
-  channel: ChannelApi.ChannelInfo;
+  channelName: string;
+  teamChannelId: string;
   allGroups: ReadonlyArray<GroupApi.GroupInfo>;
   canManage: boolean;
 }
@@ -49,14 +50,15 @@ export function ChannelAccessSheet({
   open,
   onOpenChange,
   teamId,
-  channel,
+  channelName,
+  teamChannelId,
   allGroups,
   canManage,
 }: ChannelAccessSheetProps) {
   const run = useRun();
   const router = useRouter();
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
-  const channelIdBranded = Schema.decodeSync(TeamChannel.TeamChannelId)(channel.channelId);
+  const channelIdBranded = Schema.decodeSync(TeamChannel.TeamChannelId)(teamChannelId);
 
   const [detail, setDetail] = React.useState<ChannelApi.ChannelDetail | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -71,6 +73,9 @@ export function ChannelAccessSheet({
     setLoadError(false);
     setDetail(null);
 
+    // Capture the channel id at fetch start to guard against stale results
+    const fetchedForChannelId = teamChannelId;
+
     const effect = ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.channel.getChannel({ params: { teamId: teamIdBranded, channelId: channelIdBranded } }),
@@ -80,6 +85,8 @@ export function ChannelAccessSheet({
     );
 
     effect.then((result) => {
+      // Ignore the result if the active channel has changed since fetch started
+      if (fetchedForChannelId !== teamChannelId) return;
       if (Option.isSome(result)) {
         setDetail(result.value);
       } else {
@@ -87,7 +94,7 @@ export function ChannelAccessSheet({
       }
       setLoading(false);
     });
-  }, [open, teamIdBranded, channelIdBranded, run]);
+  }, [open, teamIdBranded, channelIdBranded, run, teamChannelId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const grantedGroupIds = new Set(detail?.grants.map((g) => g.groupId) ?? []);
   const availableGroups = allGroups.filter((g) => !grantedGroupIds.has(g.groupId));
@@ -186,7 +193,7 @@ export function ChannelAccessSheet({
         <SheetHeader className='p-4 pb-2'>
           <SheetTitle>{tr('channels_access_title')}</SheetTitle>
           <SheetDescription>
-            # {channel.name} — {tr('channels_access_description')}
+            # {channelName} — {tr('channels_access_description')}
           </SheetDescription>
         </SheetHeader>
 

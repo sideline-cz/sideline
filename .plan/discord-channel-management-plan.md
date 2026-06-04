@@ -133,3 +133,24 @@ reusing existing `event_type` literals (`channel_created/updated/deleted/archive
 `docs/database.md`, `docs/api.md`, `docs/discord-bot.md`,
 `docs/thesis/{er-diagram,use-cases,sequence-diagrams}.md`,
 `applications/docs/.../admin.mdx` + changelog, relevant `AGENTS.md` sections.
+
+---
+
+## CodeRabbit review findings to fold into the change implementation (PR #346)
+
+Address these while implementing the Discord-backed-list changes (developers will
+already be touching most of these files). Resolve the threads after pushing.
+
+Valid / fold in:
+- domain `ChannelApi.ts`: use branded `Discord.Snowflake` for `discordChannelId` (not String). (Aligns with the re-key.)
+- domain `models/TeamChannel.ts:16`: brand `discord_channel_id`/`discord_role_id` as Discord.Snowflake.
+- domain `rpc/channel/ChannelRpcEvents.ts:4`: replace `~/index.js` barrel import with concrete model imports.
+- bot `rest/channels/setChannelAccessOverwrite.ts` (+ pre-existing createRoleOnly/createRoleForChannel/createChannelWithRole/createChannelOnly): wrap retried `rest.*` calls in `Effect.suspend` so retry doesn't re-run an already-constructed effect (per bot retry guideline). Verify against codebase convention first — pattern is widespread, confirm it's a real issue before mass-editing pre-existing helpers.
+- bot `handleManagedCreated.ts`: non-idempotent create — if UpsertManagedChannel fails after createChannelOnly, retry duplicates the channel. Add compensation (delete on upsert failure) or a claim/pre-check. (Heavy lift — scope carefully.)
+- web `ChannelAccessSheet.tsx:90`: guard against stale fetches overwriting grants for a different channel (race when switching channels).
+- server `test/mocks/channelMocks.ts:20`: mock write methods should fail-fast (die) on unexpected calls rather than silently succeed.
+- server `test/ChannelAccess.test.ts:295`: the guild-not-linked test doesn't truly assert zero sync events (mock gating masks it) — strengthen the assertion.
+- web `ArchiveChannelDialog.tsx`, `ChannelManagementPage.tsx`: being rewritten by this change — apply CodeRabbit's points during the rewrite.
+
+Evaluate / likely skip with reason:
+- migration `1789000000:19` add `updated_at`/`updated_by_user_id` audit columns to team_channels — team_channels isn't a config-audit table; skip unless the team wants audit columns.
