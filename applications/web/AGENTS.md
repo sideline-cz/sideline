@@ -497,6 +497,25 @@ type Run = (
 
 **Wiring**: The root loader creates `runPromiseClient(url)` and passes it to `RootDocument` as the `run` prop, which puts it in `RunProvider`. All organisms access it via `useRun()`.
 
+### Server Runners: AbortController Wiring And Exit Handling
+
+`runPromiseServer` / `ServerRunner` bind a `beforeLoad`/`loader` Effect to the router's `AbortController` so a superseded navigation interrupts the in-flight run. Both runners MUST execute via `Effect.runPromiseExit(effect, { signal: controller.signal })` and route the resulting `Exit` through the shared `resolveServerExit(exit, aborted)` helper (`lib/runtime.ts`). Never recreate this wiring inline in a route file.
+
+```typescript
+const exit = await Effect.runPromiseExit(effectResponse, {
+  signal: abortController?.signal,
+});
+return resolveServerExit(exit, abortController?.signal.aborted ?? false);
+```
+
+Rules:
+
+1. **Pass `{ signal: controller.signal }`, never the `AbortController` itself, as the second argument to `Effect.runPromiseExit`.** Effect expects a `{ signal }` options object; passing the bare controller (e.g. `Effect.runPromise(effect, abortController)`) type-checks but silently never wires abort, so superseded navigations keep running and can clobber the new page.
+2. **An interrupted or superseded run MUST NOT settle the promise.** `resolveServerExit` returns a never-settling `new Promise<never>(() => {})` when `aborted` is `true` or `Cause.hasInterruptsOnly(exit.cause)` holds. The new navigation owns the outcome; settling here would surface a bogus error or unhandled rejection. Do not add a timeout to "rescue" such a run — see the comment in `routes/__root.tsx`.
+3. **A genuine defect MUST throw a real `Error`.** For a non-interrupt failure `exit`, `resolveServerExit` does `Cause.squash` and throws the squashed value when it is an `Error`, otherwise `new Error('Unexpected runtime defect: ...')`. A bare `undefined` must never escape to the router.
+4. **Typed `Redirect` / `NotFound` are not failures here.** Server runners wrap the Effect in `Effect.result`, so those land in the `Success` exit as `Result.fail(...)`; `resolveServerExit` re-throws them via `r.redirect()` / `notFound()`. The `Failure` exit branch is therefore interrupt/defect only.
+5. **`resolveServerExit` has a co-located contract test** (`lib/runtime.test.ts`) covering success, redirect/notFound re-throw, never-settle on interrupt/abort, and the no-bare-`undefined` defect guard. Update it whenever the helper's branching changes.
+
 ### Pattern A: Organism builds and runs its own Effect (default)
 
 The organism calls `useRun()`, builds the Effect pipeline internally, and runs it. This is the standard pattern for organisms that own their API logic.

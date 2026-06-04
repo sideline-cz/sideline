@@ -6,8 +6,10 @@ import {
   redirect,
 } from '@tanstack/react-router';
 import {
+  Cause,
   Data,
   Effect,
+  Exit,
   Layer,
   Logger,
   Match,
@@ -35,7 +37,7 @@ type Client = Effect.Success<typeof client>;
 export class ApiClient extends ServiceMap.Service<ApiClient, Client>()('ApiClient') {}
 
 export class Redirect extends Data.TaggedError('Redirect')<{
-  readonly redirect: () => void;
+  readonly redirect: () => never;
 }> {
   static make = <
     TRouter extends AnyRouter = RegisteredRouter,
@@ -64,6 +66,35 @@ export const warnAndCatchAll = <A, E, R>(
     Effect.tapError((e) => Effect.logWarning('Unexpected loader error', e)),
     Effect.catch(() => Effect.fail(new NotFound())),
   );
+
+export const resolveServerExit = async <A>(
+  exit: Exit.Exit<Result.Result<A, Redirect | NotFound>>,
+  aborted: boolean,
+): Promise<A> => {
+  if (Exit.isSuccess(exit)) {
+    return Result.match(exit.value, {
+      onSuccess: (d) => d,
+      onFailure: (e) =>
+        Match.value(e).pipe(
+          Match.tag('Redirect', (r) => r.redirect()),
+          Match.tag('NotFound', () => {
+            throw notFound();
+          }),
+          Match.exhaustive,
+        ),
+    });
+  }
+  // Failure exit = interrupt/defect (typed Redirect/NotFound were captured by Effect.result into the success channel)
+  if (aborted || Cause.hasInterruptsOnly(exit.cause)) {
+    // Navigation was superseded (or the fiber was interrupted) — drop this run so a bare
+    // interrupt/undefined never escapes to the router. The new navigation owns the outcome.
+    return new Promise<never>(() => {});
+  }
+  const squashed = Cause.squash(exit.cause);
+  throw squashed instanceof Error
+    ? squashed
+    : new Error(`Unexpected runtime defect: ${String(squashed)}`);
+};
 
 const ApiClientLive = Layer.effect(ApiClient, client);
 
@@ -108,17 +139,10 @@ export class ServerRunner {
         baseUrl: this.serverUrl,
       }),
     );
-    const response = await Effect.runPromise(effectResponse, this.abortController);
-    return Result.match(response, {
-      onSuccess: (d) => d,
-      onFailure: (e) => {
-        throw Match.value(e).pipe(
-          Match.tag('Redirect', (e) => e.redirect()),
-          Match.tag('NotFound', () => notFound()),
-          Match.exhaustive,
-        );
-      },
+    const exit = await Effect.runPromiseExit(effectResponse, {
+      signal: this.abortController?.signal,
     });
+    return resolveServerExit(exit, this.abortController?.signal.aborted ?? false);
   }
 }
 
@@ -135,17 +159,10 @@ export const runPromiseServer =
         baseUrl: serverUrl,
       }),
     );
-    const response = await Effect.runPromise(effectResponse, abortController);
-    return Result.match(response, {
-      onSuccess: (d) => d,
-      onFailure: (e) => {
-        throw Match.value(e).pipe(
-          Match.tag('Redirect', (e) => e.redirect()),
-          Match.tag('NotFound', () => notFound()),
-          Match.exhaustive,
-        );
-      },
+    const exit = await Effect.runPromiseExit(effectResponse, {
+      signal: abortController?.signal,
     });
+    return resolveServerExit(exit, abortController?.signal.aborted ?? false);
   };
 
 export const runPromiseClient =
