@@ -57,12 +57,12 @@ export class TranslationForbidden extends Schema.TaggedErrorClass<TranslationFor
 
 export class TranslationsApiGroup extends HttpApiGroup.make('translations')
   .add(
-    HttpApiEndpoint.get('list', '/api/translations', {
+    HttpApiEndpoint.get('list', '/translations', {
       success: TranslationsResponse,
     }).middleware(AuthMiddleware),
   )
   .add(
-    HttpApiEndpoint.patch('upsert', '/api/translations/:key', {
+    HttpApiEndpoint.patch('upsert', '/translations/:key', {
       success: TranslationsResponse,
       error: TranslationForbidden.pipe(HttpApiSchema.status(403)),
       payload: UpsertTranslationPayload,
@@ -70,7 +70,7 @@ export class TranslationsApiGroup extends HttpApiGroup.make('translations')
     }).middleware(AuthMiddleware),
   )
   .add(
-    HttpApiEndpoint.post('import_', '/api/translations/import', {
+    HttpApiEndpoint.post('import_', '/translations/import', {
       success: TranslationsResponse,
       error: [
         TranslationForbidden.pipe(HttpApiSchema.status(403)),
@@ -80,7 +80,7 @@ export class TranslationsApiGroup extends HttpApiGroup.make('translations')
     }).middleware(AuthMiddleware),
   )
   .add(
-    HttpApiEndpoint.get('exportJson', '/api/translations/export.json', {
+    HttpApiEndpoint.get('exportJson', '/translations/export.json', {
       success: Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String)),
       error: TranslationForbidden.pipe(HttpApiSchema.status(403)),
     }).middleware(AuthMiddleware),
