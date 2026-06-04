@@ -1,5 +1,11 @@
 # @sideline/web
 
+## 0.15.2
+
+### Patch Changes
+
+- [#350](https://github.com/maxa-ondrej/sideline/pull/350) [`42c5822`](https://github.com/maxa-ondrej/sideline/commit/42c58226132734f72388d0acd6c60d89f1c30fee) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Pick up the corrected Translations API endpoint paths (08fb679c). The server now mounts the translations endpoints at `/api/translations` (instead of the double-prefixed `/api/api/translations`), and the web client requests them at the matching `/api/translations`. This restores translation-override loading and fixes the CSV/JSON export route.
+
 ## 0.15.1
 
 ### Patch Changes
