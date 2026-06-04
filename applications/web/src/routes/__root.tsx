@@ -106,6 +106,7 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
     const environment = await fetchEnv(abortController);
     const makeRun = runPromiseServer(environment.SERVER_URL);
     const run = makeRun(abortController);
+    // On a superseded navigation this intentionally never resolves — do not add a timeout.
     const user = await getCurrentUser.pipe(Effect.option, Effect.map(Option.flatten), run);
     if (Option.isSome(user)) {
       setLocale(user.value.locale);

@@ -5,6 +5,11 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-04 — Fix crash immediately after Discord login
+
+- Fixed an `Uncaught undefined` error that appeared in the browser immediately after completing Discord OAuth login. The crash was caused by the post-login redirect (which strips the `?token=` parameter from the URL) interrupting an in-flight page load, allowing a bare `undefined` to escape to the router.
+- No user data was affected. You may have seen a blank or broken page on first login; reloading the page worked around it. This is now resolved.
+
 ## 2026-06-03 — Consistent display names across the app
 
 - All name fields across the app now follow a single precedence rule: **profile name → Discord server nickname → Discord display name → Discord username**. Whichever is set and non-blank is shown first.
