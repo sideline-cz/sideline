@@ -39,16 +39,16 @@ export const Route = createFileRoute('/')({
   component: HomeRoute,
   validateSearch: Schema.toStandardSchemaV1(
     Schema.Struct({
-      token: Schema.OptionFromOptionalNullOr(Schema.String),
-      error: Schema.OptionFromOptionalNullOr(Schema.String),
-      reason: Schema.OptionFromOptionalNullOr(Schema.String),
+      token: Schema.optional(Schema.NullOr(Schema.String)),
+      error: Schema.optional(Schema.NullOr(Schema.String)),
+      reason: Schema.optional(Schema.NullOr(Schema.String)),
     }),
   ),
   beforeLoad: ({ search, context }) =>
     Effect.Do.pipe(
-      Effect.flatMap(() => Effect.fromOption(search.token)),
+      Effect.flatMap(() => Effect.fromOption(Option.fromNullishOr(search.token))),
       Effect.flatMap(finishLogin),
-      Effect.flatMap(() => Effect.fail(Redirect.make({ to: '.', search: {}, replace: true }))),
+      Effect.flatMap(() => Effect.fail(Redirect.make({ to: '.' }))),
       Effect.catchTag('NoSuchElementError', () => Effect.void),
       Effect.tap(
         Option.match(context.userOption, {
@@ -107,5 +107,11 @@ function HomeRoute() {
   const { loginUrl } = Route.useLoaderData();
   const { error, reason } = Route.useSearch();
 
-  return <HomePage loginUrl={loginUrl} error={error} reason={reason} />;
+  return (
+    <HomePage
+      loginUrl={loginUrl}
+      error={Option.fromNullishOr(error)}
+      reason={Option.fromNullishOr(reason)}
+    />
+  );
 }
