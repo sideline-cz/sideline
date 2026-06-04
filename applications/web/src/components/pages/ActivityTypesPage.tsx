@@ -60,7 +60,7 @@ interface ActivityTypeFormDialogProps {
   editing?: ActivityTypeApi.ActivityTypeInfo;
 }
 
-function ActivityTypeFormDialog({
+export function ActivityTypeFormDialog({
   teamId,
   open,
   onClose,
@@ -271,7 +271,7 @@ interface CannotDeleteDialogProps {
   onRename: () => void;
 }
 
-function CannotDeleteDialog({
+export function CannotDeleteDialog({
   open,
   name,
   usageCount,
@@ -316,6 +316,12 @@ export function ActivityTypesPage({ teamId, canAdmin, activityTypes }: ActivityT
   const [cannotDeleteTarget, setCannotDeleteTarget] =
     React.useState<ActivityTypeApi.ActivityTypeInfo | null>(null);
   const [cannotDeleteCount, setCannotDeleteCount] = React.useState(0);
+
+  const editTargetRef = React.useRef<ActivityTypeApi.ActivityTypeInfo | null>(null);
+  if (editTarget !== null) editTargetRef.current = editTarget;
+
+  const cannotDeleteNameRef = React.useRef('');
+  if (cannotDeleteTarget !== null) cannotDeleteNameRef.current = cannotDeleteTarget.name;
 
   const handleSaved = React.useCallback(() => {
     router.invalidate();
@@ -470,30 +476,29 @@ export function ActivityTypesPage({ teamId, canAdmin, activityTypes }: ActivityT
       />
 
       {/* Edit dialog */}
-      {editTarget !== null && (
-        <ActivityTypeFormDialog
-          teamId={teamIdBranded}
-          open={true}
-          onClose={() => setEditTarget(null)}
-          onSaved={handleSaved}
-          editing={editTarget}
-        />
-      )}
+      <ActivityTypeFormDialog
+        teamId={teamIdBranded}
+        open={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+        onSaved={handleSaved}
+        editing={editTarget ?? editTargetRef.current ?? undefined}
+      />
 
       {/* Cannot delete dialog */}
-      {cannotDeleteTarget !== null && (
-        <CannotDeleteDialog
-          open={true}
-          name={cannotDeleteTarget.name}
-          usageCount={cannotDeleteCount}
-          onClose={() => setCannotDeleteTarget(null)}
-          onRename={() => {
-            const target = cannotDeleteTarget;
-            setCannotDeleteTarget(null);
-            setEditTarget(target);
-          }}
-        />
-      )}
+      {/* cannotDeleteCount is intentionally not frozen/reset on close: it is only ever
+          set together with cannotDeleteTarget, so it stays consistent with the frozen
+          name during the close animation. */}
+      <CannotDeleteDialog
+        open={cannotDeleteTarget !== null}
+        name={cannotDeleteTarget?.name ?? cannotDeleteNameRef.current}
+        usageCount={cannotDeleteCount}
+        onClose={() => setCannotDeleteTarget(null)}
+        onRename={() => {
+          const target = cannotDeleteTarget;
+          setCannotDeleteTarget(null);
+          if (target) setEditTarget(target);
+        }}
+      />
     </div>
   );
 }

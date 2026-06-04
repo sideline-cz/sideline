@@ -16,6 +16,11 @@ This page lists user-visible changes to Sideline. For developer-level release no
 - The leaderboard, RSVP attendee lists, event non-responder lists, group member lists, roster member lists, and the nav user menu all benefit from this change — names are now consistent everywhere.
 - API integrators: a new `displayName` field (always a non-empty string) is now included on `CurrentUser`, `RosterPlayer`, `LeaderboardEntry`, `RsvpEntry`, `NonResponderEntry`, and group member objects inside `GroupDetail`. The existing `name` / `memberName` fields are unchanged.
 
+## 2026-06-03 — Onboarding-token page overlay fix
+
+- Fixed a bug on the **Administration → Team onboarding** page where generating a link left a dark modal overlay stuck on screen after closing the dialog.
+- The **Copy** button on the generated-link dialog no longer shows an error page when the clipboard API is unavailable; it silently falls back and the link remains visible for manual copying.
+
 ## 2026-06-02 — Discord carpool board (/doprava)
 
 - Captains and admins can now post a live-updating **carpool board** in any Discord channel with the `/doprava` command (English alias: `/carpool`).

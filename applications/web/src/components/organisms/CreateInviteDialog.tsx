@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '~/components/ui/select';
+import { copyToClipboard } from '~/lib/clipboard';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
@@ -47,6 +48,14 @@ export function CreateInviteDialog({
   const [creating, setCreating] = React.useState(false);
   const [createdCode, setCreatedCode] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
 
   const inviteLink = createdCode ? `${window.location.origin}/invite/${createdCode}` : null;
 
@@ -87,14 +96,16 @@ export function CreateInviteDialog({
   }, [teamId, groupMode, selectedGroupId, expiry, run]);
 
   const handleCopy = React.useCallback(() => {
-    if (!inviteLink) return;
-    navigator.clipboard.writeText(inviteLink).then(() => {
+    copyToClipboard(inviteLink ?? '').then((ok) => {
+      if (!ok) return;
+      if (timerRef.current) clearTimeout(timerRef.current);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      timerRef.current = setTimeout(() => setCopied(false), 2000);
     });
   }, [inviteLink]);
 
   const handleClose = React.useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
     setCreatedCode(null);
     setCopied(false);
     setGroupMode('any');

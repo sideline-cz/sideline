@@ -713,9 +713,38 @@ When building captain-/admin-facing CRUD for a small entity, pick exactly one of
 2. **Inline `<Dialog>` for create AND edit.** A single `<ResourceFormDialog>` component handles both: `editing?: ResourceInfo` prop is `undefined` for create, `Some` for edit. The form `defaultValues` and the submit handler branch on `isEditing = editing !== undefined`.
 3. **Page owns dialog open state.** Use three React state slots: `createOpen: boolean`, `editTarget: ResourceInfo | null`, optional `cannotDeleteTarget: ResourceInfo | null` for referential-integrity blocked deletes. Reset with `setEditTarget(null)` / `setCreateOpen(false)`.
 4. **Reset form on `open` change.** Inside the dialog component, `React.useEffect(() => { if (open) form.reset({...defaults}) }, [open, editing, form])` — re-opening with a different `editing` row must re-seed the form.
-5. **Render built-in/protected rows read-only.** Mark rows with `Option.isSome(row.slug)` (or equivalent "built-in" flag) and disable Edit/Delete `<Button>`s on them with `title={m.<resource>_protected()}`. The 422 `Protected` HTTP error is the server-side defence; the disabled button is the UX-side prevention.
-6. **Handle 409 `HasLogs` (or equivalent referential-integrity error) with a dedicated `CannotDeleteDialog`.** After the `Effect.mapError` branch detects the tag, stash the offending row + count in state and render a second dialog offering "Rename instead" — never just toast the error.
-7. **`router.invalidate()` after every successful mutation.** The page reads via the route loader; mutations must not optimistically update local state.
+5. **Render every dialog always-mounted, driven by `open`.** Never conditionally mount the dialog (`{editTarget !== null && <Dialog/>}`). See "Dialogs Must Be Always-Mounted, Driven By `open`" below — the page passes `open={editTarget !== null}` and feeds the dialog its data from a freeze-ref.
+6. **Render built-in/protected rows read-only.** Mark rows with `Option.isSome(row.slug)` (or equivalent "built-in" flag) and disable Edit/Delete `<Button>`s on them with `title={m.<resource>_protected()}`. The 422 `Protected` HTTP error is the server-side defence; the disabled button is the UX-side prevention.
+7. **Handle 409 `HasLogs` (or equivalent referential-integrity error) with a dedicated `CannotDeleteDialog`.** After the `Effect.mapError` branch detects the tag, stash the offending row + count in state and render a second dialog offering "Rename instead" — never just toast the error.
+8. **`router.invalidate()` after every successful mutation.** The page reads via the route loader; mutations must not optimistically update local state.
+
+## Dialogs Must Be Always-Mounted, Driven By `open`
+
+Every dialog/sheet/modal (Shadcn `Dialog`, `Sheet`, `AlertDialog` — anything backed by a Radix overlay) MUST be rendered unconditionally and have its visibility controlled by the `open` prop. NEVER conditionally mount it with `{state !== null && <Dialog open={true} .../>}` and force-unmount it on close. Force-unmounting a Radix dialog while it is open orphans its overlay, leaving a stuck dark backdrop that blocks all clicks until a full page reload.
+
+```typescript
+// WRONG — force-unmount on close orphans the Radix overlay (stuck dark backdrop)
+{editTarget !== null && (
+  <ResourceFormDialog open={true} editing={editTarget} onClose={() => setEditTarget(null)} />
+)}
+
+// CORRECT — always mounted, visibility driven by `open`, data frozen via a ref
+const editTargetRef = React.useRef<ResourceInfo | null>(null);
+if (editTarget !== null) editTargetRef.current = editTarget;
+
+<ResourceFormDialog
+  open={editTarget !== null}
+  editing={editTarget ?? editTargetRef.current ?? undefined}
+  onClose={() => setEditTarget(null)}
+/>
+```
+
+Rules:
+
+1. **Always pass `open={<state> !== null}` (or a boolean state slot), never `open={true}` inside a conditional mount.** The dialog component stays mounted across open/close; only `open` flips. Reference: `ActivityTypesPage.tsx`, `AchievementsAdminPage.tsx`, `AdminOnboardingTokensPage.tsx` (all migrated from conditional-mount to always-mounted).
+2. **Freeze the last-known data in a `useRef` so content does not blank during the close animation.** When the dialog renders data from a nullable state slot (`editTarget`, `mintedUrl`), the slot is set to `null` on close while Radix is still animating the exit. Hold the last non-null value: `const ref = useRef<T | null>(null); if (state !== null) ref.current = state;` then pass `state ?? ref.current ?? undefined` (or `mintedUrl ?? ''` for a required string prop). Without the freeze, the dialog flashes empty for the duration of the close animation.
+3. **Add a reset-on-open `useEffect` when local state was previously seeded only at mount.** A conditionally-mounted dialog got fresh `useState`/`form` defaults every time it mounted; an always-mounted dialog does not re-mount, so re-opening with a different row would show stale state. Re-seed inside `React.useEffect(() => { if (open) { form.reset({...}); /* reset other local state */ } }, [open, editing, form])`. Reference: `EditBuiltInSheet` and `CustomAchievementDialog` in `AchievementsAdminPage.tsx`.
+4. **Clear any debounce/timeout `useRef` in the same `open` effect's `else`/cleanup branch.** Because the component no longer unmounts on close, a pending `setTimeout` would otherwise survive across closes. Reference: `MintedLinkDialog` (`timerRef`) in `AdminOnboardingTokensPage.tsx`, `EditBuiltInSheet` (`debounceRef`).
 
 ## Shared Utility Modules (`src/lib/`)
 
@@ -728,7 +757,29 @@ Reusable label maps and option builders live in `src/lib/`. Always import from t
 | `src/lib/event-colors.ts` | `getEventColor`, color map utilities | Calendar view |
 | `src/lib/datetime.ts` | `formatLocalDate`, `formatLocalTime`, `formatUtcTime`, `localToUtc`, `formatEventDateRange` (canonical for event start/end rendering) | Event/training forms, EventDetailPage, EventsListPage, EventCalendarView |
 | `src/lib/discord.ts` | `DISCORD_CHANNEL_TYPE_TEXT`, `DISCORD_CHANNEL_TYPE_CATEGORY` | Any page with Discord channel selects |
+| `src/lib/clipboard.ts` | `copyToClipboard(text): Promise<boolean>` | Any "copy to clipboard" button (invite links, minted onboarding URLs, calendar subscription URLs) |
 | `src/lib/finance/` | `formatMoney`, `parseAmount`, `sortAssignments`, `computeKpis`, `pickDominantCurrency` | Finance pages, payment dialogs, "My Payments" page, dashboard banner, balance dashboard |
+
+### Clipboard Copies — `copyToClipboard` Only
+
+Every "copy to clipboard" action MUST go through `copyToClipboard(text)` from `~/lib/clipboard`. Never call `navigator.clipboard.writeText(...)` directly — the bare call throws an unhandled rejection on permission denial and crashes in insecure contexts (no `navigator.clipboard`). `copyToClipboard` guards both cases and resolves to a `boolean`.
+
+```typescript
+import { copyToClipboard } from '~/lib/clipboard';
+
+const handleCopy = () => {
+  copyToClipboard(url).then((ok) => {
+    if (!ok) return; // copy failed (insecure context / denied) — no "copied" hint
+    setCopied(true);
+    timerRef.current = setTimeout(() => setCopied(false), 2000);
+  });
+};
+```
+
+Rules:
+
+1. **The success side-effect (the "Copied!" hint) is keyed off the resolved boolean.** Show the confirmation only when `ok === true`; on `false` show nothing — never assume the write succeeded.
+2. **Hold the "copied" reset timeout in a `useRef` and clear it on dialog close / unmount,** following the always-mounted-dialog rules above. Reference: `MintedLinkDialog` in `AdminOnboardingTokensPage.tsx`.
 
 ### Currency-Picker Helpers: `pickDominantCurrency` vs `pickMostFrequentCurrency`
 

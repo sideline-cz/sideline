@@ -6,6 +6,7 @@ import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card';
 import { Input } from '~/components/ui/input';
 import { Separator } from '~/components/ui/separator';
+import { copyToClipboard } from '~/lib/clipboard';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
@@ -20,12 +21,24 @@ export function CalendarSubscriptionPage({ teamId, icalToken }: CalendarSubscrip
   const [url, setUrl] = React.useState(icalToken.url);
   const [copied, setCopied] = React.useState(false);
   const [regenerating, setRegenerating] = React.useState(false);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (!url) return;
+    copyToClipboard(url).then((ok) => {
+      if (!ok) return;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      setCopied(true);
+      timerRef.current = setTimeout(() => setCopied(false), 2000);
+    });
   };
+
+  React.useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
 
   const handleRegenerate = async () => {
     if (!window.confirm(tr('ical_regenerateConfirm'))) return;

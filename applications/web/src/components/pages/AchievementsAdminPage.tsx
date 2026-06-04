@@ -176,7 +176,13 @@ type PreviewState =
       botCanManageRoles: boolean;
     };
 
-function EditBuiltInSheet({ achievement, teamId, open, onClose, onSaved }: EditBuiltInSheetProps) {
+export function EditBuiltInSheet({
+  achievement,
+  teamId,
+  open,
+  onClose,
+  onSaved,
+}: EditBuiltInSheetProps) {
   const run = useRun();
 
   const slug = Schema.decodeUnknownSync(Achievement.AchievementSlug)(achievement.keyOrId);
@@ -192,9 +198,34 @@ function EditBuiltInSheet({ achievement, teamId, open, onClose, onSaved }: EditB
   const [saving, setSaving] = React.useState(false);
 
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewRequestIdRef = React.useRef(0);
+
+  React.useEffect(() => {
+    if (open) {
+      previewRequestIdRef.current += 1;
+      setThreshold(String(achievement.effectiveThreshold));
+      setPreviewState({ status: 'idle' });
+      setConfirmedDestructive(false);
+      setShowAffected(false);
+      setRoleSource(Option.isSome(achievement.discordRoleId) ? 'existing' : 'none');
+      setRoleId(Option.getOrElse(achievement.discordRoleId, () => ''));
+      setSaving(false);
+    } else {
+      previewRequestIdRef.current += 1;
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+    }
+    return () => {
+      previewRequestIdRef.current += 1;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [open, achievement]);
 
   const fetchPreview = React.useCallback(
     (thresholdValue: number) => {
+      const requestId = ++previewRequestIdRef.current;
       setPreviewState({ status: 'loading' });
       setConfirmedDestructive(false);
       setShowAffected(false);
@@ -210,6 +241,7 @@ function EditBuiltInSheet({ achievement, teamId, open, onClose, onSaved }: EditB
           run({}),
         )
         .then((result) => {
+          if (requestId !== previewRequestIdRef.current) return;
           if (Option.isSome(result)) {
             setPreviewState({
               status: 'loaded',
@@ -221,7 +253,10 @@ function EditBuiltInSheet({ achievement, teamId, open, onClose, onSaved }: EditB
             setPreviewState({ status: 'error' });
           }
         })
-        .catch(() => setPreviewState({ status: 'error' }));
+        .catch(() => {
+          if (requestId !== previewRequestIdRef.current) return;
+          setPreviewState({ status: 'error' });
+        });
     },
     [teamId, slug, run],
   );
@@ -455,7 +490,7 @@ interface CustomAchievementDialogProps {
   editing?: AchievementApi.AchievementOverview;
 }
 
-function CustomAchievementDialog({
+export function CustomAchievementDialog({
   teamId,
   open,
   onClose,
@@ -483,6 +518,23 @@ function CustomAchievementDialog({
       roleId: editing ? Option.getOrElse(editing.discordRoleId, () => '') : '',
     },
   });
+
+  React.useEffect(() => {
+    if (open) {
+      form.reset({
+        name: editing?.name ?? '',
+        description: editing?.description ?? '',
+        emoji: '',
+        ruleKind: (editing?.ruleKind ?? 'total_activities') as CustomAchievement.CustomRuleKind,
+        threshold: String(editing?.effectiveThreshold ?? 1),
+        activityTypeSlug: '',
+        roleSource: (Option.isSome(editing?.discordRoleId ?? Option.none())
+          ? 'existing'
+          : 'none') as 'none' | 'existing' | 'auto_create',
+        roleId: editing ? Option.getOrElse(editing.discordRoleId, () => '') : '',
+      });
+    }
+  }, [open, editing, form]);
 
   const watchedRuleKind = form.watch('ruleKind');
   const watchedRoleSource = form.watch('roleSource');
@@ -815,6 +867,13 @@ export function AchievementsAdminPage({ teamId, initialData }: AchievementsAdmin
   const [editCustomTarget, setEditCustomTarget] =
     React.useState<AchievementApi.AchievementOverview | null>(null);
 
+  const editTargetRef = React.useRef<AchievementApi.AchievementOverview | null>(null);
+  if (editTarget !== null) editTargetRef.current = editTarget;
+  const editAchievement = editTarget ?? editTargetRef.current;
+
+  const editCustomTargetRef = React.useRef<AchievementApi.AchievementOverview | null>(null);
+  if (editCustomTarget !== null) editCustomTargetRef.current = editCustomTarget;
+
   const filtered = initialData.filter((a) => {
     if (filter === 'system') return a.isBuiltIn;
     if (filter === 'custom') return !a.isBuiltIn;
@@ -974,12 +1033,14 @@ export function AchievementsAdminPage({ teamId, initialData }: AchievementsAdmin
         </div>
       )}
 
-      {/* Edit built-in sheet */}
-      {editTarget !== null && (
+      {/* Mounts on first edit, then stays mounted (editAchievement is retained by the
+          freeze-ref). Visibility is driven by `open`, so closing never unmounts it —
+          avoiding the overlay-leak bug. */}
+      {editAchievement && (
         <EditBuiltInSheet
-          achievement={editTarget}
+          achievement={editAchievement}
           teamId={teamIdBranded}
-          open={true}
+          open={editTarget !== null}
           onClose={() => setEditTarget(null)}
           onSaved={handleSaved}
         />
@@ -993,16 +1054,14 @@ export function AchievementsAdminPage({ teamId, initialData }: AchievementsAdmin
         onSaved={handleSaved}
       />
 
-      {/* Edit custom dialog */}
-      {editCustomTarget !== null && (
-        <CustomAchievementDialog
-          teamId={teamIdBranded}
-          open={true}
-          onClose={() => setEditCustomTarget(null)}
-          onSaved={handleSaved}
-          editing={editCustomTarget}
-        />
-      )}
+      {/* Edit custom dialog — always mounted, driven by open */}
+      <CustomAchievementDialog
+        teamId={teamIdBranded}
+        open={editCustomTarget !== null}
+        onClose={() => setEditCustomTarget(null)}
+        onSaved={handleSaved}
+        editing={editCustomTarget ?? editCustomTargetRef.current ?? undefined}
+      />
     </div>
   );
 }
