@@ -26,12 +26,9 @@ export const runMain =
     logLevel: Option.Option<LogLevel.LogLevel> = Option.none(),
     additionalLayers: Layer.Layer<never> = Layer.empty,
   ) =>
-  // biome-ignore lint/suspicious/noExplicitAny: entry-point — requirements are fully provided by the caller
-  <A, E, R = never>(effect: Effect.Effect<A, E, R>): void =>
-    NodeRuntime.runMain(
-      Effect.provide(effect, RuntimeLayer(env, logLevel, additionalLayers)) as Effect.Effect<
-        A,
-        E,
-        never
-      >,
-    );
+  // No `as never` cast here: any requirement not provided by RuntimeLayer must be
+  // resolved by the caller. NodeRuntime.runMain requires `R = never`, so a missing
+  // layer dependency (e.g. an unprovided repository) fails `pnpm check` at the call
+  // site instead of crashing the app at startup.
+  <A, E>(effect: Effect.Effect<A, E, never>): void =>
+    NodeRuntime.runMain(Effect.provide(effect, RuntimeLayer(env, logLevel, additionalLayers)));

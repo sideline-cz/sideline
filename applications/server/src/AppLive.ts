@@ -48,6 +48,8 @@ import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { TeamChallengeRepository } from '~/repositories/TeamChallengeRepository.js';
+import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
+import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamOnboardingTokensRepository } from '~/repositories/TeamOnboardingTokensRepository.js';
@@ -135,6 +137,8 @@ const Repositories = Layer.mergeAll(
   PaymentReminderSyncEventsRepository.Default,
   PaymentRemindersSentRepository.Default,
   CarpoolsRepository.Default,
+  TeamChannelsRepository.Default,
+  TeamChannelAccessRepository.Default,
 );
 
 const AppLayer = Layer.mergeAll(
