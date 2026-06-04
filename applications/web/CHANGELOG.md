@@ -1,5 +1,14 @@
 # @sideline/web
 
+## 0.15.1
+
+### Patch Changes
+
+- [#347](https://github.com/maxa-ondrej/sideline/pull/347) [`f7d95f8`](https://github.com/maxa-ondrej/sideline/commit/f7d95f85bede5120eccfaeedb9ccaec3a361d507) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix every authenticated API call (translations, teams, etc.) returning 404 / "team not found". The API base URL (`serverUrl`) was read via `Route.useRouteContext()` inside the document `shellComponent`, but TanStack Router renders the shell _above_ the root match's context provider, so `serverUrl` was `undefined` there. With an undefined base URL the HTTP client skipped its prefix and sent requests (e.g. `/api/translations`) to the page origin instead of the API, which the server's prefixed routes returned 404 for. The `serverUrl`-dependent providers (`RunProvider`, `TranslationOverridesProvider`) now live in a root route `component` that renders inside the match context, so the resolved base URL reaches every client call. The translations query is also keyed by `serverUrl` and gated until it resolves.
+
+- Updated dependencies [[`08fb679`](https://github.com/maxa-ondrej/sideline/commit/08fb679cde568d45a51fb274ddb789ac5588c6b4)]:
+  - @sideline/domain@0.21.1
+
 ## 0.15.0
 
 ### Minor Changes
