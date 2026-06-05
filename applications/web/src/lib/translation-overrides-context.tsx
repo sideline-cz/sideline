@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Effect, Layer, Logger, Option, References } from 'effect';
+import { Effect, Exit, Layer, Logger, Option, References } from 'effect';
 import { FetchHttpClient } from 'effect/unstable/http';
 import React from 'react';
 import { ClientConfig, client } from '~/lib/client.js';
@@ -40,19 +40,26 @@ function buildOverrides(
 }
 
 async function fetchTranslations(serverUrl: string): Promise<TranslationOverridesValue> {
-  const effect = ApiClient.asEffect().pipe(
-    Effect.flatMap((api) => api.translations.list()),
-    Effect.provide(AppLayer),
-    Effect.provide(FetchHttpClient.layer),
-    Effect.provideService(ClientConfig, { baseUrl: serverUrl }),
-    Effect.option,
+  // Use Effect.exit so that defects (including interrupts from React Query's
+  // AbortSignal or an aborted fetch during the post-login redirect sequence)
+  // never escape as an unhandled rejection.  Only a successful fetch with data
+  // produces a result; any failure — typed or otherwise — silently returns the
+  // empty default so the app keeps working without translations.
+  const exit = await Effect.runPromiseExit(
+    ApiClient.asEffect().pipe(
+      Effect.flatMap((api) => api.translations.list()),
+      Effect.provide(AppLayer),
+      Effect.provide(FetchHttpClient.layer),
+      Effect.provideService(ClientConfig, { baseUrl: serverUrl }),
+      Effect.option,
+    ),
   );
 
-  const result = await Effect.runPromise(effect);
-
-  if (Option.isNone(result)) {
+  if (!Exit.isSuccess(exit) || Option.isNone(exit.value)) {
     return { version: 0, overrides: {} };
   }
+
+  const result = exit.value;
 
   const data = result.value;
   return {

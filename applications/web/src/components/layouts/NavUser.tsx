@@ -2,7 +2,7 @@ import type { Auth } from '@sideline/domain';
 import { getLocale, setLocale } from '@sideline/i18n/runtime';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Effect, Layer, Logger, Option, References } from 'effect';
+import { Effect, Exit, Layer, Logger, Option, References } from 'effect';
 import { FetchHttpClient } from 'effect/unstable/http';
 import {
   Bell,
@@ -50,15 +50,23 @@ const VersionsAppLayer = Layer.mergeAll(
   Layer.succeed(References.MinimumLogLevel, 'Info' as const),
 );
 
-async function fetchVersions(serverUrl: string): Promise<{ server: string; bot: string }> {
-  const effect = ApiClient.asEffect().pipe(
-    Effect.flatMap((api) => api.version.get()),
-    Effect.provide(VersionsAppLayer),
-    Effect.provide(FetchHttpClient.layer),
-    Effect.provideService(ClientConfig, { baseUrl: serverUrl }),
+async function fetchVersions(serverUrl: string): Promise<{ server: string; bot: string } | null> {
+  // Guard against defects (e.g. interrupted fetch) escaping as an unhandled
+  // rejection — this is a non-critical display query, so null is fine.
+  const exit = await Effect.runPromiseExit(
+    ApiClient.asEffect().pipe(
+      Effect.flatMap((api) => api.version.get()),
+      Effect.provide(VersionsAppLayer),
+      Effect.provide(FetchHttpClient.layer),
+      Effect.provideService(ClientConfig, { baseUrl: serverUrl }),
+      Effect.option,
+    ),
   );
-  const result = await Effect.runPromise(effect);
-  return { server: result.server, bot: result.bot };
+  if (!Exit.isSuccess(exit) || Option.isNone(exit.value)) {
+    return null;
+  }
+  const { server, bot } = exit.value.value;
+  return { server, bot };
 }
 
 function discordAvatarUrl(discordId: string, avatar: string): string {
