@@ -47,6 +47,7 @@ export const handleCreated = (event: EventRpcEvents.EventCreatedEvent) =>
         counts,
         yesAttendees,
         locale,
+        allDay: event.all_day,
       });
       return rest
         .createMessage(channelId, {

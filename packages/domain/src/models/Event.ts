@@ -40,6 +40,7 @@ export class Event extends Model.Class<Event>('Event')({
   series_id: Schema.OptionFromNullOr(EventSeriesId),
   series_modified: Schema.Boolean,
   status: Model.FieldExcept(['update'])(EventStatus),
+  all_day: Schema.Boolean,
   created_by: TeamMemberId,
   created_at: Model.DateTimeInsertFromDate,
   updated_at: Model.DateTimeUpdateFromDate,

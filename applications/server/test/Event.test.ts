@@ -220,6 +220,7 @@ type EventRecord = {
   location: Option.Option<string>;
   location_url: Option.Option<string>;
   status: Event.EventStatus;
+  all_day: boolean;
   created_by: TeamMember.TeamMemberId;
   training_type_name: Option.Option<string>;
   created_by_name: Option.Option<string>;
@@ -249,6 +250,7 @@ const resetStores = () => {
     location: Option.some('Main Field'),
     location_url: Option.none(),
     status: 'active',
+    all_day: false,
     created_by: TEST_ADMIN_MEMBER_ID,
     training_type_name: Option.none(),
     created_by_name: Option.some('Admin User'),
@@ -273,6 +275,7 @@ const resetStores = () => {
     location: Option.none(),
     location_url: Option.none(),
     status: 'cancelled',
+    all_day: false,
     created_by: TEST_ADMIN_MEMBER_ID,
     training_type_name: Option.none(),
     created_by_name: Option.some('Admin User'),
@@ -297,6 +300,7 @@ const resetStores = () => {
     location: Option.none(),
     location_url: Option.none(),
     status: 'active',
+    all_day: false,
     created_by: TEST_ADMIN_MEMBER_ID,
     training_type_name: Option.some('Type A'),
     created_by_name: Option.some('Admin User'),
@@ -321,6 +325,7 @@ const resetStores = () => {
     location: Option.none(),
     location_url: Option.none(),
     status: 'active',
+    all_day: false,
     created_by: TEST_ADMIN_MEMBER_ID,
     training_type_name: Option.none(),
     created_by_name: Option.some('Admin User'),
@@ -531,6 +536,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       location: input.location,
       location_url: Option.none(),
       status: 'active',
+      all_day: false,
       created_by: input.created_by as TeamMember.TeamMemberId,
       training_type_name: Option.none(),
       created_by_name: Option.none(),
@@ -556,6 +562,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       location: record.location,
       location_url: record.location_url,
       status: record.status,
+      all_day: record.all_day,
       created_by: record.created_by,
       series_id: record.series_id,
       series_modified: record.series_modified,
@@ -591,6 +598,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       location: input.location,
       location_url: Option.none(),
       status: 'active',
+      all_day: false,
       created_by: input.createdBy as TeamMember.TeamMemberId,
       training_type_name: Option.none(),
       created_by_name: Option.none(),
@@ -616,6 +624,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       location: record.location,
       location_url: record.location_url,
       status: record.status,
+      all_day: record.all_day,
       created_by: record.created_by,
       series_id: record.series_id,
       series_modified: record.series_modified,
@@ -662,6 +671,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       location: updated.location,
       location_url: updated.location_url,
       status: updated.status,
+      all_day: updated.all_day,
       created_by: updated.created_by,
       discord_target_channel_id: updated.discord_target_channel_id,
       owner_group_id: updated.owner_group_id,
@@ -706,6 +716,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       location: updated.location,
       location_url: updated.location_url,
       status: updated.status,
+      all_day: updated.all_day,
       created_by: updated.created_by,
       discord_target_channel_id: updated.discord_target_channel_id,
       owner_group_id: updated.owner_group_id,

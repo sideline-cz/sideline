@@ -78,6 +78,7 @@ export const handleStarted = (event: EventRpcEvents.EventStartedEvent) =>
                     yesAttendees,
                     locale,
                     isStarted: true,
+                    allDay: info.all_day,
                   });
                   return rest
                     .updateMessage(msg.discord_channel_id, msg.discord_message_id, {

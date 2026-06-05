@@ -14,7 +14,8 @@ import {
   subMonths,
   subWeeks,
 } from 'date-fns';
-import { DateTime } from 'effect';
+import { DateTime, Option } from 'effect';
+import { formatUtcDate } from '~/lib/datetime.js';
 
 export interface CalendarDay {
   date: Date;
@@ -23,11 +24,28 @@ export interface CalendarDay {
   events: ReadonlyArray<EventApi.EventInfo>;
 }
 
+/** A grid day's calendar date as YYYY-MM-DD in the browser's local timezone. */
+function localDateKey(date: Date): string {
+  const y = date.getFullYear();
+  const mo = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
+}
+
 function eventsForDay(
   date: Date,
   events: ReadonlyArray<EventApi.EventInfo>,
 ): ReadonlyArray<EventApi.EventInfo> {
-  return events.filter((e) => isSameDay(new Date(DateTime.toEpochMillis(e.startAt)), date));
+  const key = localDateKey(date);
+  return events.filter((e) => {
+    // All-day events span every calendar day from their (UTC) start through end date.
+    if (e.allDay) {
+      const start = formatUtcDate(e.startAt);
+      const end = Option.match(e.endAt, { onNone: () => start, onSome: formatUtcDate });
+      return key >= start && key <= end;
+    }
+    return isSameDay(new Date(DateTime.toEpochMillis(e.startAt)), date);
+  });
 }
 
 export function buildMonthGrid(

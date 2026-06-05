@@ -19,6 +19,7 @@ export class EventCreatedEvent extends Schema.TaggedClass<EventCreatedEvent>()('
   location: Schema.OptionFromNullOr(Schema.String),
   location_url: Schema.OptionFromNullOr(Schema.String),
   event_type: Schema.String,
+  all_day: Schema.Boolean,
   discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
 }) {}
 
@@ -35,6 +36,7 @@ export class EventUpdatedEvent extends Schema.TaggedClass<EventUpdatedEvent>()('
   location: Schema.OptionFromNullOr(Schema.String),
   location_url: Schema.OptionFromNullOr(Schema.String),
   event_type: Schema.String,
+  all_day: Schema.Boolean,
   discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
 }) {}
 
@@ -60,6 +62,7 @@ export class EventStartedEvent extends Schema.TaggedClass<EventStartedEvent>()('
   location: Schema.OptionFromNullOr(Schema.String),
   location_url: Schema.OptionFromNullOr(Schema.String),
   event_type: Schema.String,
+  all_day: Schema.Boolean,
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
