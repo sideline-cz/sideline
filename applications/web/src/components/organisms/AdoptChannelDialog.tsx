@@ -92,11 +92,7 @@ export function AdoptChannelDialog({
           <AlertDialogCancel autoFocus disabled={submitting}>
             {tr('channels_cancel')}
           </AlertDialogCancel>
-          <AlertDialogAction
-            className='bg-destructive text-white hover:bg-destructive/90'
-            onClick={handleConfirm}
-            disabled={submitting}
-          >
+          <AlertDialogAction variant='destructive' onClick={handleConfirm} disabled={submitting}>
             {submitting ? tr('channels_adopt_inProgress') : tr('channels_adopt_confirm')}
           </AlertDialogAction>
         </AlertDialogFooter>

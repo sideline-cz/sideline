@@ -98,7 +98,7 @@ export function ArchiveChannelDialog({
             <>
               <AlertDialogCancel disabled={submitting}>{tr('channels_cancel')}</AlertDialogCancel>
               <AlertDialogAction
-                className='bg-destructive text-white hover:bg-destructive/90'
+                variant='destructive'
                 onClick={handleConfirm}
                 disabled={submitting}
               >

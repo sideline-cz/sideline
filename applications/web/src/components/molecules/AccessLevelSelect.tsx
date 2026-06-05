@@ -1,12 +1,6 @@
 import { TeamChannelAccess } from '@sideline/domain';
 import { Schema } from 'effect';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '~/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger } from '~/components/ui/select';
 import { tr } from '~/lib/translations.js';
 
 interface AccessLevelSelectProps {
@@ -47,7 +41,9 @@ export function AccessLevelSelect({
   return (
     <Select value={value} onValueChange={handleChange} disabled={disabled}>
       <SelectTrigger aria-label={tr('channels_accessLevel_label')} className={className} size='sm'>
-        <SelectValue />
+        {/* Show only the label in the collapsed trigger; the per-option description
+            lives in the dropdown items below (SelectValue would mirror both and overflow). */}
+        <span className='truncate'>{tr(labelMap[value])}</span>
       </SelectTrigger>
       <SelectContent>
         {levels.map((level) => (

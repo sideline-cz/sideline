@@ -302,7 +302,7 @@ export function ChannelAccessSheet({
                           <AlertDialogFooter>
                             <AlertDialogCancel>{tr('channels_cancel')}</AlertDialogCancel>
                             <AlertDialogAction
-                              className='bg-destructive text-white hover:bg-destructive/90'
+                              variant='destructive'
                               onClick={() => handleRemoveAccess(grant.groupId)}
                             >
                               {tr('channels_access_remove')}
