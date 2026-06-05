@@ -292,7 +292,10 @@ describe('handleManagedAccessRevoked', () => {
 // ---------------------------------------------------------------------------
 
 describe('handleManagedArchived', () => {
-  it('moves channel to archive category and calls Channel/ClearManagedChannel', async () => {
+  it('moves channel to archive category via updateChannel, does NOT call ClearManagedChannel', async () => {
+    // Per the RESTORE iteration: handleManagedArchived no longer calls Channel/ClearManagedChannel.
+    // The discord_channel_id link is preserved on the team_channels row so restore can later
+    // move the channel back out of the archive category.
     const { handleManagedArchived } = await import('~/rcp/channel/handleManagedArchived.js');
     const { calls: restCalls, layer: restLayer } = makeRest();
     const { calls: rpcCalls, layer: rpcLayer } = makeRpc();
@@ -316,16 +319,14 @@ describe('handleManagedArchived', () => {
     expect(updateArgs[0]).toBe(DISCORD_CHANNEL_ID);
     expect((updateArgs[1] as any).parent_id).toBe(ARCHIVE_CATEGORY_ID);
 
-    // Must NOT delete the role
+    // Must NOT delete the channel
     expect(restCalls.deleteChannel).toHaveLength(0);
 
-    // Must call ClearManagedChannel RPC
-    expect(rpcCalls.ClearManagedChannel).toHaveLength(1);
-    const clearArgs = rpcCalls.ClearManagedChannel[0] as any;
-    expect(clearArgs.team_channel_id).toBe(CHANNEL_ID);
+    // Must NOT call ClearManagedChannel — the link must stay for restore to work
+    expect(rpcCalls.ClearManagedChannel).toHaveLength(0);
   });
 
-  it('skips Discord REST when discord_channel_id is None (not yet synced)', async () => {
+  it('skips Discord REST when discord_channel_id is None (not yet synced), no RPC', async () => {
     const { handleManagedArchived } = await import('~/rcp/channel/handleManagedArchived.js');
     const { calls: restCalls, layer: restLayer } = makeRest();
     const { calls: rpcCalls, layer: rpcLayer } = makeRpc();
@@ -343,9 +344,13 @@ describe('handleManagedArchived', () => {
 
     await run(handleManagedArchived(event), rpcLayer, restLayer);
 
+    // No REST calls when discord_channel_id is None
     expect(restCalls.updateChannel).toHaveLength(0);
-    // ClearManagedChannel is still called to clean DB state
-    expect(rpcCalls.ClearManagedChannel).toHaveLength(1);
+    expect(restCalls.deleteChannel).toHaveLength(0);
+
+    // No RPC calls — link preservation is a no-op when there is no link
+    expect(rpcCalls.ClearManagedChannel).toHaveLength(0);
+    expect(rpcCalls.UpsertManagedChannel).toHaveLength(0);
   });
 });
 

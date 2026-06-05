@@ -1560,5 +1560,16 @@
   "channels_adopt_confirm": "Adopt channel",
   "channels_adopt_inProgress": "Adopting…",
   "channels_adopt_failed": "Failed to adopt channel.",
-  "channels_adopt_nameConflict": "A managed channel with this name already exists."
+  "channels_adopt_nameConflict": "A managed channel with this name already exists.",
+
+  "channels_restore": "Restore",
+  "channels_restore_tooltip": "Restore this channel from the archive",
+  "channels_restored": "Channel restored",
+  "channels_restoreFailed": "Failed to restore channel",
+  "channels_notRestorable": "This channel cannot be restored",
+
+  "channels_emojiLabel": "Emoji",
+  "channels_namePreview": "Discord name preview",
+  "channels_formatHint": "The final name is shaped by your team's channel format.",
+  "channels_formatHint_cta": "Edit format in Team settings"
 }

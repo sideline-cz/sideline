@@ -2,7 +2,6 @@ import type { ChannelRpcEvents, Discord } from '@sideline/domain';
 import { DiscordREST } from 'dfx';
 import { Effect, Option } from 'effect';
 import { retryPolicy } from '~/rest/utils.js';
-import { SyncRpc } from '~/services/SyncRpc.js';
 
 const moveToArchive = (discordChannelId: Discord.Snowflake, archiveCategoryId: Discord.Snowflake) =>
   Effect.Do.pipe(
@@ -32,7 +31,6 @@ const deleteChannelFallback = (discordChannelId: Discord.Snowflake) =>
 
 export const handleManagedArchived = (event: ChannelRpcEvents.ManagedChannelArchivedEvent) =>
   Effect.Do.pipe(
-    Effect.bind('rpc', () => SyncRpc.asEffect()),
     Effect.tap(() =>
       Option.match(event.discord_channel_id, {
         onNone: () => Effect.void,
@@ -46,9 +44,6 @@ export const handleManagedArchived = (event: ChannelRpcEvents.ManagedChannelArch
             ),
           ),
       }),
-    ),
-    Effect.tap(({ rpc }) =>
-      rpc['Channel/ClearManagedChannel']({ team_channel_id: event.team_channel_id }),
     ),
     Effect.asVoid,
   );

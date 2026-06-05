@@ -186,6 +186,12 @@ type ManagedSyncCall =
       teamChannelId: TeamChannel.TeamChannelId;
       discordChannelId: Discord.Snowflake;
     }
+  | {
+      type: 'managed_channel_restored';
+      teamChannelId: TeamChannel.TeamChannelId;
+      discordChannelId: Discord.Snowflake;
+    }
+  | { type: 'discord_channel_restored'; discordChannelId: Discord.Snowflake }
   | { type: 'access_granted' }
   | { type: 'access_revoked' };
 
@@ -257,6 +263,28 @@ const MockChannelSyncEventsRepositoryLayer = Layer.succeed(ChannelSyncEventsRepo
     });
     return Effect.void;
   },
+  emitManagedChannelRestored: (args: {
+    teamId: Team.TeamId;
+    teamChannelId: TeamChannel.TeamChannelId;
+    discordChannelId: Discord.Snowflake;
+  }) => {
+    managedSyncCalls.push({
+      type: 'managed_channel_restored',
+      teamChannelId: args.teamChannelId,
+      discordChannelId: args.discordChannelId,
+    });
+    return Effect.void;
+  },
+  emitDiscordChannelRestored: (args: {
+    teamId: Team.TeamId;
+    discordChannelId: Discord.Snowflake;
+  }) => {
+    managedSyncCalls.push({
+      type: 'discord_channel_restored',
+      discordChannelId: args.discordChannelId,
+    });
+    return Effect.void;
+  },
   emitMembersAddedBatch: () => Effect.void,
   emitMembersRemovedBatch: () => Effect.void,
   emitRosterMemberAdded: () => Effect.void,
@@ -280,6 +308,7 @@ const channelsStore = new Map<
     id: TeamChannel.TeamChannelId;
     team_id: Team.TeamId;
     name: string;
+    emoji: Option.Option<string>;
     category: Option.Option<string>;
     position: number;
     archived: boolean;
@@ -303,13 +332,19 @@ const MockTeamChannelsRepositoryLayer = Layer.succeed(TeamChannelsRepository, {
   },
   findAllByTeam: (teamId: Team.TeamId) =>
     Effect.succeed(Array.from(channelsStore.values()).filter((c) => c.team_id === teamId)),
-  insert: (teamId: Team.TeamId, name: string, _category: Option.Option<string>) => {
+  insert: (
+    teamId: Team.TeamId,
+    name: string,
+    _category: Option.Option<string>,
+    _emoji?: Option.Option<string>,
+  ) => {
     const id =
       `00000000-0000-0000-0005-${String(nextChannelId++).padStart(12, '0')}` as TeamChannel.TeamChannelId;
     const ch = {
       id,
       team_id: teamId,
       name,
+      emoji: _emoji ?? Option.none<string>(),
       category: _category,
       position: 0,
       archived: false,
@@ -348,6 +383,7 @@ const MockTeamChannelsRepositoryLayer = Layer.succeed(TeamChannelsRepository, {
       id,
       team_id: teamId,
       name,
+      emoji: Option.none<string>(),
       category: _category,
       position: 0,
       archived: false,
@@ -506,6 +542,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         team_id: TEST_TEAM_ID,
         event_horizon_days: 30,
         discord_archive_category_id: Option.some('777777777777777777' as Discord.Snowflake),
+        discord_channel_format: '{emoji}│{name}',
       }),
     ),
   upsertSettings: () => Effect.void,
@@ -940,6 +977,7 @@ describe('listChannels', () => {
       name: 'announcements',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: false,
       discord_channel_id: Option.none(),
       discord_role_id: Option.none(),
@@ -985,7 +1023,7 @@ describe('createChannel', () => {
           Authorization: 'Bearer admin-token',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name: 'announcements', category: null }),
+        body: JSON.stringify({ name: 'announcements', emoji: null, category: null }),
       }),
     );
 
@@ -1004,7 +1042,7 @@ describe('createChannel', () => {
           Authorization: 'Bearer admin-token',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name: 'general', category: null }),
+        body: JSON.stringify({ name: 'general', emoji: null, category: null }),
       }),
     );
 
@@ -1020,7 +1058,7 @@ describe('createChannel', () => {
       new Request(`http://localhost/teams/${TEST_TEAM_ID}/channels`, {
         method: 'POST',
         headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'duplicate', category: null }),
+        body: JSON.stringify({ name: 'duplicate', emoji: null, category: null }),
       }),
     );
 
@@ -1063,7 +1101,7 @@ describe('createChannel', () => {
       new Request(`http://localhost/teams/${TEST_TEAM_ID}/channels`, {
         method: 'POST',
         headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'duplicate', category: null }),
+        body: JSON.stringify({ name: 'duplicate', emoji: null, category: null }),
       }),
     );
     await dupApp.dispose();
@@ -1076,7 +1114,7 @@ describe('createChannel', () => {
       new Request(`http://localhost/teams/${TEST_TEAM_ID}/channels`, {
         method: 'POST',
         headers: { Authorization: 'Bearer member-token', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'general', category: null }),
+        body: JSON.stringify({ name: 'general', emoji: null, category: null }),
       }),
     );
 
@@ -1098,6 +1136,7 @@ describe('archiveChannel', () => {
       name: 'old-channel',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: false,
       discord_channel_id: Option.some('555555555555555555' as Discord.Snowflake),
       discord_role_id: Option.none(),
@@ -1132,6 +1171,7 @@ describe('archiveChannel', () => {
       name: 'old-channel',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: false,
       discord_channel_id: Option.some('555555555555555555' as Discord.Snowflake),
       discord_role_id: Option.none(),
@@ -1145,6 +1185,7 @@ describe('archiveChannel', () => {
             team_id: TEST_TEAM_ID,
             event_horizon_days: 30,
             discord_archive_category_id: Option.none(),
+            discord_channel_format: '{emoji}│{name}',
           }),
         ),
       upsertSettings: () => Effect.void,
@@ -1178,6 +1219,7 @@ describe('archiveChannel', () => {
       name: 'old-channel',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: false,
       discord_channel_id: Option.none(),
       discord_role_id: Option.none(),
@@ -1206,6 +1248,7 @@ describe('renameChannel', () => {
       name: 'old-name',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: false,
       discord_channel_id: Option.none(),
       discord_role_id: Option.none(),
@@ -1231,6 +1274,7 @@ describe('renameChannel', () => {
       name: 'old-name',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: false,
       discord_channel_id: Option.none(),
       discord_role_id: Option.none(),
@@ -1254,6 +1298,7 @@ describe('renameChannel', () => {
       name: 'old-name',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: false,
       discord_channel_id: Option.none(),
       discord_role_id: Option.none(),
@@ -1285,6 +1330,7 @@ describe('listChannels — Discord merge', () => {
       name: 'managed-only',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: false,
       discord_channel_id: Option.none(),
       discord_role_id: Option.none(),
@@ -1304,6 +1350,8 @@ describe('listChannels — Discord merge', () => {
             parent_id: Option.none(),
             team_channel_id: Option.none(),
             team_channel_archived: Option.none(),
+            team_channel_name: Option.none(),
+            team_channel_emoji: Option.none(),
             access_count: 0,
           },
           {
@@ -1313,6 +1361,8 @@ describe('listChannels — Discord merge', () => {
             parent_id: Option.none(),
             team_channel_id: Option.none(),
             team_channel_archived: Option.none(),
+            team_channel_name: Option.none(),
+            team_channel_emoji: Option.none(),
             access_count: 0,
           },
           {
@@ -1322,6 +1372,8 @@ describe('listChannels — Discord merge', () => {
             parent_id: Option.none(),
             team_channel_id: Option.none(),
             team_channel_archived: Option.none(),
+            team_channel_name: Option.none(),
+            team_channel_emoji: Option.none(),
             access_count: 0,
           },
         ]),
@@ -1388,6 +1440,8 @@ describe('listChannels — Discord merge', () => {
             parent_id: Option.some(ARCHIVE_CATEGORY_ID),
             team_channel_id: Option.none(),
             team_channel_archived: Option.none(),
+            team_channel_name: Option.none(),
+            team_channel_emoji: Option.none(),
             access_count: 0,
           },
           {
@@ -1397,6 +1451,8 @@ describe('listChannels — Discord merge', () => {
             parent_id: Option.none(),
             team_channel_id: Option.none(),
             team_channel_archived: Option.none(),
+            team_channel_name: Option.none(),
+            team_channel_emoji: Option.none(),
             access_count: 0,
           },
         ]),
@@ -1438,6 +1494,7 @@ describe('listChannels — Discord merge', () => {
             team_id: TEST_TEAM_ID,
             event_horizon_days: 30,
             discord_archive_category_id: Option.none(),
+            discord_channel_format: '{emoji}│{name}',
           }),
         ),
       upsertSettings: () => Effect.void,
@@ -1458,6 +1515,8 @@ describe('listChannels — Discord merge', () => {
             parent_id: Option.some(ARCHIVE_CATEGORY_ID), // would be archived if category configured
             team_channel_id: Option.none(),
             team_channel_archived: Option.none(),
+            team_channel_name: Option.none(),
+            team_channel_emoji: Option.none(),
             access_count: 0,
           },
         ]),
@@ -1551,6 +1610,7 @@ describe('archiveDiscordChannel', () => {
       name: 'managed-chan',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: false,
       discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
       discord_role_id: Option.none(),
@@ -1604,6 +1664,7 @@ describe('archiveDiscordChannel', () => {
             team_id: TEST_TEAM_ID,
             event_horizon_days: 30,
             discord_archive_category_id: Option.none(),
+            discord_channel_format: '{emoji}│{name}',
           }),
         ),
       upsertSettings: () => Effect.void,
@@ -1736,6 +1797,7 @@ describe('archiveDiscordChannel', () => {
       name: 'already-archived-managed',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: true, // already archived
       discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
       discord_role_id: Option.none(),
@@ -1790,6 +1852,7 @@ describe('listChannels — archived managed channel regression', () => {
       name: 'archived-managed',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: true,
       discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
       discord_role_id: Option.none(),
@@ -1809,6 +1872,8 @@ describe('listChannels — archived managed channel regression', () => {
             parent_id: Option.some(ARCHIVE_CATEGORY_ID),
             team_channel_id: Option.some(archivedManagedId),
             team_channel_archived: Option.some(true),
+            team_channel_name: Option.some('archived-managed'),
+            team_channel_emoji: Option.none(),
             access_count: 0,
           },
         ]),
@@ -1849,6 +1914,7 @@ describe('listChannels — archived managed channel regression', () => {
       name: 'mid-sync-channel',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: true,
       discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
       discord_role_id: Option.none(),
@@ -1866,6 +1932,8 @@ describe('listChannels — archived managed channel regression', () => {
             parent_id: Option.none(), // NOT in archive category yet (mid-sync)
             team_channel_id: Option.some(managedId),
             team_channel_archived: Option.some(true), // team_channels.archived=true
+            team_channel_name: Option.some('mid-sync-channel'),
+            team_channel_emoji: Option.none(),
             access_count: 0,
           },
         ]),
@@ -2065,6 +2133,7 @@ describe('adoptDiscordChannel', () => {
       name: 'general',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: false,
       discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
       discord_role_id: Option.none(),
@@ -2170,6 +2239,7 @@ describe('adoptDiscordChannel', () => {
       name: 'general', // same name as DISCORD_TEXT_CHANNEL_ID's name
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: false,
       // Different discord_channel_id — so idempotency check won't short-circuit
       discord_channel_id: Option.some('555555555555555555' as Discord.Snowflake),
@@ -2206,6 +2276,7 @@ describe('adoptDiscordChannel', () => {
       name: 'general',
       category: Option.none<string>(),
       position: 0,
+      emoji: Option.none<string>(),
       archived: false,
       discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
       discord_role_id: Option.none<Discord.Snowflake>(),
@@ -2315,6 +2386,7 @@ describe('bulkArchiveDiscordChannels', () => {
             team_id: TEST_TEAM_ID,
             event_horizon_days: 30,
             discord_archive_category_id: Option.none(),
+            discord_channel_format: '{emoji}│{name}',
           }),
         ),
       upsertSettings: () => Effect.void,
@@ -2440,6 +2512,7 @@ describe('bulkArchiveDiscordChannels', () => {
       name: 'managed-chan',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: false,
       discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
       discord_role_id: Option.none(),
@@ -2489,6 +2562,7 @@ describe('bulkArchiveDiscordChannels', () => {
       name: 'already-managed-archived',
       category: Option.none(),
       position: 0,
+      emoji: Option.none(),
       archived: true, // already archived
       discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
       discord_role_id: Option.none(),
@@ -2630,5 +2704,687 @@ describe('bulkArchiveDiscordChannels', () => {
     expect(failedIds).toContain(FAIL_CHANNEL_ID);
     const skippedIds = body.skipped.map((s: any) => s.discordChannelId);
     expect(skippedIds).not.toContain(FAIL_CHANNEL_ID);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// restoreDiscordChannel
+// ---------------------------------------------------------------------------
+
+describe('restoreDiscordChannel', () => {
+  const restoreUrl = (discordId: string) =>
+    `http://localhost/teams/${TEST_TEAM_ID}/discord-channels/${discordId}/restore`;
+
+  it('managed archived channel → 204, setArchived(false) called, emitManagedChannelRestored emitted', async () => {
+    // Pre-seed an archived managed channel linked to DISCORD_TEXT_CHANNEL_ID
+    const managedId = '00000000-0000-0000-0005-restore000001' as TeamChannel.TeamChannelId;
+    channelsStore.set(managedId, {
+      id: managedId,
+      team_id: TEST_TEAM_ID,
+      name: 'archived-chan',
+      category: Option.none(),
+      position: 0,
+      emoji: Option.none(),
+      archived: true,
+      discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
+      discord_role_id: Option.none(),
+    });
+
+    // Discord lookup: channel exists, type=0, not in archive category (parent_id=none)
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () =>
+        Effect.succeed(
+          Option.some({
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'archived-chan',
+            type: 0,
+            parent_id: Option.some(ARCHIVE_CATEGORY_ID),
+          }),
+        ),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(restoreUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(204);
+
+    // setArchived(id, false) must have been called
+    const ch = channelsStore.get(managedId);
+    expect(ch?.archived).toBe(false);
+
+    // emitManagedChannelRestored must have been emitted
+    const restoredCalls = managedSyncCalls.filter(
+      (c) => c.type === 'managed_channel_restored',
+    ) as Array<{
+      type: 'managed_channel_restored';
+      teamChannelId: TeamChannel.TeamChannelId;
+      discordChannelId: Discord.Snowflake;
+    }>;
+    expect(restoredCalls).toHaveLength(1);
+    expect(restoredCalls[0]?.discordChannelId).toBe(DISCORD_TEXT_CHANNEL_ID);
+
+    // No discord_channel_restored emitted (it was a managed channel)
+    const discordRestoredCalls = managedSyncCalls.filter(
+      (c) => c.type === 'discord_channel_restored',
+    );
+    expect(discordRestoredCalls).toHaveLength(0);
+  });
+
+  it('managed NOT archived channel → 409 ChannelNotRestorable', async () => {
+    const managedId = '00000000-0000-0000-0005-restore000002' as TeamChannel.TeamChannelId;
+    channelsStore.set(managedId, {
+      id: managedId,
+      team_id: TEST_TEAM_ID,
+      name: 'active-chan',
+      category: Option.none(),
+      position: 0,
+      emoji: Option.none(),
+      archived: false, // NOT archived
+      discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
+      discord_role_id: Option.none(),
+    });
+
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () =>
+        Effect.succeed(
+          Option.some({
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'active-chan',
+            type: 0,
+            parent_id: Option.none(),
+          }),
+        ),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(restoreUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(409);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('discord-only channel in archive category → 204, emitDiscordChannelRestored emitted, no team_channels write', async () => {
+    // No managed channel linked to this discord id
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () =>
+        Effect.succeed(
+          Option.some({
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'discord-chan',
+            type: 0,
+            parent_id: Option.some(ARCHIVE_CATEGORY_ID), // in archive category
+          }),
+        ),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(restoreUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(204);
+
+    // emitDiscordChannelRestored must have been emitted
+    const discordRestoredCalls = managedSyncCalls.filter(
+      (c) => c.type === 'discord_channel_restored',
+    ) as Array<{ type: 'discord_channel_restored'; discordChannelId: Discord.Snowflake }>;
+    expect(discordRestoredCalls).toHaveLength(1);
+    expect(discordRestoredCalls[0]?.discordChannelId).toBe(DISCORD_TEXT_CHANNEL_ID);
+
+    // No managed_channel_restored emitted
+    const managedRestoredCalls = managedSyncCalls.filter(
+      (c) => c.type === 'managed_channel_restored',
+    );
+    expect(managedRestoredCalls).toHaveLength(0);
+
+    // No team_channels write (channelsStore is empty)
+    expect(channelsStore.size).toBe(0);
+  });
+
+  it('discord-only NOT in archive category → 409 ChannelNotRestorable', async () => {
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () =>
+        Effect.succeed(
+          Option.some({
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'discord-chan',
+            type: 0,
+            parent_id: Option.none(), // NOT in archive category
+          }),
+        ),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(restoreUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(409);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('type=4 category channel → 409 ChannelNotRestorable', async () => {
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () =>
+        Effect.succeed(
+          Option.some({
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'category-chan',
+            type: 4,
+            parent_id: Option.none(),
+          }),
+        ),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(restoreUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(409);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('unknown snowflake → 404 ChannelNotFound', async () => {
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () => Effect.succeed(Option.none()),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(restoreUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(404);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('without group:manage → 403 ChannelForbidden', async () => {
+    const response = await handler(
+      new Request(restoreUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer member-token' },
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bulkRestoreDiscordChannels
+// ---------------------------------------------------------------------------
+
+describe('bulkRestoreDiscordChannels', () => {
+  const bulkRestoreUrl = `http://localhost/teams/${TEST_TEAM_ID}/discord-channels/bulk-restore`;
+
+  const makeDiscordLayerForRestore = (
+    channels: Array<{
+      channel_id: Discord.Snowflake;
+      name: string;
+      type: number;
+      parent_id: Option.Option<Discord.Snowflake>;
+    }>,
+  ) => {
+    const byId = new Map(channels.map((c) => [c.channel_id, c]));
+    return Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: (_guildId: Discord.Snowflake, channelId: Discord.Snowflake) =>
+        Effect.succeed(Option.fromNullishOr(byId.get(channelId))),
+    } as any);
+  };
+
+  it('without group:manage → 403 ChannelForbidden', async () => {
+    const response = await handler(
+      new Request(bulkRestoreUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer member-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discordChannelIds: [DISCORD_TEXT_CHANNEL_ID] }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it('empty discordChannelIds → {restored:[], skipped:[], failed:[]}', async () => {
+    const response = await handler(
+      new Request(bulkRestoreUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discordChannelIds: [] }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.restored).toEqual([]);
+    expect(body.skipped).toEqual([]);
+    expect(body.failed).toEqual([]);
+  });
+
+  it('dedupe duplicate ids — a repeated id is processed once', async () => {
+    // Use the DISCORD_TEXT_CHANNEL_ID twice in the request
+    // Seed an archived managed channel for it
+    const managedId = '00000000-0000-0000-0005-dedupe000001' as TeamChannel.TeamChannelId;
+    channelsStore.set(managedId, {
+      id: managedId,
+      team_id: TEST_TEAM_ID,
+      name: 'dedupe-chan',
+      category: Option.none(),
+      position: 0,
+      emoji: Option.none(),
+      archived: true,
+      discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
+      discord_role_id: Option.none(),
+    });
+
+    const discordLayer = makeDiscordLayerForRestore([
+      {
+        channel_id: DISCORD_TEXT_CHANNEL_ID,
+        name: 'dedupe-chan',
+        type: 0,
+        parent_id: Option.some(ARCHIVE_CATEGORY_ID),
+      },
+    ]);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(bulkRestoreUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        // Same id twice
+        body: JSON.stringify({
+          discordChannelIds: [DISCORD_TEXT_CHANNEL_ID, DISCORD_TEXT_CHANNEL_ID],
+        }),
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    // Should be restored exactly once (dedupe)
+    expect(body.restored).toHaveLength(1);
+    expect(body.restored).toContain(DISCORD_TEXT_CHANNEL_ID);
+    expect(body.skipped).toHaveLength(0);
+    expect(body.failed).toHaveLength(0);
+
+    // emitManagedChannelRestored called once
+    const restoredCalls = managedSyncCalls.filter((c) => c.type === 'managed_channel_restored');
+    expect(restoredCalls).toHaveLength(1);
+  });
+
+  it('mixed batch: archived-managed / archived-discord / already_active / is_category / not_found', async () => {
+    const DISCORD_ACTIVE_ID = '444444444444444444' as Discord.Snowflake;
+    const NOT_FOUND_ID = '555555555555555555' as Discord.Snowflake;
+
+    // Seed an archived managed channel
+    const managedArchivedId = '00000000-0000-0000-0005-mix000000001' as TeamChannel.TeamChannelId;
+    channelsStore.set(managedArchivedId, {
+      id: managedArchivedId,
+      team_id: TEST_TEAM_ID,
+      name: 'managed-archived',
+      category: Option.none(),
+      position: 0,
+      emoji: Option.none(),
+      archived: true,
+      discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
+      discord_role_id: Option.none(),
+    });
+
+    // Seed an active managed channel (not restorable via bulk)
+    const managedActiveId = '00000000-0000-0000-0005-mix000000002' as TeamChannel.TeamChannelId;
+    channelsStore.set(managedActiveId, {
+      id: managedActiveId,
+      team_id: TEST_TEAM_ID,
+      name: 'managed-active',
+      category: Option.none(),
+      position: 0,
+      emoji: Option.none(),
+      archived: false, // already active
+      discord_channel_id: Option.some(DISCORD_ACTIVE_ID),
+      discord_role_id: Option.none(),
+    });
+
+    const discordLayer = makeDiscordLayerForRestore([
+      // archived-managed: in archive category
+      {
+        channel_id: DISCORD_TEXT_CHANNEL_ID,
+        name: 'managed-archived',
+        type: 0,
+        parent_id: Option.some(ARCHIVE_CATEGORY_ID),
+      },
+      // archived-discord: discord-only channel in archive category
+      {
+        channel_id: DISCORD_VOICE_CHANNEL_ID,
+        name: 'discord-archived',
+        type: 0,
+        parent_id: Option.some(ARCHIVE_CATEGORY_ID),
+      },
+      // already_active: managed but not archived
+      { channel_id: DISCORD_ACTIVE_ID, name: 'managed-active', type: 0, parent_id: Option.none() },
+      // is_category: type=4
+      {
+        channel_id: DISCORD_CATEGORY_CHANNEL_ID,
+        name: 'Category',
+        type: 4,
+        parent_id: Option.none(),
+      },
+      // NOT_FOUND_ID: not returned → not_found
+    ]);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(bulkRestoreUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          discordChannelIds: [
+            DISCORD_TEXT_CHANNEL_ID, // archived-managed → restored
+            DISCORD_VOICE_CHANNEL_ID, // archived-discord → restored
+            DISCORD_ACTIVE_ID, // already_active → skipped
+            DISCORD_CATEGORY_CHANNEL_ID, // is_category → skipped
+            NOT_FOUND_ID, // not_found → skipped
+          ],
+        }),
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    // Restored: managed-archived + discord-archived
+    expect(body.restored).toHaveLength(2);
+    expect(body.restored).toContain(DISCORD_TEXT_CHANNEL_ID);
+    expect(body.restored).toContain(DISCORD_VOICE_CHANNEL_ID);
+
+    // Skipped: already_active, is_category, not_found
+    expect(body.skipped).toHaveLength(3);
+    const reasons = new Map(body.skipped.map((s: any) => [s.discordChannelId, s.reason]));
+    expect(reasons.get(DISCORD_ACTIVE_ID)).toBe('already_active');
+    expect(reasons.get(DISCORD_CATEGORY_CHANNEL_ID)).toBe('is_category');
+    expect(reasons.get(NOT_FOUND_ID)).toBe('not_found');
+
+    expect(body.failed).toHaveLength(0);
+
+    // emitManagedChannelRestored called for managed-archived
+    const managedRestoredCalls = managedSyncCalls.filter(
+      (c) => c.type === 'managed_channel_restored',
+    );
+    expect(managedRestoredCalls).toHaveLength(1);
+
+    // emitDiscordChannelRestored called for discord-archived
+    const discordRestoredCalls = managedSyncCalls.filter(
+      (c) => c.type === 'discord_channel_restored',
+    );
+    expect(discordRestoredCalls).toHaveLength(1);
+  });
+
+  it('discord-only channel NOT in archive category → skipped with not_archived', async () => {
+    const DISCORD_UNARCHIVED_ID = '666666666666666666' as Discord.Snowflake;
+
+    const discordLayer = makeDiscordLayerForRestore([
+      // discord-only channel with no parent (not in archive)
+      {
+        channel_id: DISCORD_UNARCHIVED_ID,
+        name: 'active-discord',
+        type: 0,
+        parent_id: Option.none(),
+      },
+    ]);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(bulkRestoreUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discordChannelIds: [DISCORD_UNARCHIVED_ID] }),
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.restored).toHaveLength(0);
+    expect(body.skipped).toHaveLength(1);
+    expect(body.skipped[0].discordChannelId).toBe(DISCORD_UNARCHIVED_ID);
+    expect(body.skipped[0].reason).toBe('not_archived');
+    expect(body.failed).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createChannel — emoji + format (server-side Discord name formatting)
+// ---------------------------------------------------------------------------
+
+describe('createChannel — emoji and format', () => {
+  it('createChannel with emoji produces correct discordChannelName via applyDiscordFormat', async () => {
+    // Settings return format '{emoji}│{name}'
+    // Sending emoji='🔥' and name='announcements' → discord name = '🔥│announcements'
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/channels`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'announcements', emoji: '🔥', category: null }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    // Response clean name is the stored name (no emoji in name field)
+    expect(body.name).toBe('announcements');
+    // Response emoji field should be present
+    expect(body.emoji).toBe('🔥');
+    // teamChannelId must be set
+    expect(body.teamChannelId).toBeDefined();
+    expect(body.teamChannelId).not.toBeNull();
+
+    // emitManagedChannelCreated was called with formatted discord name
+    const created = managedSyncCalls.filter((c) => c.type === 'channel_created') as Array<{
+      type: 'channel_created';
+      teamChannelId: TeamChannel.TeamChannelId;
+      discordChannelName: string;
+    }>;
+    expect(created).toHaveLength(1);
+    // The discord name should include the emoji and separator
+    expect(created[0]?.discordChannelName).toBe('🔥│announcements');
+  });
+
+  it('createChannel without emoji: discordChannelName has separator stripped', async () => {
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/channels`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'general', emoji: null, category: null }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.name).toBe('general');
+    expect(body.emoji).toBeNull();
+
+    // emitManagedChannelCreated was called with clean name (no separator)
+    const created = managedSyncCalls.filter((c) => c.type === 'channel_created') as Array<{
+      type: 'channel_created';
+      teamChannelId: TeamChannel.TeamChannelId;
+      discordChannelName: string;
+    }>;
+    expect(created).toHaveLength(1);
+    // applyDiscordFormat with None emoji removes the {emoji} and separator, leaving just the name
+    expect(created[0]?.discordChannelName).toBe('general');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listChannels — channelFormat, clean name, and emoji (managed rows)
+// ---------------------------------------------------------------------------
+
+describe('listChannels — channelFormat and emoji in response', () => {
+  it('response includes channelFormat from team settings', async () => {
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/channels`, {
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    // Default mock settings return discord_channel_format: '{emoji}│{name}'
+    expect(body.channelFormat).toBe('{emoji}│{name}');
+  });
+
+  it('managed row with team_channel_name and emoji reports clean name and emoji (not discord name)', async () => {
+    const managedChannelId = '00000000-0000-0000-0005-emojilist0001' as TeamChannel.TeamChannelId;
+
+    // Discord row already linked to managed channel, discord name has emoji+separator
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () =>
+        Effect.succeed([
+          {
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: '🔥│general', // Discord stores the formatted name
+            type: 0,
+            parent_id: Option.none(),
+            team_channel_id: Option.some(managedChannelId),
+            team_channel_archived: Option.some(false),
+            team_channel_name: Option.some('general'), // clean name from team_channels
+            team_channel_emoji: Option.some('🔥'),
+            access_count: 1,
+          },
+        ]),
+      findByChannelId: () => Effect.succeed(Option.none()),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/channels`, {
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    const ch = body.channels.find((c: any) => c.discordChannelId === DISCORD_TEXT_CHANNEL_ID);
+    expect(ch).toBeDefined();
+    // Clean name from team_channels (not the discord name with emoji)
+    expect(ch.name).toBe('general');
+    // Emoji extracted and returned separately
+    expect(ch.emoji).toBe('🔥');
+    expect(ch.managed).toBe(true);
+  });
+
+  it('discord-only row reports discord name and emoji=null', async () => {
+    const discordLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () =>
+        Effect.succeed([
+          {
+            channel_id: DISCORD_TEXT_CHANNEL_ID,
+            name: 'some-discord-channel',
+            type: 0,
+            parent_id: Option.none(),
+            team_channel_id: Option.none(),
+            team_channel_archived: Option.none(),
+            team_channel_name: Option.none(),
+            team_channel_emoji: Option.none(),
+            access_count: 0,
+          },
+        ]),
+      findByChannelId: () => Effect.succeed(Option.none()),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/channels`, {
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    const ch = body.channels.find((c: any) => c.discordChannelId === DISCORD_TEXT_CHANNEL_ID);
+    expect(ch).toBeDefined();
+    expect(ch.name).toBe('some-discord-channel');
+    expect(ch.emoji).toBeNull();
+    expect(ch.managed).toBe(false);
   });
 });

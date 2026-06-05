@@ -17,6 +17,8 @@ class ManagedListRow extends Schema.Class<ManagedListRow>('ManagedListRow')({
   parent_id: Schema.OptionFromNullOr(Discord.Snowflake),
   team_channel_id: Schema.OptionFromNullOr(TeamChannel.TeamChannelId),
   team_channel_archived: Schema.OptionFromNullOr(Schema.Boolean),
+  team_channel_name: Schema.OptionFromNullOr(Schema.String),
+  team_channel_emoji: Schema.OptionFromNullOr(Schema.String),
   access_count: Schema.Number,
 }) {}
 
@@ -142,6 +144,8 @@ const make = Effect.gen(function* () {
         dc.parent_id,
         tc.id AS team_channel_id,
         tc.archived AS team_channel_archived,
+        tc.name AS team_channel_name,
+        tc.emoji AS team_channel_emoji,
         COALESCE(acc.access_count, 0) AS access_count
       FROM teams t
       JOIN discord_channels dc ON dc.guild_id = t.guild_id

@@ -508,6 +508,31 @@ const make = Effect.gen(function* () {
       archiveCategoryId: Option.some(archiveCategoryId),
     });
 
+  const emitManagedChannelRestored = ({
+    teamId,
+    teamChannelId,
+    discordChannelId,
+  }: {
+    teamId: Team.TeamId;
+    teamChannelId: TeamChannel.TeamChannelId;
+    discordChannelId: Discord.Snowflake;
+  }) =>
+    _emitIfGuildLinked(teamId, 'channel_restored', 'managed', {
+      teamChannelId: Option.some(teamChannelId),
+      existingChannelId: Option.some(discordChannelId),
+    });
+
+  const emitDiscordChannelRestored = ({
+    teamId,
+    discordChannelId,
+  }: {
+    teamId: Team.TeamId;
+    discordChannelId: Discord.Snowflake;
+  }) =>
+    _emitIfGuildLinked(teamId, 'channel_restored', 'discord', {
+      existingChannelId: Option.some(discordChannelId),
+    });
+
   const emitManagedChannelAdopted = ({
     teamId,
     teamChannelId,
@@ -646,6 +671,8 @@ const make = Effect.gen(function* () {
     emitManagedChannelCreated,
     emitManagedChannelAdopted,
     emitManagedChannelArchived,
+    emitManagedChannelRestored,
+    emitDiscordChannelRestored,
     emitManagedChannelDeleted,
     emitDiscordChannelArchived,
     emitManagedAccessGrantedBatch,

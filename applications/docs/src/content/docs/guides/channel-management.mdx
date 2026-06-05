@@ -28,16 +28,22 @@ Channels whose Discord parent category matches the team's configured **archive c
 
 1. Click **New channel**.
 
-2. Enter a **name**. Names must be unique among active channels for your team. The bot uses this name as the Discord channel name.
+2. Enter a **name**. Names must be unique among active channels for your team. This is the logical name stored in Sideline — the actual Discord channel name is composed server-side using the team's channel format template (for example `{emoji}│{name}`).
 
-3. Optionally enter a **category** — a Sideline-side label used to group channels in the web UI. This does not create a Discord category; it is display metadata only.
+3. Optionally enter an **emoji**. The emoji is stored separately from the name and is applied to the Discord channel name via the team's format template. Leave it blank for channels without an emoji.
 
-4. Click **Create**. Sideline queues a creation event; the bot provisions the Discord channel within seconds.
+4. Optionally enter a **category** — a Sideline-side label used to group channels in the web UI. This does not create a Discord category; it is display metadata only.
+
+5. Click **Create**. Sideline queues a creation event; the bot provisions the Discord channel within seconds.
 
 </Steps>
 
 <Aside type="note" title="Discord channel provisioning">
   The Discord channel is created asynchronously. Refresh the channel list after a few seconds to see the Discord channel ID appear. Access grants you set before the channel is provisioned are automatically applied once it exists.
+</Aside>
+
+<Aside type="note" title="Channel name format">
+  The team's channel name format is shown at the top of the **Team → Channels** page (the `channelFormat` field from the API). A format like `{emoji}│{name}` will produce a Discord channel named `🏐│main-announcements` for a channel with emoji `🏐` and name `main-announcements`. Change the format in **Team settings → Discord integration → Channel format**.
 </Aside>
 
 ## Setting access for a channel
@@ -114,7 +120,7 @@ The bot moves the Discord channel to the **archive category** configured in **Te
   Archiving a channel that Sideline did not create requires an archive category to be configured. If no archive category is set, the action is blocked with an error. For Sideline-created (managed) channels, archiving also works without an archive category by falling back to deletion of the Discord channel.
 </Aside>
 
-The channel remains visible in the Sideline channel list with an *Archived* badge. For managed channels, the name can be reused for a new channel after archiving.
+The channel remains visible in the Sideline channel list with an *Archived* badge. For managed channels, the name can be reused for a new channel after archiving. The Discord channel link is preserved through archiving — if the channel was moved to the archive category it can be restored later without recreating it.
 
 ## Bulk-archiving channels
 
@@ -131,6 +137,42 @@ You can select multiple channels and archive them all in one action.
 </Steps>
 
 The archive category must be configured in **Team settings → Discord integration** before bulk-archiving. Each channel is processed independently — channels that are already archived, are categories, or cannot be found are listed as skipped in the result summary, and any unexpected error for a single channel is reported without blocking the rest.
+
+## Restoring an archived channel
+
+Archived channels can be moved back to Discord without recreating them.
+
+<Steps>
+
+1. On the **Team → Channels** page, find the channel with the *Archived* badge.
+
+2. Open the channel's detail sheet and click **Restore**.
+
+3. Confirm the action.
+
+</Steps>
+
+The bot moves the channel out of the archive category back to uncategorized in Discord. For Sideline-managed channels the existing Discord link is re-used — no new channel is created.
+
+<Aside type="caution" title="Only channels in the archive category can be restored">
+  A channel can only be restored if it is currently in the team's configured archive category. Channels that were archived by deletion (because no archive category was set at archive time) cannot be restored this way.
+</Aside>
+
+## Bulk-restoring channels
+
+You can select multiple archived channels and restore them all in one action.
+
+<Steps>
+
+1. On the **Team → Channels** page, switch to showing archived channels and enable multi-select mode.
+
+2. Tick the channels you want to restore.
+
+3. Click **Restore selected** and confirm.
+
+</Steps>
+
+Channels that are already active, are categories, or cannot be found are listed as skipped in the result summary.
 
 ## Managed vs Discord-native channels
 

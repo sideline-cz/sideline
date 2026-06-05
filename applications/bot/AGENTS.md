@@ -23,6 +23,8 @@ src/
 │   ├── handleUpdated.ts       — channel_updated handler (rename channel + role, update role color); each side optional
 │   ├── handleDeleted.ts       — channel_deleted handler
 │   ├── handleArchived.ts      — channel_archived handler (archive or fallback to delete)
+│   ├── handleManagedRestored.ts — managed channel_restored handler (move channel to parent_id=null; no delete-fallback, no RPC)
+│   ├── handleDiscordRestored.ts — discord channel_restored handler (move channel to parent_id=null; no delete-fallback, no RPC)
 │   ├── handleDetached.ts      — channel_detached handler (removes role permission overwrite; keeps channel + role)
 │   ├── handleMemberAdded.ts   — member_added handler (lazily creates role + permission overwrite when mapping has channel but no role)
 │   ├── handleMemberRemoved.ts — member_removed handler
@@ -223,9 +225,9 @@ Syncs groups to private Discord text channels with per-user permission overwrite
 | Bot service | `src/services/ChannelSyncService.ts` |
 | Mapping table | `discord_channel_mappings` (team_id + group_id → discord_channel_id) |
 
-`channel_sync_events.entity_type` is one of `group`, `roster`, `managed`, or `discord`. The same `event_type` literals (`channel_created`, `channel_archived`, `channel_deleted`, `member_added`, `member_removed`) carry a different RPC event class per `entity_type` — `ProcessorService.ts` dispatches on the decoded RPC event `_tag`, not on `event_type`. `entity_type='managed'` events decode to the `Managed*` RPC event classes (see "Managed Channels" below). `channel_updated` + `managed` is the adoption event — it decodes to `ManagedChannelAdoptedEvent` (handled by `handleManagedAdopted`); `channel_detached` is **never** emitted with `entity_type='managed'` (that `Match.when('managed', ...)` branch in `src/rpc/channel/events.ts` is an impossible-state guard that fails with `EventPropertyMissing`). `entity_type='discord'` is valid **only** with `event_type='channel_archived'` (decodes to `DiscordChannelArchivedEvent`, handled by `handleDiscordArchived`); every other `event_type` for `discord` is an impossible-state guard that fails with `EventPropertyMissing`.
+`channel_sync_events.entity_type` is one of `group`, `roster`, `managed`, or `discord`. The same `event_type` literals (`channel_created`, `channel_archived`, `channel_deleted`, `member_added`, `member_removed`) carry a different RPC event class per `entity_type` — `ProcessorService.ts` dispatches on the decoded RPC event `_tag`, not on `event_type`. `entity_type='managed'` events decode to the `Managed*` RPC event classes (see "Managed Channels" below). `channel_updated` + `managed` is the adoption event — it decodes to `ManagedChannelAdoptedEvent` (handled by `handleManagedAdopted`); `channel_detached` is **never** emitted with `entity_type='managed'` (that `Match.when('managed', ...)` branch in `src/rpc/channel/events.ts` is an impossible-state guard that fails with `EventPropertyMissing`). `entity_type='discord'` is valid **only** with `event_type` ∈ `channel_archived` (decodes to `DiscordChannelArchivedEvent`, handled by `handleDiscordArchived`) and `channel_restored` (decodes to `DiscordChannelRestoredEvent`, handled by `handleDiscordRestored`); every other `event_type` for `discord` is an impossible-state guard that fails with `EventPropertyMissing`. `channel_restored` + `managed` decodes to `ManagedChannelRestoredEvent` (handled by `handleManagedRestored`).
 
-Because `ProcessorService.ts` now exceeds the 20-argument `Match.type(...).pipe(...)` overload limit, the dispatcher is split into two chains: `actionMatcher` holds the first set of `Match.tag` arms and `action` pipes the remainder (`managed_access_revoked`, `discord_channel_archived`, `managed_channel_adopted`) before `Match.exhaustive`. Add new tags to whichever chain has room; never collapse them back into a single `pipe` past 20 arms.
+Because `ProcessorService.ts` now exceeds the 20-argument `Match.type(...).pipe(...)` overload limit, the dispatcher is split into two chains: `actionMatcher` holds the first set of `Match.tag` arms and `action` pipes the remainder (`managed_access_revoked`, `discord_channel_archived`, `managed_channel_adopted`, `managed_channel_restored`, `discord_channel_restored`) before `Match.exhaustive`. Add new tags to whichever chain has room; never collapse them back into a single `pipe` past 20 arms.
 
 Event types: `channel_created`, `channel_updated`, `channel_deleted`, `channel_archived`, `channel_detached`, `member_added`, `member_removed`
 
@@ -311,11 +313,13 @@ Bot handlers (registered in `ProcessorService.ts` via `Match.tag`):
 |------------------|--------------|----------|
 | `managed_channel_created` | `src/rcp/channel/handleManagedCreated.ts` | `createChannelOnly(guild_id, discord_channel_name)`, then `Channel/UpsertManagedChannel` to persist the new `discord_channel_id`. No role, no permission overwrite. |
 | `managed_channel_adopted` | `src/rcp/channel/handleManagedAdopted.ts` (`handleManagedAdopted`) | `updateChannel(discord_channel_id, { permission_overwrites: [@everyone deny ViewChannel] })` — a full-REPLACE of the overwrite list (see REPLACE-semantics note below). No RPC ack; group grants arrive separately via `managed_access_granted`. |
-| `managed_channel_archived` | `src/rcp/channel/handleManagedArchived.ts` | Move channel to `archive_category_id` via `updateChannel({ parent_id })`; on failure fall back to `deleteChannel`. Then call `Channel/ClearManagedChannel`. |
-| `managed_channel_deleted` | `src/rcp/channel/handleManagedDeleted.ts` | `deleteChannel`, then `Channel/ClearManagedChannel`. No endpoint currently emits this event (v1) — the handler exists for future use. |
+| `managed_channel_archived` | `src/rcp/channel/handleManagedArchived.ts` | Move channel to `archive_category_id` via `updateChannel({ parent_id })`; on failure fall back to `deleteChannel`. Does **NOT** call `Channel/ClearManagedChannel` — the `team_channels.discord_channel_id` link is preserved through archive so restore can re-flip `archived` on the same row and the channel list de-dups consistently. |
+| `managed_channel_restored` | `src/rcp/channel/handleManagedRestored.ts` (`handleManagedRestored`) | Move channel to uncategorized via `updateChannel(discord_channel_id, { parent_id: null })`. NO delete-fallback, NO RPC ack — the server already flipped `team_channels.archived` to `false` before emitting. See restore-asymmetry note below. |
+| `managed_channel_deleted` | `src/rcp/channel/handleManagedDeleted.ts` | `deleteChannel`, then `Channel/ClearManagedChannel`. This is now the ONLY handler that calls `Channel/ClearManagedChannel`. No endpoint currently emits this event (v1) — the handler exists for future use. |
 | `managed_access_granted` | `src/rcp/channel/handleManagedAccess.ts` (`handleManagedAccessGranted`) | `setChannelAccessOverwrite(discord_channel_id, discord_role_id, access_level)`. |
 | `managed_access_revoked` | `src/rcp/channel/handleManagedAccess.ts` (`handleManagedAccessRevoked`) | `removeChannelAccessOverwrite(discord_channel_id, discord_role_id)`. |
 | `discord_channel_archived` | `src/rcp/channel/handleDiscordArchived.ts` (`handleDiscordArchived`) | Move an arbitrary Discord channel (no `team_channels` row) to `archive_category_id` via `updateChannel({ parent_id })`. See asymmetry rules below. |
+| `discord_channel_restored` | `src/rcp/channel/handleDiscordRestored.ts` (`handleDiscordRestored`) | Move an arbitrary Discord channel (no `team_channels` row) to uncategorized via `updateChannel(discord_channel_id, { parent_id: null })`. NO delete-fallback, NO RPC ack. See restore-asymmetry note below. |
 
 `handleDiscordArchived` is for archiving channels Sideline did NOT create (`entity_type='discord'`). It differs from `handleManagedArchived` in two ways that MUST be preserved:
 
@@ -323,6 +327,13 @@ Bot handlers (registered in `ProcessorService.ts` via `Match.tag`):
 2. **NO RPC ack.** There is no `team_channels` row to update, so it never calls `Channel/ClearManagedChannel` or any other ack RPC.
 
 When `event.discord_channel_id` is `None`, the handler is a no-op.
+
+`handleManagedRestored` and `handleDiscordRestored` are the inverse of the archive handlers — both move the channel to uncategorized via `updateChannel(discord_channel_id, { parent_id: null })`. BOTH MUST preserve two asymmetries vs `handleManagedArchived`:
+
+1. **NO delete-fallback.** On `updateChannel` failure they log a warning and stop. A restore must never delete a channel.
+2. **NO RPC ack.** The server already set `team_channels.archived = false` (managed) or owns no row (discord) before emitting, so neither handler calls `Channel/ClearManagedChannel` or any other RPC. The preserved `team_channels.discord_channel_id` link (kept through archive) is what lets `handleManagedRestored` target the same channel.
+
+When `event.discord_channel_id` is `None`, both restore handlers are no-ops.
 
 `handleManagedAdopted` makes a previously-unmanaged channel private by **full-REPLACING** its `permission_overwrites` list with a single `@everyone` deny-`ViewChannel` overwrite (`deny(HIDDEN)`, the same shape `createChannelOnly` uses for Sideline-created channels). Rules that MUST be preserved:
 

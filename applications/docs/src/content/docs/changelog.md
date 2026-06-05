@@ -5,6 +5,11 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-05 — Channel management: restore archived channels + channel emoji
+
+- **Restore archived channels:** archived channels can now be moved back out of the archive category directly from Sideline. Open the channel's detail sheet and click **Restore**, or use multi-select to **Restore selected** channels in bulk. For Sideline-managed channels the existing Discord link is re-used — no new channel is created. Channels that are already active, are categories, or cannot be found are listed as skipped.
+- **Channel emoji:** when creating a managed channel you can now set an optional emoji. The emoji is stored separately from the logical channel name and composed into the Discord channel name via the team's channel format template (e.g. `{emoji}│{name}`). The team's current format is shown on the **Team → Channels** page.
+
 ## 2026-06-05 — Channel management: take over any Discord channel + bulk archive
 
 - **Take over any Discord channel:** you can now bring an existing Discord text channel under Sideline management without recreating it. Open the channel's detail sheet and click **Take over channel**. The bot makes the channel private (replaces all existing Discord permission overwrites with `@everyone deny ViewChannel`), then you control access from the **Access** panel as usual. Only text channels (type 0) can be adopted; categories and voice channels are not supported.

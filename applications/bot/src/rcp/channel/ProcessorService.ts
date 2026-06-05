@@ -10,11 +10,13 @@ import { handleCreated } from './handleCreated.js';
 import { handleDeleted, handleRosterDeleted } from './handleDeleted.js';
 import { handleGroupDetached, handleRosterDetached } from './handleDetached.js';
 import { handleDiscordArchived } from './handleDiscordArchived.js';
+import { handleDiscordRestored } from './handleDiscordRestored.js';
 import { handleManagedAccessGranted, handleManagedAccessRevoked } from './handleManagedAccess.js';
 import { handleManagedAdopted } from './handleManagedAdopted.js';
 import { handleManagedArchived } from './handleManagedArchived.js';
 import { handleManagedCreated } from './handleManagedCreated.js';
 import { handleManagedDeleted } from './handleManagedDeleted.js';
+import { handleManagedRestored } from './handleManagedRestored.js';
 import { handleMemberAdded, handleRosterMemberAdded } from './handleMemberAdded.js';
 import { handleMemberRemoved, handleRosterMemberRemoved } from './handleMemberRemoved.js';
 import { handleRosterChannelCreated } from './handleRosterChannelCreated.js';
@@ -48,6 +50,8 @@ const action: (
   Match.tag('managed_access_revoked', handleManagedAccessRevoked),
   Match.tag('discord_channel_archived', handleDiscordArchived),
   Match.tag('managed_channel_adopted', handleManagedAdopted),
+  Match.tag('managed_channel_restored', handleManagedRestored),
+  Match.tag('discord_channel_restored', handleDiscordRestored),
   Match.exhaustive,
 );
 

@@ -536,11 +536,61 @@ const channelUpdatedFromSql = (r: EventRow) =>
     Match.exhaustive,
   );
 
+const channelRestoredFromSql = (r: EventRow) =>
+  Match.value(r.entity_type).pipe(
+    Match.when('managed', () =>
+      Effect.Do.pipe(
+        Effect.bind('team_channel_id', () => nullable(r, 'team_channel_id')),
+        Effect.map(
+          ({ team_channel_id }) =>
+            new ChannelRpcEvents.ManagedChannelRestoredEvent({
+              id: r.id,
+              team_id: r.team_id,
+              guild_id: r.guild_id,
+              team_channel_id,
+              discord_channel_id: r.existing_channel_id,
+            }),
+        ),
+      ),
+    ),
+    Match.when('discord', () =>
+      Effect.succeed(
+        new ChannelRpcEvents.DiscordChannelRestoredEvent({
+          id: r.id,
+          team_id: r.team_id,
+          guild_id: r.guild_id,
+          discord_channel_id: r.existing_channel_id,
+        }),
+      ),
+    ),
+    // 'group' and 'roster' entity types never produce channel_restored events.
+    Match.when('group', () =>
+      Effect.fail(
+        new EventPropertyMissing({
+          event_type: r.event_type,
+          id: r.id,
+          property: 'entity_type(group) is not valid for channel_restored',
+        }),
+      ),
+    ),
+    Match.when('roster', () =>
+      Effect.fail(
+        new EventPropertyMissing({
+          event_type: r.event_type,
+          id: r.id,
+          property: 'entity_type(roster) is not valid for channel_restored',
+        }),
+      ),
+    ),
+    Match.exhaustive,
+  );
+
 export const constructEvent = Match.type<EventRow>().pipe(
   Match.when({ event_type: 'channel_created' }, channelCreatedFromSql),
   Match.when({ event_type: 'channel_updated' }, channelUpdatedFromSql),
   Match.when({ event_type: 'channel_deleted' }, channelDeletedFromSql),
   Match.when({ event_type: 'channel_archived' }, channelArchivedFromSql),
+  Match.when({ event_type: 'channel_restored' }, channelRestoredFromSql),
   Match.when({ event_type: 'channel_detached' }, channelDetachedFromSql),
   Match.when({ event_type: 'member_added' }, memberAddedFromSql),
   Match.when({ event_type: 'member_removed' }, memberRemovedFromSql),

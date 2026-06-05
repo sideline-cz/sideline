@@ -10,6 +10,7 @@ export class TeamChannel extends Model.Class<TeamChannel>('TeamChannel')({
   id: Model.Generated(TeamChannelId),
   team_id: TeamId,
   name: Schema.String,
+  emoji: Schema.OptionFromNullOr(Schema.String),
   category: Schema.OptionFromNullOr(Schema.String),
   position: Schema.Number,
   archived: Schema.Boolean,

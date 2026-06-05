@@ -458,6 +458,99 @@ describe('constructEvent — impossible-state guards for managed entity_type', (
 });
 
 // ---------------------------------------------------------------------------
+// channel_restored + managed → ManagedChannelRestoredEvent
+// ---------------------------------------------------------------------------
+
+describe('constructEvent — managed channel_restored', () => {
+  it('produces ManagedChannelRestoredEvent with team_channel_id and existing_channel_id', async () => {
+    const row = baseRow('channel_restored', 'managed', {
+      team_channel_id: Option.some(TEAM_CHANNEL_ID),
+      existing_channel_id: Option.some(DISCORD_CHANNEL_ID),
+    });
+
+    const event = await run(constructEvent(row));
+
+    expect(event._tag).toBe('managed_channel_restored');
+    if (event._tag !== 'managed_channel_restored') return;
+    expect(event.team_channel_id).toBe(TEAM_CHANNEL_ID);
+    expect(Option.isSome(event.discord_channel_id)).toBe(true);
+    if (Option.isSome(event.discord_channel_id)) {
+      expect(event.discord_channel_id.value).toBe(DISCORD_CHANNEL_ID);
+    }
+    expect(event.guild_id).toBe(GUILD_ID);
+  });
+
+  it('fails with EventPropertyMissing when team_channel_id is absent', async () => {
+    const row = baseRow('channel_restored', 'managed', {
+      existing_channel_id: Option.some(DISCORD_CHANNEL_ID),
+      // team_channel_id is Option.none()
+    });
+
+    const error = await runFail(constructEvent(row));
+
+    expect(error).toBeInstanceOf(EventPropertyMissing);
+    expect((error as EventPropertyMissing).property).toBe('team_channel_id');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// channel_restored + discord → DiscordChannelRestoredEvent
+// ---------------------------------------------------------------------------
+
+describe('constructEvent — discord channel_restored', () => {
+  it('produces DiscordChannelRestoredEvent with existing_channel_id', async () => {
+    const row = baseRow('channel_restored', 'discord', {
+      existing_channel_id: Option.some(DISCORD_CHANNEL_ID),
+    });
+
+    const event = await run(constructEvent(row));
+
+    expect(event._tag).toBe('discord_channel_restored');
+    if (event._tag !== 'discord_channel_restored') return;
+    expect(Option.isSome(event.discord_channel_id)).toBe(true);
+    if (Option.isSome(event.discord_channel_id)) {
+      expect(event.discord_channel_id.value).toBe(DISCORD_CHANNEL_ID);
+    }
+    expect(event.guild_id).toBe(GUILD_ID);
+  });
+
+  it('produces DiscordChannelRestoredEvent with discord_channel_id None when existing_channel_id absent', async () => {
+    const row = baseRow('channel_restored', 'discord');
+    // existing_channel_id is Option.none() → discord_channel_id is None
+
+    const event = await run(constructEvent(row));
+
+    expect(event._tag).toBe('discord_channel_restored');
+    if (event._tag !== 'discord_channel_restored') return;
+    expect(Option.isNone(event.discord_channel_id)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// channel_restored + group / roster → EventPropertyMissing (impossible guard)
+// ---------------------------------------------------------------------------
+
+describe('constructEvent — channel_restored impossible-state guards', () => {
+  it('channel_restored + group → fails with EventPropertyMissing', async () => {
+    const row = baseRow('channel_restored', 'group');
+
+    const error = await runFail(constructEvent(row));
+
+    expect(error).toBeInstanceOf(EventPropertyMissing);
+    expect((error as EventPropertyMissing).property).toContain('group');
+  });
+
+  it('channel_restored + roster → fails with EventPropertyMissing', async () => {
+    const row = baseRow('channel_restored', 'roster');
+
+    const error = await runFail(constructEvent(row));
+
+    expect(error).toBeInstanceOf(EventPropertyMissing);
+    expect((error as EventPropertyMissing).property).toContain('roster');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Regression: channel_updated + discord still hits the impossible-state guard
 // ---------------------------------------------------------------------------
 

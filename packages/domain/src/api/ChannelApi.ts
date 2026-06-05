@@ -16,6 +16,7 @@ export class ChannelInfo extends Schema.Class<ChannelInfo>('ChannelInfo')({
   discordChannelId: Schema.OptionFromNullOr(Snowflake),
   teamChannelId: Schema.OptionFromNullOr(TeamChannelId),
   name: Schema.String,
+  emoji: Schema.OptionFromNullOr(Schema.String),
   category: Schema.OptionFromNullOr(Schema.String),
   managed: Schema.Boolean,
   type: Schema.Number,
@@ -27,6 +28,7 @@ export class ChannelDetail extends Schema.Class<ChannelDetail>('ChannelDetail')(
   discordChannelId: Schema.OptionFromNullOr(Snowflake),
   teamChannelId: Schema.OptionFromNullOr(TeamChannelId),
   name: Schema.String,
+  emoji: Schema.OptionFromNullOr(Schema.String),
   category: Schema.OptionFromNullOr(Schema.String),
   managed: Schema.Boolean,
   type: Schema.Number,
@@ -39,11 +41,13 @@ export class ChannelListResponse extends Schema.Class<ChannelListResponse>('Chan
   canManage: Schema.Boolean,
   guildLinked: Schema.Boolean,
   archiveCategoryId: Schema.OptionFromNullOr(Snowflake),
+  channelFormat: Schema.String,
   channels: Schema.Array(ChannelInfo),
 }) {}
 
 export const CreateChannelRequest = Schema.Struct({
   name: Schema.NonEmptyString,
+  emoji: Schema.OptionFromNullOr(Schema.NonEmptyString),
   category: Schema.OptionFromNullOr(Schema.NonEmptyString),
 });
 export type CreateChannelRequest = Schema.Schema.Type<typeof CreateChannelRequest>;
@@ -83,6 +87,11 @@ export class ChannelNotArchivable extends Schema.TaggedErrorClass<ChannelNotArch
   {},
 ) {}
 
+export class ChannelNotRestorable extends Schema.TaggedErrorClass<ChannelNotRestorable>()(
+  'ChannelNotRestorable',
+  {},
+) {}
+
 export class ChannelNotAdoptable extends Schema.TaggedErrorClass<ChannelNotAdoptable>()(
   'ChannelNotAdoptable',
   {},
@@ -115,6 +124,26 @@ export class ChannelBulkArchiveResult extends Schema.Class<ChannelBulkArchiveRes
     Schema.Struct({
       discordChannelId: Snowflake,
       reason: BulkArchiveSkipReason,
+    }),
+  ),
+  failed: Schema.Array(Schema.Struct({ discordChannelId: Snowflake })),
+}) {}
+
+const BulkRestoreSkipReason = Schema.Literals([
+  'already_active',
+  'is_category',
+  'not_found',
+  'not_archived',
+]);
+
+export class ChannelBulkRestoreResult extends Schema.Class<ChannelBulkRestoreResult>(
+  'ChannelBulkRestoreResult',
+)({
+  restored: Schema.Array(Snowflake),
+  skipped: Schema.Array(
+    Schema.Struct({
+      discordChannelId: Snowflake,
+      reason: BulkRestoreSkipReason,
     }),
   ),
   failed: Schema.Array(Schema.Struct({ discordChannelId: Snowflake })),
@@ -224,6 +253,33 @@ export class ChannelApiGroup extends HttpApiGroup.make('channel')
           ChannelForbidden.pipe(HttpApiSchema.status(403)),
           ArchiveCategoryNotConfigured.pipe(HttpApiSchema.status(409)),
         ],
+        payload: BulkArchiveDiscordChannelsRequest,
+        params: { teamId: TeamId },
+      },
+    ).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post(
+      'restoreDiscordChannel',
+      '/teams/:teamId/discord-channels/:discordChannelId/restore',
+      {
+        success: Schema.Void.pipe(HttpApiSchema.status(204)),
+        error: [
+          ChannelForbidden.pipe(HttpApiSchema.status(403)),
+          ChannelNotFound.pipe(HttpApiSchema.status(404)),
+          ChannelNotRestorable.pipe(HttpApiSchema.status(409)),
+        ],
+        params: { teamId: TeamId, discordChannelId: Snowflake },
+      },
+    ).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post(
+      'bulkRestoreDiscordChannels',
+      '/teams/:teamId/discord-channels/bulk-restore',
+      {
+        success: ChannelBulkRestoreResult,
+        error: [ChannelForbidden.pipe(HttpApiSchema.status(403))],
         payload: BulkArchiveDiscordChannelsRequest,
         params: { teamId: TeamId },
       },

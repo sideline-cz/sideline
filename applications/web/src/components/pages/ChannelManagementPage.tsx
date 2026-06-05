@@ -1,6 +1,7 @@
 import type { ChannelApi, GroupApi } from '@sideline/domain';
+import { Discord, Team } from '@sideline/domain';
 import { Link, useRouter } from '@tanstack/react-router';
-import { Option } from 'effect';
+import { Effect, Option, Schema } from 'effect';
 import { MoreHorizontal } from 'lucide-react';
 import React from 'react';
 import { ChannelTypeIcon } from '~/components/atoms/ChannelTypeIcon.js';
@@ -28,6 +29,7 @@ import {
   DISCORD_CHANNEL_TYPE_TEXT,
   DISCORD_CHANNEL_TYPE_VOICE,
 } from '~/lib/discord.js';
+import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
 interface ChannelManagementPageProps {
@@ -64,6 +66,13 @@ function isSelectable(channel: ChannelApi.ChannelInfo, canManage: boolean): bool
   );
 }
 
+function displayChannelName(channel: ChannelApi.ChannelInfo): string {
+  return Option.match(channel.emoji, {
+    onSome: (e) => `${e} ${channel.name}`,
+    onNone: () => channel.name,
+  });
+}
+
 function ChannelRowSkeleton() {
   return (
     <div className='flex items-center gap-3 py-3 border-b'>
@@ -84,9 +93,11 @@ function ChannelRow({
   canManage,
   archiveCategoryId,
   onAction,
+  onRestore,
   selectionMode,
   selected,
   onToggleSelect,
+  restoring,
 }: {
   channel: ChannelApi.ChannelInfo;
   guildId: Option.Option<string>;
@@ -96,11 +107,14 @@ function ChannelRow({
     kind: 'rename' | 'archive' | 'access' | 'adopt',
     channel: ChannelApi.ChannelInfo,
   ) => void;
+  onRestore: (channel: ChannelApi.ChannelInfo) => void;
   selectionMode: boolean;
   selected: boolean;
   onToggleSelect: (key: string) => void;
+  restoring: boolean;
 }) {
-  const isSyncing = channel.managed && Option.isNone(channel.discordChannelId) && !channel.archived;
+  const isSyncing =
+    restoring || (channel.managed && Option.isNone(channel.discordChannelId) && !channel.archived);
   const isManaged = channel.managed;
   const isText = channel.type === DISCORD_CHANNEL_TYPE_TEXT;
   const isVoice = channel.type === DISCORD_CHANNEL_TYPE_VOICE;
@@ -112,7 +126,9 @@ function ChannelRow({
   const showAccess = canManage && isText && !channel.archived;
   const showRename = canManage && isManaged && isText && !channel.archived;
   const showArchive = canManage && !channel.archived && (isText || isVoice);
-  const hasAnyAction = showAccess || showRename || showArchive;
+  const showRestore =
+    canManage && channel.archived && (isText || isVoice) && Option.isSome(channel.discordChannelId);
+  const hasAnyAction = showAccess || showRename || showArchive || showRestore;
 
   return (
     <div className='flex items-center gap-3 py-3 border-b last:border-0'>
@@ -133,7 +149,7 @@ function ChannelRow({
         <ChannelTypeIcon type={channel.type} className='size-4' />
       </span>
       <div className='flex-1 min-w-0 flex flex-wrap items-center gap-2'>
-        <span className='font-medium truncate'>{channel.name}</span>
+        <span className='font-medium truncate'>{displayChannelName(channel)}</span>
         {channel.archived && (
           <Badge variant='secondary' className='text-xs'>
             {tr('channels_archived_badge')}
@@ -200,6 +216,18 @@ function ChannelRow({
                   </Tooltip>
                 </TooltipProvider>
               ))}
+            {showRestore && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuItem onClick={() => onRestore(channel)} disabled={restoring}>
+                      {tr('channels_restore')}
+                    </DropdownMenuItem>
+                  </TooltipTrigger>
+                  <TooltipContent>{tr('channels_restore_tooltip')}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -213,6 +241,7 @@ export function ChannelManagementPage({
   data,
   allGroups,
 }: ChannelManagementPageProps) {
+  const run = useRun();
   const router = useRouter();
   const [dialog, setDialog] = React.useState<DialogState>({ kind: 'none' });
 
@@ -220,10 +249,14 @@ export function ChannelManagementPage({
   const [selectionMode, setSelectionMode] = React.useState(false);
   const [selectedKeys, setSelectedKeys] = React.useState<Set<string>>(new Set());
 
+  // Restore in-progress tracking (per discordChannelId)
+  const [restoringKeys, setRestoringKeys] = React.useState<Set<string>>(new Set());
+
   const channels = data?.channels ?? [];
   const canManage = data?.canManage ?? false;
   const guildLinked = data?.guildLinked ?? false;
   const archiveCategoryId = data?.archiveCategoryId ?? Option.none();
+  const channelFormat = data?.channelFormat;
 
   // Collect existing managed categories (for CreateChannelDialog)
   const existingCategories = React.useMemo(() => {
@@ -300,6 +333,38 @@ export function ChannelManagementPage({
       setDialog({ kind: 'archive', channel });
     }
   };
+
+  const handleRestore = React.useCallback(
+    async (channel: ChannelApi.ChannelInfo) => {
+      if (Option.isNone(channel.discordChannelId)) return;
+      const discordChannelId = channel.discordChannelId.value;
+      const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
+      const discordChIdBranded = Schema.decodeSync(Discord.Snowflake)(discordChannelId);
+
+      setRestoringKeys((prev) => new Set([...prev, discordChannelId]));
+
+      await ApiClient.asEffect().pipe(
+        Effect.flatMap((api) =>
+          api.channel.restoreDiscordChannel({
+            params: { teamId: teamIdBranded, discordChannelId: discordChIdBranded },
+          }),
+        ),
+        Effect.catchTag('ChannelNotRestorable', () =>
+          Effect.fail(ClientError.make(tr('channels_notRestorable'))),
+        ),
+        Effect.mapError(() => ClientError.make(tr('channels_restoreFailed'))),
+        run({ success: tr('channels_restored') }),
+      );
+
+      setRestoringKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(discordChannelId);
+        return next;
+      });
+      router.invalidate();
+    },
+    [teamId, run, router],
+  );
 
   const handleCreated = (_channel: ChannelApi.ChannelDetail) => {
     // Channel enters syncing state - the polling effect will pick it up
@@ -445,9 +510,14 @@ export function ChannelManagementPage({
                     canManage={canManage}
                     archiveCategoryId={archiveCategoryId}
                     onAction={handleAction}
+                    onRestore={handleRestore}
                     selectionMode={selectionMode}
                     selected={selectedKeys.has(channelRowKey(channel))}
                     onToggleSelect={handleToggleSelect}
+                    restoring={
+                      Option.isSome(channel.discordChannelId) &&
+                      restoringKeys.has(channel.discordChannelId.value)
+                    }
                   />
                 ))}
               </div>
@@ -479,9 +549,14 @@ export function ChannelManagementPage({
                         canManage={canManage}
                         archiveCategoryId={archiveCategoryId}
                         onAction={handleAction}
+                        onRestore={handleRestore}
                         selectionMode={selectionMode}
                         selected={false}
                         onToggleSelect={handleToggleSelect}
+                        restoring={
+                          Option.isSome(channel.discordChannelId) &&
+                          restoringKeys.has(channel.discordChannelId.value)
+                        }
                       />
                     ))}
                 </div>
@@ -520,6 +595,7 @@ export function ChannelManagementPage({
         }}
         teamId={teamId}
         existingCategories={existingCategories}
+        channelFormat={channelFormat}
         onCreated={handleCreated}
       />
 

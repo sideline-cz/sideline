@@ -19,6 +19,7 @@ class ChannelRow extends Schema.Class<ChannelRow>('ChannelRow')({
   team_id: Team.TeamId,
   name: Schema.String,
   category: Schema.OptionFromNullOr(Schema.String),
+  emoji: Schema.OptionFromNullOr(Schema.String),
   position: Schema.Number,
   archived: Schema.Boolean,
   discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
@@ -31,6 +32,7 @@ const FindByTeamInput = Schema.Struct({ team_id: Team.TeamId });
 const InsertInput = Schema.Struct({
   team_id: Team.TeamId,
   name: Schema.String,
+  emoji: Schema.OptionFromNullOr(Schema.String),
   category: Schema.OptionFromNullOr(Schema.String),
 });
 
@@ -71,7 +73,7 @@ const make = Effect.gen(function* () {
     Request: FindByIdInput,
     Result: ChannelRow,
     execute: (input) => sql`
-      SELECT id, team_id, name, category, position, archived, discord_channel_id, discord_role_id
+      SELECT id, team_id, name, category, emoji, position, archived, discord_channel_id, discord_role_id
       FROM team_channels
       WHERE id = ${input.id}
     `,
@@ -81,7 +83,7 @@ const make = Effect.gen(function* () {
     Request: FindByTeamInput,
     Result: ChannelRow,
     execute: (input) => sql`
-      SELECT id, team_id, name, category, position, archived, discord_channel_id, discord_role_id
+      SELECT id, team_id, name, category, emoji, position, archived, discord_channel_id, discord_role_id
       FROM team_channels
       WHERE team_id = ${input.team_id}
       ORDER BY category NULLS FIRST, position ASC, name ASC
@@ -92,9 +94,9 @@ const make = Effect.gen(function* () {
     Request: InsertInput,
     Result: ChannelRow,
     execute: (input) => sql`
-      INSERT INTO team_channels (team_id, name, category)
-      VALUES (${input.team_id}, ${input.name}, ${input.category})
-      RETURNING id, team_id, name, category, position, archived, discord_channel_id, discord_role_id
+      INSERT INTO team_channels (team_id, name, emoji, category)
+      VALUES (${input.team_id}, ${input.name}, ${input.emoji}, ${input.category})
+      RETURNING id, team_id, name, category, emoji, position, archived, discord_channel_id, discord_role_id
     `,
   });
 
@@ -104,7 +106,7 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
       INSERT INTO team_channels (team_id, name, category, discord_channel_id, archived)
       VALUES (${input.team_id}, ${input.name}, ${input.category}, ${input.discord_channel_id}, false)
-      RETURNING id, team_id, name, category, position, archived, discord_channel_id, discord_role_id
+      RETURNING id, team_id, name, category, emoji, position, archived, discord_channel_id, discord_role_id
     `,
   });
 
@@ -115,7 +117,7 @@ const make = Effect.gen(function* () {
       UPDATE team_channels
       SET name = ${input.name}
       WHERE id = ${input.id}
-      RETURNING id, team_id, name, category, position, archived, discord_channel_id, discord_role_id
+      RETURNING id, team_id, name, category, emoji, position, archived, discord_channel_id, discord_role_id
     `,
   });
 
@@ -126,7 +128,7 @@ const make = Effect.gen(function* () {
       UPDATE team_channels
       SET category = ${input.category}, position = ${input.position}
       WHERE id = ${input.id}
-      RETURNING id, team_id, name, category, position, archived, discord_channel_id, discord_role_id
+      RETURNING id, team_id, name, category, emoji, position, archived, discord_channel_id, discord_role_id
     `,
   });
 
@@ -168,8 +170,13 @@ const make = Effect.gen(function* () {
   const findAllByTeam = (teamId: Team.TeamId) =>
     findAllByTeamQuery({ team_id: teamId }).pipe(catchSqlErrors);
 
-  const insert = (teamId: Team.TeamId, name: string, category: Option.Option<string>) =>
-    insertQuery({ team_id: teamId, name, category }).pipe(
+  const insert = (
+    teamId: Team.TeamId,
+    name: string,
+    category: Option.Option<string>,
+    emoji: Option.Option<string>,
+  ) =>
+    insertQuery({ team_id: teamId, name, emoji, category }).pipe(
       SqlErrors.catchUniqueViolation(() => new ChannelNameAlreadyTakenError()),
       Effect.catchTag(
         'NoSuchElementError',

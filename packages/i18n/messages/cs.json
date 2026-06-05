@@ -1560,5 +1560,16 @@
   "channels_adopt_confirm": "Přijmout kanál",
   "channels_adopt_inProgress": "Přijímám…",
   "channels_adopt_failed": "Přijetí kanálu se nezdařilo.",
-  "channels_adopt_nameConflict": "Spravovaný kanál s tímto názvem již existuje."
+  "channels_adopt_nameConflict": "Spravovaný kanál s tímto názvem již existuje.",
+
+  "channels_restore": "Obnovit",
+  "channels_restore_tooltip": "Obnovit tento kanál z archivu",
+  "channels_restored": "Kanál obnoven",
+  "channels_restoreFailed": "Nepodařilo se obnovit kanál",
+  "channels_notRestorable": "Tento kanál nelze obnovit",
+
+  "channels_emojiLabel": "Emoji",
+  "channels_namePreview": "Náhled názvu na Discordu",
+  "channels_formatHint": "Výsledný název se řídí formátem kanálů vašeho týmu.",
+  "channels_formatHint_cta": "Upravit formát v nastavení týmu"
 }

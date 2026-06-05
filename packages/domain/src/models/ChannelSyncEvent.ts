@@ -15,6 +15,7 @@ export const ChannelSyncEventType = Schema.Literals([
   'channel_updated',
   'channel_deleted',
   'channel_archived',
+  'channel_restored',
   'channel_detached',
   'member_added',
   'member_removed',
