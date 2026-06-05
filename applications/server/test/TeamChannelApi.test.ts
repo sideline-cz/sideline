@@ -44,6 +44,7 @@ import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
 import {
   ChannelNameAlreadyTakenError,
+  DiscordChannelAlreadyAdoptedError,
   TeamChannelsRepository,
 } from '~/repositories/TeamChannelsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
@@ -180,6 +181,11 @@ type ManagedSyncCall =
       discordChannelId: Discord.Snowflake;
       archiveCategoryId: Discord.Snowflake;
     }
+  | {
+      type: 'channel_adopted';
+      teamChannelId: TeamChannel.TeamChannelId;
+      discordChannelId: Discord.Snowflake;
+    }
   | { type: 'access_granted' }
   | { type: 'access_revoked' };
 
@@ -236,6 +242,18 @@ const MockChannelSyncEventsRepositoryLayer = Layer.succeed(ChannelSyncEventsRepo
       type: 'discord_channel_archived',
       discordChannelId: args.discordChannelId,
       archiveCategoryId: args.archiveCategoryId,
+    });
+    return Effect.void;
+  },
+  emitManagedChannelAdopted: (args: {
+    teamId: Team.TeamId;
+    teamChannelId: TeamChannel.TeamChannelId;
+    discordChannelId: Discord.Snowflake;
+  }) => {
+    managedSyncCalls.push({
+      type: 'channel_adopted',
+      teamChannelId: args.teamChannelId,
+      discordChannelId: args.discordChannelId,
     });
     return Effect.void;
   },
@@ -296,6 +314,44 @@ const MockTeamChannelsRepositoryLayer = Layer.succeed(TeamChannelsRepository, {
       position: 0,
       archived: false,
       discord_channel_id: Option.none<Discord.Snowflake>(),
+      discord_role_id: Option.none<Discord.Snowflake>(),
+    };
+    channelsStore.set(id, ch);
+    return Effect.succeed(ch);
+  },
+  insertAdopted: (
+    teamId: Team.TeamId,
+    name: string,
+    _category: Option.Option<string>,
+    discordChannelId: Discord.Snowflake,
+  ) => {
+    // Check for name conflict (simulates uq_team_channels_team_name_active violation)
+    const existingByName = Array.from(channelsStore.values()).find(
+      (c) => c.team_id === teamId && c.name === name && !c.archived,
+    );
+    if (existingByName) {
+      return Effect.fail(new ChannelNameAlreadyTakenError());
+    }
+    // Check for discord channel id conflict (simulates uq_team_channels_discord_channel violation)
+    const existingByDiscord = Array.from(channelsStore.values()).find((c) =>
+      Option.match(c.discord_channel_id, {
+        onNone: () => false,
+        onSome: (id) => id === discordChannelId,
+      }),
+    );
+    if (existingByDiscord) {
+      return Effect.fail(new DiscordChannelAlreadyAdoptedError());
+    }
+    const id =
+      `00000000-0000-0000-0005-${String(nextChannelId++).padStart(12, '0')}` as TeamChannel.TeamChannelId;
+    const ch = {
+      id,
+      team_id: teamId,
+      name,
+      category: _category,
+      position: 0,
+      archived: false,
+      discord_channel_id: Option.some(discordChannelId),
       discord_role_id: Option.none<Discord.Snowflake>(),
     };
     channelsStore.set(id, ch);
@@ -1834,5 +1890,745 @@ describe('listChannels — archived managed channel regression', () => {
     // Must be archived even though parent_id != archiveCategoryId
     expect(ch.archived).toBe(true);
     expect(ch.managed).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// adoptDiscordChannel
+// ---------------------------------------------------------------------------
+
+describe('adoptDiscordChannel', () => {
+  const adoptUrl = (discordId: string) =>
+    `http://localhost/teams/${TEST_TEAM_ID}/discord-channels/${discordId}/adopt`;
+
+  const textChannelDiscordLayer = Layer.succeed(DiscordChannelsRepository, {
+    syncChannels: () => Effect.void,
+    findByGuildId: () => Effect.succeed([]),
+    findManagedListByTeam: () => Effect.succeed([]),
+    findByChannelId: (_guildId: Discord.Snowflake, channelId: Discord.Snowflake) =>
+      Effect.succeed(
+        channelId === DISCORD_TEXT_CHANNEL_ID
+          ? Option.some({
+              channel_id: DISCORD_TEXT_CHANNEL_ID,
+              name: 'general',
+              type: 0,
+              parent_id: Option.none<Discord.Snowflake>(),
+            })
+          : Option.none(),
+      ),
+  } as any);
+
+  it('adopt text channel (type 0) → 200 ChannelDetail managed=true, emits channel_adopted event', async () => {
+    const customApp = HttpRouter.toWebHandler(
+      buildLayer({ discordChannelsLayer: textChannelDiscordLayer }),
+    );
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(adoptUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.managed).toBe(true);
+    // teamChannelId should be set (Some)
+    expect(body.teamChannelId).not.toBeNull();
+    // grants should be empty array
+    expect(body.grants).toEqual([]);
+
+    // Exactly one channel_adopted event emitted
+    const adoptedCalls = managedSyncCalls.filter((c) => c.type === 'channel_adopted');
+    expect(adoptedCalls).toHaveLength(1);
+    expect((adoptedCalls[0] as any).discordChannelId).toBe(DISCORD_TEXT_CHANNEL_ID);
+
+    // NO managed_channel_created event, no access events
+    const createdCalls = managedSyncCalls.filter((c) => c.type === 'channel_created');
+    expect(createdCalls).toHaveLength(0);
+    const accessCalls = managedSyncCalls.filter(
+      (c) => c.type === 'access_granted' || c.type === 'access_revoked',
+    );
+    expect(accessCalls).toHaveLength(0);
+  });
+
+  it('adopt type 2 (voice) → 409 ChannelNotAdoptable', async () => {
+    const voiceLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () =>
+        Effect.succeed(
+          Option.some({
+            channel_id: DISCORD_VOICE_CHANNEL_ID,
+            name: 'voice-chat',
+            type: 2,
+            parent_id: Option.none<Discord.Snowflake>(),
+          }),
+        ),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: voiceLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(adoptUrl(DISCORD_VOICE_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(409);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('adopt type 4 (category) → 409 ChannelNotAdoptable', async () => {
+    const categoryLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () =>
+        Effect.succeed(
+          Option.some({
+            channel_id: DISCORD_CATEGORY_CHANNEL_ID,
+            name: 'Some Category',
+            type: 4,
+            parent_id: Option.none<Discord.Snowflake>(),
+          }),
+        ),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: categoryLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(adoptUrl(DISCORD_CATEGORY_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(409);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('adopt unknown discord channel → 404 ChannelNotFound', async () => {
+    const notFoundLayer = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: () => Effect.succeed(Option.none()),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: notFoundLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(adoptUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(404);
+  });
+
+  it('adopt without group:manage → 403 ChannelForbidden', async () => {
+    const customApp = HttpRouter.toWebHandler(
+      buildLayer({ discordChannelsLayer: textChannelDiscordLayer }),
+    );
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(adoptUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer member-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(403);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('idempotent re-adopt: already adopted → 200 same detail, NO new adopted event', async () => {
+    // Pre-seed a managed channel already linked to DISCORD_TEXT_CHANNEL_ID
+    const existingId = '00000000-0000-0000-0005-adopt000000001' as TeamChannel.TeamChannelId;
+    channelsStore.set(existingId, {
+      id: existingId,
+      team_id: TEST_TEAM_ID,
+      name: 'general',
+      category: Option.none(),
+      position: 0,
+      archived: false,
+      discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
+      discord_role_id: Option.none(),
+    });
+
+    const customApp = HttpRouter.toWebHandler(
+      buildLayer({ discordChannelsLayer: textChannelDiscordLayer }),
+    );
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(adoptUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    // Should return the existing channel id
+    expect(body.teamChannelId).toBe(existingId);
+
+    // NO new adopted event emitted (idempotent)
+    const adoptedCalls = managedSyncCalls.filter((c) => c.type === 'channel_adopted');
+    expect(adoptedCalls).toHaveLength(0);
+  });
+
+  it('category resolution: parent_id resolves to category name from type=4 parent', async () => {
+    const PARENT_ID = '444444444444444444' as Discord.Snowflake;
+    const discordLayerWithParent = Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: (_guildId: Discord.Snowflake, channelId: Discord.Snowflake) => {
+        if (channelId === DISCORD_TEXT_CHANNEL_ID) {
+          return Effect.succeed(
+            Option.some({
+              channel_id: DISCORD_TEXT_CHANNEL_ID,
+              name: 'text-with-parent',
+              type: 0,
+              parent_id: Option.some(PARENT_ID),
+            }),
+          );
+        }
+        if (channelId === PARENT_ID) {
+          return Effect.succeed(
+            Option.some({
+              channel_id: PARENT_ID,
+              name: 'My Category',
+              type: 4,
+              parent_id: Option.none<Discord.Snowflake>(),
+            }),
+          );
+        }
+        return Effect.succeed(Option.none());
+      },
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(
+      buildLayer({ discordChannelsLayer: discordLayerWithParent }),
+    );
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(adoptUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.category).toBe('My Category');
+  });
+
+  it('category resolution: missing parent_id → category None (null in JSON)', async () => {
+    const customApp = HttpRouter.toWebHandler(
+      buildLayer({ discordChannelsLayer: textChannelDiscordLayer }),
+    );
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(adoptUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.category).toBeNull();
+  });
+
+  it('name conflict (active managed row with same name) → 409 ChannelAdoptionNameConflict', async () => {
+    // Pre-seed a managed channel with name 'general' (same as what we try to adopt)
+    const conflictingId = '00000000-0000-0000-0005-nameconflict1' as TeamChannel.TeamChannelId;
+    channelsStore.set(conflictingId, {
+      id: conflictingId,
+      team_id: TEST_TEAM_ID,
+      name: 'general', // same name as DISCORD_TEXT_CHANNEL_ID's name
+      category: Option.none(),
+      position: 0,
+      archived: false,
+      // Different discord_channel_id — so idempotency check won't short-circuit
+      discord_channel_id: Option.some('555555555555555555' as Discord.Snowflake),
+      discord_role_id: Option.none(),
+    });
+
+    const customApp = HttpRouter.toWebHandler(
+      buildLayer({ discordChannelsLayer: textChannelDiscordLayer }),
+    );
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(adoptUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(409);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('concurrent DiscordChannelAlreadyAdoptedError (catch path) → re-fetches and returns existing detail, 0 adopted events', async () => {
+    // Genuine concurrent-catch path test:
+    //   - findAllByTeam returns [] on the first call (pre-check sees nothing → proceeds to insert)
+    //   - insertAdopted fails with DiscordChannelAlreadyAdoptedError (another request won the race)
+    //   - findAllByTeam returns the existing row on the second call (post-catch re-fetch)
+    //   - Assert: 200, existing channel detail returned, NO adopted event emitted
+    const raceId = '00000000-0000-0000-0005-concurrent001' as TeamChannel.TeamChannelId;
+    const existingRow = {
+      id: raceId,
+      team_id: TEST_TEAM_ID,
+      name: 'general',
+      category: Option.none<string>(),
+      position: 0,
+      archived: false,
+      discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
+      discord_role_id: Option.none<Discord.Snowflake>(),
+    };
+
+    // Build a channels layer that simulates the race:
+    //   - first findAllByTeam call: [] (pre-check finds nothing, proceeds to insert)
+    //   - insertAdopted: always fails with DiscordChannelAlreadyAdoptedError
+    //   - second findAllByTeam call: returns the existing row (post-catch re-fetch)
+    let findAllByTeamCallCount = 0;
+    const concurrentChannelsLayer = Layer.succeed(TeamChannelsRepository, {
+      _tag: 'api/TeamChannelsRepository',
+      findById: (channelId: TeamChannel.TeamChannelId) => {
+        const ch = channelsStore.get(channelId);
+        return Effect.succeed(ch ? Option.some(ch) : Option.none());
+      },
+      findAllByTeam: (_teamId: Team.TeamId) => {
+        findAllByTeamCallCount++;
+        if (findAllByTeamCallCount === 1) {
+          // Pre-check call: return empty so the handler proceeds to insertAdopted
+          return Effect.succeed([]);
+        }
+        // Post-catch re-fetch call: return the "already adopted" row
+        return Effect.succeed([existingRow]);
+      },
+      insert: () => Effect.die(new Error('Not implemented')),
+      insertAdopted: () => Effect.fail(new DiscordChannelAlreadyAdoptedError()),
+      rename: () => Effect.die(new Error('Not implemented')),
+      updateOrganization: () => Effect.die(new Error('Not implemented')),
+      setArchived: () => Effect.void,
+      delete: () => Effect.void,
+      upsertDiscordChannelId: () => Effect.void,
+      clearDiscordChannelId: () => Effect.void,
+    } as never);
+
+    const customApp = HttpRouter.toWebHandler(
+      buildLayer({
+        discordChannelsLayer: textChannelDiscordLayer,
+        channelsLayer: concurrentChannelsLayer,
+      }),
+    );
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(adoptUrl(DISCORD_TEXT_CHANNEL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    await customApp.dispose();
+
+    // Handler re-fetches and returns 200 (not an error)
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.teamChannelId).toBe(raceId);
+
+    // FIX 1: NO adopted event emitted on the concurrent-catch path
+    const adoptedCalls = managedSyncCalls.filter((c) => c.type === 'channel_adopted');
+    expect(adoptedCalls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bulkArchiveDiscordChannels
+// ---------------------------------------------------------------------------
+
+describe('bulkArchiveDiscordChannels', () => {
+  const bulkArchiveUrl = `http://localhost/teams/${TEST_TEAM_ID}/discord-channels/bulk-archive`;
+
+  // Helper to build a per-test Discord layer that returns different results per channelId
+  const makeDiscordLayer = (
+    channels: Array<{
+      channel_id: Discord.Snowflake;
+      name: string;
+      type: number;
+      parent_id: Option.Option<Discord.Snowflake>;
+    }>,
+  ) => {
+    const byId = new Map(channels.map((c) => [c.channel_id, c]));
+    return Layer.succeed(DiscordChannelsRepository, {
+      syncChannels: () => Effect.void,
+      findByGuildId: () => Effect.succeed([]),
+      findManagedListByTeam: () => Effect.succeed([]),
+      findByChannelId: (_guildId: Discord.Snowflake, channelId: Discord.Snowflake) =>
+        Effect.succeed(Option.fromNullishOr(byId.get(channelId))),
+    } as any);
+  };
+
+  it('without group:manage → 403 ChannelForbidden', async () => {
+    const response = await handler(
+      new Request(bulkArchiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer member-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discordChannelIds: [DISCORD_TEXT_CHANNEL_ID] }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it('no archive category configured → 409 ArchiveCategoryNotConfigured, nothing archived', async () => {
+    const noArchiveSettingsLayer = Layer.succeed(TeamSettingsRepository, {
+      findByTeam: () => Effect.succeed(Option.none()),
+      findByTeamId: () =>
+        Effect.succeed(
+          Option.some({
+            team_id: TEST_TEAM_ID,
+            event_horizon_days: 30,
+            discord_archive_category_id: Option.none(),
+          }),
+        ),
+      upsertSettings: () => Effect.void,
+      upsert: () => Effect.void,
+      getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),
+      getHorizonDays: () => Effect.succeed(30),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(
+      buildLayer({ teamSettingsLayer: noArchiveSettingsLayer }),
+    );
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(bulkArchiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discordChannelIds: [DISCORD_TEXT_CHANNEL_ID] }),
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(409);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('empty discordChannelIds → {archived:[], skipped:[], failed:[]}', async () => {
+    const response = await handler(
+      new Request(bulkArchiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discordChannelIds: [] }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.archived).toEqual([]);
+    expect(body.skipped).toEqual([]);
+    expect(body.failed).toEqual([]);
+  });
+
+  it('mixed batch: archived valid text, skipped not_found / is_category / is_archive_category / already_archived', async () => {
+    const ALREADY_ARCHIVED_ID = '666666666666666666' as Discord.Snowflake;
+    const NOT_FOUND_ID = '123456789012345678' as Discord.Snowflake;
+
+    // is_archive_category: a text channel whose id coincidentally equals the archiveCategoryId
+    // (the impl checks channel_id === archiveCategoryId before checking parent_id,
+    // but AFTER checking type !== 4 — so give this "channel" type 0)
+    const discordLayer = makeDiscordLayer([
+      // valid text channel → should be archived
+      { channel_id: DISCORD_TEXT_CHANNEL_ID, name: 'general', type: 0, parent_id: Option.none() },
+      // category channel → is_category
+      {
+        channel_id: DISCORD_CATEGORY_CHANNEL_ID,
+        name: 'Category',
+        type: 4,
+        parent_id: Option.none(),
+      },
+      // A type=0 channel whose id equals archiveCategoryId → is_archive_category
+      // (In practice the real archive category is type=4 and would hit is_category first;
+      // we exercise the is_archive_category branch by giving it type 0.)
+      {
+        channel_id: ARCHIVE_CATEGORY_ID,
+        name: 'archive-sentinel',
+        type: 0,
+        parent_id: Option.none(),
+      },
+      // already under archive category → already_archived
+      {
+        channel_id: ALREADY_ARCHIVED_ID,
+        name: 'archived-chan',
+        type: 0,
+        parent_id: Option.some(ARCHIVE_CATEGORY_ID),
+      },
+      // NOT_FOUND_ID not in the list → returns none
+    ]);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(bulkArchiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          discordChannelIds: [
+            DISCORD_TEXT_CHANNEL_ID,
+            DISCORD_CATEGORY_CHANNEL_ID,
+            ARCHIVE_CATEGORY_ID,
+            ALREADY_ARCHIVED_ID,
+            NOT_FOUND_ID,
+          ],
+        }),
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    // Valid text channel archived
+    expect(body.archived).toContain(DISCORD_TEXT_CHANNEL_ID);
+    expect(body.archived).toHaveLength(1);
+
+    // failed should be empty
+    expect(body.failed).toHaveLength(0);
+
+    // Skipped entries
+    const reasons = new Map(body.skipped.map((s: any) => [s.discordChannelId, s.reason]));
+    expect(reasons.get(NOT_FOUND_ID)).toBe('not_found');
+    expect(reasons.get(DISCORD_CATEGORY_CHANNEL_ID)).toBe('is_category');
+    expect(reasons.get(ARCHIVE_CATEGORY_ID)).toBe('is_archive_category');
+    expect(reasons.get(ALREADY_ARCHIVED_ID)).toBe('already_archived');
+    expect(body.skipped).toHaveLength(4);
+  });
+
+  it('managed channel in batch (active) → managed archive path emits channel_archived', async () => {
+    // Pre-seed a managed team_channels row linked to DISCORD_TEXT_CHANNEL_ID
+    channelsStore.set(TEST_CHANNEL_ID, {
+      id: TEST_CHANNEL_ID,
+      team_id: TEST_TEAM_ID,
+      name: 'managed-chan',
+      category: Option.none(),
+      position: 0,
+      archived: false,
+      discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
+      discord_role_id: Option.none(),
+    });
+
+    const discordLayer = makeDiscordLayer([
+      {
+        channel_id: DISCORD_TEXT_CHANNEL_ID,
+        name: 'managed-chan',
+        type: 0,
+        parent_id: Option.none(),
+      },
+    ]);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(bulkArchiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discordChannelIds: [DISCORD_TEXT_CHANNEL_ID] }),
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.archived).toContain(DISCORD_TEXT_CHANNEL_ID);
+    expect(body.failed).toHaveLength(0);
+
+    // emitManagedChannelArchived should have been called (not discord archived)
+    const managedArchiveCalls = managedSyncCalls.filter((c) => c.type === 'channel_archived');
+    expect(managedArchiveCalls).toHaveLength(1);
+    const discordArchiveCalls = managedSyncCalls.filter(
+      (c) => c.type === 'discord_channel_archived',
+    );
+    expect(discordArchiveCalls).toHaveLength(0);
+  });
+
+  it('already-archived managed channel in batch → skipped already_archived', async () => {
+    // Pre-seed an already-archived managed channel
+    const archivedId = '00000000-0000-0000-0005-bulkarch00001' as TeamChannel.TeamChannelId;
+    channelsStore.set(archivedId, {
+      id: archivedId,
+      team_id: TEST_TEAM_ID,
+      name: 'already-managed-archived',
+      category: Option.none(),
+      position: 0,
+      archived: true, // already archived
+      discord_channel_id: Option.some(DISCORD_TEXT_CHANNEL_ID),
+      discord_role_id: Option.none(),
+    });
+
+    const discordLayer = makeDiscordLayer([
+      {
+        channel_id: DISCORD_TEXT_CHANNEL_ID,
+        name: 'already-managed-archived',
+        type: 0,
+        parent_id: Option.none(),
+      },
+    ]);
+
+    const customApp = HttpRouter.toWebHandler(buildLayer({ discordChannelsLayer: discordLayer }));
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(bulkArchiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discordChannelIds: [DISCORD_TEXT_CHANNEL_ID] }),
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.archived).toHaveLength(0);
+    expect(body.skipped).toHaveLength(1);
+    expect(body.skipped[0].reason).toBe('already_archived');
+    expect(body.failed).toHaveLength(0);
+    expect(managedSyncCalls).toHaveLength(0);
+  });
+
+  it('genuine emit failure for one id → that id in failed, others still processed', async () => {
+    // Two channels: TEXT_CHANNEL succeeds, VOICE_CHANNEL triggers a sync failure
+    const FAIL_CHANNEL_ID = DISCORD_VOICE_CHANNEL_ID;
+
+    const discordLayer = makeDiscordLayer([
+      {
+        channel_id: DISCORD_TEXT_CHANNEL_ID,
+        name: 'good-chan',
+        type: 0,
+        parent_id: Option.none(),
+      },
+      {
+        channel_id: FAIL_CHANNEL_ID,
+        name: 'fail-chan',
+        type: 0,
+        parent_id: Option.none(),
+      },
+    ]);
+
+    // Channel sync layer that fails for FAIL_CHANNEL_ID
+    const failingSyncLayer = Layer.succeed(ChannelSyncEventsRepository, {
+      ...(MockChannelSyncEventsRepositoryLayer as any),
+      _tag: 'api/ChannelSyncEventsRepository',
+      emitChannelCreated: () => Effect.void,
+      emitChannelDeleted: () => Effect.void,
+      emitChannelArchived: () => Effect.void,
+      emitChannelDetached: () => Effect.void,
+      emitRosterChannelCreated: () => Effect.void,
+      emitRosterChannelDeleted: () => Effect.void,
+      emitRosterChannelArchived: () => Effect.void,
+      emitRosterChannelDetached: () => Effect.void,
+      emitGroupChannelUpdated: () => Effect.void,
+      emitRosterChannelUpdated: () => Effect.void,
+      emitMemberAdded: () => Effect.void,
+      emitMemberRemoved: () => Effect.void,
+      emitManagedChannelCreated: () => Effect.void,
+      emitManagedChannelArchived: (_args: { teamId: Team.TeamId }) => {
+        managedSyncCalls.push({ type: 'channel_archived', teamChannelId: 'stub' as any });
+        return Effect.void;
+      },
+      emitManagedChannelDeleted: () => Effect.void,
+      emitManagedAccessGrantedBatch: () => {
+        managedSyncCalls.push({ type: 'access_granted' });
+        return Effect.void;
+      },
+      emitManagedAccessRevokedBatch: () => {
+        managedSyncCalls.push({ type: 'access_revoked' });
+        return Effect.void;
+      },
+      emitManagedChannelAdopted: () => Effect.void,
+      emitDiscordChannelArchived: (args: {
+        teamId: Team.TeamId;
+        discordChannelId: Discord.Snowflake;
+        archiveCategoryId: Discord.Snowflake;
+      }) => {
+        if (args.discordChannelId === FAIL_CHANNEL_ID) {
+          return Effect.fail(new Error('Simulated emit failure') as any);
+        }
+        managedSyncCalls.push({
+          type: 'discord_channel_archived',
+          discordChannelId: args.discordChannelId,
+          archiveCategoryId: args.archiveCategoryId,
+        });
+        return Effect.void;
+      },
+      emitMembersAddedBatch: () => Effect.void,
+      emitMembersRemovedBatch: () => Effect.void,
+      emitRosterMemberAdded: () => Effect.void,
+      emitRosterMemberRemoved: () => Effect.void,
+      findUnprocessed: () => Effect.succeed([]),
+      markProcessed: () => Effect.void,
+      markFailed: () => Effect.void,
+      markPermanentlyFailed: () => Effect.void,
+      hasUnprocessedForGroups: () => Effect.succeed([]),
+      hasUnprocessedForRosters: () => Effect.succeed([]),
+    } as any);
+
+    const customApp = HttpRouter.toWebHandler(
+      buildLayer({
+        discordChannelsLayer: discordLayer,
+        channelSyncLayer: failingSyncLayer,
+      }),
+    );
+    const customHandler: (...args: any) => Promise<Response> = customApp.handler;
+
+    const response = await customHandler(
+      new Request(bulkArchiveUrl, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          discordChannelIds: [DISCORD_TEXT_CHANNEL_ID, FAIL_CHANNEL_ID],
+        }),
+      }),
+    );
+    await customApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    // The good channel should be archived
+    expect(body.archived).toContain(DISCORD_TEXT_CHANNEL_ID);
+    // The failing channel should be in failed, NOT in skipped
+    const failedIds = body.failed.map((f: any) => f.discordChannelId);
+    expect(failedIds).toContain(FAIL_CHANNEL_ID);
+    const skippedIds = body.skipped.map((s: any) => s.discordChannelId);
+    expect(skippedIds).not.toContain(FAIL_CHANNEL_ID);
   });
 });

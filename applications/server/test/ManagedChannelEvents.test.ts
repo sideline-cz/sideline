@@ -398,19 +398,55 @@ describe('constructEvent — impossible-state guards for discord entity_type', (
 });
 
 // ---------------------------------------------------------------------------
-// Impossible-state guards: channel_updated + managed, channel_detached + managed
+// channel_updated + managed → ManagedChannelAdoptedEvent (adopted channel)
 // ---------------------------------------------------------------------------
 
-describe('constructEvent — impossible-state guards for managed entity_type', () => {
-  it('channel_updated + managed → fails with EventPropertyMissing (impossible state)', async () => {
-    const row = baseRow('channel_updated', 'managed');
+describe('constructEvent — managed channel_updated (adopted)', () => {
+  it('produces ManagedChannelAdoptedEvent with team_channel_id and discord_channel_id', async () => {
+    const row = baseRow('channel_updated', 'managed', {
+      team_channel_id: Option.some(TEAM_CHANNEL_ID),
+      existing_channel_id: Option.some(DISCORD_CHANNEL_ID),
+    });
+
+    const event = await run(constructEvent(row));
+
+    expect(event._tag).toBe('managed_channel_adopted');
+    if (event._tag !== 'managed_channel_adopted') return;
+    expect(event.team_channel_id).toBe(TEAM_CHANNEL_ID);
+    expect(event.discord_channel_id).toBe(DISCORD_CHANNEL_ID);
+    expect(event.guild_id).toBe(GUILD_ID);
+  });
+
+  it('fails with EventPropertyMissing when team_channel_id is absent', async () => {
+    const row = baseRow('channel_updated', 'managed', {
+      existing_channel_id: Option.some(DISCORD_CHANNEL_ID),
+      // team_channel_id is Option.none()
+    });
 
     const error = await runFail(constructEvent(row));
 
     expect(error).toBeInstanceOf(EventPropertyMissing);
-    expect((error as EventPropertyMissing).property).toContain('managed');
+    expect((error as EventPropertyMissing).property).toBe('team_channel_id');
   });
 
+  it('fails with EventPropertyMissing when existing_channel_id (discord_channel_id) is absent', async () => {
+    const row = baseRow('channel_updated', 'managed', {
+      team_channel_id: Option.some(TEAM_CHANNEL_ID),
+      // existing_channel_id is Option.none()
+    });
+
+    const error = await runFail(constructEvent(row));
+
+    expect(error).toBeInstanceOf(EventPropertyMissing);
+    expect((error as EventPropertyMissing).property).toBe('existing_channel_id');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Impossible-state guards: channel_detached + managed
+// ---------------------------------------------------------------------------
+
+describe('constructEvent — impossible-state guards for managed entity_type', () => {
   it('channel_detached + managed → fails with EventPropertyMissing (impossible state)', async () => {
     const row = baseRow('channel_detached', 'managed');
 
@@ -418,6 +454,21 @@ describe('constructEvent — impossible-state guards for managed entity_type', (
 
     expect(error).toBeInstanceOf(EventPropertyMissing);
     expect((error as EventPropertyMissing).property).toContain('managed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: channel_updated + discord still hits the impossible-state guard
+// ---------------------------------------------------------------------------
+
+describe('constructEvent — channel_updated + discord still fails (impossible state)', () => {
+  it('channel_updated + discord → fails with EventPropertyMissing (impossible state)', async () => {
+    const row = baseRow('channel_updated', 'discord');
+
+    const error = await runFail(constructEvent(row));
+
+    expect(error).toBeInstanceOf(EventPropertyMissing);
+    expect((error as EventPropertyMissing).property).toContain('discord');
   });
 });
 

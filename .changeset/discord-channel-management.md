@@ -25,6 +25,12 @@ grouped by their Discord category. Channels in the team's configured archive
 category are shown as archived, and admins can archive any Discord channel — not
 just Sideline-created ones — moving it into the archive category.
 
+Admins can also **bulk-archive** channels (multi-select) and **manage permissions
+for any Discord channel**, not just Sideline-created ones: managing access on a
+previously-unmanaged channel "adopts" it — making it private and replacing its
+existing Discord permissions with the Sideline access model (after a clear
+confirmation). A partial unique index keeps adoption idempotent.
+
 Also hardens `Runtime.runMain` so unsatisfied layer dependencies fail `pnpm check`
 at the call site instead of crashing the app at startup (the previous `as never`
 cast hid them). This surfaced and fixed a pre-existing missing dependency in

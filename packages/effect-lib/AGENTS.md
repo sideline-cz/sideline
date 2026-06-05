@@ -63,4 +63,16 @@ Rules:
 
 ### SQL Error Handling
 
-Utilities for handling PostgreSQL-specific errors (unique constraint violations, etc.).
+Utilities for handling PostgreSQL-specific errors (unique constraint violations, etc.). All exports live in `src/SqlErrors.ts` and walk the `SqlError` `.cause` chain (max depth 5) to find the underlying Postgres driver error.
+
+| Export | Signature | Purpose |
+|--------|-----------|---------|
+| `isUniqueViolation` | `(error: SqlError) => boolean` | `true` when the cause chain carries Postgres `code === '23505'` (unique violation). |
+| `getConstraintName` | `(cause: unknown, depth?) => Option<string>` | Walks the cause chain for a Postgres `{ constraint: string }` and returns the constraint name. Use to distinguish **which** unique index fired when a table has more than one. |
+| `catchUniqueViolation` | `<E2>(mapError: () => E2) => <A,E,R>(self) => Effect<A, E \| E2, R>` | Catches **any** unique violation and replaces it with `mapError()`. Use when the table has exactly one unique constraint. |
+| `catchUniqueViolationOn` | `<E2>(constraintName: string, onViolation: () => E2) => <A,E,R>(self) => Effect<A, E \| E2, R>` | Catches a unique violation **only** when `getConstraintName` matches `constraintName`. Use when a table has multiple unique constraints and each must map to a distinct domain error. |
+
+Rules:
+
+1. **Use `catchUniqueViolationOn` (not `catchUniqueViolation`) when a table has more than one unique constraint.** Passing the exact index name keeps each constraint mapped to its own domain error. Example: `insertAdopted` in `TeamChannelsRepository` chains `catchUniqueViolationOn('uq_team_channels_discord_channel', ...)` → `DiscordChannelAlreadyAdoptedError` then `catchUniqueViolationOn('<name>(name)', ...)` → `ChannelNameAlreadyTakenError`.
+2. **The `constraintName` argument must match the Postgres index/constraint name exactly** as defined in the migration (e.g. `uq_team_channels_discord_channel`). A typo silently falls through to the next catch.

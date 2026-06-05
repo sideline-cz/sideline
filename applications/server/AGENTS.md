@@ -237,7 +237,7 @@ Table ownership:
 
 | Table | Authoritative for | Notes |
 |-------|-------------------|-------|
-| `team_channels` | Channel name, category, position, archived, and the linked `discord_channel_id` | Sideline-owned. Created by migration `1789000000_create_team_channels.ts`. Has a partial unique index on `(team_id, name) WHERE archived = false`. Repository: `TeamChannelsRepository`. |
+| `team_channels` | Channel name, category, position, archived, and the linked `discord_channel_id` | Sideline-owned. Created by migration `1789000000_create_team_channels.ts`. Has a partial unique index on `(team_id, name) WHERE archived = false` AND a partial unique index `uq_team_channels_discord_channel` on `(team_id, discord_channel_id) WHERE discord_channel_id IS NOT NULL` (migration `1789000002_uq_team_channels_discord_channel.ts`) — the latter is the concurrency guard for channel adoption (see `adoptDiscordChannel` below). Repository: `TeamChannelsRepository`. |
 | `team_channel_access` | Per-group `VIEW`/`EDIT`/`ADMIN` grant per channel | PK `(team_channel_id, group_id)`, `access_level` CHECK in `('VIEW','EDIT','ADMIN')`. Repository: `TeamChannelAccessRepository`. |
 | `discord_channels` | Raw Discord channel mirror | Unchanged — remains the bot-synced mirror of real Discord channels (see "RPC Transport"). Do NOT conflate with `team_channels`. |
 
@@ -246,7 +246,7 @@ Outbox columns: migration `1789000001_add_channel_sync_managed_columns.ts` adds 
 Rules:
 
 1. **Channel management is gated by the existing `group:manage` permission** — no new permission was introduced. API handlers in `src/api/channel.ts` call `requirePermission(membership, 'group:manage', forbidden)` (or `hasPermission(membership, 'group:manage')` for read-only capability flags).
-2. **`managed` events reuse existing `event_type` literals.** `entity_type='managed'` rows carry `event_type` ∈ `channel_created`, `channel_archived`, `channel_deleted`, `member_added` (access granted), `member_removed` (access revoked). `events.ts` decodes them to the `Managed*` RPC event classes. `channel_updated` and `channel_detached` are never emitted for `managed` — those branches fail with `EventPropertyMissing` as impossible-state guards.
+2. **`managed` events reuse existing `event_type` literals.** `entity_type='managed'` rows carry `event_type` ∈ `channel_created`, `channel_updated` (adoption — decodes to `ManagedChannelAdoptedEvent`), `channel_archived`, `channel_deleted`, `member_added` (access granted), `member_removed` (access revoked). `events.ts` decodes them to the `Managed*` RPC event classes. The adoption event (`channel_updated` + `managed`) carries `team_channel_id` plus `discord_channel_id` (read from `existing_channel_id`); it is emitted by `emitManagedChannelAdopted` and is the ONLY `managed` use of `channel_updated`. `channel_detached` is never emitted for `managed` — that branch fails with `EventPropertyMissing` as an impossible-state guard.
 3. **`entity_type='discord'` is valid ONLY with `event_type='channel_archived'`.** `events.ts` decodes that one combination to `ChannelRpcEvents.DiscordChannelArchivedEvent` (payload: `discord_channel_id` = `existing_channel_id`, `archive_category_id`). Every other `event_type` branch for `discord` fails with `EventPropertyMissing`.
 4. **Resolving `(groupId, accessLevel)` grants into emit entries lives in exactly one place.** Both `src/api/channel.ts` (setAccess) and `Channel/UpsertManagedChannel` (reconcile) call `buildManagedAccessGrantEntries` from `src/utils/managedAccessEntries.ts`. It is a pure function that maps each grant's group to its `discord_role_id` via a `roleMap`, returning resolvable `entries` plus `unresolvableGroupIds`; the caller logs a warning for each unresolvable group before emitting. Never duplicate this `flatMap`/`filter` logic at a call site.
 
@@ -262,7 +262,23 @@ Rules:
 2. Otherwise emit a `discord`-entity `channel_archived` event via `emitDiscordChannelArchived`.
 3. Reject (`ChannelNotArchivable`) categories (`type=4`), the archive category itself, and already-archived channels.
 
-`group:manage` gates list/create/archive (`listChannels`, `createChannel`, `archiveDiscordChannel`); access (`setAccess`) and rename remain managed-only — they require an existing `team_channels` row.
+`adoptDiscordChannel` (`POST /teams/:teamId/discord-channels/:discordChannelId/adopt`, gated by `group:manage`) adopts an existing unmanaged Discord text channel into `team_channels` so Sideline manages it going forward:
+
+1. Reject non-text channels (`discordChannel.type !== 0`) with `ChannelNotAdoptable`.
+2. **Idempotent pre-check:** if a `team_channels` row already links this `discord_channel_id` (found via `channels.findAllByTeam(teamId)`), return its `toChannelDetail` and emit NO event.
+3. Otherwise insert via `channels.insertAdopted(...)` (text-only) inside `sql.withTransaction(...)`, then emit `emitManagedChannelAdopted({ teamId, teamChannelId, discordChannelId })` and return the detail.
+4. **Concurrency idempotency:** `insertAdopted` maps the `uq_team_channels_discord_channel` unique violation to `DiscordChannelAlreadyAdoptedError` via `SqlErrors.catchUniqueViolationOn(...)`. The handler catches that tag, re-fetches the now-existing row via `findAllByTeam`, and returns its detail WITHOUT re-emitting the event — so a lost race produces exactly one adopt event, never zero or two. Name-collision violations map to `ChannelNameAlreadyTakenError` → `ChannelAdoptionNameConflict`.
+
+**The adopt event does NOT carry the access grants.** `emitManagedChannelAdopted` emits only the privacy-flip signal; per-group grants are applied later via the separate `setAccess` path (its own committed `member_added` events). Keeping adoption and access as two separate committed events avoids an event-ordering race — never fold the grant entries into the adopt event. The bot's `handleManagedAdopted` does a full permission-overwrite REPLACE to a single `@everyone` deny-`ViewChannel`, wiping any foreign overwrites; see `applications/bot/AGENTS.md`.
+
+`bulkArchiveDiscordChannels` (`POST /teams/:teamId/discord-channels/bulk-archive`, gated by `group:manage`) archives many channels in one call with per-item isolation:
+
+1. **Dedupe** `payload.discordChannelIds` with `Array.dedupe(...)` so a duplicated id cannot double-emit or double-count.
+2. Fetch `channels.findAllByTeam(teamId)` ONCE and build a `Map<discord_channel_id, row>` for the whole batch — never query per item.
+3. Iterate with `{ concurrency: 1 }`; each item's effect is wrapped in `Effect.exit` so one failure never aborts the batch. Failures push to `failed`; skips (`already_archived` / `is_category` / `is_archive_category` / `not_found`) push to `skipped`; successes push to `archived`. The handler returns `ChannelBulkArchiveResult({ archived, skipped, failed })`.
+4. Per item, reuse the single-archive routing: a managed row archives via `channels.setArchived(id, true)` + `emitManagedChannelArchived` in one transaction; an unmanaged channel emits `emitDiscordChannelArchived`.
+
+`group:manage` gates list/create/archive/adopt/bulk-archive (`listChannels`, `createChannel`, `archiveDiscordChannel`, `adoptDiscordChannel`, `bulkArchiveDiscordChannels`); access (`setAccess`) and rename remain managed-only — they require an existing `team_channels` row.
 
 ### Resolving identity fields on outbox reads
 

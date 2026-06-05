@@ -321,6 +321,17 @@ export const ChannelMemberRemovedEvent = Schema.Union([
 ]);
 export type ChannelMemberRemovedEvent = Schema.Schema.Type<typeof ChannelMemberRemovedEvent>;
 
+export class ManagedChannelAdoptedEvent extends Schema.TaggedClass<ManagedChannelAdoptedEvent>()(
+  'managed_channel_adopted',
+  {
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    team_channel_id: TeamChannelId,
+    discord_channel_id: Snowflake,
+  },
+) {}
+
 // --- union of all ---
 
 export const UnprocessedChannelEvent = Schema.Union([
@@ -337,6 +348,7 @@ export const UnprocessedChannelEvent = Schema.Union([
   ChannelMemberRemovedEvent,
   ManagedChannelAccessGrantedEvent,
   ManagedChannelAccessRevokedEvent,
+  ManagedChannelAdoptedEvent,
 ]);
 
 export type UnprocessedChannelEvent = Schema.Schema.Type<typeof UnprocessedChannelEvent>;

@@ -5,6 +5,11 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-05 — Channel management: take over any Discord channel + bulk archive
+
+- **Take over any Discord channel:** you can now bring an existing Discord text channel under Sideline management without recreating it. Open the channel's detail sheet and click **Take over channel**. The bot makes the channel private (replaces all existing Discord permission overwrites with `@everyone deny ViewChannel`), then you control access from the **Access** panel as usual. Only text channels (type 0) can be adopted; categories and voice channels are not supported.
+- **Bulk archive:** select multiple channels on the **Team → Channels** page and archive them all in one action. Channels that are already archived, are categories, or cannot be found are skipped with a reason; unexpected errors for individual channels are reported without blocking the rest. Requires the archive category to be configured in **Team settings → Discord integration**.
+
 ## 2026-06-04 — Channel management: full Discord channel list + archive any channel
 
 - **Team → Channels** now shows your team's _entire_ Discord channel list — not just channels Sideline created. Every text channel in your server is visible, grouped by its Discord category, so you can see and act on your whole Discord structure from one place.

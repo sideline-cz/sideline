@@ -5,13 +5,16 @@ import { MoreHorizontal } from 'lucide-react';
 import React from 'react';
 import { ChannelTypeIcon } from '~/components/atoms/ChannelTypeIcon.js';
 import { DiscordChannelLink } from '~/components/atoms/DiscordChannelLink.js';
+import { AdoptChannelDialog } from '~/components/organisms/AdoptChannelDialog.js';
 import { ArchiveChannelDialog } from '~/components/organisms/ArchiveChannelDialog.js';
+import { BulkArchiveDialog } from '~/components/organisms/BulkArchiveDialog.js';
 import { ChannelAccessSheet } from '~/components/organisms/ChannelAccessSheet.js';
 import { CreateChannelDialog } from '~/components/organisms/CreateChannelDialog.js';
 import { RenameChannelDialog } from '~/components/organisms/RenameChannelDialog.js';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
+import { Checkbox } from '~/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,7 +42,9 @@ type DialogState =
   | { kind: 'create' }
   | { kind: 'rename'; channel: ChannelApi.ChannelInfo }
   | { kind: 'archive'; channel: ChannelApi.ChannelInfo }
-  | { kind: 'access'; channel: ChannelApi.ChannelInfo };
+  | { kind: 'access'; teamChannelId: string; channelName: string }
+  | { kind: 'adopt'; channel: ChannelApi.ChannelInfo }
+  | { kind: 'bulkArchive' };
 
 function channelRowKey(channel: ChannelApi.ChannelInfo): string {
   if (Option.isSome(channel.discordChannelId)) {
@@ -49,6 +54,14 @@ function channelRowKey(channel: ChannelApi.ChannelInfo): string {
     return `team-${channel.teamChannelId.value}`;
   }
   return `name-${channel.name}`;
+}
+
+function isSelectable(channel: ChannelApi.ChannelInfo, canManage: boolean): boolean {
+  return (
+    canManage &&
+    !channel.archived &&
+    (channel.type === DISCORD_CHANNEL_TYPE_TEXT || channel.type === DISCORD_CHANNEL_TYPE_VOICE)
+  );
 }
 
 function ChannelRowSkeleton() {
@@ -71,27 +84,51 @@ function ChannelRow({
   canManage,
   archiveCategoryId,
   onAction,
+  selectionMode,
+  selected,
+  onToggleSelect,
 }: {
   channel: ChannelApi.ChannelInfo;
   guildId: Option.Option<string>;
   canManage: boolean;
   archiveCategoryId: Option.Option<string>;
-  onAction: (kind: 'rename' | 'archive' | 'access', channel: ChannelApi.ChannelInfo) => void;
+  onAction: (
+    kind: 'rename' | 'archive' | 'access' | 'adopt',
+    channel: ChannelApi.ChannelInfo,
+  ) => void;
+  selectionMode: boolean;
+  selected: boolean;
+  onToggleSelect: (key: string) => void;
 }) {
   const isSyncing = channel.managed && Option.isNone(channel.discordChannelId) && !channel.archived;
   const isManaged = channel.managed;
   const isText = channel.type === DISCORD_CHANNEL_TYPE_TEXT;
   const isVoice = channel.type === DISCORD_CHANNEL_TYPE_VOICE;
   const hasArchiveCategory = Option.isSome(archiveCategoryId);
+  const selectable = isSelectable(channel, canManage);
+  const rowKey = channelRowKey(channel);
 
   // Determine which actions are shown
-  const showAccess = canManage && isManaged && isText && !channel.archived;
+  const showAccess = canManage && isText && !channel.archived;
   const showRename = canManage && isManaged && isText && !channel.archived;
   const showArchive = canManage && !channel.archived && (isText || isVoice);
   const hasAnyAction = showAccess || showRename || showArchive;
 
   return (
     <div className='flex items-center gap-3 py-3 border-b last:border-0'>
+      {selectionMode && (
+        <span className='shrink-0 flex items-center'>
+          <Checkbox
+            checked={selectable ? selected : false}
+            disabled={!selectable}
+            onCheckedChange={() => {
+              if (selectable) onToggleSelect(rowKey);
+            }}
+            aria-label={tr('channels_selectRow', { name: channel.name })}
+            className={!selectable ? 'opacity-30' : undefined}
+          />
+        </span>
+      )}
       <span className='text-muted-foreground shrink-0 flex items-center'>
         <ChannelTypeIcon type={channel.type} className='size-4' />
       </span>
@@ -122,7 +159,7 @@ function ChannelRow({
           </span>
         )}
       </div>
-      {canManage && hasAnyAction && (
+      {!selectionMode && canManage && hasAnyAction && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant='ghost' size='icon' className='size-8 shrink-0'>
@@ -132,7 +169,7 @@ function ChannelRow({
           </DropdownMenuTrigger>
           <DropdownMenuContent align='end'>
             {showAccess && (
-              <DropdownMenuItem onClick={() => onAction('access', channel)}>
+              <DropdownMenuItem onClick={() => onAction(isManaged ? 'access' : 'adopt', channel)}>
                 {tr('channels_access_action')}
               </DropdownMenuItem>
             )}
@@ -179,6 +216,10 @@ export function ChannelManagementPage({
   const router = useRouter();
   const [dialog, setDialog] = React.useState<DialogState>({ kind: 'none' });
 
+  // Selection state
+  const [selectionMode, setSelectionMode] = React.useState(false);
+  const [selectedKeys, setSelectedKeys] = React.useState<Set<string>>(new Set());
+
   const channels = data?.channels ?? [];
   const canManage = data?.canManage ?? false;
   const guildLinked = data?.guildLinked ?? false;
@@ -192,6 +233,11 @@ export function ChannelManagementPage({
     }
     return [...cats].sort();
   }, [channels]);
+
+  // Clear selection when data refreshes
+  React.useEffect(() => {
+    setSelectedKeys(new Set());
+  }, []);
 
   // Poll for syncing channels (managed channels still provisioning)
   React.useEffect(() => {
@@ -236,16 +282,79 @@ export function ChannelManagementPage({
 
   const [archivedExpanded, setArchivedExpanded] = React.useState(false);
 
-  const handleAction = (kind: 'rename' | 'archive' | 'access', channel: ChannelApi.ChannelInfo) => {
-    setDialog({ kind, channel });
+  const handleAction = (
+    kind: 'rename' | 'archive' | 'access' | 'adopt',
+    channel: ChannelApi.ChannelInfo,
+  ) => {
+    if (kind === 'access' && Option.isSome(channel.teamChannelId)) {
+      setDialog({
+        kind: 'access',
+        teamChannelId: channel.teamChannelId.value,
+        channelName: channel.name,
+      });
+    } else if (kind === 'adopt') {
+      setDialog({ kind: 'adopt', channel });
+    } else if (kind === 'rename') {
+      setDialog({ kind: 'rename', channel });
+    } else if (kind === 'archive') {
+      setDialog({ kind: 'archive', channel });
+    }
   };
 
   const handleCreated = (_channel: ChannelApi.ChannelDetail) => {
     // Channel enters syncing state - the polling effect will pick it up
   };
 
+  const handleToggleSelect = (key: string) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const getGroupSelectableKeys = (groupChannels: ReadonlyArray<ChannelApi.ChannelInfo>) =>
+    groupChannels.filter((ch) => isSelectable(ch, canManage)).map(channelRowKey);
+
+  const getGroupCheckedState = (
+    groupChannels: ReadonlyArray<ChannelApi.ChannelInfo>,
+  ): boolean | 'indeterminate' => {
+    const keys = getGroupSelectableKeys(groupChannels);
+    if (keys.length === 0) return false;
+    const selectedCount = keys.filter((k) => selectedKeys.has(k)).length;
+    if (selectedCount === 0) return false;
+    if (selectedCount === keys.length) return true;
+    return 'indeterminate';
+  };
+
+  const handleGroupToggle = (groupChannels: ReadonlyArray<ChannelApi.ChannelInfo>) => {
+    const keys = getGroupSelectableKeys(groupChannels);
+    const allSelected = keys.every((k) => selectedKeys.has(k));
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const k of keys) next.delete(k);
+      } else {
+        for (const k of keys) next.add(k);
+      }
+      return next;
+    });
+  };
+
+  const selectedChannels = activeChannels.filter((ch) => selectedKeys.has(channelRowKey(ch)));
+  const selectedCount = selectedChannels.length;
+
+  const handleExitSelection = () => {
+    setSelectionMode(false);
+    setSelectedKeys(new Set());
+  };
+
   return (
-    <div>
+    <div className={selectionMode ? 'pb-20' : ''}>
       <header className='mb-8'>
         <Button asChild variant='ghost' size='sm' className='mb-2'>
           <Link to='/teams/$teamId' params={{ teamId }}>
@@ -254,11 +363,28 @@ export function ChannelManagementPage({
         </Button>
         <div className='flex items-center justify-between gap-4'>
           <h1 className='text-2xl font-bold'>{tr('channels_title')}</h1>
-          {canManage && (
-            <Button size='sm' onClick={() => setDialog({ kind: 'create' })}>
-              {tr('channels_create')}
-            </Button>
-          )}
+          <div className='flex items-center gap-2'>
+            {canManage && (
+              <Button
+                size='sm'
+                variant={selectionMode ? 'secondary' : 'outline'}
+                onClick={() => {
+                  if (selectionMode) {
+                    handleExitSelection();
+                  } else {
+                    setSelectionMode(true);
+                  }
+                }}
+              >
+                {selectionMode ? tr('channels_selectDone') : tr('channels_select')}
+              </Button>
+            )}
+            {canManage && !selectionMode && (
+              <Button size='sm' onClick={() => setDialog({ kind: 'create' })}>
+                {tr('channels_create')}
+              </Button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -298,9 +424,18 @@ export function ChannelManagementPage({
           {/* Active grouped channels */}
           {activeGrouped.map((group) => (
             <div key={group.label}>
-              <h2 className='text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2'>
-                {group.label}
-              </h2>
+              <div className='flex items-center gap-2 mb-2'>
+                {selectionMode && (
+                  <Checkbox
+                    checked={getGroupCheckedState(group.channels)}
+                    onCheckedChange={() => handleGroupToggle(group.channels)}
+                    aria-label={tr('channels_selectAll', { group: group.label })}
+                  />
+                )}
+                <h2 className='text-sm font-semibold text-muted-foreground uppercase tracking-wider'>
+                  {group.label}
+                </h2>
+              </div>
               <div>
                 {group.channels.map((channel) => (
                   <ChannelRow
@@ -310,6 +445,9 @@ export function ChannelManagementPage({
                     canManage={canManage}
                     archiveCategoryId={archiveCategoryId}
                     onAction={handleAction}
+                    selectionMode={selectionMode}
+                    selected={selectedKeys.has(channelRowKey(channel))}
+                    onToggleSelect={handleToggleSelect}
                   />
                 ))}
               </div>
@@ -341,12 +479,36 @@ export function ChannelManagementPage({
                         canManage={canManage}
                         archiveCategoryId={archiveCategoryId}
                         onAction={handleAction}
+                        selectionMode={selectionMode}
+                        selected={false}
+                        onToggleSelect={handleToggleSelect}
                       />
                     ))}
                 </div>
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Sticky bulk action bar */}
+      {selectionMode && selectedCount > 0 && (
+        <div className='fixed bottom-0 left-0 right-0 z-50 flex items-center justify-between gap-4 border-t bg-background px-4 py-3 shadow-lg'>
+          <span aria-live='polite' className='text-sm font-medium'>
+            {tr('channels_selectedCount', { count: String(selectedCount) })}
+          </span>
+          <div className='flex items-center gap-2'>
+            <Button size='sm' variant='outline' onClick={() => setSelectedKeys(new Set())}>
+              {tr('channels_clearSelection')}
+            </Button>
+            <Button
+              size='sm'
+              variant='destructive'
+              onClick={() => setDialog({ kind: 'bulkArchive' })}
+            >
+              {tr('channels_bulkArchive_action')}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -388,17 +550,54 @@ export function ChannelManagementPage({
         />
       )}
 
-      {dialog.kind === 'access' && Option.isSome(dialog.channel.teamChannelId) && (
+      {dialog.kind === 'access' && (
         <ChannelAccessSheet
           open
           onOpenChange={(open) => {
             if (!open) setDialog({ kind: 'none' });
           }}
           teamId={teamId}
-          teamChannelId={dialog.channel.teamChannelId.value}
-          channelName={dialog.channel.name}
+          teamChannelId={dialog.teamChannelId}
+          channelName={dialog.channelName}
           allGroups={allGroups}
           canManage={canManage}
+        />
+      )}
+
+      {dialog.kind === 'adopt' && (
+        <AdoptChannelDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setDialog({ kind: 'none' });
+          }}
+          teamId={teamId}
+          channel={dialog.channel}
+          onAdopted={(detail) => {
+            if (Option.isSome(detail.teamChannelId)) {
+              setDialog({
+                kind: 'access',
+                teamChannelId: detail.teamChannelId.value,
+                channelName: detail.name,
+              });
+            } else {
+              setDialog({ kind: 'none' });
+            }
+          }}
+        />
+      )}
+
+      {dialog.kind === 'bulkArchive' && (
+        <BulkArchiveDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setDialog({ kind: 'none' });
+          }}
+          teamId={teamId}
+          channels={selectedChannels}
+          archiveCategoryId={archiveCategoryId}
+          onArchived={() => {
+            handleExitSelection();
+          }}
         />
       )}
     </div>

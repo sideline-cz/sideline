@@ -746,9 +746,10 @@ Admin-managed Discord text channels. Each row represents a named channel that Si
 
 **Indexes**:
 - `uq_team_channels_team_name_active` — unique partial index on `(team_id, name) WHERE archived = false`. Enforces name uniqueness among active channels; archived channels are exempt so the name can be reused.
+- `uq_team_channels_discord_channel` — unique partial index on `(team_id, discord_channel_id) WHERE discord_channel_id IS NOT NULL`. Prevents the same Discord channel from being adopted more than once per team. Added in migration `1789000002_uq_team_channels_discord_channel`.
 - `idx_team_channels_team_position` — on `(team_id, position)` for ordered listing.
 
-**Notes**: `category` and `position` are Sideline-side metadata used for display ordering; there is no Discord-side reordering in v1. `discord_channel_id` is null until the bot processes the `channel_created` sync event and writes the provisioned Discord channel snowflake back via the `Channel/UpsertManagedChannel` RPC. `discord_role_id` is reserved for future use. Added in migration `1789000000_create_team_channels`.
+**Notes**: `category` and `position` are Sideline-side metadata used for display ordering; there is no Discord-side reordering in v1. `discord_channel_id` is null until the bot processes the `channel_created` sync event and writes the provisioned Discord channel snowflake back via the `Channel/UpsertManagedChannel` RPC, or is set immediately on insert when a channel is adopted via `POST /teams/:teamId/discord-channels/:discordChannelId/adopt`. `discord_role_id` is reserved for future use. Added in migration `1789000000_create_team_channels`.
 
 ---
 
@@ -1517,6 +1518,9 @@ All 86 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1787400000 | `create_dashboard_layouts` | Creates `dashboard_layouts` (user_id FK → users CASCADE, team_id FK → teams CASCADE, widgets JSONB NOT NULL, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ; PK (user_id, team_id)). Stores per-user per-team widget layout preferences for the configurable team dashboard. |
 | 1788000000 | `create_carpools` | Creates `carpools`, `carpool_cars`, and `carpool_seats` tables (see section 15 below). Adds `idx_carpool_cars_carpool` on `carpool_cars(carpool_id)` and `idx_carpool_seats_car` on `carpool_seats(car_id)`. |
 | 1788000001 | `grant_carpool_manage_permission` | Backfills `carpool:manage` into `role_permissions` for every existing built-in Admin and Captain role; uses `ON CONFLICT DO NOTHING` to be idempotent. |
+| 1789000000 | `create_team_channels` | Creates `team_channels` (id PK, team_id FK CASCADE, name TEXT, category TEXT, position INT DEFAULT 0, archived BOOLEAN DEFAULT false, discord_channel_id TEXT, discord_role_id TEXT, created_at); unique partial index `uq_team_channels_team_name_active ON (team_id, name) WHERE archived = false`; index `idx_team_channels_team_position ON (team_id, position)`. Creates `team_channel_access` (team_channel_id FK CASCADE, group_id FK CASCADE, access_level TEXT CHECK `'VIEW'`/`'EDIT'`/`'ADMIN'`, created_at; PK (team_channel_id, group_id)); index `idx_team_channel_access_group ON (group_id)`. |
+| 1789000001 | `add_channel_sync_managed_columns` | Adds `team_channel_id UUID` and `access_level TEXT` columns to `channel_sync_events` to carry managed-channel identity and permission tier in `managed` entity-type outbox rows. |
+| 1789000002 | `uq_team_channels_discord_channel` | Adds unique partial index `uq_team_channels_discord_channel ON team_channels(team_id, discord_channel_id) WHERE discord_channel_id IS NOT NULL`. Prevents the same Discord channel being adopted more than once per team. |
 
 ### After Migrations (seed data)
 

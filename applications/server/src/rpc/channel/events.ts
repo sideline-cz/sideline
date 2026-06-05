@@ -507,15 +507,20 @@ const channelUpdatedFromSql = (r: EventRow) =>
         ),
       ),
     ),
-    // 'managed' entity_type never produces channel_updated events — this branch is an impossible
-    // state guard added only to satisfy Match.exhaustive after ChannelSyncEntityType was widened.
     Match.when('managed', () =>
-      Effect.fail(
-        new EventPropertyMissing({
-          event_type: r.event_type,
-          id: r.id,
-          property: 'entity_type(managed) is not valid for channel_updated',
-        }),
+      Effect.Do.pipe(
+        Effect.bind('team_channel_id', () => nullable(r, 'team_channel_id')),
+        Effect.bind('discord_channel_id', () => nullable(r, 'existing_channel_id')),
+        Effect.map(
+          ({ team_channel_id, discord_channel_id }) =>
+            new ChannelRpcEvents.ManagedChannelAdoptedEvent({
+              id: r.id,
+              team_id: r.team_id,
+              guild_id: r.guild_id,
+              team_channel_id,
+              discord_channel_id,
+            }),
+        ),
       ),
     ),
     // 'discord' entity_type never produces channel_updated events — impossible-state guard.

@@ -7,7 +7,7 @@ import {
   type TeamChannelAccess,
 } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
-import { Array, Effect, Option } from 'effect';
+import { Array, Effect, Exit, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { SqlClient } from 'effect/unstable/sql';
 import { Api } from '~/api/api.js';
@@ -623,6 +623,261 @@ export const ChannelApiLive = HttpApiBuilder.group(Api, 'channel', (handlers) =>
                   )
                   .pipe(catchSqlErrors),
               ),
+            ),
+          )
+          .handle('adoptDiscordChannel', ({ params: { teamId, discordChannelId } }) =>
+            Effect.Do.pipe(
+              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+              Effect.bind('membership', ({ currentUser }) =>
+                requireMembership(members, teamId, currentUser.id, forbidden),
+              ),
+              Effect.tap(({ membership }) =>
+                requirePermission(membership, 'group:manage', forbidden),
+              ),
+              Effect.bind('team', () =>
+                teams.findById(teamId).pipe(
+                  Effect.flatMap(
+                    Option.match({
+                      onNone: () => Effect.fail(forbidden),
+                      onSome: Effect.succeed,
+                    }),
+                  ),
+                ),
+              ),
+              Effect.let('guildId', ({ team }) => team.guild_id),
+              Effect.bind('discordChannel', ({ guildId }) =>
+                discordChannels.findByChannelId(guildId, discordChannelId).pipe(
+                  Effect.flatMap(
+                    Option.match({
+                      onNone: () => Effect.fail(new ChannelApi.ChannelNotFound()),
+                      onSome: Effect.succeed,
+                    }),
+                  ),
+                ),
+              ),
+              Effect.tap(({ discordChannel }) => {
+                if (discordChannel.type !== 0) {
+                  return Effect.fail(new ChannelApi.ChannelNotAdoptable());
+                }
+                return Effect.void;
+              }),
+              // Idempotency: check if already adopted
+              Effect.bind('existingChannels', () => channels.findAllByTeam(teamId)),
+              Effect.let('alreadyAdopted', ({ existingChannels }) =>
+                Option.fromNullishOr(
+                  existingChannels.find((ch) =>
+                    Option.match(ch.discord_channel_id, {
+                      onNone: () => false,
+                      onSome: (id) => id === discordChannelId,
+                    }),
+                  ),
+                ),
+              ),
+              Effect.bind('categoryName', ({ discordChannel, guildId }) =>
+                Option.match(discordChannel.parent_id, {
+                  onNone: () => Effect.succeed(Option.none<string>()),
+                  onSome: (parentId) =>
+                    discordChannels
+                      .findByChannelId(guildId, parentId)
+                      .pipe(Effect.map(Option.map((cat) => cat.name))),
+                }),
+              ),
+              Effect.bind('sqlClient', () => SqlClient.SqlClient.asEffect()),
+              Effect.flatMap(({ alreadyAdopted, discordChannel, categoryName, sqlClient }) =>
+                Option.match(alreadyAdopted, {
+                  onSome: (existing) =>
+                    // Idempotent pre-check path: already adopted — return its detail, no event
+                    channelAccess
+                      .findByChannel(existing.id)
+                      .pipe(
+                        Effect.map((grants) => toChannelDetail(existing, grants.length, grants)),
+                      ),
+                  onNone: () =>
+                    sqlClient
+                      .withTransaction(
+                        channels
+                          .insertAdopted(
+                            teamId,
+                            discordChannel.name,
+                            categoryName,
+                            discordChannelId,
+                          )
+                          .pipe(
+                            // Fresh insert succeeded: emit the adopted event, then return detail
+                            Effect.flatMap((row) =>
+                              channelSync
+                                .emitManagedChannelAdopted({
+                                  teamId,
+                                  teamChannelId: row.id,
+                                  discordChannelId,
+                                })
+                                .pipe(Effect.map(() => toChannelDetail(row, 0, []))),
+                            ),
+                            // Concurrent race: another request already inserted — re-fetch the
+                            // existing row and return its detail WITHOUT emitting a duplicate event.
+                            Effect.catchTag('DiscordChannelAlreadyAdoptedError', (_e) =>
+                              channels.findAllByTeam(teamId).pipe(
+                                Effect.flatMap((all) => {
+                                  const found = all.find((ch) =>
+                                    Option.match(ch.discord_channel_id, {
+                                      onNone: () => false,
+                                      onSome: (id) => id === discordChannelId,
+                                    }),
+                                  );
+                                  if (found === undefined) {
+                                    return Effect.fail(new ChannelApi.ChannelNotFound());
+                                  }
+                                  return channelAccess
+                                    .findByChannel(found.id)
+                                    .pipe(
+                                      Effect.map((grants) =>
+                                        toChannelDetail(found, grants.length, grants),
+                                      ),
+                                    );
+                                }),
+                              ),
+                            ),
+                          ),
+                      )
+                      .pipe(
+                        catchSqlErrors,
+                        Effect.catchTag('ChannelNameAlreadyTakenError', () =>
+                          Effect.fail(new ChannelApi.ChannelAdoptionNameConflict()),
+                        ),
+                      ),
+                }),
+              ),
+            ),
+          )
+          .handle('bulkArchiveDiscordChannels', ({ params: { teamId }, payload }) =>
+            Effect.Do.pipe(
+              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+              Effect.bind('membership', ({ currentUser }) =>
+                requireMembership(members, teamId, currentUser.id, forbidden),
+              ),
+              Effect.tap(({ membership }) =>
+                requirePermission(membership, 'group:manage', forbidden),
+              ),
+              Effect.bind('team', () =>
+                teams.findById(teamId).pipe(
+                  Effect.flatMap(
+                    Option.match({
+                      onNone: () => Effect.fail(forbidden),
+                      onSome: Effect.succeed,
+                    }),
+                  ),
+                ),
+              ),
+              Effect.bind('settings', () => teamSettings.findByTeamId(teamId)),
+              Effect.bind('archiveCategoryId', ({ settings }) =>
+                Option.match(
+                  Option.flatMap(settings, (s) => s.discord_archive_category_id),
+                  {
+                    onNone: () => Effect.fail(new ChannelApi.ArchiveCategoryNotConfigured()),
+                    onSome: Effect.succeed,
+                  },
+                ),
+              ),
+              Effect.let('guildId', ({ team }) => team.guild_id),
+              Effect.bind('managedChannels', () => channels.findAllByTeam(teamId)),
+              Effect.let('managedByDiscordId', ({ managedChannels }) => {
+                const m = new Map<Discord.Snowflake, (typeof managedChannels)[number]>();
+                for (const ch of managedChannels) {
+                  Option.match(ch.discord_channel_id, {
+                    onNone: () => undefined,
+                    onSome: (id) => m.set(id, ch),
+                  });
+                }
+                return m;
+              }),
+              Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
+              Effect.flatMap(({ archiveCategoryId, guildId, managedByDiscordId, sql }) => {
+                const archived: Discord.Snowflake[] = [];
+                const skipped: {
+                  discordChannelId: Discord.Snowflake;
+                  reason: 'already_archived' | 'is_category' | 'is_archive_category' | 'not_found';
+                }[] = [];
+                const failed: { discordChannelId: Discord.Snowflake }[] = [];
+
+                // Dedupe ids so a duplicated entry cannot double-emit or double-count
+                const uniqueIds = Array.dedupe(payload.discordChannelIds);
+
+                return Effect.forEach(
+                  uniqueIds,
+                  (id) =>
+                    Effect.Do.pipe(
+                      Effect.bind('discordChannel', () =>
+                        discordChannels.findByChannelId(guildId, id),
+                      ),
+                      Effect.flatMap(({ discordChannel }) => {
+                        if (Option.isNone(discordChannel)) {
+                          skipped.push({ discordChannelId: id, reason: 'not_found' });
+                          return Effect.void;
+                        }
+                        const ch = discordChannel.value;
+                        if (ch.type === 4) {
+                          skipped.push({ discordChannelId: id, reason: 'is_category' });
+                          return Effect.void;
+                        }
+                        if (ch.channel_id === archiveCategoryId) {
+                          skipped.push({ discordChannelId: id, reason: 'is_archive_category' });
+                          return Effect.void;
+                        }
+                        const alreadyInArchive = Option.match(ch.parent_id, {
+                          onNone: () => false,
+                          onSome: (pid) => pid === archiveCategoryId,
+                        });
+                        const managedRow = managedByDiscordId.get(id);
+                        const managedAlreadyArchived = managedRow?.archived === true;
+                        if (alreadyInArchive || managedAlreadyArchived) {
+                          skipped.push({ discordChannelId: id, reason: 'already_archived' });
+                          return Effect.void;
+                        }
+                        // Archive it
+                        const archiveEffect =
+                          managedRow !== undefined
+                            ? sql
+                                .withTransaction(
+                                  channels.setArchived(managedRow.id, true).pipe(
+                                    Effect.flatMap(() =>
+                                      channelSync.emitManagedChannelArchived({
+                                        teamId,
+                                        teamChannelId: managedRow.id,
+                                        discordChannelId: managedRow.discord_channel_id,
+                                        archiveCategoryId,
+                                      }),
+                                    ),
+                                  ),
+                                )
+                                .pipe(catchSqlErrors)
+                            : channelSync.emitDiscordChannelArchived({
+                                teamId,
+                                discordChannelId: id,
+                                archiveCategoryId,
+                              });
+                        return archiveEffect.pipe(
+                          Effect.tap(() => {
+                            archived.push(id);
+                            return Effect.void;
+                          }),
+                        );
+                      }),
+                    ).pipe(
+                      Effect.exit,
+                      Effect.flatMap((exit) => {
+                        if (Exit.isFailure(exit)) {
+                          failed.push({ discordChannelId: id });
+                        }
+                        return Effect.void;
+                      }),
+                    ),
+                  { concurrency: 1 },
+                ).pipe(
+                  Effect.map(
+                    () => new ChannelApi.ChannelBulkArchiveResult({ archived, skipped, failed }),
+                  ),
+                );
+              }),
             ),
           ),
     ),

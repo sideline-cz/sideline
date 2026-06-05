@@ -223,9 +223,9 @@ Syncs groups to private Discord text channels with per-user permission overwrite
 | Bot service | `src/services/ChannelSyncService.ts` |
 | Mapping table | `discord_channel_mappings` (team_id + group_id → discord_channel_id) |
 
-`channel_sync_events.entity_type` is one of `group`, `roster`, `managed`, or `discord`. The same `event_type` literals (`channel_created`, `channel_archived`, `channel_deleted`, `member_added`, `member_removed`) carry a different RPC event class per `entity_type` — `ProcessorService.ts` dispatches on the decoded RPC event `_tag`, not on `event_type`. `entity_type='managed'` events decode to the `Managed*` RPC event classes (see "Managed Channels" below); `channel_updated` and `channel_detached` are **never** emitted with `entity_type='managed'` (those `Match.when('managed', ...)` branches in `src/rpc/channel/events.ts` are impossible-state guards that fail with `EventPropertyMissing`). `entity_type='discord'` is valid **only** with `event_type='channel_archived'` (decodes to `DiscordChannelArchivedEvent`, handled by `handleDiscordArchived`); every other `event_type` for `discord` is an impossible-state guard that fails with `EventPropertyMissing`.
+`channel_sync_events.entity_type` is one of `group`, `roster`, `managed`, or `discord`. The same `event_type` literals (`channel_created`, `channel_archived`, `channel_deleted`, `member_added`, `member_removed`) carry a different RPC event class per `entity_type` — `ProcessorService.ts` dispatches on the decoded RPC event `_tag`, not on `event_type`. `entity_type='managed'` events decode to the `Managed*` RPC event classes (see "Managed Channels" below). `channel_updated` + `managed` is the adoption event — it decodes to `ManagedChannelAdoptedEvent` (handled by `handleManagedAdopted`); `channel_detached` is **never** emitted with `entity_type='managed'` (that `Match.when('managed', ...)` branch in `src/rpc/channel/events.ts` is an impossible-state guard that fails with `EventPropertyMissing`). `entity_type='discord'` is valid **only** with `event_type='channel_archived'` (decodes to `DiscordChannelArchivedEvent`, handled by `handleDiscordArchived`); every other `event_type` for `discord` is an impossible-state guard that fails with `EventPropertyMissing`.
 
-Because `ProcessorService.ts` now exceeds the 20-argument `Match.type(...).pipe(...)` overload limit, the dispatcher is split into two chains: `actionMatcher` holds the first set of `Match.tag` arms and `action` pipes the remainder (`managed_access_revoked`, `discord_channel_archived`) before `Match.exhaustive`. Add new tags to whichever chain has room; never collapse them back into a single `pipe` past 20 arms.
+Because `ProcessorService.ts` now exceeds the 20-argument `Match.type(...).pipe(...)` overload limit, the dispatcher is split into two chains: `actionMatcher` holds the first set of `Match.tag` arms and `action` pipes the remainder (`managed_access_revoked`, `discord_channel_archived`, `managed_channel_adopted`) before `Match.exhaustive`. Add new tags to whichever chain has room; never collapse them back into a single `pipe` past 20 arms.
 
 Event types: `channel_created`, `channel_updated`, `channel_deleted`, `channel_archived`, `channel_detached`, `member_added`, `member_removed`
 
@@ -310,6 +310,7 @@ Bot handlers (registered in `ProcessorService.ts` via `Match.tag`):
 | RPC event `_tag` | Handler file | Behavior |
 |------------------|--------------|----------|
 | `managed_channel_created` | `src/rcp/channel/handleManagedCreated.ts` | `createChannelOnly(guild_id, discord_channel_name)`, then `Channel/UpsertManagedChannel` to persist the new `discord_channel_id`. No role, no permission overwrite. |
+| `managed_channel_adopted` | `src/rcp/channel/handleManagedAdopted.ts` (`handleManagedAdopted`) | `updateChannel(discord_channel_id, { permission_overwrites: [@everyone deny ViewChannel] })` — a full-REPLACE of the overwrite list (see REPLACE-semantics note below). No RPC ack; group grants arrive separately via `managed_access_granted`. |
 | `managed_channel_archived` | `src/rcp/channel/handleManagedArchived.ts` | Move channel to `archive_category_id` via `updateChannel({ parent_id })`; on failure fall back to `deleteChannel`. Then call `Channel/ClearManagedChannel`. |
 | `managed_channel_deleted` | `src/rcp/channel/handleManagedDeleted.ts` | `deleteChannel`, then `Channel/ClearManagedChannel`. No endpoint currently emits this event (v1) — the handler exists for future use. |
 | `managed_access_granted` | `src/rcp/channel/handleManagedAccess.ts` (`handleManagedAccessGranted`) | `setChannelAccessOverwrite(discord_channel_id, discord_role_id, access_level)`. |
@@ -322,6 +323,13 @@ Bot handlers (registered in `ProcessorService.ts` via `Match.tag`):
 2. **NO RPC ack.** There is no `team_channels` row to update, so it never calls `Channel/ClearManagedChannel` or any other ack RPC.
 
 When `event.discord_channel_id` is `None`, the handler is a no-op.
+
+`handleManagedAdopted` makes a previously-unmanaged channel private by **full-REPLACING** its `permission_overwrites` list with a single `@everyone` deny-`ViewChannel` overwrite (`deny(HIDDEN)`, the same shape `createChannelOnly` uses for Sideline-created channels). Rules that MUST be preserved:
+
+1. **It is a REPLACE, not a merge.** Passing the full `permission_overwrites` array to `updateChannel` wipes every pre-existing (foreign) overwrite on the adopted channel — that is the intended effect (make the channel private from scratch). Never switch this to `setChannelPermissionOverwrite` (which only adds one entry and would leave foreign overwrites in place).
+2. **The bot keeps its own access via its guild-level bot role, not a per-channel overwrite.** The REPLACE therefore does NOT lock the bot out of the follow-up `managed_access_granted` grants.
+3. **It grants NO group access itself.** Per-group grants arrive as separate `managed_access_granted` events (their own committed outbox rows) handled by `handleManagedAccessGranted`. The server deliberately splits adoption and access into two events to avoid an event-ordering race — never fold grant logic into `handleManagedAdopted`.
+4. **No RPC ack.** The `team_channels` row already exists (the server inserted it before emitting), so the handler never calls `Channel/UpsertManagedChannel` or any other ack RPC.
 
 Access tiers and Discord permission overwrites:
 

@@ -9,6 +9,11 @@ export class ChannelNameAlreadyTakenError extends Schema.TaggedErrorClass<Channe
   {},
 ) {}
 
+export class DiscordChannelAlreadyAdoptedError extends Schema.TaggedErrorClass<DiscordChannelAlreadyAdoptedError>()(
+  'DiscordChannelAlreadyAdoptedError',
+  {},
+) {}
+
 class ChannelRow extends Schema.Class<ChannelRow>('ChannelRow')({
   id: TeamChannel.TeamChannelId,
   team_id: Team.TeamId,
@@ -27,6 +32,13 @@ const InsertInput = Schema.Struct({
   team_id: Team.TeamId,
   name: Schema.String,
   category: Schema.OptionFromNullOr(Schema.String),
+});
+
+const InsertAdoptedInput = Schema.Struct({
+  team_id: Team.TeamId,
+  name: Schema.String,
+  category: Schema.OptionFromNullOr(Schema.String),
+  discord_channel_id: Discord.Snowflake,
 });
 
 const RenameInput = Schema.Struct({
@@ -82,6 +94,16 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
       INSERT INTO team_channels (team_id, name, category)
       VALUES (${input.team_id}, ${input.name}, ${input.category})
+      RETURNING id, team_id, name, category, position, archived, discord_channel_id, discord_role_id
+    `,
+  });
+
+  const insertAdoptedQuery = SqlSchema.findOne({
+    Request: InsertAdoptedInput,
+    Result: ChannelRow,
+    execute: (input) => sql`
+      INSERT INTO team_channels (team_id, name, category, discord_channel_id, archived)
+      VALUES (${input.team_id}, ${input.name}, ${input.category}, ${input.discord_channel_id}, false)
       RETURNING id, team_id, name, category, position, archived, discord_channel_id, discord_role_id
     `,
   });
@@ -156,6 +178,35 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  const insertAdopted = (
+    teamId: Team.TeamId,
+    name: string,
+    category: Option.Option<string>,
+    discordChannelId: Discord.Snowflake,
+  ) =>
+    insertAdoptedQuery({
+      team_id: teamId,
+      name,
+      category,
+      discord_channel_id: discordChannelId,
+    }).pipe(
+      SqlErrors.catchUniqueViolationOn(
+        'uq_team_channels_discord_channel',
+        () => new DiscordChannelAlreadyAdoptedError(),
+      ),
+      SqlErrors.catchUniqueViolationOn(
+        'uq_team_channels_team_name_active',
+        () => new ChannelNameAlreadyTakenError(),
+      ),
+      Effect.catchTag(
+        'NoSuchElementError',
+        LogicError.withMessage(
+          () => `insertAdopted channel "${name}" for discord ${discordChannelId} returned no row`,
+        ),
+      ),
+      catchSqlErrors,
+    );
+
   const rename = (channelId: TeamChannel.TeamChannelId, name: string) =>
     renameQuery({ id: channelId, name }).pipe(
       SqlErrors.catchUniqueViolation(() => new ChannelNameAlreadyTakenError()),
@@ -189,6 +240,7 @@ const make = Effect.gen(function* () {
     findById,
     findAllByTeam,
     insert,
+    insertAdopted,
     rename,
     updateOrganization,
     setArchived,

@@ -83,6 +83,43 @@ export class ChannelNotArchivable extends Schema.TaggedErrorClass<ChannelNotArch
   {},
 ) {}
 
+export class ChannelNotAdoptable extends Schema.TaggedErrorClass<ChannelNotAdoptable>()(
+  'ChannelNotAdoptable',
+  {},
+) {}
+
+export class ChannelAdoptionNameConflict extends Schema.TaggedErrorClass<ChannelAdoptionNameConflict>()(
+  'ChannelAdoptionNameConflict',
+  {},
+) {}
+
+export const BulkArchiveDiscordChannelsRequest = Schema.Struct({
+  discordChannelIds: Schema.Array(Snowflake),
+});
+export type BulkArchiveDiscordChannelsRequest = Schema.Schema.Type<
+  typeof BulkArchiveDiscordChannelsRequest
+>;
+
+const BulkArchiveSkipReason = Schema.Literals([
+  'already_archived',
+  'is_category',
+  'is_archive_category',
+  'not_found',
+]);
+
+export class ChannelBulkArchiveResult extends Schema.Class<ChannelBulkArchiveResult>(
+  'ChannelBulkArchiveResult',
+)({
+  archived: Schema.Array(Snowflake),
+  skipped: Schema.Array(
+    Schema.Struct({
+      discordChannelId: Snowflake,
+      reason: BulkArchiveSkipReason,
+    }),
+  ),
+  failed: Schema.Array(Schema.Struct({ discordChannelId: Snowflake })),
+}) {}
+
 export class ChannelApiGroup extends HttpApiGroup.make('channel')
   .add(
     HttpApiEndpoint.get('listChannels', '/teams/:teamId/channels', {
@@ -158,6 +195,37 @@ export class ChannelApiGroup extends HttpApiGroup.make('channel')
           ChannelNotFound.pipe(HttpApiSchema.status(404)),
         ],
         params: { teamId: TeamId, discordChannelId: Snowflake },
+      },
+    ).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post(
+      'adoptDiscordChannel',
+      '/teams/:teamId/discord-channels/:discordChannelId/adopt',
+      {
+        success: ChannelDetail,
+        error: [
+          ChannelForbidden.pipe(HttpApiSchema.status(403)),
+          ChannelNotFound.pipe(HttpApiSchema.status(404)),
+          ChannelNotAdoptable.pipe(HttpApiSchema.status(409)),
+          ChannelAdoptionNameConflict.pipe(HttpApiSchema.status(409)),
+        ],
+        params: { teamId: TeamId, discordChannelId: Snowflake },
+      },
+    ).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post(
+      'bulkArchiveDiscordChannels',
+      '/teams/:teamId/discord-channels/bulk-archive',
+      {
+        success: ChannelBulkArchiveResult,
+        error: [
+          ChannelForbidden.pipe(HttpApiSchema.status(403)),
+          ArchiveCategoryNotConfigured.pipe(HttpApiSchema.status(409)),
+        ],
+        payload: BulkArchiveDiscordChannelsRequest,
+        params: { teamId: TeamId },
       },
     ).middleware(AuthMiddleware),
   ) {}

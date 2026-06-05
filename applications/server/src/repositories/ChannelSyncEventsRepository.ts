@@ -508,6 +508,20 @@ const make = Effect.gen(function* () {
       archiveCategoryId: Option.some(archiveCategoryId),
     });
 
+  const emitManagedChannelAdopted = ({
+    teamId,
+    teamChannelId,
+    discordChannelId,
+  }: {
+    teamId: Team.TeamId;
+    teamChannelId: TeamChannel.TeamChannelId;
+    discordChannelId: Discord.Snowflake;
+  }) =>
+    _emitIfGuildLinked(teamId, 'channel_updated', 'managed', {
+      teamChannelId: Option.some(teamChannelId),
+      existingChannelId: Option.some(discordChannelId),
+    });
+
   // NOTE: no delete endpoint currently emits `managed_channel_deleted` (v1); emitter kept for future.
   const emitManagedChannelDeleted = ({
     teamId,
@@ -630,6 +644,7 @@ const make = Effect.gen(function* () {
     emitGroupChannelUpdated,
     emitRosterChannelUpdated,
     emitManagedChannelCreated,
+    emitManagedChannelAdopted,
     emitManagedChannelArchived,
     emitManagedChannelDeleted,
     emitDiscordChannelArchived,

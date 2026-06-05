@@ -76,6 +76,26 @@ Click a channel name to open its detail sheet, then click **Rename**. Enter the 
   Renaming a channel updates the Sideline label only. The Discord channel name is **not** changed in v1. A bot-side rename handler is planned for a future release.
 </Aside>
 
+## Taking over a Discord-native channel
+
+You can bring any existing Discord text channel under Sideline management. Once adopted, Sideline treats the channel exactly like one it created: you can control access, and the channel appears in the managed list.
+
+<Steps>
+
+1. Find the channel in the **Team → Channels** list. Discord-native channels show `managed = false`.
+
+2. Open the channel's detail sheet and click **Take over channel**.
+
+3. Read the warning carefully, then click **Confirm**.
+
+</Steps>
+
+<Aside type="caution" title="Existing permissions are wiped on take-over">
+  When you take over a channel, the bot replaces **all** existing Discord permission overwrites with a single deny-all rule for `@everyone`, making the channel private. Any roles or users that previously had access via channel-level overwrites will lose it. Apply access grants from the **Access** panel after taking over to restore the correct access.
+</Aside>
+
+Only **text channels** (type 0) can be adopted. Categories, voice channels, and thread channels are not supported.
+
 ## Archiving a channel
 
 You can archive any channel shown in the list — whether Sideline created it or it already existed in Discord.
@@ -95,6 +115,22 @@ The bot moves the Discord channel to the **archive category** configured in **Te
 </Aside>
 
 The channel remains visible in the Sideline channel list with an *Archived* badge. For managed channels, the name can be reused for a new channel after archiving.
+
+## Bulk-archiving channels
+
+You can select multiple channels and archive them all in one action.
+
+<Steps>
+
+1. On the **Team → Channels** page, enable multi-select mode.
+
+2. Tick the channels you want to archive.
+
+3. Click **Archive selected** and confirm.
+
+</Steps>
+
+The archive category must be configured in **Team settings → Discord integration** before bulk-archiving. Each channel is processed independently — channels that are already archived, are categories, or cannot be found are listed as skipped in the result summary, and any unexpected error for a single channel is reported without blocking the rest.
 
 ## Managed vs Discord-native channels
 

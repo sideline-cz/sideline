@@ -11,6 +11,7 @@ import { handleDeleted, handleRosterDeleted } from './handleDeleted.js';
 import { handleGroupDetached, handleRosterDetached } from './handleDetached.js';
 import { handleDiscordArchived } from './handleDiscordArchived.js';
 import { handleManagedAccessGranted, handleManagedAccessRevoked } from './handleManagedAccess.js';
+import { handleManagedAdopted } from './handleManagedAdopted.js';
 import { handleManagedArchived } from './handleManagedArchived.js';
 import { handleManagedCreated } from './handleManagedCreated.js';
 import { handleManagedDeleted } from './handleManagedDeleted.js';
@@ -46,6 +47,7 @@ const action: (
 ) => Effect.Effect<void, unknown, SyncRpc | DiscordREST> = actionMatcher.pipe(
   Match.tag('managed_access_revoked', handleManagedAccessRevoked),
   Match.tag('discord_channel_archived', handleDiscordArchived),
+  Match.tag('managed_channel_adopted', handleManagedAdopted),
   Match.exhaustive,
 );
 
