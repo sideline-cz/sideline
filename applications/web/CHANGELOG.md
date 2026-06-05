@@ -1,5 +1,35 @@
 # @sideline/web
 
+## 0.16.1
+
+### Patch Changes
+
+- [#355](https://github.com/maxa-ondrej/sideline/pull/355) [`0d1f890`](https://github.com/maxa-ondrej/sideline/commit/0d1f890595427ead71157364e88312c747805b5c) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Serve the service worker script with `Cache-Control: no-cache`
+
+  `sw.js` is now sent with `Cache-Control: no-cache` from the origin so the
+  browser always revalidates it against the server. A stale, long-cached service
+  worker keeps an old worker (and the old cached app it serves) alive, which
+  delays deployed fixes from reaching returning users. `no-cache` makes a newly
+  deployed service worker take effect promptly. Cloudflare passes the origin
+  `no-cache` through to the browser.
+
+- [#353](https://github.com/maxa-ondrej/sideline/pull/353) [`07a27b1`](https://github.com/maxa-ondrej/sideline/commit/07a27b18fd77ca0c5dafc6d913cc3064f6a30ac4) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix white-page crash for returning users caused by a stale service worker
+
+  Returning visitors kept hitting a full white page with `Uncaught (in promise)
+undefined` because the service worker served a stale, cached app shell (and the
+  old hashed JS bundles it referenced), so a previously deployed crash fix never
+  reached them. Hard-refreshing or clearing site data worked around it.
+
+  Navigation requests now use `NetworkOnly` with the existing `offline.html`
+  fallback so the app document always comes from the network and a freshly
+  deployed shell reaches users immediately. The service worker now purges any
+  unexpected caches (such as the old `pages` shell) on activate, and the app
+  reloads once when an updated service worker takes control — so returning users
+  escape stale code automatically.
+
+  Note: offline navigation now always shows `offline.html` rather than a cached
+  last-known shell. Immutable, content-hashed static assets are still cached.
+
 ## 0.16.0
 
 ### Minor Changes
