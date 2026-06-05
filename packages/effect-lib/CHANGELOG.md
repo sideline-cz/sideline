@@ -1,5 +1,37 @@
 # @sideline/effect-lib
 
+## 0.0.8
+
+### Patch Changes
+
+- [#346](https://github.com/maxa-ondrej/sideline/pull/346) [`e22ccc5`](https://github.com/maxa-ondrej/sideline/commit/e22ccc5c9f367efca2e26956b6abcb9f351f3878) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add web-based Discord channel management for admins
+
+  Admins (with `group:manage`) can now create, rename, and archive Discord text
+  channels directly from Sideline, organize them with Sideline-side categories and
+  ordering, and grant existing groups VIEW/EDIT/ADMIN access to each channel
+  (mapped to Discord permission overwrites). The ADMIN tier is bounded — it grants
+  message/thread moderation but never channel rename or delete. Introduces a new
+  `managed` channel entity that reuses the existing channel-sync pipeline, backed
+  by new `team_channels` and `team_channel_access` tables and a new channel HTTP
+  API. v1 scope: text channels only; ordering/categories are Sideline-side.
+
+  The channel list reflects the team's actual Discord channels (synced from the
+  `discord_channels` mirror, merged with managed channels still provisioning),
+  grouped by their Discord category. Channels in the team's configured archive
+  category are shown as archived, and admins can archive any Discord channel — not
+  just Sideline-created ones — moving it into the archive category.
+
+  Admins can also **bulk-archive** channels (multi-select) and **manage permissions
+  for any Discord channel**, not just Sideline-created ones: managing access on a
+  previously-unmanaged channel "adopts" it — making it private and replacing its
+  existing Discord permissions with the Sideline access model (after a clear
+  confirmation). A partial unique index keeps adoption idempotent.
+
+  Also hardens `Runtime.runMain` so unsatisfied layer dependencies fail `pnpm check`
+  at the call site instead of crashing the app at startup (the previous `as never`
+  cast hid them). This surfaced and fixed a pre-existing missing dependency in
+  `EventStartCron` (`DiscordChannelMappingRepository`).
+
 ## 0.0.7
 
 ### Patch Changes
