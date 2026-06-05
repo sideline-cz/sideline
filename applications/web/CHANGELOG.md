@@ -1,5 +1,28 @@
 # @sideline/web
 
+## 0.17.1
+
+### Patch Changes
+
+- [#358](https://github.com/maxa-ondrej/sideline/pull/358) [`4fccc7f`](https://github.com/maxa-ondrej/sideline/commit/4fccc7f87cd2021e0c5e1d93451b17854018639f) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix `Uncaught undefined` crash after Discord login (real root cause)
+
+  `fetchTranslations` and `fetchVersions` used bare `Effect.runPromise` which
+  only catches typed errors — any defect or interrupt (e.g. an aborted fetch
+  during the post-login redirect sequence) escaped as an unhandled
+  `Uncaught (in promise) undefined`, crashing the page.
+
+  Both now use `Effect.runPromiseExit` + `Exit.isSuccess` so defects are
+  silently treated as "no data" rather than crashing the app.
+
+- [#358](https://github.com/maxa-ondrej/sideline/pull/358) [`4fccc7f`](https://github.com/maxa-ondrej/sideline/commit/4fccc7f87cd2021e0c5e1d93451b17854018639f) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Serve the service worker script with `Cache-Control: no-cache`
+
+  `sw.js` is now sent with `Cache-Control: no-cache` from the origin so the
+  browser always revalidates it against the server. A stale, long-cached service
+  worker keeps an old worker (and the old cached app it serves) alive, which
+  delays deployed fixes from reaching returning users. `no-cache` makes a newly
+  deployed service worker take effect promptly. Cloudflare passes the origin
+  `no-cache` through to the browser.
+
 ## 0.17.0
 
 ### Minor Changes
