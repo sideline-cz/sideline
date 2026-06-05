@@ -122,6 +122,7 @@ const buildICalFeed = (
     event_type: string;
     team_name: string;
     rsvp_response: string;
+    all_day: boolean;
   }>,
   paymentRows: ReadonlyArray<PaymentRow>,
   now: DateTime.Utc,
@@ -143,10 +144,21 @@ const buildICalFeed = (
     lines.push('BEGIN:VEVENT');
     lines.push(`UID:${event.id}@sideline`);
     lines.push(`DTSTAMP:${dtstamp}`);
-    lines.push(`DTSTART:${formatDateTimeUtc(event.start_at)}`);
-    Option.map(event.end_at, (endAt) => {
-      lines.push(`DTEND:${formatDateTimeUtc(endAt)}`);
-    });
+    if (event.all_day) {
+      const startDate = formatDateOnly(new Date(DateTime.toEpochMillis(event.start_at)), 'UTC');
+      lines.push(`DTSTART;VALUE=DATE:${startDate}`);
+      const endDateStr = Option.match(event.end_at, {
+        onNone: () => addOneDay(startDate),
+        onSome: (endAt) =>
+          addOneDay(formatDateOnly(new Date(DateTime.toEpochMillis(endAt)), 'UTC')),
+      });
+      lines.push(`DTEND;VALUE=DATE:${endDateStr}`);
+    } else {
+      lines.push(`DTSTART:${formatDateTimeUtc(event.start_at)}`);
+      Option.map(event.end_at, (endAt) => {
+        lines.push(`DTEND:${formatDateTimeUtc(endAt)}`);
+      });
+    }
     lines.push(`SUMMARY:${escapeICalText(`${prefix}${event.title}`)}`);
     const description = Option.match(event.location_url, {
       onNone: () => event.description,

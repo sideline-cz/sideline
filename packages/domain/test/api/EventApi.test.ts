@@ -116,6 +116,7 @@ const baseCreatePayload: Schema.Schema.Type<typeof EventApi.CreateEventRequest> 
   discordChannelId: Option.none(),
   ownerGroupId: Option.none(),
   memberGroupId: Option.none(),
+  allDay: false,
 };
 
 describe('CreateEventRequest — encoding direction (regression for runtime crash)', () => {
@@ -190,6 +191,7 @@ describe('UpdateEventRequest — encoding direction (regression for runtime cras
     discordChannelId: Option.none(),
     ownerGroupId: Option.none(),
     memberGroupId: Option.none(),
+    allDay: Option.none(),
   };
 
   it('case A: empty patch encodes without crashing — all keys absent in output', () => {
@@ -215,6 +217,7 @@ describe('UpdateEventRequest — encoding direction (regression for runtime cras
       discordChannelId: Option.some(Option.none()),
       ownerGroupId: Option.some(Option.none()),
       memberGroupId: Option.some(Option.none()),
+      allDay: Option.none(),
     };
     const encoded = Schema.encodeSync(EventApi.UpdateEventRequest)(patch);
     // location and locationUrl should both be present as null in the encoded form

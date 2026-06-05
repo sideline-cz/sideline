@@ -41,6 +41,7 @@ export class EventEmbedInfo extends Schema.Class<EventEmbedInfo>('EventEmbedInfo
   location: Schema.OptionFromNullOr(Schema.String),
   location_url: Schema.OptionFromNullOr(Schema.String),
   event_type: Schema.String,
+  all_day: Schema.Boolean,
 }) {}
 
 export class ChannelEventEntry extends Schema.Class<ChannelEventEntry>('ChannelEventEntry')({
@@ -55,6 +56,7 @@ export class ChannelEventEntry extends Schema.Class<ChannelEventEntry>('ChannelE
   location_url: Schema.OptionFromNullOr(Schema.String),
   event_type: Schema.String,
   status: Schema.String,
+  all_day: Schema.Boolean,
   discord_message_id: Snowflake,
 }) {}
 
@@ -109,6 +111,7 @@ export class GuildEventListEntry extends Schema.Class<GuildEventListEntry>('Guil
   yes_count: Schema.Number,
   no_count: Schema.Number,
   maybe_count: Schema.Number,
+  all_day: Schema.Boolean,
 }) {}
 
 export class GuildEventListResult extends Schema.Class<GuildEventListResult>(
@@ -175,6 +178,7 @@ export class UpcomingEventForUserEntry extends Schema.Class<UpcomingEventForUser
   yes_count: Schema.Number,
   no_count: Schema.Number,
   maybe_count: Schema.Number,
+  all_day: Schema.Boolean,
   my_response: Schema.OptionFromNullOr(Schema.Literals(['yes', 'no', 'maybe'])),
   my_message: Schema.OptionFromNullOr(Schema.String),
 }) {}

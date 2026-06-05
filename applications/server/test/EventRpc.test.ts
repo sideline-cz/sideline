@@ -528,6 +528,7 @@ describe('GetEventEmbedInfo RPC — image_url field', () => {
                 location: row.location,
                 location_url: row.location_url,
                 event_type: row.event_type,
+                all_day: false,
               }),
             ),
         }),
@@ -563,6 +564,7 @@ describe('GetEventEmbedInfo RPC — image_url field', () => {
                 location: row.location,
                 location_url: row.location_url,
                 event_type: row.event_type,
+                all_day: false,
               }),
             ),
         }),
@@ -647,6 +649,7 @@ describe('GetChannelEvents RPC — image_url field', () => {
               event_type: row.event_type,
               status: row.status,
               discord_message_id: row.discord_message_id,
+              all_day: false,
             }),
         ),
       ),
@@ -684,6 +687,7 @@ describe('GetChannelEvents RPC — image_url field', () => {
               event_type: row.event_type,
               status: row.status,
               discord_message_id: row.discord_message_id,
+              all_day: false,
             }),
         ),
       ),
@@ -717,6 +721,7 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       maybe_count: 0,
       my_response: Option.none(),
       my_message: Option.none(),
+      all_day: false,
     });
 
     return Effect.sync(() => {
@@ -742,6 +747,7 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       maybe_count: 0,
       my_response: Option.none(),
       my_message: Option.none(),
+      all_day: false,
     });
 
     return Effect.sync(() => {

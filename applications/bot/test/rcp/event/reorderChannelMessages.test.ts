@@ -166,6 +166,7 @@ const makeEntry = (
     event_type: 'match',
     status: opts.status ?? 'scheduled',
     discord_message_id: opts.snowflake ?? sf(n * 100), // caller assigns meaningful snowflake
+    all_day: false,
   });
 };
 

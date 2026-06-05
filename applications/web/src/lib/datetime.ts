@@ -27,6 +27,19 @@ export const formatLocalDate = (dt: DateTime.Utc): string => {
 export const dateOnlyToUtc = (date: string): DateTime.Utc =>
   DateTime.makeUnsafe(`${date}T12:00:00Z`);
 
+/**
+ * Format a UTC DateTime as YYYY-MM-DD in UTC.
+ * Used for all-day events, whose `start_at`/`end_at` are anchored at noon UTC so
+ * their calendar date is stable across timezones — always read them in UTC.
+ */
+export const formatUtcDate = (dt: DateTime.Utc): string => {
+  const d = new Date(Number(DateTime.toEpochMillis(dt)));
+  const y = d.getUTCFullYear();
+  const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
+};
+
 /** Format a UTC DateTime as HH:mm in the browser's local timezone. */
 export const formatLocalTime = (dt: DateTime.Utc): string => {
   const d = new Date(Number(DateTime.toEpochMillis(dt)));
@@ -48,12 +61,32 @@ export const formatLocalTime = (dt: DateTime.Utc): string => {
 export const formatEventDateRange = (
   startAt: DateTime.Utc,
   endAt: Option.Option<DateTime.Utc>,
+  allDay = false,
 ): {
   startDate: string;
   startTime: string;
   end: Option.Option<string>;
   sameDay: boolean;
 } => {
+  // All-day events carry no meaningful time-of-day. Format/compare by UTC calendar
+  // date (their anchor is noon UTC) and never emit a time component.
+  if (allDay) {
+    const startDate = formatUtcDate(startAt);
+    return Option.match(endAt, {
+      onNone: () => ({ startDate, startTime: '', end: Option.none<string>(), sameDay: true }),
+      onSome: (e) => {
+        const endDate = formatUtcDate(e);
+        const sameDay = startDate === endDate;
+        return {
+          startDate,
+          startTime: '',
+          end: sameDay ? Option.none<string>() : Option.some(endDate),
+          sameDay,
+        };
+      },
+    });
+  }
+
   const startDate = formatLocalDate(startAt);
   const startTime = formatLocalTime(startAt);
 

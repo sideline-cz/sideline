@@ -34,6 +34,7 @@ const InsertInput = Schema.Struct({
   discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
   claimed_by_member_id: Schema.OptionFromNullOr(TeamMember.TeamMemberId),
   claimed_by_display_name: Schema.OptionFromNullOr(Schema.String),
+  event_all_day: Schema.Boolean,
 });
 
 class GuildLookupResult extends Schema.Class<GuildLookupResult>('GuildLookupResult')({
@@ -63,6 +64,7 @@ export class EventSyncEventRow extends Schema.Class<EventSyncEventRow>('EventSyn
   claimed_by_nickname: Schema.OptionFromNullOr(Schema.String),
   claimed_by_user_display_name: Schema.OptionFromNullOr(Schema.String),
   claimed_by_username: Schema.OptionFromNullOr(Schema.String),
+  event_all_day: Schema.Boolean,
 }) {}
 
 const MarkProcessedInput = Schema.Struct({
@@ -80,8 +82,8 @@ const make = Effect.gen(function* () {
   const insertEvent = SqlSchema.void({
     Request: InsertInput,
     execute: (input) => sql`
-      INSERT INTO event_sync_events (team_id, guild_id, event_type, event_id, event_title, event_description, event_image_url, event_start_at, event_end_at, event_location, event_location_url, event_event_type, discord_target_channel_id, member_group_id, discord_role_id, claimed_by_member_id, claimed_by_display_name)
-      VALUES (${input.team_id}, ${input.guild_id}, ${input.event_type}, ${input.event_id}, ${input.event_title}, ${input.event_description}, ${input.event_image_url}, ${input.event_start_at}, ${input.event_end_at}, ${input.event_location}, ${input.event_location_url}, ${input.event_event_type}, ${input.discord_target_channel_id}, ${input.member_group_id}, ${input.discord_role_id}, ${input.claimed_by_member_id}, ${input.claimed_by_display_name})
+      INSERT INTO event_sync_events (team_id, guild_id, event_type, event_id, event_title, event_description, event_image_url, event_start_at, event_end_at, event_location, event_location_url, event_event_type, discord_target_channel_id, member_group_id, discord_role_id, claimed_by_member_id, claimed_by_display_name, event_all_day)
+      VALUES (${input.team_id}, ${input.guild_id}, ${input.event_type}, ${input.event_id}, ${input.event_title}, ${input.event_description}, ${input.event_image_url}, ${input.event_start_at}, ${input.event_end_at}, ${input.event_location}, ${input.event_location_url}, ${input.event_event_type}, ${input.discord_target_channel_id}, ${input.member_group_id}, ${input.discord_role_id}, ${input.claimed_by_member_id}, ${input.claimed_by_display_name}, ${input.event_all_day})
     `,
   });
 
@@ -105,7 +107,8 @@ const make = Effect.gen(function* () {
              COALESCE(u.name, ese.claimed_by_display_name) AS claimed_by_name,
              u.discord_nickname     AS claimed_by_nickname,
              u.discord_display_name AS claimed_by_user_display_name,
-             u.username             AS claimed_by_username
+             u.username             AS claimed_by_username,
+             ese.event_all_day
       FROM event_sync_events ese
       LEFT JOIN team_members tm ON tm.id = ese.claimed_by_member_id
       LEFT JOIN users u         ON u.id = tm.user_id
@@ -141,6 +144,7 @@ const make = Effect.gen(function* () {
     location: Option.Option<string>,
     locationUrl: Option.Option<string>,
     eventEventType: string,
+    allDay: boolean = false,
     discordTargetChannelId: Option.Option<Discord.Snowflake> = Option.none(),
     memberGroupId: Option.Option<GroupModel.GroupId> = Option.none(),
     discordRoleId: Option.Option<Discord.Snowflake> = Option.none(),
@@ -170,6 +174,7 @@ const make = Effect.gen(function* () {
               discord_role_id: discordRoleId,
               claimed_by_member_id: claimedByMemberId,
               claimed_by_display_name: claimedByDisplayName,
+              event_all_day: allDay,
             }),
         }),
       ),
@@ -190,6 +195,7 @@ const make = Effect.gen(function* () {
     discordRoleId: Option.Option<Discord.Snowflake> = Option.none(),
     imageUrl: Option.Option<string> = Option.none(),
     locationUrl: Option.Option<string> = Option.none(),
+    allDay: boolean = false,
   ) =>
     _emitIfGuildLinked(
       teamId,
@@ -203,6 +209,7 @@ const make = Effect.gen(function* () {
       location,
       locationUrl,
       eventEventType,
+      allDay,
       discordTargetChannelId,
       memberGroupId,
       discordRoleId,
@@ -222,6 +229,7 @@ const make = Effect.gen(function* () {
     discordRoleId: Option.Option<Discord.Snowflake> = Option.none(),
     imageUrl: Option.Option<string> = Option.none(),
     locationUrl: Option.Option<string> = Option.none(),
+    allDay: boolean = false,
   ) =>
     _emitIfGuildLinked(
       teamId,
@@ -235,6 +243,7 @@ const make = Effect.gen(function* () {
       location,
       locationUrl,
       eventEventType,
+      allDay,
       discordTargetChannelId,
       memberGroupId,
       discordRoleId,
@@ -266,6 +275,7 @@ const make = Effect.gen(function* () {
       location,
       locationUrl,
       eventEventType,
+      false,
       discordTargetChannelId,
       memberGroupId,
       discordRoleId,
@@ -297,6 +307,7 @@ const make = Effect.gen(function* () {
       location,
       locationUrl,
       eventEventType,
+      false,
       discordTargetChannelId,
       memberGroupId,
       discordRoleId,
@@ -316,6 +327,7 @@ const make = Effect.gen(function* () {
     discordRoleId: Option.Option<Discord.Snowflake> = Option.none(),
     imageUrl: Option.Option<string> = Option.none(),
     locationUrl: Option.Option<string> = Option.none(),
+    allDay: boolean = false,
   ) =>
     _emitIfGuildLinked(
       teamId,
@@ -329,6 +341,7 @@ const make = Effect.gen(function* () {
       location,
       locationUrl,
       eventEventType,
+      allDay,
       discordTargetChannelId,
       memberGroupId,
       discordRoleId,
@@ -358,6 +371,7 @@ const make = Effect.gen(function* () {
       location,
       locationUrl,
       'training',
+      false,
       Option.some(discordTargetChannelId),
       Option.none(),
       discordRoleId,
@@ -401,6 +415,7 @@ const make = Effect.gen(function* () {
               discord_role_id: claimDiscordMessageId,
               claimed_by_member_id: claimedByMemberId,
               claimed_by_display_name: claimedByDisplayName,
+              event_all_day: false,
             }),
         }),
       ),
@@ -443,6 +458,7 @@ const make = Effect.gen(function* () {
               discord_role_id: discordRoleId,
               claimed_by_member_id: Option.none(),
               claimed_by_display_name: Option.none(),
+              event_all_day: false,
             }),
         }),
       ),

@@ -45,6 +45,7 @@ export const handleUpdated = (event: EventRpcEvents.EventUpdatedEvent) =>
                 counts,
                 yesAttendees,
                 locale,
+                allDay: event.all_day,
               });
               return rest.updateMessage(msg.discord_channel_id, msg.discord_message_id, {
                 embeds: payload.embeds,

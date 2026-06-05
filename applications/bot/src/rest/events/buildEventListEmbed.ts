@@ -38,7 +38,8 @@ const formatEntry = (entry: EventRpcModels.GuildEventListEntry, locale: Locale):
     },
     { locale },
   );
-  return `${emoji} **${entry.title}**\n${toDiscordTimestamp(entry.start_at, 'f')}${locationPart}\n${rsvpSummary}`;
+  const startTs = toDiscordTimestamp(entry.start_at, entry.all_day ? 'D' : 'f');
+  return `${emoji} **${entry.title}**\n${startTs}${locationPart}\n${rsvpSummary}`;
 };
 
 export const PAGE_SIZE = 5;

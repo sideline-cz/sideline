@@ -26,6 +26,7 @@ const makeEntry = (
     maybe_count: 0,
     my_response: Option.none(),
     my_message: Option.none(),
+    all_day: false,
     ...overrides,
   });
 

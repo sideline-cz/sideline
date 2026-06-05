@@ -282,6 +282,7 @@ describe('EventStartedEvent — round-trip with new fields', () => {
     title: 'Saturday Match',
     start_at: '2026-05-01T16:00:00.000Z',
     event_type: 'match',
+    all_day: false,
   };
 
   it('round-trips with all Option fields populated', () => {

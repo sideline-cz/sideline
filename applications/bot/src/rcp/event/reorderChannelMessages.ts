@@ -67,6 +67,7 @@ const buildEventPayload = (
           yesAttendees,
           locale,
           isStarted: entry.status === 'started',
+          allDay: entry.all_day,
         });
   return { embeds: base.embeds, components: base.components, _testEventId: entry.event_id };
 };

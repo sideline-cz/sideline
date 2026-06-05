@@ -72,14 +72,21 @@ export const buildUpcomingEventEmbed = (params: {
 
   const fields: Array<Discord.RichEmbedField> = [];
 
-  const startTs = toDiscordTimestamp(entry.start_at, 'f');
-  const when = Option.match(entry.end_at, {
-    onNone: () => startTs,
-    onSome: (endAt) => {
-      const endStyle = isSameDay(entry.start_at, endAt) ? 't' : 'f';
-      return `${startTs} — ${toDiscordTimestamp(endAt, endStyle)}`;
-    },
-  });
+  const when = entry.all_day
+    ? Option.match(entry.end_at, {
+        onNone: () => toDiscordTimestamp(entry.start_at, 'D'),
+        onSome: (endAt) =>
+          isSameDay(entry.start_at, endAt)
+            ? toDiscordTimestamp(entry.start_at, 'D')
+            : `${toDiscordTimestamp(entry.start_at, 'D')} — ${toDiscordTimestamp(endAt, 'D')}`,
+      })
+    : Option.match(entry.end_at, {
+        onNone: () => toDiscordTimestamp(entry.start_at, 'f'),
+        onSome: (endAt) => {
+          const endStyle = isSameDay(entry.start_at, endAt) ? 't' : 'f';
+          return `${toDiscordTimestamp(entry.start_at, 'f')} — ${toDiscordTimestamp(endAt, endStyle)}`;
+        },
+      });
   fields.push({ name: m.bot_embed_when({}, { locale }), value: when, inline: false });
 
   Option.match(locationDisplay(entry.location, entry.location_url), {
