@@ -20,6 +20,7 @@ import {
   FormMessage,
 } from '~/components/ui/form';
 import { Input } from '~/components/ui/input';
+import { Label } from '~/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -27,11 +28,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '~/components/ui/select';
+import { Switch } from '~/components/ui/switch';
 import { Textarea } from '~/components/ui/textarea';
 import {
+  dateOnlyToUtc,
   formatEventDateRange,
   formatLocalDate,
   formatLocalTime,
+  formatUtcDate,
   formatUtcTime,
   localToUtc,
 } from '~/lib/datetime.js';
@@ -63,9 +67,10 @@ const EventEditSchema = Schema.Struct({
     ),
   ),
   startDate: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
-  startTime: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
+  startTime: Schema.String,
   endDate: Schema.String,
   endTime: Schema.String,
+  allDay: Schema.Boolean,
   location: Schema.String,
   discordChannelId: Schema.String,
   ownerGroupId: Schema.String,
@@ -79,11 +84,18 @@ const buildPayload = (values: EventEditValues) => {
     values.trainingTypeId && values.trainingTypeId !== NONE_VALUE
       ? Option.some(Schema.decodeSync(TrainingType.TrainingTypeId)(values.trainingTypeId))
       : Option.none();
-  const startAt = localToUtc(values.startDate, values.startTime);
-  const endAt = values.endTime
-    ? Option.some(localToUtc(values.endDate || values.startDate, values.endTime))
-    : Option.none();
-  return { trainingTypeIdOption, startAt, endAt };
+  const startAt = values.allDay
+    ? dateOnlyToUtc(values.startDate)
+    : localToUtc(values.startDate, values.startTime);
+  const endAt = values.allDay
+    ? values.endDate
+      ? Option.some(dateOnlyToUtc(values.endDate))
+      : Option.none()
+    : values.endTime
+      ? Option.some(localToUtc(values.endDate || values.startDate, values.endTime))
+      : Option.none();
+  const allDay = values.allDay;
+  return { trainingTypeIdOption, startAt, endAt, allDay };
 };
 
 interface EventDetailPageProps {
@@ -102,11 +114,12 @@ interface EventDateRangeProps {
   endAt: Option.Option<DateTime.Utc>;
   labelStart: string;
   labelEnd: string;
+  allDay: boolean;
 }
 
-const EventDateRange = ({ startAt, endAt, labelStart, labelEnd }: EventDateRangeProps) => {
-  const { startDate, startTime, end, sameDay } = formatEventDateRange(startAt, endAt);
-  const start = `${startDate} ${startTime}`;
+const EventDateRange = ({ startAt, endAt, labelStart, labelEnd, allDay }: EventDateRangeProps) => {
+  const { startDate, startTime, end, sameDay } = formatEventDateRange(startAt, endAt, allDay);
+  const start = allDay ? startDate : `${startDate} ${startTime}`;
   if (sameDay) {
     return (
       <p>
@@ -158,16 +171,21 @@ export function EventDetailPage({
       trainingTypeId: Option.getOrElse(eventDetail.trainingTypeId, () => NONE_VALUE),
       description: Option.getOrElse(eventDetail.description, () => ''),
       imageUrl: Option.getOrElse(eventDetail.imageUrl, () => ''),
-      startDate: formatLocalDate(eventDetail.startAt),
-      startTime: formatLocalTime(eventDetail.startAt),
+      startDate: eventDetail.allDay
+        ? formatUtcDate(eventDetail.startAt)
+        : formatLocalDate(eventDetail.startAt),
+      startTime: eventDetail.allDay ? '' : formatLocalTime(eventDetail.startAt),
       endDate: Option.match(eventDetail.endAt, {
         onNone: () => '',
-        onSome: formatLocalDate,
+        onSome: eventDetail.allDay ? formatUtcDate : formatLocalDate,
       }),
-      endTime: Option.match(eventDetail.endAt, {
-        onNone: () => '',
-        onSome: formatLocalTime,
-      }),
+      endTime: eventDetail.allDay
+        ? ''
+        : Option.match(eventDetail.endAt, {
+            onNone: () => '',
+            onSome: formatLocalTime,
+          }),
+      allDay: eventDetail.allDay,
       location: Option.getOrElse(eventDetail.location, () => ''),
       locationUrl: Option.getOrElse(eventDetail.locationUrl, () => ''),
       discordChannelId: Option.getOrElse(eventDetail.discordChannelId, () => NONE_VALUE),
@@ -178,6 +196,7 @@ export function EventDetailPage({
 
   const watchedEventType = form.watch('eventType');
   const watchedLocation = form.watch('location');
+  const watchedAllDay = form.watch('allDay');
 
   React.useEffect(() => {
     if (watchedEventType !== 'training') {
@@ -198,9 +217,13 @@ export function EventDetailPage({
 
   const doSaveThisOnly = React.useCallback(async () => {
     const values = form.getValues();
+    if (!values.allDay && !values.startTime) {
+      form.setError('startTime', { message: tr('validation_required') });
+      return;
+    }
     setSaving(true);
     setShowEditScope(false);
-    const { trainingTypeIdOption, startAt, endAt } = buildPayload(values);
+    const { trainingTypeIdOption, startAt, endAt, allDay } = buildPayload(values);
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.event.updateEvent({
@@ -215,6 +238,7 @@ export function EventDetailPage({
             imageUrl: Option.some(values.imageUrl ? Option.some(values.imageUrl) : Option.none()),
             startAt: Option.some(startAt),
             endAt: Option.some(endAt),
+            allDay: Option.some(allDay),
             location: Option.some(values.location ? Option.some(values.location) : Option.none()),
             locationUrl: Option.some(
               values.locationUrl ? Option.some(values.locationUrl) : Option.none(),
@@ -489,6 +513,15 @@ export function EventDetailPage({
                     )}
                   </div>
 
+                  <div className='flex items-center gap-2'>
+                    <Switch
+                      id='edit-allDay'
+                      checked={watchedAllDay}
+                      onCheckedChange={(checked) => form.setValue('allDay', checked)}
+                    />
+                    <Label htmlFor='edit-allDay'>{tr('event_allDay')}</Label>
+                  </div>
+
                   <div className='flex flex-col gap-4 sm:flex-row'>
                     <FormField
                       {...form.register('startDate')}
@@ -506,18 +539,20 @@ export function EventDetailPage({
                         </FormItem>
                       )}
                     />
-                    <FormField
-                      {...form.register('startTime')}
-                      render={({ field }) => (
-                        <FormItem className='flex-1'>
-                          <FormLabel>{tr('event_startTime')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} type='time' />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                    {!watchedAllDay && (
+                      <FormField
+                        {...form.register('startTime')}
+                        render={({ field }) => (
+                          <FormItem className='flex-1'>
+                            <FormLabel>{tr('event_startTime')}</FormLabel>
+                            <FormControl>
+                              <Input {...field} type='time' />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
                   </div>
 
                   <div className='flex flex-col gap-4 sm:flex-row'>
@@ -537,18 +572,20 @@ export function EventDetailPage({
                         </FormItem>
                       )}
                     />
-                    <FormField
-                      {...form.register('endTime')}
-                      render={({ field }) => (
-                        <FormItem className='flex-1'>
-                          <FormLabel>{tr('event_endTime')}</FormLabel>
-                          <FormControl>
-                            <Input {...field} type='time' />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                    {!watchedAllDay && (
+                      <FormField
+                        {...form.register('endTime')}
+                        render={({ field }) => (
+                          <FormItem className='flex-1'>
+                            <FormLabel>{tr('event_endTime')}</FormLabel>
+                            <FormControl>
+                              <Input {...field} type='time' />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
                   </div>
 
                   <FormField
@@ -776,6 +813,7 @@ export function EventDetailPage({
                   endAt={eventDetail.endAt}
                   labelStart={tr('event_startDate')}
                   labelEnd={tr('event_endDate')}
+                  allDay={eventDetail.allDay}
                 />
                 {Option.isSome(eventDetail.location) && (
                   <p>

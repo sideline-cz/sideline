@@ -12,6 +12,7 @@ import {
   Exit,
   Layer,
   Logger,
+  ManagedRuntime,
   Match,
   type Option,
   References,
@@ -98,11 +99,40 @@ export const resolveServerExit = async <A>(
 
 const ApiClientLive = Layer.effect(ApiClient, client);
 
-const AppLayer = Layer.mergeAll(
-  ApiClientLive,
-  Logger.layer([Logger.consolePretty()]),
-  Layer.succeed(References.MinimumLogLevel, 'Info' as const),
-);
+const makeAppLayer = (options: {
+  readonly serverUrl: string;
+  readonly telemetryLayer: Layer.Layer<never>;
+}) => {
+  // ClientConfig must be: (a) provided to ApiClientLive as a dependency, and
+  // (b) kept in the merged layer's output so ManagedRuntime exposes it to effects
+  // that declare `ApiClient | ClientConfig` as their requirement.
+  const clientConfigLayer = Layer.succeed(ClientConfig, { baseUrl: options.serverUrl });
+  return Layer.mergeAll(
+    ApiClientLive.pipe(Layer.provide(clientConfigLayer)),
+    clientConfigLayer,
+    Logger.layer([Logger.consolePretty()]),
+    Layer.succeed(References.MinimumLogLevel, 'Info' as const),
+    options.telemetryLayer,
+  );
+};
+
+let _runtime: ManagedRuntime.ManagedRuntime<ApiClient | ClientConfig, never> | null = null;
+
+export const initRuntime = (options: {
+  readonly serverUrl: string;
+  readonly telemetryLayer: Layer.Layer<never>;
+}): void => {
+  if (_runtime !== null) return;
+  _runtime = ManagedRuntime.make(makeAppLayer(options));
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', () => void _runtime?.dispose(), { once: true });
+  }
+};
+
+const getRuntime = (): ManagedRuntime.ManagedRuntime<ApiClient | ClientConfig, never> => {
+  if (_runtime === null) throw new Error('Runtime not initialized — call initRuntime() first');
+  return _runtime;
+};
 
 export type RunOptions = { readonly success?: string; readonly loading?: string };
 
@@ -121,25 +151,16 @@ export const RunProvider = RunContext.Provider;
 export const useRun = () => React.useContext(RunContext);
 
 export class ServerRunner {
-  private serverUrl: string;
   private abortController?: AbortController;
 
-  constructor(serverUrl: string, abortController?: AbortController) {
-    this.serverUrl = serverUrl;
+  constructor(_serverUrl: string, abortController?: AbortController) {
     this.abortController = abortController;
   }
 
   async run<A>(
     effect: Effect.Effect<A, Redirect | NotFound, ApiClient | ClientConfig>,
   ): Promise<A> {
-    const effectResponse = effect.pipe(
-      Effect.result,
-      Effect.provide(AppLayer),
-      Effect.provideService(ClientConfig, {
-        baseUrl: this.serverUrl,
-      }),
-    );
-    const exit = await Effect.runPromiseExit(effectResponse, {
+    const exit = await getRuntime().runPromiseExit(effect.pipe(Effect.result), {
       signal: this.abortController?.signal,
     });
     return resolveServerExit(exit, this.abortController?.signal.aborted ?? false);
@@ -147,36 +168,33 @@ export class ServerRunner {
 }
 
 export const runPromiseServer =
-  (serverUrl: string) =>
+  (_serverUrl: string) =>
   (abortController?: AbortController) =>
   async <A>(
     effect: Effect.Effect<A, Redirect | NotFound, ApiClient | ClientConfig>,
   ): Promise<A> => {
-    const effectResponse = effect.pipe(
-      Effect.result,
-      Effect.provide(AppLayer),
-      Effect.provideService(ClientConfig, {
-        baseUrl: serverUrl,
-      }),
-    );
-    const exit = await Effect.runPromiseExit(effectResponse, {
+    const exit = await getRuntime().runPromiseExit(effect.pipe(Effect.result), {
       signal: abortController?.signal,
     });
     return resolveServerExit(exit, abortController?.signal.aborted ?? false);
   };
 
+/**
+ * Fire-and-forget an Effect using the shared runtime.
+ * Useful for recording metrics/spans from non-Effect callbacks (e.g. Web Vitals).
+ */
+export const runEffect = (effect: Effect.Effect<void>): void => {
+  void getRuntime().runFork(effect);
+};
+
 export const runPromiseClient =
-  (serverUrl: string) =>
+  (_serverUrl: string) =>
   (options?: RunOptions) =>
   async <A>(
     effect: Effect.Effect<A, ClientError | SilentClientError, ApiClient | ClientConfig>,
   ): Promise<Option.Option<A>> => {
     const toastId = options?.loading ? toast.loading(options.loading) : undefined;
     const effectResponse = effect.pipe(
-      Effect.provide(AppLayer),
-      Effect.provideService(ClientConfig, {
-        baseUrl: serverUrl,
-      }),
       Effect.tapError((e) =>
         Effect.sync(() => {
           if (e._tag === 'SilentClientError') return;
@@ -200,8 +218,7 @@ export const runPromiseClient =
           }
         }),
       ),
-      // Error is already shown to the user via toast above — convert to Option.none
       Effect.option,
     );
-    return await Effect.runPromise(effectResponse);
+    return await getRuntime().runPromise(effectResponse);
   };

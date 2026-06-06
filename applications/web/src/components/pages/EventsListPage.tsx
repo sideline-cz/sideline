@@ -19,6 +19,7 @@ import {
   FormMessage,
 } from '~/components/ui/form';
 import { Input } from '~/components/ui/input';
+import { Label } from '~/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -26,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '~/components/ui/select';
+import { Switch } from '~/components/ui/switch';
 import { Textarea } from '~/components/ui/textarea';
 import { dateOnlyToUtc, formatEventDateRange, formatUtcTime, localToUtc } from '~/lib/datetime.js';
 import { DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
@@ -64,9 +66,10 @@ const CreateEventSchema = Schema.Struct({
     ),
   ),
   startDate: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
-  startTime: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
+  startTime: Schema.String,
   endDate: Schema.String,
   endTime: Schema.String,
+  allDay: Schema.Boolean,
   location: Schema.String,
   discordChannelId: Schema.String,
   ownerGroupId: Schema.String,
@@ -124,6 +127,10 @@ export function EventsListPage({
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
   const [viewMode, setViewMode] = React.useState<'list' | 'calendar'>('list');
   const [mode, setMode] = React.useState<'one-time' | 'recurring'>('one-time');
+  const [showHidden, setShowHidden] = React.useState(false);
+
+  const hiddenCount = events.filter((e) => e.status !== 'active').length;
+  const visibleEvents = showHidden ? events : events.filter((e) => e.status === 'active');
 
   const form = useForm({
     resolver: standardSchemaResolver(Schema.toStandardSchemaV1(CreateEventSchema)),
@@ -139,6 +146,7 @@ export function EventsListPage({
       startTime: '',
       endDate: '',
       endTime: '',
+      allDay: false,
       location: '',
       discordChannelId: NONE_VALUE,
       ownerGroupId: NONE_VALUE,
@@ -147,6 +155,7 @@ export function EventsListPage({
   });
 
   const watchedEventType = form.watch('eventType');
+  const watchedAllDay = form.watch('allDay');
 
   const seriesForm = useForm({
     resolver: standardSchemaResolver(Schema.toStandardSchemaV1(CreateSeriesSchema)),
@@ -191,10 +200,20 @@ export function EventsListPage({
   }, [watchedSeriesLocation, seriesForm]);
 
   const onSubmit = async (values: CreateEventValues) => {
-    const startAt = localToUtc(values.startDate, values.startTime);
-    const endAt = values.endTime
-      ? localToUtc(values.endDate || values.startDate, values.endTime)
-      : null;
+    if (!values.allDay && !values.startTime) {
+      form.setError('startTime', { message: tr('validation_required') });
+      return;
+    }
+    const startAt = values.allDay
+      ? dateOnlyToUtc(values.startDate)
+      : localToUtc(values.startDate, values.startTime);
+    const endAt = values.allDay
+      ? values.endDate
+        ? dateOnlyToUtc(values.endDate)
+        : null
+      : values.endTime
+        ? localToUtc(values.endDate || values.startDate, values.endTime)
+        : null;
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.event.createEvent({
@@ -211,6 +230,7 @@ export function EventsListPage({
             locationUrl: values.locationUrl ? Option.some(values.locationUrl) : Option.none(),
             startAt,
             endAt: endAt ? Option.some(endAt) : Option.none(),
+            allDay: values.allDay,
             location: values.location ? Option.some(values.location) : Option.none(),
             discordChannelId:
               values.discordChannelId && values.discordChannelId !== NONE_VALUE
@@ -405,6 +425,14 @@ export function EventsListPage({
                           />
                         )}
                       </div>
+                      <div className='flex items-center gap-2'>
+                        <Switch
+                          id='create-allDay'
+                          checked={watchedAllDay}
+                          onCheckedChange={(checked) => form.setValue('allDay', checked)}
+                        />
+                        <Label htmlFor='create-allDay'>{tr('event_allDay')}</Label>
+                      </div>
                       <div className='flex flex-col gap-4 sm:flex-row'>
                         <FormField
                           {...form.register('startDate')}
@@ -422,18 +450,20 @@ export function EventsListPage({
                             </FormItem>
                           )}
                         />
-                        <FormField
-                          {...form.register('startTime')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_startTime')}</FormLabel>
-                              <FormControl>
-                                <Input {...field} type='time' />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
+                        {!watchedAllDay && (
+                          <FormField
+                            {...form.register('startTime')}
+                            render={({ field }) => (
+                              <FormItem className='flex-1'>
+                                <FormLabel>{tr('event_startTime')}</FormLabel>
+                                <FormControl>
+                                  <Input {...field} type='time' />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        )}
                       </div>
                       <div className='flex flex-col gap-4 sm:flex-row'>
                         <FormField
@@ -452,18 +482,20 @@ export function EventsListPage({
                             </FormItem>
                           )}
                         />
-                        <FormField
-                          {...form.register('endTime')}
-                          render={({ field }) => (
-                            <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_endTime')}</FormLabel>
-                              <FormControl>
-                                <Input {...field} type='time' />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
+                        {!watchedAllDay && (
+                          <FormField
+                            {...form.register('endTime')}
+                            render={({ field }) => (
+                              <FormItem className='flex-1'>
+                                <FormLabel>{tr('event_endTime')}</FormLabel>
+                                <FormControl>
+                                  <Input {...field} type='time' />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        )}
                       </div>
                       <FormField
                         {...form.register('location')}
@@ -943,14 +975,22 @@ export function EventsListPage({
             )}
           </div>
           <div className='order-1 lg:order-1'>
-            {events.length === 0 ? (
+            {hiddenCount > 0 && (
+              <div className='mb-2'>
+                <Button variant='ghost' size='sm' onClick={() => setShowHidden((v) => !v)}>
+                  {showHidden ? tr('event_hidePastCancelled') : tr('event_showPastCancelled')}
+                </Button>
+              </div>
+            )}
+            {visibleEvents.length === 0 ? (
               <p className='text-muted-foreground'>{tr('event_noEvents')}</p>
             ) : (
               <div className='flex flex-col gap-2'>
-                {events.map((event) => {
+                {visibleEvents.map((event) => {
                   const { startDate, startTime, end } = formatEventDateRange(
                     event.startAt,
                     event.endAt,
+                    event.allDay,
                   );
                   return (
                     <Link
@@ -980,12 +1020,22 @@ export function EventsListPage({
                         </div>
                         <div className='flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground'>
                           <span>{eventTypeLabels[event.eventType]()}</span>
+                          {event.allDay && (
+                            <span className='text-[10px] text-muted-foreground'>
+                              {tr('event_allDayLabel')}
+                            </span>
+                          )}
                           <span>·</span>
                           <span>{startDate}</span>
-                          <span className='hidden sm:inline'>
-                            {startTime}
-                            {Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })}
-                          </span>
+                          {!event.allDay && (
+                            <span className='hidden sm:inline'>
+                              {startTime}
+                              {Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })}
+                            </span>
+                          )}
+                          {event.allDay && Option.isSome(end) && (
+                            <span className='hidden sm:inline'>{` – ${end.value}`}</span>
+                          )}
                         </div>
                       </div>
                       <span className={`text-xs shrink-0 ${eventStatusClasses[event.status]}`}>

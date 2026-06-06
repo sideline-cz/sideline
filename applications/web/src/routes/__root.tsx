@@ -3,12 +3,21 @@ import type { QueryClient } from '@tanstack/react-query';
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router';
 import { Effect, Option } from 'effect';
 import type React from 'react';
+import { Profiler } from 'react';
 import { RootDocument } from '~/components/layouts/RootDocument';
 import { RouteErrorComponent } from '~/components/layouts/RouteErrorComponent';
 import { RouteNotFoundComponent } from '~/components/layouts/RouteNotFoundComponent';
 import { RoutePendingComponent } from '~/components/layouts/RoutePendingComponent';
 import { fetchEnv } from '~/env.js';
-import { ApiClient, RunProvider, runPromiseClient, runPromiseServer } from '~/lib/runtime';
+import {
+  ApiClient,
+  initRuntime,
+  RunProvider,
+  runEffect,
+  runPromiseClient,
+  runPromiseServer,
+} from '~/lib/runtime';
+import { makeTelemetryLayer, recordReactRender, registerWebVitals } from '~/lib/telemetry';
 import { ThemeProvider } from '~/lib/theme.js';
 import { TranslationOverridesProvider } from '~/lib/translation-overrides-context.js';
 import appCss from '../styles.css?url';
@@ -106,6 +115,16 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
   notFoundComponent: RouteNotFoundComponent,
   beforeLoad: async ({ abortController }) => {
     const environment = await fetchEnv(abortController);
+    initRuntime({
+      serverUrl: environment.SERVER_URL,
+      telemetryLayer: makeTelemetryLayer({
+        endpoint: environment.OTEL_EXPORTER_OTLP_ENDPOINT,
+        serviceName: environment.OTEL_SERVICE_NAME,
+        environment: environment.APP_ENV,
+        origin: environment.APP_ORIGIN,
+      }),
+    });
+    registerWebVitals(runEffect);
     const makeRun = runPromiseServer(environment.SERVER_URL);
     const run = makeRun(abortController);
     // On a superseded navigation this intentionally never resolves — do not add a timeout.
@@ -144,7 +163,12 @@ function RootComponent() {
   return (
     <RunProvider value={runPromiseClient(serverUrl)}>
       <TranslationOverridesProvider serverUrl={serverUrl}>
-        <Outlet />
+        <Profiler
+          id='app'
+          onRender={(_id, _phase, actualDuration) => recordReactRender(runEffect, actualDuration)}
+        >
+          <Outlet />
+        </Profiler>
       </TranslationOverridesProvider>
     </RunProvider>
   );

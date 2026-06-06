@@ -35,25 +35,50 @@ export const formatLocalTime = (dt: DateTime.Utc): string => {
   return `${h}:${mi}`;
 };
 
+/** Format a UTC DateTime as YYYY-MM-DD in UTC (calendar date of the UTC clock). */
+export const formatUtcDate = (dt: DateTime.Utc): string => {
+  const d = new Date(Number(DateTime.toEpochMillis(dt)));
+  const y = d.getUTCFullYear();
+  const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
+};
+
 /**
- * Format an event's start/end range using the browser's local timezone.
+ * Format an event's start/end range.
+ *
+ * When `allDay` is `false` (default): uses the browser's local timezone.
  * - `startDate`, `startTime` — start formatted as YYYY-MM-DD and HH:mm
- * - `end` — `None` when no end is provided; otherwise:
- *     - same local calendar day → `Some('HH:mm')`
- *     - different local calendar day → `Some('YYYY-MM-DD HH:mm')`
- * - `sameDay` — `true` when there is no end OR the end falls on the same local
- *   calendar day as the start. Comparison is on LOCAL calendar date so an
- *   event that crosses midnight in the viewer's tz counts as multi-day.
+ * - `end` — `None` when no end; `Some('HH:mm')` same day; `Some('YYYY-MM-DD HH:mm')` multi-day
+ * - `sameDay` — `true` when no end OR end falls on same local calendar day
+ *
+ * When `allDay` is `true`: compares UTC calendar dates; `startTime` is always `''`.
+ * - `end` — `None` when no end OR same UTC date; `Some('YYYY-MM-DD')` for multi-day
+ * - `sameDay` — `true` when no end OR end UTC date equals start UTC date
  */
 export const formatEventDateRange = (
   startAt: DateTime.Utc,
   endAt: Option.Option<DateTime.Utc>,
+  allDay = false,
 ): {
   startDate: string;
   startTime: string;
   end: Option.Option<string>;
   sameDay: boolean;
 } => {
+  if (allDay) {
+    const startDate = formatUtcDate(startAt);
+    return Option.match(endAt, {
+      onNone: () => ({ startDate, startTime: '', end: Option.none<string>(), sameDay: true }),
+      onSome: (e) => {
+        const endDate = formatUtcDate(e);
+        const sameDay = startDate === endDate;
+        const end = sameDay ? Option.none<string>() : Option.some(endDate);
+        return { startDate, startTime: '', end, sameDay };
+      },
+    });
+  }
+
   const startDate = formatLocalDate(startAt);
   const startTime = formatLocalTime(startAt);
 
