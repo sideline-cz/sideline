@@ -204,6 +204,7 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
                 Option.none(),
                 Option.none(),
                 Option.none(),
+                Option.none(),
                 event.location_url,
               ),
             ),

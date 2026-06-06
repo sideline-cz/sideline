@@ -19,6 +19,7 @@ const makeEntry = (
     yes_count: 3,
     no_count: 1,
     maybe_count: 2,
+    all_day: false,
     ...overrides,
   });
 

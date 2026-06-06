@@ -41,6 +41,7 @@ class EventWithDetails extends Schema.Class<EventWithDetails>('EventWithDetails'
   claimer_name: Schema.OptionFromNullOr(Schema.String),
   claim_discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   claim_discord_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  all_day: Schema.Boolean,
 }) {}
 
 class EventRow extends Schema.Class<EventRow>('EventRow')({
@@ -62,6 +63,7 @@ class EventRow extends Schema.Class<EventRow>('EventRow')({
   discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
+  all_day: Schema.Boolean,
 }) {}
 
 const EventInsertInput = Schema.Struct({
@@ -80,6 +82,7 @@ const EventInsertInput = Schema.Struct({
   discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   owner_group_id: Schema.OptionFromNullOr(Schema.String),
   member_group_id: Schema.OptionFromNullOr(Schema.String),
+  all_day: Schema.Boolean,
 });
 
 const EventUpdateInput = Schema.Struct({
@@ -96,6 +99,7 @@ const EventUpdateInput = Schema.Struct({
   discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   owner_group_id: Schema.OptionFromNullOr(Schema.String),
   member_group_id: Schema.OptionFromNullOr(Schema.String),
+  all_day: Schema.Boolean,
 });
 
 class ScopedTrainingTypeId extends Schema.Class<ScopedTrainingTypeId>('ScopedTrainingTypeId')({
@@ -122,7 +126,8 @@ const make = Effect.gen(function* () {
                    e.claimed_by,
                    cu.name AS claimer_name,
                    e.claim_discord_channel_id,
-                   e.claim_discord_message_id
+                   e.claim_discord_message_id,
+                   e.all_day
             FROM events e
             LEFT JOIN training_types tt ON tt.id = e.training_type_id
             LEFT JOIN team_members tm ON tm.id = e.created_by
@@ -153,7 +158,8 @@ const make = Effect.gen(function* () {
                    e.claimed_by,
                    cu.name AS claimer_name,
                    e.claim_discord_channel_id,
-                   e.claim_discord_message_id
+                   e.claim_discord_message_id,
+                   e.all_day
             FROM events e
             LEFT JOIN training_types tt ON tt.id = e.training_type_id
             LEFT JOIN team_members tm ON tm.id = e.created_by
@@ -172,16 +178,16 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
             INSERT INTO events (team_id, training_type_id, event_type, title, description,
                                 image_url, start_at, end_at, location, location_url, created_by, series_id,
-                                discord_target_channel_id, owner_group_id, member_group_id)
+                                discord_target_channel_id, owner_group_id, member_group_id, all_day)
             VALUES (${input.team_id}, ${input.training_type_id}, ${input.event_type},
                     ${input.title}, ${input.description}, ${input.image_url}, ${input.start_at},
                     ${input.end_at}, ${input.location}, ${input.location_url}, ${input.created_by},
                     ${input.series_id}, ${input.discord_target_channel_id},
-                    ${input.owner_group_id}, ${input.member_group_id})
+                    ${input.owner_group_id}, ${input.member_group_id}, ${input.all_day})
             RETURNING id, team_id, training_type_id, event_type, title, description,
                       image_url, start_at, end_at, location, location_url, status,
                       created_by, series_id, series_modified, discord_target_channel_id,
-                      owner_group_id, member_group_id
+                      owner_group_id, member_group_id, all_day
           `,
   });
 
@@ -202,12 +208,13 @@ const make = Effect.gen(function* () {
               discord_target_channel_id = ${input.discord_target_channel_id},
               owner_group_id = ${input.owner_group_id},
               member_group_id = ${input.member_group_id},
+              all_day = ${input.all_day},
               updated_at = now()
             WHERE id = ${input.id}
             RETURNING id, team_id, training_type_id, event_type, title, description,
                       image_url, start_at, end_at, location, location_url, status,
                       created_by, series_id, series_modified, discord_target_channel_id,
-                      owner_group_id, member_group_id
+                      owner_group_id, member_group_id, all_day
           `,
   });
 
@@ -241,11 +248,12 @@ const make = Effect.gen(function* () {
       discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
       owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
       reminders_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+      all_day: Schema.Boolean,
     }),
     execute: () => sql`
       SELECT e.id, e.team_id, e.title, e.description, e.image_url, e.start_at, e.end_at, e.location, e.location_url, e.event_type,
              e.member_group_id, e.discord_target_channel_id, e.owner_group_id,
-             ts.reminders_channel_id
+             ts.reminders_channel_id, e.all_day
       FROM events e
       LEFT JOIN team_settings ts ON ts.team_id = e.team_id
       WHERE e.status = 'active'
@@ -331,11 +339,12 @@ const make = Effect.gen(function* () {
       event_type: Schema.String,
       status: Schema.String,
       discord_message_id: Discord.Snowflake,
+      all_day: Schema.Boolean,
     }),
     execute: (channelId) => sql`
             SELECT id AS event_id, team_id, title, description, image_url,
                    start_at, end_at, location, location_url, event_type,
-                   status, discord_message_id
+                   status, discord_message_id, all_day
             FROM events
             WHERE discord_channel_id = ${channelId}
               AND discord_message_id IS NOT NULL
@@ -432,10 +441,11 @@ const make = Effect.gen(function* () {
       location_url: Schema.OptionFromNullOr(Schema.String),
       member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
       my_rsvp: Schema.OptionFromNullOr(Schema.String),
+      all_day: Schema.Boolean,
     }),
     execute: (input) => sql`
       SELECT e.id, e.title, e.event_type, e.start_at, e.end_at,
-             e.location, e.location_url, e.member_group_id,
+             e.location, e.location_url, e.member_group_id, e.all_day,
              er.response AS my_rsvp
       FROM events e
       LEFT JOIN event_rsvps er ON er.event_id = e.id AND er.team_member_id = ${input.team_member_id}
@@ -509,10 +519,11 @@ const make = Effect.gen(function* () {
       yes_count: Schema.Number,
       no_count: Schema.Number,
       maybe_count: Schema.Number,
+      all_day: Schema.Boolean,
     }),
     execute: (input) => sql`
             SELECT e.id AS event_id, e.title, e.start_at, e.end_at,
-                   e.location, e.location_url, e.event_type,
+                   e.location, e.location_url, e.event_type, e.all_day,
                    COALESCE(SUM(CASE WHEN er.response = 'yes' THEN 1 ELSE 0 END), 0)::int AS yes_count,
                    COALESCE(SUM(CASE WHEN er.response = 'no' THEN 1 ELSE 0 END), 0)::int AS no_count,
                    COALESCE(SUM(CASE WHEN er.response = 'maybe' THEN 1 ELSE 0 END), 0)::int AS maybe_count
@@ -542,11 +553,12 @@ const make = Effect.gen(function* () {
       event_type: Schema.String,
       team_name: Schema.String,
       rsvp_response: Schema.String,
+      all_day: Schema.Boolean,
     }),
     execute: (userId) => sql`
             SELECT e.id, e.title, e.description, e.image_url, e.start_at, e.end_at,
                    e.location, e.location_url, e.status, e.event_type, t.name AS team_name,
-                   er.response AS rsvp_response
+                   er.response AS rsvp_response, e.all_day
             FROM events e
             JOIN teams t ON t.id = e.team_id
             JOIN team_members tm ON tm.team_id = t.id AND tm.active = true
@@ -603,6 +615,7 @@ const make = Effect.gen(function* () {
     discordTargetChannelId = Option.none(),
     ownerGroupId = Option.none(),
     memberGroupId = Option.none(),
+    allDay = false,
   }: {
     teamId: Team.TeamId;
     trainingTypeId: Option.Option<string>;
@@ -619,6 +632,7 @@ const make = Effect.gen(function* () {
     discordTargetChannelId?: Option.Option<Discord.Snowflake>;
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
+    allDay?: boolean;
   }) =>
     insert({
       team_id: teamId,
@@ -636,6 +650,7 @@ const make = Effect.gen(function* () {
       discord_target_channel_id: discordTargetChannelId,
       owner_group_id: ownerGroupId,
       member_group_id: memberGroupId,
+      all_day: allDay,
     }).pipe(catchSqlErrors);
 
   const updateEvent = ({
@@ -652,6 +667,7 @@ const make = Effect.gen(function* () {
     discordTargetChannelId = Option.none(),
     ownerGroupId = Option.none(),
     memberGroupId = Option.none(),
+    allDay = false,
   }: {
     id: Event.EventId;
     title: string;
@@ -666,6 +682,7 @@ const make = Effect.gen(function* () {
     discordTargetChannelId?: Option.Option<Discord.Snowflake>;
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
+    allDay?: boolean;
   }) =>
     update({
       id,
@@ -681,6 +698,7 @@ const make = Effect.gen(function* () {
       discord_target_channel_id: discordTargetChannelId,
       owner_group_id: ownerGroupId,
       member_group_id: memberGroupId,
+      all_day: allDay,
     }).pipe(catchSqlErrors);
 
   const cancelEvent = (eventId: Event.EventId) => cancel(eventId).pipe(catchSqlErrors);

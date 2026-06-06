@@ -52,6 +52,7 @@ export const buildEventEmbed = (opts: {
   yesAttendees: ReadonlyArray<EventRpcModels.RsvpAttendeeEntry>;
   locale: Locale;
   isStarted?: boolean;
+  allDay?: boolean;
 }): {
   embeds: ReadonlyArray<Discord.RichEmbed>;
   components: ReadonlyArray<Discord.ActionRowComponentForMessageRequest>;
@@ -68,14 +69,21 @@ export const buildEventEmbed = (opts: {
 
   const fields: Array<Discord.RichEmbedField> = [];
 
-  const startTs = toDiscordTimestamp(opts.startAt, 'f');
-  const when = Option.match(opts.endAt, {
-    onNone: () => startTs,
-    onSome: (endAt) => {
-      const endStyle = isSameDay(opts.startAt, endAt) ? 't' : 'f';
-      return `${startTs} — ${toDiscordTimestamp(endAt, endStyle)}`;
-    },
-  });
+  const when = opts.allDay
+    ? Option.match(opts.endAt, {
+        onNone: () => toDiscordTimestamp(opts.startAt, 'D'),
+        onSome: (endAt) =>
+          isSameDay(opts.startAt, endAt)
+            ? toDiscordTimestamp(opts.startAt, 'D')
+            : `${toDiscordTimestamp(opts.startAt, 'D')} — ${toDiscordTimestamp(endAt, 'D')}`,
+      })
+    : Option.match(opts.endAt, {
+        onNone: () => toDiscordTimestamp(opts.startAt, 'f'),
+        onSome: (endAt) => {
+          const endStyle = isSameDay(opts.startAt, endAt) ? 't' : 'f';
+          return `${toDiscordTimestamp(opts.startAt, 'f')} — ${toDiscordTimestamp(endAt, endStyle)}`;
+        },
+      });
   fields.push({ name: m.bot_embed_when({}, { locale }), value: when, inline: false });
 
   Option.match(locationDisplay(opts.location, opts.locationUrl), {

@@ -66,11 +66,12 @@ const EventEditSchema = Schema.Struct({
       ),
     ),
   ),
+  allDay: Schema.Boolean,
   startDate: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
+  // Required only for timed events; validated before save so all-day events can omit it.
   startTime: Schema.String,
   endDate: Schema.String,
   endTime: Schema.String,
-  allDay: Schema.Boolean,
   location: Schema.String,
   discordChannelId: Schema.String,
   ownerGroupId: Schema.String,
@@ -94,8 +95,7 @@ const buildPayload = (values: EventEditValues) => {
     : values.endTime
       ? Option.some(localToUtc(values.endDate || values.startDate, values.endTime))
       : Option.none();
-  const allDay = values.allDay;
-  return { trainingTypeIdOption, startAt, endAt, allDay };
+  return { trainingTypeIdOption, startAt, endAt, allDay: values.allDay };
 };
 
 interface EventDetailPageProps {
@@ -112,12 +112,12 @@ interface EventDetailPageProps {
 interface EventDateRangeProps {
   startAt: DateTime.Utc;
   endAt: Option.Option<DateTime.Utc>;
+  allDay: boolean;
   labelStart: string;
   labelEnd: string;
-  allDay: boolean;
 }
 
-const EventDateRange = ({ startAt, endAt, labelStart, labelEnd, allDay }: EventDateRangeProps) => {
+const EventDateRange = ({ startAt, endAt, allDay, labelStart, labelEnd }: EventDateRangeProps) => {
   const { startDate, startTime, end, sameDay } = formatEventDateRange(startAt, endAt, allDay);
   const start = allDay ? startDate : `${startDate} ${startTime}`;
   if (sameDay) {
@@ -171,6 +171,7 @@ export function EventDetailPage({
       trainingTypeId: Option.getOrElse(eventDetail.trainingTypeId, () => NONE_VALUE),
       description: Option.getOrElse(eventDetail.description, () => ''),
       imageUrl: Option.getOrElse(eventDetail.imageUrl, () => ''),
+      allDay: eventDetail.allDay,
       startDate: eventDetail.allDay
         ? formatUtcDate(eventDetail.startAt)
         : formatLocalDate(eventDetail.startAt),
@@ -185,7 +186,6 @@ export function EventDetailPage({
             onNone: () => '',
             onSome: formatLocalTime,
           }),
-      allDay: eventDetail.allDay,
       location: Option.getOrElse(eventDetail.location, () => ''),
       locationUrl: Option.getOrElse(eventDetail.locationUrl, () => ''),
       discordChannelId: Option.getOrElse(eventDetail.discordChannelId, () => NONE_VALUE),
@@ -217,10 +217,6 @@ export function EventDetailPage({
 
   const doSaveThisOnly = React.useCallback(async () => {
     const values = form.getValues();
-    if (!values.allDay && !values.startTime) {
-      form.setError('startTime', { message: tr('validation_required') });
-      return;
-    }
     setSaving(true);
     setShowEditScope(false);
     const { trainingTypeIdOption, startAt, endAt, allDay } = buildPayload(values);
@@ -231,6 +227,7 @@ export function EventDetailPage({
           payload: {
             title: Option.some(values.title),
             eventType: Option.some(values.eventType),
+            allDay: Option.some(allDay),
             trainingTypeId: Option.some(trainingTypeIdOption),
             description: Option.some(
               values.description ? Option.some(values.description) : Option.none(),
@@ -238,7 +235,6 @@ export function EventDetailPage({
             imageUrl: Option.some(values.imageUrl ? Option.some(values.imageUrl) : Option.none()),
             startAt: Option.some(startAt),
             endAt: Option.some(endAt),
-            allDay: Option.some(allDay),
             location: Option.some(values.location ? Option.some(values.location) : Option.none()),
             locationUrl: Option.some(
               values.locationUrl ? Option.some(values.locationUrl) : Option.none(),
@@ -328,7 +324,11 @@ export function EventDetailPage({
     }
   }, [form, teamIdBranded, eventDetail.seriesId, run, router]);
 
-  const handleSave = form.handleSubmit(() => {
+  const handleSave = form.handleSubmit((values) => {
+    if (!values.allDay && !values.startTime) {
+      form.setError('startTime', { message: tr('validation_required') });
+      return;
+    }
     if (hasSeries) {
       setShowEditScope(true);
     } else {
@@ -515,11 +515,11 @@ export function EventDetailPage({
 
                   <div className='flex items-center gap-2'>
                     <Switch
-                      id='edit-allDay'
+                      id='edit-all-day'
                       checked={watchedAllDay}
                       onCheckedChange={(checked) => form.setValue('allDay', checked)}
                     />
-                    <Label htmlFor='edit-allDay'>{tr('event_allDay')}</Label>
+                    <Label htmlFor='edit-all-day'>{tr('event_allDay')}</Label>
                   </div>
 
                   <div className='flex flex-col gap-4 sm:flex-row'>
@@ -811,9 +811,9 @@ export function EventDetailPage({
                 <EventDateRange
                   startAt={eventDetail.startAt}
                   endAt={eventDetail.endAt}
+                  allDay={eventDetail.allDay}
                   labelStart={tr('event_startDate')}
                   labelEnd={tr('event_endDate')}
-                  allDay={eventDetail.allDay}
                 />
                 {Option.isSome(eventDetail.location) && (
                   <p>

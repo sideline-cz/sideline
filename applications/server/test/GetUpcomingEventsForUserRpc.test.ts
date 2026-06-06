@@ -247,6 +247,7 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             maybe_count: 2,
             my_response: Option.some('yes'),
             my_message: Option.some('See you there'),
+            all_day: false,
           }),
       ),
       Effect.let(
@@ -324,6 +325,7 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             maybe_count: 0,
             my_response: Option.none(),
             my_message: Option.none(),
+            all_day: false,
           }),
       ),
       Effect.tap(({ entry }) =>

@@ -1,5 +1,72 @@
 # @sideline/web
 
+## 0.17.1
+
+### Patch Changes
+
+- [#358](https://github.com/maxa-ondrej/sideline/pull/358) [`4fccc7f`](https://github.com/maxa-ondrej/sideline/commit/4fccc7f87cd2021e0c5e1d93451b17854018639f) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix `Uncaught undefined` crash after Discord login (real root cause)
+
+  `fetchTranslations` and `fetchVersions` used bare `Effect.runPromise` which
+  only catches typed errors — any defect or interrupt (e.g. an aborted fetch
+  during the post-login redirect sequence) escaped as an unhandled
+  `Uncaught (in promise) undefined`, crashing the page.
+
+  Both now use `Effect.runPromiseExit` + `Exit.isSuccess` so defects are
+  silently treated as "no data" rather than crashing the app.
+
+- [#358](https://github.com/maxa-ondrej/sideline/pull/358) [`4fccc7f`](https://github.com/maxa-ondrej/sideline/commit/4fccc7f87cd2021e0c5e1d93451b17854018639f) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Serve the service worker script with `Cache-Control: no-cache`
+
+  `sw.js` is now sent with `Cache-Control: no-cache` from the origin so the
+  browser always revalidates it against the server. A stale, long-cached service
+  worker keeps an old worker (and the old cached app it serves) alive, which
+  delays deployed fixes from reaching returning users. `no-cache` makes a newly
+  deployed service worker take effect promptly. Cloudflare passes the origin
+  `no-cache` through to the browser.
+
+## 0.17.0
+
+### Minor Changes
+
+- [#356](https://github.com/maxa-ondrej/sideline/pull/356) [`8e17378`](https://github.com/maxa-ondrej/sideline/commit/8e173785eb8ce2a74f6a9bd729e51e6de252102b) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - feat(events): hide started/cancelled events by default and support all-day / multi-day events
+  - The events list now hides `started` and `cancelled` events by default, with a "Show past & cancelled" toggle. The calendar view continues to show all events.
+  - Events can be marked **all day** (no time), including multi-day spans such as tournaments. An "All day" toggle on the create/edit forms hides the time inputs. All-day events render as date(s) only across the web list, detail, and calendar views, in Discord embeds (date-style timestamps), and in the iCal feed (`VALUE=DATE`).
+
+### Patch Changes
+
+- Updated dependencies [[`8e17378`](https://github.com/maxa-ondrej/sideline/commit/8e173785eb8ce2a74f6a9bd729e51e6de252102b)]:
+  - @sideline/domain@0.23.0
+  - @sideline/i18n@0.9.0
+
+## 0.16.1
+
+### Patch Changes
+
+- [#355](https://github.com/maxa-ondrej/sideline/pull/355) [`0d1f890`](https://github.com/maxa-ondrej/sideline/commit/0d1f890595427ead71157364e88312c747805b5c) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Serve the service worker script with `Cache-Control: no-cache`
+
+  `sw.js` is now sent with `Cache-Control: no-cache` from the origin so the
+  browser always revalidates it against the server. A stale, long-cached service
+  worker keeps an old worker (and the old cached app it serves) alive, which
+  delays deployed fixes from reaching returning users. `no-cache` makes a newly
+  deployed service worker take effect promptly. Cloudflare passes the origin
+  `no-cache` through to the browser.
+
+- [#353](https://github.com/maxa-ondrej/sideline/pull/353) [`07a27b1`](https://github.com/maxa-ondrej/sideline/commit/07a27b18fd77ca0c5dafc6d913cc3064f6a30ac4) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix white-page crash for returning users caused by a stale service worker
+
+  Returning visitors kept hitting a full white page with `Uncaught (in promise)
+undefined` because the service worker served a stale, cached app shell (and the
+  old hashed JS bundles it referenced), so a previously deployed crash fix never
+  reached them. Hard-refreshing or clearing site data worked around it.
+
+  Navigation requests now use `NetworkOnly` with the existing `offline.html`
+  fallback so the app document always comes from the network and a freshly
+  deployed shell reaches users immediately. The service worker now purges any
+  unexpected caches (such as the old `pages` shell) on activate, and the app
+  reloads once when an updated service worker takes control — so returning users
+  escape stale code automatically.
+
+  Note: offline navigation now always shows `offline.html` rather than a cached
+  last-known shell. Immutable, content-hashed static assets are still cached.
+
 ## 0.16.0
 
 ### Minor Changes

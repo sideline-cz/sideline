@@ -38,6 +38,7 @@ describe('constructEvent with event_started type', () => {
           claimed_by_nickname: Option.none(),
           claimed_by_user_display_name: Option.none(),
           claimed_by_username: Option.none(),
+          event_all_day: false,
         }),
       ),
       Effect.tap(({ result }) =>
@@ -81,6 +82,7 @@ describe('constructEvent with event_started type', () => {
           claimed_by_nickname: Option.none(),
           claimed_by_user_display_name: Option.none(),
           claimed_by_username: Option.none(),
+          event_all_day: false,
         }),
       ),
       Effect.tap(({ result }) =>
@@ -119,6 +121,7 @@ describe('constructEvent with event_started type', () => {
           claimed_by_nickname: Option.none(),
           claimed_by_user_display_name: Option.none(),
           claimed_by_username: Option.none(),
+          event_all_day: false,
         }),
       ),
       Effect.tap(({ result }) =>

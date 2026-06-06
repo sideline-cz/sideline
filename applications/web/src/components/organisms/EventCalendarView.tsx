@@ -274,7 +274,7 @@ function EventChip({
 }) {
   const color = getEventColor(event.eventType, Option.getOrNull(event.trainingTypeName), colorMap);
   const isCancelled = event.status === 'cancelled';
-  const time = event.allDay ? null : formatLocalTime(event.startAt);
+  const time = event.allDay ? '' : formatLocalTime(event.startAt);
 
   return (
     <Link
@@ -290,7 +290,7 @@ function EventChip({
     >
       <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', color.dot)} />
       <span className='truncate'>
-        {time !== null ? `${time} ` : ''}
+        {time ? `${time} ` : ''}
         {event.title}
       </span>
     </Link>
@@ -394,10 +394,7 @@ function WeekEventCard({
   const color = getEventColor(event.eventType, Option.getOrNull(event.trainingTypeName), colorMap);
   const isCancelled = event.status === 'cancelled';
   const { startTime, end } = formatEventDateRange(event.startAt, event.endAt, event.allDay);
-
-  const timeLabel = event.allDay
-    ? tr('event_allDayLabel')
-    : `${startTime}${Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })}`;
+  const timeLabel = event.allDay ? tr('event_allDayLabel') : startTime;
 
   return (
     <Link
@@ -412,7 +409,9 @@ function WeekEventCard({
     >
       <div className={cn('text-sm font-medium', color.text)}>{event.title}</div>
       <div className='text-xs text-muted-foreground'>
-        {timeLabel} · {eventTypeLabels[event.eventType]()}
+        {timeLabel}
+        {Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })} ·{' '}
+        {eventTypeLabels[event.eventType]()}
         {event.trainingTypeName.pipe(
           Option.map((v) => ` · ${v}`),
           Option.getOrElse(() => ''),

@@ -134,6 +134,7 @@ export const mockEventList = {
       location: 'Main Field',
       locationUrl: null,
       status: 'active',
+      allDay: false,
       seriesId: null,
     },
     {
@@ -149,6 +150,7 @@ export const mockEventList = {
       location: 'City Stadium',
       locationUrl: null,
       status: 'active',
+      allDay: false,
       seriesId: null,
     },
   ],
@@ -168,6 +170,7 @@ export const mockEventDetail = {
   location: 'Main Field',
   locationUrl: null,
   status: 'active',
+  allDay: false,
   createdByName: 'Test User',
   canEdit: true,
   canCancel: true,

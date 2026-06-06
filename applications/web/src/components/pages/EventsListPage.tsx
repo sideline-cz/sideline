@@ -65,11 +65,12 @@ const CreateEventSchema = Schema.Struct({
       ),
     ),
   ),
+  allDay: Schema.Boolean,
   startDate: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
+  // Required only for timed events; validated in onSubmit so all-day events can omit it.
   startTime: Schema.String,
   endDate: Schema.String,
   endTime: Schema.String,
-  allDay: Schema.Boolean,
   location: Schema.String,
   discordChannelId: Schema.String,
   ownerGroupId: Schema.String,
@@ -127,8 +128,8 @@ export function EventsListPage({
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
   const [viewMode, setViewMode] = React.useState<'list' | 'calendar'>('list');
   const [mode, setMode] = React.useState<'one-time' | 'recurring'>('one-time');
+  // Started/cancelled events are hidden from the list by default; the calendar always shows all.
   const [showHidden, setShowHidden] = React.useState(false);
-
   const hiddenCount = events.filter((e) => e.status !== 'active').length;
   const visibleEvents = showHidden ? events : events.filter((e) => e.status === 'active');
 
@@ -142,11 +143,11 @@ export function EventsListPage({
       description: '',
       imageUrl: '',
       locationUrl: '',
+      allDay: false,
       startDate: '',
       startTime: '',
       endDate: '',
       endTime: '',
-      allDay: false,
       location: '',
       discordChannelId: NONE_VALUE,
       ownerGroupId: NONE_VALUE,
@@ -427,11 +428,11 @@ export function EventsListPage({
                       </div>
                       <div className='flex items-center gap-2'>
                         <Switch
-                          id='create-allDay'
+                          id='create-all-day'
                           checked={watchedAllDay}
                           onCheckedChange={(checked) => form.setValue('allDay', checked)}
                         />
-                        <Label htmlFor='create-allDay'>{tr('event_allDay')}</Label>
+                        <Label htmlFor='create-all-day'>{tr('event_allDay')}</Label>
                       </div>
                       <div className='flex flex-col gap-4 sm:flex-row'>
                         <FormField
@@ -976,11 +977,14 @@ export function EventsListPage({
           </div>
           <div className='order-1 lg:order-1'>
             {hiddenCount > 0 && (
-              <div className='mb-2'>
-                <Button variant='ghost' size='sm' onClick={() => setShowHidden((v) => !v)}>
-                  {showHidden ? tr('event_hidePastCancelled') : tr('event_showPastCancelled')}
-                </Button>
-              </div>
+              <Button
+                variant='ghost'
+                size='sm'
+                className='mb-2 text-muted-foreground'
+                onClick={() => setShowHidden((v) => !v)}
+              >
+                {showHidden ? tr('event_hidePastCancelled') : tr('event_showPastCancelled')}
+              </Button>
             )}
             {visibleEvents.length === 0 ? (
               <p className='text-muted-foreground'>{tr('event_noEvents')}</p>
@@ -1001,12 +1005,17 @@ export function EventsListPage({
                     >
                       <div className='flex size-10 shrink-0 flex-col items-center justify-center rounded-md bg-muted text-xs'>
                         <span className='font-semibold leading-none'>
-                          {new Date(Number(DateTime.toEpochMillis(event.startAt))).getDate()}
+                          {event.allDay
+                            ? new Date(Number(DateTime.toEpochMillis(event.startAt))).getUTCDate()
+                            : new Date(Number(DateTime.toEpochMillis(event.startAt))).getDate()}
                         </span>
                         <span className='text-muted-foreground leading-none mt-0.5'>
                           {new Date(
                             Number(DateTime.toEpochMillis(event.startAt)),
-                          ).toLocaleDateString(undefined, { month: 'short' })}
+                          ).toLocaleDateString(undefined, {
+                            month: 'short',
+                            ...(event.allDay ? { timeZone: 'UTC' } : {}),
+                          })}
                         </span>
                       </div>
                       <div className='min-w-0 flex-1'>
@@ -1020,21 +1029,21 @@ export function EventsListPage({
                         </div>
                         <div className='flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground'>
                           <span>{eventTypeLabels[event.eventType]()}</span>
-                          {event.allDay && (
-                            <span className='text-[10px] text-muted-foreground'>
+                          <span>·</span>
+                          <span>
+                            {startDate}
+                            {event.allDay &&
+                              Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })}
+                          </span>
+                          {event.allDay ? (
+                            <span className='rounded bg-muted px-1 py-0.5 text-[10px]'>
                               {tr('event_allDayLabel')}
                             </span>
-                          )}
-                          <span>·</span>
-                          <span>{startDate}</span>
-                          {!event.allDay && (
+                          ) : (
                             <span className='hidden sm:inline'>
                               {startTime}
                               {Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })}
                             </span>
-                          )}
-                          {event.allDay && Option.isSome(end) && (
-                            <span className='hidden sm:inline'>{` – ${end.value}`}</span>
                           )}
                         </div>
                       </div>

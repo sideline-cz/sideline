@@ -60,6 +60,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                         location: e.location,
                         status: e.status,
                         seriesId: e.series_id,
+                        allDay: e.all_day,
                       }),
                   ),
                 }),
@@ -131,6 +132,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                 discordTargetChannelId: payload.discordChannelId,
                 ownerGroupId: resolvedGroups.ownerGroupId,
                 memberGroupId: resolvedGroups.memberGroupId,
+                allDay: payload.allDay,
               }),
             ),
             Effect.bind('resolvedChannel', ({ event }) => resolveChannel(teamId, event.id)),
@@ -149,6 +151,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                 Option.none(),
                 event.image_url,
                 event.location_url,
+                event.all_day,
               ),
             ),
             Effect.tap(({ event }) =>
@@ -181,6 +184,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   location: event.location,
                   status: event.status,
                   seriesId: event.series_id,
+                  allDay: event.all_day,
                 }),
             ),
             Effect.catchTag(
@@ -255,6 +259,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   ownerGroupName: event.owner_group_name,
                   memberGroupId: event.member_group_id,
                   memberGroupName: event.member_group_name,
+                  allDay: event.all_day,
                 }),
             ),
           ),
@@ -364,6 +369,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   onNone: () => existing.member_group_id,
                   onSome: (v) => v,
                 }),
+                allDay: Option.getOrElse(payload.allDay, () => existing.all_day),
               }),
             ),
             Effect.tap(({ existing }) =>
@@ -399,6 +405,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                 Option.none(),
                 detail.image_url,
                 detail.location_url,
+                detail.all_day,
               ),
             ),
             Effect.map(
@@ -428,6 +435,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   ownerGroupName: detail.owner_group_name,
                   memberGroupId: detail.member_group_id,
                   memberGroupName: detail.member_group_name,
+                  allDay: detail.all_day,
                 }),
             ),
             Effect.catchTag(

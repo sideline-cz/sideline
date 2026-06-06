@@ -135,6 +135,7 @@ export const postRsvpDiscordUpdates = (params: {
                 yesAttendees,
                 locale: embedLocale,
                 isStarted,
+                allDay: info.all_day,
               });
               return rest.updateMessage(msg.discord_channel_id, msg.discord_message_id, {
                 embeds: payload.embeds,

@@ -111,6 +111,7 @@ export class EventInfo extends Schema.Class<EventInfo>('EventInfo')({
   location: Schema.OptionFromNullOr(Schema.String),
   locationUrl: Schema.OptionFromNullOr(Schema.String),
   status: EventStatus,
+  allDay: Schema.Boolean,
   seriesId: Schema.OptionFromNullOr(EventSeriesId),
 }) {}
 
@@ -128,6 +129,7 @@ export class EventDetail extends Schema.Class<EventDetail>('EventDetail')({
   location: Schema.OptionFromNullOr(Schema.String),
   locationUrl: Schema.OptionFromNullOr(Schema.String),
   status: EventStatus,
+  allDay: Schema.Boolean,
   createdByName: Schema.OptionFromNullOr(Schema.String),
   canEdit: Schema.Boolean,
   canCancel: Schema.Boolean,
@@ -153,6 +155,7 @@ const CreateEventRequestStruct = Schema.Struct({
   imageUrl: Schema.OptionFromOptionalNullOr(EventImageUrl),
   startAt: Schemas.DateTimeFromIsoString,
   endAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
+  allDay: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
   location: Schema.OptionFromNullOr(Schema.String),
   locationUrl: Schema.OptionFromOptionalNullOr(EventLocationUrl),
   discordChannelId: Schema.OptionFromNullOr(Snowflake),
@@ -178,6 +181,7 @@ const UpdateEventRequestStruct = Schema.Struct({
   imageUrl: Schema.OptionFromOptional(Schema.OptionFromNullOr(EventImageUrl)),
   startAt: Schema.OptionFromOptional(Schemas.DateTimeFromIsoString),
   endAt: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString)),
+  allDay: Schema.OptionFromOptional(Schema.Boolean),
   location: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schema.String)),
   locationUrl: Schema.OptionFromOptional(Schema.OptionFromNullOr(EventLocationUrl)),
   discordChannelId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),
