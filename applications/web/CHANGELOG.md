@@ -1,5 +1,34 @@
 # @sideline/web
 
+## 0.18.0
+
+### Minor Changes
+
+- [#360](https://github.com/maxa-ondrej/sideline/pull/360) [`2b1b9eb`](https://github.com/maxa-ondrej/sideline/commit/2b1b9eb98d71051c658d6098c28314cb25a2a14a) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add OpenTelemetry / SigNoz monitoring for the web application.
+
+  Sets up a `ManagedRuntime` singleton (built once per page session) with OTLP JSON export via the Fetch API. Registers Web Vitals metrics (LCP, CLS, FCP, INP, TTFB), page load timing, and React component render duration. OTEL config is optional so local dev works without it configured.
+
+### Patch Changes
+
+- [#360](https://github.com/maxa-ondrej/sideline/pull/360) [`2b1b9eb`](https://github.com/maxa-ondrej/sideline/commit/2b1b9eb98d71051c658d6098c28314cb25a2a14a) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix `Uncaught undefined` crash after Discord login (real root cause)
+
+  `fetchTranslations` and `fetchVersions` used bare `Effect.runPromise` which
+  only catches typed errors — any defect or interrupt (e.g. an aborted fetch
+  during the post-login redirect sequence) escaped as an unhandled
+  `Uncaught (in promise) undefined`, crashing the page.
+
+  Both now use `Effect.runPromiseExit` + `Exit.isSuccess` so defects are
+  silently treated as "no data" rather than crashing the app.
+
+- [#360](https://github.com/maxa-ondrej/sideline/pull/360) [`2b1b9eb`](https://github.com/maxa-ondrej/sideline/commit/2b1b9eb98d71051c658d6098c28314cb25a2a14a) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Serve the service worker script with `Cache-Control: no-cache`
+
+  `sw.js` is now sent with `Cache-Control: no-cache` from the origin so the
+  browser always revalidates it against the server. A stale, long-cached service
+  worker keeps an old worker (and the old cached app it serves) alive, which
+  delays deployed fixes from reaching returning users. `no-cache` makes a newly
+  deployed service worker take effect promptly. Cloudflare passes the origin
+  `no-cache` through to the browser.
+
 ## 0.17.1
 
 ### Patch Changes
