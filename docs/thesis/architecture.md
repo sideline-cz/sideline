@@ -41,6 +41,7 @@ graph TD
     Server -->|SQL| DB
     Server -->|OTLP| OTEL
     Bot -->|OTLP| OTEL
+    Web -->|OTLP| OTEL
 
     Proxy -.->|"depends_on (healthy)"| Server
     Proxy -.->|"depends_on (healthy)"| Web
@@ -205,6 +206,8 @@ For the bot, `AppLive` composes:
 - `Runtime.runMain(...)` from `@sideline/effect-lib` — sets up structured logging, the OpenTelemetry telemetry layer (`makeTelemetryLayer`), and calls `NodeRuntime.runMain`
 
 The clean separation means `AppLive` never imports `node:http`, never reads environment variables directly, and never starts the runtime — all of that is the exclusive responsibility of `run.ts`.
+
+The web frontend follows a slightly different pattern. Rather than a Node.js `run.ts`, it uses a TanStack Start root route (`src/routes/__root.tsx`) whose `beforeLoad` hook calls `initRuntime` (initialising a `ManagedRuntime` singleton from `src/lib/runtime.ts`) and `registerWebVitals` (wiring Web Vitals and page-load reporters). The `makeTelemetryLayer` in `src/lib/telemetry.ts` uses the browser Fetch API as its OTLP transport and is silently disabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is not set.
 
 ---
 

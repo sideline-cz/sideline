@@ -488,6 +488,60 @@ Rules:
 
 Reference: `applications/web/src/routes/(authenticated)/teams/$teamId/index.tsx` (dashboard + `myStatus`).
 
+## Runtime Singleton & Browser Telemetry
+
+The web app runs every Effect through ONE module-level `ManagedRuntime` singleton held in `lib/runtime.ts`. The singleton carries the OpenTelemetry browser layer, the API client, and `ClientConfig`. OTEL config flows in one direction only:
+
+```
+fetchEnv (server function, src/env.ts)
+  → initRuntime({ serverUrl, telemetryLayer })   (root beforeLoad)
+    → ManagedRuntime singleton (makeAppLayer)
+      → runPromiseServer / runPromiseClient / ServerRunner / runEffect
+```
+
+### `initRuntime` — Call Once In Root `beforeLoad`
+
+`initRuntime({ serverUrl, telemetryLayer })` (`lib/runtime.ts`) builds the singleton via `ManagedRuntime.make(makeAppLayer(...))`. It is **idempotent** — the second and later calls return immediately (`if (_runtime !== null) return;`). It registers a one-shot `pagehide` listener that disposes the runtime.
+
+Rules:
+
+1. **`initRuntime` MUST be called from the root route `beforeLoad` (`src/routes/__root.tsx`), after `await fetchEnv(abortController)`, before any `runPromiseServer` / `runPromiseClient` call.** Every other runner (`runPromiseServer`, `runPromiseClient`, `ServerRunner`, `runEffect`) routes through the private `getRuntime()`, which **throws** `Error('Runtime not initialized — call initRuntime() first')` if the singleton is null. Never call a runner before `initRuntime`.
+2. **The telemetry layer MUST be produced by `makeTelemetryLayer(...)` from `~/lib/telemetry`,** passing the four OTEL env values read from `fetchEnv`: `endpoint: OTEL_EXPORTER_OTLP_ENDPOINT`, `serviceName: OTEL_SERVICE_NAME`, `environment: APP_ENV`, `origin: APP_ORIGIN`. Never construct an `Otlp` layer inline in the route.
+3. **All four OTEL env vars are optional** (`Schema.UndefinedOr(Schema.NonEmptyString)` in `src/env.ts`, `emptyStringAsUndefined: true`). When `endpoint` is `undefined`, `makeTelemetryLayer` returns `Layer.empty` — telemetry is silently disabled, the app still runs. Adding a new OTEL env var requires adding it to BOTH `src/env.ts` (`fetchEnv`) and the `makeTelemetryLayer({...})` call in `__root.tsx`.
+4. **`makeAppLayer` MUST expose `ClientConfig` twice:** once provided as a dependency to `ApiClientLive`, and once merged into the runtime's output so effects that declare `ApiClient | ClientConfig` resolve it. The exact shape is load-bearing:
+   ```typescript
+   const clientConfigLayer = Layer.succeed(ClientConfig, { baseUrl: options.serverUrl });
+   return Layer.mergeAll(
+     ApiClientLive.pipe(Layer.provide(clientConfigLayer)),
+     clientConfigLayer,
+     Logger.layer([Logger.consolePretty()]),
+     Layer.succeed(References.MinimumLogLevel, 'Info' as const),
+     options.telemetryLayer,
+   );
+   ```
+   Dropping the standalone `clientConfigLayer` from `Layer.mergeAll` makes the runtime's success type `ManagedRuntime<ApiClient, never>` and breaks every `ApiClient | ClientConfig` effect at the type level.
+
+### `runEffect` — Fire-And-Forget From Non-Effect Callbacks
+
+`runEffect(effect: Effect.Effect<void>): void` (`lib/runtime.ts`) does `void getRuntime().runFork(effect)`. Use it ONLY to record metrics/spans from plain (non-Effect) callbacks — Web Vitals, the React `<Profiler>` `onRender` hook. Never use it for API calls, navigation, or anything whose result the UI depends on — those go through `useRun()` / `runPromiseClient` / `runPromiseServer`.
+
+### Web Vitals & React Render Metrics — `lib/telemetry.ts`
+
+`lib/telemetry.ts` owns all browser metric definitions (`Metric.histogram(...)` for `web_vitals_lcp_ms`, `web_vitals_cls`, `web_vitals_fcp_ms`, `web_vitals_inp_ms`, `web_vitals_ttfb_ms`, `page_load_ms`, `react_render_ms`). Two registration helpers consume `runEffect`:
+
+| Helper | Call site | Behaviour |
+|--------|-----------|-----------|
+| `registerWebVitals(runEffect)` | `__root.tsx` `beforeLoad`, immediately after `initRuntime` | Lazy-imports `web-vitals` and wires `onLCP`/`onCLS`/`onFCP`/`onINP`/`onTTFB` + a `load`-event page-load reporter. Idempotent via an internal `_vitalsRegistered` flag; no-ops on the server (`typeof window === 'undefined'`). |
+| `recordReactRender(runEffect, actualDuration)` | `<Profiler id='app' onRender={...}>` wrapping `<Outlet />` in `RootComponent` | Records the React tree render duration into `react_render_ms`. |
+
+Rules:
+
+1. **`registerWebVitals` MUST be called exactly once, after `initRuntime`, in the root `beforeLoad`.** It is safe to call on every navigation (the `_vitalsRegistered` guard), but the canonical call site is the root `beforeLoad` right after `initRuntime(...)`.
+2. **All new browser metrics live in `lib/telemetry.ts`,** defined with `Metric.histogram(name, { description, boundaries })`. Never define a `Metric` inline in a component or route.
+3. **Metrics are recorded only via `runEffect(Metric.update(<metric>, value))`** — never `Effect.runSync`/`Effect.runPromise` on a metric update, and never a raw `getRuntime()` call from outside `lib/runtime.ts`.
+4. **The `<Profiler>` wrapper lives in `RootComponent` (the root `component`), not the shell.** It wraps `<Outlet />` inside `RunProvider` + `TranslationOverridesProvider`. Do not move it into `RootDocumentRoute` — the shell renders above the context provider (see "Root Route: `shellComponent` vs `component`").
+5. **`web-vitals` is lazy-imported** (`void import('web-vitals').then(...)`) so it stays out of the initial bundle. Keep it lazy — do not add a top-level `import` of `web-vitals`.
+
 ## Runtime — Client vs Server Runners
 
 `lib/runtime.ts` exposes two distinct run functions:
@@ -496,6 +550,9 @@ Reference: `applications/web/src/routes/(authenticated)/teams/$teamId/index.tsx`
 |---|---|---|---|---|
 | `runPromiseServer(url)(abortController?)` | `beforeLoad`, `loader` | `Redirect \| NotFound` | `Promise<A>` (throws on error) | None |
 | `runPromiseClient(url)` | Root loader → `RunProvider` | `ClientError` | `Promise<Option<A>>` | Auto `toast.error` on failure |
+| `runEffect(effect)` | Web Vitals, `<Profiler onRender>` only | `never` (effect is `Effect<void>`) | `void` (fire-and-forget `runFork`) | None |
+
+All three functions route through the private `getRuntime()` singleton (see "Runtime Singleton & Browser Telemetry" above). The `url` argument to `runPromiseServer`/`runPromiseClient` is retained for signature stability but the runtime's `baseUrl` comes from the `ClientConfig` provided at `initRuntime` time. Calling any runner before `initRuntime` throws.
 
 **`Run` type** (what `useRun()` returns):
 ```typescript
@@ -510,7 +567,7 @@ type Run = (
 
 `Run` is curried: call it with optional `RunOptions` first, then pass the Effect. When `success` is provided, a success toast is shown automatically. When `loading` is provided, a loading toast is shown until the Effect completes.
 
-**Wiring**: `RootComponent` (the root route `component`, NOT the shell) creates `runPromiseClient(serverUrl)` and provides it via `RunProvider`. All organisms access it via `useRun()`. See "Root Route: `shellComponent` vs `component`" below for why this must not live in the shell.
+**Wiring**: The root `beforeLoad` calls `initRuntime(...)` then `registerWebVitals(runEffect)` (see "Runtime Singleton & Browser Telemetry" above). `RootComponent` (the root route `component`, NOT the shell) creates `runPromiseClient(serverUrl)`, provides it via `RunProvider`, and wraps `<Outlet />` in a `<Profiler id='app' onRender={...recordReactRender(runEffect, ...)}>`. All organisms access the runner via `useRun()`. See "Root Route: `shellComponent` vs `component`" below for why this must not live in the shell.
 
 ### Server Runners: AbortController Wiring And Exit Handling
 

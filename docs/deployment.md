@@ -244,6 +244,10 @@ Build stages:
 | `PORT` | No | `3000` | Port on which the web server listens |
 | `DISCORD_CLIENT_ID` | Yes | — | Discord OAuth2 application client ID, used on the frontend for the OAuth flow |
 | `WEB_URL` | No | — | Public base URL of the web app (e.g. `https://sideline.example.com`). When set, the Nitro server plugin rewrites the relative `og:image` URL to an absolute URL for Open Graph / Twitter Card embeds |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | — | OTLP HTTP endpoint for telemetry export. When omitted, telemetry is disabled |
+| `OTEL_SERVICE_NAME` | No | `sideline-web` | Service name reported to the telemetry backend |
+| `APP_ENV` | No | — | Deployment environment name (e.g. `dev`, `preview`, `production`), reported as the `deployment.environment` OTEL resource attribute |
+| `APP_ORIGIN` | No | — | Origin hostname (e.g. `sideline-preview.majksa.net`), reported as the `service.origin` OTEL resource attribute |
 
 ---
 
@@ -420,7 +424,9 @@ Required secrets: `SIDELINE_DB_HOST`, `SIDELINE_DB_PORT`, `SIDELINE_DB_USER`, `S
 
 ### 7.1 OpenTelemetry
 
-Both the server and the bot export logs, traces, and metrics via the OTLP HTTP protocol to a SigNoz instance. The telemetry layer is configured in each application's `run.ts` using `Telemetry.makeTelemetryLayer` from `@sideline/effect-lib`:
+The server, bot, and web frontend all export telemetry via the OTLP HTTP protocol to a SigNoz instance.
+
+**Server and bot** use `Telemetry.makeTelemetryLayer` from `@sideline/effect-lib`, configured in each application's `run.ts`:
 
 ```typescript
 Runtime.runMain(
@@ -434,6 +440,20 @@ Runtime.runMain(
   }),
 )
 ```
+
+**Web frontend** uses its own `makeTelemetryLayer` in `applications/web/src/lib/telemetry.ts`, initialised from `fetchEnv` in the root route's `beforeLoad` hook. The web layer uses the browser Fetch API as the OTLP transport instead of Node.js HTTP. Telemetry is optional — when `OTEL_EXPORTER_OTLP_ENDPOINT` is not set, the layer is a no-op.
+
+In addition to traces, the web frontend reports the following OTEL histogram metrics:
+
+| Metric | Description |
+|--------|-------------|
+| `web_vitals_lcp_ms` | Largest Contentful Paint (ms) |
+| `web_vitals_cls` | Cumulative Layout Shift score |
+| `web_vitals_fcp_ms` | First Contentful Paint (ms) |
+| `web_vitals_inp_ms` | Interaction to Next Paint (ms) |
+| `web_vitals_ttfb_ms` | Time to First Byte (ms) |
+| `page_load_ms` | Full page load time (`loadEventEnd`) in ms |
+| `react_render_ms` | React component tree render duration (ms) |
 
 ### 7.2 Resource Attributes
 
@@ -449,6 +469,7 @@ Runtime.runMain(
 |-------------|----------------|
 | Server | `sideline-server` |
 | Bot | `sideline-bot` |
+| Web | `sideline-web` (default; overridden by `OTEL_SERVICE_NAME`) |
 
 ### 7.4 Log Levels
 
@@ -601,6 +622,8 @@ Discord caches slash command registrations globally. After adding or modifying c
 ### 9.8 OTEL Telemetry Not Appearing
 
 **Checks:**
-- Verify `OTEL_EXPORTER_OTLP_ENDPOINT` is reachable from the container network
-- Confirm `OTEL_SERVICE_NAME`, `APP_ENV`, and `APP_ORIGIN` are all set — missing values will prevent telemetry layer initialization
+- Verify `OTEL_EXPORTER_OTLP_ENDPOINT` is reachable from the container network (for server/bot) or from the browser (for web)
+- For the **server** and **bot**, `OTEL_SERVICE_NAME`, `APP_ENV`, and `APP_ORIGIN` are required — missing values will prevent telemetry layer initialisation
+- For the **web** frontend, all four OTEL env vars are optional; when `OTEL_EXPORTER_OTLP_ENDPOINT` is absent the telemetry layer is silently disabled
 - Check that the OTLP endpoint accepts HTTP (not HTTPS) if the URL does not use TLS; the current preview endpoint uses HTTPS (`https://otelcollectorhttp-*.majksa.net/`)
+- Web Vitals and React render metrics are only emitted in the browser — they will not appear in server-side SSR traces
