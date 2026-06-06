@@ -1,11 +1,18 @@
+import type { ErrorComponentProps } from '@tanstack/react-router';
 import { useRouter } from '@tanstack/react-router';
+import { Effect } from 'effect';
 import React from 'react';
 import { Button } from '~/components/ui/button';
+import { runEffect } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
-export function RouteErrorComponent() {
+export function RouteErrorComponent({ error }: ErrorComponentProps) {
   const router = useRouter();
   const [isOffline, setIsOffline] = React.useState(!navigator.onLine);
+
+  React.useEffect(() => {
+    runEffect(Effect.logError('Route error boundary caught', error));
+  }, [error]);
 
   React.useEffect(() => {
     const goOnline = () => setIsOffline(false);

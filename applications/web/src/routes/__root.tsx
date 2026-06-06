@@ -17,7 +17,12 @@ import {
   runPromiseClient,
   runPromiseServer,
 } from '~/lib/runtime';
-import { makeTelemetryLayer, recordReactRender, registerWebVitals } from '~/lib/telemetry';
+import {
+  makeTelemetryLayer,
+  recordReactRender,
+  registerErrorHandlers,
+  registerWebVitals,
+} from '~/lib/telemetry';
 import { ThemeProvider } from '~/lib/theme.js';
 import { TranslationOverridesProvider } from '~/lib/translation-overrides-context.js';
 import appCss from '../styles.css?url';
@@ -125,6 +130,7 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
       }),
     });
     registerWebVitals(runEffect);
+    registerErrorHandlers(runEffect);
     const makeRun = runPromiseServer(environment.SERVER_URL);
     const run = makeRun(abortController);
     // On a superseded navigation this intentionally never resolves — do not add a timeout.

@@ -181,10 +181,12 @@ export const runPromiseServer =
 
 /**
  * Fire-and-forget an Effect using the shared runtime.
- * Useful for recording metrics/spans from non-Effect callbacks (e.g. Web Vitals).
+ * Useful for recording metrics/spans from non-Effect callbacks (e.g. Web Vitals, error handlers).
+ * Null-safe — silently no-ops if the runtime hasn't been initialized yet.
  */
 export const runEffect = (effect: Effect.Effect<void>): void => {
-  void getRuntime().runFork(effect);
+  if (_runtime === null) return;
+  void _runtime.runFork(effect);
 };
 
 export const runPromiseClient =
@@ -195,6 +197,7 @@ export const runPromiseClient =
   ): Promise<Option.Option<A>> => {
     const toastId = options?.loading ? toast.loading(options.loading) : undefined;
     const effectResponse = effect.pipe(
+      Effect.tapError((e) => Effect.logError('Client error', e)),
       Effect.tapError((e) =>
         Effect.sync(() => {
           if (e._tag === 'SilentClientError') return;

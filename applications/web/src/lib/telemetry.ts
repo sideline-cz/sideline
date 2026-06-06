@@ -1,4 +1,4 @@
-import { type Effect, Layer, Metric } from 'effect';
+import { Effect, Layer, Metric } from 'effect';
 import { FetchHttpClient } from 'effect/unstable/http';
 import { Otlp } from 'effect/unstable/observability';
 
@@ -105,4 +105,29 @@ export const registerWebVitals = (runEffect: RunEffect): void => {
   } else {
     window.addEventListener('load', recordPageLoad, { once: true });
   }
+};
+
+let _errorHandlersRegistered = false;
+
+/**
+ * Register global error handlers that forward unhandled JS errors and
+ * unhandled promise rejections to SigNoz as OTEL log entries.
+ * Idempotent — safe to call on every navigation.
+ * @param runEffect - fire-and-forget Effect runner from `~/lib/runtime`
+ */
+export const registerErrorHandlers = (runEffect: RunEffect): void => {
+  if (typeof window === 'undefined') return;
+  if (_errorHandlersRegistered) return;
+  _errorHandlersRegistered = true;
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
+    runEffect(Effect.logError('Unhandled promise rejection', reason));
+  });
+
+  window.addEventListener('error', (event) => {
+    if (event.error instanceof Error) {
+      runEffect(Effect.logError('Unhandled error', event.error));
+    }
+  });
 };
