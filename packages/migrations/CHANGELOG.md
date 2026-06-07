@@ -1,5 +1,11 @@
 # @sideline/migrations
 
+## 0.18.1
+
+### Patch Changes
+
+- [#362](https://github.com/maxa-ondrej/sideline/pull/362) [`a103105`](https://github.com/maxa-ondrej/sideline/commit/a103105f7db7b468fa3dbf82dbf02cac971468ec) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add idempotent migration to create `team_onboarding_tokens` table on production databases where migration `1747700000` was silently skipped. The Effect SQL migrator only runs migrations with ID greater than the latest applied ID, so any migration added with an older timestamp than what is already in the database will never execute. This `IF NOT EXISTS` migration at a higher ID ensures the table is created correctly regardless of migration history.
+
 ## 0.18.0
 
 ### Minor Changes
