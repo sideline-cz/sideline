@@ -73,7 +73,7 @@ Server, Bot, Web ────────────────────►
 
 ### 2.2 Server
 
-**Purpose:** The core HTTP API server. Exposes the REST API (under `$API_PREFIX`, default `/api`), an internal RPC endpoint for the bot (under `$RPC_PREFIX`, default `/rpc/sync`), and runs seven background cron jobs.
+**Purpose:** The core HTTP API server. Exposes the REST API (under `$API_PREFIX`, default `/api`), an internal RPC endpoint for the bot (under `$RPC_PREFIX`, default `/rpc/sync`), and runs nine background cron jobs.
 
 **Dockerfile:** `applications/server/Dockerfile`
 
@@ -97,7 +97,7 @@ Build stages:
 
 1. If `DATABASE_MAIN != DATABASE_NAME`, creates the target database (used for preview environments where each PR has an isolated database).
 2. Runs "before" migrations (schema changes).
-3. Launches all of the following concurrently (concurrency: 8):
+3. Launches all of the following concurrently (concurrency: 10):
    - HTTP application server (`AppLive`)
    - Health check server (`HealthServerLive`)
    - "After" migrations (seed data)
@@ -108,6 +108,8 @@ Build stages:
    - `RsvpReminderCron`
    - `TrainingAutoLogCron`
    - `WeeklySummaryCron`
+   - `TrainingClaimRequestCron`
+   - `CoachingStatusCron`
 
 The `Runtime.runMain` wrapper configures the OpenTelemetry telemetry layer before starting.
 
@@ -266,6 +268,8 @@ Source files: `applications/server/src/services/*Cron.ts`
 | `TrainingAutoLogCron` | `*/5 * * * *` (every 5 minutes) | Finds ended training events that haven't been auto-logged yet. For each event, inserts an `activity_logs` row for every member who RSVP'd "yes". Ignores duplicate-key violations (idempotent). |
 | `WeeklySummaryCron` | `* * * * *` (every minute) | Checks all teams that have a `weekly_summary_channel_id` configured. For each team whose current local time is Sunday 20:00, builds a `WeeklySummaryDigest` and inserts a `weekly_summary_sync_events` row (ON CONFLICT DO NOTHING ensures idempotency). The bot's Weekly Summary worker drains the outbox and posts the embed to the configured Discord channel. Instrumented with the `weekly-summary` metric label. |
 | `PaymentReminderCron` | `* * * * *` (every minute) | Finds fee assignments that have crossed a reminder cadence threshold (T−3 days, T+0, T+3, T+10, T+21 days) and have not already been queued for that cadence (no unprocessed `payment_reminder_sync_events` row for the same `(assignment_id, kind)` pair). For each candidate, inserts a row into `payment_reminder_sync_events`. The bot's Finance Sync worker drains the outbox and sends a Discord DM to the member; on successful delivery it calls `Finance/MarkReminderSent` to record the send in `payment_reminders_sent`. Instrumented with the `payment-reminder` metric label. The server must be running for reminders to fire; the bot need not be running for the cron to enqueue them, but the DMs are only delivered while the bot is connected. |
+| `TrainingClaimRequestCron` | `* * * * *` (every minute) | Finds training events whose `claim_request_sent_at` is NULL and whose `start_at` is within `team_settings.claim_request_days_before` days. For each, resolves the owner group's Discord channel via `DiscordChannelMappingRepository` and emits a `training_claim_request` sync event. Sets `claim_request_sent_at = now()` on the event after queuing (or immediately if no channel can be resolved, to prevent repeated retries). Instrumented with the `training-claim-request` metric label. |
+| `CoachingStatusCron` | `* * * * *` (every minute) | Finds claimed training events whose `coaching_status_sent_at` is NULL and whose `start_at` is on the current calendar day. For each, resolves the target Discord channel: first tries `team_settings.discord_channel_training`; falls back to the owner group's channel via `DiscordChannelMappingRepository`. Emits a `coaching_status` sync event so the bot posts a "today's coach is X" announcement to the member training channel. Sets `coaching_status_sent_at = now()` on the event. Instrumented with the `coaching-status` metric label. |
 
 ---
 

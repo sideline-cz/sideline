@@ -253,6 +253,7 @@ erDiagram
         TIME rsvp_reminder_time
         TEXT reminders_channel_id
         TEXT timezone
+        INTEGER claim_request_days_before
         TEXT discord_channel_training
         TEXT discord_channel_match
         TEXT discord_channel_tournament
@@ -451,6 +452,9 @@ erDiagram
         UUID claimed_by FK
         TEXT claim_discord_channel_id
         TEXT claim_discord_message_id
+        TIMESTAMPTZ claim_request_sent_at
+        TIMESTAMPTZ coaching_status_sent_at
+        TEXT claim_thread_id
         TEXT image_url
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at

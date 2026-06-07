@@ -188,6 +188,13 @@ export const EventRpcGroup = RpcGroup.make(
     },
     success: Schema.Void,
   }),
+  Rpc.make('SaveClaimThreadId', {
+    payload: {
+      event_id: Event.EventId,
+      thread_id: Discord.Snowflake,
+    },
+    success: Schema.Void,
+  }),
   Rpc.make('GetClaimInfo', {
     payload: { event_id: Event.EventId },
     success: Schema.OptionFromNullOr(EventClaimInfo),

@@ -160,6 +160,19 @@ When API handlers create/delete resources that need Discord sync:
 2. Call `repo.emitIfGuildLinked(teamId, eventType, ...)` — looks up `guild_id` from `teams` table; if linked, inserts event row; if not, no-op
 3. Wrap emission in `Effect.catchAllDefect(() => Effect.void)` so sync failures never break the primary operation. Use `Effect.catchAllDefect` (not `Effect.catchAll`) because repository methods convert SQL/parse errors to defects via `catchSqlErrors`. Always log before catching with `Effect.tapDefect`
 
+### Adding an `event_sync_events` Event Type — Four Synchronized Places
+
+Each `event_sync_events.event_type` value is enumerated in **four** places that MUST stay consistent. Three live in this repo's server + domain; the fourth is the bot. Adding a value to fewer than all four either fails an insert at runtime (DB constraint), drops the event on decode, or fails to compile (bot `Match.exhaustive`).
+
+| # | Place | File | What to add |
+|---|-------|------|-------------|
+| 1 | DB CHECK constraint `event_sync_events_event_type_check` | migration (drop + re-add the constraint, see `packages/migrations/AGENTS.md` → "Updating CHECK Constraints") | the new literal in the `event_type IN (...)` list |
+| 2 | `EventSyncEventType` `Schema.Literals([...])` | `src/repositories/EventSyncEventsRepository.ts` | the new literal |
+| 3 | `UnprocessedEventSyncEvent` `Schema.Union([...])` | `packages/domain/src/rpc/event/EventRpcEvents.ts` | a new `Schema.TaggedClass` whose tag equals the literal, added to the union |
+| 4 | Bot dispatcher `Match.type<UnprocessedEventSyncEvent>().pipe(...)` | `applications/bot/src/rcp/event/ProcessorService.ts` | a `Match.tag('<literal>', handler)` arm before `Match.exhaustive` |
+
+Place 4 is the compile-time backstop: `Match.exhaustive` fails to type-check the moment place 3 gains a variant with no matching `Match.tag` arm (see `applications/bot/AGENTS.md` → "Tagged-Union Dispatch With `Match.exhaustive`"). Places 1 and 2 have no compile-time link to the others — verify them by hand. The same four-place rule applies to any other `*_sync_events` table that pairs a DB CHECK constraint, a repository `Schema.Literals`, a domain `Schema.Union`, and a bot `Match.exhaustive` dispatcher.
+
 ### Channel Sync Event Lifecycle (Server side)
 
 `channel_sync_events` is a poll-driven outbox. Each event has two terminal states besides "processed":
@@ -394,6 +407,8 @@ Cron jobs are long-running Effects that repeat on a schedule. Each cron is defin
 | `EventStartCron` | `src/services/EventStartCron.ts` | every minute | Mark active events as `started` when `start_at <= NOW()`, emit `event_started` sync events |
 | `WeeklySummaryCron` | `src/services/WeeklySummaryCron.ts` | every minute (gated to Sun 20:00 in team timezone) | Build a per-team weekly digest and insert one `weekly_summary_sync_events` row per team-week |
 | `PaymentReminderCron` | `src/services/PaymentReminderCron.ts` | every minute | For each unpaid fee assignment whose `effective_due_at` matches a `PaymentReminderKind` offset (−3 / 0 / +3 / +10 / +21 days in team timezone), insert one `payment_reminder_sync_events` row. Idempotency lives in `FeeAssignmentsRepository.findReminderCandidates` (NOT EXISTS against both `payment_reminders_sent` and the outbox) — see "Bot-Ack Idempotency for Discord-Side-Effect Crons" below. |
+| `TrainingClaimRequestCron` | `src/services/TrainingClaimRequestCron.ts` | every minute | Emit a `training_claim_request` event once per training, `team_settings.claim_request_days_before` days ahead of `start_at`. Candidate query `TeamSettingsRepository.findEventsNeedingClaimRequest`; idempotency via `events.claim_request_sent_at` — see "Self-Healing `*_sent_at` Date-Gated Crons" below. |
+| `CoachingStatusCron` | `src/services/CoachingStatusCron.ts` | every minute | Emit a `coaching_status` event once per claimed training on the day of `start_at` (gated to ≥ 07:00 local). Candidate query `TeamSettingsRepository.findEventsNeedingCoachingStatus`; idempotency via `events.coaching_status_sent_at` — see "Self-Healing `*_sent_at` Date-Gated Crons" below. |
 
 ### Pattern
 
@@ -452,6 +467,29 @@ Rules for the TS-side variant:
 3. **The gate's hour/minute comparison must be exact** (`hour === 20 && minute === 0`) and the second must be range-checked (`second <= 59`) so a one-minute-cadence cron fires exactly once per team-week. Do not use `hour >= 20` — that fires every minute for the next four hours.
 4. **Wrap the `Intl.DateTimeFormat` call in `try { ... } catch { return false }`** — an unknown IANA zone in `team_settings.timezone` is a misconfiguration, not a cron failure. The bad team is skipped silently this cycle.
 5. **Skip via `Effect.fail(new SkipTeam(...))`** (a module-local `Data.TaggedError`) and `Effect.catchTag('SkipTeam', () => Effect.void)` at the per-team boundary. Do not use `Effect.when` — the gate is one of several short-circuit filters and the tagged-skip pattern keeps the chain readable.
+
+### Self-Healing `*_sent_at` Date-Gated Crons
+
+A cron whose business rule is "emit one Discord event per source row, N days ahead of a date, exactly once" uses a per-row `*_sent_at` marker column on the source table plus a **lower-bound (self-healing) date gate** in the candidate query. This is distinct from `RsvpReminderCron`, whose gate is an **exact-day equality + time-of-day BETWEEN window** (`DATE(now) + days_before = DATE(start) AND now::time BETWEEN reminder_time AND reminder_time + 5min`) — that window fires only inside a five-minute slot, so a cron outage spanning the slot permanently misses the event. Reference: `TrainingClaimRequestCron` + `events.claim_request_sent_at`, `CoachingStatusCron` + `events.coaching_status_sent_at` (both query through `TeamSettingsRepository`).
+
+The lower-bound gate (from `findEventsNeedingClaimRequest`):
+
+```sql
+WHERE e.status = 'active'
+  AND e.event_type = 'training'
+  AND e.claim_request_sent_at IS NULL
+  AND e.start_at > (${nowParam}::timestamptz)
+  AND DATE(e.start_at AT TIME ZONE ts.timezone) - ts.claim_request_days_before
+      <= DATE((${nowParam}::timestamptz) AT TIME ZONE ts.timezone)
+```
+
+Rules:
+
+1. **Use `>= ` / `<=` (lower-bound), not `=`, on the date arithmetic.** Once `DATE(start) - days_before <= DATE(now)` becomes true it stays true until `start_at` passes, so the next cron tick after any outage still picks the row up. The `*_sent_at IS NULL` predicate is what bounds it to one emission, NOT the date window.
+2. **The `*_sent_at` marker is set in every terminal branch of the per-row effect** — on successful emit AND on every "cannot deliver, skip permanently" branch (no owner group, no resolvable channel). Skipping the marker on a skip branch makes the cron rescan the same dead row every minute forever. See `eventsRepo.markClaimRequestSent` / `markCoachingStatusSent` called from both the success `Effect.tap` and the `logWarning(...).pipe(Effect.tap(...))` skip branches.
+3. **Add a partial index `WHERE <predicate> AND *_sent_at IS NULL`** matching the candidate query so the per-minute scan stays cheap (see `idx_events_claim_request_pending`, `idx_events_coaching_status_pending`).
+4. **Apply the standard "Per-Item Error Isolation" wrapping** (`Effect.tapError` + `Effect.exit`, `{ concurrency: 1 }`) — a row whose emit fails is retried next tick because its `*_sent_at` was never set.
+5. **The migration that adds a `*_sent_at` marker MUST backfill existing rows** to avoid a first-deploy notification blast — see `packages/migrations/AGENTS.md` → "Backfill `*_sent_at` Idempotency Markers on Add".
 
 ## Bot-Ack Idempotency for Discord-Side-Effect Crons
 

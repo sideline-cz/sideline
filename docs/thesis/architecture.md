@@ -167,6 +167,8 @@ All cron jobs run inside the server process, launched as concurrent fibers along
 | `RsvpReminderCron` | `* * * * *` (every minute) | Emits RSVP reminder sync events for upcoming events that have not yet had a reminder sent |
 | `AgeCheckCron` | `0 2 * * *` (daily at 02:00 UTC) | Evaluates age-threshold rules per team and applies Discord role changes to members who have crossed an age boundary |
 | `TrainingAutoLogCron` | `*/5 * * * *` (every 5 minutes) | Automatically logs training activity for members who had a "yes" RSVP on completed training events |
+| `TrainingClaimRequestCron` | `* * * * *` (every minute) | Emits `training_claim_request` sync events for training events that are within the team's configured `claim_request_days_before` window and have not yet had a claim-request message posted (`claim_request_sent_at IS NULL`) |
+| `CoachingStatusCron` | `* * * * *` (every minute) | Emits `coaching_status` sync events on the day of a claimed training (where `coaching_status_sent_at IS NULL`), causing the bot to post a "today's coach is X" announcement to the member training channel |
 
 ---
 

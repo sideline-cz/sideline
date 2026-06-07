@@ -51,6 +51,28 @@ export default Effect.flatMap(SqlClient.SqlClient, (sql) =>
 
 New nullable columns do not need a `DEFAULT` clause — PostgreSQL defaults to `NULL`. Add `NOT NULL DEFAULT ...` only when the column must never be null.
 
+### Backfill `*_sent_at` Idempotency Markers on Add
+
+A cron that emits "one Discord event per row, once" reads a nullable `*_sent_at` marker on the source table as its idempotency signal (see `applications/server/AGENTS.md` → "Self-Healing `*_sent_at` Date-Gated Crons"). When the migration adds such a marker as a fresh `NULL` column, **every already-existing in-window row becomes an unsent candidate on the first deploy**, so the cron fires a backlog blast (e.g. claim requests for every training already scheduled). The same migration MUST backfill the marker to `now()` for rows that would otherwise be re-notified:
+
+```typescript
+Effect.tap(() => sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS claim_request_sent_at TIMESTAMPTZ`),
+// Backfill so the new cron skips pre-existing rows on first deploy
+Effect.tap(
+  () =>
+    sql`UPDATE events SET claim_request_sent_at = now() WHERE event_type = 'training' AND claim_request_sent_at IS NULL`,
+),
+```
+
+Rules:
+
+1. **Backfill in the SAME migration that adds the marker**, immediately after the `ADD COLUMN IF NOT EXISTS`. A later migration leaves a deploy window in which the cron fires the blast.
+2. **Scope the `UPDATE` to the rows the cron actually targets** (e.g. `WHERE event_type = 'training'`) so unrelated rows are untouched.
+3. **The backfill must be idempotent** (`... WHERE <marker> IS NULL`) so re-running the migration is a no-op.
+4. This applies only when historical rows existing before the feature should be treated as "already handled". If the intended behaviour is to notify the existing backlog, omit the backfill and document that decision inline.
+
+Reference: `1789300000_improve_coach_assigning.ts` backfills `claim_request_sent_at` and `coaching_status_sent_at`.
+
 ### Partial Indexes for Hot Filters
 
 When a cron or query repeatedly scans a table for rows matching a stable predicate (e.g. "active unclaimed trainings for team X"), prefer a partial index over a full index. Use `CREATE INDEX IF NOT EXISTS ... WHERE ...`:

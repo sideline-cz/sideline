@@ -7,6 +7,7 @@ import { POLL_BATCH_SIZE } from '~/rest/utils.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 import { ChannelReorderSemaphore } from './ChannelReorderSemaphore.js';
 import { handleCancelled } from './handleCancelled.js';
+import { handleCoachingStatus } from './handleCoachingStatus.js';
 import { handleCreated } from './handleCreated.js';
 import { handleRsvpReminder } from './handleRsvpReminder.js';
 import { handleStarted } from './handleStarted.js';
@@ -27,6 +28,7 @@ const action: (
     Match.tag('training_claim_request', handleTrainingClaimRequest),
     Match.tag('training_claim_update', handleTrainingClaimUpdate),
     Match.tag('unclaimed_training_reminder', handleUnclaimedTrainingReminder),
+    Match.tag('coaching_status', handleCoachingStatus),
     Match.exhaustive,
   );
 

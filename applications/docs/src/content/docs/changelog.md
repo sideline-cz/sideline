@@ -5,6 +5,13 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-07 — Improved coach assigning
+
+- The training claim-board message is now posted a configurable number of **days before** the training (default: 3 days), rather than immediately when the training is created. This gives the coaching team time to coordinate in advance.
+- When the bot posts the claim-board message, it now automatically opens a **Discord thread** on that message so coaches can discuss preparation without cluttering the main channel.
+- On the day of the training, if a coach has claimed it, the bot posts a **"today's coach is X"** announcement to the member training channel. Players see at a glance who is running the session.
+- The lead time (how many days before the training the claim message is posted) is a per-team setting. Contact your Sideline administrator to change the default of 3 days.
+
 ## 2026-06-05 — Channel management: restore archived channels + channel emoji
 
 - **Restore archived channels:** archived channels can now be moved back out of the archive category directly from Sideline. Open the channel's detail sheet and click **Restore**, or use multi-select to **Restore selected** channels in bulk. For Sideline-managed channels the existing Discord link is re-used — no new channel is created. Channels that are already active, are categories, or cannot be found are listed as skipped.

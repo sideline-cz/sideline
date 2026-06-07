@@ -142,6 +142,22 @@ export class UnclaimedTrainingReminderEvent extends Schema.TaggedClass<Unclaimed
   },
 ) {}
 
+export class CoachingStatusEvent extends Schema.TaggedClass<CoachingStatusEvent>()(
+  'coaching_status',
+  {
+    id: Schema.String,
+    team_id: Team.TeamId,
+    guild_id: Discord.Snowflake,
+    event_id: Event.EventId,
+    title: Schema.String,
+    start_at: Schemas.DateTimeFromIsoString,
+    discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    claimed_by_display_name: Schema.OptionFromNullOr(Schema.String),
+    claimed_by_discord_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    location: Schema.OptionFromNullOr(Schema.String),
+  },
+) {}
+
 export const UnprocessedEventSyncEvent = Schema.Union([
   EventCreatedEvent,
   EventUpdatedEvent,
@@ -151,6 +167,7 @@ export const UnprocessedEventSyncEvent = Schema.Union([
   TrainingClaimRequestEvent,
   TrainingClaimUpdateEvent,
   UnclaimedTrainingReminderEvent,
+  CoachingStatusEvent,
 ]);
 
 export type UnprocessedEventSyncEvent = Schema.Schema.Type<typeof UnprocessedEventSyncEvent>;

@@ -13,6 +13,7 @@ const EventSyncEventType = Schema.Literals([
   'training_claim_request',
   'training_claim_update',
   'unclaimed_training_reminder',
+  'coaching_status',
 ]);
 type EventSyncEventType = typeof EventSyncEventType.Type;
 
@@ -465,6 +466,46 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  const emitCoachingStatus = (
+    teamId: Team.TeamId,
+    eventId: Event.EventId,
+    title: string,
+    startAt: DateTime.Utc,
+    discordTargetChannelId: Discord.Snowflake,
+    claimedByMemberId: Option.Option<TeamMember.TeamMemberId> = Option.none(),
+    claimedByDisplayName: Option.Option<string> = Option.none(),
+    locationUrl: Option.Option<string> = Option.none(),
+  ) =>
+    lookupGuildId(teamId).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: ({ guild_id }) =>
+            insertEvent({
+              team_id: teamId,
+              guild_id,
+              event_type: 'coaching_status',
+              event_id: eventId,
+              event_title: title,
+              event_description: Option.none(),
+              event_image_url: Option.none(),
+              event_start_at: startAt,
+              event_end_at: Option.none(),
+              event_location: Option.none(),
+              event_location_url: locationUrl,
+              event_event_type: 'training',
+              discord_target_channel_id: Option.some(discordTargetChannelId),
+              member_group_id: Option.none(),
+              discord_role_id: Option.none(),
+              claimed_by_member_id: claimedByMemberId,
+              claimed_by_display_name: claimedByDisplayName,
+              event_all_day: false,
+            }),
+        }),
+      ),
+      catchSqlErrors,
+    );
+
   const findUnprocessed = (limit: number) => findUnprocessedEvents(limit).pipe(catchSqlErrors);
 
   const markProcessed = (id: string) => markEventProcessed({ id }).pipe(catchSqlErrors);
@@ -481,6 +522,7 @@ const make = Effect.gen(function* () {
     emitTrainingClaimRequest,
     emitTrainingClaimUpdate,
     emitUnclaimedTrainingReminder,
+    emitCoachingStatus,
     findUnprocessed,
     markProcessed,
     markFailed,

@@ -199,6 +199,7 @@ export class EventClaimInfo extends Schema.Class<EventClaimInfo>('EventClaimInfo
   claimed_by_display_name: Schema.OptionFromNullOr(Schema.String),
   claim_discord_channel_id: Schema.OptionFromNullOr(Snowflake),
   claim_discord_message_id: Schema.OptionFromNullOr(Snowflake),
+  claim_thread_id: Schema.OptionFromNullOr(Snowflake),
 }) {}
 
 export class ClaimEventNotFound extends Schema.TaggedErrorClass<ClaimEventNotFound>()(

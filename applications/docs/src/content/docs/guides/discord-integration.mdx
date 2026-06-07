@@ -91,7 +91,7 @@ Set a **system log channel** to receive a private embed for every join. The log 
 
 ## Training claim board
 
-When a training event is created, the bot posts a **claim-board message** to the owner group's Discord channel. The message shows training details and an orange **Claim** button.
+The bot posts a **claim-board message** to the owner group's Discord channel a configurable number of days before the training (default: 3 days). The message shows training details and an orange **Claim** button, and the bot automatically opens a **discussion thread** on the message so the coaching team can coordinate.
 
 A coach (any member of the training's owner group or a sub-group of it) can click **Claim** to mark themselves as responsible for running the training. The message turns green and shows the coach's name with a clickable Discord mention (for example, `**Alex** (<@123456789>)`). If the training is already claimed by someone else, the button responds with a quiet "already claimed" notice visible only to you.
 
@@ -99,8 +99,14 @@ The current claimer can click **Release** to give up the claim, returning the bo
 
 If no one has claimed a training by the time the regular RSVP reminder fires, the bot posts an additional **unclaimed training reminder** to the owner group's channel, including a jump link back to the claim-board message.
 
+On the day of the training, if the training has been claimed, the bot posts a **"today's coach is X"** announcement to the member training channel so players know who is running the session.
+
 <Aside type="note" title="Who can claim?">
   Only members (including coaches in sub-groups) of the training's **owner group** can claim or release a training. The Claim button silently rejects everyone else.
+</Aside>
+
+<Aside type="note" title="Configuring the lead time">
+  The number of days before a training the claim-board message is posted defaults to **3**. This is a per-team setting (`claim_request_days_before`) — contact your Sideline administrator to adjust it. Setting it to **0** posts the message on the day of the training.
 </Aside>
 
 ## Group channels and roles

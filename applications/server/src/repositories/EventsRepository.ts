@@ -386,6 +386,25 @@ const make = Effect.gen(function* () {
       sql`UPDATE events SET claim_discord_channel_id = ${input.channel_id}, claim_discord_message_id = ${input.message_id} WHERE id = ${input.event_id}`,
   });
 
+  const _saveClaimThreadId = SqlSchema.void({
+    Request: Schema.Struct({
+      event_id: Event.EventId,
+      thread_id: Discord.Snowflake,
+    }),
+    execute: (input) =>
+      sql`UPDATE events SET claim_thread_id = ${input.thread_id} WHERE id = ${input.event_id}`,
+  });
+
+  const _markClaimRequestSent = SqlSchema.void({
+    Request: Event.EventId,
+    execute: (id) => sql`UPDATE events SET claim_request_sent_at = now() WHERE id = ${id}`,
+  });
+
+  const _markCoachingStatusSent = SqlSchema.void({
+    Request: Event.EventId,
+    execute: (id) => sql`UPDATE events SET coaching_status_sent_at = now() WHERE id = ${id}`,
+  });
+
   const _findClaimInfo = SqlSchema.findOneOption({
     Request: Event.EventId,
     Result: Schema.Struct({
@@ -396,11 +415,13 @@ const make = Effect.gen(function* () {
       claimer_name: Schema.OptionFromNullOr(Schema.String),
       claim_discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
       claim_discord_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
+      claim_thread_id: Schema.OptionFromNullOr(Discord.Snowflake),
     }),
     execute: (id) => sql`
       SELECT e.id AS event_id, e.event_type, e.status,
              e.claimed_by, cu.name AS claimer_name,
-             e.claim_discord_channel_id, e.claim_discord_message_id
+             e.claim_discord_channel_id, e.claim_discord_message_id,
+             e.claim_thread_id
       FROM events e
       LEFT JOIN team_members ctm ON ctm.id = e.claimed_by
       LEFT JOIN users cu ON cu.id = ctm.user_id
@@ -748,6 +769,18 @@ const make = Effect.gen(function* () {
       message_id: messageId,
     }).pipe(catchSqlErrors);
 
+  const saveClaimThread = (eventId: Event.EventId, threadId: Discord.Snowflake) =>
+    _saveClaimThreadId({
+      event_id: eventId,
+      thread_id: threadId,
+    }).pipe(catchSqlErrors);
+
+  const markClaimRequestSent = (eventId: Event.EventId) =>
+    _markClaimRequestSent(eventId).pipe(catchSqlErrors);
+
+  const markCoachingStatusSent = (eventId: Event.EventId) =>
+    _markCoachingStatusSent(eventId).pipe(catchSqlErrors);
+
   const findClaimInfo = (eventId: Event.EventId) =>
     _findClaimInfo(eventId).pipe(
       Effect.map(
@@ -761,6 +794,7 @@ const make = Effect.gen(function* () {
               claimed_by_display_name: row.claimer_name,
               claim_discord_channel_id: row.claim_discord_channel_id,
               claim_discord_message_id: row.claim_discord_message_id,
+              claim_thread_id: row.claim_thread_id,
             }),
         ),
       ),
@@ -822,6 +856,8 @@ const make = Effect.gen(function* () {
     findEventsByChannelId,
     findAllChannelsWithStoredMessages,
     markReminderSent,
+    markClaimRequestSent,
+    markCoachingStatusSent,
     markTrainingAutoLogged,
     findEndedTrainingsForAutoLog,
     markEventSeriesModified,
@@ -831,6 +867,7 @@ const make = Effect.gen(function* () {
     claimTraining,
     unclaimTraining,
     saveClaimDiscordMessage,
+    saveClaimThread,
     findClaimInfo,
   };
 });

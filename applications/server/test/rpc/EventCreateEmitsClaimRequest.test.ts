@@ -51,6 +51,7 @@ type EmittedClaimRequest = {
 
 let emittedEventCreated: Event.EventId[];
 let emittedClaimRequests: EmittedClaimRequest[];
+let markedClaimRequestSent: Event.EventId[];
 
 // Controls whether the owner group has a Discord channel mapping
 let ownerGroupChannelMapping: Option.Option<{
@@ -61,6 +62,7 @@ let ownerGroupChannelMapping: Option.Option<{
 const resetStores = () => {
   emittedEventCreated = [];
   emittedClaimRequests = [];
+  markedClaimRequestSent = [];
   ownerGroupChannelMapping = Option.some({
     discord_channel_id: Option.some(OWNER_CHANNEL_ID),
     discord_role_id: Option.some(OWNER_ROLE_ID),
@@ -201,6 +203,10 @@ const makeMockEventsRepository = (
     unclaimTraining: () => Effect.succeed(Option.none()),
     findClaimInfo: () => Effect.succeed(Option.none()),
     saveClaimDiscordMessage: () => Effect.void,
+    markClaimRequestSent: (eventId: Event.EventId) => {
+      markedClaimRequestSent.push(eventId);
+      return Effect.void;
+    },
   } as any);
 
 const makeMockSyncEventsRepository = () =>
@@ -299,7 +305,11 @@ const makeMockDiscordChannelMappingRepository = () =>
     findAllByTeam: () => Effect.succeed([]),
   } as any);
 
-const makeStaticLayers = () =>
+// A large claim_request_days_before value that makes ANY date be "in window".
+// Used for the "should emit immediately" test cases.
+const LARGE_LEAD_TIME = 99999;
+
+const makeStaticLayers = (claimRequestDaysBefore = LARGE_LEAD_TIME) =>
   Layer.mergeAll(
     Layer.succeed(GroupsRepository, {
       getDescendantMemberIds: () => Effect.succeed([]),
@@ -319,7 +329,12 @@ const makeStaticLayers = () =>
       getAncestors: () => Effect.succeed([]),
     } as any),
     Layer.succeed(TeamSettingsRepository, {
-      findByTeamId: () => Effect.succeed(Option.none()),
+      findByTeamId: () =>
+        Effect.succeed(
+          Option.some({
+            claim_request_days_before: claimRequestDaysBefore,
+          }),
+        ),
       findByTeam: () => Effect.succeed(Option.none()),
       upsert: () => Effect.die(new Error('Not implemented')),
       getHorizonDays: () => Effect.succeed(30),
@@ -351,6 +366,7 @@ const makeStaticLayers = () =>
 // Build the full RPC test layer with owner-group channel mapping
 const buildRpcTestLayer = (
   ownerGroupId: Option.Option<GroupModel.GroupId> = Option.some(OWNER_GROUP_ID),
+  claimRequestDaysBefore = LARGE_LEAD_TIME,
 ) =>
   EventsRpcLive.pipe(
     Layer.provide(makeMockEventsRepository(ownerGroupId)),
@@ -358,7 +374,7 @@ const buildRpcTestLayer = (
     Layer.provide(makeMockTeamMembersRepository()),
     Layer.provide(makeMockTrainingTypesRepository(ownerGroupId)),
     Layer.provide(makeMockDiscordChannelMappingRepository()),
-    Layer.provide(makeStaticLayers()),
+    Layer.provide(makeStaticLayers(claimRequestDaysBefore)),
     Layer.provide(makeMockSqlClientLayer()),
   );
 
@@ -372,12 +388,12 @@ afterEach(() => {
 
 // ---------------------------------------------------------------------------
 // Case 12: Creating a training with owner_group_id resolving to an owners channel
-//          emits training_claim_request
+//          emits training_claim_request WHEN within the lead-time window
 // ---------------------------------------------------------------------------
 
 describe('Event/CreateEvent — training_claim_request emission', () => {
   itEffect.effect(
-    'emits training_claim_request when creating a training with owner-group channel',
+    'emits training_claim_request when creating a training with owner-group channel (in-window via large lead-time)',
     () =>
       Effect.scoped(
         (RpcTest.makeClient(EventRpcGroup.EventRpcGroup) as Effect.Effect<any, never, any>).pipe(
@@ -400,13 +416,56 @@ describe('Event/CreateEvent — training_claim_request emission', () => {
       ).pipe(
         Effect.tap((_result) =>
           Effect.sync(() => {
-            // The training_claim_request must have been emitted
+            // The training_claim_request must have been emitted immediately
             expect(emittedClaimRequests).toHaveLength(1);
             expect(emittedClaimRequests[0].eventId).toBe(NEW_EVENT_ID);
             expect(emittedClaimRequests[0].discordTargetChannelId).toBe(OWNER_CHANNEL_ID);
+            // markClaimRequestSent must have been called to prevent cron double-posting
+            expect(markedClaimRequestSent).toHaveLength(1);
+            expect(markedClaimRequestSent[0]).toBe(NEW_EVENT_ID);
           }),
         ),
         Effect.provide(buildRpcTestLayer()),
+        Effect.asVoid,
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // Case: far-future training with DEFAULT small lead-time does NOT emit on creation
+  // ---------------------------------------------------------------------------
+
+  itEffect.effect(
+    'does NOT emit training_claim_request when training is far future (outside default lead-time window)',
+    () =>
+      Effect.scoped(
+        (RpcTest.makeClient(EventRpcGroup.EventRpcGroup) as Effect.Effect<any, never, any>).pipe(
+          Effect.flatMap(
+            (rpc: any) =>
+              rpc['Event/CreateEvent']({
+                guild_id: GUILD_ID,
+                discord_user_id: CREATOR_DISCORD_ID,
+                event_type: 'training' as Event.EventType,
+                title: 'Far Future Training',
+                start_at: '2099-12-31 18:00',
+                end_at: Option.none<string>(),
+                location: Option.none<string>(),
+                location_url: Option.none<string>(),
+                description: Option.none<string>(),
+                training_type_id: Option.some(TRAINING_TYPE_ID),
+              }) as Effect.Effect<EventRpcModels.CreateEventResult, unknown, never>,
+          ),
+        ),
+      ).pipe(
+        Effect.tap((_result) =>
+          Effect.sync(() => {
+            // With default 3-day lead-time, a far-future date should NOT emit.
+            // The cron will handle it when the window opens.
+            expect(emittedClaimRequests).toHaveLength(0);
+            expect(markedClaimRequestSent).toHaveLength(0);
+          }),
+        ),
+        // Use default claim_request_days_before = 3 (via Option.none() → default)
+        Effect.provide(buildRpcTestLayer(Option.some(OWNER_GROUP_ID), 3)),
         Effect.asVoid,
       ),
   );
@@ -438,6 +497,7 @@ describe('Event/CreateEvent — training_claim_request emission', () => {
       Effect.tap((_result) =>
         Effect.sync(() => {
           expect(emittedClaimRequests).toHaveLength(0);
+          expect(markedClaimRequestSent).toHaveLength(0);
           // event_created must still have been emitted
           expect(emittedEventCreated).toHaveLength(1);
         }),
@@ -475,6 +535,7 @@ describe('Event/CreateEvent — training_claim_request emission', () => {
         Effect.sync(() => {
           // No training_claim_request: training type has no owner group
           expect(emittedClaimRequests).toHaveLength(0);
+          expect(markedClaimRequestSent).toHaveLength(0);
         }),
       ),
       // Provide layer where training type has no owner_group
@@ -483,38 +544,43 @@ describe('Event/CreateEvent — training_claim_request emission', () => {
     ),
   );
 
-  itEffect.effect('captures locationUrl in emitted training_claim_request', () =>
-    Effect.scoped(
-      (RpcTest.makeClient(EventRpcGroup.EventRpcGroup) as Effect.Effect<any, never, any>).pipe(
-        Effect.flatMap(
-          (rpc: any) =>
-            rpc['Event/CreateEvent']({
-              guild_id: GUILD_ID,
-              discord_user_id: CREATOR_DISCORD_ID,
-              event_type: 'training' as Event.EventType,
-              title: 'Training With Location URL',
-              start_at: '2099-12-31 18:00',
-              end_at: Option.none<string>(),
-              location: Option.some('Main Field'),
-              location_url: Option.some('https://maps.google.com/x'),
-              description: Option.none<string>(),
-              training_type_id: Option.some(TRAINING_TYPE_ID),
-            }) as Effect.Effect<EventRpcModels.CreateEventResult, unknown, never>,
+  itEffect.effect(
+    'captures locationUrl in emitted training_claim_request (in-window via large lead-time)',
+    () =>
+      Effect.scoped(
+        (RpcTest.makeClient(EventRpcGroup.EventRpcGroup) as Effect.Effect<any, never, any>).pipe(
+          Effect.flatMap(
+            (rpc: any) =>
+              rpc['Event/CreateEvent']({
+                guild_id: GUILD_ID,
+                discord_user_id: CREATOR_DISCORD_ID,
+                event_type: 'training' as Event.EventType,
+                title: 'Training With Location URL',
+                start_at: '2099-12-31 18:00',
+                end_at: Option.none<string>(),
+                location: Option.some('Main Field'),
+                location_url: Option.some('https://maps.google.com/x'),
+                description: Option.none<string>(),
+                training_type_id: Option.some(TRAINING_TYPE_ID),
+              }) as Effect.Effect<EventRpcModels.CreateEventResult, unknown, never>,
+          ),
         ),
+      ).pipe(
+        Effect.tap((_result) =>
+          Effect.sync(() => {
+            expect(emittedClaimRequests).toHaveLength(1);
+            expect(emittedClaimRequests[0].eventId).toBe(NEW_EVENT_ID);
+            expect(emittedClaimRequests[0].locationUrl).toEqual(
+              Option.some('https://maps.google.com/x'),
+            );
+            // markClaimRequestSent must have been called
+            expect(markedClaimRequestSent).toHaveLength(1);
+            expect(markedClaimRequestSent[0]).toBe(NEW_EVENT_ID);
+          }),
+        ),
+        Effect.provide(buildRpcTestLayer()),
+        Effect.asVoid,
       ),
-    ).pipe(
-      Effect.tap((_result) =>
-        Effect.sync(() => {
-          expect(emittedClaimRequests).toHaveLength(1);
-          expect(emittedClaimRequests[0].eventId).toBe(NEW_EVENT_ID);
-          expect(emittedClaimRequests[0].locationUrl).toEqual(
-            Option.some('https://maps.google.com/x'),
-          );
-        }),
-      ),
-      Effect.provide(buildRpcTestLayer()),
-      Effect.asVoid,
-    ),
   );
 
   itEffect.effect(
@@ -545,6 +611,8 @@ describe('Event/CreateEvent — training_claim_request emission', () => {
         Effect.tap((_result) =>
           Effect.sync(() => {
             expect(emittedClaimRequests).toHaveLength(0);
+            // No channel means no emit and no mark
+            expect(markedClaimRequestSent).toHaveLength(0);
           }),
         ),
         Effect.provide(buildRpcTestLayer()),

@@ -29,11 +29,13 @@ import {
 } from '~/repositories/WeeklySummaryRepository.js';
 import { AgeCheckCron } from '~/services/AgeCheckCron.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
+import { CoachingStatusCron } from '~/services/CoachingStatusCron.js';
 import { EventHorizonCron } from '~/services/EventHorizonCron.js';
 import { EventStartCron } from '~/services/EventStartCron.js';
 import { PaymentReminderCron } from '~/services/PaymentReminderCron.js';
 import { RsvpReminderCron } from '~/services/RsvpReminderCron.js';
 import { TrainingAutoLogCron } from '~/services/TrainingAutoLogCron.js';
+import { TrainingClaimRequestCron } from '~/services/TrainingClaimRequestCron.js';
 import { WeeklySummaryCron } from '~/services/WeeklySummaryCron.js';
 
 const BasePg: Config.Wrap<PgClient.PgClientConfig> = {
@@ -165,6 +167,32 @@ const PaymentReminderCronEffect = PaymentReminderCron.asEffect().pipe(
   ),
 );
 
+const ClaimRequestRepositoriesLive = Layer.mergeAll(
+  EventsRepository.Default,
+  EventSyncEventsRepository.Default,
+  TeamSettingsRepository.Default,
+  DiscordChannelMappingRepository.Default,
+);
+
+const ClaimRequestCronEffect = TrainingClaimRequestCron.asEffect().pipe(
+  Effect.provide(
+    ClaimRequestRepositoriesLive.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
+  ),
+);
+
+const CoachingStatusRepositoriesLive = Layer.mergeAll(
+  EventsRepository.Default,
+  EventSyncEventsRepository.Default,
+  TeamSettingsRepository.Default,
+  DiscordChannelMappingRepository.Default,
+);
+
+const CoachingStatusCronEffect = CoachingStatusCron.asEffect().pipe(
+  Effect.provide(
+    CoachingStatusRepositoriesLive.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
+  ),
+);
+
 Effect.Do.pipe(
   Effect.tap(() => (env.DATABASE_MAIN !== env.DATABASE_NAME ? CreateDb : Effect.void)),
   Effect.tap(() => MigrateBefore),
@@ -181,6 +209,8 @@ Effect.Do.pipe(
         StartCron,
         WeeklySummaryCronEffect,
         PaymentReminderCronEffect,
+        ClaimRequestCronEffect,
+        CoachingStatusCronEffect,
       ],
       {
         concurrency: 10,

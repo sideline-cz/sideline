@@ -1299,6 +1299,18 @@ export const EventsRpcLive = rpcHandlers.pipe(
         events.saveClaimDiscordMessage(event_id, channel_id, message_id),
   ),
   Effect.let(
+    'Event/SaveClaimThreadId',
+    ({ events }) =>
+      ({
+        event_id,
+        thread_id,
+      }: {
+        readonly event_id: Event.EventId;
+        readonly thread_id: Discord.Snowflake;
+      }) =>
+        events.saveClaimThread(event_id, thread_id),
+  ),
+  Effect.let(
     'Event/GetClaimInfo',
     ({ events }) =>
       ({ event_id }: { readonly event_id: Event.EventId }) =>

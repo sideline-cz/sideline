@@ -330,6 +330,7 @@ const makeMockEventsRepository = () =>
             claimed_by_display_name: Option.none(),
             claim_discord_channel_id: Option.none(),
             claim_discord_message_id: Option.none(),
+            claim_thread_id: Option.none(),
           }),
         ),
       );
