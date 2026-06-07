@@ -85,7 +85,7 @@ services:
       SERVER_URL: ${SERVICE_URL_PROXY}/api
       PORT: 3000
       WEB_URL: ${SERVICE_URL_PROXY}
-      OTEL_EXPORTER_OTLP_ENDPOINT: https://otelcollectorhttp-ccogw4cogg00wwowc0s4c0cs.majksa.net/
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${SERVICE_URL_PROXY}/otel
       OTEL_SERVICE_NAME: sideline-web
       APP_ENV: preview
       APP_ORIGIN: ${SERVICE_FQDN_PROXY}
