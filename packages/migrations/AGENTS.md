@@ -33,7 +33,8 @@ Rules when adding a new migration file:
 
 1. **Run `ls -1 packages/migrations/src/before/ | sort | tail -1`** before choosing a filename. The new timestamp must be strictly greater than that last entry. Do not pick a "round" number from the past (e.g. `1747700000`) when the latest applied id is already `1778716800` — pick something like `1779000000` (greater than every existing id, rounded up from `Date.now() / 1000` is fine).
 2. **Never renumber an existing migration** to fix this — the old timestamp is already recorded as applied in preview/staging DBs, so renaming the file orphans the recorded row. Add a new migration with a strictly-greater timestamp instead.
-3. This rule applies to both `src/before/` and any future migration directories — the runner uses one monotonically-increasing id sequence per directory.
+3. **When backfilling a skipped migration, the backfill MUST be idempotent.** The original migration already ran in every environment whose highest applied id was below the original timestamp, so the backfill re-runs the same DDL on those databases. Use `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, and `ADD COLUMN IF NOT EXISTS` so the re-run is a no-op where the object already exists and creates it where it is missing. Name the file `{newHigherTimestamp}_<original_description>_if_not_exists.ts` and add a header comment naming the original migration it re-runs. Reference: `1789200000_create_team_onboarding_tokens_if_not_exists.ts` backfills the skipped `1747700000_create_team_onboarding_tokens`.
+4. This rule applies to both `src/before/` and any future migration directories — the runner uses one monotonically-increasing id sequence per directory.
 
 ### Adding Columns to Existing Tables
 
