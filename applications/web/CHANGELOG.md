@@ -1,5 +1,11 @@
 # @sideline/web
 
+## 0.18.1
+
+### Patch Changes
+
+- [#365](https://github.com/maxa-ondrej/sideline/pull/365) [`c931704`](https://github.com/maxa-ondrej/sideline/commit/c9317041669c68437576931e74832f163a4b521b) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Route frontend OTEL telemetry through the nginx proxy to avoid cross-origin issues with the SigNoz collector. The browser OTEL exporter now posts to the same-origin `/otel/` path which nginx proxies to the collector, eliminating CORS preflight failures. Also bumps server to pick up the migrations 0.18.1 patch.
+
 ## 0.18.0
 
 ### Minor Changes
