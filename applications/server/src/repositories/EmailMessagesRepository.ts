@@ -148,7 +148,21 @@ const make = Effect.gen(function* () {
     `,
   });
 
-  const rejectQuery = SqlSchema.findOneOption({
+  const sendOriginalQuery = SqlSchema.findOneOption({
+    Request: Schema.Struct({
+      id: EmailForwarding.EmailMessageId,
+      by: Schema.String,
+    }),
+    Result: ConditionalId,
+    execute: (input) => sql`
+      UPDATE email_messages
+      SET status = 'send_original', approved_by = ${input.by}, updated_at = now()
+      WHERE id = ${input.id}::uuid AND status = 'pending_approval'
+      RETURNING id
+    `,
+  });
+
+  const dismissQuery = SqlSchema.findOneOption({
     Request: Schema.Struct({
       id: EmailForwarding.EmailMessageId,
       by: Schema.String,
@@ -216,8 +230,11 @@ const make = Effect.gen(function* () {
   const approve = (id: EmailForwarding.EmailMessageId, by: string) =>
     approveQuery({ id, by }).pipe(catchSqlErrors, Effect.map(Option.map((r) => r.id)));
 
-  const reject = (id: EmailForwarding.EmailMessageId, by: string) =>
-    rejectQuery({ id, by }).pipe(catchSqlErrors, Effect.map(Option.map((r) => r.id)));
+  const sendOriginal = (id: EmailForwarding.EmailMessageId, by: string) =>
+    sendOriginalQuery({ id, by }).pipe(catchSqlErrors, Effect.map(Option.map((r) => r.id)));
+
+  const dismiss = (id: EmailForwarding.EmailMessageId, by: string) =>
+    dismissQuery({ id, by }).pipe(catchSqlErrors, Effect.map(Option.map((r) => r.id)));
 
   const setPosted = (
     id: EmailForwarding.EmailMessageId,
@@ -234,7 +251,8 @@ const make = Effect.gen(function* () {
     updateSummary,
     incrementAttemptsAndMaybeFail,
     approve,
-    reject,
+    sendOriginal,
+    dismiss,
     setPosted,
   } as const;
 });

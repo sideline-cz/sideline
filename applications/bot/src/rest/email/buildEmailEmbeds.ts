@@ -73,6 +73,12 @@ export const buildApprovalComponents = (
     },
     {
       type: 2,
+      style: 2,
+      label: m.bot_email_btn_send_original({}, { locale }),
+      custom_id: `email-send-original:${teamId}:${emailId}`,
+    },
+    {
+      type: 2,
       style: 4,
       label: m.bot_email_btn_reject({}, { locale }),
       custom_id: `email-reject:${teamId}:${emailId}`,
@@ -102,7 +108,9 @@ export const buildSummaryEmbed = (
       ? m.bot_email_summary_title({ subject: event.subject }, { locale })
       : m.bot_email_summary_title_fallback({}, { locale });
 
-  const description = Option.getOrElse(event.summary, () => event.body);
+  const summaryRaw = Option.getOrElse(event.summary, () => event.body);
+  const truncatedMarker = m.bot_email_original_truncated({}, { locale });
+  const description = truncateBody(summaryRaw, truncatedMarker);
 
   return {
     color: SUMMARY_COLOR,

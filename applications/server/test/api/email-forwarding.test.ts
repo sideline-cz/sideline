@@ -373,7 +373,13 @@ const MockEmailMessagesRepositoryLayer = Layer.succeed(EmailMessagesRepository, 
     emailStore.set(id, { ...row, status: 'approved', approved_by: Option.some(by) });
     return Effect.succeed(Option.some(id));
   },
-  reject: (id: EmailForwarding.EmailMessageId, by: string) => {
+  sendOriginal: (id: EmailForwarding.EmailMessageId, by: string) => {
+    const row = emailStore.get(id);
+    if (row?.status !== 'pending_approval') return Effect.succeed(Option.none());
+    emailStore.set(id, { ...row, status: 'send_original', approved_by: Option.some(by) });
+    return Effect.succeed(Option.some(id));
+  },
+  dismiss: (id: EmailForwarding.EmailMessageId, by: string) => {
     const row = emailStore.get(id);
     if (row?.status !== 'pending_approval') return Effect.succeed(Option.none());
     emailStore.set(id, { ...row, status: 'rejected', rejected_by: Option.some(by) });
@@ -762,6 +768,9 @@ const summaryUrl = (teamId: string, emailId: string) =>
 const approveUrl = (teamId: string, emailId: string) =>
   `http://localhost/teams/${teamId}/emails/${emailId}/approve`;
 
+const sendOriginalUrl = (teamId: string, emailId: string) =>
+  `http://localhost/teams/${teamId}/emails/${emailId}/send-original`;
+
 const rejectUrl = (teamId: string, emailId: string) =>
   `http://localhost/teams/${teamId}/emails/${emailId}/reject`;
 
@@ -953,11 +962,74 @@ describe('approveEmail — POST /teams/:teamId/emails/:emailId/approve', () => {
 });
 
 // ---------------------------------------------------------------------------
+// sendOriginalEmail — POST /teams/:teamId/emails/:emailId/send-original
+// ---------------------------------------------------------------------------
+
+describe('sendOriginalEmail — POST /teams/:teamId/emails/:emailId/send-original', () => {
+  it('coach sends original on pending email → 200 with outcome=sent_original, enqueues post_original', async () => {
+    const response = await handler(
+      new Request(sendOriginalUrl(TEAM_ID, EMAIL_ID_PENDING), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer coach-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.outcome).toBe('sent_original');
+    expect(emailStore.get(EMAIL_ID_PENDING)?.status).toBe('send_original');
+    expect(enqueuedSyncEvents.some((e) => e.kind === 'post_original')).toBe(true);
+  });
+
+  it('non-coach gets 403', async () => {
+    const response = await handler(
+      new Request(sendOriginalUrl(TEAM_ID, EMAIL_ID_PENDING), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer member-token' },
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect(emailStore.get(EMAIL_ID_PENDING)?.status).toBe('pending_approval');
+  });
+
+  it('unknown emailId returns 404', async () => {
+    const response = await handler(
+      new Request(sendOriginalUrl(TEAM_ID, BOGUS_EMAIL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer coach-token' },
+      }),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('already-handled email returns 200 with outcome=already_handled (idempotent)', async () => {
+    // First call
+    await handler(
+      new Request(sendOriginalUrl(TEAM_ID, EMAIL_ID_PENDING), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer coach-token' },
+      }),
+    );
+    // Second call
+    const response = await handler(
+      new Request(sendOriginalUrl(TEAM_ID, EMAIL_ID_PENDING), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer coach-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.outcome).toBe('already_handled');
+    // Only one post_original event
+    expect(enqueuedSyncEvents.filter((e) => e.kind === 'post_original')).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // rejectEmail — POST /teams/:teamId/emails/:emailId/reject
 // ---------------------------------------------------------------------------
 
 describe('rejectEmail — POST /teams/:teamId/emails/:emailId/reject', () => {
-  it('coach rejects pending email → 200 with outcome=rejected, enqueues post_original', async () => {
+  it('coach dismisses pending email → 200 with outcome=dismissed, NO sync event enqueued', async () => {
     const response = await handler(
       new Request(rejectUrl(TEAM_ID, EMAIL_ID_PENDING), {
         method: 'POST',
@@ -966,9 +1038,10 @@ describe('rejectEmail — POST /teams/:teamId/emails/:emailId/reject', () => {
     );
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.outcome).toBe('rejected');
+    expect(body.outcome).toBe('dismissed');
     expect(emailStore.get(EMAIL_ID_PENDING)?.status).toBe('rejected');
-    expect(enqueuedSyncEvents.some((e) => e.kind === 'post_original')).toBe(true);
+    // dismiss does NOT enqueue any sync event
+    expect(enqueuedSyncEvents).toHaveLength(0);
   });
 
   it('non-coach gets 403', async () => {
@@ -979,6 +1052,37 @@ describe('rejectEmail — POST /teams/:teamId/emails/:emailId/reject', () => {
       }),
     );
     expect(response.status).toBe(403);
+  });
+
+  it('unknown emailId returns 404 EmailMessageNotFound', async () => {
+    const response = await handler(
+      new Request(rejectUrl(TEAM_ID, BOGUS_EMAIL_ID), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer coach-token' },
+      }),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('already-handled email returns 200 with outcome=already_handled (idempotent)', async () => {
+    // First call
+    await handler(
+      new Request(rejectUrl(TEAM_ID, EMAIL_ID_PENDING), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer coach-token' },
+      }),
+    );
+    // Second call
+    const response = await handler(
+      new Request(rejectUrl(TEAM_ID, EMAIL_ID_PENDING), {
+        method: 'POST',
+        headers: { Authorization: 'Bearer coach-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.outcome).toBe('already_handled');
+    expect(enqueuedSyncEvents).toHaveLength(0);
   });
 });
 

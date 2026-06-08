@@ -31,7 +31,8 @@ export const MockEmailMessagesRepositoryLayer = Layer.succeed(EmailMessagesRepos
     'MockEmailMessagesRepository.incrementAttemptsAndMaybeFail not implemented',
   ),
   approve: () => Effect.succeed(Option.none()),
-  reject: () => Effect.succeed(Option.none()),
+  sendOriginal: () => Effect.succeed(Option.none()),
+  dismiss: () => Effect.succeed(Option.none()),
   setPosted: die('MockEmailMessagesRepository.setPosted not implemented'),
 } as never);
 
@@ -45,7 +46,8 @@ export const MockEmailAttachmentsRepositoryLayer = Layer.succeed(EmailAttachment
 export const MockEmailApprovalServiceLayer = Layer.succeed(EmailApprovalService, {
   _tag: 'api/EmailApprovalService' as const,
   approve: die('MockEmailApprovalService.approve not implemented'),
-  reject: die('MockEmailApprovalService.reject not implemented'),
+  sendOriginal: die('MockEmailApprovalService.sendOriginal not implemented'),
+  dismiss: die('MockEmailApprovalService.dismiss not implemented'),
 } as never);
 
 export const MockEmailLayers = Layer.mergeAll(

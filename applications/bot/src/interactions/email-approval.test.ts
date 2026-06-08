@@ -6,7 +6,11 @@ import { Interaction, MessageComponentData } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
 import { Effect, Layer, Schema } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
-import { EmailApproveButton, EmailRejectButton } from '~/interactions/email-approval.js';
+import {
+  EmailApproveButton,
+  EmailRejectButton,
+  EmailSendOriginalButton,
+} from '~/interactions/email-approval.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 // ---------------------------------------------------------------------------
@@ -104,13 +108,15 @@ const makeRestStub = (options: RestStubOptions = {}) => {
 
 interface SyncRpcOptions {
   'Email/RecordApproval'?: ReturnType<typeof vi.fn>;
-  'Email/RecordRejection'?: ReturnType<typeof vi.fn>;
+  'Email/RecordReject'?: ReturnType<typeof vi.fn>;
+  'Email/RecordSendOriginal'?: ReturnType<typeof vi.fn>;
 }
 
 const makeRpcStub = (options: SyncRpcOptions = {}) => {
   const defaults: Record<string, ReturnType<typeof vi.fn>> = {
     'Email/RecordApproval': vi.fn(() => Effect.succeed({ outcome: 'approved' })),
-    'Email/RecordRejection': vi.fn(() => Effect.succeed({ outcome: 'rejected' })),
+    'Email/RecordReject': vi.fn(() => Effect.succeed({ outcome: 'dismissed' })),
+    'Email/RecordSendOriginal': vi.fn(() => Effect.succeed({ outcome: 'sent_original' })),
   };
 
   const rpc = new Proxy({} as any, {
@@ -274,8 +280,8 @@ describe('EmailApproveButton', () => {
 
 describe('EmailRejectButton', () => {
   it('custom_id parsing — teamId and emailId are correctly extracted', async () => {
-    const rejectFn = vi.fn(() => Effect.succeed({ outcome: 'rejected' }));
-    const rpcStub = makeRpcStub({ 'Email/RecordRejection': rejectFn });
+    const rejectFn = vi.fn(() => Effect.succeed({ outcome: 'dismissed' }));
+    const rpcStub = makeRpcStub({ 'Email/RecordReject': rejectFn });
     const restStub = makeRestStub();
     const interaction = makeComponentInteraction(`email-reject:${TEAM_ID}:${EMAIL_ID}`);
 
@@ -308,21 +314,34 @@ describe('EmailRejectButton', () => {
     expect((response as any).data?.flags).toBe(DiscordTypes.MessageFlags.Ephemeral);
   });
 
-  it('rejected outcome — updateOriginalWebhookMessage called', async () => {
+  it('dismissed outcome — updateOriginalWebhookMessage called, createMessage never called', async () => {
     const rpcStub = makeRpcStub({
-      'Email/RecordRejection': vi.fn(() => Effect.succeed({ outcome: 'rejected' })),
+      'Email/RecordReject': vi.fn(() => Effect.succeed({ outcome: 'dismissed' })),
     });
     const restStub = makeRestStub();
+    const createMessageFn = vi.fn(() => Effect.succeed(undefined));
+    const layer = Layer.succeed(
+      DiscordREST,
+      new Proxy({} as InstanceType<typeof DiscordREST>, {
+        get: (_target, prop: string) => {
+          if (prop === 'updateOriginalWebhookMessage') return restStub.updateOriginalWebhookMessage;
+          if (prop === 'updateMessage') return restStub.updateMessage;
+          if (prop === 'createMessage') return createMessageFn;
+          return () => Effect.succeed(undefined);
+        },
+      }),
+    );
     const interaction = makeComponentInteraction(`email-reject:${TEAM_ID}:${EMAIL_ID}`);
 
-    await runHandler(EmailRejectButton, restStub.layer, rpcStub.layer, interaction);
+    await runHandler(EmailRejectButton, layer, rpcStub.layer, interaction);
 
     expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    expect(createMessageFn).not.toHaveBeenCalled();
   });
 
   it('already_handled outcome — updateOriginalWebhookMessage called', async () => {
     const rpcStub = makeRpcStub({
-      'Email/RecordRejection': vi.fn(() => Effect.succeed({ outcome: 'already_handled' })),
+      'Email/RecordReject': vi.fn(() => Effect.succeed({ outcome: 'already_handled' })),
     });
     const restStub = makeRestStub();
     const interaction = makeComponentInteraction(`email-reject:${TEAM_ID}:${EMAIL_ID}`);
@@ -334,7 +353,7 @@ describe('EmailRejectButton', () => {
 
   it('EmailApprovalForbidden — updateOriginalWebhookMessage called with not-authorized', async () => {
     const rpcStub = makeRpcStub({
-      'Email/RecordRejection': vi.fn(() =>
+      'Email/RecordReject': vi.fn(() =>
         Effect.fail({ _tag: 'EmailApprovalForbidden', message: 'Not a coach' } as any),
       ),
     });
@@ -348,7 +367,7 @@ describe('EmailRejectButton', () => {
 
   it('EmailRpcMessageNotFound — updateOriginalWebhookMessage called with not-found', async () => {
     const rpcStub = makeRpcStub({
-      'Email/RecordRejection': vi.fn(() =>
+      'Email/RecordReject': vi.fn(() =>
         Effect.fail({ _tag: 'EmailRpcMessageNotFound', message: 'Email not found' } as any),
       ),
     });
@@ -360,9 +379,9 @@ describe('EmailRejectButton', () => {
     expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
   });
 
-  it('rejected — updateMessage called on original message to disable buttons with allowed_mentions', async () => {
+  it('dismissed — updateMessage called on original message to disable buttons with allowed_mentions', async () => {
     const rpcStub = makeRpcStub({
-      'Email/RecordRejection': vi.fn(() => Effect.succeed({ outcome: 'rejected' })),
+      'Email/RecordReject': vi.fn(() => Effect.succeed({ outcome: 'dismissed' })),
     });
     const restStub = makeRestStub();
     const interaction = makeComponentInteraction(`email-reject:${TEAM_ID}:${EMAIL_ID}`);
@@ -374,5 +393,114 @@ describe('EmailRejectButton', () => {
       MESSAGE_ID,
       expect.objectContaining({ allowed_mentions: { parse: [] } }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — EmailSendOriginalButton
+// ---------------------------------------------------------------------------
+
+describe('EmailSendOriginalButton', () => {
+  it('custom_id parsing — teamId and emailId are correctly extracted', async () => {
+    const sendOriginalFn = vi.fn(() => Effect.succeed({ outcome: 'sent_original' }));
+    const rpcStub = makeRpcStub({ 'Email/RecordSendOriginal': sendOriginalFn });
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-send-original:${TEAM_ID}:${EMAIL_ID}`);
+
+    await runHandler(EmailSendOriginalButton, restStub.layer, rpcStub.layer, interaction);
+
+    expect(sendOriginalFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        team_id: decodeTeamId(TEAM_ID),
+        email_id: decodeEmailId(EMAIL_ID),
+        discord_user_id: USER_DISCORD_ID,
+      }),
+    );
+  });
+
+  it('happy path — returns DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE with Ephemeral flag', async () => {
+    const rpcStub = makeRpcStub();
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-send-original:${TEAM_ID}:${EMAIL_ID}`);
+
+    const response = await runHandler(
+      EmailSendOriginalButton,
+      restStub.layer,
+      rpcStub.layer,
+      interaction,
+    );
+
+    expect((response as any).type).toBe(
+      DiscordTypes.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+    );
+    expect((response as any).data?.flags).toBe(DiscordTypes.MessageFlags.Ephemeral);
+  });
+
+  it('sent_original outcome — updateOriginalWebhookMessage called with success message', async () => {
+    const rpcStub = makeRpcStub({
+      'Email/RecordSendOriginal': vi.fn(() => Effect.succeed({ outcome: 'sent_original' })),
+    });
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-send-original:${TEAM_ID}:${EMAIL_ID}`);
+
+    await runHandler(EmailSendOriginalButton, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+  });
+
+  it('sent_original — updateMessage called on original message to disable buttons', async () => {
+    const rpcStub = makeRpcStub({
+      'Email/RecordSendOriginal': vi.fn(() => Effect.succeed({ outcome: 'sent_original' })),
+    });
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-send-original:${TEAM_ID}:${EMAIL_ID}`);
+
+    await runHandler(EmailSendOriginalButton, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateMessage).toHaveBeenCalledWith(
+      CHANNEL_ID,
+      MESSAGE_ID,
+      expect.objectContaining({ allowed_mentions: { parse: [] } }),
+    );
+  });
+
+  it('already_handled outcome — updateOriginalWebhookMessage called', async () => {
+    const rpcStub = makeRpcStub({
+      'Email/RecordSendOriginal': vi.fn(() => Effect.succeed({ outcome: 'already_handled' })),
+    });
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-send-original:${TEAM_ID}:${EMAIL_ID}`);
+
+    await runHandler(EmailSendOriginalButton, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+  });
+
+  it('EmailApprovalForbidden — updateOriginalWebhookMessage called with not-authorized', async () => {
+    const rpcStub = makeRpcStub({
+      'Email/RecordSendOriginal': vi.fn(() =>
+        Effect.fail({ _tag: 'EmailApprovalForbidden', message: 'Not a coach' } as any),
+      ),
+    });
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-send-original:${TEAM_ID}:${EMAIL_ID}`);
+
+    await runHandler(EmailSendOriginalButton, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+  });
+
+  it('EmailRpcMessageNotFound — updateOriginalWebhookMessage called with not-found', async () => {
+    const rpcStub = makeRpcStub({
+      'Email/RecordSendOriginal': vi.fn(() =>
+        Effect.fail({ _tag: 'EmailRpcMessageNotFound', message: 'Email not found' } as any),
+      ),
+    });
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-send-original:${TEAM_ID}:${EMAIL_ID}`);
+
+    await runHandler(EmailSendOriginalButton, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
   });
 });

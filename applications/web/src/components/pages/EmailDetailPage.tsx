@@ -46,6 +46,7 @@ export function EmailDetailPage({
   const [summaryText, setSummaryText] = React.useState(Option.getOrElse(email.summary, () => ''));
   const [savingSummary, setSavingSummary] = React.useState(false);
   const [approving, setApproving] = React.useState(false);
+  const [sendingOriginal, setSendingOriginal] = React.useState(false);
   const [rejecting, setRejecting] = React.useState(false);
   const [showRejectConfirm, setShowRejectConfirm] = React.useState(false);
 
@@ -127,6 +128,23 @@ export function EmailDetailPage({
     }
   }, [teamIdBranded, emailIdBranded, summaryText, summaryChanged, summaryIsEmpty, run, router]);
 
+  const handleSendOriginal = React.useCallback(async () => {
+    setSendingOriginal(true);
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.emailForwarding.sendOriginalEmail({
+          params: { teamId: teamIdBranded, emailId: emailIdBranded },
+        }),
+      ),
+      Effect.mapError(() => ClientError.make(tr('email_detail_send_original_error'))),
+      run({ success: tr('email_detail_send_original_success') }),
+    );
+    setSendingOriginal(false);
+    if (Option.isSome(result)) {
+      router.invalidate();
+    }
+  }, [teamIdBranded, emailIdBranded, run, router]);
+
   const handleReject = React.useCallback(async () => {
     setRejecting(true);
     const result = await ApiClient.asEffect().pipe(
@@ -194,8 +212,15 @@ export function EmailDetailPage({
   const terminalResultBanner = (() => {
     if (email.status === 'approved') {
       return (
-        <Alert variant='default' className='border-success text-success-foreground bg-success/10'>
+        <Alert variant='default' className='border-blue-500 text-blue-700 bg-blue-50'>
           <AlertDescription>{tr('email_detail_result_approved')}</AlertDescription>
+        </Alert>
+      );
+    }
+    if (email.status === 'send_original') {
+      return (
+        <Alert variant='default' className='border-blue-500 text-blue-700 bg-blue-50'>
+          <AlertDescription>{tr('email_detail_result_send_original')}</AlertDescription>
         </Alert>
       );
     }
@@ -206,10 +231,17 @@ export function EmailDetailPage({
         </Alert>
       );
     }
-    if (email.status === 'posted_summary' || email.status === 'posted_original') {
+    if (email.status === 'posted_summary') {
       return (
         <Alert variant='default' className='border-success text-success-foreground bg-success/10'>
-          <AlertDescription>{tr('email_detail_result_posted')}</AlertDescription>
+          <AlertDescription>{tr('email_detail_result_posted_summary')}</AlertDescription>
+        </Alert>
+      );
+    }
+    if (email.status === 'posted_original') {
+      return (
+        <Alert variant='default' className='border-success text-success-foreground bg-success/10'>
+          <AlertDescription>{tr('email_detail_result_posted_original')}</AlertDescription>
         </Alert>
       );
     }
@@ -337,13 +369,20 @@ export function EmailDetailPage({
           >
             {savingSummary ? tr('profile_saving') : tr('email_detail_save_summary')}
           </Button>
-          <Button onClick={handleApprove} disabled={approving || rejecting}>
+          <Button onClick={handleApprove} disabled={approving || sendingOriginal || rejecting}>
             {approving ? tr('profile_saving') : tr('email_detail_approve')}
+          </Button>
+          <Button
+            variant='outline'
+            onClick={handleSendOriginal}
+            disabled={approving || sendingOriginal || rejecting}
+          >
+            {sendingOriginal ? tr('profile_saving') : tr('email_detail_send_original')}
           </Button>
           <Button
             variant='destructive'
             onClick={() => setShowRejectConfirm(true)}
-            disabled={approving || rejecting}
+            disabled={approving || sendingOriginal || rejecting}
           >
             {tr('email_detail_reject')}
           </Button>
@@ -361,7 +400,7 @@ export function EmailDetailPage({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{tr('email_detail_reject_confirm_cancel')}</AlertDialogCancel>
-            <AlertDialogAction variant='destructive' onClick={handleReject} disabled={rejecting}>
+            <AlertDialogAction onClick={handleReject} disabled={rejecting}>
               {tr('email_detail_reject_confirm_action')}
             </AlertDialogAction>
           </AlertDialogFooter>

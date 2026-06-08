@@ -110,7 +110,13 @@ const makeMockEmailMessagesRepository = () =>
       emailStore.set(id, { ...row, status: 'approved', approved_by: Option.some(_by) });
       return Effect.succeed(Option.some(id));
     },
-    reject: (id: EmailForwarding.EmailMessageId, _by: string) => {
+    sendOriginal: (id: EmailForwarding.EmailMessageId, _by: string) => {
+      const row = emailStore.get(id);
+      if (row?.status !== 'pending_approval') return Effect.succeed(Option.none());
+      emailStore.set(id, { ...row, status: 'send_original', approved_by: Option.some(_by) });
+      return Effect.succeed(Option.some(id));
+    },
+    dismiss: (id: EmailForwarding.EmailMessageId, _by: string) => {
       const row = emailStore.get(id);
       if (row?.status !== 'pending_approval') return Effect.succeed(Option.none());
       emailStore.set(id, { ...row, status: 'rejected', rejected_by: Option.some(_by) });
@@ -208,8 +214,8 @@ const callRecordApproval = (params: {
   ).pipe(Effect.provide(layer)) as Effect.Effect<any, any, never>;
 };
 
-// Helper to call Email/RecordRejection
-const callRecordRejection = (params: {
+// Helper to call Email/RecordSendOriginal
+const callRecordSendOriginal = (params: {
   team_id: Team.TeamId;
   email_id: EmailForwarding.EmailMessageId;
   discord_user_id: Discord.Snowflake;
@@ -218,7 +224,23 @@ const callRecordRejection = (params: {
   return Effect.scoped(
     (RpcTest.makeClient(EmailRpcGroup.EmailRpcGroup) as Effect.Effect<any, never, any>).pipe(
       Effect.flatMap(
-        (rpc: any) => rpc['Email/RecordRejection'](params) as Effect.Effect<any, any, any>,
+        (rpc: any) => rpc['Email/RecordSendOriginal'](params) as Effect.Effect<any, any, any>,
+      ),
+    ),
+  ).pipe(Effect.provide(layer)) as Effect.Effect<any, any, never>;
+};
+
+// Helper to call Email/RecordReject
+const callRecordReject = (params: {
+  team_id: Team.TeamId;
+  email_id: EmailForwarding.EmailMessageId;
+  discord_user_id: Discord.Snowflake;
+}) => {
+  const layer = buildRpcTestLayer();
+  return Effect.scoped(
+    (RpcTest.makeClient(EmailRpcGroup.EmailRpcGroup) as Effect.Effect<any, never, any>).pipe(
+      Effect.flatMap(
+        (rpc: any) => rpc['Email/RecordReject'](params) as Effect.Effect<any, any, any>,
       ),
     ),
   ).pipe(Effect.provide(layer)) as Effect.Effect<any, any, never>;
@@ -387,37 +409,39 @@ describe('Email/RecordApproval — email belongs to different team', () => {
 });
 
 // ---------------------------------------------------------------------------
-// RecordRejection — happy path
+// RecordSendOriginal — happy path
 // ---------------------------------------------------------------------------
 
-describe('Email/RecordRejection — authorized coach + pending email', () => {
-  itEffect.effect('returns { outcome: rejected } and enqueues post_original', () =>
-    callRecordRejection({
-      team_id: TEAM_ID,
-      email_id: EMAIL_PENDING,
-      discord_user_id: COACH_DISCORD_ID,
-    }).pipe(
-      Effect.tap((result) =>
-        Effect.sync(() => {
-          expect(result.outcome).toBe('rejected');
-          const row = emailStore.get(EMAIL_PENDING);
-          expect(row?.status).toBe('rejected');
-          const postOriginalEvents = enqueuedEvents.filter((e) => e.kind === 'post_original');
-          expect(postOriginalEvents).toHaveLength(1);
-        }),
+describe('Email/RecordSendOriginal — authorized coach + pending email', () => {
+  itEffect.effect(
+    'returns { outcome: sent_original }, status=send_original, enqueues post_original',
+    () =>
+      callRecordSendOriginal({
+        team_id: TEAM_ID,
+        email_id: EMAIL_PENDING,
+        discord_user_id: COACH_DISCORD_ID,
+      }).pipe(
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result.outcome).toBe('sent_original');
+            const row = emailStore.get(EMAIL_PENDING);
+            expect(row?.status).toBe('send_original');
+            const postOriginalEvents = enqueuedEvents.filter((e) => e.kind === 'post_original');
+            expect(postOriginalEvents).toHaveLength(1);
+          }),
+        ),
+        Effect.asVoid,
       ),
-      Effect.asVoid,
-    ),
   );
 });
 
 // ---------------------------------------------------------------------------
-// RecordRejection — already handled
+// RecordSendOriginal — already handled (idempotency)
 // ---------------------------------------------------------------------------
 
-describe('Email/RecordRejection — already approved email', () => {
-  itEffect.effect('returns { outcome: already_handled } for already-approved email', () =>
-    callRecordRejection({
+describe('Email/RecordSendOriginal — already approved email', () => {
+  itEffect.effect('returns { outcome: already_handled } and enqueues nothing', () =>
+    callRecordSendOriginal({
       team_id: TEAM_ID,
       email_id: EMAIL_APPROVED,
       discord_user_id: COACH_DISCORD_ID,
@@ -434,12 +458,12 @@ describe('Email/RecordRejection — already approved email', () => {
 });
 
 // ---------------------------------------------------------------------------
-// RecordRejection — non-coach user
+// RecordSendOriginal — non-coach user
 // ---------------------------------------------------------------------------
 
-describe('Email/RecordRejection — non-coach discord user', () => {
+describe('Email/RecordSendOriginal — non-coach discord user', () => {
   itEffect.effect('fails with EmailApprovalForbidden', () =>
-    callRecordRejection({
+    callRecordSendOriginal({
       team_id: TEAM_ID,
       email_id: EMAIL_PENDING,
       discord_user_id: NON_COACH_DISCORD_ID,
@@ -460,34 +484,196 @@ describe('Email/RecordRejection — non-coach discord user', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Approve then reject race — only one wins
+// RecordSendOriginal — unknown email id
 // ---------------------------------------------------------------------------
 
-describe('Email/RecordApproval + RecordRejection — concurrent race on same email', () => {
+describe('Email/RecordSendOriginal — unknown email id', () => {
+  itEffect.effect('fails with EmailRpcMessageNotFound', () =>
+    callRecordSendOriginal({
+      team_id: TEAM_ID,
+      email_id: BOGUS_EMAIL_ID,
+      discord_user_id: COACH_DISCORD_ID,
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            const err = result.failure as any;
+            expect(err._tag).toBe('EmailRpcMessageNotFound');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// RecordReject (dismiss) — happy path
+// ---------------------------------------------------------------------------
+
+describe('Email/RecordReject — authorized coach + pending email', () => {
+  itEffect.effect('returns { outcome: dismissed }, status=rejected, ZERO events enqueued', () =>
+    callRecordReject({
+      team_id: TEAM_ID,
+      email_id: EMAIL_PENDING,
+      discord_user_id: COACH_DISCORD_ID,
+    }).pipe(
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result.outcome).toBe('dismissed');
+          const row = emailStore.get(EMAIL_PENDING);
+          expect(row?.status).toBe('rejected');
+          // dismiss does NOT enqueue any sync events
+          expect(enqueuedEvents).toHaveLength(0);
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// RecordReject (dismiss) — already handled (idempotency)
+// ---------------------------------------------------------------------------
+
+describe('Email/RecordReject — already approved email', () => {
+  itEffect.effect('returns { outcome: already_handled } and enqueues nothing', () =>
+    callRecordReject({
+      team_id: TEAM_ID,
+      email_id: EMAIL_APPROVED,
+      discord_user_id: COACH_DISCORD_ID,
+    }).pipe(
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result.outcome).toBe('already_handled');
+          expect(enqueuedEvents).toHaveLength(0);
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// RecordReject — non-coach user
+// ---------------------------------------------------------------------------
+
+describe('Email/RecordReject — non-coach discord user', () => {
+  itEffect.effect('fails with EmailApprovalForbidden', () =>
+    callRecordReject({
+      team_id: TEAM_ID,
+      email_id: EMAIL_PENDING,
+      discord_user_id: NON_COACH_DISCORD_ID,
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            const err = result.failure as any;
+            expect(err._tag).toBe('EmailApprovalForbidden');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// RecordReject — unknown email id
+// ---------------------------------------------------------------------------
+
+describe('Email/RecordReject — unknown email id', () => {
+  itEffect.effect('fails with EmailRpcMessageNotFound', () =>
+    callRecordReject({
+      team_id: TEAM_ID,
+      email_id: BOGUS_EMAIL_ID,
+      discord_user_id: COACH_DISCORD_ID,
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            const err = result.failure as any;
+            expect(err._tag).toBe('EmailRpcMessageNotFound');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// RecordApproval + RecordSendOriginal — concurrent race on same email
+// ---------------------------------------------------------------------------
+
+describe('Email/RecordApproval + RecordSendOriginal — concurrent race on same email', () => {
   itEffect.effect(
     'first caller wins, second returns already_handled, exactly one event enqueued',
     () => {
-      // We'll do approval first, then rejection
+      // Approve first, then try sendOriginal
       return callRecordApproval({
         team_id: TEAM_ID,
         email_id: EMAIL_PENDING,
         discord_user_id: COACH_DISCORD_ID,
       }).pipe(
         Effect.flatMap((approveResult) =>
-          callRecordRejection({
+          callRecordSendOriginal({
             team_id: TEAM_ID,
             email_id: EMAIL_PENDING,
             discord_user_id: COACH_DISCORD_ID,
           }).pipe(
-            Effect.tap((rejectResult) =>
+            Effect.tap((sendResult) =>
               Effect.sync(() => {
                 expect(approveResult.outcome).toBe('approved');
-                expect(rejectResult.outcome).toBe('already_handled');
+                expect(sendResult.outcome).toBe('already_handled');
                 // Status stays approved
                 expect(emailStore.get(EMAIL_PENDING)?.status).toBe('approved');
-                // Only one post event
+                // Only one post event (post_summary from approve)
                 expect(enqueuedEvents).toHaveLength(1);
                 expect(enqueuedEvents[0].kind).toBe('post_summary');
+              }),
+            ),
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Dismiss-then-sendOriginal race — dismiss wins, zero events
+// ---------------------------------------------------------------------------
+
+describe('Email/RecordReject then RecordSendOriginal — dismiss wins', () => {
+  itEffect.effect(
+    'dismiss wins, sendOriginal returns already_handled, zero events enqueued',
+    () => {
+      return callRecordReject({
+        team_id: TEAM_ID,
+        email_id: EMAIL_PENDING,
+        discord_user_id: COACH_DISCORD_ID,
+      }).pipe(
+        Effect.flatMap((dismissResult) =>
+          callRecordSendOriginal({
+            team_id: TEAM_ID,
+            email_id: EMAIL_PENDING,
+            discord_user_id: COACH_DISCORD_ID,
+          }).pipe(
+            Effect.tap((sendResult) =>
+              Effect.sync(() => {
+                expect(dismissResult.outcome).toBe('dismissed');
+                expect(sendResult.outcome).toBe('already_handled');
+                // Status stays rejected from dismiss
+                expect(emailStore.get(EMAIL_PENDING)?.status).toBe('rejected');
+                // Zero events — dismiss does not enqueue, sendOriginal found already handled
+                expect(enqueuedEvents).toHaveLength(0);
               }),
             ),
           ),

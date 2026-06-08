@@ -13,11 +13,16 @@ interface EmailApprovalServiceInterface {
     emailId: EmailForwarding.EmailMessageId,
     actorId: string,
   ) => Effect.Effect<'approved' | 'already_handled'>;
-  readonly reject: (
+  readonly sendOriginal: (
     teamId: string,
     emailId: EmailForwarding.EmailMessageId,
     actorId: string,
-  ) => Effect.Effect<'rejected' | 'already_handled'>;
+  ) => Effect.Effect<'sent_original' | 'already_handled'>;
+  readonly dismiss: (
+    teamId: string,
+    emailId: EmailForwarding.EmailMessageId,
+    actorId: string,
+  ) => Effect.Effect<'dismissed' | 'already_handled'>;
 }
 
 // ---------------------------------------------------------------------------
@@ -41,15 +46,25 @@ const make = Effect.Do.pipe(
           }),
         ),
 
-      reject: (teamId, emailId, actorId) =>
-        messagesRepo.reject(emailId, actorId).pipe(
+      sendOriginal: (teamId, emailId, actorId) =>
+        messagesRepo.sendOriginal(emailId, actorId).pipe(
           Effect.flatMap((result) => {
             if (Option.isSome(result)) {
               return syncEventsRepo
                 .enqueue(emailId, teamId, 'post_original')
-                .pipe(Effect.as('rejected' as const));
+                .pipe(Effect.as('sent_original' as const));
             }
             return Effect.succeed('already_handled' as const);
+          }),
+        ),
+
+      dismiss: (_teamId, emailId, actorId) =>
+        messagesRepo.dismiss(emailId, actorId).pipe(
+          Effect.map((result) => {
+            if (Option.isSome(result)) {
+              return 'dismissed' as const;
+            }
+            return 'already_handled' as const;
           }),
         ),
     }),

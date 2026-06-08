@@ -10,7 +10,11 @@ import {
   CarpoolReserveButtonReg,
 } from './carpool.js';
 import { ClaimButton, UnclaimButton } from './claim.js';
-import { EmailApproveButton, EmailRejectButton } from './email-approval.js';
+import {
+  EmailApproveButton,
+  EmailRejectButton,
+  EmailSendOriginalButton,
+} from './email-approval.js';
 import { EventCreateModal } from './event-create.js';
 import { EventCreateAutocomplete } from './event-create-autocomplete.js';
 import { MakanickoLogAutocomplete } from './makanicko-log-autocomplete.js';
@@ -41,6 +45,7 @@ export const interactionBuilder = Ix.builder
   .add(ClaimButton)
   .add(UnclaimButton)
   .add(EmailApproveButton)
+  .add(EmailSendOriginalButton)
   .add(EmailRejectButton)
   .add(CarpoolAddButtonReg)
   .add(CarpoolAddModal)

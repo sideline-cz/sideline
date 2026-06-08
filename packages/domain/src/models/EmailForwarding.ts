@@ -25,6 +25,7 @@ export const EmailStatus = Schema.Literals([
   'summarizing',
   'pending_approval',
   'approved',
+  'send_original',
   'rejected',
   'posted_summary',
   'posted_original',

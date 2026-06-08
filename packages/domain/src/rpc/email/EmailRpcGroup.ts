@@ -20,14 +20,25 @@ export const EmailRpcGroup = RpcGroup.make(
     }),
     error: Schema.Union([EmailApprovalForbidden, EmailRpcMessageNotFound]),
   }),
-  Rpc.make('RecordRejection', {
+  Rpc.make('RecordSendOriginal', {
     payload: {
       team_id: Team.TeamId,
       email_id: EmailMessageId,
       discord_user_id: Discord.Snowflake,
     },
     success: Schema.Struct({
-      outcome: Schema.Literals(['rejected', 'already_handled']),
+      outcome: Schema.Literals(['sent_original', 'already_handled']),
+    }),
+    error: Schema.Union([EmailApprovalForbidden, EmailRpcMessageNotFound]),
+  }),
+  Rpc.make('RecordReject', {
+    payload: {
+      team_id: Team.TeamId,
+      email_id: EmailMessageId,
+      discord_user_id: Discord.Snowflake,
+    },
+    success: Schema.Struct({
+      outcome: Schema.Literals(['dismissed', 'already_handled']),
     }),
     error: Schema.Union([EmailApprovalForbidden, EmailRpcMessageNotFound]),
   }),

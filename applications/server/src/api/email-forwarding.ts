@@ -235,6 +235,25 @@ export const EmailForwardingApiLive = HttpApiBuilder.group(Api, 'emailForwarding
             ),
           )
 
+          // POST /teams/:teamId/emails/:emailId/send-original
+          .handle('sendOriginalEmail', ({ params: { teamId, emailId } }) =>
+            Effect.Do.pipe(
+              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+              Effect.bind('membership', ({ currentUser }) =>
+                requireMembership(members, teamId, currentUser.id, forbidden),
+              ),
+              Effect.tap(({ membership }) =>
+                requirePermission(membership, MANAGE_PERMISSION, forbidden),
+              ),
+              // Verify email belongs to team
+              Effect.tap(() => findOwnedEmail(emailId, teamId)),
+              Effect.bind('outcome', ({ currentUser }) =>
+                approvalService.sendOriginal(teamId, emailId, currentUser.id),
+              ),
+              Effect.map(({ outcome }) => ({ outcome })),
+            ),
+          )
+
           // POST /teams/:teamId/emails/:emailId/reject
           .handle('rejectEmail', ({ params: { teamId, emailId } }) =>
             Effect.Do.pipe(
@@ -248,7 +267,7 @@ export const EmailForwardingApiLive = HttpApiBuilder.group(Api, 'emailForwarding
               // Verify email belongs to team
               Effect.tap(() => findOwnedEmail(emailId, teamId)),
               Effect.bind('outcome', ({ currentUser }) =>
-                approvalService.reject(teamId, emailId, currentUser.id),
+                approvalService.dismiss(teamId, emailId, currentUser.id),
               ),
               Effect.map(({ outcome }) => ({ outcome })),
             ),

@@ -27,9 +27,9 @@ const rpcHandlers = Effect.Do.pipe(
   Effect.bind('membersRepo', () => TeamMembersRepository.asEffect()),
   Effect.bind('approvalService', () => EmailApprovalService.asEffect()),
 
-  // RecordApproval / RecordRejection share the same guard sequence (email
-  // ownership + team:manage authorization) and differ only in the approval
-  // service method invoked.
+  // RecordApproval / RecordSendOriginal / RecordReject share the same guard
+  // sequence (email ownership + team:manage authorization) and differ only in
+  // the approval service method invoked.
   Effect.let('recordDecision', ({ messagesRepo, membersRepo, approvalService }) => {
     const guard = ({ team_id, email_id, discord_user_id }: EmailDecisionInput) =>
       Effect.Do.pipe(
@@ -82,10 +82,17 @@ const rpcHandlers = Effect.Do.pipe(
   ),
 
   Effect.let(
-    'Email/RecordRejection',
+    'Email/RecordSendOriginal',
     ({ recordDecision, approvalService }) =>
       (input: EmailDecisionInput) =>
-        recordDecision(approvalService.reject, input),
+        recordDecision(approvalService.sendOriginal, input),
+  ),
+
+  Effect.let(
+    'Email/RecordReject',
+    ({ recordDecision, approvalService }) =>
+      (input: EmailDecisionInput) =>
+        recordDecision(approvalService.dismiss, input),
   ),
 
   // GetUnprocessedEmailPostEvents

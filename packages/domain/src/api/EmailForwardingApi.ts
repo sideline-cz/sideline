@@ -77,7 +77,7 @@ export type UpdateEmailSummaryRequest = Schema.Schema.Type<typeof UpdateEmailSum
 // ---------------------------------------------------------------------------
 
 export const EmailActionResult = Schema.Struct({
-  outcome: Schema.Literals(['approved', 'rejected', 'already_handled']),
+  outcome: Schema.Literals(['approved', 'sent_original', 'dismissed', 'already_handled']),
 });
 export type EmailActionResult = Schema.Schema.Type<typeof EmailActionResult>;
 
@@ -162,6 +162,17 @@ export class EmailForwardingApiGroup extends HttpApiGroup.make('emailForwarding'
   )
   .add(
     HttpApiEndpoint.post('approveEmail', '/teams/:teamId/emails/:emailId/approve', {
+      success: EmailActionResult,
+      error: [
+        EmailForbidden.pipe(HttpApiSchema.status(403)),
+        EmailMessageNotFound.pipe(HttpApiSchema.status(404)),
+        EmailNotPending.pipe(HttpApiSchema.status(409)),
+      ],
+      params: { teamId: TeamId, emailId: EmailMessageId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post('sendOriginalEmail', '/teams/:teamId/emails/:emailId/send-original', {
       success: EmailActionResult,
       error: [
         EmailForbidden.pipe(HttpApiSchema.status(403)),

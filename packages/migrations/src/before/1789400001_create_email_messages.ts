@@ -9,7 +9,7 @@ export default Effect.flatMap(Effect.service(SqlClient.SqlClient), (sql) =>
           id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           team_id                  UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
           status                   TEXT NOT NULL DEFAULT 'received'
-                                   CHECK (status IN ('received','summarizing','pending_approval','approved','rejected','posted_summary','posted_original','failed')),
+                                   CHECK (status IN ('received','summarizing','pending_approval','approved','send_original','rejected','posted_summary','posted_original','failed')),
           from_address             TEXT NOT NULL,
           subject                  TEXT NOT NULL,
           body                     TEXT NOT NULL,

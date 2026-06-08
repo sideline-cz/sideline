@@ -32,6 +32,13 @@ const buildDisabledApprovalRow = (): Discord.ActionRowComponentForMessageRequest
     },
     {
       type: 2,
+      style: 2,
+      label: m.bot_email_btn_send_original({}, { locale: 'en' }),
+      custom_id: 'email-send-original:disabled',
+      disabled: true,
+    },
+    {
+      type: 2,
       style: 4,
       label: m.bot_email_btn_reject({}, { locale: 'en' }),
       custom_id: 'email-reject:disabled',
@@ -73,7 +80,9 @@ const makeEmailDecisionButton = (config: {
       readonly discord_user_id: DiscordSchemas.Snowflake;
     },
   ) => Effect.Effect<
-    { readonly outcome: 'approved' | 'rejected' | 'already_handled' },
+    {
+      readonly outcome: 'approved' | 'sent_original' | 'dismissed' | 'already_handled';
+    },
     | EmailRpcModels.EmailApprovalForbidden
     | EmailRpcModels.EmailRpcMessageNotFound
     | RpcClientErrorNs.RpcClientError
@@ -189,9 +198,18 @@ export const EmailApproveButton = makeEmailDecisionButton({
 
 export const EmailRejectButton = makeEmailDecisionButton({
   idPrefix: 'email-reject:',
-  invoke: (rpc, input) => rpc['Email/RecordRejection'](input),
+  invoke: (rpc, input) => rpc['Email/RecordReject'](input),
   successMessage: (user, locale) => m.bot_email_rejected_by({ user }, { locale }),
   spanName: 'interaction/email-reject-button',
   disableButtonsLogLabel: 'Failed to disable rejection buttons on message',
   followUpFailureLog: 'EmailRejectButton: failed to update follow-up',
+});
+
+export const EmailSendOriginalButton = makeEmailDecisionButton({
+  idPrefix: 'email-send-original:',
+  invoke: (rpc, input) => rpc['Email/RecordSendOriginal'](input),
+  successMessage: (user, locale) => m.bot_email_original_sent_by({ user }, { locale }),
+  spanName: 'interaction/email-send-original-button',
+  disableButtonsLogLabel: 'Failed to disable send-original buttons on message',
+  followUpFailureLog: 'EmailSendOriginalButton: failed to update follow-up',
 });
