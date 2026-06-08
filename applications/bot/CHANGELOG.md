@@ -1,5 +1,17 @@
 # @sideline/bot
 
+## 0.20.0
+
+### Minor Changes
+
+- [#376](https://github.com/maxa-ondrej/sideline/pull/376) [`4f2d818`](https://github.com/maxa-ondrej/sideline/commit/4f2d818a03acf47d15e1a74eabf06136c84f1c94) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add email forwarding with AI summarization and coach approval. Teams can forward organizational emails to a unique inbound address (secured by a per-team token plus HMAC signature verification, body-size cap, and rate limiting). Each email is summarized via an `effect/unstable/ai` LLM client (config-gated, with a deterministic stub when no provider is configured), then an approval request with Approve/Reject buttons and a "Review & edit in Sideline" link is posted to a configurable coach channel. On approval the AI summary posts to the team's target channel; on rejection the original email posts instead. Both posts link back to a new web Email Detail page where coaches can review the original message, download attachments, edit the summary before approving, and members can view posted emails. Adds the `email_forwarding_config`, `email_messages`, `email_post_sync_events`, and `email_attachments` tables, the `EmailForwardingApi` endpoints, the `Email` RPC group, an email summarization cron, and the `EmailSyncService` bot worker. New env vars: `EMAIL_WEBHOOK_SIGNING_SECRET` (required) and optional `LLM_API_URL`/`LLM_API_KEY`/`LLM_MODEL`.
+
+### Patch Changes
+
+- Updated dependencies [[`4f2d818`](https://github.com/maxa-ondrej/sideline/commit/4f2d818a03acf47d15e1a74eabf06136c84f1c94), [`5e0a4a0`](https://github.com/maxa-ondrej/sideline/commit/5e0a4a0c781ee8574eb62c69fe613cae13515118)]:
+  - @sideline/domain@0.25.0
+  - @sideline/i18n@0.11.0
+
 ## 0.19.0
 
 ### Minor Changes
