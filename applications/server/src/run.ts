@@ -228,7 +228,11 @@ Effect.Do.pipe(
         EmailSummarizerCronEffect,
       ],
       {
-        concurrency: 10,
+        // These are all long-running, never-completing supervised effects (HTTP
+        // server, health, and the repeating cron loops). A bounded concurrency
+        // smaller than the list length starves the tail — they never get a slot
+        // because the earlier ones never complete. Run them all concurrently.
+        concurrency: 'unbounded',
       },
     ),
   ),
