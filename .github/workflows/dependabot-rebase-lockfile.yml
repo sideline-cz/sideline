@@ -1,0 +1,109 @@
+name: Rebase Dependabot lockfile conflicts
+
+# When main moves, open Dependabot PRs can go stale. Dependabot rebases clean
+# PRs itself, but a pnpm-lock.yaml conflict blocks it. This workflow rebases
+# such PRs onto main and regenerates the lockfile — but only when the lockfile
+# is the *sole* conflict; anything else is left for a human.
+#
+# Uses GH_PAT (not GITHUB_TOKEN) so the force-push re-triggers CI on the branch.
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: dependabot-rebase-lockfile
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  rebase:
+    name: Rebase conflicting Dependabot PRs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+      - name: Install node
+        uses: actions/setup-node@v5
+        with:
+          cache: pnpm
+          node-version: 25.x
+      - name: Rebase and regenerate lockfile
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          set -uo pipefail
+
+          git config user.name "dependabot[bot]"
+          git config user.email "49699333+dependabot[bot]@users.noreply.github.com"
+
+          mapfile -t prs < <(gh pr list \
+            --state open --base main --author app/dependabot \
+            --json number,headRefName \
+            --jq '.[] | "\(.number) \(.headRefName)"')
+
+          if [ "${#prs[@]}" -eq 0 ]; then
+            echo "No open Dependabot PRs."
+            exit 0
+          fi
+
+          for pr in "${prs[@]}"; do
+            number="${pr%% *}"
+            branch="${pr#* }"
+            echo "::group::PR #$number ($branch)"
+
+            git checkout -B "$branch" "origin/$branch"
+
+            if git rebase origin/main; then
+              echo "Clean rebase — Dependabot handles this itself, not pushing."
+              git rebase --abort 2>/dev/null || true
+              git checkout --force main
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Rebase stopped on a conflict. Resolve as long as the only
+            # conflicting file is pnpm-lock.yaml, looping in case multiple
+            # commits (e.g. bump + changeset) each conflict.
+            resolved=true
+            for _ in $(seq 1 20); do
+              conflicts="$(git diff --name-only --diff-filter=U)"
+              if [ "$conflicts" != "pnpm-lock.yaml" ]; then
+                echo "Conflicts beyond pnpm-lock.yaml — leaving for a human:"
+                echo "$conflicts"
+                git rebase --abort
+                resolved=false
+                break
+              fi
+
+              echo "Regenerating pnpm-lock.yaml..."
+              git checkout origin/main -- pnpm-lock.yaml
+              pnpm install --lockfile-only
+              git add pnpm-lock.yaml
+
+              if GIT_EDITOR=true git rebase --continue; then
+                break
+              fi
+            done
+
+            if [ "$resolved" = true ] && [ ! -d .git/rebase-merge ] && [ ! -d .git/rebase-apply ]; then
+              echo "Rebase complete — force-pushing #$number."
+              git push --force-with-lease origin "$branch"
+            else
+              echo "Did not fully resolve #$number; aborting any in-progress rebase."
+              git rebase --abort 2>/dev/null || true
+            fi
+
+            git checkout --force main
+            echo "::endgroup::"
+          done

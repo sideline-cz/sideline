@@ -16,6 +16,10 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.ref }}
+          # PAT (not the default GITHUB_TOKEN) so the action's `git push` of the
+          # changeset commit authenticates as a user with write access — pushing
+          # as github-actions[bot] is denied (403).
+          token: ${{ secrets.GH_PAT }}
       - name: Update PR
         uses: StafflinePeoplePlus/dependabot-changesets@v0.1.5
         with:
