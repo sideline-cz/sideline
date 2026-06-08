@@ -173,6 +173,7 @@ let teamSettingsStore: {
   event_horizon_days: number;
   rsvp_reminders_enabled: boolean;
   rsvp_reminder_days_before: number;
+  claim_request_days_before: number;
   rsvp_reminder_time: string;
   reminders_channel_id: Option.Option<string>;
   timezone: string;
@@ -185,6 +186,7 @@ const resetStores = () => {
     event_horizon_days: 30,
     rsvp_reminders_enabled: true,
     rsvp_reminder_days_before: 1,
+    claim_request_days_before: 3,
     rsvp_reminder_time: '18:00',
     reminders_channel_id: Option.none(),
     timezone: 'Europe/Prague',
@@ -515,6 +517,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         min_players_threshold: teamSettingsStore.min_players_threshold,
         rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
         rsvp_reminder_days_before: teamSettingsStore.rsvp_reminder_days_before,
+        claim_request_days_before: teamSettingsStore.claim_request_days_before,
         rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
         timezone: teamSettingsStore.timezone,
@@ -542,6 +545,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         min_players_threshold: teamSettingsStore.min_players_threshold,
         rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
         rsvp_reminder_days_before: teamSettingsStore.rsvp_reminder_days_before,
+        claim_request_days_before: teamSettingsStore.claim_request_days_before,
         rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
         timezone: teamSettingsStore.timezone,
@@ -566,6 +570,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
     event_horizon_days: number;
     min_players_threshold: number;
     rsvp_reminder_days_before?: number;
+    claim_request_days_before?: number;
     rsvp_reminder_time?: string;
     reminders_channel_id?: Option.Option<string>;
     timezone?: string;
@@ -583,6 +588,8 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
       rsvp_reminder_days_before:
         input.rsvp_reminder_days_before ?? teamSettingsStore.rsvp_reminder_days_before,
+      claim_request_days_before:
+        input.claim_request_days_before ?? teamSettingsStore.claim_request_days_before,
       rsvp_reminder_time: input.rsvp_reminder_time ?? teamSettingsStore.rsvp_reminder_time,
       reminders_channel_id: input.reminders_channel_id ?? teamSettingsStore.reminders_channel_id,
       timezone: input.timezone ?? teamSettingsStore.timezone,
@@ -606,6 +613,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
     eventHorizonDays: number;
     minPlayersThreshold: number;
     rsvpReminderDaysBefore?: number;
+    claimRequestDaysBefore?: number;
     rsvpReminderTime?: string;
     remindersChannelId?: Option.Option<string>;
     timezone?: string;
@@ -620,6 +628,8 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
     teamSettingsStore.event_horizon_days = input.eventHorizonDays;
     if (input.rsvpReminderDaysBefore !== undefined)
       teamSettingsStore.rsvp_reminder_days_before = input.rsvpReminderDaysBefore;
+    if (input.claimRequestDaysBefore !== undefined)
+      teamSettingsStore.claim_request_days_before = input.claimRequestDaysBefore;
     if (input.rsvpReminderTime !== undefined)
       teamSettingsStore.rsvp_reminder_time = input.rsvpReminderTime;
     if (input.remindersChannelId !== undefined)
@@ -631,6 +641,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       min_players_threshold: input.minPlayersThreshold,
       rsvp_reminders_enabled: teamSettingsStore.rsvp_reminders_enabled,
       rsvp_reminder_days_before: teamSettingsStore.rsvp_reminder_days_before,
+      claim_request_days_before: teamSettingsStore.claim_request_days_before,
       rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
       reminders_channel_id: teamSettingsStore.reminders_channel_id,
       timezone: teamSettingsStore.timezone,

@@ -106,7 +106,7 @@ On the day of the training, if the training has been claimed, the bot posts a **
 </Aside>
 
 <Aside type="note" title="Configuring the lead time">
-  The number of days before a training the claim-board message is posted defaults to **3**. This is a per-team setting (`claim_request_days_before`) — contact your Sideline administrator to adjust it. Setting it to **0** posts the message on the day of the training.
+  The number of days before a training the claim-board message is posted defaults to **3**. Captains can change this in **Team settings → Coach assignment → Days before training** (range 0–30). Setting it to **0** posts the message on the day of the training. If the value is higher than the team's event horizon, the message may never appear because the training is not yet generated when the cron runs.
 </Aside>
 
 ## Group channels and roles

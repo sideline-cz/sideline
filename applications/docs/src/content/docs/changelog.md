@@ -5,6 +5,12 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-08 — Configurable coach claim-request lead time in Team Settings
+
+- Captains can now set how many days before a training the bot posts the coach claim-request message, directly from **Team settings → Coach assignment → Days before training** (range 0–30; default 3).
+- Previously this setting required a database change. It is now fully self-service.
+- Setting the value to **0** posts the message on the day of the training. If the value exceeds the team's event horizon, the message may never appear because the training has not been generated yet when the cron runs.
+
 ## 2026-06-07 — Improved coach assigning
 
 - The training claim-board message is now posted a configurable number of **days before** the training (default: 3 days), rather than immediately when the training is created. This gives the coaching team time to coordinate in advance.
