@@ -74,7 +74,8 @@ const makeReal = (
             'Start with a 2-4 sentence plain-language overview of what the email is about, then below it provide a detailed breakdown. ' +
             'In the breakdown, forward ALL important information — dates, times, locations/addresses, prices/amounts, deadlines, payment details, instructions, contacts, and action items. Do not drop important details. ' +
             'Be clear and concise. You MAY use only Discord-supported markdown to make it scannable: ' +
-            '**bold**, *italic*, headings (#, ##, ###), bullet lists (- ), numbered lists, > blockquotes, `inline code`, and relevant emojis. ' +
+            '**bold**, *italic*, headings (#, ##, ###), bullet lists (- ), numbered lists, > blockquotes, and `inline code`. ' +
+            'Use relevant emojis generously — e.g. to prefix section headings and key items — to make the summary lively and scannable; Discord renders emojis fully. ' +
             'Do NOT use horizontal rules (---), tables, or images — Discord does not render them and they show up as raw text. ' +
             'Separate sections with a blank line and/or a bold heading, never with ---. ' +
             'Write in the SAME LANGUAGE as the email. ' +
