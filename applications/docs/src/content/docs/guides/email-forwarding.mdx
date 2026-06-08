@@ -36,7 +36,7 @@ When an email arrives at the configured inbound address:
 
 1. Go to **Team settings → Email forwarding** and enable the feature.
 2. Set the **coach channel** (where approval requests appear) and the **target channel** (where approved or rejected emails are posted).
-3. Optionally add **monitored addresses** to filter which recipient addresses are accepted; leave the list empty to accept all.
+3. Optionally add **allowed senders** to filter which sender addresses are accepted (matched against each email's *From*); leave the list empty to accept all.
 4. Copy the **inbound webhook URL** (generated after saving) and configure your email provider to forward to it.
 5. Rotate the token with **Regenerate token** if the URL is ever compromised.
 

@@ -1233,7 +1233,7 @@ erDiagram
 | `carpools` | Top-level record for a Discord carpool board posted by `/carpool`. Optionally linked to an event. Tracks the board message ID and the Discord channel. |
 | `carpool_cars` | Individual car offered by a team member within a carpool. Capacity 1–8 including the driver/owner. Tracks the optional private Discord thread ID. Unique on `(carpool_id, owner_team_member_id)`. |
 | `carpool_seats` | Individual seat record in a car. Owner always occupies seat #1. `assigned_by` is set for owner-assigned seats. Unique on `(carpool_id, team_member_id)` prevents double-booking across cars in the same carpool. |
-| `email_forwarding_config` | Per-team configuration for the email forwarding feature (one row per team). Stores enabled flag, target Discord channel, coach channel, monitored recipient addresses, and the per-team inbound webhook token. |
+| `email_forwarding_config` | Per-team configuration for the email forwarding feature (one row per team). Stores enabled flag, target Discord channel, coach channel, monitored sender addresses (allow-list matched against the email's `from`), and the per-team inbound webhook token. |
 | `email_messages` | One row per inbound email. Tracks the full status lifecycle from receipt through AI summarization, coach approval/rejection, and Discord posting. |
 | `email_post_sync_events` | Outbox records for the bot's Email Sync worker to post Discord messages. Three kinds: `approval_request`, `post_summary`, `post_original`. Unique on `(email_message_id, kind)`. |
 | `email_attachments` | Binary attachment storage per email. `content` is a `BYTEA` column; no automatic retention in v1. |

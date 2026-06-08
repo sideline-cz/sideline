@@ -20,7 +20,8 @@ const VALID_TOKEN = 'valid-inbound-token-abc123';
 const DISABLED_TOKEN = 'disabled-inbound-token-xyz';
 const UNKNOWN_TOKEN = 'not-found-token';
 const TEAM_ID = '00000000-0000-0000-0000-000000000001';
-const MONITORED_ADDRESS = 'team@example.com';
+// monitored_addresses is an allow-list of SENDERS; must match the payload `from`.
+const MONITORED_ADDRESS = 'sender@external.com';
 
 // ---------------------------------------------------------------------------
 // HMAC helper
@@ -289,8 +290,8 @@ describe('Email webhook — security gates', () => {
     expect(insertedMessages).toHaveLength(0);
   });
 
-  it('to/from not in monitored_addresses → 200 ack, no row inserted', async () => {
-    const body = makePayload({ to: ['someone@other.com'] });
+  it('sender not in monitored_addresses → 200 ack, no row inserted', async () => {
+    const body = makePayload({ from: 'stranger@other.com' });
     const response = await postWebhook(VALID_TOKEN, body);
     expect(response.status).toBe(200);
     expect(insertedMessages).toHaveLength(0);

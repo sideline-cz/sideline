@@ -1461,7 +1461,7 @@ Per-team configuration for the email forwarding and AI summarization feature. On
 
 **Indexes**: implicit unique index on `(inbound_token)` from the UNIQUE constraint.
 
-**Notes**: Added in migration `1789400000_create_email_forwarding_config`. `target_channel_id` is the Discord channel where the final post (approved summary or rejected original) is sent. `coach_channel_id` is the private Discord channel where the bot posts approval-request embeds. `monitored_addresses` is an allowlist of email recipient addresses; an empty array means all inbound emails are accepted. `inbound_token` is the per-team secret appended to the webhook URL (`POST /email/inbound/:token`); it is regenerated via `POST /teams/:teamId/email-forwarding/regenerate-token` and is intentionally omitted from all API responses except the regenerate endpoint. Team deletion cascades and removes this row.
+**Notes**: Added in migration `1789400000_create_email_forwarding_config`. `target_channel_id` is the Discord channel where the final post (approved summary or rejected original) is sent. `coach_channel_id` is the private Discord channel where the bot posts approval-request embeds. `monitored_addresses` is an allow-list of permitted **sender** addresses (matched against the email's `from`); an empty array means all inbound emails are accepted. `inbound_token` is the per-team secret appended to the webhook URL (`POST /email/inbound/:token`); it is regenerated via `POST /teams/:teamId/email-forwarding/regenerate-token` and is intentionally omitted from all API responses except the regenerate endpoint. Team deletion cascades and removes this row.
 
 ---
 

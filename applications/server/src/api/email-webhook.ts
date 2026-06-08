@@ -130,12 +130,15 @@ const handleInbound = (
           ),
         ),
 
-        // Check monitored addresses
+        // Check monitored addresses — an allow-list of permitted SENDERS.
+        // The UI labels these "allowed senders" ("only emails from these
+        // addresses are processed"), so match against the `from` address.
+        // Use a substring match so display-name forms ("Name <addr>") match too.
         Effect.tap(({ config, payload }) => {
           const monitored = config.monitored_addresses;
           if (monitored.length === 0) return Effect.void;
-          const toAddresses = payload.to.map((a) => a.toLowerCase());
-          const hasMatch = monitored.some((addr) => toAddresses.includes(addr.toLowerCase()));
+          const from = payload.from.toLowerCase();
+          const hasMatch = monitored.some((addr) => from.includes(addr.toLowerCase()));
           if (!hasMatch) {
             return earlyExit(HttpServerResponse.text('OK', { status: 200 }));
           }
