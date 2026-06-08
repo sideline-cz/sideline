@@ -1,5 +1,11 @@
 # @sideline/server
 
+## 0.25.2
+
+### Patch Changes
+
+- [#379](https://github.com/maxa-ondrej/sideline/pull/379) [`82dc769`](https://github.com/maxa-ondrej/sideline/commit/82dc76994e5786859061582bb347ff6842e98cb1) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Tune the email-summary LLM prompt to a balanced, easy-to-read digest: a one-or-two-sentence overview followed by emoji-led **bold** section labels and clean bullet lists (~150–250 words for a typical email). Emojis are used where they genuinely help, and a bullet dash is never placed before an emoji. Same-language output and the untrusted-body guard are retained.
+
 ## 0.25.1
 
 ### Patch Changes
