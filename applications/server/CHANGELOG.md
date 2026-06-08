@@ -1,5 +1,11 @@
 # @sideline/server
 
+## 0.25.1
+
+### Patch Changes
+
+- [#377](https://github.com/maxa-ondrej/sideline/pull/377) [`9fbbe82`](https://github.com/maxa-ondrej/sideline/commit/9fbbe82307823f9e3418c1129a04181d6f554feb) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Make AI email summaries concise and scannable. The summarization prompt now produces a short digest — a one-line opener plus a few essential bullets (dates, location, fees, deadlines, action), well under ~120 words, with light Discord markdown and emojis — instead of a long exhaustive breakdown of the whole email.
+
 ## 0.25.0
 
 ### Minor Changes
