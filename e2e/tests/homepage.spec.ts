@@ -78,6 +78,22 @@ test.describe('Homepage', () => {
     await expect(page.getByText('You').first()).toBeVisible();
   });
 
+  test('displays demo finance widget', async ({ page }) => {
+    const card = page.locator('[data-slot="card"]', { hasText: 'Team Finances' }).first();
+    await expect(card.getByText('Team Finances').first()).toBeVisible();
+    await expect(card.getByText('Spring Membership').first()).toBeVisible();
+    await expect(card.getByText('Paid').first()).toBeVisible();
+    await expect(card.getByText('Outstanding').first()).toBeVisible();
+    await expect(card.getByText('$1,240').first()).toBeVisible();
+  });
+
+  test('displays demo achievements widget', async ({ page }) => {
+    await expect(page.getByText('Achievements').first()).toBeVisible();
+    await expect(page.getByText('On Fire').first()).toBeVisible();
+    await expect(page.getByText('Podium Finish').first()).toBeVisible();
+    await expect(page.getByText('Century Club').first()).toBeVisible();
+  });
+
   test('displays demo RSVP banner', async ({ page }) => {
     await expect(page.getByText('Awaiting RSVP')).toBeVisible();
     await expect(page.getByText('Team Building BBQ')).toBeVisible();
