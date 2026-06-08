@@ -12,7 +12,7 @@ class AttachmentMetaRow extends Schema.Class<AttachmentMetaRow>('EmailAttachment
   filename: Schema.String,
   content_type: Schema.String,
   size_bytes: Schema.Int,
-  created_at: Schema.DateTimeUtc,
+  created_at: Schema.DateTimeUtcFromDate,
 }) {}
 
 class AttachmentWithBytesRow extends Schema.Class<AttachmentWithBytesRow>(

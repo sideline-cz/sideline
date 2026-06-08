@@ -19,7 +19,7 @@ class UnprocessedEventRow extends Schema.Class<UnprocessedEventRow>('Unprocessed
     from_address: Schema.String,
     summary: Schema.OptionFromNullOr(Schema.String),
     body: Schema.String,
-    received_at: Schema.DateTimeUtc,
+    received_at: Schema.DateTimeUtcFromDate,
   },
 ) {}
 

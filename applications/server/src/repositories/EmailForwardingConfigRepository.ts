@@ -18,8 +18,8 @@ export class EmailForwardingConfigRow extends Schema.Class<EmailForwardingConfig
   coach_channel_id: Discord.Snowflake,
   monitored_addresses: Schema.Array(Schema.String),
   inbound_token: Schema.String,
-  created_at: Schema.DateTimeUtc,
-  updated_at: Schema.DateTimeUtc,
+  created_at: Schema.DateTimeUtcFromDate,
+  updated_at: Schema.DateTimeUtcFromDate,
 }) {}
 
 // ---------------------------------------------------------------------------

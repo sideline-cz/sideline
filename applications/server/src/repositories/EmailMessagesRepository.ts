@@ -1,5 +1,5 @@
 import { Discord, EmailForwarding, Team } from '@sideline/domain';
-import { LogicError } from '@sideline/effect-lib';
+import { LogicError, Schemas } from '@sideline/effect-lib';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
@@ -22,9 +22,9 @@ export class EmailMessageRow extends Schema.Class<EmailMessageRow>('EmailMessage
   approved_by: Schema.OptionFromNullOr(Schema.String),
   rejected_by: Schema.OptionFromNullOr(Schema.String),
   posted_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
-  received_at: Schema.DateTimeUtc,
-  created_at: Schema.DateTimeUtc,
-  updated_at: Schema.DateTimeUtc,
+  received_at: Schema.DateTimeUtcFromDate,
+  created_at: Schema.DateTimeUtcFromDate,
+  updated_at: Schema.DateTimeUtcFromDate,
 }) {}
 
 class InsertedId extends Schema.Class<InsertedId>('EmailInsertedId')({
@@ -48,7 +48,7 @@ const make = Effect.gen(function* () {
       from_address: Schema.String,
       subject: Schema.String,
       body: Schema.String,
-      received_at: Schema.DateTimeUtc,
+      received_at: Schemas.DateTimeFromIsoString,
     }),
     Result: InsertedId,
     execute: (input) => sql`
