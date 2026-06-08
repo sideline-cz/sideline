@@ -1,5 +1,6 @@
 import { Option, Record } from 'effect';
 import {
+  Award,
   Calendar,
   CheckCircle2,
   Clock,
@@ -11,6 +12,7 @@ import {
   Sun,
   Trophy,
   Users,
+  Wallet,
   Zap,
 } from 'lucide-react';
 import { LanguageSwitcher } from '~/components/organisms/LanguageSwitcher';
@@ -251,6 +253,134 @@ function DemoRsvpBanner() {
   );
 }
 
+function DemoFinance() {
+  return (
+    <Card className='shadow-lg border-border/50'>
+      <CardHeader className='pb-2'>
+        <CardTitle className='text-sm font-medium text-muted-foreground'>
+          {tr('hero_demo_finance')}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className='flex flex-col gap-3'>
+          <div className='grid grid-cols-2 gap-3'>
+            <div className='flex items-center gap-2'>
+              <Wallet className='size-4 text-green-500' />
+              <div>
+                <p className='text-lg font-bold leading-none'>$1,240</p>
+                <p className='text-[10px] text-muted-foreground leading-tight mt-0.5'>
+                  {tr('hero_demo_finance_paid')}
+                </p>
+              </div>
+            </div>
+            <div className='flex items-center gap-2'>
+              <Clock className='size-4 text-amber-500' />
+              <div>
+                <p className='text-lg font-bold leading-none'>$80</p>
+                <p className='text-[10px] text-muted-foreground leading-tight mt-0.5'>
+                  {tr('hero_demo_finance_outstanding')}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className='flex items-center justify-between gap-3 rounded-lg border p-2.5'>
+            <div className='min-w-0 flex-1'>
+              <p className='font-medium truncate text-xs'>{tr('hero_demo_finance_due')}</p>
+              <p className='text-[10px] text-muted-foreground'>
+                {tr('hero_demo_finance_due_time')}
+              </p>
+            </div>
+            <Badge
+              variant='outline'
+              className='bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/50 dark:text-amber-200 dark:border-amber-800 text-[10px] px-1.5 py-0'
+            >
+              {tr('hero_demo_finance_status')}
+            </Badge>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DemoAchievements() {
+  const achievements = [
+    {
+      icon: Flame,
+      iconClass: 'text-orange-500',
+      iconBgClass: 'bg-orange-100 dark:bg-orange-900/40',
+      titleKey: 'hero_demo_ach1_title',
+      descKey: 'hero_demo_ach1_desc',
+      progress: Option.none<string>(),
+    },
+    {
+      icon: Trophy,
+      iconClass: 'text-yellow-500',
+      iconBgClass: 'bg-yellow-100 dark:bg-yellow-900/40',
+      titleKey: 'hero_demo_ach2_title',
+      descKey: 'hero_demo_ach2_desc',
+      progress: Option.none<string>(),
+    },
+    {
+      icon: Award,
+      iconClass: 'text-muted-foreground',
+      iconBgClass: 'bg-muted',
+      titleKey: 'hero_demo_ach3_title',
+      descKey: 'hero_demo_ach3_desc',
+      progress: Option.some('8 / 10'),
+    },
+  ] as const;
+
+  return (
+    <Card className='shadow-lg border-border/50'>
+      <CardHeader className='pb-2'>
+        <div className='flex items-center gap-2'>
+          <CardTitle className='text-sm font-medium text-muted-foreground'>
+            {tr('hero_demo_achievements')}
+          </CardTitle>
+          <Badge
+            variant='secondary'
+            className='bg-green-100 text-green-800 border-green-200 dark:bg-green-900/50 dark:text-green-200 dark:border-green-800 text-[10px] px-1.5 py-0'
+          >
+            12
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className='flex flex-col gap-1.5'>
+          {achievements.map((achievement) => {
+            const Icon = achievement.icon;
+            return (
+              <div
+                key={achievement.titleKey}
+                className='flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs'
+              >
+                <div
+                  className={`flex size-7 shrink-0 items-center justify-center rounded-md ${achievement.iconBgClass}`}
+                >
+                  <Icon className={`size-3.5 ${achievement.iconClass}`} />
+                </div>
+                <div className='min-w-0 flex-1'>
+                  <p className='font-medium truncate text-xs'>{tr(achievement.titleKey)}</p>
+                  <p className='text-[10px] text-muted-foreground'>{tr(achievement.descKey)}</p>
+                </div>
+                {Option.match(achievement.progress, {
+                  onNone: () => <CheckCircle2 className='size-3.5 text-green-500' />,
+                  onSome: (progress) => (
+                    <span className='text-[10px] text-muted-foreground tabular-nums'>
+                      {progress}
+                    </span>
+                  ),
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // -- Main component --
 
 export function HomePage({ loginUrl, error, reason }: HomePageProps) {
@@ -336,6 +466,16 @@ export function HomePage({ loginUrl, error, reason }: HomePageProps) {
                 {/* RSVP banner - bottom right */}
                 <div className='sm:col-span-1 lg:col-span-1 transition-transform hover:scale-[1.02] duration-200 -rotate-1'>
                   <DemoRsvpBanner />
+                </div>
+
+                {/* Finance card */}
+                <div className='sm:col-span-1 lg:col-span-2 transition-transform hover:scale-[1.02] duration-200 rotate-1'>
+                  <DemoFinance />
+                </div>
+
+                {/* Achievements card */}
+                <div className='sm:col-span-1 lg:col-span-1 transition-transform hover:scale-[1.02] duration-200 -rotate-1'>
+                  <DemoAchievements />
                 </div>
               </div>
             </div>
