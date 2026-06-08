@@ -5,6 +5,7 @@ import { ChannelReorderSemaphore } from '~/rcp/event/ChannelReorderSemaphore.js'
 import {
   AchievementSyncService,
   ChannelSyncService,
+  EmailSyncService,
   EventSyncService,
   FinanceSyncService,
   GuildJoinSyncService,
@@ -24,6 +25,7 @@ const SyncLive = Layer.mergeAll(
   RoleSyncService.Default,
   RoleProvisionSyncService.Default,
   ChannelSyncService.Default,
+  EmailSyncService.Default,
   EventSyncService.Default,
   FinanceSyncService.Default,
   GuildJoinSyncService.Default,

@@ -61,6 +61,7 @@ import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { MockChannelManagementLayers } from '../mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from '../mocks/dashboardLayoutMocks.js';
+import { MockEmailLayers } from '../mocks/emailMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from '../mocks/onboardingMocks.js';
 import { MockTeamChallengeRepositoryLayer } from '../mocks/teamChallengeMocks.js';
 import { MockTranslationsLayers } from '../mocks/translationMocks.js';
@@ -616,6 +617,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
   .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
   .pipe(Layer.provide(MockChannelManagementLayers))
+  .pipe(Layer.provide(MockEmailLayers))
   .pipe(Layer.provide(BotInfoStore.Default));
 
 // ---------------------------------------------------------------------------

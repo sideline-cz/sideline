@@ -8,6 +8,7 @@ import {
   ChannelApi,
   DashboardApi,
   DashboardLayoutApi,
+  EmailForwardingApi,
   EventApi,
   EventRsvpApi,
   EventSeriesApi,
@@ -65,5 +66,6 @@ export const Api = HttpApi.make('api')
     VersionApi.VersionApiGroup,
     WeeklySummaryApi.WeeklySummaryApiGroup,
     DashboardLayoutApi.DashboardLayoutApiGroup,
+    EmailForwardingApi.EmailForwardingApiGroup,
   )
   .prefix(env.API_PREFIX as '/${string}');

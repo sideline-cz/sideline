@@ -205,6 +205,10 @@ Build stages:
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Yes | — | OTLP HTTP endpoint for telemetry export |
 | `OTEL_SERVICE_NAME` | Yes | — | Service name reported to the telemetry backend (e.g. `sideline-server`) |
 | `APP_GLOBAL_ADMIN_DISCORD_IDS` | No | `''` | Comma-separated list of Discord user snowflake IDs that are granted global-admin access. A user is a global admin when **either** their `users.is_global_admin` DB flag is `true` **or** their Discord ID appears in this list — the two sources are combined with OR. The first user to register on a fresh database is automatically promoted via the DB flag. This env list exists for backward compatibility and for bootstrap scenarios where the DB flag cannot yet be set. Empty or unset means no env-list admins, but DB-flagged users still have access. Example: `123456789012345678,987654321098765432` |
+| `EMAIL_WEBHOOK_SIGNING_SECRET` | **Yes** | — | HMAC-SHA-256 signing secret used to verify inbound email webhook payloads. Every `POST /email/inbound/:token` request must include an `X-Signature` header whose value is `HMAC-SHA256(raw_body, EMAIL_WEBHOOK_SIGNING_SECRET)` in hex. Requests with a missing or invalid signature are rejected with `401`. Required even when email forwarding is not actively used. |
+| `LLM_API_URL` | No | `''` | Base URL of the OpenAI-compatible LLM API used for email summarization (e.g. `https://api.openai.com/v1`). When empty or unset, the AI summarization pipeline uses a deterministic stub that returns the first 500 characters of the email body as the summary. |
+| `LLM_API_KEY` | No | — | API key for the LLM service. Redacted in logs. Required when `LLM_API_URL` is set; ignored otherwise. |
+| `LLM_MODEL` | No | `gpt-4o-mini` | Model identifier passed to the LLM API (e.g. `gpt-4o`, `gpt-4o-mini`). Ignored when `LLM_API_URL` is empty. |
 
 ### 3.2 Bot (`applications/bot/src/env.ts`)
 

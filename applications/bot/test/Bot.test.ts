@@ -6,6 +6,7 @@ import { Bot } from '~/index.js';
 import {
   AchievementSyncService,
   ChannelSyncService,
+  EmailSyncService,
   EventSyncService,
   FinanceSyncService,
   GuildJoinSyncService,
@@ -104,6 +105,10 @@ const MockFinanceSyncServiceLayer = Layer.succeed(FinanceSyncService, {
   processTick: Effect.void,
 } as never);
 
+const MockEmailSyncServiceLayer = Layer.succeed(EmailSyncService, {
+  processTick: Effect.void,
+} as never);
+
 const MockOnboardingRoleCacheLayer = Layer.succeed(OnboardingRoleCache, {
   get: () => Effect.succeed(Option.none()),
   set: () => Effect.void,
@@ -144,6 +149,7 @@ describe('Bot', () => {
       MockTeamChallengeSyncServiceLayer,
       MockWeeklySummarySyncServiceLayer,
       MockFinanceSyncServiceLayer,
+      MockEmailSyncServiceLayer,
       MockOnboardingRoleCacheLayer,
       MockSyncRpcLayer,
       MockInviteCacheLayer,

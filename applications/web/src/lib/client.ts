@@ -8,6 +8,7 @@ import {
   ChannelApi,
   DashboardApi,
   DashboardLayoutApi,
+  EmailForwardingApi,
   EventApi,
   EventRsvpApi,
   EventSeriesApi,
@@ -71,7 +72,8 @@ class ClientApi extends HttpApi.make('api')
   .add(OnboardingApi.OnboardingApiGroup)
   .add(WeeklySummaryApi.WeeklySummaryApiGroup)
   .add(TeamChallengeApi.TeamChallengeApiGroup)
-  .add(ChannelApi.ChannelApiGroup) {}
+  .add(ChannelApi.ChannelApiGroup)
+  .add(EmailForwardingApi.EmailForwardingApiGroup) {}
 
 export const client = ClientConfig.asEffect().pipe(
   Effect.flatMap(({ baseUrl }) =>

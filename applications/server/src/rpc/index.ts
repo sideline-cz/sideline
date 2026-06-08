@@ -4,6 +4,7 @@ import { ActivityRpcLive } from './activity/index.js';
 import { BotInfoRpcLive } from './botInfo/index.js';
 import { CarpoolsRpcLive } from './carpool/index.js';
 import { ChannelsRpcLive } from './channel/index.js';
+import { EmailRpcLive } from './email/index.js';
 import { EventsRpcLive } from './event/index.js';
 import { FinanceRpcLive } from './finance/index.js';
 import { GuildsRpcLive } from './guild/index.js';
@@ -27,4 +28,5 @@ export const SyncRpcsLive = Layer.mergeAll(
   TeamChallengeSyncEventsRpcLive,
   FinanceRpcLive,
   CarpoolsRpcLive,
+  EmailRpcLive,
 );

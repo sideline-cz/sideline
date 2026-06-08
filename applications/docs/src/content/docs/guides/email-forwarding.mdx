@@ -1,0 +1,47 @@
+---
+title: Email forwarding & AI summarization
+description: Route inbound emails to a Discord channel with an AI-generated summary and a coach approval step.
+---
+
+import { Badge, Steps, Aside } from '@astrojs/starlight/components';
+
+<Badge text="Coming soon" variant="caution" />
+
+Full step-by-step instructions for enabling email forwarding, configuring the inbound webhook with your email provider, and managing the coach approval flow are coming soon.
+
+Until the full guide is published, here is a brief overview of the feature.
+
+## How it works
+
+When an email arrives at the configured inbound address:
+
+1. Sideline stores the email and generates an AI summary.
+2. The bot posts an **approval request** embed to the private coach channel you configured.
+3. A coach reviews the summary on the **Email detail page** (`/teams/{teamId}/emails/{emailId}`) in the web app, edits it if needed, then clicks **Approve** or **Reject** in Discord.
+4. On approval, the summary is posted to the team channel. On rejection, the original email text is posted instead.
+5. Attached files are stored and downloadable from the Email detail page by any team member.
+
+## Who can do what
+
+| Action | Permission required |
+|---|---|
+| Configure email forwarding settings | `team:manage` |
+| Approve or reject an email | `team:manage` |
+| Edit the AI summary | `team:manage` |
+| View an email and download attachments | Any team member |
+
+## Setup checklist
+
+<Steps>
+
+1. Go to **Team settings → Email forwarding** and enable the feature.
+2. Set the **coach channel** (where approval requests appear) and the **target channel** (where approved or rejected emails are posted).
+3. Optionally add **monitored addresses** to filter which recipient addresses are accepted; leave the list empty to accept all.
+4. Copy the **inbound webhook URL** (generated after saving) and configure your email provider to forward to it.
+5. Rotate the token with **Regenerate token** if the URL is ever compromised.
+
+</Steps>
+
+<Aside type="caution" title="V1 limitation">
+  Stored email bodies and attachments have no automatic retention or purge policy in this release. Manual cleanup is required for now; automated retention is planned as a follow-up.
+</Aside>

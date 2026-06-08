@@ -5,6 +5,17 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-08 — Email forwarding with AI summarization
+
+- Captains can now connect a team email address to Sideline via **Team settings → Email forwarding**. When enabled, inbound emails are automatically summarised by an AI assistant and posted to a Discord channel of your choice.
+- A dedicated **coach channel** receives an approval embed first. Coaches review the draft summary (and can edit it on the **Email detail page** in the web app), then click **Approve** or **Reject** in Discord. Approving posts the summary to the team channel; rejecting posts the original email text.
+- The **Email detail page** (`/teams/{teamId}/emails/{emailId}`) lets coaches edit the AI summary and download any attached files. Team members with any role can view and download attachments.
+- Supported attachment formats: any file up to 10 MB per attachment, 25 MB total per email.
+- New **regenerate token** action rotates the inbound webhook URL if the token is ever compromised.
+- Requires the `team:manage` permission to configure settings, approve, reject, or edit summaries. Any team member can view an email and its attachments.
+- **V1 limitation:** stored email bodies and attachments have no automatic retention policy; purging is a follow-up feature.
+- See the [Email forwarding guide](/guides/email-forwarding/) for setup instructions.
+
 ## 2026-06-08 — Configurable coach claim-request lead time in Team Settings
 
 - Captains can now set how many days before a training the bot posts the coach claim-request message, directly from **Team settings → Coach assignment → Days before training** (range 0–30; default 3).

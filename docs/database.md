@@ -1442,6 +1442,103 @@ Records which team members have a seat in a car. The carpool owner is also recor
 
 ---
 
+### 16. Email Forwarding
+
+#### `email_forwarding_config`
+
+Per-team configuration for the email forwarding and AI summarization feature. One row per team (PK = `team_id`). The `inbound_token` is a random secret embedded in the webhook URL; the UNIQUE constraint creates an implicit index that makes token-based lookups efficient.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `team_id` | UUID | PK, FK → `teams(id)` ON DELETE CASCADE | — |
+| `enabled` | BOOLEAN | NOT NULL | `false` |
+| `target_channel_id` | TEXT | NOT NULL | `''` |
+| `coach_channel_id` | TEXT | NOT NULL | `''` |
+| `monitored_addresses` | TEXT[] | NOT NULL | `'{}'` |
+| `inbound_token` | TEXT | NOT NULL, UNIQUE | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Indexes**: implicit unique index on `(inbound_token)` from the UNIQUE constraint.
+
+**Notes**: Added in migration `1789400000_create_email_forwarding_config`. `target_channel_id` is the Discord channel where the final post (approved summary or rejected original) is sent. `coach_channel_id` is the private Discord channel where the bot posts approval-request embeds. `monitored_addresses` is an allowlist of email recipient addresses; an empty array means all inbound emails are accepted. `inbound_token` is the per-team secret appended to the webhook URL (`POST /email/inbound/:token`); it is regenerated via `POST /teams/:teamId/email-forwarding/regenerate-token` and is intentionally omitted from all API responses except the regenerate endpoint. Team deletion cascades and removes this row.
+
+---
+
+#### `email_messages`
+
+One row per inbound email received via the webhook. Tracks the full lifecycle from receipt through AI summarization and coach approval to Discord posting.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `status` | TEXT | NOT NULL, CHECK (`received`, `summarizing`, `pending_approval`, `approved`, `rejected`, `posted_summary`, `posted_original`, `failed`) | `'received'` |
+| `from_address` | TEXT | NOT NULL | — |
+| `subject` | TEXT | NOT NULL | — |
+| `body` | TEXT | NOT NULL | — |
+| `summary` | TEXT | — | — |
+| `summarize_attempts` | INT | NOT NULL | `0` |
+| `last_error` | TEXT | — | — |
+| `approval_request_message_id` | TEXT | — | — |
+| `approved_by` | TEXT | — | — |
+| `rejected_by` | TEXT | — | — |
+| `posted_channel_id` | TEXT | — | — |
+| `received_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Indexes**:
+- `idx_email_messages_status_received` — partial index on `(received_at) WHERE status = 'received'`. Used by the AI summarization pipeline to find newly received emails.
+- `idx_email_messages_team_id` — on `(team_id)`.
+
+**Notes**: Added in migration `1789400001_create_email_messages`. `body` contains the plain-text email body as received from the provider. `summary` is populated by the AI summarization service (`LlmClient`) or by a manual edit via `PUT /teams/:teamId/emails/:emailId/summary`. `approved_by` and `rejected_by` store the Discord user snowflake of the team member who performed the action (set via the bot buttons or the web UI). `approval_request_message_id` is the Discord message ID of the approval-request embed posted to `coach_channel_id` (set after the bot posts it). `posted_channel_id` records where the final post landed. **V1 limitation:** stored email bodies and attachments have no automatic retention/purge policy; this is planned as a follow-up.
+
+---
+
+#### `email_post_sync_events`
+
+Outbox table driving email-related Discord posts. Polled by the bot's Email Sync worker. One row per (email, event kind) pair; the UNIQUE constraint prevents duplicate events.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `email_message_id` | UUID | NOT NULL, FK → `email_messages(id)` ON DELETE CASCADE | — |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `kind` | TEXT | NOT NULL, CHECK (`approval_request`, `post_summary`, `post_original`) | — |
+| `attempts` | INT | NOT NULL | `0` |
+| `processed_at` | TIMESTAMPTZ | — | — |
+| `error` | TEXT | — | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(email_message_id, kind)`
+
+**Indexes**: `idx_email_post_sync_events_unprocessed` — partial index on `(created_at) WHERE processed_at IS NULL`.
+
+**Notes**: Added in migration `1789400002_create_email_post_sync_events`. Three event kinds: `approval_request` (bot posts the approval embed to `coach_channel_id`), `post_summary` (bot posts the AI summary to `target_channel_id` after approval), `post_original` (bot posts the raw email body to `target_channel_id` after rejection). Cascade on `email_message_id` ensures sync events are cleaned up when the message is deleted.
+
+---
+
+#### `email_attachments`
+
+Binary attachment storage. Attachment bytes are stored directly in a `BYTEA` column. No automatic retention policy in v1.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `email_message_id` | UUID | NOT NULL, FK → `email_messages(id)` ON DELETE CASCADE | — |
+| `filename` | TEXT | NOT NULL | — |
+| `content_type` | TEXT | NOT NULL | — |
+| `size_bytes` | INT | NOT NULL | — |
+| `content` | BYTEA | NOT NULL | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Indexes**: `idx_email_attachments_email_message_id` on `(email_message_id)`.
+
+**Notes**: Added in migration `1789400003_create_email_attachments`. Per-attachment size cap: 10 MB; total attachment cap per email: 25 MB (enforced in the webhook handler before insertion). `content` holds the raw decoded bytes (base64-decoded from the provider's payload). The download endpoint (`GET /teams/:teamId/emails/:emailId/attachments/:attachmentId`) streams the bytes directly without a file-system intermediary.
+
+---
+
 ## Migration History
 
 All 86 migration files in `packages/migrations/src/before/` plus 1 after-migration.
@@ -1531,6 +1628,11 @@ All 86 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1789000002 | `uq_team_channels_discord_channel` | Adds unique partial index `uq_team_channels_discord_channel ON team_channels(team_id, discord_channel_id) WHERE discord_channel_id IS NOT NULL`. Prevents the same Discord channel being adopted more than once per team. |
 | 1789000003 | `add_team_channels_emoji` | Adds nullable `emoji TEXT` column to `team_channels`. Stores the emoji separately from the logical channel name so the Discord channel name can be composed via the team's `discordChannelFormat` template. |
 | 1789000004 | `add_channel_restored_event_type` | Extends `channel_sync_events.event_type` CHECK constraint to include `'channel_restored'`, enabling the new restore endpoints to enqueue restore events. |
+| 1789300000 | `improve_coach_assigning` | Adds `claim_request_days_before INT` to `team_settings`; adds `claim_request_sent_at`, `coaching_status_sent_at`, `claim_thread_id` to `events`. |
+| 1789400000 | `create_email_forwarding_config` | Creates `email_forwarding_config` table (per-team email forwarding configuration with inbound token). |
+| 1789400001 | `create_email_messages` | Creates `email_messages` table with status lifecycle and partial indexes. |
+| 1789400002 | `create_email_post_sync_events` | Creates `email_post_sync_events` outbox table for bot Discord posting pipeline. |
+| 1789400003 | `create_email_attachments` | Creates `email_attachments` table for binary attachment storage (BYTEA). |
 
 ### After Migrations (seed data)
 
@@ -1554,6 +1656,7 @@ Three tables act as outbox queues for bot-server communication:
 | `achievement_sync_events` | Achievement Sync | `achievement_earned` |
 | `discord_role_provision_events` | Role Provision | `builtin_achievement`, `custom_achievement` |
 | `payment_reminder_sync_events` | Finance Sync | `payment_reminder_ready` |
+| `email_post_sync_events` | Email Sync | `approval_request`, `post_summary`, `post_original` |
 
 The server inserts rows when the relevant domain action occurs. The bot polls `WHERE processed_at IS NULL ORDER BY created_at` and updates `processed_at` (and optionally `error`) when processing is complete. Partial indexes on `(created_at) WHERE processed_at IS NULL` make these polls efficient. Event data is denormalised into snapshot columns so that the bot's message content remains accurate even if the source row is subsequently modified.
 
@@ -1563,7 +1666,7 @@ The server inserts rows when the relevant domain action occurs. The bot polls `W
 
 ### Cascading Deletes
 
-Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events, fees, expenses). Fee deletion cascades to fee_assignments. Fee assignment deletion cascades to `payment_reminder_sync_events` and `payment_reminders_sent`. Expense deletion does not cascade to `expense_history` (no FK constraint on `expense_history.expense_id`). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, and achievement_sync_events. Member deletion is blocked (`ON DELETE RESTRICT`) when any fee_assignment or payment row references the member. User deletion is blocked (`ON DELETE RESTRICT`) when any expense or expense_history row references the user. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
+Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events, fees, expenses, email_forwarding_config, email_messages, email_post_sync_events). Deletion of an `email_messages` row cascades to its `email_attachments` and `email_post_sync_events` rows. Fee deletion cascades to fee_assignments. Fee assignment deletion cascades to `payment_reminder_sync_events` and `payment_reminders_sent`. Expense deletion does not cascade to `expense_history` (no FK constraint on `expense_history.expense_id`). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, and achievement_sync_events. Member deletion is blocked (`ON DELETE RESTRICT`) when any fee_assignment or payment row references the member. User deletion is blocked (`ON DELETE RESTRICT`) when any expense or expense_history row references the user. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
 
 Role deletion uses `ON DELETE RESTRICT` on `member_roles` to prevent accidentally orphaning members. FK references from `role_sync_events.role_id` and `channel_sync_events.group_id` are stored as plain UUID (no FK constraint) so audit rows are retained after the referenced entity is deleted.
 

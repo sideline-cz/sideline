@@ -10,6 +10,7 @@ import { AuthApiLive } from '~/api/auth.js';
 import { ChannelApiLive } from '~/api/channel.js';
 import { DashboardApiLive } from '~/api/dashboard.js';
 import { DashboardLayoutApiLive } from '~/api/dashboard-layout.js';
+import { EmailForwardingApiLive } from '~/api/email-forwarding.js';
 import { EventApiLive } from '~/api/event.js';
 import { EventRsvpApiLive } from '~/api/event-rsvp.js';
 import { EventSeriesApiLive } from '~/api/event-series.js';
@@ -64,6 +65,7 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
     Layer.provide(VersionApiLive),
     Layer.provide(WeeklySummaryApiLive),
     Layer.provide(DashboardLayoutApiLive),
+    Layer.provide(EmailForwardingApiLive),
   );
 
 export { Redirect } from '~/api/redirect.js';

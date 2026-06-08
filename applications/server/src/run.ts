@@ -12,6 +12,8 @@ import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.
 import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { EmailMessagesRepository } from '~/repositories/EmailMessagesRepository.js';
+import { EmailPostSyncEventsRepository } from '~/repositories/EmailPostSyncEventsRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
@@ -30,8 +32,10 @@ import {
 import { AgeCheckCron } from '~/services/AgeCheckCron.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { CoachingStatusCron } from '~/services/CoachingStatusCron.js';
+import { EmailSummarizer } from '~/services/EmailSummarizer.js';
 import { EventHorizonCron } from '~/services/EventHorizonCron.js';
 import { EventStartCron } from '~/services/EventStartCron.js';
+import { LlmClient } from '~/services/LlmClient.js';
 import { PaymentReminderCron } from '~/services/PaymentReminderCron.js';
 import { RsvpReminderCron } from '~/services/RsvpReminderCron.js';
 import { TrainingAutoLogCron } from '~/services/TrainingAutoLogCron.js';
@@ -193,6 +197,16 @@ const CoachingStatusCronEffect = CoachingStatusCron.asEffect().pipe(
   ),
 );
 
+const EmailSummarizerCronEffect = EmailSummarizer.asEffect().pipe(
+  Effect.provide(
+    EmailMessagesRepository.Default.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
+  ),
+  Effect.provide(
+    EmailPostSyncEventsRepository.Default.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
+  ),
+  Effect.provide(LlmClient.Default),
+);
+
 Effect.Do.pipe(
   Effect.tap(() => (env.DATABASE_MAIN !== env.DATABASE_NAME ? CreateDb : Effect.void)),
   Effect.tap(() => MigrateBefore),
@@ -211,6 +225,7 @@ Effect.Do.pipe(
         PaymentReminderCronEffect,
         ClaimRequestCronEffect,
         CoachingStatusCronEffect,
+        EmailSummarizerCronEffect,
       ],
       {
         concurrency: 10,

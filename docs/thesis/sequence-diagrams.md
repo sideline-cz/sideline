@@ -1,6 +1,6 @@
 # Sideline — Core System Sequence Diagrams
 
-This document provides sequence diagrams for the eleven core flows in the Sideline platform. Each diagram is accompanied by a brief description of the flow and its key design decisions. The diagrams use Mermaid `sequenceDiagram` syntax and are intended for inclusion in a bachelor's thesis.
+This document provides sequence diagrams for the twelve core flows in the Sideline platform. Each diagram is accompanied by a brief description of the flow and its key design decisions. The diagrams use Mermaid `sequenceDiagram` syntax and are intended for inclusion in a bachelor's thesis.
 
 ---
 
@@ -779,4 +779,64 @@ sequenceDiagram
     DB-->>Server: OK — commit transaction
     Server-->>Captain: 201 Created — UserTeam {teamId, teamName, roleNames, permissions}
     Note over Captain: Browser redirects to /teams/{teamId} dashboard
+```
+
+---
+
+## 12. Email Forwarding — Inbound Email, AI Summarization, and Coach Approval
+
+An external email provider delivers a message to the Sideline inbound webhook. The server validates the HMAC signature and per-team token, stores the email, and queues it for AI summarization. The AI summarizer produces a draft summary. The server enqueues an `approval_request` outbox event. The bot drains the outbox and posts an approval embed to the coach channel. The coach clicks **Approve** in Discord; the bot calls the `Email/RecordApproval` RPC. The server transitions the email to `approved` and enqueues a `post_summary` event. The bot drains the new event and posts the summary to the team channel.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant EP as Email Provider
+    participant Server
+    participant DB as PostgreSQL
+    participant LLM as LLM API
+    participant Bot as Discord Bot
+    participant Discord
+    participant Coach
+
+    EP->>Server: POST /email/inbound/:token
+    Note over Server: Verify X-Signature (HMAC-SHA256)
+    Server->>DB: SELECT email_forwarding_config WHERE inbound_token=?
+    DB-->>Server: config row (enabled=true, monitored_addresses, ...)
+    Note over Server: Check monitored_addresses filter
+    Server->>DB: INSERT email_messages (status=received)
+    Server->>DB: INSERT email_attachments (BYTEA x N)
+    DB-->>Server: email_message_id
+    Server-->>EP: 202 Accepted
+
+    Note over Server: AI Summarization pipeline (async)
+    Server->>DB: UPDATE email_messages SET status=summarizing
+    Server->>LLM: POST /chat/completions
+    LLM-->>Server: summary text
+    Server->>DB: UPDATE email_messages SET status=pending_approval, summary=?
+    Server->>DB: INSERT email_post_sync_events (kind=approval_request)
+
+    Bot->>Server: Email/GetUnprocessedEmailPostEvents
+    Server->>DB: SELECT email_post_sync_events WHERE processed_at IS NULL
+    DB-->>Server: [approval_request event]
+    Server-->>Bot: [approval_request event]
+    Bot->>Discord: POST /channels/{coachChannelId}/messages
+    Note over Bot: Approval embed + Approve / Reject buttons
+    Discord-->>Bot: message created
+    Bot->>Server: Email/MarkEmailPostEventProcessed
+
+    Coach->>Discord: Click Approve button
+    Discord->>Bot: Interaction (email-approve:{teamId}:{emailId})
+    Bot->>Server: Email/RecordApproval (team_id, email_id, discord_user_id)
+    Server->>DB: UPDATE email_messages SET status=approved, approved_by=?
+    Server->>DB: INSERT email_post_sync_events (kind=post_summary)
+    Server-->>Bot: { outcome: "approved" }
+    Bot->>Discord: Edit approval message (disable buttons)
+    Bot->>Discord: Ephemeral reply to coach
+
+    Bot->>Server: Email/GetUnprocessedEmailPostEvents
+    Server-->>Bot: [post_summary event]
+    Bot->>Discord: POST /channels/{targetChannelId}/messages
+    Note over Bot: Summary embed + "View original" link button
+    Discord-->>Bot: message created
+    Bot->>Server: Email/MarkEmailPostEventProcessed (status→posted_summary)
 ```

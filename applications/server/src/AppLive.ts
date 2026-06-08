@@ -4,6 +4,7 @@ import { FetchHttpClient, HttpRouter, HttpServer } from 'effect/unstable/http';
 import { HttpApiSwagger } from 'effect/unstable/httpapi';
 import { RpcSerialization, RpcServer } from 'effect/unstable/rpc';
 import { Api } from '~/api/api.js';
+import { EmailWebhookLive } from '~/api/email-webhook.js';
 import { ApiLive } from '~/api/index.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
 import { RpcObservability, RpcObservabilityLive } from '~/middleware/RpcObservability.js';
@@ -25,6 +26,10 @@ import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingR
 import { DiscordRoleProvisionEventsRepository } from '~/repositories/DiscordRoleProvisionEventsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EarnedAchievementsRepository } from '~/repositories/EarnedAchievementsRepository.js';
+import { EmailAttachmentsRepository } from '~/repositories/EmailAttachmentsRepository.js';
+import { EmailForwardingConfigRepository } from '~/repositories/EmailForwardingConfigRepository.js';
+import { EmailMessagesRepository } from '~/repositories/EmailMessagesRepository.js';
+import { EmailPostSyncEventsRepository } from '~/repositories/EmailPostSyncEventsRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
@@ -67,6 +72,8 @@ import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { EmailApprovalService } from '~/services/EmailApprovalService.js';
+import { LlmClient } from '~/services/LlmClient.js';
 import { TranslationCache } from '~/services/TranslationCache.js';
 import { env } from './env.js';
 import { HttpLogger } from './middleware/HttpLogger.js';
@@ -139,6 +146,10 @@ const Repositories = Layer.mergeAll(
   CarpoolsRepository.Default,
   TeamChannelsRepository.Default,
   TeamChannelAccessRepository.Default,
+  EmailForwardingConfigRepository.Default,
+  EmailMessagesRepository.Default,
+  EmailAttachmentsRepository.Default,
+  EmailPostSyncEventsRepository.Default,
 );
 
 const AppLayer = Layer.mergeAll(
@@ -146,6 +157,7 @@ const AppLayer = Layer.mergeAll(
   HttpApiSwagger.layer(Api, { path: '/docs/swagger-ui' }),
   HttpRouter.cors({ credentials: true }),
   RpcLive,
+  EmailWebhookLive,
 );
 
 export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pipe(
@@ -156,7 +168,10 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   Layer.provide(AchievementPreview.Default),
   Layer.provide(BotInfoStore.Default),
   Layer.provide(TranslationCache.Default),
-  Layer.provide(Repositories),
+  Layer.provide(
+    Layer.merge(Repositories, EmailApprovalService.Default.pipe(Layer.provide(Repositories))),
+  ),
   Layer.provide(DiscordOAuth.Default),
+  Layer.provide(LlmClient.Default),
   Layer.provide(FetchHttpClient.layer),
 );

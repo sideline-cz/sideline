@@ -38,6 +38,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Weekly Challenge](#27-weekly-challenge)
    - [Dashboard Layout](#28-dashboard-layout)
    - [Channel](#29-channel)
+   - [Email Forwarding](#30-email-forwarding)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -5357,6 +5358,232 @@ Replaces the complete set of access grants for a channel. Groups in the payload 
 
 ---
 
+### 30. Email Forwarding
+
+**Source:** `packages/domain/src/api/EmailForwardingApi.ts`
+
+Manages per-team email forwarding configuration, inbound email review, and attachment downloads.
+
+**Inbound webhook (unauthenticated):**
+
+`POST /email/inbound/:token` — receives emails from external providers. Authenticated by a per-team `inbound_token` (path parameter) and a global HMAC-SHA-256 signature (`X-Signature` header; secret = `EMAIL_WEBHOOK_SIGNING_SECRET`). Returns `202 Accepted` on success. Size limits: 36 MB total body, 10 MB per attachment, 25 MB total attachments. If `monitored_addresses` is configured, emails not addressed to a monitored address are silently dropped (`200 OK`). Not included in the authenticated API group.
+
+---
+
+#### `GET /teams/:teamId/email-forwarding`
+
+Returns the team's current email forwarding configuration.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `team:manage`
+
+**Response:** `200 OK` — `EmailForwardingConfigView`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `teamId` | `TeamId` | No | Team ID |
+| `enabled` | `boolean` | No | Whether email forwarding is active |
+| `targetChannelId` | `Snowflake` | No | Discord channel where approved/rejected emails are posted |
+| `coachChannelId` | `Snowflake` | No | Discord channel where approval requests are posted |
+| `monitoredAddresses` | `string[]` | No | List of email addresses to accept; empty means accept all |
+| `createdAt` | `string` (ISO 8601) | No | Row creation timestamp |
+| `updatedAt` | `string` (ISO 8601) | No | Last update timestamp |
+
+**Notes:** `inbound_token` is intentionally omitted from this view. It is only returned by the regenerate-token endpoint.
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EmailForbidden` | 403 | Not a member, or missing `team:manage` permission |
+
+---
+
+#### `PUT /teams/:teamId/email-forwarding`
+
+Creates or updates the email forwarding configuration for a team.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `team:manage`
+
+**Request Body:** `UpsertEmailForwardingConfigRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | `boolean` | Yes | Enable or disable forwarding |
+| `target_channel_id` | `Snowflake` | Yes | Channel where approved/rejected emails are posted |
+| `coach_channel_id` | `Snowflake` | Yes | Channel where approval-request embeds are posted |
+| `monitored_addresses` | `string[]` | Yes | Addresses to accept; empty array accepts all |
+
+**Response:** `200 OK` — `EmailForwardingConfigView`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EmailForbidden` | 403 | Not a member, or missing `team:manage` permission |
+
+---
+
+#### `POST /teams/:teamId/email-forwarding/regenerate-token`
+
+Generates a new `inbound_token` for the team's webhook URL. The previous token is immediately invalidated.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `team:manage`
+
+**Response:** `200 OK` — `RegenerateTokenResponse`
+
+| Field | Type | Description |
+|---|---|---|
+| `inbound_token` | `string` | New inbound token; this is the only response that includes the token value |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EmailForbidden` | 403 | Not a member, or missing `team:manage` permission |
+| `EmailMessageNotFound` | 404 | No config row exists for this team yet (call `PUT` first) |
+
+---
+
+#### `GET /teams/:teamId/emails/:emailId`
+
+Returns the full detail of a received email, including attachment metadata.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** Team membership (any role)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `emailId` | `EmailMessageId` (string) | Email ID |
+
+**Response:** `200 OK` — `EmailDetailView`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `emailId` | `EmailMessageId` | No | Email ID |
+| `teamId` | `TeamId` | No | Team ID |
+| `status` | `EmailStatus` | No | Processing status (see below) |
+| `fromAddress` | `string` | No | Sender address |
+| `subject` | `string` | No | Email subject |
+| `body` | `string` | No | Plain-text email body |
+| `summary` | `string \| null` | Yes | AI-generated or manually edited summary |
+| `receivedAt` | `string` (ISO 8601) | No | When the email was received |
+| `approvedBy` | `string \| null` | Yes | Discord user snowflake of the member who approved |
+| `rejectedBy` | `string \| null` | Yes | Discord user snowflake of the member who rejected |
+| `postedChannelId` | `Snowflake \| null` | Yes | Channel where the email was posted |
+| `attachments` | `EmailAttachmentMeta[]` | No | List of attachment metadata |
+
+`EmailStatus` values: `received`, `summarizing`, `pending_approval`, `approved`, `rejected`, `posted_summary`, `posted_original`, `failed`.
+
+`EmailAttachmentMeta` fields: `attachmentId`, `filename`, `contentType`, `sizeBytes`, `createdAt`.
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EmailForbidden` | 403 | Not a member of this team |
+| `EmailMessageNotFound` | 404 | Email does not exist or belongs to a different team |
+
+---
+
+#### `PUT /teams/:teamId/emails/:emailId/summary`
+
+Updates the AI-generated summary text before approval.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `team:manage`
+
+**Request Body:** `UpdateEmailSummaryRequest`
+
+| Field | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `summary` | `string` | Yes | Max 4000 characters | New summary text |
+
+**Response:** `200 OK` — `EmailDetailView`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EmailForbidden` | 403 | Not a member, or missing `team:manage` permission |
+| `EmailMessageNotFound` | 404 | Email does not exist or belongs to a different team |
+
+---
+
+#### `POST /teams/:teamId/emails/:emailId/approve`
+
+Approves an email: posts the AI summary to the target channel.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `team:manage`
+
+**Response:** `200 OK` — `EmailActionResult`
+
+| Field | Type | Description |
+|---|---|---|
+| `outcome` | `"approved" \| "rejected" \| "already_handled"` | Result of the action |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EmailForbidden` | 403 | Not a member, or missing `team:manage` permission |
+| `EmailMessageNotFound` | 404 | Email does not exist or belongs to a different team |
+| `EmailNotPending` | 409 | Email is not in `pending_approval` status |
+
+---
+
+#### `POST /teams/:teamId/emails/:emailId/reject`
+
+Rejects an email: posts the original body to the target channel instead of the summary.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `team:manage`
+
+**Response:** `200 OK` — `EmailActionResult`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EmailForbidden` | 403 | Not a member, or missing `team:manage` permission |
+| `EmailMessageNotFound` | 404 | Email does not exist or belongs to a different team |
+| `EmailNotPending` | 409 | Email is not in `pending_approval` status |
+
+---
+
+#### `GET /teams/:teamId/emails/:emailId/attachments/:attachmentId`
+
+Downloads an attachment file. Returns the raw file bytes with `Content-Type`, `Content-Disposition: attachment`, and `Content-Length` headers.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** Team membership (any role)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `emailId` | `EmailMessageId` (string) | Email ID |
+| `attachmentId` | `EmailAttachmentId` (string) | Attachment ID |
+
+**Response:** `200 OK` — raw file bytes (content type set per attachment)
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EmailForbidden` | 403 | Not a member of this team |
+| `EmailMessageNotFound` | 404 | Email does not exist or belongs to a different team |
+| `EmailAttachmentNotFound` | 404 | Attachment does not exist for this email |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -5521,6 +5748,22 @@ Handles the `/finance status` slash command and the payment reminder delivery pi
 
 ---
 
+#### Email
+
+Handles the coach approval flow (approve/reject via Discord buttons) and the email post outbox pipeline.
+
+| Method | Payload / Returns | Description |
+|---|---|---|
+| `Email/RecordApproval` | `team_id`, `email_id`, `discord_user_id` → `{ outcome: "approved" \| "already_handled" }` | Records a coach approval of a pending email. Requires `team:manage` for the invoking Discord user. Errors: `EmailApprovalForbidden`, `EmailRpcMessageNotFound`. |
+| `Email/RecordRejection` | `team_id`, `email_id`, `discord_user_id` → `{ outcome: "rejected" \| "already_handled" }` | Records a coach rejection of a pending email. Requires `team:manage` for the invoking Discord user. Errors: `EmailApprovalForbidden`, `EmailRpcMessageNotFound`. |
+| `Email/GetUnprocessedEmailPostEvents` | `{ limit }` → `UnprocessedEmailPostEvent[]` | Polls `email_post_sync_events` for rows where `processed_at IS NULL`, up to `limit`. Called by the bot's Email Sync worker on a 5-second cadence. |
+| `Email/MarkEmailPostEventProcessed` | `id`, `deliveredAt`, `email_message_id`, `kind`, `posted_channel_id` | Sets `processed_at = now()` on the sync event row. For `post_summary` and `post_original` kinds, also transitions the `email_messages.status` to `posted_summary` or `posted_original` and records `posted_channel_id`. |
+| `Email/MarkEmailPostEventFailed` | `id`, `error` | Records a delivery failure on the sync event row; the row is retried on the next poll. |
+
+`UnprocessedEmailPostEvent` fields: `id`, `email_message_id`, `team_id`, `kind` (`"approval_request" | "post_summary" | "post_original"`), `coach_channel_id`, `target_channel_id`, `subject`, `from_address`, `summary` (nullable), `body`, `received_at`.
+
+---
+
 ## Error Reference
 
 The following table consolidates all error tags across all API groups.
@@ -5609,6 +5852,10 @@ The following table consolidates all error tags across all API groups.
 | `ChannelForbidden` | 403 | Channel | Not a member of this team, or missing `group:manage` permission |
 | `ChannelNotFound` | 404 | Channel | Channel does not exist or belongs to a different team |
 | `ChannelNameAlreadyTaken` | 409 | Channel | An active channel with this name already exists for this team |
+| `EmailForbidden` | 403 | Email Forwarding | Not a member of the team, or missing `team:manage` for write operations |
+| `EmailMessageNotFound` | 404 | Email Forwarding | Email does not exist or belongs to a different team |
+| `EmailAttachmentNotFound` | 404 | Email Forwarding | Attachment does not exist for this email |
+| `EmailNotPending` | 409 | Email Forwarding | Approve/reject attempted on an email that is not in `pending_approval` status |
 | `ArchiveCategoryNotConfigured` | 409 | Channel | `archiveDiscordChannel` or `bulkArchiveDiscordChannels` was called but `team_settings.discord_archive_category_id` is not set |
 | `ChannelNotArchivable` | 409 | Channel | The target Discord channel is already in the archive category or is a category channel |
 | `ChannelNotAdoptable` | 409 | Channel | `adoptDiscordChannel` was called on a non-text channel (type ≠ 0) |

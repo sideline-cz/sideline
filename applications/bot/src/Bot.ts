@@ -10,6 +10,7 @@ import { APP_VERSION } from '~/version.js';
 import {
   AchievementSyncService,
   ChannelSyncService,
+  EmailSyncService,
   EventSyncService,
   FinanceSyncService,
   GuildJoinSyncService,
@@ -58,6 +59,7 @@ export const program = Effect.Do.pipe(
   Effect.bind('teamChallenge', () => TeamChallengeSyncService.asEffect()),
   Effect.bind('weeklySummary', () => WeeklySummarySyncService.asEffect()),
   Effect.bind('finance', () => FinanceSyncService.asEffect()),
+  Effect.bind('emailSync', () => EmailSyncService.asEffect()),
   Effect.tap(() => Effect.logInfo('Bot connected to Discord')),
   Effect.andThen(
     ({
@@ -73,6 +75,7 @@ export const program = Effect.Do.pipe(
       teamChallenge,
       weeklySummary,
       finance,
+      emailSync,
     }) =>
       Effect.all(
         [
@@ -89,6 +92,7 @@ export const program = Effect.Do.pipe(
           pollLoop(teamChallenge.processTick),
           pollLoop(weeklySummary.processTick),
           pollLoop(finance.processTick),
+          pollLoop(emailSync.processTick),
           recoverDeletedMessages,
         ],
         {
@@ -105,6 +109,7 @@ export const program = Effect.Do.pipe(
   | SyncRpc
   | RoleSyncService
   | ChannelSyncService
+  | EmailSyncService
   | EventSyncService
   | FinanceSyncService
   | GuildJoinSyncService

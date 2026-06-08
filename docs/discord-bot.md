@@ -751,6 +751,35 @@ Handles the user-select submission from the Carpool Assign Button. Assigns the c
 
 ---
 
+### Email Approve Button — `email-approve:{teamId}:{emailId}`
+
+Appears on the approval-request embed posted to the coach channel when a new email is received.
+
+**Custom ID pattern:** `email-approve:{teamId}:{emailId}`
+
+**Behavior:**
+
+1. Returns a deferred ephemeral response and forks a background fiber.
+2. The fiber calls `Email/RecordApproval` RPC with `team_id`, `email_id`, and the clicking user's Discord snowflake.
+3. On success, edits the original approval embed to disable both Approve and Reject buttons.
+4. Sends an ephemeral follow-up: approval confirmation, "already handled" notice, or an authorization error.
+
+**Source file:** `applications/bot/src/interactions/email-approval.ts` (`EmailApproveButton`)
+
+---
+
+### Email Reject Button — `email-reject:{teamId}:{emailId}`
+
+Appears on the same approval-request embed as the Approve button.
+
+**Custom ID pattern:** `email-reject:{teamId}:{emailId}`
+
+**Behavior:** identical to Approve but calls `Email/RecordRejection` RPC. The server posts the original email body (truncated) to the target channel.
+
+**Source file:** `applications/bot/src/interactions/email-approval.ts` (`EmailRejectButton`)
+
+---
+
 ### Event Create Autocomplete
 
 Provides training type suggestions for the `/event create training_type` option.
@@ -882,9 +911,9 @@ Calls `Guild/UpsertChannel` RPC to update the channel's name and metadata in the
 
 ## RPC Sync Workers
 
-Eight background worker loops run continuously inside the bot process. Seven of them (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync, Weekly Challenge Sync) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those seven loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`). Several outbox workers pass a client-side `POLL_BATCH_SIZE = 50` limit to the server query (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync); the Weekly Challenge and Weekly Summary workers do not — their server-side queries are currently unbounded, which is acceptable because the per-team-per-week invariant naturally bounds the backlog. The eighth worker (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation.
+Nine background worker loops run continuously inside the bot process. Eight of them (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync, Weekly Challenge Sync, Email Sync) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those eight loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`). Several outbox workers pass a client-side `POLL_BATCH_SIZE = 50` limit to the server query (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync, Email Sync); the Weekly Challenge and Weekly Summary workers do not — their server-side queries are currently unbounded, which is acceptable because the per-team-per-week invariant naturally bounds the backlog. The ninth worker (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation.
 
-The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, `event_sync_events`, `achievement_sync_events`, `discord_role_provision_events`, `payment_reminder_sync_events`, and `weekly_challenge_sync_events`; the bot drains those queues.
+The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, `event_sync_events`, `achievement_sync_events`, `discord_role_provision_events`, `payment_reminder_sync_events`, `weekly_challenge_sync_events`, and `email_post_sync_events`; the bot drains those queues.
 
 > **Note on directory name:** The source files for these workers live under `applications/bot/src/rcp/`. This is a typo in the codebase; the intended name is `rpc`. The import paths and class names (`RoleSyncService`, `ChannelSyncService`, `EventSyncService`) all reflect the intended `rpc` meaning.
 
@@ -1152,6 +1181,34 @@ The server's weekly challenge cron inserts rows into the `weekly_challenge_sync_
 
 ---
 
+### Email Sync Worker
+
+**Service class:** `EmailSyncService` (`applications/bot/src/rcp/email/index.ts`)
+
+**Polling RPC:** `Email/GetUnprocessedEmailPostEvents`
+
+**Polling interval:** 5 seconds (`pollLoop` in `Bot.ts`).
+
+The server's AI summarization pipeline inserts rows into `email_post_sync_events` when an email is ready for a Discord action. The Email Sync worker drains this outbox.
+
+**Events processed:**
+
+| Event kind | Handler | Discord action |
+|---|---|---|
+| `approval_request` | `handleEmailPostEvent.ts` | Posts an approval embed to the team's configured `coach_channel_id`. The embed (amber/yellow colour) shows the AI summary or original body, sender, subject, and received-at timestamp. Three buttons are attached: **Approve** (`email-approve:{teamId}:{emailId}`), **Reject** (`email-reject:{teamId}:{emailId}`), and an optional **Review & edit in Sideline** link button (shown when `WEB_URL` is set). |
+| `post_summary` | `handleEmailPostEvent.ts` | Posts the AI summary embed (green colour) to `target_channel_id`. When `WEB_URL` is set, includes a **View original & attachments in Sideline** link button. |
+| `post_original` | `handleEmailPostEvent.ts` | Posts the original email body (grey colour, truncated to 3500 characters) to `target_channel_id`. Same deep-link button as `post_summary`. |
+
+**Embed builder:** `applications/bot/src/rest/email/buildEmailEmbeds.ts`
+
+**Locale note:** all email embeds are rendered in Czech (`cs`). Per-team locale support is planned.
+
+**Lifecycle RPCs:**
+- `Email/MarkEmailPostEventProcessed` — called with event ID, kind, and the posted channel ID after the Discord message is created. For `post_summary` and `post_original`, also transitions the `email_messages.status`.
+- `Email/MarkEmailPostEventFailed` — called on any error; the row is retried on the next poll.
+
+---
+
 ## Startup Tasks
 
 In addition to the poll loops, the bot runs one-off tasks at startup (after the gateway connection is established). These tasks are composed alongside the poll loops with `concurrency: 'unbounded'` in `Bot.ts`.
@@ -1311,6 +1368,18 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `WeeklyChallenge/GetUnprocessedWeeklyChallengeEvents` | Poll for pending `weekly_challenge_sync_events` outbox rows (no client-side limit) |
 | `WeeklyChallenge/MarkWeeklyChallengeProcessed` | Acknowledge successful processing; payload: `{ eventId, deliveredAt }` |
 | `WeeklyChallenge/MarkWeeklyChallengeFailed` | Record a processing failure and increment the attempt counter; payload: `{ eventId, error }` |
+
+### Email group (`Email/`)
+
+| Method | Payload / Returns | Description |
+|--------|---------|-------------|
+| `Email/RecordApproval` | `team_id`, `email_id`, `discord_user_id` → `{ outcome }` | Records a coach approval. Validates team membership and `team:manage` permission. `outcome` is `"approved"` or `"already_handled"`. Errors: `EmailApprovalForbidden`, `EmailRpcMessageNotFound`. |
+| `Email/RecordRejection` | `team_id`, `email_id`, `discord_user_id` → `{ outcome }` | Records a coach rejection. Same authorization check as approval. `outcome` is `"rejected"` or `"already_handled"`. Errors: `EmailApprovalForbidden`, `EmailRpcMessageNotFound`. |
+| `Email/GetUnprocessedEmailPostEvents` | `{ limit }` → `UnprocessedEmailPostEvent[]` | Polls `email_post_sync_events` for rows where `processed_at IS NULL`, up to `limit`. |
+| `Email/MarkEmailPostEventProcessed` | `id`, `deliveredAt`, `email_message_id`, `kind`, `posted_channel_id` | Sets `processed_at = now()`. For `post_summary`/`post_original` kinds, also updates `email_messages.status` and `posted_channel_id`. |
+| `Email/MarkEmailPostEventFailed` | `id`, `error` | Records a delivery failure. The row remains `processed_at = NULL` and will be retried. |
+
+---
 
 ### Finance group (`Finance/`)
 

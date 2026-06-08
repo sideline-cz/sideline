@@ -1,13 +1,31 @@
-import type { GroupApi, TeamApi, TeamSettingsApi } from '@sideline/domain';
-import { ChannelSyncEvent, Discord } from '@sideline/domain';
+import type { EmailForwardingApi, GroupApi, TeamApi, TeamSettingsApi } from '@sideline/domain';
+import { ChannelSyncEvent, Discord, Team } from '@sideline/domain';
 import { applyTemplate, sanitizeRendered } from '@sideline/template-renderer';
 import { Link, useRouter } from '@tanstack/react-router';
 import { DateTime, Effect, Option, Schema } from 'effect';
-import { AlertTriangle, MessageSquare, Settings, ShieldCheck, Users } from 'lucide-react';
+import {
+  AlertTriangle,
+  Copy,
+  Mail,
+  MessageSquare,
+  Settings,
+  ShieldCheck,
+  Users,
+} from 'lucide-react';
 import React from 'react';
 import { toast } from 'sonner';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 import { Alert, AlertDescription } from '~/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '~/components/ui/alert-dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
@@ -28,6 +46,7 @@ import { ToggleGroup, ToggleGroupItem } from '~/components/ui/toggle-group';
 import { useFormatDate } from '~/hooks/useFormatDate';
 import { DISCORD_CHANNEL_TYPE_CATEGORY, DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
+import { useServerUrl } from '~/lib/translation-overrides-context.js';
 import { tr } from '~/lib/translations.js';
 
 interface TeamSettingsPageProps {
@@ -36,6 +55,7 @@ interface TeamSettingsPageProps {
   discordChannels: ReadonlyArray<GroupApi.DiscordChannelInfo>;
   discordRoles: ReadonlyArray<GroupApi.DiscordRoleInfo>;
   teamInfo: TeamApi.TeamInfo;
+  emailForwardingConfig: EmailForwardingApi.EmailForwardingConfigView | null;
 }
 
 const NONE_VALUE = '__none__';
@@ -56,6 +76,7 @@ export function TeamSettingsPage({
   discordChannels,
   discordRoles,
   teamInfo,
+  emailForwardingConfig,
 }: TeamSettingsPageProps) {
   const run = useRun();
   const router = useRouter();
@@ -1145,6 +1166,13 @@ export function TeamSettingsPage({
           handleRetryOnboarding={handleRetryOnboarding}
           formatRelative={formatRelative}
         />
+
+        {/* Email Forwarding */}
+        <EmailForwardingCard
+          teamId={teamId}
+          discordChannels={discordChannels}
+          initialConfig={emailForwardingConfig}
+        />
       </div>
     </div>
   );
@@ -1451,5 +1479,380 @@ function OnboardingCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// EmailForwardingCard
+// ---------------------------------------------------------------------------
+
+interface EmailForwardingCardProps {
+  teamId: string;
+  discordChannels: ReadonlyArray<GroupApi.DiscordChannelInfo>;
+  initialConfig: EmailForwardingApi.EmailForwardingConfigView | null;
+}
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function EmailForwardingCard({ teamId, discordChannels, initialConfig }: EmailForwardingCardProps) {
+  const run = useRun();
+  const router = useRouter();
+  const serverUrl = useServerUrl();
+
+  const [config, setConfig] = React.useState<EmailForwardingApi.EmailForwardingConfigView | null>(
+    initialConfig,
+  );
+  // The inbound token is only revealed after regeneration
+  const [lastToken, setLastToken] = React.useState<string | null>(null);
+
+  // Form state — initialise from loader data
+  const [enabled, setEnabled] = React.useState(initialConfig?.enabled ?? false);
+  const [coachChannelId, setCoachChannelId] = React.useState(
+    initialConfig?.coachChannelId || NONE_VALUE,
+  );
+  const [targetChannelId, setTargetChannelId] = React.useState(
+    initialConfig?.targetChannelId || NONE_VALUE,
+  );
+  const [monitoredAddresses, setMonitoredAddresses] = React.useState<string[]>(
+    initialConfig ? [...initialConfig.monitoredAddresses] : [],
+  );
+  const [newSender, setNewSender] = React.useState('');
+  const [newSenderError, setNewSenderError] = React.useState<string | null>(null);
+  const [saving, setSaving] = React.useState(false);
+  const [regenerating, setRegenerating] = React.useState(false);
+  const [showRegenerateConfirm, setShowRegenerateConfirm] = React.useState(false);
+  const [copiedAddress, setCopiedAddress] = React.useState(false);
+
+  const initialEnabled = config?.enabled ?? false;
+  const initialCoach = config?.coachChannelId || NONE_VALUE;
+  const initialTarget = config?.targetChannelId || NONE_VALUE;
+  const initialAddresses = React.useMemo(() => [...(config?.monitoredAddresses ?? [])], [config]);
+
+  const hasChanges =
+    enabled !== initialEnabled ||
+    coachChannelId !== initialCoach ||
+    targetChannelId !== initialTarget ||
+    JSON.stringify(monitoredAddresses) !== JSON.stringify(initialAddresses);
+
+  const hasInvalidSender = newSender.trim().length > 0 && !EMAIL_REGEX.test(newSender.trim());
+
+  // Build the inbound webhook URL — only available after regeneration (token is secret)
+  const inboundUrl = React.useMemo(() => {
+    if (!lastToken) return null;
+    const base = serverUrl.replace(/\/$/, '');
+    return `${base}/email/inbound/${lastToken}`;
+  }, [lastToken, serverUrl]);
+
+  const handleAddSender = () => {
+    const trimmed = newSender.trim();
+    if (!trimmed) return;
+    if (!EMAIL_REGEX.test(trimmed)) {
+      setNewSenderError(tr('team_email_forwarding_allowed_senders_invalid'));
+      return;
+    }
+    if (monitoredAddresses.includes(trimmed)) {
+      setNewSenderError(tr('team_email_forwarding_allowed_senders_duplicate'));
+      return;
+    }
+    setMonitoredAddresses((prev) => [...prev, trimmed]);
+    setNewSender('');
+    setNewSenderError(null);
+  };
+
+  const handleRemoveSender = (addr: string) => {
+    setMonitoredAddresses((prev) => prev.filter((a) => a !== addr));
+  };
+
+  const handleCopyAddress = async () => {
+    if (!inboundUrl) return;
+    await navigator.clipboard.writeText(inboundUrl);
+    setCopiedAddress(true);
+    setTimeout(() => setCopiedAddress(false), 2000);
+  };
+
+  const handleSave = React.useCallback(async () => {
+    setSaving(true);
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.emailForwarding.upsertEmailForwardingConfig({
+          params: { teamId: Schema.decodeSync(Team.TeamId)(teamId) },
+          payload: {
+            enabled,
+            coach_channel_id:
+              coachChannelId !== NONE_VALUE
+                ? Discord.Snowflake.makeUnsafe(coachChannelId)
+                : Discord.Snowflake.makeUnsafe(''),
+            target_channel_id:
+              targetChannelId !== NONE_VALUE
+                ? Discord.Snowflake.makeUnsafe(targetChannelId)
+                : Discord.Snowflake.makeUnsafe(''),
+            monitored_addresses: monitoredAddresses,
+          },
+        }),
+      ),
+      Effect.mapError(() => ClientError.make(tr('team_email_forwarding_save_error'))),
+      run({ success: tr('team_email_forwarding_save_success') }),
+    );
+    setSaving(false);
+    if (Option.isSome(result)) {
+      const cfg = result.value;
+      setConfig(cfg);
+      setEnabled(cfg.enabled);
+      setCoachChannelId(cfg.coachChannelId || NONE_VALUE);
+      setTargetChannelId(cfg.targetChannelId || NONE_VALUE);
+      setMonitoredAddresses([...cfg.monitoredAddresses]);
+      router.invalidate();
+    }
+  }, [teamId, enabled, coachChannelId, targetChannelId, monitoredAddresses, run, router]);
+
+  const handleRegenerate = React.useCallback(async () => {
+    setRegenerating(true);
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.emailForwarding.regenerateEmailForwardingToken({
+          params: { teamId: Schema.decodeSync(Team.TeamId)(teamId) },
+        }),
+      ),
+      Effect.mapError(() => ClientError.make(tr('team_email_forwarding_save_error'))),
+      run({}),
+    );
+    setRegenerating(false);
+    setShowRegenerateConfirm(false);
+    if (Option.isSome(result)) {
+      setLastToken(result.value.inbound_token);
+      router.invalidate();
+    }
+  }, [teamId, run, router]);
+
+  const textChannelOptions = React.useMemo(
+    () => [
+      { value: NONE_VALUE, label: tr('teamSettings_channelNone') },
+      ...discordChannels
+        .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
+        .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
+    ],
+    [discordChannels],
+  );
+
+  const showChannelsWarning =
+    enabled && (coachChannelId === NONE_VALUE || targetChannelId === NONE_VALUE);
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <div className='flex items-center gap-2'>
+            <Mail className='size-4 text-muted-foreground' />
+            <CardTitle className='text-base'>{tr('team_email_forwarding_title')}</CardTitle>
+          </div>
+          <CardDescription>{tr('team_email_forwarding_description')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className='flex flex-col gap-5'>
+            {/* Enable switch */}
+            <div className='flex items-start justify-between gap-4'>
+              <div>
+                <label htmlFor='email-forwarding-enabled' className='text-sm font-medium block'>
+                  {tr('team_email_forwarding_enabled_label')}
+                </label>
+                <p className='text-xs text-muted-foreground mt-1'>
+                  {tr('team_email_forwarding_enabled_help')}
+                </p>
+              </div>
+              <Switch
+                id='email-forwarding-enabled'
+                checked={enabled}
+                onCheckedChange={setEnabled}
+              />
+            </div>
+
+            <Separator />
+
+            {/* Inbound address */}
+            <div>
+              <span className='text-sm font-medium mb-1 block'>
+                {tr('team_email_forwarding_inbound_address_label')}
+              </span>
+              <p className='text-xs text-muted-foreground mb-2'>
+                {tr('team_email_forwarding_inbound_address_help')}
+              </p>
+              <div className='flex gap-2 flex-wrap sm:flex-nowrap'>
+                <Input
+                  readOnly
+                  value={inboundUrl ?? (config ? '(regenerate token to reveal URL)' : '—')}
+                  className='font-mono text-xs'
+                />
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={handleCopyAddress}
+                  disabled={!inboundUrl}
+                >
+                  <Copy className='size-3 mr-1' />
+                  {copiedAddress
+                    ? tr('team_email_forwarding_copied')
+                    : tr('team_email_forwarding_copy')}
+                </Button>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => setShowRegenerateConfirm(true)}
+                  disabled={!config}
+                >
+                  {tr('team_email_forwarding_regenerate')}
+                </Button>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Channels warning */}
+            {showChannelsWarning && (
+              <Alert variant='warning'>
+                <AlertTriangle className='size-4' />
+                <AlertDescription>{tr('team_email_forwarding_channels_warning')}</AlertDescription>
+              </Alert>
+            )}
+
+            {/* Fields disabled when not enabled */}
+            <fieldset disabled={!enabled} className={!enabled ? 'opacity-60' : ''}>
+              <div className='flex flex-col gap-5'>
+                {/* Allowed senders */}
+                <div>
+                  <span className='text-sm font-medium mb-1 block'>
+                    {tr('team_email_forwarding_allowed_senders_label')}
+                  </span>
+                  <p className='text-xs text-muted-foreground mb-2'>
+                    {tr('team_email_forwarding_allowed_senders_help')}
+                  </p>
+                  <div className='flex flex-col gap-2'>
+                    {monitoredAddresses.map((addr) => (
+                      <div key={addr} className='flex items-center gap-2'>
+                        <Input readOnly value={addr} className='text-sm' />
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          onClick={() => handleRemoveSender(addr)}
+                          type='button'
+                        >
+                          {tr('team_email_forwarding_allowed_senders_remove')}
+                        </Button>
+                      </div>
+                    ))}
+                    <div className='flex items-start gap-2'>
+                      <div className='flex-1'>
+                        <Input
+                          type='email'
+                          placeholder='coach@example.com'
+                          value={newSender}
+                          onChange={(e) => {
+                            setNewSender(e.target.value);
+                            setNewSenderError(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddSender();
+                            }
+                          }}
+                          aria-invalid={newSenderError !== null}
+                        />
+                        {newSenderError && (
+                          <p className='text-xs text-destructive mt-1'>{newSenderError}</p>
+                        )}
+                      </div>
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        onClick={handleAddSender}
+                        disabled={!newSender.trim() || hasInvalidSender}
+                        type='button'
+                      >
+                        {tr('team_email_forwarding_allowed_senders_add')}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Coach channel */}
+                <div>
+                  <label
+                    htmlFor='email-forwarding-coach-channel'
+                    className='text-sm font-medium mb-1 block'
+                  >
+                    {tr('team_email_forwarding_coach_channel_label')}
+                  </label>
+                  <p className='text-xs text-muted-foreground mb-2'>
+                    {tr('team_email_forwarding_coach_channel_help')}
+                  </p>
+                  <SearchableSelect
+                    id='email-forwarding-coach-channel'
+                    value={coachChannelId}
+                    onValueChange={setCoachChannelId}
+                    placeholder={tr('teamSettings_channelNone')}
+                    pinnedValues={[NONE_VALUE]}
+                    options={textChannelOptions}
+                  />
+                </div>
+
+                {/* Target channel */}
+                <div>
+                  <label
+                    htmlFor='email-forwarding-target-channel'
+                    className='text-sm font-medium mb-1 block'
+                  >
+                    {tr('team_email_forwarding_target_channel_label')}
+                  </label>
+                  <p className='text-xs text-muted-foreground mb-2'>
+                    {tr('team_email_forwarding_target_channel_help')}
+                  </p>
+                  <SearchableSelect
+                    id='email-forwarding-target-channel'
+                    value={targetChannelId}
+                    onValueChange={setTargetChannelId}
+                    placeholder={tr('teamSettings_channelNone')}
+                    pinnedValues={[NONE_VALUE]}
+                    options={textChannelOptions}
+                  />
+                </div>
+              </div>
+            </fieldset>
+
+            <div className='flex items-center gap-3'>
+              <Button onClick={handleSave} disabled={saving || !hasChanges || hasInvalidSender}>
+                {saving ? tr('profile_saving') : tr('profile_saveChanges')}
+              </Button>
+              {hasChanges && (
+                <p className='text-sm text-muted-foreground'>{tr('teamSettings_unsavedChanges')}</p>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Regenerate token confirm dialog */}
+      <AlertDialog open={showRegenerateConfirm} onOpenChange={setShowRegenerateConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {tr('team_email_forwarding_regenerate_confirm_title')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {tr('team_email_forwarding_regenerate_confirm_body')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {tr('team_email_forwarding_regenerate_confirm_cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleRegenerate} disabled={regenerating}>
+              {tr('team_email_forwarding_regenerate_confirm_action')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

@@ -18,6 +18,11 @@ export * as DashboardApi from './api/DashboardApi.js';
 
 export * as DashboardLayoutApi from './api/DashboardLayoutApi.js';
 
+/**
+ * Config view returned to web clients — inbound_token is intentionally omitted.
+ */
+export * as EmailForwardingApi from './api/EmailForwardingApi.js';
+
 export * as EventApi from './api/EventApi.js';
 
 export * as EventRsvpApi from './api/EventRsvpApi.js';
@@ -105,6 +110,8 @@ export * as DisplayName from './models/DisplayName.js';
 
 export * as EarnedAchievement from './models/EarnedAchievement.js';
 
+export * as EmailForwarding from './models/EmailForwarding.js';
+
 export * as Event from './models/Event.js';
 
 export * as EventRsvp from './models/EventRsvp.js';
@@ -184,6 +191,9 @@ export * as CarpoolRpcModels from './rpc/carpool/CarpoolRpcModels.js';
 export * as ChannelRpcEvents from './rpc/channel/ChannelRpcEvents.js';
 export * as ChannelRpcGroup from './rpc/channel/ChannelRpcGroup.js';
 export * as ChannelRpcModels from './rpc/channel/ChannelRpcModels.js';
+export * as EmailRpcEvents from './rpc/email/EmailRpcEvents.js';
+export * as EmailRpcGroup from './rpc/email/EmailRpcGroup.js';
+export * as EmailRpcModels from './rpc/email/EmailRpcModels.js';
 export * as EventRpcEvents from './rpc/event/EventRpcEvents.js';
 export * as EventRpcGroup from './rpc/event/EventRpcGroup.js';
 export * as EventRpcModels from './rpc/event/EventRpcModels.js';

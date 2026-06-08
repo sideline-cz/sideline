@@ -46,6 +46,20 @@ export const env = createEnv({
       Schemas.Optional(() => ''),
       Schema.toStandardSchemaV1,
     ),
+    EMAIL_WEBHOOK_SIGNING_SECRET: Schema.toStandardSchemaV1(
+      Schema.RedactedFromValue(Schema.NonEmptyString),
+    ),
+    LLM_API_URL: Schema.String.pipe(
+      Schemas.Optional(() => ''),
+      Schema.toStandardSchemaV1,
+    ),
+    LLM_API_KEY: Schema.toStandardSchemaV1(
+      Schema.OptionFromNullishOr(Schema.RedactedFromValue(Schema.NonEmptyString)),
+    ),
+    LLM_MODEL: Schema.String.pipe(
+      Schemas.Optional(() => 'gpt-4o-mini'),
+      Schema.toStandardSchemaV1,
+    ),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,

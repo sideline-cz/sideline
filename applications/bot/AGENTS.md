@@ -382,6 +382,24 @@ Rules:
 2. **Never write to `payment_reminders_sent` from the bot directly.** The bot only calls the RPC; the server handler owns the `INSERT ... ON CONFLICT DO NOTHING`.
 3. **`buildPaymentReminderEmbed` must remain pure** — no Effect, no `DiscordREST` calls, no i18n side effects. The embed copy is currently English-only and lives inline; do not add `tr()` or `m.*` imports without first adding `bot_payment_reminder_*` keys per the "Translation Source — Compiled Paraglide Only" rules above.
 
+### Email Sync (email posts → Discord embeds)
+
+Syncs `email_post_sync_events` rows to Discord embeds. The server's `EmailSummarizer` cron and the approval state machine enqueue one outbox row per delivery; the bot posts an embed (and approval buttons) per row. This is a sync-event family alongside Role / Channel / Event / Finance / weekly-summary sync.
+
+| Component | File |
+|-----------|------|
+| Domain event | `packages/domain/src/rpc/email/EmailRpcEvents.ts` (`EmailPostEvent`, `UnprocessedEmailPostEvent`) |
+| Bot service | `src/rcp/email/ProcessorService.ts` (`ProcessorService.processTick`, exported via `src/rcp/email/index.ts`) |
+| Post handler | `src/rcp/email/handleEmailPostEvent.ts` — dispatches on `event.kind` (`switch` with a `const _exhaustive: never` default) |
+| Embed builders | `src/rest/email/buildEmailEmbeds.ts` (`buildApprovalEmbed` / `buildSummaryEmbed` / `buildOriginalEmbed` + component builders) |
+| Approval interaction | `src/interactions/email-approval.ts` (Approve / Reject buttons) |
+
+Event kinds: `approval_request` (post summary + Approve/Reject buttons to the coach channel), `post_summary` (post the approved AI summary to the team channel), `post_original` (post the original email to the team channel after rejection). Uses the standard `pollLoop` (5s) and the standard `Effect.catch` → `Email/MarkEmailPostEventFailed` per-event funnel.
+
+#### `allowed_mentions: { parse: [] }` On Every Message Carrying User- or Email-Derived Content
+
+Any `rest.createMessage` / `rest.updateMessage` whose embed or content includes a string the bot did not author — a user-typed value, or content forwarded from an external source (email subject/body/sender, summaries) — MUST pass `allowed_mentions: { parse: [] }` (optionally with an explicit `users` allow-list). Without it, a `@everyone`, `@here`, role, or user mention literal embedded in that text pings real recipients. This generalises the welcome-flow rule above: it applies to the email post handlers (`handleEmailPostEvent` passes `allowed_mentions: { parse: [] }` on every `createMessage`) and to any future feature that relays third-party or user-authored text into Discord. The only messages that may omit it are those whose entire content is bot-authored static copy with no interpolated user/external strings.
+
 #### Coach-claim message id round-trip
 
 The `training_claim_request` handler posts the initial claim embed to the owner-group channel. The server does not know the resulting Discord channel/message id ahead of time. After `rest.createMessage` succeeds, the handler must call `rpc['Event/SaveClaimDiscordMessageId']({ event_id, channel_id, message_id })` so subsequent `training_claim_update` and `unclaimed_training_reminder` events can locate and edit / link to that message. Always save the id in the same effect chain as the create call (via `Effect.tap`) so a failure to save is logged together with the create.
@@ -439,7 +457,7 @@ Two distinct schedules wrap processor `processTick` effects:
 
 | Helper | Cadence | Schedule | Used by |
 |--------|---------|----------|---------|
-| `pollLoop` | 5s | `Schedule.spaced('5 seconds')` | `roles.processTick`, `channels.processTick`, `eventSync.processTick`, `guildJoin.processTick`, `onboarding.processTick` |
+| `pollLoop` | 5s | `Schedule.spaced('5 seconds')` | `roles.processTick`, `channels.processTick`, `eventSync.processTick`, `guildJoin.processTick`, `onboarding.processTick`, `finance.processTick`, `email.processTick` |
 | `fastPollLoop` | 1s | `Schedule.spaced('1 seconds')` | `inviteGenerator.processTick` only |
 
 Rules:

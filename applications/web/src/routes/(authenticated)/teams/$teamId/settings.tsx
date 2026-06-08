@@ -1,6 +1,6 @@
 import { Team } from '@sideline/domain';
 import { createFileRoute } from '@tanstack/react-router';
-import { Effect, pipe, Schema } from 'effect';
+import { Effect, Option, pipe, Schema } from 'effect';
 import { TeamSettingsPage } from '~/components/pages/TeamSettingsPage';
 import { ApiClient, NotFound, warnAndCatchAll } from '~/lib/runtime';
 
@@ -21,6 +21,9 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/settings')(
           discordChannels: api.group.listDiscordChannels({ params: { teamId } }),
           discordRoles: api.group.listDiscordRoles({ params: { teamId } }),
           teamInfo: api.team.getTeamInfo({ params: { teamId } }),
+          emailForwardingConfig: api.emailForwarding
+            .getEmailForwardingConfig({ params: { teamId } })
+            .pipe(Effect.option),
         }),
       ),
       warnAndCatchAll,
@@ -31,7 +34,8 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/settings')(
 
 function TeamSettingsRoute() {
   const { teamId: teamIdRaw } = Route.useParams();
-  const { settings, discordChannels, discordRoles, teamInfo } = Route.useLoaderData();
+  const { settings, discordChannels, discordRoles, teamInfo, emailForwardingConfig } =
+    Route.useLoaderData();
 
   return (
     <TeamSettingsPage
@@ -40,6 +44,7 @@ function TeamSettingsRoute() {
       discordChannels={discordChannels}
       discordRoles={discordRoles}
       teamInfo={teamInfo}
+      emailForwardingConfig={Option.getOrNull(emailForwardingConfig)}
     />
   );
 }

@@ -409,6 +409,7 @@ Cron jobs are long-running Effects that repeat on a schedule. Each cron is defin
 | `PaymentReminderCron` | `src/services/PaymentReminderCron.ts` | every minute | For each unpaid fee assignment whose `effective_due_at` matches a `PaymentReminderKind` offset (−3 / 0 / +3 / +10 / +21 days in team timezone), insert one `payment_reminder_sync_events` row. Idempotency lives in `FeeAssignmentsRepository.findReminderCandidates` (NOT EXISTS against both `payment_reminders_sent` and the outbox) — see "Bot-Ack Idempotency for Discord-Side-Effect Crons" below. |
 | `TrainingClaimRequestCron` | `src/services/TrainingClaimRequestCron.ts` | every minute | Emit a `training_claim_request` event once per training, `team_settings.claim_request_days_before` days ahead of `start_at`. Candidate query `TeamSettingsRepository.findEventsNeedingClaimRequest`; idempotency via `events.claim_request_sent_at` — see "Self-Healing `*_sent_at` Date-Gated Crons" below. |
 | `CoachingStatusCron` | `src/services/CoachingStatusCron.ts` | every minute | Emit a `coaching_status` event once per claimed training on the day of `start_at` (gated to ≥ 07:00 local). Candidate query `TeamSettingsRepository.findEventsNeedingCoachingStatus`; idempotency via `events.coaching_status_sent_at` — see "Self-Healing `*_sent_at` Date-Gated Crons" below. |
+| `EmailSummarizer` | `src/services/EmailSummarizer.ts` | every minute | Claim `email_messages` rows in `received` status, summarize via `LlmClient`, set `pending_approval` + enqueue an `approval_request` `email_post_sync_events` row. The claim (`claimForSummarizing`: `UPDATE ... SET status='summarizing' WHERE status='received'`) is the per-row lock — skip when it returns `Option.none()`. On `LlmError`, `incrementAttemptsAndMaybeFail` caps at `MAX_SUMMARIZE_ATTEMPTS` (3) then sets status `failed` (transient attempts return the row to `received`). See "Status-Claim As Per-Row Lock" below. |
 
 ### Pattern
 
@@ -545,6 +546,32 @@ Rules:
 3. **`UID` values are server-generated** (`payment-${assignment_id}@sideline`, `${event_id}@sideline`) — never interpolate user input into `UID`. The UUID/event-id source guarantees no special characters.
 4. **DTSTART/DTEND `VALUE=DATE` for payments use the team's IANA timezone** (`team_timezone` from `team_settings`, defaulting to `'UTC'`). Use `Intl.DateTimeFormat('en-CA', { timeZone })` to compute the local `YYYYMMDD` so a payment due "Friday in Prague" renders on Friday even for users whose calendar app is in Sydney.
 5. **Skip rules for payment VEVENTs** live in `buildPaymentVEvents`: skip rows where `computed_status === 'paid'` or `stored_status === 'waived'`, and skip rows whose `effective_due_at` is older than the 180-day `HISTORY_CAP_MS` window. Do not relax these — older paid/waived items would bloat every refresh of every subscriber's calendar.
+
+## Unauthenticated Raw HTTP Routes (`HttpRouter.add`, Outside `AuthMiddleware`)
+
+Almost every HTTP surface is a typed `HttpApi` group provided through `ApiLive` and gated by `AuthMiddlewareLive`. A route that must be reachable **without** a Sideline session (third-party inbound webhook, public callback) is the exception: define it as a raw `HttpRouter.add(method, path, handler)` layer and merge it into `AppLayer` in `AppLive.ts` **next to `RpcLive`**, NOT into `ApiLive`. Because `AuthMiddlewareLive` is provided around the whole `HttpRouter.serve(AppLayer)`, a raw route runs without a `CurrentUser` and authenticates itself.
+
+Reference: `EmailWebhookLive` (`src/api/email-webhook.ts`) — the inbound email webhook `POST /email/inbound/:token`. Contrast with `ICalApiGroup`, which is a read-only public `HttpApi` group; the email webhook is the first **inbound write** webhook.
+
+Rules for any new unauthenticated raw route:
+
+1. **Self-authenticate before any DB work.** The email webhook layers four independent gates, in this order: (a) **body-size cap** (`MAX_BODY_BYTES`) checked on `request.arrayBuffer` before parsing — reject oversized payloads with `413`; (b) **HMAC signature** verified FIRST (before the DB token lookup) so an unsigned request never costs a query — `verifySignature` does `createHmac('sha256', secret).update(rawBody).digest('hex')` and compares with `crypto.timingSafeEqual` (constant-time; bail to `false` on any length mismatch or throw); (c) **per-team capability token** from the path param looked up via `findByInboundToken`; (d) **resource-state filter** (config `enabled`, monitored-address allow-list). The signing secret comes from a **required** redacted env var (`EMAIL_WEBHOOK_SIGNING_SECRET`).
+2. **Never compare secrets/signatures with `===`.** Always `crypto.timingSafeEqual` over equal-length `Buffer`s; return `false` (not throw) on length mismatch.
+3. **The handler's `E` channel is `never`.** A webhook returns an HTTP status for every outcome, including auth failures, rather than failing the Effect. Model early exits as a module-local tagged error (`WebhookEarlyExit` carrying the `HttpServerResponse`) raised via `Effect.fail`, then absorb them at the end with `Effect.catchTag('WebhookEarlyExit', (e) => Effect.succeed(e.response))`. Do not leak typed failures out of a raw route — there is no `HttpApi` error encoder to map them.
+4. **Map sender-distinguishable conditions to distinct statuses** but never leak whether a token exists: unknown/disabled token → `404`; bad signature → `401`; malformed/over-cap body → `413`/`400`; non-monitored recipient → `200`/`202` no-op (silently accept-and-drop so the sender does not retry). Successful ingest returns `202 Accepted`.
+5. **Wrap the durable write in `sql.withTransaction(...)`** so the parent row and its children (e.g. message + attachments) commit atomically, and apply `catchSqlErrors`.
+
+## Status-Claim As Per-Row Lock (`UPDATE ... WHERE status = '<from>'`)
+
+A poll-driven worker (cron or RPC) that processes rows through a status state machine MUST claim each row with a conditional status transition, not a plain `SELECT ... WHERE status = '<from>'` followed by an unconditional update. The claim is `UPDATE <table> SET status = '<inflight>' WHERE id = ${id} AND status = '<from>' RETURNING id` exposed via `SqlSchema.findOneOption` — it returns `Option.some(id)` for exactly the one worker that won the row and `Option.none()` for everyone else. The worker MUST skip (`Effect.void`) on `Option.none()`. This makes overlapping cron ticks and concurrent workers safe without an advisory lock.
+
+Reference: `EmailMessagesRepository.claimForSummarizing` (`received → summarizing`) consumed by `EmailSummarizer`. Every subsequent terminal transition (`setSummaryPendingApproval`, `approve`, `reject`) is likewise guarded by `AND status = '<expected>'` so a duplicate action becomes a no-op (`approve`/`reject` return `Option` and the handler maps `None` to `'already_handled'`).
+
+Rules:
+
+1. **The claim's `WHERE status = '<from>'` is the lock.** Never `SELECT` candidate ids and then update them in a second statement — two ticks would both claim the same row.
+2. **Every state transition that has a precondition repeats it in the `WHERE`** (`AND status = '<expected>'`) and returns `Option`/affected-rows so the caller can detect "already handled" without a prior read.
+3. **The `attempts`-counted retry uses `CASE WHEN`** in the same UPDATE (`status = CASE WHEN attempts + 1 >= ${max} THEN 'failed' ELSE '<from>' END`) so a transient failure returns the row to the pollable state and a capped failure terminates it — see `incrementAttemptsAndMaybeFail`. This is the in-table analogue of the `attempts`-counted outbox pattern documented above.
 
 ## Outbox With Opaque JSONB Payload
 
@@ -1122,3 +1149,16 @@ Rules:
 2. **Noop mocks use `Effect.succeed(<empty>)` for read methods and `Effect.die(...)` for non-trivial writes** (any method whose success type is a domain model, not `void`). Read methods that return `Option` succeed with `Option.none()`; read methods that return `ReadonlyArray` succeed with `[]`; void-returning writes succeed with `Effect.void`.
 3. **Cast the mock object with `as never`** (matching the existing files) — the repository's `ServiceMap.Service` tag carries a private brand that cannot be reconstructed in test code.
 4. **Mock objects must build the canonical domain model via its constructor, not as a plain camelCase literal.** `new WeeklyChallenge.WeeklyChallengeView({ challenge: new WeeklyChallenge.WeeklyChallenge({ ... }), completedMemberIds: [], isActive: false })` — NOT `{ challenge: { id: '...', weekStartDate: '...' }, ... }`. The HTTP handler encodes the response through the schema; a string-shaped literal fails encoding and tempts a "fix" that bypasses schema encoding entirely. Build mocks via the same constructors the production code uses.
+
+## Config-Gated External Service Provider (Real vs Deterministic Stub)
+
+An external integration that is **optional** in some environments (missing API key in dev/preview, present in production) is modelled as a single `ServiceMap.Service` whose `Default` layer chooses a real or a stub implementation at construction time, based on config. The service interface is the same either way, so consumers never branch on "is it configured".
+
+Reference: `LlmClient` (`src/services/LlmClient.ts`) — `make` reads `env.LLM_API_URL` / `env.LLM_API_KEY`, logs a `Effect.logWarning` when unconfigured, and returns `makeStub()` (a deterministic, offline summary) or `makeReal(...)` (an OpenAI-compatible HTTP call). Both satisfy the same `LlmClientService` interface.
+
+Rules:
+
+1. **One service interface, two factory functions.** `make` returns `Effect<ServiceInterface>` selecting `makeStub()` vs `makeReal(...)`. The interface MUST be identical — the stub returns plausible-shaped data, never a different error surface, so swapping providers never changes the consumer's `E` channel.
+2. **The gating env vars are optional with safe defaults**, except the security-critical secret. Use `Schema.OptionFromNullishOr(Schema.RedactedFromValue(...))` for the optional API key and `Schemas.Optional(() => '<default>')` for the URL/model. The provider is real only when every required piece is present (`apiUrl !== '' && Option.isSome(apiKey)`); otherwise stub. Log a single warning at construction so operators see the fallback in startup logs.
+3. **The real provider's typed error is the service's only failure** (`LlmError`). Map every downstream failure (HTTP error, JSON parse, missing field) into it via `Effect.mapError`; never let `HttpClientError` / `ParseError` leak into the consumer.
+4. **Tests provide a fake via `Layer.succeed(Service, fakeImpl)`** rather than env-stubbing the real layer — `Layer.succeed(LlmClient, { summarizeEmail: () => Effect.succeed('...') })` (or an `Effect.fail(new LlmError(...))` to exercise the failure path). Do not construct `Default` in tests; it would attempt a real HTTP call or pick the stub by accident.

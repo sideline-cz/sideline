@@ -6,6 +6,7 @@ export { interactionBuilder } from '~/interactions/index.js';
 export {
   AchievementSyncService,
   ChannelSyncService,
+  EmailSyncService,
   EventSyncService,
   FinanceSyncService,
   GuildJoinSyncService,
