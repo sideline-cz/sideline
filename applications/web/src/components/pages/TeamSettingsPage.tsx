@@ -81,6 +81,9 @@ export function TeamSettingsPage({
   const [rsvpReminderDaysBefore, setRsvpReminderDaysBefore] = React.useState(
     String(settings.rsvpReminderDaysBefore),
   );
+  const [claimRequestDaysBefore, setClaimRequestDaysBefore] = React.useState(
+    String(settings.claimRequestDaysBefore),
+  );
   const [rsvpReminderTime, setRsvpReminderTime] = React.useState(
     settings.rsvpReminderTime || '18:00',
   );
@@ -199,6 +202,7 @@ export function TeamSettingsPage({
     minPlayersThreshold !== String(settings.minPlayersThreshold) ||
     rsvpRemindersEnabled !== settings.rsvpRemindersEnabled ||
     rsvpReminderDaysBefore !== String(settings.rsvpReminderDaysBefore) ||
+    claimRequestDaysBefore !== String(settings.claimRequestDaysBefore) ||
     rsvpReminderTime !== (settings.rsvpReminderTime || '18:00') ||
     timezone !== (settings.timezone || 'Europe/Prague') ||
     remindersChannelId !== Option.getOrElse(settings.remindersChannelId, () => NONE_VALUE) ||
@@ -270,6 +274,13 @@ export function TeamSettingsPage({
       parsedReminderDaysBefore > 14
     )
       return;
+    const parsedClaimDaysBefore = Number(claimRequestDaysBefore);
+    if (
+      !Number.isInteger(parsedClaimDaysBefore) ||
+      parsedClaimDaysBefore < 0 ||
+      parsedClaimDaysBefore > 30
+    )
+      return;
     if (!isFormatValid(roleFormat) || !isFormatValid(channelFormat)) return;
     setSavingSettings(true);
     const result = await ApiClient.asEffect().pipe(
@@ -281,6 +292,7 @@ export function TeamSettingsPage({
             minPlayersThreshold: Option.some(parsedThreshold),
             rsvpRemindersEnabled: Option.some(rsvpRemindersEnabled),
             rsvpReminderDaysBefore: Option.some(parsedReminderDaysBefore),
+            claimRequestDaysBefore: Option.some(parsedClaimDaysBefore),
             rsvpReminderTime: Option.some(rsvpReminderTime),
             timezone: Option.some(timezone),
             remindersChannelId: Option.some(channelToOption(remindersChannelId)),
@@ -314,6 +326,7 @@ export function TeamSettingsPage({
     minPlayersThreshold,
     rsvpRemindersEnabled,
     rsvpReminderDaysBefore,
+    claimRequestDaysBefore,
     rsvpReminderTime,
     timezone,
     remindersChannelId,
@@ -721,6 +734,32 @@ export function TeamSettingsPage({
                   ))}
                 </select>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Coach assignment */}
+        <Card>
+          <CardHeader>
+            <CardTitle className='text-base'>{tr('teamSettings_coachAssignment')}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div>
+              <label htmlFor='claim-request-days-before' className='text-sm font-medium mb-1 block'>
+                {tr('teamSettings_claimRequestDaysBefore')}
+              </label>
+              <p className='text-xs text-muted-foreground mb-2'>
+                {tr('teamSettings_claimRequestHelp')}
+              </p>
+              <Input
+                id='claim-request-days-before'
+                type='number'
+                min={0}
+                max={30}
+                value={claimRequestDaysBefore}
+                onChange={(e) => setClaimRequestDaysBefore(e.target.value)}
+                className='max-w-32'
+              />
             </div>
           </CardContent>
         </Card>

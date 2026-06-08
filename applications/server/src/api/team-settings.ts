@@ -35,6 +35,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     minPlayersThreshold: 0,
                     rsvpRemindersEnabled: true,
                     rsvpReminderDaysBefore: 1,
+                    claimRequestDaysBefore: 3,
                     rsvpReminderTime: '18:00',
                     remindersChannelId: Option.none(),
                     timezone: 'Europe/Prague',
@@ -60,6 +61,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     minPlayersThreshold: s.min_players_threshold,
                     rsvpRemindersEnabled: s.rsvp_reminders_enabled,
                     rsvpReminderDaysBefore: s.rsvp_reminder_days_before,
+                    claimRequestDaysBefore: s.claim_request_days_before,
                     rsvpReminderTime: s.rsvp_reminder_time,
                     remindersChannelId: s.reminders_channel_id,
                     timezone: s.timezone,
@@ -122,6 +124,10 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                       payload.rsvpReminderDaysBefore,
                       () => 1,
                     ),
+                    claimRequestDaysBefore: Option.getOrElse(
+                      payload.claimRequestDaysBefore,
+                      () => 3,
+                    ),
                     rsvpReminderTime: Option.getOrElse(payload.rsvpReminderTime, () => '18:00'),
                     remindersChannelId: Option.flatten(payload.remindersChannelId),
                     timezone: Option.getOrElse(payload.timezone, () => 'Europe/Prague'),
@@ -174,6 +180,10 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     rsvpReminderDaysBefore: Option.getOrElse(
                       payload.rsvpReminderDaysBefore,
                       () => s.rsvp_reminder_days_before,
+                    ),
+                    claimRequestDaysBefore: Option.getOrElse(
+                      payload.claimRequestDaysBefore,
+                      () => s.claim_request_days_before,
                     ),
                     rsvpReminderTime: Option.getOrElse(
                       payload.rsvpReminderTime,
@@ -257,6 +267,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                   minPlayersThreshold: result.min_players_threshold,
                   rsvpRemindersEnabled: result.rsvp_reminders_enabled,
                   rsvpReminderDaysBefore: result.rsvp_reminder_days_before,
+                  claimRequestDaysBefore: result.claim_request_days_before,
                   rsvpReminderTime: result.rsvp_reminder_time,
                   remindersChannelId: result.reminders_channel_id,
                   timezone: result.timezone,

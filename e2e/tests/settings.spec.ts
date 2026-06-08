@@ -28,6 +28,27 @@ test.describe('Settings Page', () => {
     await expect(page.getByLabel('Minimum players threshold')).toBeVisible({ timeout: 30000 });
     await expect(page.getByLabel('Minimum players threshold')).toHaveValue('10');
   });
+
+  // ASSUMPTION: The web form renders the claimRequestDaysBefore field inside a
+  // "Coach assignment" card (i18n key: teamSettings_coachAssignment, English:
+  // "Coach assignment"). The input is labelled with i18n key
+  // teamSettings_claimRequestDaysBefore (English: "Days before training") and
+  // has id "claim-request-days-before". The web developer must honour at least
+  // one of these conventions so the locators below resolve correctly.
+  // The mock value is 3 (from mockTeamSettings.claimRequestDaysBefore).
+  test('shows claim-request days before (3) inside Coach assignment card', async ({ page }) => {
+    await page.goto(`/teams/${TEAM_ID}/settings`);
+    // Wait for the page to fully load by asserting a known field is visible first.
+    await expect(page.getByLabel('Event generation horizon (days)')).toBeVisible({
+      timeout: 30000,
+    });
+    // Primary locator: label text "Days before training" (English i18n value for
+    // teamSettings_claimRequestDaysBefore). Falls back to id-based locator if the
+    // label text changes — the developer must ensure one of these works.
+    const field = page.getByLabel('Days before training');
+    await expect(field).toBeVisible({ timeout: 30000 });
+    await expect(field).toHaveValue('3');
+  });
 });
 
 test.describe('Roles List', () => {

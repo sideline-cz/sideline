@@ -202,6 +202,76 @@ describe('UpdateTeamSettingsRequest — rsvpReminderDaysBefore validation', () =
 });
 
 // ---------------------------------------------------------------------------
+// UpdateTeamSettingsRequest — claimRequestDaysBefore validation
+// ---------------------------------------------------------------------------
+
+describe('UpdateTeamSettingsRequest — claimRequestDaysBefore validation', () => {
+  it('accepts 0 (lower bound)', () => {
+    const result = Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+      eventHorizonDays: 30,
+      claimRequestDaysBefore: 0,
+    });
+    expect(Option.isSome(result.claimRequestDaysBefore)).toBe(true);
+    if (Option.isSome(result.claimRequestDaysBefore)) {
+      expect(result.claimRequestDaysBefore.value).toBe(0);
+    }
+  });
+
+  it('accepts 30 (upper bound)', () => {
+    const result = Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+      eventHorizonDays: 30,
+      claimRequestDaysBefore: 30,
+    });
+    expect(Option.isSome(result.claimRequestDaysBefore)).toBe(true);
+    if (Option.isSome(result.claimRequestDaysBefore)) {
+      expect(result.claimRequestDaysBefore.value).toBe(30);
+    }
+  });
+
+  it('accepts 3 (mid-range)', () => {
+    const result = Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+      eventHorizonDays: 30,
+      claimRequestDaysBefore: 3,
+    });
+    expect(Option.isSome(result.claimRequestDaysBefore)).toBe(true);
+  });
+
+  it('rejects 31 (above maximum)', () => {
+    expect(() =>
+      Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+        eventHorizonDays: 30,
+        claimRequestDaysBefore: 31,
+      }),
+    ).toThrow();
+  });
+
+  it('rejects -1 (below minimum)', () => {
+    expect(() =>
+      Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+        eventHorizonDays: 30,
+        claimRequestDaysBefore: -1,
+      }),
+    ).toThrow();
+  });
+
+  it('rejects 2.5 (non-integer)', () => {
+    expect(() =>
+      Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+        eventHorizonDays: 30,
+        claimRequestDaysBefore: 2.5,
+      }),
+    ).toThrow();
+  });
+
+  it('omitting claimRequestDaysBefore yields None', () => {
+    const result = Schema.decodeUnknownSync(TeamSettingsApi.UpdateTeamSettingsRequest)({
+      eventHorizonDays: 30,
+    });
+    expect(Option.isNone(result.claimRequestDaysBefore)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // UpdateTeamSettingsRequest — timezone validation
 // ---------------------------------------------------------------------------
 

@@ -412,7 +412,12 @@ Returns the team's current settings.
 | `teamId` | `TeamId` | No | Team ID |
 | `eventHorizonDays` | `integer` | No | How many days ahead to generate events from active series |
 | `minPlayersThreshold` | `integer` | No | Minimum players for an event to show a warning |
-| `rsvpReminderHours` | `integer` | No | Hours before an event when the RSVP reminder is sent |
+| `rsvpRemindersEnabled` | `boolean` | No | Whether RSVP reminders are enabled for this team |
+| `rsvpReminderDaysBefore` | `integer` | No | Days before an event the RSVP reminder is sent |
+| `claimRequestDaysBefore` | `integer` | No | Days before a training the coach claim-board message is posted (0 = on the training day; range 0–30) |
+| `rsvpReminderTime` | `string` | No | Time of day the RSVP reminder fires (HH:MM in the team's timezone, e.g. `18:00`) |
+| `remindersChannelId` | `Snowflake \| null` | Yes | Discord channel where reminders and event-start announcements are posted; falls back to the event's owner-group channel if unset |
+| `timezone` | `string` | No | IANA timezone name used for scheduling reminders and cron jobs (e.g. `Europe/Prague`) |
 | `discordChannelTraining` | `Snowflake \| null` | Yes | Default Discord channel for training events |
 | `discordChannelMatch` | `Snowflake \| null` | Yes | Default Discord channel for match events |
 | `discordChannelTournament` | `Snowflake \| null` | Yes | Default Discord channel for tournament events |
@@ -438,7 +443,7 @@ Returns the team's current settings.
 
 #### `PATCH /teams/:teamId/settings`
 
-Updates the team's settings. `eventHorizonDays` is required; all other fields are optional.
+Updates the team's settings. All fields are optional; only provided fields are changed.
 
 **Auth:** Bearer token (AuthMiddleware)
 **Required Permission:** `team:manage`
@@ -453,9 +458,14 @@ Updates the team's settings. `eventHorizonDays` is required; all other fields ar
 
 | Field | Type | Required | Constraints | Description |
 |---|---|---|---|---|
-| `eventHorizonDays` | `integer` | Yes | 1–365 | Days ahead to generate scheduled events |
+| `eventHorizonDays` | `integer` | No | 1–365 | Days ahead to generate scheduled events |
 | `minPlayersThreshold` | `integer` | No | 0–100 | Minimum player threshold |
-| `rsvpReminderHours` | `integer` | No | 0–168 | Hours before event for RSVP reminder |
+| `rsvpRemindersEnabled` | `boolean` | No | — | Enable or disable RSVP reminders |
+| `rsvpReminderDaysBefore` | `integer` | No | 0–14 | Days before the event the reminder fires |
+| `claimRequestDaysBefore` | `integer` | No | 0–30 | Days before a training the coach claim-board message is posted; 0 posts on the training day |
+| `rsvpReminderTime` | `string` | No | Valid HH:MM, max `23:54` | Time of day the reminder fires in the team's timezone |
+| `remindersChannelId` | `Snowflake \| null` | No | — | Channel for reminders; null clears the field |
+| `timezone` | `string` | No | Valid IANA timezone | Team timezone (e.g. `Europe/Prague`) |
 | `discordChannelTraining` | `Snowflake \| null` | No | — | Channel for training events |
 | `discordChannelMatch` | `Snowflake \| null` | No | — | Channel for match events |
 | `discordChannelTournament` | `Snowflake \| null` | No | — | Channel for tournament events |
