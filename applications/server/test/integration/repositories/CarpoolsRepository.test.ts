@@ -465,6 +465,93 @@ describe('CarpoolsRepository', () => {
   );
 
   it.effect(
+    'reserveSeat by owner of another car in same carpool → CarpoolAlreadyInAnotherCar',
+    () =>
+      Effect.gen(function* () {
+        // ownerA owns carA; ownerB owns carB; ownerA tries to reserve a seat in carB
+        const ownerAId = yield* createUser('400000000000000140', 'owner-a-cross-reserve');
+        const ownerBId = yield* createUser('400000000000000141', 'owner-b-cross-reserve');
+        const team = yield* createTeam('424242424242424242' as Discord.Snowflake, ownerAId);
+        const ownerAMember = yield* addTeamMember(team.id, ownerAId);
+        const ownerBMember = yield* addTeamMember(team.id, ownerBId);
+        const carpool = yield* createCarpool(team.id, team.guild_id, ownerAMember.id);
+        yield* addCar(carpool.id, ownerAMember.id, 4); // carA — ownerA is its owner
+        const carB = yield* addCar(carpool.id, ownerBMember.id, 4);
+
+        // ownerA (who already owns carA) tries to reserve a passenger seat in carB
+        const result = yield* reserveSeat(carB.car_id, ownerAMember.id).pipe(Effect.result);
+
+        expect(result._tag).toBe('Failure');
+        if (result._tag === 'Failure') {
+          expect(result.failure._tag).toBe('CarpoolAlreadyInAnotherCar');
+        }
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'assignSeat (assignedBy set) by owner of another car in same carpool → CarpoolAlreadyInAnotherCar',
+    () =>
+      Effect.gen(function* () {
+        // ownerA owns carA; ownerB owns carB; ownerB tries to assign ownerA a seat in carB
+        const ownerAId = yield* createUser('400000000000000150', 'owner-a-cross-assign');
+        const ownerBId = yield* createUser('400000000000000151', 'owner-b-cross-assign');
+        const team = yield* createTeam('425252525252525252' as Discord.Snowflake, ownerAId);
+        const ownerAMember = yield* addTeamMember(team.id, ownerAId);
+        const ownerBMember = yield* addTeamMember(team.id, ownerBId);
+        const carpool = yield* createCarpool(team.id, team.guild_id, ownerAMember.id);
+        yield* addCar(carpool.id, ownerAMember.id, 4); // carA — ownerA is its owner
+        const carB = yield* addCar(carpool.id, ownerBMember.id, 4);
+
+        // ownerB assigns ownerA (who already owns carA) a seat in carB
+        const result = yield* CarpoolsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.reserveSeat({
+              carId: carB.car_id,
+              teamMemberId: ownerAMember.id,
+              assignedBy: Option.some(ownerBMember.id),
+            }),
+          ),
+          Effect.result,
+        );
+
+        expect(result._tag).toBe('Failure');
+        if (result._tag === 'Failure') {
+          expect(result.failure._tag).toBe('CarpoolAlreadyInAnotherCar');
+        }
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'owns-another-car check takes precedence over CarpoolFull — → CarpoolAlreadyInAnotherCar not CarpoolFull',
+    () =>
+      Effect.gen(function* () {
+        // ownerA owns carA (capacity 4); ownerB owns carB (capacity 2, will be filled)
+        // Then ownerA tries to reserve in carB — should get CarpoolAlreadyInAnotherCar, not CarpoolFull
+        const ownerAId = yield* createUser('400000000000000160', 'owner-a-precedence');
+        const ownerBId = yield* createUser('400000000000000161', 'owner-b-precedence');
+        const passId = yield* createUser('400000000000000162', 'pass-precedence');
+        const team = yield* createTeam('426262626262626262' as Discord.Snowflake, ownerAId);
+        const ownerAMember = yield* addTeamMember(team.id, ownerAId);
+        const ownerBMember = yield* addTeamMember(team.id, ownerBId);
+        const pm = yield* addTeamMember(team.id, passId);
+        const carpool = yield* createCarpool(team.id, team.guild_id, ownerAMember.id);
+        yield* addCar(carpool.id, ownerAMember.id, 4); // carA — ownerA is its owner
+        const carB = yield* addCar(carpool.id, ownerBMember.id, 2); // capacity 2: owner + 1 passenger
+        // Fill carB: owner(1) + passenger(1) = full (capacity 2)
+        yield* reserveSeat(carB.car_id, pm.id);
+
+        // ownerA (who owns carA) tries to reserve in full carB
+        // Expects CarpoolAlreadyInAnotherCar, NOT CarpoolFull
+        const result = yield* reserveSeat(carB.car_id, ownerAMember.id).pipe(Effect.result);
+
+        expect(result._tag).toBe('Failure');
+        if (result._tag === 'Failure') {
+          expect(result.failure._tag).toBe('CarpoolAlreadyInAnotherCar');
+        }
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
     'findCarpoolView with member whose user/name rows are null — returns view, name fields are Option.none',
     () =>
       Effect.gen(function* () {

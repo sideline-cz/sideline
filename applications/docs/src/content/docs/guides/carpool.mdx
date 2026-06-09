@@ -57,6 +57,7 @@ Any team member can reserve an available seat in a car by clicking its **Reserve
 - You are added to the car's private thread automatically so you can follow the driver's updates.
 - The board refreshes to show the updated passenger list.
 - You can be in at most one car per board. Clicking **Reserve** while you already have a seat in a different car on the same board will show an error.
+- If you own a car on this board, you cannot also reserve a passenger seat in another car on the same board.
 - The driver cannot reserve a seat in their own car.
 
 After reserving, an ephemeral confirmation appears with a **Leave** button in case you change your mind.
@@ -105,7 +106,7 @@ Car owners can remove their car from the board at any time using the **Remove ca
 |---------|--------------|
 | `/doprava` does not appear | You do not have the `carpool:manage` permission. Ask your captain or admin. |
 | "Car is full" error | All seats (including the driver's) are taken. Find another car. |
-| "Already in another car" error | You already have a seat in a different car on this board. Leave that car first. |
+| "Already in another car" error | You already have a seat in a different car on this board, or you own a car on this board. A member can only be in one car per board (as driver or passenger, not both). |
 | Cannot see the private thread | You haven't reserved a seat (or been assigned one) in that car yet. |
 
 ## See also

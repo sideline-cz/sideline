@@ -433,6 +433,19 @@ const make = Effect.gen(function* () {
       sql`SELECT capacity, carpool_id, owner_team_member_id FROM carpool_cars WHERE id = ${carId} FOR UPDATE`,
   });
 
+  // Locks the carpools row resolved from a car id via subquery.
+  // Serializes reserveSeat (and removeCar) against addCar, matching addCar's
+  // lockCarpoolQuery — closing the race between addCar and reserveSeat.
+  const lockCarpoolByCarQuery = SqlSchema.findOneOption({
+    Request: Carpool.CarpoolCarId,
+    Result: Schema.Struct({ id: Carpool.CarpoolId }),
+    execute: (carId) => sql`
+      SELECT id FROM carpools
+      WHERE id = (SELECT carpool_id FROM carpool_cars WHERE id = ${carId})
+      FOR UPDATE
+    `,
+  });
+
   const countSeatsQuery = SqlSchema.findOne({
     Request: Carpool.CarpoolCarId,
     Result: SeatCountRow,
@@ -448,6 +461,18 @@ const make = Effect.gen(function* () {
     Result: ExistingSeatRow,
     execute: (input) =>
       sql`SELECT car_id FROM carpool_seats WHERE carpool_id = ${input.carpool_id} AND team_member_id = ${input.team_member_id}`,
+  });
+
+  // Mirrors addCar's checkOwnerIsPassengerQuery guard in the opposite direction:
+  // prevents a car owner from taking a passenger seat in another car of the same carpool.
+  const findOwnedCarQuery = SqlSchema.findOneOption({
+    Request: Schema.Struct({
+      carpool_id: Carpool.CarpoolId,
+      team_member_id: TeamMember.TeamMemberId,
+    }),
+    Result: Schema.Struct({ id: Carpool.CarpoolCarId }),
+    execute: (input) =>
+      sql`SELECT id FROM carpool_cars WHERE carpool_id = ${input.carpool_id} AND owner_team_member_id = ${input.team_member_id}`,
   });
 
   const insertSeatQuery = SqlSchema.void({
@@ -471,6 +496,11 @@ const make = Effect.gen(function* () {
     sql
       .withTransaction(
         Effect.Do.pipe(
+          // Lock the carpool row first — shared lock with addCar's lockCarpoolQuery —
+          // to serialize reserveSeat against addCar and close the addCar/reserveSeat race.
+          // A None result (car not found yet) simply falls through; the next step raises
+          // CarpoolCarNotFound.
+          Effect.tap(() => lockCarpoolByCarQuery(input.carId).pipe(catchSqlErrors)),
           Effect.bind('car', () =>
             lockCarQuery(input.carId).pipe(
               catchSqlErrors,
@@ -487,9 +517,26 @@ const make = Effect.gen(function* () {
               ? Effect.fail(new CarpoolRpcModels.CarpoolOwnerCannotReserve())
               : Effect.void,
           ),
+          // Mirrors addCar's checkOwnerIsPassengerQuery guard: prevents a car owner from
+          // taking a passenger seat in another car of the same carpool.
+          // Placed before the capacity check so CarpoolAlreadyInAnotherCar wins over CarpoolFull.
+          Effect.tap(({ car }) =>
+            findOwnedCarQuery({
+              carpool_id: car.carpool_id,
+              team_member_id: input.teamMemberId,
+            }).pipe(
+              catchSqlErrors,
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.void,
+                  onSome: () => Effect.fail(new CarpoolRpcModels.CarpoolAlreadyInAnotherCar()),
+                }),
+              ),
+            ),
+          ),
           // Proactive duplicate check — runs while the transaction is still clean
           // (before any INSERT that could abort it). This handles the deterministic
-          // cases: same-car duplicate and already-in-another-car.
+          // cases: same-car duplicate and already-in-another-car (as a passenger).
           Effect.tap(({ car }) =>
             findExistingSeatQuery({
               carpool_id: car.carpool_id,
@@ -632,6 +679,9 @@ const make = Effect.gen(function* () {
     sql
       .withTransaction(
         Effect.Do.pipe(
+          // Lock the carpool row first so that removeCar serializes against reserveSeat
+          // on the same carpool row (matching reserveSeat's lockCarpoolByCarQuery).
+          Effect.tap(() => lockCarpoolByCarQuery(input.carId).pipe(catchSqlErrors)),
           Effect.bind('car', () =>
             findCarOwnerQuery(input.carId).pipe(
               catchSqlErrors,

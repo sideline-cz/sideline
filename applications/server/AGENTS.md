@@ -970,6 +970,19 @@ Rules:
 2. The handler that consumes the `Option` must, on `None`, re-read the row to distinguish which precondition failed and map to the appropriate typed error (e.g. `ClaimEventNotFound` vs `ClaimAlreadyClaimed` vs `ClaimEventInactive`)
 3. Used by: `EventsRepository.claimTraining` / `unclaimTraining` (claim race), `EventsRepository.markEventStarted` (start race), `EventRsvpsRepository` upserts
 
+## Consistent `FOR UPDATE` Lock Ordering Within A Transaction
+
+When two or more repository methods mutate the same set of related rows inside `sql.withTransaction(...)` and guard against concurrency with explicit `SELECT ... FOR UPDATE` row locks, every such method MUST acquire those locks in the **same order**, from the parent (least-granular) row down to the child (most-granular) row. Acquiring the same locks in different orders across methods lets two concurrent transactions deadlock, and skipping the parent lock in one method reopens the race the others closed.
+
+For the carpool repository the order is fixed: **lock the `carpools` row first, then the `carpool_cars` row.** `reserveSeat` and `removeCar` each begin their transaction with `lockCarpoolByCarQuery(input.carId)` (`SELECT id FROM carpools WHERE id = (SELECT carpool_id FROM carpool_cars WHERE id = $1) FOR UPDATE`) before locking the car row via `lockCarQuery`, matching the `carpools`-then-`carpool_cars` order `addCar` already uses. A `None` result from the carpool lock (car not found yet) falls through; the next step raises `CarpoolCarNotFound`.
+
+Rules:
+1. **Lock parent before child, identically in every method.** In `CarpoolsRepository`, the first step of any multi-table mutating transaction is the `carpools` `FOR UPDATE` lock, then the `carpool_cars` `FOR UPDATE` lock.
+2. **A mutation that touches only one of the tables still takes the parent lock first** if it must serialize against a sibling method that touches both — otherwise the sibling's parent lock does not exclude it. This is why `reserveSeat` (which conceptually only touches `carpool_seats`/`carpool_cars`) locks the `carpools` row: to serialize against `addCar`.
+3. **Mirror cross-method guards in both directions.** When method A guards "owner cannot be a passenger" (`addCar`'s `checkOwnerIsPassengerQuery`), the inverse method must guard "passenger cannot already own a car in the same carpool" — `reserveSeat`'s `findOwnedCarQuery`, placed before the capacity check so `CarpoolAlreadyInAnotherCar` wins over `CarpoolFull`.
+
+Reference: `CarpoolsRepository.reserveSeat` / `removeCar` / `addCar` (`src/repositories/CarpoolsRepository.ts`).
+
 ## Global Admin Authorization (`users.is_global_admin` + `APP_GLOBAL_ADMIN_DISCORD_IDS`)
 
 Some HTTP endpoints (translations CMS, onboarding-token tools, future cross-team operator tools) must be restricted to Sideline operators that are **not** modelled per-team in the database. Global-admin status has two additive sources, OR-combined into a per-request boolean on `CurrentUser`: a persisted `users.is_global_admin` DB flag and an env-driven Discord-id allow-list.
