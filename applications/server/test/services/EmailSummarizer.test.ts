@@ -26,6 +26,7 @@ type EmailRecord = {
   subject: string;
   body: string;
   summary: Option.Option<string>;
+  short_summary: Option.Option<string>;
   summarize_attempts: number;
   last_error: Option.Option<string>;
   approval_request_message_id: Option.Option<string>;
@@ -53,6 +54,7 @@ const makeEmailRecord = (
   subject: 'Team Update',
   body: 'Please read the latest news from the team.',
   summary: Option.none(),
+  short_summary: Option.none(),
   summarize_attempts: 0,
   last_error: Option.none(),
   approval_request_message_id: Option.none(),
@@ -95,10 +97,19 @@ const makeMockEmailMessagesRepository = () =>
       emailStore.set(id, { ...row, status: 'summarizing' });
       return Effect.succeed(Option.some(id));
     },
-    setSummaryPendingApproval: (id: EmailForwarding.EmailMessageId, summary: string) => {
+    setSummaryPendingApproval: (
+      id: EmailForwarding.EmailMessageId,
+      summary: string,
+      shortSummary: string,
+    ) => {
       const row = emailStore.get(id);
       if (row) {
-        emailStore.set(id, { ...row, status: 'pending_approval', summary: Option.some(summary) });
+        emailStore.set(id, {
+          ...row,
+          status: 'pending_approval',
+          summary: Option.some(summary),
+          short_summary: Option.some(shortSummary),
+        });
       }
       return Effect.void;
     },
@@ -146,7 +157,7 @@ const makeFakeLlmClientLayer = (result: 'success' | 'fail') =>
       if (result === 'fail') {
         return Effect.fail(new LlmError({ message: 'LLM failed' }));
       }
-      return Effect.succeed('FAKE SUMMARY');
+      return Effect.succeed({ short: 'FAKE SHORT', detailed: 'FAKE SUMMARY' });
     },
   } as never);
 
@@ -162,29 +173,38 @@ const buildLayer = (llmResult: 'success' | 'fail' = 'success') =>
 // ---------------------------------------------------------------------------
 
 describe('EmailSummarizer — received email summarized successfully', () => {
-  it.effect('sets status to pending_approval, saves summary, enqueues approval_request', () => {
-    resetStores();
-    emailStore.set(EMAIL_ID_1, makeEmailRecord(EMAIL_ID_1, { status: 'received' }));
+  it.effect(
+    'sets status to pending_approval, saves summary + short_summary, enqueues approval_request',
+    () => {
+      resetStores();
+      emailStore.set(EMAIL_ID_1, makeEmailRecord(EMAIL_ID_1, { status: 'received' }));
 
-    return emailSummarizerEffect.pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          const row = emailStore.get(EMAIL_ID_1);
-          expect(row).toBeDefined();
-          expect(row?.status).toBe('pending_approval');
-          expect(Option.isSome(row?.summary ?? Option.none())).toBe(true);
-          expect((row?.summary as Option.Some<string>).value).toBe('FAKE SUMMARY');
+      return emailSummarizerEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            const row = emailStore.get(EMAIL_ID_1);
+            expect(row).toBeDefined();
+            expect(row?.status).toBe('pending_approval');
 
-          const approval = enqueuedEvents.filter(
-            (e) => e.emailId === EMAIL_ID_1 && e.kind === 'approval_request',
-          );
-          expect(approval).toHaveLength(1);
-        }),
-      ),
-      Effect.asVoid,
-      Effect.provide(buildLayer('success')),
-    );
-  });
+            // detailed summary persisted
+            expect(Option.isSome(row?.summary ?? Option.none())).toBe(true);
+            expect(Option.getOrThrow(row?.summary ?? Option.none())).toBe('FAKE SUMMARY');
+
+            // short summary persisted
+            expect(Option.isSome(row?.short_summary ?? Option.none())).toBe(true);
+            expect(Option.getOrThrow(row?.short_summary ?? Option.none())).toBe('FAKE SHORT');
+
+            const approval = enqueuedEvents.filter(
+              (e) => e.emailId === EMAIL_ID_1 && e.kind === 'approval_request',
+            );
+            expect(approval).toHaveLength(1);
+          }),
+        ),
+        Effect.asVoid,
+        Effect.provide(buildLayer('success')),
+      );
+    },
+  );
 });
 
 describe('EmailSummarizer — LlmClient fails 3 times → status failed', () => {

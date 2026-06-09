@@ -4,7 +4,11 @@ import * as Discord from '../../models/Discord.js';
 import { EmailMessageId } from '../../models/EmailForwarding.js';
 import * as Team from '../../models/Team.js';
 import { EmailPostEventKind, UnprocessedEmailPostEvent } from './EmailRpcEvents.js';
-import { EmailApprovalForbidden, EmailRpcMessageNotFound } from './EmailRpcModels.js';
+import {
+  EmailApprovalForbidden,
+  EmailContentView,
+  EmailRpcMessageNotFound,
+} from './EmailRpcModels.js';
 
 const UUIDString = Schema.String.pipe(Schema.check(Schema.isUUID()));
 
@@ -57,5 +61,13 @@ export const EmailRpcGroup = RpcGroup.make(
   }),
   Rpc.make('MarkEmailPostEventFailed', {
     payload: { id: UUIDString, error: Schema.String },
+  }),
+  Rpc.make('GetEmailContent', {
+    payload: {
+      team_id: Team.TeamId,
+      email_id: EmailMessageId,
+    },
+    success: EmailContentView,
+    error: Schema.Union([EmailRpcMessageNotFound]),
   }),
 ).prefix('Email/');

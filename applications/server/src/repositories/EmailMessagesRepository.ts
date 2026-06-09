@@ -16,6 +16,7 @@ export class EmailMessageRow extends Schema.Class<EmailMessageRow>('EmailMessage
   subject: Schema.String,
   body: Schema.String,
   summary: Schema.OptionFromNullOr(Schema.String),
+  short_summary: Schema.OptionFromNullOr(Schema.String),
   summarize_attempts: Schema.Int,
   last_error: Schema.OptionFromNullOr(Schema.String),
   approval_request_message_id: Schema.OptionFromNullOr(Schema.String),
@@ -62,8 +63,8 @@ const make = Effect.gen(function* () {
     Request: EmailForwarding.EmailMessageId,
     Result: EmailMessageRow,
     execute: (id) => sql`
-      SELECT id, team_id, status, from_address, subject, body, summary, summarize_attempts,
-             last_error, approval_request_message_id, approved_by, rejected_by,
+      SELECT id, team_id, status, from_address, subject, body, summary, short_summary,
+             summarize_attempts, last_error, approval_request_message_id, approved_by, rejected_by,
              posted_channel_id, received_at, created_at, updated_at
       FROM email_messages
       WHERE id = ${id}::uuid
@@ -96,10 +97,11 @@ const make = Effect.gen(function* () {
     Request: Schema.Struct({
       id: EmailForwarding.EmailMessageId,
       summary: Schema.String,
+      short_summary: Schema.String,
     }),
     execute: (input) => sql`
       UPDATE email_messages
-      SET status = 'pending_approval', summary = ${input.summary}, updated_at = now()
+      SET status = 'pending_approval', summary = ${input.summary}, short_summary = ${input.short_summary}, updated_at = now()
       WHERE id = ${input.id}::uuid
     `,
   });
@@ -108,11 +110,12 @@ const make = Effect.gen(function* () {
     Request: Schema.Struct({
       id: EmailForwarding.EmailMessageId,
       summary: Schema.String,
+      short_summary: Schema.String,
     }),
     Result: ConditionalId,
     execute: (input) => sql`
       UPDATE email_messages
-      SET summary = ${input.summary}, updated_at = now()
+      SET summary = ${input.summary}, short_summary = ${input.short_summary}, updated_at = now()
       WHERE id = ${input.id}::uuid AND status = 'pending_approval'
       RETURNING id
     `,
@@ -215,11 +218,24 @@ const make = Effect.gen(function* () {
   const claimForSummarizing = (id: EmailForwarding.EmailMessageId) =>
     claimForSummarizingQuery(id).pipe(catchSqlErrors, Effect.map(Option.map((r) => r.id)));
 
-  const setSummaryPendingApproval = (id: EmailForwarding.EmailMessageId, summary: string) =>
-    setSummaryPendingApprovalQuery({ id, summary }).pipe(catchSqlErrors);
+  const setSummaryPendingApproval = (
+    id: EmailForwarding.EmailMessageId,
+    summary: string,
+    shortSummary: string,
+  ) =>
+    setSummaryPendingApprovalQuery({ id, summary, short_summary: shortSummary }).pipe(
+      catchSqlErrors,
+    );
 
-  const updateSummary = (id: EmailForwarding.EmailMessageId, summary: string) =>
-    updateSummaryQuery({ id, summary }).pipe(catchSqlErrors, Effect.map(Option.map((r) => r.id)));
+  const updateSummary = (
+    id: EmailForwarding.EmailMessageId,
+    summary: string,
+    shortSummary: string,
+  ) =>
+    updateSummaryQuery({ id, summary, short_summary: shortSummary }).pipe(
+      catchSqlErrors,
+      Effect.map(Option.map((r) => r.id)),
+    );
 
   const incrementAttemptsAndMaybeFail = (
     id: EmailForwarding.EmailMessageId,

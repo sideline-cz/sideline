@@ -43,7 +43,12 @@ export function EmailDetailPage({
   const serverUrl = useServerUrl();
 
   const [email, setEmail] = React.useState(initialEmail);
-  const [summaryText, setSummaryText] = React.useState(Option.getOrElse(email.summary, () => ''));
+  const [shortSummaryText, setShortSummaryText] = React.useState(
+    Option.getOrElse(email.shortSummary, () => ''),
+  );
+  const [detailedSummaryText, setDetailedSummaryText] = React.useState(
+    Option.getOrElse(email.summary, () => ''),
+  );
   const [savingSummary, setSavingSummary] = React.useState(false);
   const [approving, setApproving] = React.useState(false);
   const [sendingOriginal, setSendingOriginal] = React.useState(false);
@@ -53,9 +58,13 @@ export function EmailDetailPage({
   const isPending = email.status === 'pending_approval';
   const canAct = isPending && hasCoachAuthority;
 
-  const initialSummary = Option.getOrElse(email.summary, () => '');
-  const summaryChanged = summaryText !== initialSummary;
-  const summaryIsEmpty = !summaryText.trim();
+  const initialShortSummary = Option.getOrElse(email.shortSummary, () => '');
+  const initialDetailedSummary = Option.getOrElse(email.summary, () => '');
+  const shortChanged = shortSummaryText !== initialShortSummary;
+  const detailedChanged = detailedSummaryText !== initialDetailedSummary;
+  const summaryChanged = shortChanged || detailedChanged;
+
+  const shortSummaryEmpty = !shortSummaryText.trim();
 
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
   const emailIdBranded = email.emailId;
@@ -75,7 +84,7 @@ export function EmailDetailPage({
       Effect.flatMap((api) =>
         api.emailForwarding.updateEmailSummary({
           params: { teamId: teamIdBranded, emailId: emailIdBranded },
-          payload: { summary: summaryText },
+          payload: { summary: detailedSummaryText, short_summary: shortSummaryText },
         }),
       ),
       Effect.mapError(() => ClientError.make(tr('email_detail_save_summary_error'))),
@@ -85,18 +94,18 @@ export function EmailDetailPage({
     if (Option.isSome(result)) {
       setEmail(result.value);
     }
-  }, [teamIdBranded, emailIdBranded, summaryText, run]);
+  }, [teamIdBranded, emailIdBranded, detailedSummaryText, shortSummaryText, run]);
 
   const handleApprove = React.useCallback(async () => {
     setApproving(true);
 
     // Flush pending summary changes first
-    if (summaryChanged && !summaryIsEmpty) {
+    if (summaryChanged && !shortSummaryEmpty) {
       const saveResult = await ApiClient.asEffect().pipe(
         Effect.flatMap((api) =>
           api.emailForwarding.updateEmailSummary({
             params: { teamId: teamIdBranded, emailId: emailIdBranded },
-            payload: { summary: summaryText },
+            payload: { summary: detailedSummaryText, short_summary: shortSummaryText },
           }),
         ),
         Effect.mapError(() => ClientError.make(tr('email_detail_save_summary_error'))),
@@ -126,7 +135,16 @@ export function EmailDetailPage({
         router.invalidate();
       }
     }
-  }, [teamIdBranded, emailIdBranded, summaryText, summaryChanged, summaryIsEmpty, run, router]);
+  }, [
+    teamIdBranded,
+    emailIdBranded,
+    detailedSummaryText,
+    shortSummaryText,
+    summaryChanged,
+    shortSummaryEmpty,
+    run,
+    router,
+  ]);
 
   const handleSendOriginal = React.useCallback(async () => {
     setSendingOriginal(true);
@@ -329,33 +347,66 @@ export function EmailDetailPage({
         </CardContent>
       </Card>
 
-      {/* AI Summary */}
+      {/* SHORT Summary card */}
       <Card>
         <CardHeader>
-          <CardTitle className='text-base'>{tr('email_detail_summary_heading')}</CardTitle>
+          <CardTitle className='text-base'>{tr('email_detail_short_heading')}</CardTitle>
+          <p className='text-xs text-muted-foreground'>{tr('email_detail_short_hint')}</p>
         </CardHeader>
         <CardContent>
-          <div className='flex flex-col gap-3'>
-            <span className='text-sm font-medium'>{tr('email_detail_summary_label')}</span>
-            {canAct ? (
-              <>
-                <Textarea
-                  rows={6}
-                  value={summaryText}
-                  onChange={(e) => setSummaryText(e.target.value)}
-                  placeholder={tr('email_detail_summary_placeholder')}
-                  maxLength={4000}
-                />
-                <p className='text-xs text-muted-foreground'>
-                  {tr('email_detail_summary_edit_hint')}
+          {canAct ? (
+            <div className='flex flex-col gap-2'>
+              <Textarea
+                rows={6}
+                value={shortSummaryText}
+                onChange={(e) => setShortSummaryText(e.target.value)}
+                placeholder={tr('email_detail_short_placeholder')}
+                maxLength={2000}
+              />
+              <div className='flex items-center justify-between'>
+                {shortSummaryEmpty ? (
+                  <p className='text-xs text-destructive'>{tr('email_detail_short_required')}</p>
+                ) : (
+                  <span />
+                )}
+                <p className='text-xs text-muted-foreground text-right'>
+                  {shortSummaryText.length}/2000
                 </p>
-              </>
-            ) : (
-              <p className='text-sm whitespace-pre-wrap break-words'>
-                {Option.getOrElse(email.summary, () => '—')}
+              </div>
+            </div>
+          ) : (
+            <p className='text-sm whitespace-pre-wrap break-words'>
+              {Option.getOrElse(email.shortSummary, () => '—')}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* DETAILED Summary card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className='text-base'>{tr('email_detail_detailed_heading')}</CardTitle>
+          <p className='text-xs text-muted-foreground'>{tr('email_detail_detailed_hint')}</p>
+        </CardHeader>
+        <CardContent>
+          {canAct ? (
+            <div className='flex flex-col gap-2'>
+              <Textarea
+                rows={12}
+                value={detailedSummaryText}
+                onChange={(e) => setDetailedSummaryText(e.target.value)}
+                placeholder={tr('email_detail_detailed_placeholder')}
+                maxLength={8000}
+              />
+              <p className='text-xs text-muted-foreground text-right'>
+                {detailedSummaryText.length}/8000
               </p>
-            )}
-          </div>
+            </div>
+          ) : (
+            <p className='text-sm whitespace-pre-wrap break-words'>
+              {Option.getOrElse(email.summary, () => '—')}
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -365,11 +416,14 @@ export function EmailDetailPage({
           <Button
             variant='outline'
             onClick={handleSaveSummary}
-            disabled={savingSummary || !summaryChanged || summaryIsEmpty}
+            disabled={savingSummary || !summaryChanged}
           >
             {savingSummary ? tr('profile_saving') : tr('email_detail_save_summary')}
           </Button>
-          <Button onClick={handleApprove} disabled={approving || sendingOriginal || rejecting}>
+          <Button
+            onClick={handleApprove}
+            disabled={approving || sendingOriginal || rejecting || shortSummaryEmpty}
+          >
             {approving ? tr('profile_saving') : tr('email_detail_approve')}
           </Button>
           <Button

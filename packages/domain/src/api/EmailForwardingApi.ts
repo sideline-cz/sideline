@@ -46,6 +46,7 @@ export class EmailDetailView extends Schema.Class<EmailDetailView>('EmailDetailV
   subject: Schema.String,
   body: Schema.String,
   summary: Schema.OptionFromNullOr(Schema.String),
+  shortSummary: Schema.OptionFromNullOr(Schema.String),
   receivedAt: Schema.DateTimeUtc,
   approvedBy: Schema.OptionFromNullOr(Schema.String),
   rejectedBy: Schema.OptionFromNullOr(Schema.String),
@@ -68,7 +69,8 @@ export type UpsertEmailForwardingConfigRequest = Schema.Schema.Type<
 >;
 
 export const UpdateEmailSummaryRequest = Schema.Struct({
-  summary: Schema.String.pipe(Schema.check(Schema.isMaxLength(4000))),
+  summary: Schema.String.pipe(Schema.check(Schema.isMaxLength(8000))),
+  short_summary: Schema.String.pipe(Schema.check(Schema.isMaxLength(2000))),
 });
 export type UpdateEmailSummaryRequest = Schema.Schema.Type<typeof UpdateEmailSummaryRequest>;
 

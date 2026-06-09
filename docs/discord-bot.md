@@ -780,6 +780,58 @@ Appears on the same approval-request embed as the Approve button.
 
 ---
 
+### Email Detail Open Button — `email-detail:{teamId}:{emailId}`
+
+Appears on the green team-post embed after a coach approves an email.
+
+**Custom ID pattern:** `email-detail:{teamId}:{emailId}`
+
+**Behavior:**
+
+1. Returns a deferred ephemeral response.
+2. Calls `Email/GetEmailContent` RPC to fetch the detailed summary.
+3. Chunks the detailed summary text (max ~1900 chars per page) and renders the first page as a blurple embed with optional pagination buttons (`◀`/`▶`).
+
+**Source file:** `applications/bot/src/interactions/email-pages.ts` (`EmailDetailOpenButton`)
+
+---
+
+### Email Original Open Button — `email-original:{teamId}:{emailId}`
+
+Appears on the same green team-post embed as the Detail button.
+
+**Custom ID pattern:** `email-original:{teamId}:{emailId}`
+
+**Behavior:** identical to Email Detail Open, but uses the raw `body` text and renders a grey embed.
+
+**Source file:** `applications/bot/src/interactions/email-pages.ts` (`EmailOriginalOpenButton`)
+
+---
+
+### Email Detail Page Button — `email-detail-page:{teamId}:{emailId}:{pageIndex}`
+
+Pagination button inside the ephemeral detailed-summary embed. Appears when the detailed summary exceeds one embed page.
+
+**Custom ID pattern:** `email-detail-page:{teamId}:{emailId}:{pageIndex}`
+
+**Behavior:** Defers an update, re-fetches the email content, chunks the detailed summary, and renders the requested page.
+
+**Source file:** `applications/bot/src/interactions/email-pages.ts` (`EmailDetailPageButton`)
+
+---
+
+### Email Original Page Button — `email-original-page:{teamId}:{emailId}:{pageIndex}`
+
+Pagination button inside the ephemeral original-email embed. Appears when the email body exceeds one embed page.
+
+**Custom ID pattern:** `email-original-page:{teamId}:{emailId}:{pageIndex}`
+
+**Behavior:** identical to Email Detail Page but renders the raw body text.
+
+**Source file:** `applications/bot/src/interactions/email-pages.ts` (`EmailOriginalPageButton`)
+
+---
+
 ### Event Create Autocomplete
 
 Provides training type suggestions for the `/event create training_type` option.
@@ -1195,9 +1247,9 @@ The server's AI summarization pipeline inserts rows into `email_post_sync_events
 
 | Event kind | Handler | Discord action |
 |---|---|---|
-| `approval_request` | `handleEmailPostEvent.ts` | Posts an approval embed to the team's configured `coach_channel_id`. The embed (amber/yellow colour) shows the AI summary or original body, sender, subject, and received-at timestamp. Three buttons are attached: **Approve** (`email-approve:{teamId}:{emailId}`), **Reject** (`email-reject:{teamId}:{emailId}`), and an optional **Review & edit in Sideline** link button (shown when `WEB_URL` is set). |
-| `post_summary` | `handleEmailPostEvent.ts` | Posts the AI summary embed (green colour) to `target_channel_id`. When `WEB_URL` is set, includes a **View original & attachments in Sideline** link button. |
-| `post_original` | `handleEmailPostEvent.ts` | Posts the original email body (grey colour, truncated to 3500 characters) to `target_channel_id`. Same deep-link button as `post_summary`. |
+| `approval_request` | `handleEmailPostEvent.ts` | Posts **two embeds** to the team's configured `coach_channel_id`: (1) an amber embed showing the **short summary** (falling back to the detailed summary or body) with From/Subject/Received fields; (2) a blurple embed showing the **detailed summary** (truncated at 3500 chars). Two buttons are attached: **Approve** (`email-approve:{teamId}:{emailId}`) and **Reject** (`email-reject:{teamId}:{emailId}`). An optional **Edit in Sideline** link button is appended when `WEB_URL` is set. |
+| `post_summary` | `handleEmailPostEvent.ts` | Posts the **short summary** embed (green colour) to `target_channel_id`. Two buttons are always present: **Detailed summary** (`email-detail:{teamId}:{emailId}`) and **Original email** (`email-original:{teamId}:{emailId}`). |
+| `post_original` | `handleEmailPostEvent.ts` | Posts the original email body (grey colour, truncated to 3500 characters) to `target_channel_id`. No buttons attached. |
 
 **Embed builder:** `applications/bot/src/rest/email/buildEmailEmbeds.ts`
 
@@ -1378,6 +1430,7 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Email/GetUnprocessedEmailPostEvents` | `{ limit }` → `UnprocessedEmailPostEvent[]` | Polls `email_post_sync_events` for rows where `processed_at IS NULL`, up to `limit`. |
 | `Email/MarkEmailPostEventProcessed` | `id`, `deliveredAt`, `email_message_id`, `kind`, `posted_channel_id` | Sets `processed_at = now()`. For `post_summary`/`post_original` kinds, also updates `email_messages.status` and `posted_channel_id`. |
 | `Email/MarkEmailPostEventFailed` | `id`, `error` | Records a delivery failure. The row remains `processed_at = NULL` and will be retried. |
+| `Email/GetEmailContent` | `team_id`, `email_id` → `EmailContentView` | Returns `subject`, `from_address`, `short_summary`, `summary`, `body` for an email in `posted_summary` or `posted_original` status. Called by the ephemeral pagination buttons. Errors: `EmailRpcMessageNotFound`. |
 
 ---
 

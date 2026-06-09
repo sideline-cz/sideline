@@ -22,6 +22,7 @@ export class EmailPostEvent extends Schema.Class<EmailPostEvent>('EmailPostEvent
   subject: Schema.String,
   from_address: Schema.String,
   summary: Schema.OptionFromNullOr(Schema.String),
+  short_summary: Schema.OptionFromNullOr(Schema.String),
   body: Schema.String,
   received_at: Schema.DateTimeUtc,
 }) {}

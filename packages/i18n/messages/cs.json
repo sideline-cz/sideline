@@ -627,6 +627,19 @@
   "bot_email_original_field_received": "Přijato",
   "bot_email_original_footer": "Přeposlaný e-mail · originál",
   "bot_email_original_truncated": "…zpráva zkrácena",
+  "bot_email_approval_short_header": "🟢 Krátké shrnutí",
+  "bot_email_approval_detailed_title": "📄 Podrobné shrnutí",
+  "bot_email_approval_detailed_footer": "Podrobné AI shrnutí",
+  "bot_email_detailed_truncated": "… (zkráceno) Celé shrnutí najdeš přes „Upravit na Sideline\".",
+  "bot_email_btn_edit_sideline": "✏️ Upravit na Sideline",
+  "bot_email_btn_detailed": "📄 Podrobné shrnutí",
+  "bot_email_btn_original": "✉️ Původní e-mail",
+  "bot_email_detailed_title": "📄 Podrobné shrnutí",
+  "bot_email_detailed_footer": "Podrobné AI shrnutí",
+  "bot_email_original_ephemeral_title": "✉️ Původní e-mail",
+  "bot_email_page_indicator": "Strana {current}/{total}",
+  "bot_email_page_continued": "… (pokračování na další straně)",
+  "bot_email_page_empty": "(žádný obsah)",
 
   "searchable_select_search": "Hledat...",
   "searchable_select_noResults": "Žádné výsledky.",
@@ -1702,5 +1715,12 @@
   "email_detail_not_found_title": "E-mail není k dispozici",
   "email_detail_not_found_body": "Hledaný e-mail neexistuje nebo nemáš oprávnění k jeho zobrazení.",
   "email_detail_not_found_back": "Zpět na tým",
-  "email_detail_load_error": "Nepodařilo se načíst e-mail."
+  "email_detail_load_error": "Nepodařilo se načíst e-mail.",
+  "email_detail_short_heading": "🟢 Krátké shrnutí",
+  "email_detail_short_hint": "Krátká verze, kterou uvidí celý tým. Úvodní věta a pár odrážek.",
+  "email_detail_short_placeholder": "Zadej nebo uprav krátké shrnutí…",
+  "email_detail_short_required": "Krátké shrnutí je povinné před schválením.",
+  "email_detail_detailed_heading": "📄 Podrobné shrnutí",
+  "email_detail_detailed_hint": "Delší shrnutí dostupné v Discordu přes tlačítko „Podrobné shrnutí\". Tým ho nevidí automaticky.",
+  "email_detail_detailed_placeholder": "Zadej nebo uprav podrobné shrnutí…"
 }

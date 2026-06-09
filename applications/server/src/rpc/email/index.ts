@@ -141,6 +141,45 @@ const rpcHandlers = Effect.Do.pipe(
         syncEventsRepo.markFailed(id, error),
   ),
 
+  // GetEmailContent — member-facing; no team:manage required
+  // Only accessible for emails in posted states: posted_summary / posted_original
+  Effect.let(
+    'Email/GetEmailContent',
+    ({ messagesRepo }) =>
+      ({
+        team_id,
+        email_id,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly email_id: EmailForwarding.EmailMessageId;
+      }) =>
+        messagesRepo.findById(email_id).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => Effect.fail(new EmailRpcModels.EmailRpcMessageNotFound()),
+              onSome: (row) => {
+                if (row.team_id !== team_id) {
+                  return Effect.fail(new EmailRpcModels.EmailRpcMessageNotFound());
+                }
+                const postableStatuses = ['posted_summary', 'posted_original'] as const;
+                if (!(postableStatuses as ReadonlyArray<string>).includes(row.status)) {
+                  return Effect.fail(new EmailRpcModels.EmailRpcMessageNotFound());
+                }
+                return Effect.succeed(
+                  new EmailRpcModels.EmailContentView({
+                    subject: row.subject,
+                    from_address: row.from_address,
+                    short_summary: row.short_summary,
+                    summary: row.summary,
+                    body: row.body,
+                  }),
+                );
+              },
+            }),
+          ),
+        ),
+  ),
+
   Bind.remove('messagesRepo'),
   Bind.remove('syncEventsRepo'),
   Bind.remove('membersRepo'),

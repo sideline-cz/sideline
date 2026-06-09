@@ -74,6 +74,7 @@ const toDetailView = (
     subject: row.subject,
     body: row.body,
     summary: row.summary,
+    shortSummary: row.short_summary,
     receivedAt: row.received_at,
     approvedBy: row.approved_by,
     rejectedBy: row.rejected_by,
@@ -204,7 +205,7 @@ export const EmailForwardingApiLive = HttpApiBuilder.group(Api, 'emailForwarding
               // Verify email belongs to this team before mutating
               Effect.tap(() => findOwnedEmail(emailId, teamId)),
               Effect.bind('updateResult', () =>
-                messagesRepo.updateSummary(emailId, payload.summary),
+                messagesRepo.updateSummary(emailId, payload.summary, payload.short_summary),
               ),
               Effect.tap(({ updateResult }) =>
                 Option.isNone(updateResult) ? Effect.fail(notFound) : Effect.void,

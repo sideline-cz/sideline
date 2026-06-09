@@ -575,6 +575,22 @@ Rules:
 2. **Every state transition that has a precondition repeats it in the `WHERE`** (`AND status = '<expected>'`) and returns `Option`/affected-rows so the caller can detect "already handled" without a prior read.
 3. **The `attempts`-counted retry uses `CASE WHEN`** in the same UPDATE (`status = CASE WHEN attempts + 1 >= ${max} THEN 'failed' ELSE '<from>' END`) so a transient failure returns the row to the pollable state and a capped failure terminates it — see `incrementAttemptsAndMaybeFail`. This is the in-table analogue of the `attempts`-counted outbox pattern documented above.
 
+### Two-Tier Email Summaries + Member-Facing Read RPC
+
+`email_messages` stores TWO AI summaries: `summary` (detailed, multi-paragraph) and `short_summary` (the scannable headline shown in the Discord embed body). `short_summary` was added by migration `1789400004_add_short_summary_to_email_messages.ts` as a nullable column; both decode via `Schema.OptionFromNullOr(Schema.String)` on `EmailContentView` (`packages/domain/src/rpc/email/EmailRpcModels.ts`). `EmailSummarizer` produces both at once — `LlmClient.summarizeEmail` returns `{ short, detailed }`, and `setSummaryPendingApproval(emailId, detailed, short)` persists them together.
+
+Consumers pick a tier via an **explicit fallback chain**, never reading a single column directly:
+
+1. **Short / embed body** — `short_summary` (non-blank) → `summary` (non-blank) → `body`.
+2. **Detailed view** — `summary` → `body`.
+
+`Email/GetEmailContent` (`src/rpc/email/index.ts`) is a **member-facing read RPC** that backs the bot's ephemeral "Read detailed summary" / "Read original" pagination (see `applications/bot/AGENTS.md` → "Stateless ephemeral pagination"). Unlike the approval RPCs (`Email/RecordApproval` / `RecordSendOriginal` / `RecordReject`), which require `team:manage` via `findMembershipByDiscordAndTeam` + `hasPermission`, `GetEmailContent` is readable by any member. Its guard is two checks, BOTH mapping failure to `EmailRpcMessageNotFound` (never leak existence):
+
+1. **Team ownership** — `row.team_id !== team_id` → `EmailRpcMessageNotFound`.
+2. **Postable status** — `row.status` must be `posted_summary` or `posted_original`; any other status (`received`, `summarizing`, `pending_approval`, `failed`, …) → `EmailRpcMessageNotFound`. A member must never read an email the coach has not yet approved for posting.
+
+Any future member-facing email/content read RPC MUST repeat both guards and MUST NOT require `team:manage` — gate visibility on team ownership + a posted/published status, not on the manage permission.
+
 ## Outbox With Opaque JSONB Payload
 
 Most `*_sync_events` tables expand the payload into named columns on the row (e.g. `event_sync_events.title`, `event_sync_events.start_at`) and decode them via the row schema. This is the right default — the SQL planner can index/filter on individual fields, and bot handlers receive typed RPC events.

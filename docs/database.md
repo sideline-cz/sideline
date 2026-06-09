@@ -1478,6 +1478,7 @@ One row per inbound email received via the webhook. Tracks the full lifecycle fr
 | `subject` | TEXT | NOT NULL | — |
 | `body` | TEXT | NOT NULL | — |
 | `summary` | TEXT | — | — |
+| `short_summary` | TEXT | — | — |
 | `summarize_attempts` | INT | NOT NULL | `0` |
 | `last_error` | TEXT | — | — |
 | `approval_request_message_id` | TEXT | — | — |
@@ -1492,7 +1493,7 @@ One row per inbound email received via the webhook. Tracks the full lifecycle fr
 - `idx_email_messages_status_received` — partial index on `(received_at) WHERE status = 'received'`. Used by the AI summarization pipeline to find newly received emails.
 - `idx_email_messages_team_id` — on `(team_id)`.
 
-**Notes**: Added in migration `1789400001_create_email_messages`. `body` contains the plain-text email body as received from the provider. `summary` is populated by the AI summarization service (`LlmClient`) or by a manual edit via `PUT /teams/:teamId/emails/:emailId/summary`. `approved_by` and `rejected_by` store the Discord user snowflake of the team member who performed the action (set via the bot buttons or the web UI). `approval_request_message_id` is the Discord message ID of the approval-request embed posted to `coach_channel_id` (set after the bot posts it). `posted_channel_id` records where the final post landed. **V1 limitation:** stored email bodies and attachments have no automatic retention/purge policy; this is planned as a follow-up.
+**Notes**: Added in migration `1789400001_create_email_messages`; `short_summary` column added in `1789400004_add_short_summary_to_email_messages`. `body` contains the plain-text email body as received from the provider. `summary` is the detailed AI-generated (or manually edited) summary, populated by `LlmClient` or via `PUT /teams/:teamId/emails/:emailId/summary`. `short_summary` is the brief version (approx. one sentence + up to 6 emoji-led bullet points) shown in Discord team-post embeds and in the short summary card on the Email detail page. `approved_by` and `rejected_by` store the Discord user snowflake of the team member who performed the action (set via the bot buttons or the web UI). `approval_request_message_id` is the Discord message ID of the approval-request embed posted to `coach_channel_id` (set after the bot posts it). `posted_channel_id` records where the final post landed. **V1 limitation:** stored email bodies and attachments have no automatic retention/purge policy; this is planned as a follow-up.
 
 ---
 
@@ -1633,6 +1634,7 @@ All 86 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1789400001 | `create_email_messages` | Creates `email_messages` table with status lifecycle and partial indexes. |
 | 1789400002 | `create_email_post_sync_events` | Creates `email_post_sync_events` outbox table for bot Discord posting pipeline. |
 | 1789400003 | `create_email_attachments` | Creates `email_attachments` table for binary attachment storage (BYTEA). |
+| 1789400004 | `add_short_summary_to_email_messages` | Adds nullable `short_summary TEXT` column to `email_messages` for the two-tier AI summary (short + detailed). |
 
 ### After Migrations (seed data)
 

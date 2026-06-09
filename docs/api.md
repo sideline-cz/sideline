@@ -5471,7 +5471,8 @@ Returns the full detail of a received email, including attachment metadata.
 | `fromAddress` | `string` | No | Sender address |
 | `subject` | `string` | No | Email subject |
 | `body` | `string` | No | Plain-text email body |
-| `summary` | `string \| null` | Yes | AI-generated or manually edited summary |
+| `summary` | `string \| null` | Yes | Detailed AI-generated or manually edited summary (max 8000 chars) |
+| `shortSummary` | `string \| null` | Yes | Brief AI-generated or manually edited summary shown in Discord team-post embeds (max 2000 chars) |
 | `receivedAt` | `string` (ISO 8601) | No | When the email was received |
 | `approvedBy` | `string \| null` | Yes | Discord user snowflake of the member who approved |
 | `rejectedBy` | `string \| null` | Yes | Discord user snowflake of the member who rejected |
@@ -5502,7 +5503,8 @@ Updates the AI-generated summary text before approval.
 
 | Field | Type | Required | Constraints | Description |
 |---|---|---|---|---|
-| `summary` | `string` | Yes | Max 4000 characters | New summary text |
+| `summary` | `string` | Yes | Max 8000 characters | New detailed summary text |
+| `short_summary` | `string` | Yes | Max 2000 characters | New short summary text (shown in Discord team-post embeds) |
 
 **Response:** `200 OK` — `EmailDetailView`
 
@@ -5759,8 +5761,11 @@ Handles the coach approval flow (approve/reject via Discord buttons) and the ema
 | `Email/GetUnprocessedEmailPostEvents` | `{ limit }` → `UnprocessedEmailPostEvent[]` | Polls `email_post_sync_events` for rows where `processed_at IS NULL`, up to `limit`. Called by the bot's Email Sync worker on a 5-second cadence. |
 | `Email/MarkEmailPostEventProcessed` | `id`, `deliveredAt`, `email_message_id`, `kind`, `posted_channel_id` | Sets `processed_at = now()` on the sync event row. For `post_summary` and `post_original` kinds, also transitions the `email_messages.status` to `posted_summary` or `posted_original` and records `posted_channel_id`. |
 | `Email/MarkEmailPostEventFailed` | `id`, `error` | Records a delivery failure on the sync event row; the row is retried on the next poll. |
+| `Email/GetEmailContent` | `team_id`, `email_id` → `EmailContentView` | Returns the subject, sender, short summary, detailed summary, and body of a posted email. Only accessible for emails in `posted_summary` or `posted_original` status. Called by the bot's ephemeral pagination buttons. Errors: `EmailRpcMessageNotFound`. |
 
-`UnprocessedEmailPostEvent` fields: `id`, `email_message_id`, `team_id`, `kind` (`"approval_request" | "post_summary" | "post_original"`), `coach_channel_id`, `target_channel_id`, `subject`, `from_address`, `summary` (nullable), `body`, `received_at`.
+`EmailContentView` fields: `subject`, `from_address`, `short_summary` (nullable), `summary` (nullable), `body`.
+
+`UnprocessedEmailPostEvent` fields: `id`, `email_message_id`, `team_id`, `kind` (`"approval_request" | "post_summary" | "post_original"`), `coach_channel_id`, `target_channel_id`, `subject`, `from_address`, `summary` (nullable), `short_summary` (nullable), `body`, `received_at`.
 
 ---
 

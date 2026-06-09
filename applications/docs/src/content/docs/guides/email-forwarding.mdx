@@ -15,11 +15,12 @@ Until the full guide is published, here is a brief overview of the feature.
 
 When an email arrives at the configured inbound address:
 
-1. Sideline stores the email and generates an AI summary.
-2. The bot posts an **approval request** embed to the private coach channel you configured.
-3. A coach reviews the summary on the **Email detail page** (`/teams/{teamId}/emails/{emailId}`) in the web app, edits it if needed, then clicks **Approve** or **Reject** in Discord.
-4. On approval, the summary is posted to the team channel. On rejection, the original email text is posted instead.
-5. Attached files are stored and downloadable from the Email detail page by any team member.
+1. Sideline stores the email and asks the AI to produce two summaries: a **short summary** (one sentence + key bullet points, shown in Discord) and a **detailed summary** (fuller breakdown for coach review).
+2. The bot posts an **approval request** to the private coach channel: an amber embed with the short summary and an email metadata (From/Subject/Received), followed by a blurple embed with the detailed summary.
+3. A coach reviews both summaries. They can open the **Email detail page** (`/teams/{teamId}/emails/{emailId}`) in the web app to edit either summary, then click **Approve** or **Reject** in Discord.
+4. On approval, the **short summary** is posted to the team channel. Team members can click **Detailed summary** or **Original email** to see the full text as an ephemeral (visible only to them) paginated preview.
+5. On rejection, the original email text is posted to the team channel instead.
+6. Attached files are stored and downloadable from the Email detail page by any team member.
 
 ## Who can do what
 
@@ -27,7 +28,7 @@ When an email arrives at the configured inbound address:
 |---|---|
 | Configure email forwarding settings | `team:manage` |
 | Approve or reject an email | `team:manage` |
-| Edit the AI summary | `team:manage` |
+| Edit the short or detailed AI summary | `team:manage` |
 | View an email and download attachments | Any team member |
 
 ## Setup checklist

@@ -653,6 +653,26 @@ Used by `/event list` and the overview show button (`overview-show`). Instead of
 3. `UpcomingRsvpButton` (`src/interactions/upcoming-rsvp.ts`) handles inline RSVP — submits the RSVP via `Event/SubmitRsvp`, triggers embed updates via `postRsvpDiscordUpdates`, then edits the current ephemeral message to reflect the new RSVP state
 4. `OverviewShowButton` (`src/interactions/overview-channel.ts`) handles the `overview-show` button — delegates to `sendUpcomingEventFollowups`
 
+#### Stateless ephemeral pagination (email detail / original)
+
+Used by the member-facing "Read detailed summary" / "Read original" buttons under a posted email embed. The full text can exceed Discord's 4096-char embed-description limit, so it is paged into an ephemeral message that only the clicking member sees. The page index is carried entirely in the button `custom_id` — there is NO server-side or in-memory page state. Handlers live in `src/interactions/email-pages.ts`; embed/component builders are `buildPageEmbed` / `buildPageComponents` in `src/rest/email/buildEmailEmbeds.ts`.
+
+Two `custom_id` schemes per "kind" (`detailed` and `original`), all colon-delimited and parsed positionally with `data.custom_id.split(':')` (UUIDs use hyphens, never colons, so the split is safe):
+
+| Action | `custom_id` | Interaction response | Parts |
+|--------|-------------|----------------------|-------|
+| Open (first page) | `email-detail:{teamId}:{emailId}` / `email-original:{teamId}:{emailId}` | `DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE` with `flags: Ephemeral` | `[prefix, teamId, emailId]` |
+| Navigate | `email-detail-page:{teamId}:{emailId}:{pageIndex}` / `email-original-page:{teamId}:{emailId}:{pageIndex}` | `DEFERRED_UPDATE_MESSAGE` | `[prefix, teamId, emailId, pageIndex]` |
+
+Rules (must be preserved):
+
+1. **Open responds `DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE` + `Ephemeral`; navigate responds `DEFERRED_UPDATE_MESSAGE`.** Open creates a NEW ephemeral message (only the clicker sees it); navigate edits that same ephemeral message in place. Never use `CHANNEL_MESSAGE_WITH_SOURCE` for open — the read must not be visible to the whole channel.
+2. **The page index is stateless — it lives ONLY in the navigate `custom_id`.** Never store page position in memory, a `Ref`, or the DB. The handler re-fetches the content via `Email/GetEmailContent`, re-chunks it, clamps `requestedPageIndex` to `[0, totalPages-1]`, and renders that page. `prev`/`next` buttons embed `pageIndex ± 1` in their own `custom_id`.
+3. **Both handler families share `fetchAndRenderPage`** (open passes page `0`; navigate passes the parsed index). It calls `rpc['Email/GetEmailContent']`, derives the text by kind — `detailed` = `Option.getOrElse(content.summary, () => content.body)`, `original` = `content.body` — chunks via `chunkForEmbedDescription`, then `rest.updateOriginalWebhookMessage(application_id, token, ...)`. On `EmailRpcMessageNotFound` / `RpcClientError`, render `m.bot_email_page_empty` instead of failing.
+4. **Always chunk embed-description text with `chunkForEmbedDescription`** (`src/rest/email/chunkText.ts`) — never `string.slice`. It is code-point-safe: it splits on paragraph (`\n\n`) → line (`\n`) → word → individual code-point boundaries so no chunk exceeds `maxChars` (default `4096`, the embed-description cap) AND no UTF-8 surrogate pair (emoji) is split mid-character. Reuse it for any future feature that pages arbitrary text into a Discord embed description.
+5. **The actual REST work is forked with `Effect.forkDetach`** and the handler returns the deferred response immediately — Discord requires an interaction ack within 3s, and the RPC + render may take longer.
+6. **Register all four handlers** (`EmailDetailOpenButton`, `EmailOriginalOpenButton`, `EmailDetailPageButton`, `EmailOriginalPageButton`) in `src/interactions/index.ts`. The middle page-indicator button uses a `{prefix}-disabled:` `custom_id` and `disabled: true` so it never dispatches.
+
 #### Coach claim / release buttons
 
 `ClaimButton` and `UnclaimButton` (`src/interactions/claim.ts`) are matched via `Ix.idStartsWith('claim:')` and `Ix.idStartsWith('unclaim:')`. The `custom_id` format is `claim:{team_id}:{event_id}` and `unclaim:{team_id}:{event_id}` — parsed positionally by `data.custom_id.split(':')`. Both handlers respond with `DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE` (ephemeral), fork the RPC call (`Event/ClaimTraining` / `Event/UnclaimTraining`) in the background via `Effect.forkDetach`, and edit the original webhook message with the localized result. RPC error tags are mapped to localized strings via `Effect.catchTag`: `ClaimAlreadyClaimed` → `bot_claim_already_claimed_by`, `ClaimNotOwnerGroupMember` → `bot_claim_not_owner`, `ClaimEventInactive` / `ClaimEventNotFound` / `ClaimNotTraining` → `bot_claim_event_cancelled`, `ClaimNotClaimer` → `bot_claim_release_not_claimer`.

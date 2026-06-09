@@ -1130,6 +1130,7 @@ erDiagram
         TEXT subject
         TEXT body
         TEXT summary
+        TEXT short_summary
         INT summarize_attempts
         TEXT last_error
         TEXT approval_request_message_id

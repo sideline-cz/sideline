@@ -785,7 +785,7 @@ sequenceDiagram
 
 ## 12. Email Forwarding — Inbound Email, AI Summarization, and Coach Approval
 
-An external email provider delivers a message to the Sideline inbound webhook. The server validates the HMAC signature and per-team token, stores the email, and queues it for AI summarization. The AI summarizer produces a draft summary. The server enqueues an `approval_request` outbox event. The bot drains the outbox and posts an approval embed to the coach channel. The coach clicks **Approve** in Discord; the bot calls the `Email/RecordApproval` RPC. The server transitions the email to `approved` and enqueues a `post_summary` event. The bot drains the new event and posts the summary to the team channel.
+An external email provider delivers a message to the Sideline inbound webhook. The server validates the HMAC signature and per-team token, stores the email, and queues it for AI summarization. The AI summarizer calls the LLM and receives a JSON object with two fields: `short` (a brief summary for the Discord team-post embed) and `detailed` (a fuller summary for the approval review). Both are stored in `email_messages`. The server enqueues an `approval_request` outbox event. The bot drains the outbox and posts two embeds to the coach channel: an amber short-summary embed and a blurple detailed-summary embed. The coach clicks **Approve** in Discord; the bot calls the `Email/RecordApproval` RPC. The server transitions the email to `approved` and enqueues a `post_summary` event. The bot drains the new event and posts the short summary to the team channel with **Detailed summary** and **Original email** ephemeral pagination buttons.
 
 ```mermaid
 sequenceDiagram
@@ -810,9 +810,9 @@ sequenceDiagram
 
     Note over Server: AI Summarization pipeline (async)
     Server->>DB: UPDATE email_messages SET status=summarizing
-    Server->>LLM: POST /chat/completions
-    LLM-->>Server: summary text
-    Server->>DB: UPDATE email_messages SET status=pending_approval, summary=?
+    Server->>LLM: POST /chat/completions (response_format: json_object)
+    LLM-->>Server: JSON { short: "...", detailed: "..." }
+    Server->>DB: UPDATE email_messages SET status=pending_approval, summary=?, short_summary=?
     Server->>DB: INSERT email_post_sync_events (kind=approval_request)
 
     Bot->>Server: Email/GetUnprocessedEmailPostEvents
@@ -820,7 +820,7 @@ sequenceDiagram
     DB-->>Server: [approval_request event]
     Server-->>Bot: [approval_request event]
     Bot->>Discord: POST /channels/{coachChannelId}/messages
-    Note over Bot: Approval embed + Approve / Reject buttons
+    Note over Bot: Two embeds: amber (short summary + metadata) + blurple (detailed summary). Approve / Reject buttons.
     Discord-->>Bot: message created
     Bot->>Server: Email/MarkEmailPostEventProcessed
 
@@ -836,7 +836,7 @@ sequenceDiagram
     Bot->>Server: Email/GetUnprocessedEmailPostEvents
     Server-->>Bot: [post_summary event]
     Bot->>Discord: POST /channels/{targetChannelId}/messages
-    Note over Bot: Summary embed + "View original" link button
+    Note over Bot: Green embed (short summary) + Detailed summary / Original email buttons
     Discord-->>Bot: message created
     Bot->>Server: Email/MarkEmailPostEventProcessed (status→posted_summary)
 ```

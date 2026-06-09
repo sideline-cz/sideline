@@ -610,6 +610,19 @@
   "bot_email_original_field_received": "Received",
   "bot_email_original_footer": "Forwarded email · original",
   "bot_email_original_truncated": "…message truncated",
+  "bot_email_approval_short_header": "🟢 Short summary",
+  "bot_email_approval_detailed_title": "📄 Detailed summary",
+  "bot_email_approval_detailed_footer": "Detailed AI summary",
+  "bot_email_detailed_truncated": "… (truncated) See the full summary via \"Edit on Sideline\".",
+  "bot_email_btn_edit_sideline": "✏️ Edit on Sideline",
+  "bot_email_btn_detailed": "📄 Detailed summary",
+  "bot_email_btn_original": "✉️ Original email",
+  "bot_email_detailed_title": "📄 Detailed summary",
+  "bot_email_detailed_footer": "Detailed AI summary",
+  "bot_email_original_ephemeral_title": "✉️ Original email",
+  "bot_email_page_indicator": "Page {current}/{total}",
+  "bot_email_page_continued": "… (continued on the next page)",
+  "bot_email_page_empty": "(no content)",
 
   "searchable_select_search": "Search...",
   "searchable_select_noResults": "No results found.",
@@ -1702,5 +1715,12 @@
   "email_detail_not_found_title": "Email not available",
   "email_detail_not_found_body": "The email you are looking for does not exist or you do not have permission to view it.",
   "email_detail_not_found_back": "Back to team",
-  "email_detail_load_error": "Failed to load email."
+  "email_detail_load_error": "Failed to load email.",
+  "email_detail_short_heading": "🟢 Short summary",
+  "email_detail_short_hint": "The short version the whole team sees. Opening sentence plus a few bullets.",
+  "email_detail_short_placeholder": "Enter or edit the short summary…",
+  "email_detail_short_required": "A short summary is required before approving.",
+  "email_detail_detailed_heading": "📄 Detailed summary",
+  "email_detail_detailed_hint": "The longer summary, available in Discord behind the \"Detailed summary\" button. Not shown to the team automatically.",
+  "email_detail_detailed_placeholder": "Enter or edit the detailed summary…"
 }

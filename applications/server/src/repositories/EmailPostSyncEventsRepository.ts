@@ -18,6 +18,7 @@ class UnprocessedEventRow extends Schema.Class<UnprocessedEventRow>('Unprocessed
     subject: Schema.String,
     from_address: Schema.String,
     summary: Schema.OptionFromNullOr(Schema.String),
+    short_summary: Schema.OptionFromNullOr(Schema.String),
     body: Schema.String,
     received_at: Schema.DateTimeUtcFromDate,
   },
@@ -59,6 +60,7 @@ const make = Effect.gen(function* () {
         m.subject,
         m.from_address,
         m.summary,
+        m.short_summary,
         m.body,
         m.received_at
       FROM email_post_sync_events e
@@ -113,6 +115,7 @@ const make = Effect.gen(function* () {
               subject: r.subject,
               from_address: r.from_address,
               summary: r.summary,
+              short_summary: r.short_summary,
               body: r.body,
               received_at: r.received_at,
             }),

@@ -41,9 +41,9 @@ const processEmailId = (
                     })
                     .pipe(
                       // Success: mark pending_approval + enqueue approval_request
-                      Effect.flatMap((summary) =>
+                      Effect.flatMap(({ short, detailed }) =>
                         messagesRepo
-                          .setSummaryPendingApproval(emailId, summary)
+                          .setSummaryPendingApproval(emailId, detailed, short)
                           .pipe(
                             Effect.tap(() =>
                               syncEventsRepo.enqueue(emailId, row.team_id, 'approval_request'),

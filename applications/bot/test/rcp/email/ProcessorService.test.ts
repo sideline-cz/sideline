@@ -58,6 +58,7 @@ const makeEmailPostEvent = (
       overrides.summary !== undefined
         ? Option.fromNullishOr(overrides.summary)
         : Option.some('AI generated summary text'),
+    short_summary: Option.some('Short: Quick bullet-point summary.'),
     body: 'Full body text of the email',
     received_at: DateTime.makeUnsafe('2026-01-15T09:00:00.000Z'),
   });
@@ -201,7 +202,7 @@ describe('Email ProcessorService — processTick', () => {
     expect(rpcCalls.MarkFailed).toHaveLength(0);
   });
 
-  it('approval_request → embed has approval_request color (amber 0xfee75c)', async () => {
+  it('approval_request → two embeds: embed[0] has amber color (0xfee75c), embed[1] has blurple color (0x5865f2)', async () => {
     const event = makeEmailPostEvent('approval_request');
     const { layer: rpcLayer } = makeRpc([event]);
     const { calls: restCalls, layer: restLayer } = makeRest();
@@ -210,8 +211,9 @@ describe('Email ProcessorService — processTick', () => {
 
     const [, body] = restCalls.createMessage[0];
     const embeds = (body as any).embeds as Array<{ color?: number }>;
-    expect(embeds).toHaveLength(1);
+    expect(embeds).toHaveLength(2);
     expect(embeds[0].color).toBe(0xfee75c);
+    expect(embeds[1].color).toBe(0x5865f2);
   });
 
   it('approval_request — embed has approve + reject buttons with correct custom_ids', async () => {
@@ -302,7 +304,7 @@ describe('Email ProcessorService — processTick', () => {
     expect(linkButtons[0].url).toBe(`https://sideline.app/teams/${TEAM_ID}/emails/${EMAIL_ID}`);
   });
 
-  it('WEB_URL not set → post_summary has no link button (components undefined)', async () => {
+  it('post_summary always has two non-link buttons (Detailed summary + Original email)', async () => {
     mockWebUrl = Option.none();
     const event = makeEmailPostEvent('post_summary');
     const { layer: rpcLayer } = makeRpc([event]);
@@ -311,11 +313,19 @@ describe('Email ProcessorService — processTick', () => {
     await runProcessTick(rpcLayer, restLayer);
 
     const [, body] = restCalls.createMessage[0];
-    // When there are no deep-link components, components is undefined (not set)
-    expect((body as any).components).toBeUndefined();
+    const components = (body as any).components as Array<{
+      components: Array<{ style?: number; custom_id?: string }>;
+    }>;
+    expect(components).toHaveLength(1);
+    const buttons = components[0].components;
+    // Both buttons are non-link (style !== 5)
+    expect(buttons.every((b) => b.style !== 5)).toBe(true);
+    const customIds = buttons.map((b) => b.custom_id);
+    expect(customIds).toContain(`email-detail:${TEAM_ID}:${EMAIL_ID}`);
+    expect(customIds).toContain(`email-original:${TEAM_ID}:${EMAIL_ID}`);
   });
 
-  it('WEB_URL set → post_summary embed includes view link button', async () => {
+  it('WEB_URL set → post_summary still has two non-link buttons (no deep link on team post)', async () => {
     mockWebUrl = Option.some('https://sideline.app');
     const event = makeEmailPostEvent('post_summary');
     const { layer: rpcLayer } = makeRpc([event]);
@@ -328,8 +338,9 @@ describe('Email ProcessorService — processTick', () => {
       components: Array<{ url?: string; style?: number }>;
     }>;
     expect(components).toHaveLength(1);
-    const linkButton = components[0].components.find((b) => b.style === 5);
-    expect(linkButton?.url).toBe(`https://sideline.app/teams/${TEAM_ID}/emails/${EMAIL_ID}`);
+    // No link buttons on team post message
+    const linkButtons = components[0].components.filter((b) => b.style === 5);
+    expect(linkButtons).toHaveLength(0);
   });
 
   it('createMessage throws Discord error → MarkEmailPostEventFailed called with error', async () => {

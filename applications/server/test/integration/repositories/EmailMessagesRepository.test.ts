@@ -93,7 +93,11 @@ describe('EmailMessagesRepository', () => {
           Effect.andThen((repo) =>
             repo
               .claimForSummarizing(emailId)
-              .pipe(Effect.andThen(() => repo.setSummaryPendingApproval(emailId, 'AI summary'))),
+              .pipe(
+                Effect.andThen(() =>
+                  repo.setSummaryPendingApproval(emailId, 'AI summary', 'Short summary'),
+                ),
+              ),
           ),
         ),
       ),
@@ -184,7 +188,11 @@ describe('EmailMessagesRepository', () => {
           Effect.andThen((repo) =>
             repo
               .claimForSummarizing(emailId)
-              .pipe(Effect.andThen(() => repo.setSummaryPendingApproval(emailId, 'AI summary'))),
+              .pipe(
+                Effect.andThen(() =>
+                  repo.setSummaryPendingApproval(emailId, 'AI summary', 'Short summary'),
+                ),
+              ),
           ),
         ),
       ),
@@ -240,7 +248,11 @@ describe('EmailMessagesRepository', () => {
           Effect.andThen((repo) =>
             repo
               .claimForSummarizing(emailId)
-              .pipe(Effect.andThen(() => repo.setSummaryPendingApproval(emailId, 'AI summary'))),
+              .pipe(
+                Effect.andThen(() =>
+                  repo.setSummaryPendingApproval(emailId, 'AI summary', 'Short summary'),
+                ),
+              ),
           ),
         ),
       ),

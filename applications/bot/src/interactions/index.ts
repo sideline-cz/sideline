@@ -15,6 +15,12 @@ import {
   EmailRejectButton,
   EmailSendOriginalButton,
 } from './email-approval.js';
+import {
+  EmailDetailOpenButton,
+  EmailDetailPageButton,
+  EmailOriginalOpenButton,
+  EmailOriginalPageButton,
+} from './email-pages.js';
 import { EventCreateModal } from './event-create.js';
 import { EventCreateAutocomplete } from './event-create-autocomplete.js';
 import { MakanickoLogAutocomplete } from './makanicko-log-autocomplete.js';
@@ -47,6 +53,10 @@ export const interactionBuilder = Ix.builder
   .add(EmailApproveButton)
   .add(EmailSendOriginalButton)
   .add(EmailRejectButton)
+  .add(EmailDetailOpenButton)
+  .add(EmailOriginalOpenButton)
+  .add(EmailDetailPageButton)
+  .add(EmailOriginalPageButton)
   .add(CarpoolAddButtonReg)
   .add(CarpoolAddModal)
   .add(CarpoolReserveButtonReg)

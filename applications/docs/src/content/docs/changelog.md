@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-09 — Two-tier AI summaries for email forwarding
+
+- The AI assistant now produces **two summaries** for every inbound email: a **short summary** (one opening sentence plus up to 6 emoji-led bullet points) and a **detailed summary** (fuller bullet-point breakdown). Both can be edited on the Email detail page before approval.
+- The coach approval embed in Discord now shows **both summaries**: an amber embed with the short version and email metadata, followed by a blurple embed with the detailed version.
+- After approval, the **short summary** is posted to the team channel. Members can tap **Detailed summary** or **Original email** to view the full text as an ephemeral (private) paginated preview — only visible to the person who clicked.
+- The **Approve** button is disabled until the short summary is non-empty, preventing accidental approvals with no Discord-visible text.
+- The "Send original" button on the coach approval embed has been removed; posting the original is handled via the **Reject** flow.
+
 ## 2026-06-08 — Email forwarding with AI summarization
 
 - Captains can now connect a team email address to Sideline via **Team settings → Email forwarding**. When enabled, inbound emails are automatically summarised by an AI assistant and posted to a Discord channel of your choice.

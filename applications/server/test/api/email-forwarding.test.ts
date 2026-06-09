@@ -93,6 +93,7 @@ type EmailRecord = {
   subject: string;
   body: string;
   summary: Option.Option<string>;
+  short_summary: Option.Option<string>;
   summarize_attempts: number;
   last_error: Option.Option<string>;
   approval_request_message_id: Option.Option<string>;
@@ -119,6 +120,7 @@ const makeEmailRecord = (
   subject: 'Team Update',
   body: 'Email body text',
   summary: Option.some('AI-generated summary'),
+  short_summary: Option.none(),
   summarize_attempts: 1,
   last_error: Option.none(),
   approval_request_message_id: Option.none(),
@@ -359,7 +361,7 @@ const MockEmailMessagesRepositoryLayer = Layer.succeed(EmailMessagesRepository, 
   findReceivedBatch: () => Effect.succeed([]),
   claimForSummarizing: () => Effect.succeed(Option.none()),
   setSummaryPendingApproval: () => Effect.void,
-  updateSummary: (id: EmailForwarding.EmailMessageId, summary: string) => {
+  updateSummary: (id: EmailForwarding.EmailMessageId, summary: string, _shortSummary?: string) => {
     summaryUpdateCalls.push({ id, summary });
     const row = emailStore.get(id);
     if (row?.status !== 'pending_approval') return Effect.succeed(Option.none());
@@ -856,7 +858,7 @@ describe('updateEmailSummary — PUT /teams/:teamId/emails/:emailId/summary', ()
           Authorization: 'Bearer coach-token',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ summary: 'Coach-edited summary text' }),
+        body: JSON.stringify({ summary: 'Coach-edited summary text', short_summary: 'Short edit' }),
       }),
     );
     expect(response.status).toBe(200);
@@ -874,7 +876,7 @@ describe('updateEmailSummary — PUT /teams/:teamId/emails/:emailId/summary', ()
           Authorization: 'Bearer member-token',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ summary: 'Should not be saved' }),
+        body: JSON.stringify({ summary: 'Should not be saved', short_summary: 'Short' }),
       }),
     );
     expect(response.status).toBe(403);
@@ -890,7 +892,7 @@ describe('updateEmailSummary — PUT /teams/:teamId/emails/:emailId/summary', ()
           Authorization: 'Bearer coach-token',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ summary: 'Should not work' }),
+        body: JSON.stringify({ summary: 'Should not work', short_summary: 'Short' }),
       }),
     );
     // updateSummary returns None → 404 in the handler

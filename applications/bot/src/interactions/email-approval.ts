@@ -32,13 +32,6 @@ const buildDisabledApprovalRow = (): Discord.ActionRowComponentForMessageRequest
     },
     {
       type: 2,
-      style: 2,
-      label: m.bot_email_btn_send_original({}, { locale: 'en' }),
-      custom_id: 'email-send-original:disabled',
-      disabled: true,
-    },
-    {
-      type: 2,
       style: 4,
       label: m.bot_email_btn_reject({}, { locale: 'en' }),
       custom_id: 'email-reject:disabled',
