@@ -1,5 +1,13 @@
 # @sideline/server
 
+## 0.26.1
+
+### Patch Changes
+
+- [#385](https://github.com/maxa-ondrej/sideline/pull/385) [`59c314a`](https://github.com/maxa-ondrej/sideline/commit/59c314a85f3715a84d6e865e44619422e9e6060f) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix(email): make the short AI summary a proper 5-7 emoji bullet list, not a single sentence
+
+  The short email summary was collapsing into one opener sentence instead of the intended scannable bullets. The LLM prompt now requires a 5-7 emoji-led bullet list (one short context line optional, never a replacement for the bullets).
+
 ## 0.26.0
 
 ### Minor Changes
