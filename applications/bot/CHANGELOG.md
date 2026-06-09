@@ -1,5 +1,13 @@
 # @sideline/bot
 
+## 0.20.1
+
+### Patch Changes
+
+- [#381](https://github.com/maxa-ondrej/sideline/pull/381) [`63944c0`](https://github.com/maxa-ondrej/sideline/commit/63944c055606415b955344313fe7e8cb3af87d5d) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix(rpc): preserve UTF-8 multi-byte characters across NDJSON stream chunk boundaries
+
+  Patches the `effect` NDJSON RPC serializer to decode streamed response chunks with a streaming `TextDecoder` (`{ stream: true }`). Previously, when an HTTP response body was split mid-character across network chunks, multi-byte UTF-8 sequences (e.g. Czech accented letters, emoji) were flushed as U+FFFD replacement characters, corrupting forwarded email summaries posted to Discord.
+
 ## 0.20.0
 
 ### Minor Changes
