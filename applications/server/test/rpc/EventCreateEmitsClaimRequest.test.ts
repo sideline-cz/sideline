@@ -15,6 +15,7 @@ import { SqlClient } from 'effect/unstable/sql';
 import { afterEach, beforeEach, describe, expect } from 'vitest';
 import { ChannelEventDividersRepository } from '~/repositories/ChannelEventDividersRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { EventJoinRequestsRepository } from '~/repositories/EventJoinRequestsRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
@@ -366,6 +367,15 @@ const makeStaticLayers = (claimRequestDaysBefore = LARGE_LEAD_TIME) =>
       findByChannelId: () => Effect.succeed(Option.none()),
       upsert: () => Effect.void,
       deleteByChannelId: () => Effect.void,
+    } as any),
+    Layer.succeed(EventJoinRequestsRepository, {
+      submit: () => Effect.die(new Error('Not implemented')),
+      accept: () => Effect.die(new Error('Not implemented')),
+      decline: () => Effect.die(new Error('Not implemented')),
+      saveDiscordMessageId: () => Effect.void,
+      findOverview: () => Effect.succeed([]),
+      findRequestById: () => Effect.succeed(Option.none()),
+      hasRosterManagePermission: () => Effect.succeed(false),
     } as any),
   );
 

@@ -1,6 +1,7 @@
 import {
   type Discord,
   type Event,
+  type EventRpcEvents,
   EventRpcGroup,
   EventRpcModels,
   type EventRsvp,
@@ -10,22 +11,13 @@ import {
   type TrainingType,
   User,
 } from '@sideline/domain';
-import { Bind, LogicError, Options, Schemas } from '@sideline/effect-lib';
-import {
-  Array,
-  Data,
-  DateTime,
-  Effect,
-  flow,
-  Metric,
-  Option,
-  Schema,
-  type ServiceMap,
-} from 'effect';
+import { LogicError, Options, Schemas } from '@sideline/effect-lib';
+import { Array, Data, DateTime, Effect, Metric, Option, Schema, type ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { rsvpSubmissionsTotal } from '~/metrics.js';
 import { ChannelEventDividersRepository } from '~/repositories/ChannelEventDividersRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { EventJoinRequestsRepository } from '~/repositories/EventJoinRequestsRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
@@ -312,9 +304,10 @@ const createEvent = (
     ),
   );
 
-const rpcHandlers = Effect.Do.pipe(
+export const EventsRpcLive = Effect.Do.pipe(
   Effect.bind('events', () => EventsRepository.asEffect()),
   Effect.bind('rsvps', () => EventRsvpsRepository.asEffect()),
+  Effect.bind('joinRequests', () => EventJoinRequestsRepository.asEffect()),
   Effect.bind('deps', () =>
     Effect.all({
       syncEvents: EventSyncEventsRepository.asEffect(),
@@ -328,41 +321,62 @@ const rpcHandlers = Effect.Do.pipe(
       mappingRepo: DiscordChannelMappingRepository.asEffect(),
     }),
   ),
-  Effect.let(
-    'Event/GetUnprocessedEvents',
-    ({ deps: { syncEvents } }) =>
-      ({ limit }: { readonly limit: number }) =>
+  Effect.map(({ events, rsvps, joinRequests, deps }) => {
+    const {
+      syncEvents,
+      sql,
+      groups,
+      trainingTypesRepo,
+      teamsRepo,
+      teamSettings,
+      channelDividers,
+      mappingRepo,
+      members,
+    } = deps;
+    return {
+      'Event/GetUnprocessedEvents': ({ limit }: { readonly limit: number }) =>
         syncEvents.findUnprocessed(limit).pipe(
-          Effect.map(Array.map(flow(constructEvent))),
           Effect.tap((arr) =>
             Array.isArrayEmpty(arr) ? Effect.fail(NoChanges.make()) : Effect.void,
           ),
-          Effect.tap((events) =>
-            Effect.logInfo(`Collected ${events.length} event sync events from database.`),
+          Effect.tap((rows) =>
+            Effect.logInfo(`Collected ${rows.length} event sync events from database.`),
           ),
-          Effect.flatMap(Effect.all),
-          Effect.tap((events) =>
-            Effect.logInfo(`Successfully mapped ${events.length} event sync events from database.`),
+          Effect.flatMap(
+            (
+              rows,
+            ): Effect.Effect<
+              ReadonlyArray<EventRpcEvents.UnprocessedEventSyncEvent>,
+              never,
+              never
+            > =>
+              Effect.forEach(rows, (row) =>
+                constructEvent(row).pipe(
+                  Effect.map(
+                    (evt): Option.Option<EventRpcEvents.UnprocessedEventSyncEvent> =>
+                      Option.some(evt),
+                  ),
+                  Effect.catchTag('EventPropertyMissing', (e) =>
+                    e.log().pipe(
+                      Effect.tap(() => syncEvents.markFailed(e.id, e.errorMessage())),
+                      Effect.as(Option.none<EventRpcEvents.UnprocessedEventSyncEvent>()),
+                    ),
+                  ),
+                ),
+              ).pipe(Effect.map(Array.getSomes)),
+          ),
+          Effect.tap((evts) =>
+            Effect.logInfo(`Successfully mapped ${evts.length} event sync events from database.`),
           ),
           Effect.catchTag('NoChanges', () => Effect.succeed(Array.empty())),
         ),
-  ),
-  Effect.let(
-    'Event/MarkEventProcessed',
-    ({ deps: { syncEvents } }) =>
-      ({ id }: { readonly id: string }) =>
-        syncEvents.markProcessed(id),
-  ),
-  Effect.let(
-    'Event/MarkEventFailed',
-    ({ deps: { syncEvents } }) =>
-      ({ id, error }: { readonly id: string; readonly error: string }) =>
+
+      'Event/MarkEventProcessed': ({ id }: { readonly id: string }) => syncEvents.markProcessed(id),
+
+      'Event/MarkEventFailed': ({ id, error }: { readonly id: string; readonly error: string }) =>
         syncEvents.markFailed(id, error),
-  ),
-  Effect.let(
-    'Event/SaveDiscordMessageId',
-    ({ events }) =>
-      ({
+
+      'Event/SaveDiscordMessageId': ({
         event_id,
         discord_channel_id,
         discord_message_id,
@@ -370,13 +384,9 @@ const rpcHandlers = Effect.Do.pipe(
         readonly event_id: Event.EventId;
         readonly discord_channel_id: Discord.Snowflake;
         readonly discord_message_id: Discord.Snowflake;
-      }) =>
-        events.saveDiscordMessageId(event_id, discord_channel_id, discord_message_id),
-  ),
-  Effect.let(
-    'Event/GetDiscordMessageId',
-    ({ events }) =>
-      ({ event_id }: { readonly event_id: Event.EventId }) =>
+      }) => events.saveDiscordMessageId(event_id, discord_channel_id, discord_message_id),
+
+      'Event/GetDiscordMessageId': ({ event_id }: { readonly event_id: Event.EventId }) =>
         events.getDiscordMessageId(event_id).pipe(
           Effect.map(
             Option.flatMap((row) =>
@@ -387,17 +397,10 @@ const rpcHandlers = Effect.Do.pipe(
             ),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetChannelsWithStoredMessages',
-    ({ events }) =>
-      () =>
-        events.findAllChannelsWithStoredMessages(),
-  ),
-  Effect.let(
-    'Event/SubmitRsvp',
-    ({ rsvps, events, deps: { sql, groups, teamSettings } }) =>
-      ({
+
+      'Event/GetChannelsWithStoredMessages': () => events.findAllChannelsWithStoredMessages(),
+
+      'Event/SubmitRsvp': ({
         event_id,
         team_id,
         discord_user_id,
@@ -521,17 +524,11 @@ const rpcHandlers = Effect.Do.pipe(
               }),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetRsvpCounts',
-    ({ rsvps, events }) =>
-      ({ event_id }: { readonly event_id: Event.EventId }) =>
+
+      'Event/GetRsvpCounts': ({ event_id }: { readonly event_id: Event.EventId }) =>
         getRsvpCounts(rsvps, event_id, events),
-  ),
-  Effect.let(
-    'Event/GetEventEmbedInfo',
-    ({ events }) =>
-      ({ event_id }: { readonly event_id: Event.EventId }) =>
+
+      'Event/GetEventEmbedInfo': ({ event_id }: { readonly event_id: Event.EventId }) =>
         events.findEventByIdWithDetails(event_id).pipe(
           Effect.map(
             Option.map(
@@ -550,11 +547,12 @@ const rpcHandlers = Effect.Do.pipe(
             ),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetChannelEvents',
-    ({ events }) =>
-      ({ discord_channel_id }: { readonly discord_channel_id: Discord.Snowflake }) =>
+
+      'Event/GetChannelEvents': ({
+        discord_channel_id,
+      }: {
+        readonly discord_channel_id: Discord.Snowflake;
+      }) =>
         events.findEventsByChannelId(discord_channel_id).pipe(
           Effect.map(
             Array.map(
@@ -577,11 +575,8 @@ const rpcHandlers = Effect.Do.pipe(
             ),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetRsvpAttendees',
-    ({ rsvps }) =>
-      ({
+
+      'Event/GetRsvpAttendees': ({
         event_id,
         offset,
         limit,
@@ -613,11 +608,8 @@ const rpcHandlers = Effect.Do.pipe(
               }),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetRsvpReminderSummary',
-    ({ rsvps, events }) =>
-      ({ event_id }: { readonly event_id: Event.EventId }) =>
+
+      'Event/GetRsvpReminderSummary': ({ event_id }: { readonly event_id: Event.EventId }) =>
         Effect.Do.pipe(
           Effect.bind('event', () =>
             events.findEventByIdWithDetails(event_id).pipe(Effect.map(Option.getOrUndefined)),
@@ -673,11 +665,8 @@ const rpcHandlers = Effect.Do.pipe(
             });
           }),
         ),
-  ),
-  Effect.let(
-    'Event/GetUpcomingGuildEvents',
-    ({ events, deps: { sql } }) =>
-      ({
+
+      'Event/GetUpcomingGuildEvents': ({
         guild_id,
         offset,
         limit,
@@ -727,11 +716,8 @@ const rpcHandlers = Effect.Do.pipe(
               }),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetUpcomingEventsForUser',
-    ({ deps: { sql } }) =>
-      ({
+
+      'Event/GetUpcomingEventsForUser': ({
         guild_id,
         discord_user_id,
         offset,
@@ -933,14 +919,34 @@ const rpcHandlers = Effect.Do.pipe(
               }),
           ),
         ),
-  ),
-);
 
-export const EventsRpcLive = rpcHandlers.pipe(
-  Effect.let(
-    'Event/GetTrainingTypesByGuild',
-    ({ deps: { trainingTypesRepo, teamsRepo } }) =>
-      ({ guild_id }: { readonly guild_id: Discord.Snowflake }) =>
+      'Event/GetOwnerClaimThread': ({
+        team_id,
+        owner_group_id,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly owner_group_id: GroupModel.GroupId;
+      }) => mappingRepo.findClaimThread(team_id, owner_group_id),
+
+      'Event/SaveOwnerClaimThread': ({
+        team_id,
+        owner_group_id,
+        thread_id,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly owner_group_id: GroupModel.GroupId;
+        readonly thread_id: Discord.Snowflake;
+      }) => mappingRepo.saveClaimThreadIfAbsent(team_id, owner_group_id, thread_id),
+
+      'Event/ClearOwnerClaimThread': ({
+        team_id,
+        owner_group_id,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly owner_group_id: GroupModel.GroupId;
+      }) => mappingRepo.clearClaimThread(team_id, owner_group_id),
+
+      'Event/GetTrainingTypesByGuild': ({ guild_id }: { readonly guild_id: Discord.Snowflake }) =>
         teamsRepo.findByGuildId(guild_id).pipe(
           Effect.flatMap(
             Option.match({
@@ -965,11 +971,8 @@ export const EventsRpcLive = rpcHandlers.pipe(
             ),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetYesAttendeesForEmbed',
-    ({ rsvps }) =>
-      ({
+
+      'Event/GetYesAttendeesForEmbed': ({
         event_id,
         limit,
         member_group_id,
@@ -994,11 +997,8 @@ export const EventsRpcLive = rpcHandlers.pipe(
             ),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/CreateEvent',
-    ({ deps: { sql, members, syncEvents, trainingTypesRepo, mappingRepo }, events }) =>
-      (input: {
+
+      'Event/CreateEvent': (input: {
         readonly guild_id: Discord.Snowflake;
         readonly discord_user_id: Discord.Snowflake;
         readonly event_type: Event.EventType;
@@ -1009,37 +1009,29 @@ export const EventsRpcLive = rpcHandlers.pipe(
         readonly location_url: Option.Option<string>;
         readonly description: Option.Option<string>;
         readonly training_type_id: Option.Option<TrainingType.TrainingTypeId>;
-      }) =>
-        createEvent(sql, events, syncEvents, members, trainingTypesRepo, mappingRepo, input),
-  ),
-  Effect.let(
-    'Event/GetChannelDivider',
-    ({ deps: { channelDividers } }) =>
-      ({ discord_channel_id }: { readonly discord_channel_id: Discord.Snowflake }) =>
-        channelDividers.findByChannelId(discord_channel_id),
-  ),
-  Effect.let(
-    'Event/SaveChannelDivider',
-    ({ deps: { channelDividers } }) =>
-      ({
+      }) => createEvent(sql, events, syncEvents, members, trainingTypesRepo, mappingRepo, input),
+
+      'Event/GetChannelDivider': ({
+        discord_channel_id,
+      }: {
+        readonly discord_channel_id: Discord.Snowflake;
+      }) => channelDividers.findByChannelId(discord_channel_id),
+
+      'Event/SaveChannelDivider': ({
         discord_channel_id,
         discord_message_id,
       }: {
         readonly discord_channel_id: Discord.Snowflake;
         readonly discord_message_id: Discord.Snowflake;
-      }) =>
-        channelDividers.upsert(discord_channel_id, discord_message_id),
-  ),
-  Effect.let(
-    'Event/DeleteChannelDivider',
-    ({ deps: { channelDividers } }) =>
-      ({ discord_channel_id }: { readonly discord_channel_id: Discord.Snowflake }) =>
-        channelDividers.deleteByChannelId(discord_channel_id),
-  ),
-  Effect.let(
-    'Event/ClaimTraining',
-    ({ events, deps: { sql, groups, syncEvents } }) =>
-      ({
+      }) => channelDividers.upsert(discord_channel_id, discord_message_id),
+
+      'Event/DeleteChannelDivider': ({
+        discord_channel_id,
+      }: {
+        readonly discord_channel_id: Discord.Snowflake;
+      }) => channelDividers.deleteByChannelId(discord_channel_id),
+
+      'Event/ClaimTraining': ({
         event_id,
         team_id,
         discord_user_id,
@@ -1189,11 +1181,8 @@ export const EventsRpcLive = rpcHandlers.pipe(
           ),
           Effect.map(({ claimInfo }) => claimInfo),
         ),
-  ),
-  Effect.let(
-    'Event/UnclaimTraining',
-    ({ events, deps: { sql, syncEvents } }) =>
-      ({
+
+      'Event/UnclaimTraining': ({
         event_id,
         team_id,
         discord_user_id,
@@ -1283,11 +1272,8 @@ export const EventsRpcLive = rpcHandlers.pipe(
           ),
           Effect.map(({ claimInfo }) => claimInfo),
         ),
-  ),
-  Effect.let(
-    'Event/SaveClaimDiscordMessageId',
-    ({ events }) =>
-      ({
+
+      'Event/SaveClaimDiscordMessageId': ({
         event_id,
         channel_id,
         message_id,
@@ -1295,67 +1281,280 @@ export const EventsRpcLive = rpcHandlers.pipe(
         readonly event_id: Event.EventId;
         readonly channel_id: Discord.Snowflake;
         readonly message_id: Discord.Snowflake;
-      }) =>
-        events.saveClaimDiscordMessage(event_id, channel_id, message_id),
-  ),
-  Effect.let(
-    'Event/SaveClaimThreadId',
-    ({ events }) =>
-      ({
+      }) => events.saveClaimDiscordMessage(event_id, channel_id, message_id),
+
+      'Event/SaveClaimThreadId': ({
         event_id,
         thread_id,
       }: {
         readonly event_id: Event.EventId;
         readonly thread_id: Discord.Snowflake;
-      }) =>
-        events.saveClaimThread(event_id, thread_id),
-  ),
-  Effect.let(
-    'Event/GetClaimInfo',
-    ({ events }) =>
-      ({ event_id }: { readonly event_id: Event.EventId }) =>
+      }) => events.saveClaimThread(event_id, thread_id),
+
+      'Event/GetClaimInfo': ({ event_id }: { readonly event_id: Event.EventId }) =>
         events.findClaimInfo(event_id),
-  ),
-  Effect.let(
-    'Event/GetOwnerClaimThread',
-    ({ deps: { mappingRepo } }) =>
-      ({
+
+      'Event/SubmitJoinRequest': ({
+        event_id,
         team_id,
-        owner_group_id,
+        discord_user_id,
+        message,
       }: {
+        readonly event_id: Event.EventId;
         readonly team_id: Team.TeamId;
-        readonly owner_group_id: GroupModel.GroupId;
+        readonly discord_user_id: Discord.Snowflake;
+        readonly message: Option.Option<string>;
       }) =>
-        mappingRepo.findClaimThread(team_id, owner_group_id),
-  ),
-  Effect.let(
-    'Event/SaveOwnerClaimThread',
-    ({ deps: { mappingRepo } }) =>
-      ({
+        Effect.Do.pipe(
+          Effect.bind('member', () =>
+            SqlSchema.findOne({
+              Request: Schema.Struct({
+                discord_user_id: Schema.String,
+                team_id: Schema.String,
+              }),
+              Result: TeamMemberLookup,
+              execute: (input) => sql`
+                SELECT tm.id,
+                       u.name,
+                       u.discord_nickname AS nickname,
+                       u.discord_display_name AS display_name,
+                       u.username
+                FROM team_members tm
+                JOIN users u ON u.id = tm.user_id
+                WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
+              `,
+            })({ discord_user_id, team_id }).pipe(
+              Effect.catchTag('NoSuchElementError', () =>
+                Effect.fail(new EventRpcModels.JoinRequestNotMember()),
+              ),
+              Effect.mapError(() => new EventRpcModels.JoinRequestNotMember()),
+            ),
+          ),
+          Effect.bind('event', () =>
+            events.findEventByIdWithDetails(event_id).pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.fail(new EventRpcModels.JoinRequestEventNotFound()),
+                  onSome: Effect.succeed,
+                }),
+              ),
+            ),
+          ),
+          Effect.tap(({ event }) =>
+            event.event_type !== 'tournament'
+              ? Effect.fail(new EventRpcModels.JoinRequestNotTournament())
+              : Effect.void,
+          ),
+          Effect.tap(({ event }) =>
+            event.status !== 'active'
+              ? Effect.fail(new EventRpcModels.JoinRequestEventInactive())
+              : Effect.void,
+          ),
+          Effect.bind('submitResult', ({ member }) =>
+            joinRequests.submit(event_id, member.id, member.display_name, Option.none(), message),
+          ),
+          Effect.bind('eventDiscordChannel', () =>
+            // Resolve the channel where the board embed was posted (stored by handleCreated).
+            // This mirrors the claim flow: the stored discord_channel_id is passed through so
+            // handleTournamentJoinRequest can post the Accept/Decline review message there.
+            events
+              .getDiscordMessageId(event_id)
+              .pipe(Effect.map(Option.flatMap((msg) => msg.discord_channel_id))),
+          ),
+          Effect.tap(({ member, submitResult, eventDiscordChannel }) =>
+            // Only emit when a NEW review message should be posted (fresh insert or reopen from declined).
+            // Skipping duplicate emit prevents double-posting review messages (B4 / reviewer #5).
+            submitResult.created
+              ? syncEvents.emitTournamentJoinRequest(
+                  team_id,
+                  event_id,
+                  submitResult.entry.id,
+                  member.display_name,
+                  Option.none(),
+                  message,
+                  eventDiscordChannel,
+                  Option.none(),
+                )
+              : Effect.void,
+          ),
+          Effect.map(
+            ({ submitResult }) =>
+              new EventRpcModels.SubmitJoinRequestResult({
+                request_id: submitResult.entry.id,
+                status: submitResult.entry.status,
+                created: submitResult.created,
+              }),
+          ),
+        ),
+
+      'Event/AcceptJoinRequest': ({
+        request_id,
         team_id,
-        owner_group_id,
-        thread_id,
+        discord_user_id,
       }: {
+        readonly request_id: EventRpcModels.JoinRequestId;
         readonly team_id: Team.TeamId;
-        readonly owner_group_id: GroupModel.GroupId;
-        readonly thread_id: Discord.Snowflake;
+        readonly discord_user_id: Discord.Snowflake;
       }) =>
-        mappingRepo.saveClaimThreadIfAbsent(team_id, owner_group_id, thread_id),
-  ),
-  Effect.let(
-    'Event/ClearOwnerClaimThread',
-    ({ deps: { mappingRepo } }) =>
-      ({
+        Effect.Do.pipe(
+          Effect.bind('member', () =>
+            SqlSchema.findOne({
+              Request: Schema.Struct({
+                discord_user_id: Schema.String,
+                team_id: Schema.String,
+              }),
+              Result: TeamMemberLookup,
+              execute: (input) => sql`
+                SELECT tm.id,
+                       u.name,
+                       u.discord_nickname AS nickname,
+                       u.discord_display_name AS display_name,
+                       u.username
+                FROM team_members tm
+                JOIN users u ON u.id = tm.user_id
+                WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
+              `,
+            })({ discord_user_id, team_id }).pipe(
+              Effect.catchTag('NoSuchElementError', () =>
+                Effect.fail(new EventRpcModels.JoinRequestNotMember()),
+              ),
+              Effect.mapError(() => new EventRpcModels.JoinRequestNotMember()),
+            ),
+          ),
+          Effect.tap(({ member }) =>
+            joinRequests
+              .hasRosterManagePermission(member.id, team_id)
+              .pipe(
+                Effect.flatMap((hasPerm) =>
+                  hasPerm ? Effect.void : Effect.fail(new EventRpcModels.JoinRequestForbidden()),
+                ),
+              ),
+          ),
+          Effect.bind('acceptResult', ({ member }) =>
+            // B3: team_id is passed so the UPDATE is scoped to events owned by this team,
+            // preventing cross-team forgery (a captain of team A cannot accept a request
+            // belonging to team B even if they know the request_id).
+            joinRequests.accept(request_id, member.id, team_id),
+          ),
+          Effect.flatMap(({ member, acceptResult }) =>
+            Option.isNone(acceptResult)
+              ? Effect.fail(new EventRpcModels.JoinRequestAlreadyDecided())
+              : Effect.Do.pipe(
+                  Effect.tap(() =>
+                    syncEvents.emitTournamentAttendanceUpdate(
+                      team_id,
+                      acceptResult.value.event_id,
+                      request_id,
+                      'accepted',
+                      member.display_name,
+                      acceptResult.value.member_display_name,
+                      // B2: pass stored discord_channel_id so the bot can edit the review message
+                      acceptResult.value.discord_channel_id,
+                      acceptResult.value.discord_message_id,
+                    ),
+                  ),
+                  Effect.map(
+                    () =>
+                      new EventRpcModels.DecideJoinRequestResult({
+                        request_id,
+                        status: acceptResult.value.status,
+                        member_display_name: acceptResult.value.member_display_name,
+                      }),
+                  ),
+                ),
+          ),
+        ),
+
+      'Event/DeclineJoinRequest': ({
+        request_id,
         team_id,
-        owner_group_id,
+        discord_user_id,
       }: {
+        readonly request_id: EventRpcModels.JoinRequestId;
         readonly team_id: Team.TeamId;
-        readonly owner_group_id: GroupModel.GroupId;
+        readonly discord_user_id: Discord.Snowflake;
       }) =>
-        mappingRepo.clearClaimThread(team_id, owner_group_id),
-  ),
-  Bind.remove('events'),
-  Bind.remove('rsvps'),
-  Bind.remove('deps'),
+        Effect.Do.pipe(
+          Effect.bind('member', () =>
+            SqlSchema.findOne({
+              Request: Schema.Struct({
+                discord_user_id: Schema.String,
+                team_id: Schema.String,
+              }),
+              Result: TeamMemberLookup,
+              execute: (input) => sql`
+                SELECT tm.id,
+                       u.name,
+                       u.discord_nickname AS nickname,
+                       u.discord_display_name AS display_name,
+                       u.username
+                FROM team_members tm
+                JOIN users u ON u.id = tm.user_id
+                WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
+              `,
+            })({ discord_user_id, team_id }).pipe(
+              Effect.catchTag('NoSuchElementError', () =>
+                Effect.fail(new EventRpcModels.JoinRequestNotMember()),
+              ),
+              Effect.mapError(() => new EventRpcModels.JoinRequestNotMember()),
+            ),
+          ),
+          Effect.tap(({ member }) =>
+            joinRequests
+              .hasRosterManagePermission(member.id, team_id)
+              .pipe(
+                Effect.flatMap((hasPerm) =>
+                  hasPerm ? Effect.void : Effect.fail(new EventRpcModels.JoinRequestForbidden()),
+                ),
+              ),
+          ),
+          Effect.bind('declineResult', ({ member }) =>
+            // B3: team_id is passed so the UPDATE is scoped to events owned by this team,
+            // preventing cross-team forgery.
+            joinRequests.decline(request_id, member.id, team_id),
+          ),
+          Effect.flatMap(({ member, declineResult }) =>
+            Option.isNone(declineResult)
+              ? Effect.fail(new EventRpcModels.JoinRequestAlreadyDecided())
+              : Effect.Do.pipe(
+                  Effect.tap(() =>
+                    syncEvents.emitTournamentAttendanceUpdate(
+                      team_id,
+                      declineResult.value.event_id,
+                      request_id,
+                      'declined',
+                      member.display_name,
+                      declineResult.value.member_display_name,
+                      // B2: pass stored discord_channel_id so the bot can edit the review message
+                      declineResult.value.discord_channel_id,
+                      declineResult.value.discord_message_id,
+                    ),
+                  ),
+                  Effect.map(
+                    () =>
+                      new EventRpcModels.DecideJoinRequestResult({
+                        request_id,
+                        status: declineResult.value.status,
+                        member_display_name: declineResult.value.member_display_name,
+                      }),
+                  ),
+                ),
+          ),
+        ),
+
+      'Event/GetAttendanceOverview': ({ event_id }: { readonly event_id: Event.EventId }) =>
+        joinRequests.findOverview(event_id),
+
+      'Event/SaveJoinRequestMessageId': ({
+        request_id,
+        channel_id,
+        message_id,
+      }: {
+        readonly request_id: EventRpcModels.JoinRequestId;
+        readonly channel_id: Discord.Snowflake;
+        readonly message_id: Discord.Snowflake;
+      }) => joinRequests.saveDiscordMessageId(request_id, channel_id, message_id),
+    };
+  }),
   (handlers) => EventRpcGroup.EventRpcGroup.toLayer(handlers),
 );

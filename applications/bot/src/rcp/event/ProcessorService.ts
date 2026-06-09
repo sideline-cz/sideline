@@ -11,6 +11,8 @@ import { handleCoachingStatus } from './handleCoachingStatus.js';
 import { handleCreated } from './handleCreated.js';
 import { handleRsvpReminder } from './handleRsvpReminder.js';
 import { handleStarted } from './handleStarted.js';
+import { handleTournamentAttendanceUpdate } from './handleTournamentAttendanceUpdate.js';
+import { handleTournamentJoinRequest } from './handleTournamentJoinRequest.js';
 import { handleTrainingClaimRequest } from './handleTrainingClaimRequest.js';
 import { handleTrainingClaimUpdate } from './handleTrainingClaimUpdate.js';
 import { handleUnclaimedTrainingReminder } from './handleUnclaimedTrainingReminder.js';
@@ -29,6 +31,8 @@ const action: (
     Match.tag('training_claim_update', handleTrainingClaimUpdate),
     Match.tag('unclaimed_training_reminder', handleUnclaimedTrainingReminder),
     Match.tag('coaching_status', handleCoachingStatus),
+    Match.tag('tournament_join_request', handleTournamentJoinRequest),
+    Match.tag('tournament_attendance_update', handleTournamentAttendanceUpdate),
     Match.exhaustive,
   );
 

@@ -8,6 +8,7 @@ import * as Team from '~/models/Team.js';
 import * as TrainingType from '~/models/TrainingType.js';
 import { UnprocessedEventSyncEvent } from './EventRpcEvents.js';
 import {
+  AttendanceOverview,
   ChannelEventEntry,
   ClaimAlreadyClaimed,
   ClaimEventInactive,
@@ -19,11 +20,19 @@ import {
   CreateEventInvalidDate,
   CreateEventNotMember,
   CreateEventResult,
+  DecideJoinRequestResult,
   EventClaimInfo,
   EventDiscordMessage,
   EventEmbedInfo,
   GuildEventListResult,
   GuildNotFound,
+  JoinRequestAlreadyDecided,
+  JoinRequestEventInactive,
+  JoinRequestEventNotFound,
+  JoinRequestForbidden,
+  JoinRequestId,
+  JoinRequestNotMember,
+  JoinRequestNotTournament,
   RsvpAttendeeEntry,
   RsvpAttendeesResult,
   RsvpCountsResult,
@@ -32,6 +41,7 @@ import {
   RsvpMemberNotFound,
   RsvpNotGroupMember,
   RsvpReminderSummary,
+  SubmitJoinRequestResult,
   SubmitRsvpResult,
   TrainingTypeChoice,
   UpcomingEventsForUserResult,
@@ -228,5 +238,50 @@ export const EventRpcGroup = RpcGroup.make(
         guild_id: Discord.Snowflake,
       }),
     ),
+  }),
+  Rpc.make('SubmitJoinRequest', {
+    payload: {
+      event_id: Event.EventId,
+      team_id: Team.TeamId,
+      discord_user_id: Discord.Snowflake,
+      message: Schema.OptionFromNullOr(Schema.String),
+    },
+    success: SubmitJoinRequestResult,
+    error: Schema.Union([
+      JoinRequestEventNotFound,
+      JoinRequestNotTournament,
+      JoinRequestEventInactive,
+      JoinRequestNotMember,
+    ]),
+  }),
+  Rpc.make('AcceptJoinRequest', {
+    payload: {
+      request_id: JoinRequestId,
+      team_id: Team.TeamId,
+      discord_user_id: Discord.Snowflake,
+    },
+    success: DecideJoinRequestResult,
+    error: Schema.Union([JoinRequestForbidden, JoinRequestNotMember, JoinRequestAlreadyDecided]),
+  }),
+  Rpc.make('DeclineJoinRequest', {
+    payload: {
+      request_id: JoinRequestId,
+      team_id: Team.TeamId,
+      discord_user_id: Discord.Snowflake,
+    },
+    success: DecideJoinRequestResult,
+    error: Schema.Union([JoinRequestForbidden, JoinRequestNotMember, JoinRequestAlreadyDecided]),
+  }),
+  Rpc.make('GetAttendanceOverview', {
+    payload: { event_id: Event.EventId },
+    success: AttendanceOverview,
+  }),
+  Rpc.make('SaveJoinRequestMessageId', {
+    payload: {
+      request_id: JoinRequestId,
+      channel_id: Discord.Snowflake,
+      message_id: Discord.Snowflake,
+    },
+    success: Schema.Void,
   }),
 ).prefix('Event/');

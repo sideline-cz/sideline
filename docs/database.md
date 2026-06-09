@@ -569,6 +569,32 @@ Attendance responses submitted by team members for a specific event.
 
 ---
 
+#### `event_join_requests`
+
+Join requests submitted by team members for tournament events. Each accepted request is the canonical attendance record for tournament participation.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `event_id` | UUID | NOT NULL, FK → `events(id)` ON DELETE CASCADE | — |
+| `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE CASCADE | — |
+| `status` | TEXT | NOT NULL, CHECK (`'pending'`, `'accepted'`, `'declined'`) | `'pending'` |
+| `message` | TEXT | — | — |
+| `decided_by` | UUID | FK → `team_members(id)` ON DELETE SET NULL | — |
+| `decided_at` | TIMESTAMPTZ | — | — |
+| `discord_channel_id` | TEXT | — | — |
+| `discord_message_id` | TEXT | — | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(event_id, team_member_id)` — one request per member per event.
+
+**Indexes**: `idx_event_join_requests_event_status` on `(event_id, status)`
+
+**Notes**: Added in migration `1789400006_create_event_join_requests`. `status` transitions: `pending` → `accepted` or `pending` → `declined`; a `declined` row can be reopened to `pending` via resubmission (`ON CONFLICT DO UPDATE … WHERE status = 'declined'`). The accept and decline operations use an atomic guarded `UPDATE … WHERE status = 'pending' RETURNING id` — a `None` result means the request was already decided (`JoinRequestAlreadyDecided` error). `decided_by` is the team-member who accepted or declined; it is cleared (`ON DELETE SET NULL`) if that member is later deleted. `discord_channel_id` and `discord_message_id` are the Discord channel and message IDs of the review message posted by the bot for this request; written by `Event/SaveJoinRequestMessageId` after the bot posts the review embed. The `GetAttendanceOverview` RPC returns only `accepted` and `pending` rows (declined rows are excluded from the overview). The `EventJoinRequestsRepository.hasRosterManagePermission` helper checks effective/inherited permissions via a recursive groups CTE — any member with `roster:manage` (directly or via a group hierarchy) qualifies to accept or decline.
+
+---
+
 ### 7. Discord Integration
 
 #### `bot_guilds`
@@ -712,7 +738,7 @@ Outbox table driving event announcements, edits, cancellations, and RSVP reminde
 | `id` | UUID | PK | `gen_random_uuid()` |
 | `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
 | `guild_id` | TEXT | NOT NULL | — |
-| `event_type` | TEXT | NOT NULL, CHECK (`'event_created'`, `'event_updated'`, `'event_cancelled'`, `'rsvp_reminder'`, `'event_started'`, `'training_claim_request'`, `'training_claim_update'`, `'unclaimed_training_reminder'`, `'coaching_status'`) | — |
+| `event_type` | TEXT | NOT NULL, CHECK (`'event_created'`, `'event_updated'`, `'event_cancelled'`, `'rsvp_reminder'`, `'event_started'`, `'training_claim_request'`, `'training_claim_update'`, `'unclaimed_training_reminder'`, `'coaching_status'`, `'tournament_join_request'`, `'tournament_attendance_update'`) | — |
 | `event_id` | UUID | NOT NULL, FK → `events(id)` ON DELETE CASCADE | — |
 | `event_title` | TEXT | NOT NULL | — |
 | `event_description` | TEXT | — | — |
@@ -726,13 +752,18 @@ Outbox table driving event announcements, edits, cancellations, and RSVP reminde
 | `discord_role_id` | TEXT | — | — |
 | `claimed_by_member_id` | UUID | — | — |
 | `event_image_url` | TEXT | — | — |
+| `join_request_id` | UUID | — | — |
+| `join_request_message_id` | TEXT | — | — |
+| `requester_display_name` | TEXT | — | — |
+| `request_message` | TEXT | — | — |
+| `decided_by_display_name` | TEXT | — | — |
 | `processed_at` | TIMESTAMPTZ | — | — |
 | `error` | TEXT | — | — |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
 **Indexes**: `idx_event_sync_unprocessed` — partial index on `(created_at) WHERE processed_at IS NULL`
 
-**Notes**: Snapshot columns (`event_title`, `event_start_at`, etc.) are denormalised copies of the event data at the time of the sync event, ensuring the bot can post the embed even if the event is later modified. `rsvp_reminder` event type and `discord_target_channel_id` added in migration `1742500000` and `1742100000` respectively. `event_started` event type added in migration `1744000000`; emitted by `EventStartCron` when an event's `start_at` time passes. `member_group_id` and `discord_role_id` added in migration `1745800000`; `member_group_id` stores the UUID of the member group whose attendee list the bot should display (no FK constraint by design, to preserve rows after group deletion); `discord_role_id` is the Discord role to @-mention in the start-announcement message. For `event_started` rows whose `event_event_type` is `'training'`, `discord_role_id` is resolved from the event's owner group (not the member group) so the owners-group role is pinged as a fallback when no coach was assigned; for all other event types it is resolved from the member group as before. `training_claim_request`, `training_claim_update`, and `unclaimed_training_reminder` event types added in migration `1745900000` to drive the training-claim board in Discord; `claimed_by_member_id` carries the current claimer's team-member ID for `training_claim_update` events (no FK constraint by design, to preserve rows after member deletion); the claimer's identity fields (`discord_id`, `name`, `nickname`, `discord_display_name`, `username`) are resolved at SELECT time via a LEFT JOIN to `team_members → users` — they are not stored as columns in the table. `coaching_status` event type added in migration `1789300000_improve_coach_assigning`; emitted by `CoachingStatusCron` on the day of a claimed training to announce the coach's name in the member training channel. `event_location_url` added in migration `1746100000`; snapshot of the event's optional location URL at sync time. The `EventStartedEvent` RPC domain type carries a `claimed_by_discord_id` field (resolved at SELECT time from the claimer's `users.discord_id`); for training `event_started` rows it is used by `handleStarted` to @-mention the coach directly (`<@discordId>`) instead of the role; for non-training events it is always `None`.
+**Notes**: Snapshot columns (`event_title`, `event_start_at`, etc.) are denormalised copies of the event data at the time of the sync event, ensuring the bot can post the embed even if the event is later modified. `rsvp_reminder` event type and `discord_target_channel_id` added in migration `1742500000` and `1742100000` respectively. `event_started` event type added in migration `1744000000`; emitted by `EventStartCron` when an event's `start_at` time passes. `member_group_id` and `discord_role_id` added in migration `1745800000`; `member_group_id` stores the UUID of the member group whose attendee list the bot should display (no FK constraint by design, to preserve rows after group deletion); `discord_role_id` is the Discord role to @-mention in the start-announcement message. For `event_started` rows whose `event_event_type` is `'training'`, `discord_role_id` is resolved from the event's owner group (not the member group) so the owners-group role is pinged as a fallback when no coach was assigned; for all other event types it is resolved from the member group as before. `training_claim_request`, `training_claim_update`, and `unclaimed_training_reminder` event types added in migration `1745900000` to drive the training-claim board in Discord; `claimed_by_member_id` carries the current claimer's team-member ID for `training_claim_update` events (no FK constraint by design, to preserve rows after member deletion); the claimer's identity fields (`discord_id`, `name`, `nickname`, `discord_display_name`, `username`) are resolved at SELECT time via a LEFT JOIN to `team_members → users` — they are not stored as columns in the table. `coaching_status` event type added in migration `1789300000_improve_coach_assigning`; emitted by `CoachingStatusCron` on the day of a claimed training to announce the coach's name in the member training channel. `event_location_url` added in migration `1746100000`; snapshot of the event's optional location URL at sync time. The `EventStartedEvent` RPC domain type carries a `claimed_by_discord_id` field (resolved at SELECT time from the claimer's `users.discord_id`); for training `event_started` rows it is used by `handleStarted` to @-mention the coach directly (`<@discordId>`) instead of the role; for non-training events it is always `None`. `tournament_join_request` and `tournament_attendance_update` event types added in migration `1789400006_create_event_join_requests`; `join_request_id` carries the UUID of the relevant `event_join_requests` row (no FK constraint by design); `join_request_message_id` is the Discord message ID of the review message posted by the bot for `tournament_attendance_update` events; `requester_display_name` is the display name of the member who submitted the join request; `request_message` is the optional free-text message the member included; `decided_by_display_name` is the display name of the captain who accepted or declined the request.
 
 ---
 

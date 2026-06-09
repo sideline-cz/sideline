@@ -1,5 +1,5 @@
-import { EventRpcEvents } from '@sideline/domain';
-import { Effect, Match, Option } from 'effect';
+import { EventRpcEvents, EventRpcModels } from '@sideline/domain';
+import { Effect, Match, Option, Schema } from 'effect';
 import {
   type EventSyncEventRow,
   EventSyncEventsRepository,
@@ -193,5 +193,47 @@ export const constructEvent = Match.type<EventSyncEventRow>().pipe(
       }),
     ),
   ),
+  Match.when({ event_type: 'tournament_join_request' }, (r) => {
+    if (Option.isNone(r.join_request_id)) {
+      const missing = new EventPropertyMissing(r.event_type, r.id, 'join_request_id');
+      return missing.log().pipe(Effect.flatMap(() => Effect.fail(missing)));
+    }
+    return Effect.succeed(
+      new EventRpcEvents.TournamentJoinRequestEvent({
+        id: r.id,
+        team_id: r.team_id,
+        guild_id: r.guild_id,
+        event_id: r.event_id,
+        join_request_id: r.join_request_id.value,
+        requester_display_name: r.requester_display_name,
+        requester_discord_id: r.discord_role_id,
+        request_message: r.request_message,
+        join_request_discord_channel_id: r.discord_target_channel_id,
+        join_request_discord_message_id: r.join_request_message_id,
+      }),
+    );
+  }),
+  Match.when({ event_type: 'tournament_attendance_update' }, (r) => {
+    if (Option.isNone(r.join_request_id)) {
+      const missing = new EventPropertyMissing(r.event_type, r.id, 'join_request_id');
+      return missing.log().pipe(Effect.flatMap(() => Effect.fail(missing)));
+    }
+    const decodeStatus = Schema.decodeUnknownSync(EventRpcModels.JoinRequestStatus);
+    return Effect.succeed(
+      new EventRpcEvents.TournamentAttendanceUpdateEvent({
+        id: r.id,
+        team_id: r.team_id,
+        guild_id: r.guild_id,
+        event_id: r.event_id,
+        join_request_id: r.join_request_id.value,
+        // event_event_type stores 'accepted' | 'declined' — decode to the typed JoinRequestStatus
+        status: decodeStatus(r.event_event_type),
+        decided_by_display_name: r.decided_by_display_name,
+        requester_display_name: r.requester_display_name,
+        join_request_discord_channel_id: r.discord_target_channel_id,
+        join_request_discord_message_id: r.join_request_message_id,
+      }),
+    );
+  }),
   Match.exhaustive,
 );

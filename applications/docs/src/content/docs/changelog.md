@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-10 — Tournament attendance tracking via Discord join requests
+
+When a **tournament event** is created, the bot now posts a dedicated **"Request to join" board** in the tournament's Discord channel alongside the normal event embed.
+
+- **Members:** click the **Request to join** button on the board to request a spot. You receive an ephemeral confirmation (or an "already submitted" notice if you've already requested). If your previous request was declined, clicking the button reopens a fresh pending request.
+- **Captains / members with roster:manage:** each request generates a separate review embed in the same channel with **Accept** and **Decline** buttons. Clicking either button records your decision, updates the review embed to show the outcome (green = accepted, red = declined), and removes the buttons.
+- Accepted members constitute the confirmed tournament attendance list, visible via the `Event/GetAttendanceOverview` RPC.
+- The join board and review embeds are Discord-only in this release; the web app does not yet show tournament attendance.
+
 ## 2026-06-09 — Training-start announcement @-mentions the assigned coach
 
 - When a training starts, the **"Starting now"** announcement in Discord now **@-mentions the assigned coach directly** instead of the member-group role, so the coach is notified the moment their session begins.

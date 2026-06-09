@@ -96,6 +96,7 @@ erDiagram
 
     events ||--o{ event_rsvps : "collects"
     events ||--o{ event_sync_events : "triggers"
+    events ||--o{ event_join_requests : "tracks"
 
     activity_types ||--o{ activity_logs : "categorises"
 
@@ -499,6 +500,20 @@ erDiagram
         TIMESTAMPTZ updated_at
     }
 
+    event_join_requests {
+        UUID id PK
+        UUID event_id FK
+        UUID team_member_id FK
+        TEXT status
+        TEXT message
+        UUID decided_by FK "nullable"
+        TIMESTAMPTZ decided_at "nullable"
+        TEXT discord_channel_id "nullable"
+        TEXT discord_message_id "nullable"
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
     teams ||--o{ events : "schedules"
     teams ||--o{ event_series : "schedules"
     event_series ||--o{ events : "generates"
@@ -511,13 +526,16 @@ erDiagram
     team_members o|--o{ events : "claims"
     events ||--o{ event_rsvps : "collects"
     team_members ||--o{ event_rsvps : "submits"
+    events ||--o{ event_join_requests : "tracks"
+    team_members ||--o{ event_join_requests : "submits"
+    team_members o|--o{ event_join_requests : "decides"
 ```
 
 ---
 
 ### Discord Integration
 
-This domain bridges the application to a Discord bot. `bot_guilds` tracks which Discord servers the bot has joined. `discord_channels` caches the channel list for each guild. `discord_role_mappings` and `discord_channel_mappings` link application roles and groups to their Discord counterparts. In `discord_channel_mappings`, the `discord_channel_id` column is nullable — a group always receives a Discord role, but a Discord channel is only created when explicitly requested (via the `create_discord_channel_on_group` team setting or a manual "Create channel" action). The `claim_thread_id` column stores the persistent Discord thread ID used for training coach-claim embeds: all claim messages for the same owner group are posted into one long-lived thread rather than one thread per training. `team_channels` stores admin-managed Discord text channels (the `managed` entity type); each row represents a channel whose lifecycle Sideline fully controls. A fourth entity type `'discord'` is used in `channel_sync_events` for archive operations on Discord-native channels (channels not created by Sideline); these events carry no `team_channel_id`. `team_channel_access` records per-group access grants (`VIEW`, `EDIT`, or `ADMIN`) for managed channels; these grants are translated into Discord permission overwrites by the bot. The three sync-event tables (`role_sync_events`, `channel_sync_events`, `event_sync_events`) are outbox tables consumed by the bot worker to propagate state changes to Discord. `channel_event_dividers` tracks the single divider message posted in each event channel to visually separate past events from upcoming ones.
+This domain bridges the application to a Discord bot. `bot_guilds` tracks which Discord servers the bot has joined. `discord_channels` caches the channel list for each guild. `discord_role_mappings` and `discord_channel_mappings` link application roles and groups to their Discord counterparts. In `discord_channel_mappings`, the `discord_channel_id` column is nullable — a group always receives a Discord role, but a Discord channel is only created when explicitly requested (via the `create_discord_channel_on_group` team setting or a manual "Create channel" action). The `claim_thread_id` column stores the persistent Discord thread ID used for training coach-claim embeds: all claim messages for the same owner group are posted into one long-lived thread rather than one thread per training. `team_channels` stores admin-managed Discord text channels (the `managed` entity type); each row represents a channel whose lifecycle Sideline fully controls. A fourth entity type `'discord'` is used in `channel_sync_events` for archive operations on Discord-native channels (channels not created by Sideline); these events carry no `team_channel_id`. `team_channel_access` records per-group access grants (`VIEW`, `EDIT`, or `ADMIN`) for managed channels; these grants are translated into Discord permission overwrites by the bot. The three sync-event tables (`role_sync_events`, `channel_sync_events`, `event_sync_events`) are outbox tables consumed by the bot worker to propagate state changes to Discord. `channel_event_dividers` tracks the single divider message posted in each event channel to visually separate past events from upcoming ones. `event_sync_events` was extended with five new columns (`join_request_id`, `join_request_message_id`, `requester_display_name`, `request_message`, `decided_by_display_name`) and two new `event_type` values (`tournament_join_request`, `tournament_attendance_update`) to drive the tournament join-request flow.
 
 ```mermaid
 erDiagram
@@ -618,6 +636,11 @@ erDiagram
         TEXT discord_role_id
         UUID claimed_by_member_id
         TEXT event_image_url
+        UUID join_request_id "nullable"
+        TEXT join_request_message_id "nullable"
+        TEXT requester_display_name "nullable"
+        TEXT request_message "nullable"
+        TEXT decided_by_display_name "nullable"
         TIMESTAMPTZ processed_at
         TEXT error
         TIMESTAMPTZ created_at
@@ -1199,6 +1222,7 @@ erDiagram
 | `events` | Individual scheduled occurrences (training, match, tournament, etc.). |
 | `event_series` | Recurring event schedules that generate individual event rows on a rolling horizon. |
 | `event_rsvps` | Attendance responses (yes / no / maybe) submitted by team members for events. |
+| `event_join_requests` | Join requests submitted by team members for tournament events. Status is `pending`, `accepted`, or `declined`. Accepted rows represent confirmed tournament attendance. |
 | `bot_guilds` | Registry of Discord servers where the Sideline bot is installed. |
 | `discord_channels` | Cached channel list fetched from Discord for each bot guild. |
 | `discord_role_mappings` | Links an application role to its corresponding Discord role. |

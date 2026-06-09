@@ -5,6 +5,77 @@ import { EventId } from '~/models/Event.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 import { TrainingTypeId } from '~/models/TrainingType.js';
 
+export const JoinRequestId = Schema.String.pipe(Schema.brand('JoinRequestId'));
+export type JoinRequestId = typeof JoinRequestId.Type;
+
+export const JoinRequestStatus = Schema.Literals(['pending', 'accepted', 'declined']);
+export type JoinRequestStatus = typeof JoinRequestStatus.Type;
+
+export class JoinRequestEntry extends Schema.Class<JoinRequestEntry>('JoinRequestEntry')({
+  id: JoinRequestId,
+  event_id: EventId,
+  team_member_id: TeamMemberId,
+  status: JoinRequestStatus,
+  member_display_name: Schema.OptionFromNullOr(Schema.String),
+  member_discord_id: Schema.OptionFromNullOr(Snowflake),
+  message: Schema.OptionFromNullOr(Schema.String),
+  discord_channel_id: Schema.OptionFromNullOr(Snowflake),
+  discord_message_id: Schema.OptionFromNullOr(Snowflake),
+}) {}
+
+export class AttendanceOverview extends Schema.Class<AttendanceOverview>('AttendanceOverview')({
+  event_id: EventId,
+  accepted: Schema.Array(JoinRequestEntry),
+  pending: Schema.Array(JoinRequestEntry),
+}) {}
+
+export class SubmitJoinRequestResult extends Schema.Class<SubmitJoinRequestResult>(
+  'SubmitJoinRequestResult',
+)({
+  request_id: JoinRequestId,
+  status: JoinRequestStatus,
+  /** true when a new pending request was created or a declined row was reopened to pending */
+  created: Schema.Boolean,
+}) {}
+
+export class DecideJoinRequestResult extends Schema.Class<DecideJoinRequestResult>(
+  'DecideJoinRequestResult',
+)({
+  request_id: JoinRequestId,
+  status: JoinRequestStatus,
+  member_display_name: Schema.OptionFromNullOr(Schema.String),
+}) {}
+
+export class JoinRequestEventNotFound extends Schema.TaggedErrorClass<JoinRequestEventNotFound>()(
+  'JoinRequestEventNotFound',
+  {},
+) {}
+
+export class JoinRequestNotTournament extends Schema.TaggedErrorClass<JoinRequestNotTournament>()(
+  'JoinRequestNotTournament',
+  {},
+) {}
+
+export class JoinRequestEventInactive extends Schema.TaggedErrorClass<JoinRequestEventInactive>()(
+  'JoinRequestEventInactive',
+  {},
+) {}
+
+export class JoinRequestNotMember extends Schema.TaggedErrorClass<JoinRequestNotMember>()(
+  'JoinRequestNotMember',
+  {},
+) {}
+
+export class JoinRequestForbidden extends Schema.TaggedErrorClass<JoinRequestForbidden>()(
+  'JoinRequestForbidden',
+  {},
+) {}
+
+export class JoinRequestAlreadyDecided extends Schema.TaggedErrorClass<JoinRequestAlreadyDecided>()(
+  'JoinRequestAlreadyDecided',
+  {},
+) {}
+
 export class EventDiscordMessage extends Schema.Class<EventDiscordMessage>('EventDiscordMessage')({
   discord_channel_id: Snowflake,
   discord_message_id: Snowflake,

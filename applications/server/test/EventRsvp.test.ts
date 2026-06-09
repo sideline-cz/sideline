@@ -22,6 +22,7 @@ import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMa
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRoleProvisionEventsRepository } from '~/repositories/DiscordRoleProvisionEventsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
+import { EventJoinRequestsRepository } from '~/repositories/EventJoinRequestsRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
@@ -1603,6 +1604,16 @@ const MockRpcChannelEventDividersRepositoryLayer = Layer.succeed(ChannelEventDiv
   deleteByChannelId: () => Effect.void,
 } as any);
 
+const MockRpcEventJoinRequestsRepositoryLayer = Layer.succeed(EventJoinRequestsRepository, {
+  submit: () => Effect.die(new Error('Not implemented')),
+  accept: () => Effect.die(new Error('Not implemented')),
+  decline: () => Effect.die(new Error('Not implemented')),
+  saveDiscordMessageId: () => Effect.void,
+  findOverview: () => Effect.succeed([]),
+  findRequestById: () => Effect.succeed(Option.none()),
+  hasRosterManagePermission: () => Effect.succeed(false),
+} as any);
+
 const RpcTestLayer = EventsRpcLive.pipe(
   Layer.provide(MockRpcEventsRepositoryLayer),
   Layer.provide(MockRpcEventRsvpsRepositoryLayer),
@@ -1614,6 +1625,7 @@ const RpcTestLayer = EventsRpcLive.pipe(
   Layer.provide(MockRpcTrainingTypesRepositoryLayer),
   Layer.provide(MockRpcChannelEventDividersRepositoryLayer),
   Layer.provide(MockDiscordChannelMappingRepositoryLayer),
+  Layer.provide(MockRpcEventJoinRequestsRepositoryLayer),
   Layer.provide(MockSqlClientLayer),
 );
 

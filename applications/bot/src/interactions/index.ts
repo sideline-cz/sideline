@@ -24,6 +24,7 @@ import {
 } from './email-pages.js';
 import { EventCreateModal } from './event-create.js';
 import { EventCreateAutocomplete } from './event-create-autocomplete.js';
+import { JoinAcceptButton, JoinDeclineButton, JoinRequestButton } from './joinRequest.js';
 import { MakanickoLogAutocomplete } from './makanicko-log-autocomplete.js';
 import { OverviewShowButton } from './overview-channel.js';
 import { RsvpAddMessageButton, RsvpButton, RsvpClearMessageButton, RsvpModal } from './rsvp.js';
@@ -51,6 +52,9 @@ export const interactionBuilder = Ix.builder
   .add(MakanickoLogAutocomplete)
   .add(ClaimButton)
   .add(UnclaimButton)
+  .add(JoinRequestButton)
+  .add(JoinAcceptButton)
+  .add(JoinDeclineButton)
   .add(EmailApproveButton)
   .add(EmailSendOriginalButton)
   .add(EmailRejectButton)

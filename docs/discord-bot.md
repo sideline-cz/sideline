@@ -573,6 +573,84 @@ Appears on the training claim-board message after a coach has claimed the traini
 
 ---
 
+### Join Request Button — `join-request:{teamId}:{eventId}`
+
+Appears on the "Request to join" board message posted to the tournament event's channel when the event is created. Allows any team member to submit a join request for the tournament.
+
+**Custom ID pattern:** `join-request:{teamId}:{eventId}`
+
+**Behavior:**
+
+1. Parses `teamId` and `eventId` from the custom ID.
+2. Responds with a deferred ephemeral acknowledgement and forks a background fiber.
+3. The background fiber calls `Event/SubmitJoinRequest` RPC with `event_id`, `team_id`, `discord_user_id`, and `message: none`.
+4. If the request was newly created (or a previously declined row was reopened), responds with a "request submitted" confirmation; if the member already has a pending or accepted request, responds with an "already submitted" notice.
+
+**Errors from `Event/SubmitJoinRequest`:**
+
+| Error tag | User-visible message |
+|-----------|----------------------|
+| `JoinRequestNotMember` | Not a member |
+| `JoinRequestEventInactive` | Event inactive or not found |
+| `JoinRequestNotTournament` | Event inactive or not found |
+| `JoinRequestEventNotFound` | Event inactive or not found |
+
+**Source file:** `applications/bot/src/interactions/joinRequest.ts` (`JoinRequestButton`)
+
+---
+
+### Join Accept Button — `join-accept:{teamId}:{requestId}`
+
+Appears on the review message posted by the bot when a member submits a join request. Only visible to captains with `roster:manage` permission.
+
+**Custom ID pattern:** `join-accept:{teamId}:{requestId}`
+
+**Behavior:**
+
+1. Parses `teamId` and `requestId` from the custom ID.
+2. Responds with a deferred ephemeral acknowledgement and forks a background fiber.
+3. The background fiber calls `Event/AcceptJoinRequest` RPC with `request_id`, `team_id`, and `discord_user_id`.
+4. On success, responds with a "Accepted **{member}**" confirmation.
+5. The server emits a `tournament_attendance_update` sync event; the bot's Event Sync worker then edits the review message to reflect the accepted state and removes the Accept/Decline buttons.
+
+**Errors from `Event/AcceptJoinRequest`:**
+
+| Error tag | User-visible message |
+|-----------|----------------------|
+| `JoinRequestForbidden` | Not a captain |
+| `JoinRequestNotMember` | Not a captain |
+| `JoinRequestAlreadyDecided` | Request already decided |
+
+**Source file:** `applications/bot/src/interactions/joinRequest.ts` (`JoinAcceptButton`)
+
+---
+
+### Join Decline Button — `join-decline:{teamId}:{requestId}`
+
+Appears alongside the Accept button on the join request review message.
+
+**Custom ID pattern:** `join-decline:{teamId}:{requestId}`
+
+**Behavior:**
+
+1. Parses `teamId` and `requestId` from the custom ID.
+2. Responds with a deferred ephemeral acknowledgement and forks a background fiber.
+3. The background fiber calls `Event/DeclineJoinRequest` RPC with `request_id`, `team_id`, and `discord_user_id`.
+4. On success, responds with a "Declined **{member}**" confirmation.
+5. The server emits a `tournament_attendance_update` sync event; the bot's Event Sync worker edits the review message to reflect the declined state and removes the buttons.
+
+**Errors from `Event/DeclineJoinRequest`:**
+
+| Error tag | User-visible message |
+|-----------|----------------------|
+| `JoinRequestForbidden` | Not a captain |
+| `JoinRequestNotMember` | Not a captain |
+| `JoinRequestAlreadyDecided` | Request already decided |
+
+**Source file:** `applications/bot/src/interactions/joinRequest.ts` (`JoinDeclineButton`)
+
+---
+
 ### Carpool Add Button — `carpool-add:{carpoolId}`
 
 Appears on the public carpool board message posted by `/carpool`. Opens a modal so the user can specify the car capacity.
@@ -1092,7 +1170,7 @@ Channel sync manages Discord channels and roles for Sideline groups. The Discord
 
 | Event tag | Handler file | Discord action |
 |-----------|-------------|----------------|
-| `event_created` | `handleCreated.ts` | Fetches RSVP counts (`Event/GetRsvpCounts`) and the guild's preferred locale, builds an event embed with RSVP buttons, posts it to the group's configured Discord channel (or the guild system channel as fallback), saves the resulting message ID via `Event/SaveDiscordMessageId`, then re-orders all event messages in the channel by start time |
+| `event_created` | `handleCreated.ts` | Fetches RSVP counts (`Event/GetRsvpCounts`) and the guild's preferred locale, builds an event embed with RSVP buttons, posts it to the group's configured Discord channel (or the guild system channel as fallback), saves the resulting message ID via `Event/SaveDiscordMessageId`, then re-orders all event messages in the channel by start time. For **tournament** events, after the event embed is posted, `handleCreated` additionally posts a separate **join board message** (`buildJoinBoardMessage` in `board` mode) to the same channel — a blurple embed with a "Request to join" button. This board message is posted best-effort; failures are logged as warnings and do not abort the event embed flow. |
 | `event_updated` | `handleUpdated.ts` | Looks up the stored Discord message via `Event/GetDiscordMessageId`, fetches updated RSVP counts, rebuilds the embed, edits the existing Discord message, then re-orders channel messages |
 | `event_cancelled` | `handleCancelled.ts` | Looks up the stored Discord message, replaces the embed content with a cancelled-state embed (no RSVP buttons), edits the existing Discord message |
 | `event_started` | `handleStarted.ts` | Three actions run in parallel. (1) In-place edit: looks up the stored Discord message via `Event/GetDiscordMessageId`, fetches updated RSVP counts and embed info, rebuilds the embed without RSVP action-row buttons, and edits the existing Discord message. If Discord returns error 10008 (Unknown Message — the message was deleted), the embed is re-posted with `createMessage` and the new message ID is persisted via `Event/SaveDiscordMessageId`. After the in-place edit (or recreation) succeeds, `reorderChannelMessages` is called so the started event moves into the channel's "past" section. (2) New announcement post: posts a fresh "Starting now: {title}" message to the team's configured reminders channel (falls back to the guild system channel when no reminders channel is set). The announcement embed lists the going attendees filtered to the event's member group, and is formatted in yellow. For **training** events: if `claimed_by_discord_id` is set the message content is `<@coachDiscordId>` (user mention with `allowed_mentions.users`); if no coach was assigned (or the claimer has no linked Discord) the content pings the owners-group Discord role (`<@&ownersRole>`) together with the i18n string `bot_event_started_no_coach_warning` ("No coach claimed this training."). If neither is available, only the warning text is shown. For **non-training** events the behavior is unchanged: the member-group Discord role is @-mentioned as before. The `GetYesAttendeesForEmbed` RPC is called with `member_group_id` so only members in the event's member group (and their descendants, via `WITH RECURSIVE descendant_groups`) appear. Emitted by `EventStartCron` when an event's `start_at` time passes. (3) Best-effort claim-message deletion: for training events, calls `Event/GetClaimInfo` to find the claim message's thread channel and message IDs, then calls `rest.deleteMessage` to remove the embed from the owners claim thread. Discord 10008 errors (unknown message) are silently swallowed; other errors are logged as warnings. |
@@ -1101,6 +1179,8 @@ Channel sync manages Discord channels and roles for Sideline groups. The Discord
 | `coaching_status` | `handleCoachingStatus.ts` | Posts a green "today's coach is X" embed to the channel supplied in `discord_target_channel_id`. The coach is shown as a Discord @-mention when a Discord ID is available, or a plain display name otherwise. Emitted by `CoachingStatusCron` on the day of a claimed training. |
 | `training_claim_update` | `handleTrainingClaimUpdate.ts` | Edits the existing claim-board message (located via `claim_discord_channel_id` / `claim_discord_message_id`). The updated embed reflects whether the training is now claimed (green, claimer shown as `**Name** (<@discordId>)` using the same `formatNameWithMention` helper as RSVP attendee lists, Unclaim button) or unclaimed (orange, Claim button). The claimer's identity fields (`discord_id`, `name`, `nickname`, `display_name`, `username`) are resolved at SELECT time via a LEFT JOIN to `team_members → users` rather than being stored in the outbox row. If the message has been deleted (404 response), the update is silently skipped. |
 | `unclaimed_training_reminder` | `handleUnclaimedTrainingReminder.ts` | Posts a yellow reminder embed to the owner-group's channel warning that the training is still unclaimed. If `claim_discord_channel_id` and `claim_discord_message_id` are present, the embed description includes a jump link to the claim-board message. If a Discord role is set, the message content @-mentions that role. Emitted by `RsvpReminderCron` alongside the normal RSVP reminder when the training's `claimed_by` is NULL. |
+| `tournament_join_request` | `handleTournamentJoinRequest.ts` | Posts a **review message** (orange pending embed with Accept and Decline buttons) to the tournament event's Discord channel. The channel is sourced from `join_request_discord_channel_id` on the sync event; if absent, the handler logs a warning and skips. After posting, calls `Event/SaveJoinRequestMessageId` to persist the Discord channel and message IDs on the `event_join_requests` row so the `tournament_attendance_update` handler can locate and edit it later. `SaveJoinRequestMessageId` failures are not swallowed — the event is retried so the message ID is eventually persisted. |
+| `tournament_attendance_update` | `handleTournamentAttendanceUpdate.ts` | Edits the existing review message (located via `join_request_discord_channel_id` / `join_request_discord_message_id`). The updated embed reflects the new status: orange (pending), green (accepted), or red (declined). Accept/Decline buttons are present only when `status = 'pending'`; they are stripped in the accepted and declined states. If the message has been deleted (404 response), the update is silently skipped. |
 
 **Lifecycle RPCs:**
 - `Event/MarkEventProcessed`
@@ -1390,6 +1470,11 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Event/SaveOwnerClaimThread` | Compare-and-swap write: sets `claim_thread_id` on the mapping row only when the current value is `NULL`; returns the winning thread ID (the caller's if it won, or the pre-existing one if it lost the race) |
 | `Event/ClearOwnerClaimThread` | Sets `claim_thread_id = NULL` on the mapping row for a given `(team_id, owner_group_id)`; called when the thread is found to have been deleted (Discord error 10003) so that the next claim-request recreates it |
 | `Event/GetChannelsWithStoredMessages` | Fetch all `(discord_channel_id, guild_id)` pairs for which at least one event message ID is stored; used by the `recoverDeletedMessages` startup task |
+| `Event/SubmitJoinRequest` | Submit a join request for a tournament event; payload: `event_id`, `team_id`, `discord_user_id`, `message: Option<string>`; returns `SubmitJoinRequestResult` (`request_id`, `status`, `created: boolean`). Errors: `JoinRequestEventNotFound`, `JoinRequestNotTournament`, `JoinRequestEventInactive`, `JoinRequestNotMember`. |
+| `Event/AcceptJoinRequest` | Accept a pending join request; payload: `request_id`, `team_id`, `discord_user_id`; returns `DecideJoinRequestResult` (`request_id`, `status`, `member_display_name`). Requires `roster:manage` (effective/inherited). Errors: `JoinRequestForbidden`, `JoinRequestNotMember`, `JoinRequestAlreadyDecided`. |
+| `Event/DeclineJoinRequest` | Decline a pending join request; payload: `request_id`, `team_id`, `discord_user_id`; returns `DecideJoinRequestResult`. Same auth and errors as `AcceptJoinRequest`. |
+| `Event/GetAttendanceOverview` | Fetch accepted and pending join requests for a tournament event; payload: `event_id`; returns `AttendanceOverview` (`event_id`, `accepted: JoinRequestEntry[]`, `pending: JoinRequestEntry[]`). Declined rows are excluded. |
+| `Event/SaveJoinRequestMessageId` | Persist the Discord channel and message IDs of the join-request review message; payload: `request_id`, `channel_id`, `message_id`; returns `void`. Called by `handleTournamentJoinRequest` after posting the review embed. |
 
 ### Invite group (`Invite/`)
 

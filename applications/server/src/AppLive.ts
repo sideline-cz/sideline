@@ -30,6 +30,7 @@ import { EmailAttachmentsRepository } from '~/repositories/EmailAttachmentsRepos
 import { EmailForwardingConfigRepository } from '~/repositories/EmailForwardingConfigRepository.js';
 import { EmailMessagesRepository } from '~/repositories/EmailMessagesRepository.js';
 import { EmailPostSyncEventsRepository } from '~/repositories/EmailPostSyncEventsRepository.js';
+import { EventJoinRequestsRepository } from '~/repositories/EventJoinRequestsRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
@@ -111,6 +112,7 @@ const Repositories = Layer.mergeAll(
   DiscordRoleMappingRepository.Default,
   ChannelSyncEventsRepository.Default,
   EventSyncEventsRepository.Default,
+  EventJoinRequestsRepository.Default,
   DiscordChannelMappingRepository.Default,
   DiscordChannelsRepository.Default,
   DiscordRolesRepository.Default,

@@ -46,12 +46,16 @@ src/
     ├── handleRsvpReminder.ts           — rsvp_reminder handler
     ├── handleTrainingClaimRequest.ts   — training_claim_request handler (posts claim embed into the persistent owners claim thread, saves message id back via Event/SaveClaimDiscordMessageId)
     ├── handleTrainingClaimUpdate.ts    — training_claim_update handler (edits existing claim embed in place)
-    └── handleUnclaimedTrainingReminder.ts — unclaimed_training_reminder handler (posts reminder pointing to claim message)
+    ├── handleUnclaimedTrainingReminder.ts — unclaimed_training_reminder handler (posts reminder pointing to claim message)
+    ├── handleCoachingStatus.ts         — coaching_status handler
+    ├── handleTournamentJoinRequest.ts  — tournament_join_request handler (posts the join-request review board message via buildJoinBoardMessage, saves message id back via Event/SaveJoinRequestMessageId)
+    └── handleTournamentAttendanceUpdate.ts — tournament_attendance_update handler (edits the existing join-request board message in place to reflect accepted/declined status)
 └── rest/events/     — Embed builder functions
     ├── buildEventEmbed.ts              — Main event embed (RSVP counts, "Going" field)
     ├── buildAttendeesEmbed.ts          — Paginated attendee list embed
     ├── buildUpcomingEventEmbed.ts      — Per-user upcoming events embed (/event list, overview button)
     ├── buildClaimMessage.ts            — Coach-claim embed + Claim/Release button row
+    ├── buildJoinBoardMessage.ts        — Tournament join-request review board embed + accept/decline button row (mode: 'review')
     └── sendUpcomingEventFollowups.ts   — Shared helper: sends one ephemeral follow-up message per event (max 10)
 ```
 

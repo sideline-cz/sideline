@@ -114,6 +114,27 @@ On the day of the training, if the training has been claimed, the bot also posts
   The number of days before a training the claim-board message is posted defaults to **3**. Captains can change this in **Team settings → Coach assignment → Days before training** (range 0–30). Setting it to **0** posts the message on the day of the training. If the value is higher than the team's event horizon, the message may never appear because the training is not yet generated when the cron runs.
 </Aside>
 
+## Tournament join board
+
+When a tournament event is created, the bot posts a second message in the tournament's event channel — a **"Request to join" board** — directly below the normal event embed.
+
+### For players
+
+Click the **Request to join** button on the board. You receive an ephemeral confirmation visible only to you. If you already have a pending or accepted request, you receive an "already submitted" notice instead. If a previous request of yours was declined, clicking the button reopens a fresh pending request.
+
+### For captains (roster:manage required)
+
+Each request generates a separate **review embed** in the same channel. Two buttons appear on each embed:
+
+- **Accept** — marks the member as confirmed for the tournament. The embed turns green and the buttons are removed.
+- **Decline** — rejects the request. The embed turns red and the buttons are removed.
+
+Only members with the `roster:manage` permission (Captains and Admins by default) can use the Accept and Decline buttons. Anyone else receives a quiet "not authorised" notice.
+
+<Aside type="note" title="Web app not yet supported">
+  The join board and review embeds are Discord-only in this release. The web app does not yet display tournament attendance lists or allow accepting/declining requests from the browser.
+</Aside>
+
 ## Group channels and roles
 
 Each group in Sideline gets a **Discord role** automatically — this happens when the group is first created or the first time a member is added to it. The role is what controls who can see the group's channel.

@@ -333,6 +333,18 @@ Two `event_sync_events` payload fields carry **different semantics depending on 
 
 For `event_started`, `EventStartCron` additionally passes `event.claimed_by` (the assigned coach's `TeamMemberId`) to `emitEventStarted` ONLY for trainings; the JOIN in `findUnprocessedEvents` resolves it to `claimed_by_discord_id`, and the bot prefers a `<@coach>` user mention over the role mention. See the bot AGENTS.md "Training claim threads" note for the consumer rules.
 
+### Repurposed `event_sync_events` columns on tournament join-request events
+
+The `tournament_join_request` and `tournament_attendance_update` emitters reuse pre-existing physical columns to carry join-request fields rather than adding a dedicated column for every value. The reuse is bridged in exactly two places that MUST agree, or the bot decodes the wrong field: the **encoder** (`EventSyncEventsRepository.emitTournamentJoinRequest` / `emitTournamentAttendanceUpdate`) and the **decoder** (`constructEvent` in `src/rpc/event/events.ts`, which maps the reused column back onto the typed RPC-event field). Dedicated columns (`join_request_id`, `join_request_message_id`, `requester_display_name`, `request_message`, `decided_by_display_name`, added by migration `1789400006_create_event_join_requests.ts`) are NOT reused — only the three below are.
+
+| Physical column | Repurposed-as (RPC field) | On event type | Encoder | Decoder |
+|-----------------|---------------------------|---------------|---------|---------|
+| `discord_role_id` | `requester_discord_id` (NOT a Discord role) | `tournament_join_request` | `emitTournamentJoinRequest` | `constructEvent` → `requester_discord_id: r.discord_role_id` |
+| `event_event_type` | `status` (`'accepted' \| 'declined' \| 'pending'`, decoded to `EventRpcModels.JoinRequestStatus`) | `tournament_attendance_update` | `emitTournamentAttendanceUpdate` | `constructEvent` → `status: decodeStatus(r.event_event_type)` |
+| `discord_target_channel_id` | `join_request_discord_channel_id` | both | both emitters | `constructEvent` → `join_request_discord_channel_id: r.discord_target_channel_id` |
+
+When adding a tournament-flow event type, prefer a dedicated column for any genuinely new value; only repurpose a column whose original meaning is unused for that event type (as above, no role and no real `event_event_type` apply to a join request). The bot handlers (`handleTournamentJoinRequest`, `handleTournamentAttendanceUpdate`) read ONLY the typed RPC-event fields produced by `constructEvent` — never the raw physical column — so the decoder mapping is the single source of truth for the reuse.
+
 ### Dead claim-thread column and RPC (do not reuse)
 
 `events.claim_thread_id` and the `Event/SaveClaimThreadId` RPC are **dead** as of the persistent-owners-claim-thread change. Claim threads are no longer per-training; they are one persistent thread per owners group stored on `discord_channel_mappings.claim_thread_id` (see "Persistent owners claim thread" below). Do not write to `events.claim_thread_id` or call `Event/SaveClaimThreadId` in new code.

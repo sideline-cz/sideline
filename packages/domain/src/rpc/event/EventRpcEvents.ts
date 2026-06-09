@@ -5,6 +5,7 @@ import * as Event from '~/models/Event.js';
 import * as GroupModel from '~/models/GroupModel.js';
 import * as Team from '~/models/Team.js';
 import * as TeamMember from '~/models/TeamMember.js';
+import { JoinRequestId, JoinRequestStatus } from './EventRpcModels.js';
 
 export class EventCreatedEvent extends Schema.TaggedClass<EventCreatedEvent>()('event_created', {
   id: Schema.String,
@@ -160,6 +161,38 @@ export class CoachingStatusEvent extends Schema.TaggedClass<CoachingStatusEvent>
   },
 ) {}
 
+export class TournamentJoinRequestEvent extends Schema.TaggedClass<TournamentJoinRequestEvent>()(
+  'tournament_join_request',
+  {
+    id: Schema.String,
+    team_id: Team.TeamId,
+    guild_id: Discord.Snowflake,
+    event_id: Event.EventId,
+    join_request_id: JoinRequestId,
+    requester_display_name: Schema.OptionFromNullOr(Schema.String),
+    requester_discord_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    request_message: Schema.OptionFromNullOr(Schema.String),
+    join_request_discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    join_request_discord_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  },
+) {}
+
+export class TournamentAttendanceUpdateEvent extends Schema.TaggedClass<TournamentAttendanceUpdateEvent>()(
+  'tournament_attendance_update',
+  {
+    id: Schema.String,
+    team_id: Team.TeamId,
+    guild_id: Discord.Snowflake,
+    event_id: Event.EventId,
+    join_request_id: JoinRequestId,
+    status: JoinRequestStatus,
+    decided_by_display_name: Schema.OptionFromNullOr(Schema.String),
+    requester_display_name: Schema.OptionFromNullOr(Schema.String),
+    join_request_discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    join_request_discord_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  },
+) {}
+
 export const UnprocessedEventSyncEvent = Schema.Union([
   EventCreatedEvent,
   EventUpdatedEvent,
@@ -170,6 +203,8 @@ export const UnprocessedEventSyncEvent = Schema.Union([
   TrainingClaimUpdateEvent,
   UnclaimedTrainingReminderEvent,
   CoachingStatusEvent,
+  TournamentJoinRequestEvent,
+  TournamentAttendanceUpdateEvent,
 ]);
 
 export type UnprocessedEventSyncEvent = Schema.Schema.Type<typeof UnprocessedEventSyncEvent>;

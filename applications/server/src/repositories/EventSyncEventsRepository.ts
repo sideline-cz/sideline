@@ -1,6 +1,6 @@
-import { Discord, Event, GroupModel, Team, TeamMember } from '@sideline/domain';
+import { Discord, Event, EventRpcModels, GroupModel, Team, TeamMember } from '@sideline/domain';
 import { Schemas } from '@sideline/effect-lib';
-import { type DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
+import { DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 
@@ -14,6 +14,8 @@ const EventSyncEventType = Schema.Literals([
   'training_claim_update',
   'unclaimed_training_reminder',
   'coaching_status',
+  'tournament_join_request',
+  'tournament_attendance_update',
 ]);
 type EventSyncEventType = typeof EventSyncEventType.Type;
 
@@ -36,6 +38,11 @@ const InsertInput = Schema.Struct({
   claimed_by_member_id: Schema.OptionFromNullOr(TeamMember.TeamMemberId),
   claimed_by_display_name: Schema.OptionFromNullOr(Schema.String),
   event_all_day: Schema.Boolean,
+  join_request_id: Schema.OptionFromNullOr(EventRpcModels.JoinRequestId),
+  join_request_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  requester_display_name: Schema.OptionFromNullOr(Schema.String),
+  request_message: Schema.OptionFromNullOr(Schema.String),
+  decided_by_display_name: Schema.OptionFromNullOr(Schema.String),
 });
 
 class GuildLookupResult extends Schema.Class<GuildLookupResult>('GuildLookupResult')({
@@ -66,6 +73,11 @@ export class EventSyncEventRow extends Schema.Class<EventSyncEventRow>('EventSyn
   claimed_by_user_display_name: Schema.OptionFromNullOr(Schema.String),
   claimed_by_username: Schema.OptionFromNullOr(Schema.String),
   event_all_day: Schema.Boolean,
+  join_request_id: Schema.OptionFromNullOr(EventRpcModels.JoinRequestId),
+  join_request_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  requester_display_name: Schema.OptionFromNullOr(Schema.String),
+  request_message: Schema.OptionFromNullOr(Schema.String),
+  decided_by_display_name: Schema.OptionFromNullOr(Schema.String),
 }) {}
 
 const MarkProcessedInput = Schema.Struct({
@@ -83,8 +95,8 @@ const make = Effect.gen(function* () {
   const insertEvent = SqlSchema.void({
     Request: InsertInput,
     execute: (input) => sql`
-      INSERT INTO event_sync_events (team_id, guild_id, event_type, event_id, event_title, event_description, event_image_url, event_start_at, event_end_at, event_location, event_location_url, event_event_type, discord_target_channel_id, member_group_id, discord_role_id, claimed_by_member_id, claimed_by_display_name, event_all_day)
-      VALUES (${input.team_id}, ${input.guild_id}, ${input.event_type}, ${input.event_id}, ${input.event_title}, ${input.event_description}, ${input.event_image_url}, ${input.event_start_at}, ${input.event_end_at}, ${input.event_location}, ${input.event_location_url}, ${input.event_event_type}, ${input.discord_target_channel_id}, ${input.member_group_id}, ${input.discord_role_id}, ${input.claimed_by_member_id}, ${input.claimed_by_display_name}, ${input.event_all_day})
+      INSERT INTO event_sync_events (team_id, guild_id, event_type, event_id, event_title, event_description, event_image_url, event_start_at, event_end_at, event_location, event_location_url, event_event_type, discord_target_channel_id, member_group_id, discord_role_id, claimed_by_member_id, claimed_by_display_name, event_all_day, join_request_id, join_request_message_id, requester_display_name, request_message, decided_by_display_name)
+      VALUES (${input.team_id}, ${input.guild_id}, ${input.event_type}, ${input.event_id}, ${input.event_title}, ${input.event_description}, ${input.event_image_url}, ${input.event_start_at}, ${input.event_end_at}, ${input.event_location}, ${input.event_location_url}, ${input.event_event_type}, ${input.discord_target_channel_id}, ${input.member_group_id}, ${input.discord_role_id}, ${input.claimed_by_member_id}, ${input.claimed_by_display_name}, ${input.event_all_day}, ${input.join_request_id}, ${input.join_request_message_id}, ${input.requester_display_name}, ${input.request_message}, ${input.decided_by_display_name})
     `,
   });
 
@@ -109,7 +121,12 @@ const make = Effect.gen(function* () {
              u.discord_nickname     AS claimed_by_nickname,
              u.discord_display_name AS claimed_by_user_display_name,
              u.username             AS claimed_by_username,
-             ese.event_all_day
+             ese.event_all_day,
+             ese.join_request_id,
+             ese.join_request_message_id,
+             ese.requester_display_name,
+             ese.request_message,
+             ese.decided_by_display_name
       FROM event_sync_events ese
       LEFT JOIN team_members tm ON tm.id = ese.claimed_by_member_id
       LEFT JOIN users u         ON u.id = tm.user_id
@@ -176,6 +193,11 @@ const make = Effect.gen(function* () {
               claimed_by_member_id: claimedByMemberId,
               claimed_by_display_name: claimedByDisplayName,
               event_all_day: allDay,
+              join_request_id: Option.none(),
+              join_request_message_id: Option.none(),
+              requester_display_name: Option.none(),
+              request_message: Option.none(),
+              decided_by_display_name: Option.none(),
             }),
         }),
       ),
@@ -420,6 +442,11 @@ const make = Effect.gen(function* () {
               claimed_by_member_id: claimedByMemberId,
               claimed_by_display_name: claimedByDisplayName,
               event_all_day: false,
+              join_request_id: Option.none(),
+              join_request_message_id: Option.none(),
+              requester_display_name: Option.none(),
+              request_message: Option.none(),
+              decided_by_display_name: Option.none(),
             }),
         }),
       ),
@@ -463,6 +490,11 @@ const make = Effect.gen(function* () {
               claimed_by_member_id: Option.none(),
               claimed_by_display_name: Option.none(),
               event_all_day: false,
+              join_request_id: Option.none(),
+              join_request_message_id: Option.none(),
+              requester_display_name: Option.none(),
+              request_message: Option.none(),
+              decided_by_display_name: Option.none(),
             }),
         }),
       ),
@@ -503,6 +535,102 @@ const make = Effect.gen(function* () {
               claimed_by_member_id: claimedByMemberId,
               claimed_by_display_name: claimedByDisplayName,
               event_all_day: false,
+              join_request_id: Option.none(),
+              join_request_message_id: Option.none(),
+              requester_display_name: Option.none(),
+              request_message: Option.none(),
+              decided_by_display_name: Option.none(),
+            }),
+        }),
+      ),
+      catchSqlErrors,
+    );
+
+  const emitTournamentJoinRequest = (
+    teamId: Team.TeamId,
+    eventId: Event.EventId,
+    requestId: EventRpcModels.JoinRequestId,
+    requesterDisplayName: Option.Option<string>,
+    requesterDiscordId: Option.Option<Discord.Snowflake>,
+    requestMessage: Option.Option<string>,
+    joinRequestDiscordChannelId: Option.Option<Discord.Snowflake>,
+    joinRequestDiscordMessageId: Option.Option<Discord.Snowflake>,
+  ) =>
+    lookupGuildId(teamId).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: ({ guild_id }) =>
+            insertEvent({
+              team_id: teamId,
+              guild_id,
+              event_type: 'tournament_join_request',
+              event_id: eventId,
+              event_title: '',
+              event_description: Option.none(),
+              event_image_url: Option.none(),
+              event_start_at: DateTime.makeUnsafe(0),
+              event_end_at: Option.none(),
+              event_location: Option.none(),
+              event_location_url: Option.none(),
+              event_event_type: 'tournament',
+              discord_target_channel_id: joinRequestDiscordChannelId,
+              member_group_id: Option.none(),
+              // discord_role_id column is reused to carry the requester's discord id (no role involved here)
+              discord_role_id: requesterDiscordId,
+              claimed_by_member_id: Option.none(),
+              claimed_by_display_name: Option.none(),
+              event_all_day: false,
+              join_request_id: Option.some(requestId),
+              join_request_message_id: joinRequestDiscordMessageId,
+              requester_display_name: requesterDisplayName,
+              request_message: requestMessage,
+              decided_by_display_name: Option.none(),
+            }),
+        }),
+      ),
+      catchSqlErrors,
+    );
+
+  const emitTournamentAttendanceUpdate = (
+    teamId: Team.TeamId,
+    eventId: Event.EventId,
+    requestId: EventRpcModels.JoinRequestId,
+    status: EventRpcModels.JoinRequestStatus,
+    decidedByDisplayName: Option.Option<string>,
+    requesterDisplayName: Option.Option<string>,
+    joinRequestDiscordChannelId: Option.Option<Discord.Snowflake>,
+    joinRequestDiscordMessageId: Option.Option<Discord.Snowflake>,
+  ) =>
+    lookupGuildId(teamId).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: ({ guild_id }) =>
+            insertEvent({
+              team_id: teamId,
+              guild_id,
+              event_type: 'tournament_attendance_update',
+              event_id: eventId,
+              event_title: '',
+              event_description: Option.none(),
+              event_image_url: Option.none(),
+              event_start_at: DateTime.makeUnsafe(0),
+              event_end_at: Option.none(),
+              event_location: Option.none(),
+              event_location_url: Option.none(),
+              event_event_type: status,
+              discord_target_channel_id: joinRequestDiscordChannelId,
+              member_group_id: Option.none(),
+              discord_role_id: Option.none(),
+              claimed_by_member_id: Option.none(),
+              claimed_by_display_name: decidedByDisplayName,
+              event_all_day: false,
+              join_request_id: Option.some(requestId),
+              join_request_message_id: joinRequestDiscordMessageId,
+              requester_display_name: requesterDisplayName,
+              request_message: Option.none(),
+              decided_by_display_name: decidedByDisplayName,
             }),
         }),
       ),
@@ -526,6 +654,8 @@ const make = Effect.gen(function* () {
     emitTrainingClaimUpdate,
     emitUnclaimedTrainingReminder,
     emitCoachingStatus,
+    emitTournamentJoinRequest,
+    emitTournamentAttendanceUpdate,
     findUnprocessed,
     markProcessed,
     markFailed,

@@ -3,6 +3,7 @@ import { DiscordREST } from 'dfx/DiscordREST';
 import { Effect, Option, Schema } from 'effect';
 import { guildLocale } from '~/locale.js';
 import { buildEventEmbed, YES_EMBED_LIMIT } from '~/rest/events/buildEventEmbed.js';
+import { buildJoinBoardMessage } from '~/rest/events/buildJoinBoardMessage.js';
 import { DfxGuild } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 import { reorderChannelMessages } from './reorderChannelMessages.js';
@@ -53,6 +54,7 @@ export const handleCreated = (event: EventRpcEvents.EventCreatedEvent) =>
         .createMessage(channelId, {
           embeds: payload.embeds,
           components: payload.components,
+          allowed_mentions: { parse: [] as const },
         })
         .pipe(
           Effect.tap((msg) =>
@@ -68,6 +70,40 @@ export const handleCreated = (event: EventRpcEvents.EventCreatedEvent) =>
             ),
           ),
           Effect.tap(() => reorderChannelMessages(channelId, locale)),
+          Effect.tap(() => {
+            if (event.event_type !== 'tournament') return Effect.void;
+            const boardPayload = buildJoinBoardMessage({
+              mode: 'board',
+              title: event.title,
+              teamId: event.team_id,
+              eventId: event.event_id,
+              locale,
+            });
+            // S7 note: if this sync event is retried, the board will be double-posted.
+            // Full idempotency guard (store board message id) is deferred; at minimum the
+            // event embed above already uses the stored discord_channel_id/message_id for
+            // idempotency via handleCreated being idempotent at the event embed level.
+            return rest
+              .createMessage(channelId, {
+                embeds: boardPayload.embeds,
+                components: boardPayload.components,
+                allowed_mentions: { parse: [] as const },
+              })
+              .pipe(
+                Effect.tap((boardMsg) =>
+                  Effect.logInfo(
+                    `Posted join board for tournament "${event.title}" to channel ${channelId}, message ${boardMsg.id}`,
+                  ),
+                ),
+                Effect.asVoid,
+                Effect.catchCause((cause) =>
+                  Effect.logWarning(
+                    `handleCreated: failed to post join board for event ${event.event_id}`,
+                    cause,
+                  ),
+                ),
+              );
+          }),
           Effect.asVoid,
         );
     }),
