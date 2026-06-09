@@ -1,5 +1,26 @@
 # @sideline/domain
 
+## 0.26.2
+
+### Patch Changes
+
+- [#392](https://github.com/maxa-ondrej/sideline/pull/392) [`aeffab9`](https://github.com/maxa-ondrej/sideline/commit/aeffab928c7ccfdd80101d024e13c5fea5885b2c) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix(event): mention the assigned coach on training start and consolidate claim embeds into one owners thread
+
+  When a training starts, the "Starting now" post now mentions the assigned coach
+  instead of pinging the whole member group. If no coach has claimed the training
+  (or the coach has no linked Discord account), the post instead pings the owners
+  group with a "no coach claimed this training" warning. Non-training events are
+  unchanged and still ping the member group.
+
+  Coach claim embeds are no longer posted as a separate thread per training. Each
+  owners group now has a single persistent claim thread (a new
+  `discord_channel_mappings.claim_thread_id` column, created lazily and race-safe
+  via an atomic save) into which all claim embeds are posted. When a training
+  starts, its claim message is removed from that thread to keep it tidy. Three new
+  RPCs (`Event/GetOwnerClaimThread`, `Event/SaveOwnerClaimThread`,
+  `Event/ClearOwnerClaimThread`) back the persistent thread, and `EventStartedEvent`
+  now carries the coach's Discord id.
+
 ## 0.26.1
 
 ### Patch Changes
