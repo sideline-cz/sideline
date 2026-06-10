@@ -1,5 +1,31 @@
 # @sideline/bot
 
+## 0.22.0
+
+### Minor Changes
+
+- [#399](https://github.com/maxa-ondrej/sideline/pull/399) [`58b7a5a`](https://github.com/maxa-ondrej/sideline/commit/58b7a5aa2954faa5925bdcf0f3e9334b5d102d2e) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Link a tournament event to a real roster with a per-pair auto-approve toggle. An
+  RSVP "yes" drives roster membership: with auto-approve on, the member is added
+  automatically; with it off, an Approve/Decline request is posted to a dedicated
+  per-event thread in the owner group's channel and is also actionable on the web
+  roster detail page. Withdrawing a "yes" removes flow-added members (manual members
+  are protected) and cancels pending requests; enabling auto-approve backfills current
+  "yes" responders. Configure and approve from either Discord or the web.
+
+### Patch Changes
+
+- [#400](https://github.com/maxa-ondrej/sideline/pull/400) [`dbdf1b7`](https://github.com/maxa-ondrej/sideline/commit/dbdf1b71f3f46566de01e8c270bb38bc05442c32) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Make the bot's sync poll loops resilient to transient failures. Every poller
+  (`roles`, `channels`, `events`, `email`, `finance`, …) ran as
+  `processTick.pipe(Effect.repeat(Schedule.spaced(...)))`, and `Effect.repeat`
+  stops on the first failure — so a single transient error (e.g. an RPC blip
+  while the server is redeploying) would silently kill that poller until the bot
+  was restarted. The shared `pollLoop`/`fastPollLoop` now catch and log the whole
+  cause of a failed tick (including defects) so the loop keeps ticking, while
+  per-service `tapError` logging still records the specific failure.
+- Updated dependencies [[`58b7a5a`](https://github.com/maxa-ondrej/sideline/commit/58b7a5aa2954faa5925bdcf0f3e9334b5d102d2e)]:
+  - @sideline/domain@0.27.0
+  - @sideline/i18n@0.12.4
+
 ## 0.21.2
 
 ### Patch Changes

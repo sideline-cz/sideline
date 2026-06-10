@@ -1,5 +1,24 @@
 # @sideline/server
 
+## 0.28.0
+
+### Minor Changes
+
+- [#399](https://github.com/maxa-ondrej/sideline/pull/399) [`58b7a5a`](https://github.com/maxa-ondrej/sideline/commit/58b7a5aa2954faa5925bdcf0f3e9334b5d102d2e) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Link a tournament event to a real roster with a per-pair auto-approve toggle. An
+  RSVP "yes" drives roster membership: with auto-approve on, the member is added
+  automatically; with it off, an Approve/Decline request is posted to a dedicated
+  per-event thread in the owner group's channel and is also actionable on the web
+  roster detail page. Withdrawing a "yes" removes flow-added members (manual members
+  are protected) and cancels pending requests; enabling auto-approve backfills current
+  "yes" responders. Configure and approve from either Discord or the web.
+
+### Patch Changes
+
+- Updated dependencies [[`58b7a5a`](https://github.com/maxa-ondrej/sideline/commit/58b7a5aa2954faa5925bdcf0f3e9334b5d102d2e)]:
+  - @sideline/domain@0.27.0
+  - @sideline/migrations@0.21.0
+  - @sideline/i18n@0.12.4
+
 ## 0.27.0
 
 ### Minor Changes
