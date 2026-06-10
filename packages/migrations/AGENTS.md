@@ -218,3 +218,15 @@ Effect.tap(
 ```
 
 Without `NULLS NOT DISTINCT`, two rows that differ only by `NULL` values in the constrained columns would both be accepted — usually not what you want when the `NULL`s represent "any" / "no filter" semantics.
+
+### Migration id ordering vs. long-lived preview DBs (out-of-order skip hazard)
+
+The Effect `Migrator` is **last-id-wins**: it records the highest applied `migration_id` and only runs migrations whose id is **strictly greater**. A migration with an id **lower** than the recorded maximum is silently **skipped forever** — it is treated as already-past.
+
+This bites when a long-lived **PR preview database** applies a feature branch's higher-id migrations *before* a concurrently-merged `main` migration with a *lower* id reaches that branch (e.g. branch adds `1789500000`, then rebases in main's `1789400006`). After the rebase the preview DB has `1789500000` recorded, so `1789400006` is never run → its columns/tables are missing → the app boots unhealthy against that DB. Fresh dev/prod DBs are unaffected because they apply every migration in id order.
+
+Guidance:
+
+1. **Always pick a timestamp `> max(existing)` AT MERGE TIME**, not at branch-creation time. If `main` advanced while your branch was open, re-check the max during rebase and renumber your migration above it if a lower-id migration merged after yours was written.
+2. **A preview DB that has applied an out-of-order set is permanently inconsistent** — the skipped migration won't auto-run. Remediate by applying the missing migration's (idempotent) SQL directly via `bin/psql --pr <PR>` and recording it: `INSERT INTO migrations_before (migration_id, name) VALUES (<id>, '<name>') ON CONFLICT DO NOTHING;`. Then redeploy.
+3. This is a **preview-environment hazard only** — it never affects dev/prod migration order. Don't "fix" it by lowering your migration's id below an already-merged one.
