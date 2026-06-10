@@ -133,7 +133,7 @@ const make = Effect.gen(function* () {
                ) all_perms), ''
              ) AS permissions,
              u.name, u.birth_date::text AS birth_date, u.gender, tm.jersey_number,
-             u.username, u.avatar
+             u.username, u.avatar, u.discord_nickname, u.discord_display_name
       FROM roster_members rmb
       JOIN team_members tm ON tm.id = rmb.team_member_id
       JOIN users u ON u.id = tm.user_id
