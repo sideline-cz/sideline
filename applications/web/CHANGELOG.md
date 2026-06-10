@@ -1,5 +1,24 @@
 # @sideline/web
 
+## 0.21.0
+
+### Minor Changes
+
+- [#396](https://github.com/maxa-ondrej/sideline/pull/396) [`4f69c4c`](https://github.com/maxa-ondrej/sideline/commit/4f69c4ce586911ad828844928ec4a393e5f39678) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add per-team IMAP email ingestion alongside the existing inbound webhook. Teams can now
+  configure an IMAP mailbox in Team Settings; a UID-tracked cron poller fetches new mail every
+  few minutes, parses it, and feeds the same summarize → coach-approval → Discord pipeline the
+  webhook uses. Mailbox credentials are stored encrypted at rest (AES-256-GCM with an app-held
+  key), never returned by the API, and entered via a write-only password field. Message-ID
+  deduplication prevents double-processing when both ingestion methods run at once, and the
+  watermark only advances past mail that was successfully ingested so transient failures retry
+  rather than lose messages.
+
+### Patch Changes
+
+- Updated dependencies [[`4f69c4c`](https://github.com/maxa-ondrej/sideline/commit/4f69c4ce586911ad828844928ec4a393e5f39678)]:
+  - @sideline/domain@0.26.3
+  - @sideline/i18n@0.12.3
+
 ## 0.20.0
 
 ### Minor Changes
