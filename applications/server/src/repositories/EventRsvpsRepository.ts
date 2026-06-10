@@ -96,27 +96,48 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  class UpsertWithPriorResult extends Schema.Class<UpsertWithPriorResult>('UpsertWithPriorResult')({
+    id: EventRsvp.EventRsvpId,
+    event_id: Event.EventId,
+    team_member_id: TeamMember.TeamMemberId,
+    response: EventRsvp.RsvpResponse,
+    message: Schema.OptionFromNullOr(Schema.String),
+    prior_response: Schema.OptionFromNullOr(EventRsvp.RsvpResponse),
+  }) {}
+
   const upsert = SqlSchema.findOne({
     Request: UpsertInput,
-    Result: RsvpRow,
+    Result: UpsertWithPriorResult,
     execute: (input) => sql`
+      WITH prior AS (
+        SELECT response AS prior_response
+        FROM event_rsvps
+        WHERE event_id = ${input.event_id} AND team_member_id = ${input.team_member_id}
+      )
       INSERT INTO event_rsvps (event_id, team_member_id, response, message)
       VALUES (${input.event_id}, ${input.team_member_id}, ${input.response}, ${input.message})
       ON CONFLICT (event_id, team_member_id)
       DO UPDATE SET response = ${input.response}, message = COALESCE(${input.message}, event_rsvps.message), updated_at = now()
-      RETURNING id, event_id, team_member_id, response, message
+      RETURNING id, event_id, team_member_id, response, message,
+                (SELECT prior_response FROM prior) AS prior_response
     `,
   });
 
   const upsertClearing = SqlSchema.findOne({
     Request: UpsertClearInput,
-    Result: RsvpRow,
+    Result: UpsertWithPriorResult,
     execute: (input) => sql`
+      WITH prior AS (
+        SELECT response AS prior_response
+        FROM event_rsvps
+        WHERE event_id = ${input.event_id} AND team_member_id = ${input.team_member_id}
+      )
       INSERT INTO event_rsvps (event_id, team_member_id, response, message)
       VALUES (${input.event_id}, ${input.team_member_id}, ${input.response}, NULL)
       ON CONFLICT (event_id, team_member_id)
       DO UPDATE SET response = ${input.response}, message = NULL, updated_at = now()
-      RETURNING id, event_id, team_member_id, response, message
+      RETURNING id, event_id, team_member_id, response, message,
+                (SELECT prior_response FROM prior) AS prior_response
     `,
   });
 
@@ -257,7 +278,19 @@ const make = Effect.gen(function* () {
     (clearMessage
       ? upsertClearing({ event_id: eventId, team_member_id: teamMemberId, response })
       : upsert({ event_id: eventId, team_member_id: teamMemberId, response, message })
-    ).pipe(catchSqlErrors);
+    ).pipe(
+      catchSqlErrors,
+      Effect.map((row) => ({
+        row: {
+          id: row.id,
+          event_id: row.event_id,
+          team_member_id: row.team_member_id,
+          response: row.response,
+          message: row.message,
+        },
+        priorResponse: row.prior_response,
+      })),
+    );
 
   const countRsvpsByEventId = (eventId: Event.EventId) =>
     countByEventId(eventId).pipe(catchSqlErrors);

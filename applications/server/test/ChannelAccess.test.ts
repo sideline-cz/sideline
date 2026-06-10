@@ -63,6 +63,7 @@ import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
+import { MockEventRosterLayers } from './mocks/eventRosterMocks.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from './mocks/onboardingMocks.js';
 import { MockTeamChallengeRepositoryLayer } from './mocks/teamChallengeMocks.js';
@@ -761,6 +762,7 @@ const buildFullLayer = (overrides?: {
     .pipe(Layer.provide(makeAccessLayer()))
     .pipe(Layer.provide(MockSqlClientLayer))
     .pipe(Layer.provide(MockEmailLayers))
+    .pipe(Layer.provide(MockEventRosterLayers))
     .pipe(Layer.provide(BotInfoStore.Default));
 };
 

@@ -46,12 +46,16 @@ src/
     ├── handleRsvpReminder.ts           — rsvp_reminder handler
     ├── handleTrainingClaimRequest.ts   — training_claim_request handler (posts claim embed into the persistent owners claim thread, saves message id back via Event/SaveClaimDiscordMessageId)
     ├── handleTrainingClaimUpdate.ts    — training_claim_update handler (edits existing claim embed in place)
-    └── handleUnclaimedTrainingReminder.ts — unclaimed_training_reminder handler (posts reminder pointing to claim message)
+    ├── handleUnclaimedTrainingReminder.ts — unclaimed_training_reminder handler (posts reminder pointing to claim message)
+    ├── handleEventRosterApprovalRequest.ts — event_roster_approval_request handler (resolves/creates owners thread, posts approval embed + Approve/Decline buttons, saves message id back via Event/SaveApprovalRequestMessageId)
+    ├── handleEventRosterApprovalCancel.ts — event_roster_approval_cancel handler (deletes the approval thread message; swallows 10008)
+    └── handleEventRosterThreadDelete.ts — event_roster_thread_delete handler (deletes the entire owners approval thread; swallows 10003)
 └── rest/events/     — Embed builder functions
     ├── buildEventEmbed.ts              — Main event embed (RSVP counts, "Going" field)
     ├── buildAttendeesEmbed.ts          — Paginated attendee list embed
     ├── buildUpcomingEventEmbed.ts      — Per-user upcoming events embed (/event list, overview button)
     ├── buildClaimMessage.ts            — Coach-claim embed + Claim/Release button row
+    ├── buildRosterApprovalMessage.ts   — Roster-approval embed + Approve/Decline button row (status-colored; disabled row for decided/withdrawn states)
     └── sendUpcomingEventFollowups.ts   — Shared helper: sends one ephemeral follow-up message per event (max 10)
 ```
 
@@ -358,9 +362,26 @@ Syncs event lifecycle to Discord embed messages. When events are created/updated
 | Domain model | `packages/domain/src/rpc/event/EventRpcEvents.ts` |
 | Bot service | `src/rcp/event/ProcessorService.ts` |
 
-Event types: `event_created`, `event_updated`, `event_cancelled`, `event_started`, `rsvp_reminder`, `training_claim_request`, `training_claim_update`, `unclaimed_training_reminder`
+Event types: `event_created`, `event_updated`, `event_cancelled`, `event_started`, `rsvp_reminder`, `training_claim_request`, `training_claim_update`, `unclaimed_training_reminder`, `coaching_status`, `event_roster_approval_request`, `event_roster_approval_cancel`, `event_roster_thread_delete`
 
 The `event_started` handler updates the Discord embed to remove RSVP buttons and rebuilds the embed with current RSVP counts. For its "Starting now" post, the mention is `event_type`-dependent: for a **training** it mentions the assigned coach via a `<@coach>` user mention (`event.claimed_by_discord_id` + `allowed_mentions.users`), falling back to the owners-group role mention + `bot_event_started_no_coach_warning` when no coach is claimed (and to the bare warning text when neither is resolvable); for **non-training** events it mentions `event.discord_role_id` (the member-group role) as before. Note `event.discord_role_id` is the OWNERS-group role for trainings and the MEMBER-group role otherwise — this overload is set server-side; see `applications/server/AGENTS.md` → "Overloaded payload fields on event sync events". The handler also best-effort deletes the owners-thread claim message (`Event/GetClaimInfo` → `rest.deleteMessage`, swallowing code 10008) when a training starts.
+
+#### Roster-approval sync handlers (Event↔Roster Attendance)
+
+Three event-sync handlers drive the Discord side of the Event↔Roster Attendance approval flow. The server-side emit contract for these event types lives in `applications/server/AGENTS.md` → "Overloaded payload fields on event sync events (roster approval flow)".
+
+| Handler | Event type | Behaviour |
+|---------|-----------|-----------|
+| `handleEventRosterApprovalRequest` | `event_roster_approval_request` | Posts the approval embed (built by `buildRosterApprovalMessage`) with Approve/Decline buttons into the owners thread, then saves the posted message id back via `Event/SaveApprovalRequestMessageId`. |
+| `handleEventRosterApprovalCancel` | `event_roster_approval_cancel` | `rest.deleteMessage(owners_thread_id, discord_message_id)`; swallows code 10008 (Unknown Message). No-ops when either id is `None`. |
+| `handleEventRosterThreadDelete` | `event_roster_thread_delete` | `rest.deleteChannel(owners_thread_id)`; swallows code 10003 (Unknown Channel). No-ops when `owners_thread_id` is `None`. |
+
+`handleEventRosterApprovalRequest` resolves the owners thread with the same race-safe lazy-create pattern as the persistent claim thread (see "Persistent owners claim thread" in `applications/server/AGENTS.md`):
+
+1. If `event.owners_thread_id` is `Some`, use it. Otherwise `rest.createThread(owner_channel_id, ...)` (PUBLIC_THREAD, 7-day auto-archive), then `Event/SaveEventRosterThreadIfAbsent` returns the WINNING thread id. If another request won the save race, `rest.deleteChannel` the orphan thread (best-effort) and use the winner's id.
+2. If `owner_channel_id` is `None`, log a warning and skip — no thread can be created.
+3. On `createMessage` failure with code 10003 / HTTP 404 (thread deleted), call `Event/ClearEventRosterThread`, recreate via the same race-safe path, and retry the post once.
+4. The candidate's `discord_id` is resolved server-side and arrives on the event as `candidate_discord_id` — the handler never looks it up itself.
 
 ### Finance Sync (payment reminders → user DMs)
 
@@ -699,6 +720,16 @@ Rules (must be preserved):
 #### Coach claim / release buttons
 
 `ClaimButton` and `UnclaimButton` (`src/interactions/claim.ts`) are matched via `Ix.idStartsWith('claim:')` and `Ix.idStartsWith('unclaim:')`. The `custom_id` format is `claim:{team_id}:{event_id}` and `unclaim:{team_id}:{event_id}` — parsed positionally by `data.custom_id.split(':')`. Both handlers respond with `DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE` (ephemeral), fork the RPC call (`Event/ClaimTraining` / `Event/UnclaimTraining`) in the background via `Effect.forkDetach`, and edit the original webhook message with the localized result. RPC error tags are mapped to localized strings via `Effect.catchTag`: `ClaimAlreadyClaimed` → `bot_claim_already_claimed_by`, `ClaimNotOwnerGroupMember` → `bot_claim_not_owner`, `ClaimEventInactive` / `ClaimEventNotFound` / `ClaimNotTraining` → `bot_claim_event_cancelled`, `ClaimNotClaimer` → `bot_claim_release_not_claimer`.
+
+#### Roster approve / decline buttons
+
+`RosterApproveButton` and `RosterDeclineButton` (`src/interactions/roster-approval.ts`) are matched via `Ix.idStartsWith('rsv-approve:')` and `Ix.idStartsWith('rsv-decline:')`. The `custom_id` format is `rsv-approve:{eventId}:{memberId}` and `rsv-decline:{eventId}:{memberId}` — parsed positionally by `data.custom_id.split(':')`. Both handlers respond with `DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE` (ephemeral), fork the RPC call (`Event/ApproveRosterRequest` / `Event/DeclineRosterRequest`, payload `{ event_id, team_member_id, decided_by_discord_id }`) in the background via `Effect.forkDetach`, and edit the original webhook message with the localized result. RPC error tags map to localized strings via `Effect.catchTag`: `NotOwnerGroupMember` → `bot_roster_ephemeral_not_owner`, `RosterRequestNotPending` → `bot_roster_ephemeral_already_handled`, `RosterRequestNotFound` / `EventRosterEventNotFound` → `bot_roster_ephemeral_error`.
+
+Rules:
+
+1. **The Discord path passes `decided_by_discord_id`; the server resolves the decider and enforces owner-group membership.** This is the Discord side of the dual-surface approve/decline convergence — the web path instead authenticates `roster:manage` and passes `membership.id`, but both surfaces converge on `EventRosterProvisioningService.approve`/`decline`. See `applications/server/AGENTS.md` → "Dual-surface roster approve/decline convergence".
+2. **On success, the handler disables the source message's button row in place** (`rest.updateMessage` with a disabled `buildDisabledRosterRow`) AND the server emits an `event_roster_approval_cancel` sync so the thread message is deleted — the in-place disable is the immediate UX; the cancel sync is the durable cleanup.
+3. **`already_handled` / `already_member` outcomes** edit the follow-up to `bot_roster_ephemeral_already_handled` without re-disabling — the message was already decided.
 
 ## Environment Variables (`src/env.ts`)
 

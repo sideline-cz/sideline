@@ -858,6 +858,42 @@ Pagination button inside the ephemeral original-email embed. Appears when the em
 
 ---
 
+### Roster Approve Button — `rsv-approve:{eventId}:{memberId}`
+
+Approves a roster attendance request from the per-event approval thread.
+
+**Custom ID pattern:** `rsv-approve:{eventId}:{memberId}`
+
+**Behavior:**
+
+1. Responds immediately with a deferred ephemeral acknowledgement.
+2. The background fiber calls `Event/ApproveRosterRequest` RPC with `event_id`, `team_member_id`, and the invoking user's `discord_user_id`.
+3. If the outcome is `approved`: edits the follow-up with a localised "Approved {candidate}" confirmation and disables both Approve/Decline buttons on the source message.
+4. If the outcome is `already_handled` or `already_member`: edits the follow-up with "Already handled".
+5. Errors: `NotOwnerGroupMember` → "Only owners can decide" ephemeral; `RosterRequestNotPending` → "Already handled"; `RosterRequestNotFound` / `EventRosterEventNotFound` → generic error ephemeral.
+
+**Source file:** `applications/bot/src/interactions/roster-approval.ts` (`RosterApproveButton`)
+
+---
+
+### Roster Decline Button — `rsv-decline:{eventId}:{memberId}`
+
+Declines a roster attendance request from the per-event approval thread.
+
+**Custom ID pattern:** `rsv-decline:{eventId}:{memberId}`
+
+**Behavior:**
+
+1. Responds immediately with a deferred ephemeral acknowledgement.
+2. The background fiber calls `Event/DeclineRosterRequest` RPC with `event_id`, `team_member_id`, and the invoking user's `discord_user_id`.
+3. If the outcome is `declined`: edits the follow-up with a localised "Declined" confirmation and disables both Approve/Decline buttons on the source message.
+4. If the outcome is `already_handled` or `already_member`: edits the follow-up with "Already handled".
+5. Errors: same as Roster Approve Button.
+
+**Source file:** `applications/bot/src/interactions/roster-approval.ts` (`RosterDeclineButton`)
+
+---
+
 ### Event Create Autocomplete
 
 Provides training type suggestions for the `/event create training_type` option.
@@ -1101,6 +1137,9 @@ Channel sync manages Discord channels and roles for Sideline groups. The Discord
 | `coaching_status` | `handleCoachingStatus.ts` | Posts a green "today's coach is X" embed to the channel supplied in `discord_target_channel_id`. The coach is shown as a Discord @-mention when a Discord ID is available, or a plain display name otherwise. Emitted by `CoachingStatusCron` on the day of a claimed training. |
 | `training_claim_update` | `handleTrainingClaimUpdate.ts` | Edits the existing claim-board message (located via `claim_discord_channel_id` / `claim_discord_message_id`). The updated embed reflects whether the training is now claimed (green, claimer shown as `**Name** (<@discordId>)` using the same `formatNameWithMention` helper as RSVP attendee lists, Unclaim button) or unclaimed (orange, Claim button). The claimer's identity fields (`discord_id`, `name`, `nickname`, `display_name`, `username`) are resolved at SELECT time via a LEFT JOIN to `team_members → users` rather than being stored in the outbox row. If the message has been deleted (404 response), the update is silently skipped. |
 | `unclaimed_training_reminder` | `handleUnclaimedTrainingReminder.ts` | Posts a yellow reminder embed to the owner-group's channel warning that the training is still unclaimed. If `claim_discord_channel_id` and `claim_discord_message_id` are present, the embed description includes a jump link to the claim-board message. If a Discord role is set, the message content @-mentions that role. Emitted by `RsvpReminderCron` alongside the normal RSVP reminder when the training's `claimed_by` is NULL. |
+| `event_roster_approval_request` | `handleEventRosterApprovalRequest.ts` | Posts an Approve/Decline approval embed to a per-event Discord thread in the event's owner-group channel. Flow: (1) Resolve the stored thread ID via `Event/SaveEventRosterThreadIfAbsent`; if none exists, create a PUBLIC_THREAD (type 11, 7-day auto-archive, name `"Roster approval: {eventTitle}"` truncated to 100 chars) in `owner_channel_id` and save it with CAS — the loser of a concurrent race deletes its orphan thread and uses the winner's ID. (2) Build the approval embed (orange, pending state) via `buildRosterApprovalMessage` with event/candidate/roster fields and `rsv-approve:{eventId}:{memberId}` / `rsv-decline:{eventId}:{memberId}` button components. (3) Post the message to the resolved thread via `rest.createMessage`. (4) Persist the message ID via `Event/SaveApprovalRequestMessageId`. Emitted by `EventRosterProvisioningService` when a member RSVPs "yes" to an event whose linked roster has `auto_approve = false` and the member is not already a roster member. If `owner_channel_id` is absent (event has no owner group), the event is skipped with a warning. |
+| `event_roster_approval_cancel` | `handleEventRosterApprovalCancel.ts` | Deletes the specific approval embed message from the per-event thread. Uses `owners_thread_id` (the thread channel ID) and `discord_message_id` (the message ID) from the event payload. Discord 10008 errors (Unknown Message) are silently swallowed. Emitted when a pending approval request is cancelled — e.g. the member's RSVP changes away from "yes" or the event–roster link is removed. |
+| `event_roster_thread_delete` | `handleEventRosterThreadDelete.ts` | Deletes the entire per-event approval thread from Discord. Uses `owners_thread_id` from the event payload. Discord 10003 errors (Unknown Channel) are silently swallowed. Emitted when the event–roster link is removed and a thread previously existed. |
 
 **Lifecycle RPCs:**
 - `Event/MarkEventProcessed`

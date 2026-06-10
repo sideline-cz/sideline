@@ -15,6 +15,8 @@ import { SqlClient } from 'effect/unstable/sql';
 import { afterEach, beforeEach, describe, expect } from 'vitest';
 import { ChannelEventDividersRepository } from '~/repositories/ChannelEventDividersRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { EventRosterRequestsRepository } from '~/repositories/EventRosterRequestsRepository.js';
+import { EventRostersRepository } from '~/repositories/EventRostersRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
@@ -24,6 +26,7 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { EventsRpcLive } from '~/rpc/event/index.js';
+import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 
 // ---------------------------------------------------------------------------
 // Test IDs
@@ -369,6 +372,35 @@ const makeStaticLayers = (claimRequestDaysBefore = LARGE_LEAD_TIME) =>
     } as any),
   );
 
+const MockEventRostersRepositoryLayer = Layer.succeed(EventRostersRepository, {
+  findByEventId: () => Effect.succeed(Option.none()),
+  link: () => Effect.die(new Error('Not expected')),
+  unlink: () => Effect.void,
+  setAutoApprove: () => Effect.void,
+  saveThreadIfAbsent: () => Effect.succeed(Option.none()),
+  clearThread: () => Effect.void,
+} as any);
+
+const MockEventRosterRequestsRepositoryLayer = Layer.succeed(EventRosterRequestsRepository, {
+  findByEventAndMember: () => Effect.succeed(Option.none()),
+  upsertApproved: () => Effect.die(new Error('Not expected')),
+  upsertPending: () => Effect.die(new Error('Not expected')),
+  claimDecision: () => Effect.succeed(Option.none()),
+  cancel: () => Effect.succeed(Option.none()),
+  saveMessageId: () => Effect.void,
+  findPendingByEvent: () => Effect.succeed([]),
+  findPendingByRoster: () => Effect.succeed([]),
+  wasMemberBefore: () => Effect.succeed(false),
+  findById: () => Effect.succeed(Option.none()),
+} as any);
+
+const MockEventRosterProvisioningServiceLayer = Layer.succeed(EventRosterProvisioningService, {
+  onRsvp: () => Effect.void,
+  approve: () => Effect.die(new Error('Not expected')),
+  decline: () => Effect.die(new Error('Not expected')),
+  backfill: () => Effect.die(new Error('Not expected')),
+} as any);
+
 // Build the full RPC test layer with owner-group channel mapping
 const buildRpcTestLayer = (
   ownerGroupId: Option.Option<GroupModel.GroupId> = Option.some(OWNER_GROUP_ID),
@@ -382,6 +414,9 @@ const buildRpcTestLayer = (
     Layer.provide(makeMockDiscordChannelMappingRepository()),
     Layer.provide(makeStaticLayers(claimRequestDaysBefore)),
     Layer.provide(makeMockSqlClientLayer()),
+    Layer.provide(MockEventRostersRepositoryLayer),
+    Layer.provide(MockEventRosterRequestsRepositoryLayer),
+    Layer.provide(MockEventRosterProvisioningServiceLayer),
   );
 
 beforeEach(() => {

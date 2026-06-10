@@ -1,5 +1,12 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
-import type { EventApi, EventRsvpApi, GroupApi, TrainingTypeApi } from '@sideline/domain';
+import type {
+  EventApi,
+  EventRosterApi,
+  EventRsvpApi,
+  GroupApi,
+  Roster as RosterDomain,
+  TrainingTypeApi,
+} from '@sideline/domain';
 import { Discord, Event, EventSeries, GroupModel, Team, TrainingType } from '@sideline/domain';
 import { Link, useNavigate, useRouter } from '@tanstack/react-router';
 import { type DateTime, Effect, Option, Schema } from 'effect';
@@ -8,6 +15,7 @@ import { useForm } from 'react-hook-form';
 
 import { EventLocation } from '~/components/atoms/EventLocation.js';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import { EventAttendanceRosterSection } from '~/components/organisms/EventAttendanceRosterSection.js';
 import { EventRsvpPanel } from '~/components/organisms/EventRsvpPanel.js';
 import { Button } from '~/components/ui/button';
 import { DatePicker } from '~/components/ui/date-picker';
@@ -107,6 +115,9 @@ interface EventDetailPageProps {
   rsvpDetail: EventRsvpApi.EventRsvpDetail;
   nonResponders: ReadonlyArray<EventRsvpApi.NonResponderEntry>;
   groups: ReadonlyArray<GroupApi.GroupInfo>;
+  rosters: ReadonlyArray<RosterDomain.RosterInfo>;
+  canManageRosters: boolean;
+  initialEventRosterLink: Option.Option<EventRosterApi.EventRosterLink>;
 }
 
 interface EventDateRangeProps {
@@ -154,6 +165,9 @@ export function EventDetailPage({
   rsvpDetail,
   nonResponders,
   groups,
+  rosters,
+  canManageRosters,
+  initialEventRosterLink,
 }: EventDetailPageProps) {
   const run = useRun();
   const router = useRouter();
@@ -865,6 +879,18 @@ export function EventDetailPage({
           </div>
         )}
       </div>
+
+      {canManageRosters && (
+        <div className='mt-6'>
+          <EventAttendanceRosterSection
+            teamId={teamId}
+            eventId={eventId}
+            rosters={rosters}
+            initialEventRosterLink={initialEventRosterLink}
+            onRefresh={() => router.invalidate()}
+          />
+        </div>
+      )}
     </div>
   );
 }

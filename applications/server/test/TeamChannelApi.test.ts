@@ -26,6 +26,8 @@ import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMa
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRoleProvisionEventsRepository } from '~/repositories/DiscordRoleProvisionEventsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
+import { EventRosterRequestsRepository } from '~/repositories/EventRosterRequestsRepository.js';
+import { EventRostersRepository } from '~/repositories/EventRostersRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
@@ -58,6 +60,7 @@ import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
@@ -585,6 +588,35 @@ const MockSqlClientLayer = Layer.succeed(
   ) as unknown as SqlClient.SqlClient,
 );
 
+const MockEventRostersRepositoryLayer = Layer.succeed(EventRostersRepository, {
+  findByEventId: () => Effect.succeed(Option.none()),
+  link: () => Effect.die(new Error('Not implemented')),
+  unlink: () => Effect.void,
+  setAutoApprove: () => Effect.void,
+  saveThreadIfAbsent: () => Effect.succeed(Option.none()),
+  clearThread: () => Effect.void,
+} as any);
+
+const MockEventRosterRequestsRepositoryLayer = Layer.succeed(EventRosterRequestsRepository, {
+  findByEventAndMember: () => Effect.succeed(Option.none()),
+  upsertApproved: () => Effect.die(new Error('Not implemented')),
+  upsertPending: () => Effect.die(new Error('Not implemented')),
+  claimDecision: () => Effect.succeed(Option.none()),
+  cancel: () => Effect.succeed(Option.none()),
+  saveMessageId: () => Effect.void,
+  findPendingByEvent: () => Effect.succeed([]),
+  findPendingByRoster: () => Effect.succeed([]),
+  wasMemberBefore: () => Effect.succeed(false),
+  findById: () => Effect.succeed(Option.none()),
+} as any);
+
+const MockEventRosterProvisioningServiceLayer = Layer.succeed(EventRosterProvisioningService, {
+  onRsvp: () => Effect.void,
+  approve: () => Effect.die(new Error('Not implemented')),
+  decline: () => Effect.die(new Error('Not implemented')),
+  backfill: () => Effect.succeed({ added: 0, cancelled: 0 }),
+} as any);
+
 const buildLayer = (overrides?: {
   botGuildsLayer?: Layer.Layer<BotGuildsRepository>;
   channelSyncLayer?: Layer.Layer<ChannelSyncEventsRepository>;
@@ -919,6 +951,9 @@ const buildLayer = (overrides?: {
     .pipe(Layer.provide(MockTeamChannelAccessRepositoryLayer))
     .pipe(Layer.provide(MockSqlClientLayer))
     .pipe(Layer.provide(MockEmailLayers))
+    .pipe(Layer.provide(MockEventRostersRepositoryLayer))
+    .pipe(Layer.provide(MockEventRosterRequestsRepositoryLayer))
+    .pipe(Layer.provide(MockEventRosterProvisioningServiceLayer))
     .pipe(Layer.provide(BotInfoStore.Default));
 
 let handler: (...args: any) => Promise<Response>;

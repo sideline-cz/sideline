@@ -39,6 +39,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Dashboard Layout](#28-dashboard-layout)
    - [Channel](#29-channel)
    - [Email Forwarding](#30-email-forwarding)
+   - [Event Roster](#31-event-roster)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -5602,6 +5603,221 @@ Downloads an attachment file. Returns the raw file bytes with `Content-Type`, `C
 
 ---
 
+### 31. Event Roster
+
+**Source:** `packages/domain/src/api/EventRosterApi.ts`
+
+Links a tournament event to a named roster and manages the attendance-approval workflow. A linked event–roster pair optionally runs an auto-approve flow (members who RSVP "yes" are added to the roster automatically) or a manual-approval flow (owners review each request via a dedicated Discord thread and from the roster detail page).
+
+**Required Permission:** All write endpoints require `roster:manage`.
+
+---
+
+#### `GET /teams/:teamId/events/:eventId/roster`
+
+Returns the current event–roster link, or `null` if no roster is linked.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Response:** `200 OK` — `EventRosterLink | null`
+
+`EventRosterLink`:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `eventRosterId` | `EventRosterId` | No | Event–roster link ID |
+| `eventId` | `EventId` | No | Event ID |
+| `rosterId` | `RosterId` | No | Roster ID |
+| `rosterName` | `string` | No | Roster display name |
+| `autoApprove` | `boolean` | No | Whether new "yes" RSVPs are auto-approved onto the roster |
+| `hasOwnerGroup` | `boolean` | No | Whether the event has an owner group (determines if the approval thread flow is available) |
+| `memberCount` | `number` | No | Current member count on the linked roster |
+| `backfillAdded` | `number \| null` | Yes | Number of members added during a backfill (present only on `PATCH` response when auto-approve was toggled ON) |
+| `backfillCancelled` | `number \| null` | Yes | Number of pending requests cancelled during a backfill (present only on `PATCH` response when auto-approve was toggled ON) |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventRosterForbidden` | 403 | Not a member, or missing required permission |
+| `EventRosterEventNotFound` | 404 | Event does not exist |
+
+---
+
+#### `POST /teams/:teamId/events/:eventId/roster`
+
+Links an existing roster to the event.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `roster:manage`
+
+**Request Body:** `LinkEventRosterRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rosterId` | `RosterId` | Yes | ID of the roster to link |
+| `autoApprove` | `boolean` | Yes | Whether to auto-approve "yes" RSVPs onto the roster |
+
+**Response:** `201 Created` — `EventRosterLink`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventRosterForbidden` | 403 | Missing `roster:manage` permission |
+| `EventRosterEventNotFound` | 404 | Event does not exist |
+| `EventRosterRosterNotFound` | 404 | Roster does not exist |
+| `EventRosterAlreadyLinked` | 409 | A roster is already linked to this event |
+
+---
+
+#### `POST /teams/:teamId/events/:eventId/roster/create`
+
+Creates a new roster and immediately links it to the event.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `roster:manage`
+
+**Request Body:** `CreateAndLinkRosterRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | Yes | New roster name |
+| `color` | `string \| null` | Yes | Hex colour string (null for none) |
+| `emoji` | `string \| null` | Yes | Emoji (null for none) |
+| `autoApprove` | `boolean` | Yes | Whether to auto-approve "yes" RSVPs onto the roster |
+
+**Response:** `201 Created` — `EventRosterLink`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventRosterForbidden` | 403 | Missing `roster:manage` permission |
+| `EventRosterEventNotFound` | 404 | Event does not exist |
+| `EventRosterAlreadyLinked` | 409 | A roster is already linked to this event |
+
+---
+
+#### `PATCH /teams/:teamId/events/:eventId/roster`
+
+Updates the `autoApprove` flag on the existing event–roster link. Toggling `autoApprove` to `true` triggers an immediate backfill: all current "yes" RSVPs from non-members are approved and added to the roster; any existing `pending` requests are cancelled. The `backfillAdded` and `backfillCancelled` fields in the response carry the counts.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `roster:manage`
+
+**Request Body:** `PatchEventRosterRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `autoApprove` | `boolean` | Yes | New auto-approve state |
+
+**Response:** `200 OK` — `EventRosterLink` (with `backfillAdded` and `backfillCancelled` populated)
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventRosterForbidden` | 403 | Missing `roster:manage` permission |
+| `EventRosterEventNotFound` | 404 | Event does not exist |
+| `EventRosterRosterNotFound` | 404 | Linked roster does not exist |
+
+---
+
+#### `DELETE /teams/:teamId/events/:eventId/roster`
+
+Removes the event–roster link. Any `pending` requests are cancelled; members who were added by the flow (i.e. `was_member_before = false`) are removed from the roster. If an approval thread exists it is scheduled for deletion via the `event_roster_thread_delete` sync event.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `roster:manage`
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventRosterForbidden` | 403 | Missing `roster:manage` permission |
+| `EventRosterEventNotFound` | 404 | Event does not exist |
+
+---
+
+#### `GET /teams/:teamId/rosters/:rosterId/requests`
+
+Lists all pending attendance approval requests for a roster across all linked events.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `roster:manage`
+
+**Response:** `200 OK` — `PendingRequestView[]`
+
+`PendingRequestView`:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `requestId` | `EventRosterRequestId` | No | Request ID |
+| `eventId` | `EventId` | No | Event the request came from |
+| `eventTitle` | `string` | No | Event title |
+| `candidateMemberId` | `TeamMemberId` | No | Team member who submitted the RSVP |
+| `candidateName` | `string \| null` | Yes | Display name of the candidate |
+| `requestedAt` | `string` (ISO 8601) | No | When the RSVP was submitted |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventRosterForbidden` | 403 | Missing `roster:manage` permission |
+| `EventRosterRosterNotFound` | 404 | Roster does not exist |
+
+---
+
+#### `POST /teams/:teamId/rosters/:rosterId/requests/:requestId/approve`
+
+Approves a pending attendance request and adds the member to the roster. Safe to call multiple times — `already_handled` is returned if the request was already decided.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `roster:manage`
+
+**Response:** `200 OK` — `ApproveDeclineResult`
+
+`ApproveDeclineResult`:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `outcome` | `'approved' \| 'declined' \| 'already_member' \| 'already_handled'` | No | Result of the operation |
+| `memberDisplayName` | `string \| null` | Yes | Display name of the affected member |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventRosterForbidden` | 403 | Missing `roster:manage` permission |
+| `EventRosterRosterNotFound` | 404 | Roster does not exist |
+| `EventRosterRequestNotFound` | 404 | Request does not exist |
+| `EventRosterRequestAlreadyHandled` | 409 | Request was already approved or declined |
+
+---
+
+#### `POST /teams/:teamId/rosters/:rosterId/requests/:requestId/decline`
+
+Declines a pending attendance request. The member is not added to the roster. Safe to call multiple times.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `roster:manage`
+
+**Response:** `200 OK` — `ApproveDeclineResult` (see approve endpoint for field descriptions)
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `EventRosterForbidden` | 403 | Missing `roster:manage` permission |
+| `EventRosterRosterNotFound` | 404 | Roster does not exist |
+| `EventRosterRequestNotFound` | 404 | Request does not exist |
+| `EventRosterRequestAlreadyHandled` | 409 | Request was already approved or declined |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -5657,6 +5873,28 @@ Manages event embeds, RSVPs, and event sync outbox processing.
 | `Event/GetUpcomingEventsForUser` | `guild_id`, `discord_user_id`, `offset`, `limit` → `UpcomingEventsForUserResult` | Lists upcoming events with the invoking user's RSVP status; used by `/event list`, the overview show button, and per-user embed pagination |
 | `Event/GetTrainingTypesByGuild` | `guild_id` → `TrainingTypeChoice[]` | Lists training types for a guild (for autocomplete) |
 | `Event/CreateEvent` | `guild_id`, `discord_user_id`, `event_type`, `title`, `start_at`, ... → `CreateEventResult` | Creates an event from the bot slash command |
+| `Event/GetChannelDivider` | `discord_channel_id` → `Snowflake \| null` | Returns the stored divider message ID for a channel |
+| `Event/SaveChannelDivider` | `discord_channel_id`, `discord_message_id` | Persists or updates the divider message ID |
+| `Event/DeleteChannelDivider` | `discord_channel_id` | Removes the stored divider message ID |
+| `Event/GetYesAttendeesForEmbed` | `event_id`, `limit`, `member_group_id` → `RsvpAttendeeEntry[]` | Returns up to `limit` yes-RSVP attendees filtered to a member group (including descendants) |
+| `Event/ClaimTraining` | `event_id`, `team_id`, `discord_user_id` → `EventClaimInfo` | Claims an unclaimed training for the invoking user; errors: `ClaimEventNotFound`, `ClaimNotTraining`, `ClaimEventInactive`, `ClaimNotOwnerGroupMember`, `ClaimAlreadyClaimed` |
+| `Event/UnclaimTraining` | `event_id`, `team_id`, `discord_user_id` → `EventClaimInfo` | Unclaims a previously claimed training; errors: `ClaimEventNotFound`, `ClaimEventInactive`, `ClaimNotClaimer` |
+| `Event/SaveClaimDiscordMessageId` | `event_id`, `channel_id`, `message_id` | Stores the claim-board message ID after posting |
+| `Event/SaveClaimThreadId` | `event_id`, `thread_id` | Stores the thread ID created from the claim-board message |
+| `Event/GetClaimInfo` | `event_id` → `EventClaimInfo \| null` | Returns claim metadata for a training event |
+| `Event/GetOwnerClaimThread` | `team_id`, `owner_group_id` → `Snowflake \| null` | Returns the persistent "Training claims" thread ID for an owner group |
+| `Event/SaveOwnerClaimThread` | `team_id`, `owner_group_id`, `thread_id` → `Snowflake \| null` | CAS-saves the claim thread; returns the winning ID (null means caller's value was saved) |
+| `Event/ClearOwnerClaimThread` | `team_id`, `owner_group_id` | Clears the stored claim thread ID (called when the thread is deleted) |
+| `Event/GetChannelsWithStoredMessages` | — → `{ discord_channel_id, guild_id }[]` | Returns all channels that have a stored event embed message (used by startup recovery) |
+| `Event/LinkEventRoster` | `event_id`, `team_id`, `roster_id`, `auto_approve` → `EventRoster` | Links a roster to an event; errors: `EventRosterAlreadyLinked`, `RosterNotFoundForLink`, `EventRosterEventNotFound` |
+| `Event/UnlinkEventRoster` | `event_id` | Removes the event–roster link |
+| `Event/GetEventRoster` | `event_id` → `EventRoster \| null` | Returns the current event–roster link row |
+| `Event/SetEventRosterAutoApprove` | `event_id`, `team_id`, `auto_approve` → `SetAutoApproveResult` | Updates the `auto_approve` flag and runs backfill if toggled ON; result has `added` and `cancelled` counts |
+| `Event/SaveEventRosterThreadIfAbsent` | `event_id`, `thread_id` → `Snowflake \| null` | CAS-saves the per-event approval thread ID; returns the winning value |
+| `Event/ClearEventRosterThread` | `event_id` | Clears the stored approval thread ID |
+| `Event/SaveApprovalRequestMessageId` | `event_id`, `team_member_id`, `message_id` | Stores the Discord message ID of the approval embed for a specific candidate |
+| `Event/ApproveRosterRequest` | `event_id`, `team_member_id`, `decided_by_discord_id` → `DecideRosterRequestResult` | Approves a pending roster request from Discord; errors: `RosterRequestNotFound`, `RosterRequestNotPending`, `NotOwnerGroupMember`, `EventRosterEventNotFound` |
+| `Event/DeclineRosterRequest` | `event_id`, `team_member_id`, `decided_by_discord_id` → `DecideRosterRequestResult` | Declines a pending roster request from Discord; errors: `RosterRequestNotFound`, `RosterRequestNotPending`, `NotOwnerGroupMember`, `EventRosterEventNotFound` |
 
 #### Role
 
@@ -5882,3 +6120,9 @@ The following table consolidates all error tags across all API groups.
 | `ChannelNotAdoptable` | 409 | Channel | `adoptDiscordChannel` was called on a non-text channel (type ≠ 0) |
 | `ChannelAdoptionNameConflict` | 409 | Channel | `adoptDiscordChannel` would create a name conflict with an existing active managed channel |
 | `ChannelNotRestorable` | 409 | Channel | `restoreDiscordChannel` was called on a channel that is not in the archive category, is already active, or is a category channel |
+| `EventRosterForbidden` | 403 | Event Roster | Not a member, or missing `roster:manage` permission |
+| `EventRosterEventNotFound` | 404 | Event Roster | Event does not exist |
+| `EventRosterRosterNotFound` | 404 | Event Roster | Roster does not exist |
+| `EventRosterRequestNotFound` | 404 | Event Roster | Request does not exist |
+| `EventRosterAlreadyLinked` | 409 | Event Roster | A roster is already linked to this event |
+| `EventRosterRequestAlreadyHandled` | 409 | Event Roster | Request was already approved or declined |

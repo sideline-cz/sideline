@@ -9,6 +9,9 @@ import { ChannelReorderSemaphore } from './ChannelReorderSemaphore.js';
 import { handleCancelled } from './handleCancelled.js';
 import { handleCoachingStatus } from './handleCoachingStatus.js';
 import { handleCreated } from './handleCreated.js';
+import { handleEventRosterApprovalCancel } from './handleEventRosterApprovalCancel.js';
+import { handleEventRosterApprovalRequest } from './handleEventRosterApprovalRequest.js';
+import { handleEventRosterThreadDelete } from './handleEventRosterThreadDelete.js';
 import { handleRsvpReminder } from './handleRsvpReminder.js';
 import { handleStarted } from './handleStarted.js';
 import { handleTrainingClaimRequest } from './handleTrainingClaimRequest.js';
@@ -29,6 +32,9 @@ const action: (
     Match.tag('training_claim_update', handleTrainingClaimUpdate),
     Match.tag('unclaimed_training_reminder', handleUnclaimedTrainingReminder),
     Match.tag('coaching_status', handleCoachingStatus),
+    Match.tag('event_roster_approval_request', handleEventRosterApprovalRequest),
+    Match.tag('event_roster_approval_cancel', handleEventRosterApprovalCancel),
+    Match.tag('event_roster_thread_delete', handleEventRosterThreadDelete),
     Match.exhaustive,
   );
 

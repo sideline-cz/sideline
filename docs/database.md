@@ -569,6 +569,55 @@ Attendance responses submitted by team members for a specific event.
 
 ---
 
+#### `event_rosters`
+
+Links a single event to a roster for attendance tracking. One event can have at most one linked roster (enforced by `UNIQUE (event_id)`).
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `event_id` | UUID | NOT NULL, FK → `events(id)` ON DELETE CASCADE, UNIQUE | — |
+| `roster_id` | UUID | NOT NULL, FK → `rosters(id)` ON DELETE CASCADE | — |
+| `auto_approve` | BOOLEAN | NOT NULL | `false` |
+| `owners_thread_id` | TEXT | — | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Indexes**: `idx_event_rosters_roster` on `(roster_id)`
+
+**Notes**: Added in migration `1789500000_create_event_rosters`. When `auto_approve = true`, a "yes" RSVP from a non-member automatically adds that member to the linked roster (via `EventRosterProvisioningService`); withdrawing the RSVP removes them if `was_member_before = false` on their `event_roster_requests` row. When `auto_approve = false`, a "yes" RSVP creates a `pending` request and the bot posts an Approve/Decline embed in a dedicated Discord thread (`owners_thread_id`) in the event owner-group's channel. `owners_thread_id` is written back by the bot after it creates the per-event approval thread; it is cleared via `Event/ClearEventRosterThread` if the thread is deleted. Enabling auto-approve via `PATCH /teams/:teamId/events/:eventId/roster` triggers a backfill: all current "yes" RSVPs for non-members are processed immediately and the response includes `backfillAdded` and `backfillCancelled` counts.
+
+---
+
+#### `event_roster_requests`
+
+Tracks each individual membership request created by the roster-attendance provisioning flow. One row per (event, team member) pair (enforced by `UNIQUE (event_id, team_member_id)`).
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `event_id` | UUID | NOT NULL, FK → `events(id)` ON DELETE CASCADE | — |
+| `roster_id` | UUID | NOT NULL, FK → `rosters(id)` ON DELETE CASCADE | — |
+| `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE CASCADE | — |
+| `status` | TEXT | NOT NULL, CHECK (`'pending'`, `'approved'`, `'declined'`, `'cancelled'`) | `'pending'` |
+| `source` | TEXT | NOT NULL, CHECK (`'auto'`, `'approval'`) | — |
+| `was_member_before` | BOOLEAN | NOT NULL | `false` |
+| `discord_message_id` | TEXT | — | — |
+| `decided_by` | UUID | FK → `team_members(id)` ON DELETE SET NULL | — |
+| `decided_at` | TIMESTAMPTZ | — | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(event_id, team_member_id)`
+
+**Indexes**:
+- `idx_err_event_status` on `(event_id, status)`
+- `idx_err_pending` — partial index on `(event_id) WHERE status = 'pending'`
+
+**Notes**: Added in migration `1789500001_create_event_roster_requests`. `source` is `'auto'` for requests created when `auto_approve = true` (member is added immediately without a human decision) and `'approval'` for requests that require owner approval. `was_member_before` is `true` if the member was already on the roster when the request was created; this flag is used by the provisioning service to decide whether to remove the member when the request is cancelled or the RSVP is withdrawn — pre-existing members are never removed. `discord_message_id` is the snowflake of the approval embed posted in the owner-group thread; set by the bot via `Event/SaveApprovalRequestMessageId` after posting the message. `decided_by` and `decided_at` are set when a request moves to `approved` or `declined`. `status = 'cancelled'` is set when the triggering RSVP is withdrawn or the event–roster link is removed.
+
+---
+
 ### 7. Discord Integration
 
 #### `bot_guilds`
@@ -712,7 +761,7 @@ Outbox table driving event announcements, edits, cancellations, and RSVP reminde
 | `id` | UUID | PK | `gen_random_uuid()` |
 | `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
 | `guild_id` | TEXT | NOT NULL | — |
-| `event_type` | TEXT | NOT NULL, CHECK (`'event_created'`, `'event_updated'`, `'event_cancelled'`, `'rsvp_reminder'`, `'event_started'`, `'training_claim_request'`, `'training_claim_update'`, `'unclaimed_training_reminder'`, `'coaching_status'`) | — |
+| `event_type` | TEXT | NOT NULL, CHECK (`'event_created'`, `'event_updated'`, `'event_cancelled'`, `'rsvp_reminder'`, `'event_started'`, `'training_claim_request'`, `'training_claim_update'`, `'unclaimed_training_reminder'`, `'coaching_status'`, `'event_roster_approval_request'`, `'event_roster_approval_cancel'`, `'event_roster_thread_delete'`) | — |
 | `event_id` | UUID | NOT NULL, FK → `events(id)` ON DELETE CASCADE | — |
 | `event_title` | TEXT | NOT NULL | — |
 | `event_description` | TEXT | — | — |
@@ -732,7 +781,7 @@ Outbox table driving event announcements, edits, cancellations, and RSVP reminde
 
 **Indexes**: `idx_event_sync_unprocessed` — partial index on `(created_at) WHERE processed_at IS NULL`
 
-**Notes**: Snapshot columns (`event_title`, `event_start_at`, etc.) are denormalised copies of the event data at the time of the sync event, ensuring the bot can post the embed even if the event is later modified. `rsvp_reminder` event type and `discord_target_channel_id` added in migration `1742500000` and `1742100000` respectively. `event_started` event type added in migration `1744000000`; emitted by `EventStartCron` when an event's `start_at` time passes. `member_group_id` and `discord_role_id` added in migration `1745800000`; `member_group_id` stores the UUID of the member group whose attendee list the bot should display (no FK constraint by design, to preserve rows after group deletion); `discord_role_id` is the Discord role to @-mention in the start-announcement message. For `event_started` rows whose `event_event_type` is `'training'`, `discord_role_id` is resolved from the event's owner group (not the member group) so the owners-group role is pinged as a fallback when no coach was assigned; for all other event types it is resolved from the member group as before. `training_claim_request`, `training_claim_update`, and `unclaimed_training_reminder` event types added in migration `1745900000` to drive the training-claim board in Discord; `claimed_by_member_id` carries the current claimer's team-member ID for `training_claim_update` events (no FK constraint by design, to preserve rows after member deletion); the claimer's identity fields (`discord_id`, `name`, `nickname`, `discord_display_name`, `username`) are resolved at SELECT time via a LEFT JOIN to `team_members → users` — they are not stored as columns in the table. `coaching_status` event type added in migration `1789300000_improve_coach_assigning`; emitted by `CoachingStatusCron` on the day of a claimed training to announce the coach's name in the member training channel. `event_location_url` added in migration `1746100000`; snapshot of the event's optional location URL at sync time. The `EventStartedEvent` RPC domain type carries a `claimed_by_discord_id` field (resolved at SELECT time from the claimer's `users.discord_id`); for training `event_started` rows it is used by `handleStarted` to @-mention the coach directly (`<@discordId>`) instead of the role; for non-training events it is always `None`.
+**Notes**: Snapshot columns (`event_title`, `event_start_at`, etc.) are denormalised copies of the event data at the time of the sync event, ensuring the bot can post the embed even if the event is later modified. `rsvp_reminder` event type and `discord_target_channel_id` added in migration `1742500000` and `1742100000` respectively. `event_started` event type added in migration `1744000000`; emitted by `EventStartCron` when an event's `start_at` time passes. `member_group_id` and `discord_role_id` added in migration `1745800000`; `member_group_id` stores the UUID of the member group whose attendee list the bot should display (no FK constraint by design, to preserve rows after group deletion); `discord_role_id` is the Discord role to @-mention in the start-announcement message. For `event_started` rows whose `event_event_type` is `'training'`, `discord_role_id` is resolved from the event's owner group (not the member group) so the owners-group role is pinged as a fallback when no coach was assigned; for all other event types it is resolved from the member group as before. `training_claim_request`, `training_claim_update`, and `unclaimed_training_reminder` event types added in migration `1745900000` to drive the training-claim board in Discord; `claimed_by_member_id` carries the current claimer's team-member ID for `training_claim_update` events (no FK constraint by design, to preserve rows after member deletion); the claimer's identity fields (`discord_id`, `name`, `nickname`, `discord_display_name`, `username`) are resolved at SELECT time via a LEFT JOIN to `team_members → users` — they are not stored as columns in the table. `coaching_status` event type added in migration `1789300000_improve_coach_assigning`; emitted by `CoachingStatusCron` on the day of a claimed training to announce the coach's name in the member training channel. `event_location_url` added in migration `1746100000`; snapshot of the event's optional location URL at sync time. The `EventStartedEvent` RPC domain type carries a `claimed_by_discord_id` field (resolved at SELECT time from the claimer's `users.discord_id`); for training `event_started` rows it is used by `handleStarted` to @-mention the coach directly (`<@discordId>`) instead of the role; for non-training events it is always `None`. Three new event types added in migration `1789500002_add_event_roster_sync_types` to drive the roster-attendance approval workflow: `event_roster_approval_request` is emitted by `EventRosterProvisioningService` when a member RSVPs "yes" to an event that has a linked roster with `auto_approve = false` and the member is not yet a roster member — the bot posts an Approve/Decline embed in the event's per-event owner-group thread; `event_roster_approval_cancel` is emitted when a pending approval is cancelled (e.g. the member changes their RSVP away from "yes" or the roster link is removed) — the bot deletes the original approval message in the thread; `event_roster_thread_delete` is emitted when the event–roster link is removed and a thread was previously created — the bot deletes the entire thread. The `EventRosterApprovalRequestEvent` RPC type carries the roster-specific fields (`event_roster_id`, `roster_id`, `team_member_id`, `candidate_discord_id`, `candidate_display_name`, `title`, `start_at`, `owners_thread_id`, `owner_channel_id`, `roster_name`) needed to build and post the approval embed; the row-level snapshot columns in `event_sync_events` are reused via the generic payload mechanism and those extra fields are serialised into the outbox JSON.
 
 ---
 

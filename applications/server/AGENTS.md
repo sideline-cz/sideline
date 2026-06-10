@@ -333,6 +333,50 @@ Two `event_sync_events` payload fields carry **different semantics depending on 
 
 For `event_started`, `EventStartCron` additionally passes `event.claimed_by` (the assigned coach's `TeamMemberId`) to `emitEventStarted` ONLY for trainings; the JOIN in `findUnprocessedEvents` resolves it to `claimed_by_discord_id`, and the bot prefers a `<@coach>` user mention over the role mention. See the bot AGENTS.md "Training claim threads" note for the consumer rules.
 
+### Overloaded payload fields on event sync events (roster approval flow)
+
+Three `event_sync_events` event types are emitted by the **Event↔Roster Attendance** feature. They reuse the generic outbox columns with specific semantics:
+
+| `event_type` | Emitter method | Key columns used | Semantic |
+|--------------|----------------|------------------|----------|
+| `event_roster_approval_request` | `emitEventRosterApprovalRequest` | `event_id` (FK to `events`), `group_id` (FK to `event_rosters.event_id` → resolved `owners_thread_id` at bot read time), `entity_id` = `EventRosterRequestId` (request row PK), `title` = roster name (snapshot), `start_at` = event start time (snapshot), `discord_message_id` = thread message id (nullable; the bot saves it back via `saveMessageId` after posting) | Bot posts an approval-request message to the owners Discord thread; the message id is stored so it can later be deleted on approve/decline |
+| `event_roster_approval_cancel` | `emitEventRosterApprovalCancel` | `entity_id` = `EventRosterRequestId`, `discord_message_id` = thread message id to delete (resolved at emit-time from `event_roster_requests.discord_message_id`) | Bot deletes the approval-request thread message when a request is approved or declined (from web or Discord) |
+| `event_roster_thread_delete` | `emitEventRosterThreadDelete` | `event_id` (FK to `events`), `group_id` (the `owners_thread_id` is resolved at bot read time from the `event_rosters` row) | Bot deletes the entire owners approval thread when the event↔roster link is removed via `unlinkEventRoster` |
+
+Rules:
+
+1. **The candidate's `discord_id` is never stored in the outbox row.** `emitEventRosterApprovalRequest` does NOT accept a `candidateDiscordId` parameter — the bot resolves it at read time via `LEFT JOIN team_members → users` on `event_roster_requests.team_member_id`.
+2. **`emitEventRosterApprovalCancel` must be emitted after EVERY successful approve/decline** (both Discord RPC path and web HTTP path) using the `discord_message_id` from the pending request row. If the request has no `discord_message_id` (`Option.none()`), the emit is skipped with `Effect.ignore` — the bot will no-op on a null message id.
+3. **`emitEventRosterApprovalCancel` must also be emitted for ALL pending requests** when `unlinkEventRoster` is called — iterate `requests.findPendingByEvent(eventId)` and emit one cancel per request before calling `eventRosters.unlink`.
+4. **`emitEventRosterThreadDelete` must be emitted** in `unlinkEventRoster` before the `eventRosters.unlink` call (while the `owners_thread_id` is still resolvable from the DB row).
+5. **`was_member_before` is set once on first upsert and never updated.** Both the approved and pending upserts (`_upsertApproved`, `_upsertPendingInsert`) use `ON CONFLICT (event_id, team_member_id) DO UPDATE SET ...` but intentionally omit `was_member_before` from the update list. This protects members who were on the roster at request-time: even if they are later removed before the event, the flag stays `true` so an admin decline does not double-remove them. See `_upsertApproved` in `src/repositories/EventRosterRequestsRepository.ts` for the immutability comment.
+
+### Roster request provenance invariant (do not break)
+
+`event_roster_requests.was_member_before` is a per-candidate provenance flag that decides whether withdrawing/declining a candidate removes them from the roster. `EventRosterProvisioningService` (`src/services/EventRosterProvisioningService.ts`) is the single owner of this invariant — never replicate the transitions elsewhere.
+
+Rules:
+
+1. **`was_member_before` is captured on the FIRST write only.** It is the result of `rosters.findMemberEntriesById(roster_id).some(e => e === memberId)` at the moment the flow first touches the candidate (auto-approve add, pending request, or backfill). Subsequent transitions (withdraw → re-RSVP yes, pending → approved) keep the original value — see the immutability rule above and the `ON CONFLICT DO UPDATE` omission.
+2. **Adding to the roster only happens when `was_member_before === false`.** `addMemberToRoster` is itself idempotent (re-checks membership and skips `emitRosterMemberAdded` if already present), but the service additionally gates the add on `!wasMemberBefore` so an already-rostered candidate is never re-added.
+3. **Removal on withdraw fires ONLY when the prior request status is `approved` AND `was_member_before === false`** (the T9 branch in `onRsvp`). This is the safety invariant: a candidate who was on the roster BEFORE the approval flow touched them (`was_member_before === true`, T10) is never removed by a withdraw, and a still-`pending` withdrawal (T8) only cancels the request + emits `event_roster_approval_cancel` — it never touches roster membership. The same gate (`!decisionRow.was_member_before`) governs whether `approve` adds the candidate.
+4. **`cancel` returns the prior row via a CTE** (`_cancelWithPrior` selects `status, was_member_before` from a `prior` CTE, then UPDATEs to `cancelled`). The service branches on that prior status — never read the row after the UPDATE, because the status is already `cancelled` by then.
+
+### Dual-surface roster approve/decline convergence
+
+A roster approval can be decided from **two surfaces**, each with a different authority model, but both converge on `EventRosterProvisioningService.approve` / `decline` by passing an already-resolved `deciderMemberId: TeamMemberId`:
+
+| Surface | Handler | Authority | How `deciderMemberId` is resolved |
+|---------|---------|-----------|-----------------------------------|
+| Discord button | `Event/ApproveRosterRequest` / `Event/DeclineRosterRequest` (`src/rpc/event/index.ts`) | Owner-group membership — the handler resolves `decided_by_discord_id` → `TeamMemberId`, looks up the event's `owner_group_id`, and verifies the decider is in `groups.getDescendantMemberIds(ownerGroupId)`, failing `NotOwnerGroupMember` otherwise. | resolved from `decided_by_discord_id` BEFORE calling the service |
+| Web HTTP | `approveEventRosterRequest` / `declineEventRosterRequest` (`src/api/event-roster.ts`) | `requirePermission(membership, 'roster:manage', forbidden)` — no owner-group check; `roster:manage` is the authority. | `membership.id` from the authenticated session |
+
+Rules:
+
+1. **The service performs NO authorization.** `approve`/`decline` trust `deciderMemberId` — each caller MUST enforce its own authority (owner-group check for Discord, `roster:manage` for web) BEFORE calling. Never move the owner-group check into the service, and never call the service from a third surface without an equivalent authority gate.
+2. **Both surfaces emit `event_roster_approval_cancel` on success** (via the service's `approve`/`decline`, which emit the cancel using the request row's `discord_message_id`) so the Discord thread message is disabled regardless of which surface decided. This is the durable cleanup; the Discord button handler additionally disables its own message in place for immediate UX (see `applications/bot/AGENTS.md` → "Roster approve / decline buttons").
+3. **The decision UPDATE is race-safe.** `claimDecision` is a guarded `UPDATE ... WHERE status = 'pending' RETURNING was_member_before`; it returns `Option.none()` when the row was already decided, which both surfaces map to `RosterRequestNotPending` → an idempotent "already handled" response. Two concurrent deciders therefore produce exactly one approval.
+
 ### Dead claim-thread column and RPC (do not reuse)
 
 `events.claim_thread_id` and the `Event/SaveClaimThreadId` RPC are **dead** as of the persistent-owners-claim-thread change. Claim threads are no longer per-training; they are one persistent thread per owners group stored on `discord_channel_mappings.claim_thread_id` (see "Persistent owners claim thread" below). Do not write to `events.claim_thread_id` or call `Event/SaveClaimThreadId` in new code.

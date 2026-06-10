@@ -1,4 +1,4 @@
-import type { GroupApi, Roster as RosterDomain } from '@sideline/domain';
+import type { EventRosterApi, GroupApi, Roster as RosterDomain } from '@sideline/domain';
 import { Discord, RosterModel, Team, TeamMember } from '@sideline/domain';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
@@ -8,6 +8,7 @@ import React from 'react';
 import { ColorPicker } from '~/components/atoms/ColorPicker.js';
 import { DiscordChannelLink } from '~/components/atoms/DiscordChannelLink.js';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import { RosterPendingRequestsSection } from '~/components/organisms/RosterPendingRequestsSection.js';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card';
@@ -26,6 +27,7 @@ interface RosterDetailPageProps {
   userId: string;
   discordChannels: ReadonlyArray<GroupApi.DiscordChannelInfo>;
   guildId: Option.Option<string>;
+  pendingRequests: ReadonlyArray<EventRosterApi.PendingRequestView>;
 }
 
 export function RosterDetailPage({
@@ -36,6 +38,7 @@ export function RosterDetailPage({
   canManage,
   discordChannels,
   guildId,
+  pendingRequests,
 }: RosterDetailPageProps) {
   const run = useRun();
   const router = useRouter();
@@ -447,6 +450,17 @@ export function RosterDetailPage({
             })}
           </tbody>
         </table>
+      )}
+
+      {canManage && (
+        <div className='mt-6'>
+          <RosterPendingRequestsSection
+            teamId={teamId}
+            rosterId={rosterId}
+            initialRequests={pendingRequests}
+            onRefresh={() => router.invalidate()}
+          />
+        </div>
       )}
     </div>
   );

@@ -51,6 +51,7 @@ import { EmailApprovalService } from '~/services/EmailApprovalService.js';
 import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
 import { MockChannelManagementLayers } from '../mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from '../mocks/dashboardLayoutMocks.js';
+import { MockEventRosterLayers } from '../mocks/eventRosterMocks.js';
 import { MockFinanceLayers } from '../mocks/financeMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from '../mocks/onboardingMocks.js';
 import { MockTeamChallengeRepositoryLayer } from '../mocks/teamChallengeMocks.js';
@@ -735,6 +736,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
   .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
   .pipe(Layer.provide(MockChannelManagementLayers))
+  .pipe(Layer.provide(MockEventRosterLayers))
   .pipe(Layer.provide(BotInfoStore.Default));
 
 // ---------------------------------------------------------------------------

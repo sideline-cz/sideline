@@ -17,6 +17,7 @@ import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
+import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 
 const forbidden = new EventRsvpApi.Forbidden();
 const notFound = new EventRsvpApi.EventNotFound();
@@ -108,7 +109,8 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
     Effect.bind('syncEvents', () => EventSyncEventsRepository.asEffect()),
     Effect.bind('teamSettings', () => TeamSettingsRepository.asEffect()),
     Effect.bind('groups', () => GroupsRepository.asEffect()),
-    Effect.map(({ members, events, rsvps, syncEvents, teamSettings, groups }) =>
+    Effect.bind('provisioning', () => EventRosterProvisioningService.asEffect()),
+    Effect.map(({ members, events, rsvps, syncEvents, teamSettings, groups, provisioning }) =>
       handlers
         .handle('getRsvps', ({ params: { teamId, eventId } }) =>
           Effect.Do.pipe(
@@ -177,7 +179,7 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
                 Effect.flatMap((isMember) => (isMember ? Effect.void : Effect.fail(forbidden))),
               ),
             ),
-            Effect.tap(({ membership }) =>
+            Effect.bind('upsertResult', ({ membership }) =>
               rsvps.upsertRsvp(eventId, membership.id, payload.response, payload.message).pipe(
                 Effect.catchTag(
                   'NoSuchElementError',
@@ -190,6 +192,24 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
                   ),
                 ),
               ),
+            ),
+            // Best-effort: trigger roster provisioning after RSVP
+            Effect.tap(({ event, membership, upsertResult }) =>
+              provisioning.onRsvp({
+                teamId,
+                event: {
+                  id: eventId,
+                  owner_group_id: event.owner_group_id,
+                  member_group_id: event.member_group_id,
+                  title: event.title,
+                  start_at: event.start_at,
+                },
+                memberId: membership.id,
+                discordUserId: Option.none(),
+                priorResponse: upsertResult.priorResponse,
+                newResponse: payload.response,
+                displayName: Option.none(),
+              }),
             ),
             Effect.andThen(({ event }) =>
               syncEvents.emitEventUpdated(

@@ -1,5 +1,11 @@
-import { EventRpcEvents } from '@sideline/domain';
-import { Effect, Match, Option } from 'effect';
+import {
+  Discord,
+  EventRosterModel,
+  EventRpcEvents,
+  RosterModel,
+  TeamMember,
+} from '@sideline/domain';
+import { Effect, Match, Option, Schema } from 'effect';
 import {
   type EventSyncEventRow,
   EventSyncEventsRepository,
@@ -190,6 +196,76 @@ export const constructEvent = Match.type<EventSyncEventRow>().pipe(
         claimed_by_display_name: r.claimed_by_name,
         claimed_by_discord_id: r.claimed_by_discord_id,
         location: r.event_location,
+      }),
+    ),
+  ),
+  // Roster attendance sync events — column overloads documented in EventSyncEventsRepository
+  Match.when({ event_type: 'event_roster_approval_request' }, (r) =>
+    Effect.succeed(
+      new EventRpcEvents.EventRosterApprovalRequestEvent({
+        id: r.id,
+        team_id: r.team_id,
+        guild_id: r.guild_id,
+        event_id: r.event_id,
+        // discord_target_channel_id overloaded with event_roster_id
+        event_roster_id: Schema.decodeUnknownSync(EventRosterModel.EventRosterId)(
+          Option.getOrElse(r.discord_target_channel_id, () => ''),
+        ),
+        // member_group_id overloaded with roster_id
+        roster_id: Schema.decodeUnknownSync(RosterModel.RosterId)(
+          Option.getOrElse(r.member_group_id, () => ''),
+        ),
+        // claimed_by_member_id stores the candidate
+        team_member_id: Schema.decodeUnknownSync(TeamMember.TeamMemberId)(
+          Option.getOrElse(r.claimed_by_member_id, () => ''),
+        ),
+        // candidate_discord_id is resolved via the member JOIN on claimed_by_member_id
+        candidate_discord_id: r.claimed_by_discord_id,
+        // claimed_by_name = COALESCE(u.name, ese.claimed_by_display_name) — uses stored snapshot
+        // when the user has no name, ensuring the bot embed shows something meaningful
+        candidate_display_name: r.claimed_by_name,
+        title: r.event_title,
+        start_at: r.event_start_at,
+        // event_location overloaded with owners_thread_id (Snowflake stored as plain string)
+        owners_thread_id: Option.map(r.event_location, (s) =>
+          Schema.decodeUnknownSync(Discord.Snowflake)(s),
+        ),
+        // discord_role_id overloaded with owner_channel_id
+        owner_channel_id: r.discord_role_id,
+        // event_description overloaded with roster_name
+        roster_name: r.event_description,
+      }),
+    ),
+  ),
+  Match.when({ event_type: 'event_roster_approval_cancel' }, (r) =>
+    Effect.succeed(
+      new EventRpcEvents.EventRosterApprovalCancelEvent({
+        id: r.id,
+        team_id: r.team_id,
+        guild_id: r.guild_id,
+        event_id: r.event_id,
+        // event_location overloaded with owners_thread_id
+        owners_thread_id: Option.map(r.event_location, (s) =>
+          Schema.decodeUnknownSync(Discord.Snowflake)(s),
+        ),
+        // discord_role_id overloaded with discord_message_id
+        discord_message_id: Option.map(r.discord_role_id, (s) =>
+          Schema.decodeUnknownSync(Discord.Snowflake)(s),
+        ),
+      }),
+    ),
+  ),
+  Match.when({ event_type: 'event_roster_thread_delete' }, (r) =>
+    Effect.succeed(
+      new EventRpcEvents.EventRosterThreadDeleteEvent({
+        id: r.id,
+        team_id: r.team_id,
+        guild_id: r.guild_id,
+        event_id: r.event_id,
+        // event_location overloaded with owners_thread_id
+        owners_thread_id: Option.map(r.event_location, (s) =>
+          Schema.decodeUnknownSync(Discord.Snowflake)(s),
+        ),
       }),
     ),
   ),

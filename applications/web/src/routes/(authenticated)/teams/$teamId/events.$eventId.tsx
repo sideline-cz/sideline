@@ -1,6 +1,6 @@
-import { Event, Team } from '@sideline/domain';
+import { Event, type EventRosterApi, type Roster, Team } from '@sideline/domain';
 import { createFileRoute } from '@tanstack/react-router';
-import { Effect, Schema } from 'effect';
+import { Effect, Option, Schema } from 'effect';
 import { EventDetailPage } from '~/components/pages/EventDetailPage';
 import { ApiClient, warnAndCatchAll } from '~/lib/runtime';
 
@@ -25,6 +25,19 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/events/$eve
           groups: api.group
             .listGroups({ params: { teamId } })
             .pipe(Effect.catch(() => Effect.succeed([] as const))),
+          rosters: api.roster.listRosters({ params: { teamId } }).pipe(
+            Effect.tapError((e) => Effect.logWarning('Failed to load rosters for event', e)),
+            Effect.catch(() =>
+              Effect.succeed({
+                canManage: false,
+                rosters: [] as ReadonlyArray<Roster.RosterInfo>,
+              }),
+            ),
+          ),
+          eventRosterLink: api.eventRoster.getEventRosterLink({ params: { teamId, eventId } }).pipe(
+            Effect.tapError((e) => Effect.logWarning('Failed to load event roster link', e)),
+            Effect.catch(() => Effect.succeed(Option.none<EventRosterApi.EventRosterLink>())),
+          ),
         }),
       ),
       warnAndCatchAll,
@@ -47,6 +60,9 @@ function EventDetailRoute() {
       discordChannels={data.discordChannels}
       nonResponders={data.nonResponders.nonResponders}
       groups={data.groups}
+      rosters={data.rosters.rosters}
+      canManageRosters={data.rosters.canManage}
+      initialEventRosterLink={data.eventRosterLink}
     />
   );
 }

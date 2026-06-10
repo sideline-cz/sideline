@@ -233,3 +233,47 @@ export class ClaimNotClaimer extends Schema.TaggedErrorClass<ClaimNotClaimer>()(
   'ClaimNotClaimer',
   {},
 ) {}
+
+export class DecideRosterRequestResult extends Schema.Class<DecideRosterRequestResult>(
+  'DecideRosterRequestResult',
+)({
+  outcome: Schema.Literals(['approved', 'declined', 'already_member', 'already_handled']),
+  member_display_name: Schema.OptionFromNullOr(Schema.String),
+}) {}
+
+export class SetAutoApproveResult extends Schema.Class<SetAutoApproveResult>(
+  'SetAutoApproveResult',
+)({
+  added: Schema.Number,
+  cancelled: Schema.Number,
+}) {}
+
+export class RosterRequestNotFound extends Schema.TaggedErrorClass<RosterRequestNotFound>()(
+  'RosterRequestNotFound',
+  {},
+) {}
+
+export class RosterRequestNotPending extends Schema.TaggedErrorClass<RosterRequestNotPending>()(
+  'RosterRequestNotPending',
+  {},
+) {}
+
+export class NotOwnerGroupMember extends Schema.TaggedErrorClass<NotOwnerGroupMember>()(
+  'NotOwnerGroupMember',
+  {},
+) {}
+
+export class EventRosterEventNotFound extends Schema.TaggedErrorClass<EventRosterEventNotFound>()(
+  'EventRosterEventNotFound',
+  {},
+) {}
+
+export class EventRosterAlreadyLinked extends Schema.TaggedErrorClass<EventRosterAlreadyLinked>()(
+  'EventRosterAlreadyLinked',
+  {},
+) {}
+
+export class RosterNotFoundForLink extends Schema.TaggedErrorClass<RosterNotFoundForLink>()(
+  'RosterNotFoundForLink',
+  {},
+) {}

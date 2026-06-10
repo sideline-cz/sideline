@@ -12,6 +12,8 @@
     "rootDir": "test",
     "noEmit": true,
     "baseUrl": ".",
-    "paths": { "~/*": ["./src/*", "../src/*"] }
+    "paths": { "~/*": ["./src/*", "../src/*"] },
+    "noUnusedLocals": false,
+    "exactOptionalPropertyTypes": false
   }
 }

@@ -54,6 +54,7 @@ import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { MockChannelManagementLayers } from './mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
+import { MockEventRosterLayers } from './mocks/eventRosterMocks.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from './mocks/onboardingMocks.js';
 import { MockTeamChallengeRepositoryLayer } from './mocks/teamChallengeMocks.js';
@@ -767,6 +768,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
   .pipe(Layer.provide(MockChannelManagementLayers))
   .pipe(Layer.provide(MockEmailLayers))
+  .pipe(Layer.provide(MockEventRosterLayers))
   .pipe(Layer.provide(BotInfoStore.Default));
 
 let handler: (...args: any) => Promise<Response>;
@@ -1313,6 +1315,7 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
       .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
       .pipe(Layer.provide(MockChannelManagementLayers))
       .pipe(Layer.provide(MockEmailLayers))
+      .pipe(Layer.provide(MockEventRosterLayers))
       .pipe(Layer.provide(BotInfoStore.Default));
 
   it('removed user re-joins via invite — reactivateMember is called, NOT addMember, returns JoinResult', async () => {

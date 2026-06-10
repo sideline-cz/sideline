@@ -295,13 +295,13 @@ const make = Effect.gen(function* () {
     rosterId: RosterModel.RosterId,
     rosterName: string,
     teamMemberId: TeamMember.TeamMemberId,
-    discordUserId: Discord.Snowflake,
+    discordUserId: Option.Option<Discord.Snowflake>,
   ) =>
     _emitIfGuildLinked(teamId, 'member_added', 'roster', {
       rosterId: Option.some(rosterId),
       rosterName: Option.some(rosterName),
       teamMemberId: Option.some(teamMemberId),
-      discordUserId: Option.some(discordUserId),
+      discordUserId,
     });
 
   const emitMemberRemoved = (
@@ -323,13 +323,13 @@ const make = Effect.gen(function* () {
     rosterId: RosterModel.RosterId,
     rosterName: string,
     teamMemberId: TeamMember.TeamMemberId,
-    discordUserId: Discord.Snowflake,
+    discordUserId: Option.Option<Discord.Snowflake>,
   ) =>
     _emitIfGuildLinked(teamId, 'member_removed', 'roster', {
       rosterId: Option.some(rosterId),
       rosterName: Option.some(rosterName),
       teamMemberId: Option.some(teamMemberId),
-      discordUserId: Option.some(discordUserId),
+      discordUserId,
     });
 
   const emitRosterChannelCreated = (

@@ -5,12 +5,13 @@ import {
   EventRpcModels,
   type EventRsvp,
   type GroupModel,
+  type RosterModel,
   Team,
   TeamMember,
   type TrainingType,
   User,
 } from '@sideline/domain';
-import { Bind, LogicError, Options, Schemas } from '@sideline/effect-lib';
+import { LogicError, Options, Schemas } from '@sideline/effect-lib';
 import {
   Array,
   Data,
@@ -26,6 +27,8 @@ import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { rsvpSubmissionsTotal } from '~/metrics.js';
 import { ChannelEventDividersRepository } from '~/repositories/ChannelEventDividersRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { EventRosterRequestsRepository } from '~/repositories/EventRosterRequestsRepository.js';
+import { EventRostersRepository } from '~/repositories/EventRostersRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
@@ -35,6 +38,7 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { resolveChannel } from '~/services/EventChannelResolver.js';
+import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
 import { constructEvent } from './events.js';
 
@@ -312,30 +316,34 @@ const createEvent = (
     ),
   );
 
-const rpcHandlers = Effect.Do.pipe(
-  Effect.bind('events', () => EventsRepository.asEffect()),
-  Effect.bind('rsvps', () => EventRsvpsRepository.asEffect()),
-  Effect.bind('deps', () =>
-    Effect.all({
-      syncEvents: EventSyncEventsRepository.asEffect(),
-      members: TeamMembersRepository.asEffect(),
-      groups: GroupsRepository.asEffect(),
-      sql: SqlClient.SqlClient.asEffect(),
-      trainingTypesRepo: TrainingTypesRepository.asEffect(),
-      teamsRepo: TeamsRepository.asEffect(),
-      teamSettings: TeamSettingsRepository.asEffect(),
-      channelDividers: ChannelEventDividersRepository.asEffect(),
-      mappingRepo: DiscordChannelMappingRepository.asEffect(),
-    }),
-  ),
-  Effect.let(
-    'Event/GetUnprocessedEvents',
-    ({ deps: { syncEvents } }) =>
-      ({ limit }: { readonly limit: number }) =>
-        syncEvents.findUnprocessed(limit).pipe(
+// ---------------------------------------------------------------------------
+// All services gathered upfront; handlers are built in a single Effect.map step
+// to avoid TypeScript's TS2589 "type instantiation excessively deep" error that
+// occurs when Effect.Do.pipe accumulates 30+ sequential Effect.let steps.
+// ---------------------------------------------------------------------------
+export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
+  Effect.all({
+    events: EventsRepository.asEffect(),
+    rsvps: EventRsvpsRepository.asEffect(),
+    syncEvents: EventSyncEventsRepository.asEffect(),
+    members: TeamMembersRepository.asEffect(),
+    groups: GroupsRepository.asEffect(),
+    sql: SqlClient.SqlClient.asEffect(),
+    trainingTypesRepo: TrainingTypesRepository.asEffect(),
+    teamsRepo: TeamsRepository.asEffect(),
+    teamSettings: TeamSettingsRepository.asEffect(),
+    channelDividers: ChannelEventDividersRepository.asEffect(),
+    mappingRepo: DiscordChannelMappingRepository.asEffect(),
+    eventRosters: EventRostersRepository.asEffect(),
+    rosterRequests: EventRosterRequestsRepository.asEffect(),
+    provisioning: EventRosterProvisioningService.asEffect(),
+  }).pipe(
+    Effect.map((svc) => ({
+      'Event/GetUnprocessedEvents': ({ limit }: { readonly limit: number }) =>
+        svc.syncEvents.findUnprocessed(limit).pipe(
           Effect.map(Array.map(flow(constructEvent))),
-          Effect.tap((arr) =>
-            Array.isArrayEmpty(arr) ? Effect.fail(NoChanges.make()) : Effect.void,
+          Effect.tap((events) =>
+            Array.isArrayEmpty(events) ? Effect.fail(NoChanges.make()) : Effect.void,
           ),
           Effect.tap((events) =>
             Effect.logInfo(`Collected ${events.length} event sync events from database.`),
@@ -346,23 +354,14 @@ const rpcHandlers = Effect.Do.pipe(
           ),
           Effect.catchTag('NoChanges', () => Effect.succeed(Array.empty())),
         ),
-  ),
-  Effect.let(
-    'Event/MarkEventProcessed',
-    ({ deps: { syncEvents } }) =>
-      ({ id }: { readonly id: string }) =>
-        syncEvents.markProcessed(id),
-  ),
-  Effect.let(
-    'Event/MarkEventFailed',
-    ({ deps: { syncEvents } }) =>
-      ({ id, error }: { readonly id: string; readonly error: string }) =>
-        syncEvents.markFailed(id, error),
-  ),
-  Effect.let(
-    'Event/SaveDiscordMessageId',
-    ({ events }) =>
-      ({
+
+      'Event/MarkEventProcessed': ({ id }: { readonly id: string }) =>
+        svc.syncEvents.markProcessed(id),
+
+      'Event/MarkEventFailed': ({ id, error }: { readonly id: string; readonly error: string }) =>
+        svc.syncEvents.markFailed(id, error),
+
+      'Event/SaveDiscordMessageId': ({
         event_id,
         discord_channel_id,
         discord_message_id,
@@ -370,14 +369,10 @@ const rpcHandlers = Effect.Do.pipe(
         readonly event_id: Event.EventId;
         readonly discord_channel_id: Discord.Snowflake;
         readonly discord_message_id: Discord.Snowflake;
-      }) =>
-        events.saveDiscordMessageId(event_id, discord_channel_id, discord_message_id),
-  ),
-  Effect.let(
-    'Event/GetDiscordMessageId',
-    ({ events }) =>
-      ({ event_id }: { readonly event_id: Event.EventId }) =>
-        events.getDiscordMessageId(event_id).pipe(
+      }) => svc.events.saveDiscordMessageId(event_id, discord_channel_id, discord_message_id),
+
+      'Event/GetDiscordMessageId': ({ event_id }: { readonly event_id: Event.EventId }) =>
+        svc.events.getDiscordMessageId(event_id).pipe(
           Effect.map(
             Option.flatMap((row) =>
               Option.all({
@@ -387,17 +382,10 @@ const rpcHandlers = Effect.Do.pipe(
             ),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetChannelsWithStoredMessages',
-    ({ events }) =>
-      () =>
-        events.findAllChannelsWithStoredMessages(),
-  ),
-  Effect.let(
-    'Event/SubmitRsvp',
-    ({ rsvps, events, deps: { sql, groups, teamSettings } }) =>
-      ({
+
+      'Event/GetChannelsWithStoredMessages': () => svc.events.findAllChannelsWithStoredMessages(),
+
+      'Event/SubmitRsvp': ({
         event_id,
         team_id,
         discord_user_id,
@@ -423,7 +411,7 @@ const rpcHandlers = Effect.Do.pipe(
             }),
           ),
           Effect.bind('event', () =>
-            events.findEventByIdWithDetails(event_id).pipe(
+            svc.events.findEventByIdWithDetails(event_id).pipe(
               Effect.tap((event) => Effect.logInfo('Found event by id', event)),
               Effect.flatMap(Options.toEffect(() => new EventRpcModels.RsvpEventNotFound())),
             ),
@@ -440,7 +428,7 @@ const rpcHandlers = Effect.Do.pipe(
                 team_id: Schema.String,
               }),
               Result: TeamMemberLookup,
-              execute: (input) => sql`
+              execute: (input) => svc.sql`
                 SELECT tm.id,
                        u.name,
                        u.discord_nickname AS nickname,
@@ -464,7 +452,7 @@ const rpcHandlers = Effect.Do.pipe(
             Option.match(event.member_group_id, {
               onNone: () => Effect.void,
               onSome: (groupId) =>
-                groups
+                svc.groups
                   .getDescendantMemberIds(groupId)
                   .pipe(
                     Effect.flatMap((memberIds) =>
@@ -475,11 +463,8 @@ const rpcHandlers = Effect.Do.pipe(
                   ),
             }),
           ),
-          Effect.bind('priorRsvp', ({ member }) =>
-            rsvps.findRsvpByEventAndMember(event_id, member.id),
-          ),
-          Effect.bind('savedRsvp', ({ member }) =>
-            rsvps.upsertRsvp(event_id, member.id, response, message, clearMessage).pipe(
+          Effect.bind('upsertResult', ({ member }) =>
+            svc.rsvps.upsertRsvp(event_id, member.id, response, message, clearMessage).pipe(
               Effect.catchTag(
                 'NoSuchElementError',
                 LogicError.withMessage(
@@ -491,21 +476,48 @@ const rpcHandlers = Effect.Do.pipe(
               ),
             ),
           ),
-          Effect.bind('counts', () => getRsvpCounts(rsvps, event_id, events)),
+          // Best-effort: call provisioning after RSVP — failure must NOT fail the write
+          Effect.tap(({ event, member, upsertResult }) =>
+            svc.provisioning
+              .onRsvp({
+                teamId: team_id,
+                event: {
+                  id: event.id,
+                  owner_group_id: event.owner_group_id,
+                  member_group_id: event.member_group_id,
+                  title: event.title,
+                  start_at: event.start_at,
+                },
+                memberId: member.id,
+                discordUserId: Option.some(discord_user_id),
+                priorResponse: upsertResult.priorResponse,
+                newResponse: response,
+                displayName: member.name,
+              })
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning(
+                    'EventRosterProvisioningService.onRsvp best-effort error in SubmitRsvp RPC',
+                    cause,
+                  ),
+                ),
+              ),
+          ),
+          Effect.bind('counts', () => getRsvpCounts(svc.rsvps, event_id, svc.events)),
           Effect.let(
             'isLateRsvp',
-            ({ event, priorRsvp }) =>
+            ({ event, upsertResult }) =>
               Option.isSome(event.reminder_sent_at) &&
-              (Option.isNone(priorRsvp) ||
-                Option.exists(priorRsvp, (r) => r.response !== response)),
+              (Option.isNone(upsertResult.priorResponse) ||
+                Option.exists(upsertResult.priorResponse, (r) => r !== response)),
           ),
           Effect.bind('lateRsvpChannelId', ({ isLateRsvp }) =>
             isLateRsvp
-              ? teamSettings.findLateRsvpChannelId(team_id)
+              ? svc.teamSettings.findLateRsvpChannelId(team_id)
               : Effect.succeed(Option.none<Discord.Snowflake>()),
           ),
           Effect.map(
-            ({ counts, isLateRsvp, lateRsvpChannelId, savedRsvp, member }) =>
+            ({ counts, isLateRsvp, lateRsvpChannelId, upsertResult, member }) =>
               new EventRpcModels.SubmitRsvpResult({
                 yesCount: counts.yesCount,
                 noCount: counts.noCount,
@@ -513,7 +525,7 @@ const rpcHandlers = Effect.Do.pipe(
                 canRsvp: counts.canRsvp,
                 isLateRsvp,
                 lateRsvpChannelId,
-                message: savedRsvp.message,
+                message: upsertResult.row.message,
                 userName: member.name,
                 userNickname: member.nickname,
                 userDisplayName: member.display_name,
@@ -521,18 +533,12 @@ const rpcHandlers = Effect.Do.pipe(
               }),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetRsvpCounts',
-    ({ rsvps, events }) =>
-      ({ event_id }: { readonly event_id: Event.EventId }) =>
-        getRsvpCounts(rsvps, event_id, events),
-  ),
-  Effect.let(
-    'Event/GetEventEmbedInfo',
-    ({ events }) =>
-      ({ event_id }: { readonly event_id: Event.EventId }) =>
-        events.findEventByIdWithDetails(event_id).pipe(
+
+      'Event/GetRsvpCounts': ({ event_id }: { readonly event_id: Event.EventId }) =>
+        getRsvpCounts(svc.rsvps, event_id, svc.events),
+
+      'Event/GetEventEmbedInfo': ({ event_id }: { readonly event_id: Event.EventId }) =>
+        svc.events.findEventByIdWithDetails(event_id).pipe(
           Effect.map(
             Option.map(
               (row) =>
@@ -550,12 +556,13 @@ const rpcHandlers = Effect.Do.pipe(
             ),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetChannelEvents',
-    ({ events }) =>
-      ({ discord_channel_id }: { readonly discord_channel_id: Discord.Snowflake }) =>
-        events.findEventsByChannelId(discord_channel_id).pipe(
+
+      'Event/GetChannelEvents': ({
+        discord_channel_id,
+      }: {
+        readonly discord_channel_id: Discord.Snowflake;
+      }) =>
+        svc.events.findEventsByChannelId(discord_channel_id).pipe(
           Effect.map(
             Array.map(
               (row) =>
@@ -577,11 +584,8 @@ const rpcHandlers = Effect.Do.pipe(
             ),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetRsvpAttendees',
-    ({ rsvps }) =>
-      ({
+
+      'Event/GetRsvpAttendees': ({
         event_id,
         offset,
         limit,
@@ -591,8 +595,8 @@ const rpcHandlers = Effect.Do.pipe(
         readonly limit: number;
       }) =>
         Effect.Do.pipe(
-          Effect.bind('attendees', () => rsvps.findRsvpAttendeesPage(event_id, offset, limit)),
-          Effect.bind('total', () => rsvps.countRsvpTotal(event_id)),
+          Effect.bind('attendees', () => svc.rsvps.findRsvpAttendeesPage(event_id, offset, limit)),
+          Effect.bind('total', () => svc.rsvps.countRsvpTotal(event_id)),
           Effect.map(
             ({ attendees, total }) =>
               new EventRpcModels.RsvpAttendeesResult({
@@ -613,23 +617,20 @@ const rpcHandlers = Effect.Do.pipe(
               }),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetRsvpReminderSummary',
-    ({ rsvps, events }) =>
-      ({ event_id }: { readonly event_id: Event.EventId }) =>
+
+      'Event/GetRsvpReminderSummary': ({ event_id }: { readonly event_id: Event.EventId }) =>
         Effect.Do.pipe(
           Effect.bind('event', () =>
-            events.findEventByIdWithDetails(event_id).pipe(Effect.map(Option.getOrUndefined)),
+            svc.events.findEventByIdWithDetails(event_id).pipe(Effect.map(Option.getOrUndefined)),
           ),
-          Effect.bind('counts', () => rsvps.countRsvpsByEventId(event_id)),
+          Effect.bind('counts', () => svc.rsvps.countRsvpsByEventId(event_id)),
           Effect.bind('nonResponders', ({ event }) =>
             event
-              ? rsvps.findNonRespondersByEventId(event_id, event.team_id, event.member_group_id)
+              ? svc.rsvps.findNonRespondersByEventId(event_id, event.team_id, event.member_group_id)
               : Effect.succeed([]),
           ),
           Effect.bind('yesAttendees', ({ event }) =>
-            rsvps.findYesAttendeesForEmbed(
+            svc.rsvps.findYesAttendeesForEmbed(
               event_id,
               50,
               event ? event.member_group_id : Option.none(),
@@ -673,11 +674,8 @@ const rpcHandlers = Effect.Do.pipe(
             });
           }),
         ),
-  ),
-  Effect.let(
-    'Event/GetUpcomingGuildEvents',
-    ({ events, deps: { sql } }) =>
-      ({
+
+      'Event/GetUpcomingGuildEvents': ({
         guild_id,
         offset,
         limit,
@@ -691,7 +689,7 @@ const rpcHandlers = Effect.Do.pipe(
             SqlSchema.findOne({
               Request: Schema.String,
               Result: TeamLookupResult,
-              execute: (guildId) => sql`SELECT id FROM teams WHERE guild_id = ${guildId}`,
+              execute: (guildId) => svc.sql`SELECT id FROM teams WHERE guild_id = ${guildId}`,
             })(guild_id).pipe(
               Effect.catchTag('NoSuchElementError', () =>
                 Effect.fail(new EventRpcModels.GuildNotFound()),
@@ -700,8 +698,8 @@ const rpcHandlers = Effect.Do.pipe(
               Effect.map((r) => r.id),
             ),
           ),
-          Effect.bind('rows', () => events.findUpcomingByGuildId(guild_id, offset, limit)),
-          Effect.bind('total', () => events.countUpcomingByGuildId(guild_id)),
+          Effect.bind('rows', () => svc.events.findUpcomingByGuildId(guild_id, offset, limit)),
+          Effect.bind('total', () => svc.events.countUpcomingByGuildId(guild_id)),
           Effect.map(
             ({ teamId, rows, total }) =>
               new EventRpcModels.GuildEventListResult({
@@ -727,11 +725,8 @@ const rpcHandlers = Effect.Do.pipe(
               }),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetUpcomingEventsForUser',
-    ({ deps: { sql } }) =>
-      ({
+
+      'Event/GetUpcomingEventsForUser': ({
         guild_id,
         discord_user_id,
         offset,
@@ -747,7 +742,7 @@ const rpcHandlers = Effect.Do.pipe(
             SqlSchema.findOne({
               Request: Schema.String,
               Result: TeamLookupResult,
-              execute: (guildId) => sql`SELECT id FROM teams WHERE guild_id = ${guildId}`,
+              execute: (guildId) => svc.sql`SELECT id FROM teams WHERE guild_id = ${guildId}`,
             })(guild_id).pipe(
               Effect.catchTag('NoSuchElementError', () =>
                 Effect.fail(new EventRpcModels.GuildNotFound()),
@@ -763,7 +758,7 @@ const rpcHandlers = Effect.Do.pipe(
               Result: Schema.Struct({
                 id: TeamMember.TeamMemberId,
               }),
-              execute: (input) => sql`
+              execute: (input) => svc.sql`
                 SELECT tm.id FROM team_members tm
                 JOIN users u ON u.id = tm.user_id
                 WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
@@ -803,7 +798,7 @@ const rpcHandlers = Effect.Do.pipe(
                 my_message: Schema.OptionFromNullOr(Schema.String),
                 all_day: Schema.Boolean,
               }),
-              execute: (input) => sql`
+              execute: (input) => svc.sql`
                 SELECT
                   e.id AS event_id,
                   e.team_id,
@@ -866,7 +861,7 @@ const rpcHandlers = Effect.Do.pipe(
                 team_member_id: Schema.String,
               }),
               Result: Schema.Struct({ count: Schema.Number }),
-              execute: (input) => sql`
+              execute: (input) => svc.sql`
                 SELECT COUNT(DISTINCT e.id)::int AS count
                 FROM events e
                 WHERE e.team_id = ${input.team_id}
@@ -933,20 +928,14 @@ const rpcHandlers = Effect.Do.pipe(
               }),
           ),
         ),
-  ),
-);
 
-export const EventsRpcLive = rpcHandlers.pipe(
-  Effect.let(
-    'Event/GetTrainingTypesByGuild',
-    ({ deps: { trainingTypesRepo, teamsRepo } }) =>
-      ({ guild_id }: { readonly guild_id: Discord.Snowflake }) =>
-        teamsRepo.findByGuildId(guild_id).pipe(
+      'Event/GetTrainingTypesByGuild': ({ guild_id }: { readonly guild_id: Discord.Snowflake }) =>
+        svc.teamsRepo.findByGuildId(guild_id).pipe(
           Effect.flatMap(
             Option.match({
               onNone: () => Effect.succeed(Array.empty<EventRpcModels.TrainingTypeChoice>()),
               onSome: (team) =>
-                trainingTypesRepo.findTrainingTypesByTeamId(team.id).pipe(
+                svc.trainingTypesRepo.findTrainingTypesByTeamId(team.id).pipe(
                   Effect.map(
                     Array.map(
                       (tt) =>
@@ -965,11 +954,8 @@ export const EventsRpcLive = rpcHandlers.pipe(
             ),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/GetYesAttendeesForEmbed',
-    ({ rsvps }) =>
-      ({
+
+      'Event/GetYesAttendeesForEmbed': ({
         event_id,
         limit,
         member_group_id,
@@ -978,7 +964,7 @@ export const EventsRpcLive = rpcHandlers.pipe(
         readonly limit: number;
         readonly member_group_id: Option.Option<GroupModel.GroupId>;
       }) =>
-        rsvps.findYesAttendeesForEmbed(event_id, limit, member_group_id).pipe(
+        svc.rsvps.findYesAttendeesForEmbed(event_id, limit, member_group_id).pipe(
           Effect.map(
             Array.map(
               (row) =>
@@ -994,11 +980,8 @@ export const EventsRpcLive = rpcHandlers.pipe(
             ),
           ),
         ),
-  ),
-  Effect.let(
-    'Event/CreateEvent',
-    ({ deps: { sql, members, syncEvents, trainingTypesRepo, mappingRepo }, events }) =>
-      (input: {
+
+      'Event/CreateEvent': (input: {
         readonly guild_id: Discord.Snowflake;
         readonly discord_user_id: Discord.Snowflake;
         readonly event_type: Event.EventType;
@@ -1010,36 +993,36 @@ export const EventsRpcLive = rpcHandlers.pipe(
         readonly description: Option.Option<string>;
         readonly training_type_id: Option.Option<TrainingType.TrainingTypeId>;
       }) =>
-        createEvent(sql, events, syncEvents, members, trainingTypesRepo, mappingRepo, input),
-  ),
-  Effect.let(
-    'Event/GetChannelDivider',
-    ({ deps: { channelDividers } }) =>
-      ({ discord_channel_id }: { readonly discord_channel_id: Discord.Snowflake }) =>
-        channelDividers.findByChannelId(discord_channel_id),
-  ),
-  Effect.let(
-    'Event/SaveChannelDivider',
-    ({ deps: { channelDividers } }) =>
-      ({
+        createEvent(
+          svc.sql,
+          svc.events,
+          svc.syncEvents,
+          svc.members,
+          svc.trainingTypesRepo,
+          svc.mappingRepo,
+          input,
+        ),
+
+      'Event/GetChannelDivider': ({
+        discord_channel_id,
+      }: {
+        readonly discord_channel_id: Discord.Snowflake;
+      }) => svc.channelDividers.findByChannelId(discord_channel_id),
+      'Event/SaveChannelDivider': ({
         discord_channel_id,
         discord_message_id,
       }: {
         readonly discord_channel_id: Discord.Snowflake;
         readonly discord_message_id: Discord.Snowflake;
-      }) =>
-        channelDividers.upsert(discord_channel_id, discord_message_id),
-  ),
-  Effect.let(
-    'Event/DeleteChannelDivider',
-    ({ deps: { channelDividers } }) =>
-      ({ discord_channel_id }: { readonly discord_channel_id: Discord.Snowflake }) =>
-        channelDividers.deleteByChannelId(discord_channel_id),
-  ),
-  Effect.let(
-    'Event/ClaimTraining',
-    ({ events, deps: { sql, groups, syncEvents } }) =>
-      ({
+      }) => svc.channelDividers.upsert(discord_channel_id, discord_message_id),
+
+      'Event/DeleteChannelDivider': ({
+        discord_channel_id,
+      }: {
+        readonly discord_channel_id: Discord.Snowflake;
+      }) => svc.channelDividers.deleteByChannelId(discord_channel_id),
+
+      'Event/ClaimTraining': ({
         event_id,
         team_id,
         discord_user_id,
@@ -1056,7 +1039,7 @@ export const EventsRpcLive = rpcHandlers.pipe(
                 team_id: Schema.String,
               }),
               Result: TeamMemberLookup,
-              execute: (input) => sql`
+              execute: (input) => svc.sql`
                 SELECT tm.id,
                        u.name,
                        u.discord_nickname AS nickname,
@@ -1077,7 +1060,7 @@ export const EventsRpcLive = rpcHandlers.pipe(
             ),
           ),
           Effect.bind('event', () =>
-            events.findEventByIdWithDetails(event_id).pipe(
+            svc.events.findEventByIdWithDetails(event_id).pipe(
               Effect.flatMap(
                 Option.match({
                   onNone: () => Effect.fail(new EventRpcModels.ClaimEventNotFound()),
@@ -1105,7 +1088,7 @@ export const EventsRpcLive = rpcHandlers.pipe(
             Option.match(event.owner_group_id, {
               onNone: () => Effect.fail(new EventRpcModels.ClaimNotOwnerGroupMember()),
               onSome: (ownerGroupId) =>
-                groups
+                svc.groups
                   .getDescendantMemberIds(ownerGroupId)
                   .pipe(
                     Effect.flatMap((memberIds) =>
@@ -1125,7 +1108,7 @@ export const EventsRpcLive = rpcHandlers.pipe(
                 )
               : Effect.void,
           ),
-          Effect.bind('claimResult', ({ member }) => events.claimTraining(event_id, member.id)),
+          Effect.bind('claimResult', ({ member }) => svc.events.claimTraining(event_id, member.id)),
           Effect.bind(
             'claimInfo',
             ({
@@ -1138,7 +1121,7 @@ export const EventsRpcLive = rpcHandlers.pipe(
               never
             > =>
               Option.isNone(claimResult)
-                ? events.findEventByIdWithDetails(event_id).pipe(
+                ? svc.events.findEventByIdWithDetails(event_id).pipe(
                     Effect.flatMap(
                       (
                         reloaded,
@@ -1163,7 +1146,7 @@ export const EventsRpcLive = rpcHandlers.pipe(
                       },
                     ),
                   )
-                : events
+                : svc.events
                     .findClaimInfo(event_id)
                     .pipe(
                       Effect.flatMap(
@@ -1172,7 +1155,7 @@ export const EventsRpcLive = rpcHandlers.pipe(
                     ),
           ),
           Effect.tap(({ event, claimInfo }) =>
-            syncEvents.emitTrainingClaimUpdate(
+            svc.syncEvents.emitTrainingClaimUpdate(
               team_id,
               event_id,
               event.title,
@@ -1189,11 +1172,8 @@ export const EventsRpcLive = rpcHandlers.pipe(
           ),
           Effect.map(({ claimInfo }) => claimInfo),
         ),
-  ),
-  Effect.let(
-    'Event/UnclaimTraining',
-    ({ events, deps: { sql, syncEvents } }) =>
-      ({
+
+      'Event/UnclaimTraining': ({
         event_id,
         team_id,
         discord_user_id,
@@ -1210,7 +1190,7 @@ export const EventsRpcLive = rpcHandlers.pipe(
                 team_id: Schema.String,
               }),
               Result: TeamMemberLookup,
-              execute: (input) => sql`
+              execute: (input) => svc.sql`
                 SELECT tm.id,
                        u.name,
                        u.discord_nickname AS nickname,
@@ -1231,7 +1211,7 @@ export const EventsRpcLive = rpcHandlers.pipe(
             ),
           ),
           Effect.bind('event', () =>
-            events.findEventByIdWithDetails(event_id).pipe(
+            svc.events.findEventByIdWithDetails(event_id).pipe(
               Effect.flatMap(
                 Option.match({
                   onNone: () => Effect.fail(new EventRpcModels.ClaimEventNotFound()),
@@ -1245,7 +1225,9 @@ export const EventsRpcLive = rpcHandlers.pipe(
               ? Effect.fail(new EventRpcModels.ClaimEventInactive())
               : Effect.void,
           ),
-          Effect.bind('unclaimResult', ({ member }) => events.unclaimTraining(event_id, member.id)),
+          Effect.bind('unclaimResult', ({ member }) =>
+            svc.events.unclaimTraining(event_id, member.id),
+          ),
           Effect.bind(
             'claimInfo',
             ({
@@ -1257,7 +1239,7 @@ export const EventsRpcLive = rpcHandlers.pipe(
             > =>
               Option.isNone(unclaimResult)
                 ? Effect.fail(new EventRpcModels.ClaimNotClaimer())
-                : events
+                : svc.events
                     .findClaimInfo(event_id)
                     .pipe(
                       Effect.flatMap(
@@ -1266,7 +1248,7 @@ export const EventsRpcLive = rpcHandlers.pipe(
                     ),
           ),
           Effect.tap(({ event, claimInfo }) =>
-            syncEvents.emitTrainingClaimUpdate(
+            svc.syncEvents.emitTrainingClaimUpdate(
               team_id,
               event_id,
               event.title,
@@ -1283,11 +1265,8 @@ export const EventsRpcLive = rpcHandlers.pipe(
           ),
           Effect.map(({ claimInfo }) => claimInfo),
         ),
-  ),
-  Effect.let(
-    'Event/SaveClaimDiscordMessageId',
-    ({ events }) =>
-      ({
+
+      'Event/SaveClaimDiscordMessageId': ({
         event_id,
         channel_id,
         message_id,
@@ -1295,43 +1274,28 @@ export const EventsRpcLive = rpcHandlers.pipe(
         readonly event_id: Event.EventId;
         readonly channel_id: Discord.Snowflake;
         readonly message_id: Discord.Snowflake;
-      }) =>
-        events.saveClaimDiscordMessage(event_id, channel_id, message_id),
-  ),
-  Effect.let(
-    'Event/SaveClaimThreadId',
-    ({ events }) =>
-      ({
+      }) => svc.events.saveClaimDiscordMessage(event_id, channel_id, message_id),
+
+      'Event/SaveClaimThreadId': ({
         event_id,
         thread_id,
       }: {
         readonly event_id: Event.EventId;
         readonly thread_id: Discord.Snowflake;
-      }) =>
-        events.saveClaimThread(event_id, thread_id),
-  ),
-  Effect.let(
-    'Event/GetClaimInfo',
-    ({ events }) =>
-      ({ event_id }: { readonly event_id: Event.EventId }) =>
-        events.findClaimInfo(event_id),
-  ),
-  Effect.let(
-    'Event/GetOwnerClaimThread',
-    ({ deps: { mappingRepo } }) =>
-      ({
+      }) => svc.events.saveClaimThread(event_id, thread_id),
+
+      'Event/GetClaimInfo': ({ event_id }: { readonly event_id: Event.EventId }) =>
+        svc.events.findClaimInfo(event_id),
+
+      'Event/GetOwnerClaimThread': ({
         team_id,
         owner_group_id,
       }: {
         readonly team_id: Team.TeamId;
         readonly owner_group_id: GroupModel.GroupId;
-      }) =>
-        mappingRepo.findClaimThread(team_id, owner_group_id),
-  ),
-  Effect.let(
-    'Event/SaveOwnerClaimThread',
-    ({ deps: { mappingRepo } }) =>
-      ({
+      }) => svc.mappingRepo.findClaimThread(team_id, owner_group_id),
+
+      'Event/SaveOwnerClaimThread': ({
         team_id,
         owner_group_id,
         thread_id,
@@ -1339,23 +1303,301 @@ export const EventsRpcLive = rpcHandlers.pipe(
         readonly team_id: Team.TeamId;
         readonly owner_group_id: GroupModel.GroupId;
         readonly thread_id: Discord.Snowflake;
-      }) =>
-        mappingRepo.saveClaimThreadIfAbsent(team_id, owner_group_id, thread_id),
-  ),
-  Effect.let(
-    'Event/ClearOwnerClaimThread',
-    ({ deps: { mappingRepo } }) =>
-      ({
+      }) => svc.mappingRepo.saveClaimThreadIfAbsent(team_id, owner_group_id, thread_id),
+
+      'Event/ClearOwnerClaimThread': ({
         team_id,
         owner_group_id,
       }: {
         readonly team_id: Team.TeamId;
         readonly owner_group_id: GroupModel.GroupId;
+      }) => svc.mappingRepo.clearClaimThread(team_id, owner_group_id),
+
+      // ---------------------------------------------------------------------------
+      // Event roster handlers
+      // ---------------------------------------------------------------------------
+
+      'Event/LinkEventRoster': ({
+        event_id,
+        roster_id,
+        auto_approve,
+      }: {
+        readonly event_id: Event.EventId;
+        readonly team_id: Team.TeamId;
+        readonly roster_id: RosterModel.RosterId;
+        readonly auto_approve: boolean;
       }) =>
-        mappingRepo.clearClaimThread(team_id, owner_group_id),
+        svc.eventRosters
+          .link({ eventId: event_id, rosterId: roster_id, autoApprove: auto_approve })
+          .pipe(
+            Effect.catchTag('EventRosterAlreadyLinked', () =>
+              Effect.fail(new EventRpcModels.EventRosterAlreadyLinked()),
+            ),
+            Effect.map((row) => ({
+              id: row.id,
+              event_id: row.event_id,
+              roster_id: row.roster_id,
+              auto_approve: row.auto_approve,
+              owners_thread_id: row.owners_thread_id,
+              created_at: row.created_at,
+              updated_at: row.updated_at,
+            })),
+          ),
+
+      'Event/UnlinkEventRoster': ({ event_id }: { readonly event_id: Event.EventId }) =>
+        svc.eventRosters.unlink(event_id),
+
+      'Event/GetEventRoster': ({ event_id }: { readonly event_id: Event.EventId }) =>
+        svc.eventRosters.findByEventId(event_id).pipe(
+          Effect.map((opt) =>
+            Option.map(opt, (link) => ({
+              id: link.id,
+              event_id: link.event_id,
+              roster_id: link.roster_id,
+              auto_approve: link.auto_approve,
+              owners_thread_id: link.owners_thread_id,
+              created_at: link.created_at,
+              updated_at: link.updated_at,
+            })),
+          ),
+        ),
+
+      'Event/SetEventRosterAutoApprove': ({
+        event_id,
+        team_id,
+        auto_approve,
+      }: {
+        readonly event_id: Event.EventId;
+        readonly team_id: Team.TeamId;
+        readonly auto_approve: boolean;
+      }) =>
+        svc.eventRosters.findByEventId(event_id).pipe(
+          Effect.tap(() => svc.eventRosters.setAutoApprove(event_id, auto_approve)),
+          Effect.flatMap((linkOpt) => {
+            // Run backfill only when toggling ON AND currently OFF
+            if (!auto_approve) {
+              return Effect.succeed(
+                new EventRpcModels.SetAutoApproveResult({ added: 0, cancelled: 0 }),
+              );
+            }
+            if (!Option.isSome(linkOpt)) {
+              return Effect.succeed(
+                new EventRpcModels.SetAutoApproveResult({ added: 0, cancelled: 0 }),
+              );
+            }
+            const link = linkOpt.value;
+            if (link.auto_approve) {
+              // Was already ON — no backfill needed
+              return Effect.succeed(
+                new EventRpcModels.SetAutoApproveResult({ added: 0, cancelled: 0 }),
+              );
+            }
+            return svc.rsvps.findRsvpsByEventId(event_id).pipe(
+              Effect.flatMap((allRsvps) => {
+                const yesResponders = allRsvps
+                  .filter((r) => r.response === 'yes')
+                  .map((r) => ({
+                    team_member_id: r.team_member_id,
+                    discord_user_id: Option.none<Discord.Snowflake>(),
+                    display_name: r.display_name,
+                  }));
+                return svc.provisioning
+                  .backfill({
+                    eventId: event_id,
+                    teamId: team_id,
+                    rosterId: link.roster_id,
+                    yesResponders,
+                  })
+                  .pipe(
+                    Effect.map(
+                      (result) =>
+                        new EventRpcModels.SetAutoApproveResult({
+                          added: result.added,
+                          cancelled: result.cancelled,
+                        }),
+                    ),
+                  );
+              }),
+            );
+          }),
+        ),
+
+      'Event/SaveEventRosterThreadIfAbsent': ({
+        event_id,
+        thread_id,
+      }: {
+        readonly event_id: Event.EventId;
+        readonly thread_id: Discord.Snowflake;
+      }) => svc.eventRosters.saveThreadIfAbsent(event_id, thread_id),
+
+      'Event/ClearEventRosterThread': ({ event_id }: { readonly event_id: Event.EventId }) =>
+        svc.eventRosters.clearThread(event_id),
+
+      'Event/SaveApprovalRequestMessageId': ({
+        event_id,
+        team_member_id,
+        message_id,
+      }: {
+        readonly event_id: Event.EventId;
+        readonly team_member_id: TeamMember.TeamMemberId;
+        readonly message_id: Discord.Snowflake;
+      }) => svc.rosterRequests.saveMessageId(event_id, team_member_id, message_id),
+
+      'Event/ApproveRosterRequest': ({
+        event_id,
+        team_member_id,
+        decided_by_discord_id,
+      }: {
+        readonly event_id: Event.EventId;
+        readonly team_member_id: TeamMember.TeamMemberId;
+        readonly decided_by_discord_id: Discord.Snowflake;
+      }) =>
+        Effect.Do.pipe(
+          // Resolve the event to get team_id and owner_group_id
+          Effect.bind('event', () =>
+            svc.events.findEventByIdWithDetails(event_id).pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.fail(new EventRpcModels.EventRosterEventNotFound()),
+                  onSome: Effect.succeed,
+                }),
+              ),
+            ),
+          ),
+          // Resolve the decider's team member record from their discord id
+          Effect.bind('decider', ({ event }) =>
+            SqlSchema.findOne({
+              Request: Schema.Struct({
+                discord_user_id: Schema.String,
+                team_id: Schema.String,
+              }),
+              Result: TeamMemberLookup,
+              execute: (input) => svc.sql`
+                SELECT tm.id,
+                       u.name,
+                       u.discord_nickname AS nickname,
+                       u.discord_display_name AS display_name,
+                       u.username
+                FROM team_members tm
+                JOIN users u ON u.id = tm.user_id
+                WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
+              `,
+            })({ discord_user_id: decided_by_discord_id, team_id: event.team_id }).pipe(
+              Effect.catchTag('NoSuchElementError', () =>
+                Effect.fail(new EventRpcModels.NotOwnerGroupMember()),
+              ),
+              Effect.mapError(() => new EventRpcModels.NotOwnerGroupMember()),
+            ),
+          ),
+          // Verify the decider is a member of the event's owner group
+          Effect.tap(({ event, decider }) =>
+            Option.match(event.owner_group_id, {
+              onNone: () => Effect.fail(new EventRpcModels.NotOwnerGroupMember()),
+              onSome: (ownerGroupId) =>
+                svc.groups
+                  .getDescendantMemberIds(ownerGroupId)
+                  .pipe(
+                    Effect.flatMap((memberIds) =>
+                      Array.contains(memberIds, decider.id)
+                        ? Effect.void
+                        : Effect.fail(new EventRpcModels.NotOwnerGroupMember()),
+                    ),
+                  ),
+            }),
+          ),
+          Effect.flatMap(({ event, decider }) =>
+            svc.provisioning
+              .approve({
+                eventId: event_id,
+                teamId: event.team_id,
+                memberId: team_member_id,
+                deciderMemberId: decider.id,
+              })
+              .pipe(
+                Effect.catchTag('EventRosterNotFound', () =>
+                  Effect.fail(new EventRpcModels.EventRosterEventNotFound()),
+                ),
+              ),
+          ),
+        ),
+
+      'Event/DeclineRosterRequest': ({
+        event_id,
+        team_member_id,
+        decided_by_discord_id,
+      }: {
+        readonly event_id: Event.EventId;
+        readonly team_member_id: TeamMember.TeamMemberId;
+        readonly decided_by_discord_id: Discord.Snowflake;
+      }) =>
+        Effect.Do.pipe(
+          // Resolve the event to get team_id and owner_group_id
+          Effect.bind('event', () =>
+            svc.events.findEventByIdWithDetails(event_id).pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.fail(new EventRpcModels.EventRosterEventNotFound()),
+                  onSome: Effect.succeed,
+                }),
+              ),
+            ),
+          ),
+          // Resolve the decider's team member record from their discord id
+          Effect.bind('decider', ({ event }) =>
+            SqlSchema.findOne({
+              Request: Schema.Struct({
+                discord_user_id: Schema.String,
+                team_id: Schema.String,
+              }),
+              Result: TeamMemberLookup,
+              execute: (input) => svc.sql`
+                SELECT tm.id,
+                       u.name,
+                       u.discord_nickname AS nickname,
+                       u.discord_display_name AS display_name,
+                       u.username
+                FROM team_members tm
+                JOIN users u ON u.id = tm.user_id
+                WHERE u.discord_id = ${input.discord_user_id} AND tm.team_id = ${input.team_id}
+              `,
+            })({ discord_user_id: decided_by_discord_id, team_id: event.team_id }).pipe(
+              Effect.catchTag('NoSuchElementError', () =>
+                Effect.fail(new EventRpcModels.NotOwnerGroupMember()),
+              ),
+              Effect.mapError(() => new EventRpcModels.NotOwnerGroupMember()),
+            ),
+          ),
+          // Verify the decider is a member of the event's owner group
+          Effect.tap(({ event, decider }) =>
+            Option.match(event.owner_group_id, {
+              onNone: () => Effect.fail(new EventRpcModels.NotOwnerGroupMember()),
+              onSome: (ownerGroupId) =>
+                svc.groups
+                  .getDescendantMemberIds(ownerGroupId)
+                  .pipe(
+                    Effect.flatMap((memberIds) =>
+                      Array.contains(memberIds, decider.id)
+                        ? Effect.void
+                        : Effect.fail(new EventRpcModels.NotOwnerGroupMember()),
+                    ),
+                  ),
+            }),
+          ),
+          Effect.flatMap(({ event, decider }) =>
+            svc.provisioning
+              .decline({
+                eventId: event_id,
+                teamId: event.team_id,
+                memberId: team_member_id,
+                deciderMemberId: decider.id,
+              })
+              .pipe(
+                Effect.catchTag('EventRosterNotFound', () =>
+                  Effect.fail(new EventRpcModels.EventRosterEventNotFound()),
+                ),
+              ),
+          ),
+        ),
+    })),
   ),
-  Bind.remove('events'),
-  Bind.remove('rsvps'),
-  Bind.remove('deps'),
-  (handlers) => EventRpcGroup.EventRpcGroup.toLayer(handlers),
 );

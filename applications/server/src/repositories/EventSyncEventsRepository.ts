@@ -1,6 +1,14 @@
-import { Discord, Event, GroupModel, Team, TeamMember } from '@sideline/domain';
+import {
+  Discord,
+  Event,
+  type EventRosterModel,
+  GroupModel,
+  type RosterModel,
+  Team,
+  TeamMember,
+} from '@sideline/domain';
 import { Schemas } from '@sideline/effect-lib';
-import { type DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
+import { DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 
@@ -14,6 +22,9 @@ const EventSyncEventType = Schema.Literals([
   'training_claim_update',
   'unclaimed_training_reminder',
   'coaching_status',
+  'event_roster_approval_request',
+  'event_roster_approval_cancel',
+  'event_roster_thread_delete',
 ]);
 type EventSyncEventType = typeof EventSyncEventType.Type;
 
@@ -36,6 +47,23 @@ const InsertInput = Schema.Struct({
   claimed_by_member_id: Schema.OptionFromNullOr(TeamMember.TeamMemberId),
   claimed_by_display_name: Schema.OptionFromNullOr(Schema.String),
   event_all_day: Schema.Boolean,
+});
+
+// Separate insert schema for roster-type events which overload columns with non-Snowflake values.
+const RosterInsertInput = Schema.Struct({
+  team_id: Team.TeamId,
+  guild_id: Discord.Snowflake,
+  event_type: EventSyncEventType,
+  event_id: Event.EventId,
+  event_title: Schema.String,
+  event_description: Schema.OptionFromNullOr(Schema.String), // overloaded: roster_name
+  event_start_at: Schemas.DateTimeFromIsoString,
+  discord_target_channel_id: Schema.OptionFromNullOr(Schema.String), // overloaded: event_roster_id
+  member_group_id: Schema.OptionFromNullOr(Schema.String), // overloaded: roster_id
+  discord_role_id: Schema.OptionFromNullOr(Schema.String), // overloaded: owner_channel_id / message_id
+  claimed_by_member_id: Schema.OptionFromNullOr(TeamMember.TeamMemberId), // team_member_id (candidate)
+  claimed_by_display_name: Schema.OptionFromNullOr(Schema.String), // candidate_display_name
+  event_location: Schema.OptionFromNullOr(Schema.String), // overloaded: owners_thread_id
 });
 
 class GuildLookupResult extends Schema.Class<GuildLookupResult>('GuildLookupResult')({
@@ -509,6 +537,155 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  // ---- Roster event helpers ---------------------------------------------------
+
+  const insertRosterEvent = SqlSchema.void({
+    Request: RosterInsertInput,
+    execute: (input) => sql`
+      INSERT INTO event_sync_events (
+        team_id, guild_id, event_type, event_id, event_title, event_description,
+        event_image_url, event_start_at, event_end_at, event_location,
+        event_location_url, event_event_type, discord_target_channel_id,
+        member_group_id, discord_role_id, claimed_by_member_id, claimed_by_display_name,
+        event_all_day
+      ) VALUES (
+        ${input.team_id}, ${input.guild_id}, ${input.event_type}, ${input.event_id},
+        ${input.event_title}, ${input.event_description},
+        ${null}, ${input.event_start_at}, ${null}, ${input.event_location},
+        ${null}, ${'roster'}, ${input.discord_target_channel_id},
+        ${input.member_group_id}, ${input.discord_role_id},
+        ${input.claimed_by_member_id}, ${input.claimed_by_display_name}, ${false}
+      )
+    `,
+  });
+
+  /**
+   * Emit an `event_roster_approval_request` outbox event.
+   *
+   * Column overloads (precedent: training-claim):
+   *   discord_target_channel_id → event_roster_id
+   *   member_group_id           → roster_id
+   *   claimed_by_member_id      → team_member_id (candidate)
+   *   claimed_by_display_name   → candidate_display_name (snapshot; COALESCE with u.name at read)
+   *   event_location            → owners_thread_id
+   *   discord_role_id           → owner_channel_id
+   *   event_description         → roster_name
+   *
+   * Note: candidate discord_id is resolved at read time via the JOIN on claimed_by_member_id →
+   * team_members → users.discord_id — no need to store it separately.
+   */
+  const emitEventRosterApprovalRequest = (
+    teamId: Team.TeamId,
+    eventId: Event.EventId,
+    eventRosterId: EventRosterModel.EventRosterId,
+    rosterId: RosterModel.RosterId,
+    teamMemberId: TeamMember.TeamMemberId,
+    candidateDisplayName: Option.Option<string>,
+    title: string,
+    startAt: DateTime.Utc,
+    ownersThreadId: Option.Option<Discord.Snowflake>,
+    ownerChannelId: Option.Option<Discord.Snowflake>,
+    rosterName: Option.Option<string>,
+  ) =>
+    lookupGuildId(teamId).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: ({ guild_id }) =>
+            insertRosterEvent({
+              team_id: teamId,
+              guild_id,
+              event_type: 'event_roster_approval_request',
+              event_id: eventId,
+              event_title: title,
+              event_description: rosterName,
+              event_start_at: startAt,
+              discord_target_channel_id: Option.some(eventRosterId),
+              member_group_id: Option.some(rosterId),
+              discord_role_id: ownerChannelId,
+              claimed_by_member_id: Option.some(teamMemberId),
+              claimed_by_display_name: candidateDisplayName,
+              event_location: ownersThreadId,
+            }),
+        }),
+      ),
+      catchSqlErrors,
+    );
+
+  /**
+   * Emit an `event_roster_approval_cancel` outbox event.
+   *
+   * Column overloads:
+   *   event_location  → owners_thread_id
+   *   discord_role_id → discord_message_id
+   */
+  const emitEventRosterApprovalCancel = (
+    teamId: Team.TeamId,
+    eventId: Event.EventId,
+    ownersThreadId: Option.Option<Discord.Snowflake>,
+    discordMessageId: Option.Option<Discord.Snowflake>,
+  ) =>
+    lookupGuildId(teamId).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: ({ guild_id }) =>
+            insertRosterEvent({
+              team_id: teamId,
+              guild_id,
+              event_type: 'event_roster_approval_cancel',
+              event_id: eventId,
+              event_title: '',
+              event_description: Option.none(),
+              event_start_at: DateTime.makeUnsafe(0),
+              discord_target_channel_id: Option.none(),
+              member_group_id: Option.none(),
+              discord_role_id: discordMessageId,
+              claimed_by_member_id: Option.none(),
+              claimed_by_display_name: Option.none(),
+              event_location: ownersThreadId,
+            }),
+        }),
+      ),
+      catchSqlErrors,
+    );
+
+  /**
+   * Emit an `event_roster_thread_delete` outbox event.
+   *
+   * Column overloads:
+   *   event_location → owners_thread_id
+   */
+  const emitEventRosterThreadDelete = (
+    teamId: Team.TeamId,
+    eventId: Event.EventId,
+    ownersThreadId: Option.Option<Discord.Snowflake>,
+  ) =>
+    lookupGuildId(teamId).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: ({ guild_id }) =>
+            insertRosterEvent({
+              team_id: teamId,
+              guild_id,
+              event_type: 'event_roster_thread_delete',
+              event_id: eventId,
+              event_title: '',
+              event_description: Option.none(),
+              event_start_at: DateTime.makeUnsafe(0),
+              discord_target_channel_id: Option.none(),
+              member_group_id: Option.none(),
+              discord_role_id: Option.none(),
+              claimed_by_member_id: Option.none(),
+              claimed_by_display_name: Option.none(),
+              event_location: ownersThreadId,
+            }),
+        }),
+      ),
+      catchSqlErrors,
+    );
+
   const findUnprocessed = (limit: number) => findUnprocessedEvents(limit).pipe(catchSqlErrors);
 
   const markProcessed = (id: string) => markEventProcessed({ id }).pipe(catchSqlErrors);
@@ -526,6 +703,9 @@ const make = Effect.gen(function* () {
     emitTrainingClaimUpdate,
     emitUnclaimedTrainingReminder,
     emitCoachingStatus,
+    emitEventRosterApprovalRequest,
+    emitEventRosterApprovalCancel,
+    emitEventRosterThreadDelete,
     findUnprocessed,
     markProcessed,
     markFailed,

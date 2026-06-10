@@ -2,9 +2,12 @@ import { Schema } from 'effect';
 import { Rpc, RpcGroup } from 'effect/unstable/rpc';
 import * as Discord from '~/models/Discord.js';
 import * as Event from '~/models/Event.js';
+import * as EventRosterModel from '~/models/EventRosterModel.js';
 import * as EventRsvp from '~/models/EventRsvp.js';
 import * as GroupModel from '~/models/GroupModel.js';
+import * as RosterModel from '~/models/RosterModel.js';
 import * as Team from '~/models/Team.js';
+import * as TeamMember from '~/models/TeamMember.js';
 import * as TrainingType from '~/models/TrainingType.js';
 import { UnprocessedEventSyncEvent } from './EventRpcEvents.js';
 import {
@@ -19,11 +22,18 @@ import {
   CreateEventInvalidDate,
   CreateEventNotMember,
   CreateEventResult,
+  DecideRosterRequestResult,
   EventClaimInfo,
   EventDiscordMessage,
   EventEmbedInfo,
+  EventRosterAlreadyLinked,
+  EventRosterEventNotFound,
   GuildEventListResult,
   GuildNotFound,
+  NotOwnerGroupMember,
+  RosterNotFoundForLink,
+  RosterRequestNotFound,
+  RosterRequestNotPending,
   RsvpAttendeeEntry,
   RsvpAttendeesResult,
   RsvpCountsResult,
@@ -32,6 +42,7 @@ import {
   RsvpMemberNotFound,
   RsvpNotGroupMember,
   RsvpReminderSummary,
+  SetAutoApproveResult,
   SubmitRsvpResult,
   TrainingTypeChoice,
   UpcomingEventsForUserResult,
@@ -228,5 +239,82 @@ export const EventRpcGroup = RpcGroup.make(
         guild_id: Discord.Snowflake,
       }),
     ),
+  }),
+  Rpc.make('LinkEventRoster', {
+    payload: {
+      event_id: Event.EventId,
+      team_id: Team.TeamId,
+      roster_id: RosterModel.RosterId,
+      auto_approve: Schema.Boolean,
+    },
+    success: EventRosterModel.EventRoster,
+    error: Schema.Union([
+      EventRosterAlreadyLinked,
+      RosterNotFoundForLink,
+      EventRosterEventNotFound,
+    ]),
+  }),
+  Rpc.make('UnlinkEventRoster', {
+    payload: { event_id: Event.EventId },
+    success: Schema.Void,
+  }),
+  Rpc.make('GetEventRoster', {
+    payload: { event_id: Event.EventId },
+    success: Schema.OptionFromNullOr(EventRosterModel.EventRoster),
+  }),
+  Rpc.make('SetEventRosterAutoApprove', {
+    payload: {
+      event_id: Event.EventId,
+      team_id: Team.TeamId,
+      auto_approve: Schema.Boolean,
+    },
+    success: SetAutoApproveResult,
+  }),
+  Rpc.make('SaveEventRosterThreadIfAbsent', {
+    payload: {
+      event_id: Event.EventId,
+      thread_id: Discord.Snowflake,
+    },
+    success: Schema.OptionFromNullOr(Discord.Snowflake),
+  }),
+  Rpc.make('ClearEventRosterThread', {
+    payload: { event_id: Event.EventId },
+    success: Schema.Void,
+  }),
+  Rpc.make('SaveApprovalRequestMessageId', {
+    payload: {
+      event_id: Event.EventId,
+      team_member_id: TeamMember.TeamMemberId,
+      message_id: Discord.Snowflake,
+    },
+    success: Schema.Void,
+  }),
+  Rpc.make('ApproveRosterRequest', {
+    payload: {
+      event_id: Event.EventId,
+      team_member_id: TeamMember.TeamMemberId,
+      decided_by_discord_id: Discord.Snowflake,
+    },
+    success: DecideRosterRequestResult,
+    error: Schema.Union([
+      RosterRequestNotFound,
+      RosterRequestNotPending,
+      NotOwnerGroupMember,
+      EventRosterEventNotFound,
+    ]),
+  }),
+  Rpc.make('DeclineRosterRequest', {
+    payload: {
+      event_id: Event.EventId,
+      team_member_id: TeamMember.TeamMemberId,
+      decided_by_discord_id: Discord.Snowflake,
+    },
+    success: DecideRosterRequestResult,
+    error: Schema.Union([
+      RosterRequestNotFound,
+      RosterRequestNotPending,
+      NotOwnerGroupMember,
+      EventRosterEventNotFound,
+    ]),
   }),
 ).prefix('Event/');

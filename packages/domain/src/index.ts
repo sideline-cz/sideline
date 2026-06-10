@@ -25,6 +25,8 @@ export * as EmailForwardingApi from './api/EmailForwardingApi.js';
 
 export * as EventApi from './api/EventApi.js';
 
+export * as EventRosterApi from './api/EventRosterApi.js';
+
 export * as EventRsvpApi from './api/EventRsvpApi.js';
 
 export * as EventSeriesApi from './api/EventSeriesApi.js';
@@ -113,6 +115,8 @@ export * as EarnedAchievement from './models/EarnedAchievement.js';
 export * as EmailForwarding from './models/EmailForwarding.js';
 
 export * as Event from './models/Event.js';
+
+export * as EventRosterModel from './models/EventRosterModel.js';
 
 export * as EventRsvp from './models/EventRsvp.js';
 

@@ -114,6 +114,29 @@ On the day of the training, if the training has been claimed, the bot also posts
   The number of days before a training the claim-board message is posted defaults to **3**. Captains can change this in **Team settings → Coach assignment → Days before training** (range 0–30). Setting it to **0** posts the message on the day of the training. If the value is higher than the team's event horizon, the message may never appear because the training is not yet generated when the cron runs.
 </Aside>
 
+## Event roster attendance
+
+Captains can link a named roster to a specific event (for example, a tournament squad list) from the event's detail page in the web app. Once linked, every **"yes" RSVP** from a team member triggers one of two flows depending on the **auto-approve** setting:
+
+### Auto-approve ON
+
+Members who RSVP "yes" are added to the roster immediately — no action needed from captains. If they later withdraw their RSVP they are removed from the roster automatically, unless they were already a roster member before the link was created.
+
+### Auto-approve OFF (approval flow)
+
+When a non-member RSVPs "yes", the bot posts an **Approve / Decline** embed in a dedicated thread inside the event's owner-group channel. The thread is named after the event and is created automatically the first time a request comes in for that event.
+
+Owners can approve or decline each candidate:
+
+- **From Discord** — click the green **Approve** or red **Decline** button on the embed. Once decided, the buttons are disabled and the embed colour updates to green (approved) or red (declined).
+- **From the web app** — open the roster's detail page and use the **Pending requests** section to approve or decline each request.
+
+<Aside type="note" title="Who can approve?">
+  Only members of the event's **owner group** can click Approve or Decline. Anyone else receives a quiet ephemeral "only owners can decide" message.
+</Aside>
+
+Withdrawing a "yes" RSVP cancels the pending request and the bot removes the approval embed from the thread. When the event–roster link is removed entirely, all pending requests are cancelled and the thread is deleted.
+
 ## Group channels and roles
 
 Each group in Sideline gets a **Discord role** automatically — this happens when the group is first created or the first time a member is added to it. The role is what controls who can see the group's channel.

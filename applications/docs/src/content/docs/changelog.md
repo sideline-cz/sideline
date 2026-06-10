@@ -5,6 +5,20 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-10 — Event roster attendance: link a roster to a tournament event
+
+Captains can now link any named roster directly to an event (e.g. a tournament), then choose how "yes" RSVPs are handled:
+
+- **Auto-approve ON** — any member who RSVPs "yes" is added to the roster automatically. Withdrawing the RSVP removes them from the roster (unless they were already a member before the link was set up).
+- **Auto-approve OFF** — a "yes" RSVP creates a pending request. The event's owner group receives an **Approve / Decline** embed in a dedicated Discord thread. Owners can also approve or decline from the **roster detail page** in the web app.
+
+Other things to know:
+
+- You can link an existing roster or create a new one directly from the event detail page.
+- Toggling auto-approve ON after the fact immediately backfills: all current "yes" RSVPs from non-members are approved and any pending approval requests are cancelled.
+- Removing the roster link cancels all pending requests and removes members who were added by the flow (pre-existing roster members are never removed).
+- The approval thread is automatically cleaned up when the event–roster link is removed.
+
 ## 2026-06-09 — Training-start announcement @-mentions the assigned coach
 
 - When a training starts, the **"Starting now"** announcement in Discord now **@-mentions the assigned coach directly** instead of the member-group role, so the coach is notified the moment their session begins.

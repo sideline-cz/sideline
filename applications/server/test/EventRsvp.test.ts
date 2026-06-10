@@ -52,6 +52,7 @@ import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { MockChannelManagementLayers } from './mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
+import { MockEventRosterLayers } from './mocks/eventRosterMocks.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from './mocks/onboardingMocks.js';
 import { MockTeamChallengeRepositoryLayer } from './mocks/teamChallengeMocks.js';
@@ -544,11 +545,14 @@ const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
     };
     rsvpsStore.set(key, record);
     return Effect.succeed({
-      id: record.id,
-      event_id: record.event_id,
-      team_member_id: record.team_member_id,
-      response: record.response,
-      message: record.message,
+      row: {
+        id: record.id,
+        event_id: record.event_id,
+        team_member_id: record.team_member_id,
+        response: record.response,
+        message: record.message,
+      },
+      priorResponse: Option.none<EventRsvp.RsvpResponse>(),
     });
   },
   countByEventId: (eventId: Event.EventId) => {
@@ -943,6 +947,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
   .pipe(Layer.provide(MockChannelManagementLayers))
   .pipe(Layer.provide(MockEmailLayers))
+  .pipe(Layer.provide(MockEventRosterLayers))
   .pipe(Layer.provide(BotInfoStore.Default));
 
 let handler: (...args: any) => Promise<Response>;
@@ -1450,7 +1455,18 @@ const MockRpcEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
       display_name: Option.none(),
     };
     rpcRsvpsStore.set(key, record);
-    return Effect.succeed(record);
+    return Effect.succeed({
+      row: {
+        id: record.id,
+        event_id: record.event_id,
+        team_member_id: record.team_member_id,
+        response: record.response,
+        message: record.message,
+      },
+      priorResponse: existing
+        ? Option.some(existing.response)
+        : Option.none<EventRsvp.RsvpResponse>(),
+    });
   },
   countByEventId: () => Effect.succeed([]),
   countRsvpsByEventId: (eventId: Event.EventId) => {
@@ -1615,6 +1631,7 @@ const RpcTestLayer = EventsRpcLive.pipe(
   Layer.provide(MockRpcChannelEventDividersRepositoryLayer),
   Layer.provide(MockDiscordChannelMappingRepositoryLayer),
   Layer.provide(MockSqlClientLayer),
+  Layer.provide(MockEventRosterLayers),
 );
 
 // Helper to submit an RSVP via the Event/SubmitRsvp RPC handler

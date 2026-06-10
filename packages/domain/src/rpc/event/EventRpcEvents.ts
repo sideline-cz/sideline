@@ -2,7 +2,9 @@ import * as Schemas from '@sideline/effect-lib/Schemas';
 import { Schema } from 'effect';
 import * as Discord from '~/models/Discord.js';
 import * as Event from '~/models/Event.js';
+import * as EventRosterModel from '~/models/EventRosterModel.js';
 import * as GroupModel from '~/models/GroupModel.js';
+import * as RosterModel from '~/models/RosterModel.js';
 import * as Team from '~/models/Team.js';
 import * as TeamMember from '~/models/TeamMember.js';
 
@@ -160,6 +162,49 @@ export class CoachingStatusEvent extends Schema.TaggedClass<CoachingStatusEvent>
   },
 ) {}
 
+export class EventRosterApprovalRequestEvent extends Schema.TaggedClass<EventRosterApprovalRequestEvent>()(
+  'event_roster_approval_request',
+  {
+    id: Schema.String,
+    team_id: Team.TeamId,
+    guild_id: Discord.Snowflake,
+    event_id: Event.EventId,
+    event_roster_id: EventRosterModel.EventRosterId,
+    roster_id: RosterModel.RosterId,
+    team_member_id: TeamMember.TeamMemberId,
+    candidate_discord_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    candidate_display_name: Schema.OptionFromNullOr(Schema.String),
+    title: Schema.String,
+    start_at: Schemas.DateTimeFromIsoString,
+    owners_thread_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    owner_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    roster_name: Schema.OptionFromNullOr(Schema.String),
+  },
+) {}
+
+export class EventRosterApprovalCancelEvent extends Schema.TaggedClass<EventRosterApprovalCancelEvent>()(
+  'event_roster_approval_cancel',
+  {
+    id: Schema.String,
+    team_id: Team.TeamId,
+    guild_id: Discord.Snowflake,
+    event_id: Event.EventId,
+    owners_thread_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    discord_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  },
+) {}
+
+export class EventRosterThreadDeleteEvent extends Schema.TaggedClass<EventRosterThreadDeleteEvent>()(
+  'event_roster_thread_delete',
+  {
+    id: Schema.String,
+    team_id: Team.TeamId,
+    guild_id: Discord.Snowflake,
+    event_id: Event.EventId,
+    owners_thread_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  },
+) {}
+
 export const UnprocessedEventSyncEvent = Schema.Union([
   EventCreatedEvent,
   EventUpdatedEvent,
@@ -170,6 +215,9 @@ export const UnprocessedEventSyncEvent = Schema.Union([
   TrainingClaimUpdateEvent,
   UnclaimedTrainingReminderEvent,
   CoachingStatusEvent,
+  EventRosterApprovalRequestEvent,
+  EventRosterApprovalCancelEvent,
+  EventRosterThreadDeleteEvent,
 ]);
 
 export type UnprocessedEventSyncEvent = Schema.Schema.Type<typeof UnprocessedEventSyncEvent>;

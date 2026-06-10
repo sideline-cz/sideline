@@ -29,6 +29,8 @@ import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsReposit
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRoleProvisionEventsRepository } from '~/repositories/DiscordRoleProvisionEventsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
+import { EventRosterRequestsRepository } from '~/repositories/EventRosterRequestsRepository.js';
+import { EventRostersRepository } from '~/repositories/EventRostersRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
@@ -56,6 +58,7 @@ import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { MockChannelManagementLayers } from '../mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from '../mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from '../mocks/emailMocks.js';
@@ -452,6 +455,9 @@ const MockNoopLayers = Layer.mergeAll(
   noopMockLayer(CustomAchievementsRepository),
   noopMockLayer(DiscordRoleProvisionEventsRepository),
   noopMockLayer(AchievementPreview),
+  noopMockLayer(EventRostersRepository),
+  noopMockLayer(EventRosterRequestsRepository),
+  noopMockLayer(EventRosterProvisioningService),
   MockTeamSettingsRepositoryLayer,
   MockTranslationsLayers,
 );

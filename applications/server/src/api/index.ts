@@ -12,6 +12,7 @@ import { DashboardApiLive } from '~/api/dashboard.js';
 import { DashboardLayoutApiLive } from '~/api/dashboard-layout.js';
 import { EmailForwardingApiLive } from '~/api/email-forwarding.js';
 import { EventApiLive } from '~/api/event.js';
+import { EventRosterApiLive } from '~/api/event-roster.js';
 import { EventRsvpApiLive } from '~/api/event-rsvp.js';
 import { EventSeriesApiLive } from '~/api/event-series.js';
 import { ExpenseApiLive } from '~/api/expenses.js';
@@ -44,6 +45,7 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
     Layer.provide(AuthApiLive),
     Layer.provide(ChannelApiLive),
     Layer.provide(EventApiLive),
+    Layer.provide(EventRosterApiLive),
     Layer.provide(EventRsvpApiLive),
     Layer.provide(EventSeriesApiLive),
     Layer.provide(ExpenseApiLive),

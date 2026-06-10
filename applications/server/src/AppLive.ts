@@ -30,6 +30,8 @@ import { EmailAttachmentsRepository } from '~/repositories/EmailAttachmentsRepos
 import { EmailForwardingConfigRepository } from '~/repositories/EmailForwardingConfigRepository.js';
 import { EmailMessagesRepository } from '~/repositories/EmailMessagesRepository.js';
 import { EmailPostSyncEventsRepository } from '~/repositories/EmailPostSyncEventsRepository.js';
+import { EventRosterRequestsRepository } from '~/repositories/EventRosterRequestsRepository.js';
+import { EventRostersRepository } from '~/repositories/EventRostersRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
@@ -74,6 +76,7 @@ import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { EmailApprovalService } from '~/services/EmailApprovalService.js';
 import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
+import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { LlmClient } from '~/services/LlmClient.js';
 import { TranslationCache } from '~/services/TranslationCache.js';
 import { env } from './env.js';
@@ -117,6 +120,8 @@ const Repositories = Layer.mergeAll(
   DiscordRolesRepository.Default,
   EventsRepository.Default,
   EventRsvpsRepository.Default,
+  EventRostersRepository.Default,
+  EventRosterRequestsRepository.Default,
   ChannelEventDividersRepository.Default,
   ICalTokensRepository.Default,
   EventSeriesRepository.Default,
@@ -165,6 +170,7 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   HttpServer.withLogAddress,
   Layer.provide(AuthMiddlewareLive),
   Layer.provide(AgeCheckService.Default),
+  Layer.provide(EventRosterProvisioningService.Default),
   Layer.provide(AchievementEvaluator.Default),
   Layer.provide(AchievementPreview.Default),
   Layer.provide(BotInfoStore.Default),
