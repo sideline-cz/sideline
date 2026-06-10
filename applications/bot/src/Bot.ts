@@ -32,11 +32,20 @@ const ixProgram = Effect.succeed(commandBuilder).pipe(
   ),
 );
 
+// A poll tick that fails (or dies) must NOT kill the repeat loop: `Effect.repeat`
+// stops on the first failure, which would silently stop a poller forever (until the
+// bot is restarted) on a transient blip — e.g. an RPC error while the server is
+// redeploying. Catch the whole cause, log it, and return void so the loop keeps
+// ticking. Per-service `processTick`s already log the specific error via `tapError`;
+// this is the safety net that also swallows defects. Mirrors the `ixProgram` boundary.
+export const resilientTick = <E, R>(processTick: Effect.Effect<void, E, R>) =>
+  Effect.catchCause(processTick, (cause) => Effect.logError('Sync poll tick failed', cause));
+
 const pollLoop = <E, R>(processTick: Effect.Effect<void, E, R>) =>
-  processTick.pipe(Effect.repeat(Schedule.spaced('5 seconds')));
+  resilientTick(processTick).pipe(Effect.repeat(Schedule.spaced('5 seconds')));
 
 const fastPollLoop = <E, R>(processTick: Effect.Effect<void, E, R>) =>
-  processTick.pipe(Effect.repeat(Schedule.spaced('1 seconds')));
+  resilientTick(processTick).pipe(Effect.repeat(Schedule.spaced('1 seconds')));
 
 export const program = Effect.Do.pipe(
   Effect.bind('rpc', () => SyncRpc.asEffect()),

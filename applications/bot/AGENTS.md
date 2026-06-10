@@ -467,7 +467,15 @@ Use this pattern (and not `Effect.Semaphore.make` at module top-level) whenever 
 
 ### Poll-Loop Cadences (`src/Bot.ts`)
 
-Two distinct schedules wrap processor `processTick` effects:
+Two distinct schedules wrap processor `processTick` effects. Both wrap the tick in the exported `resilientTick` helper BEFORE `Effect.repeat`:
+
+```ts
+export const resilientTick = <E, R>(processTick: Effect.Effect<void, E, R>) =>
+  Effect.catchCause(processTick, (cause) => Effect.logError('Sync poll tick failed', cause));
+
+const pollLoop = <E, R>(processTick: Effect.Effect<void, E, R>) =>
+  resilientTick(processTick).pipe(Effect.repeat(Schedule.spaced('5 seconds')));
+```
 
 | Helper | Cadence | Schedule | Used by |
 |--------|---------|----------|---------|
@@ -476,9 +484,10 @@ Two distinct schedules wrap processor `processTick` effects:
 
 Rules:
 
-1. **`fastPollLoop` is reserved for the invite generator.** The web client begins polling `GET /invite/acceptances/:acceptanceId` immediately after a user accepts an invite; the 1s cadence keeps the wait between accept and the "Open Discord server" CTA under ~2s.
-2. **Never promote other services to `fastPollLoop`** without explicit justification — every additional 1s loop multiplies idle RPC load.
-3. **Never demote `inviteGenerator` back to `pollLoop`** — the user-visible latency on `InvitePage` depends on this cadence.
+1. **A `processTick` failure or defect MUST NOT kill its repeat loop.** `Effect.repeat(Schedule.spaced(...))` stops permanently on the first failure — a single transient blip (e.g. an `RpcClientError` while the server redeploys) would silently stop that poller until the bot is restarted. The shared `resilientTick` boundary in `pollLoop` / `fastPollLoop` catches the whole `Cause` (failures AND defects), logs `'Sync poll tick failed'`, and returns void so the loop keeps ticking. NEVER route a `processTick` to `Effect.repeat` outside `pollLoop` / `fastPollLoop`, and never remove the `resilientTick` wrapper. Per-service `processTick`s still `tapError`-log their specific error; `resilientTick` is the catch-all safety net, not a substitute for that per-service logging. Mirrors the `ixProgram` interaction-handler boundary in the same file.
+2. **`fastPollLoop` is reserved for the invite generator.** The web client begins polling `GET /invite/acceptances/:acceptanceId` immediately after a user accepts an invite; the 1s cadence keeps the wait between accept and the "Open Discord server" CTA under ~2s.
+3. **Never promote other services to `fastPollLoop`** without explicit justification — every additional 1s loop multiplies idle RPC load.
+4. **Never demote `inviteGenerator` back to `pollLoop`** — the user-visible latency on `InvitePage` depends on this cadence.
 
 ### Invite Generator (`src/rcp/inviteGenerator/ProcessorService.ts`)
 

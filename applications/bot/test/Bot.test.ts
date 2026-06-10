@@ -1,6 +1,6 @@
 import { DiscordREST } from 'dfx/DiscordREST';
 import { DiscordGateway, InteractionsRegistry } from 'dfx/gateway';
-import { Effect, Layer, Option, References } from 'effect';
+import { Effect, Exit, Layer, Option, References } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { Bot } from '~/index.js';
 import {
@@ -165,5 +165,28 @@ describe('Bot', () => {
     );
 
     expect(result).toBeUndefined();
+  });
+});
+
+describe('resilientTick', () => {
+  const SilentLogger = Layer.succeed(References.MinimumLogLevel, 'None');
+
+  it('neutralizes a failing tick (so Effect.repeat keeps the poller alive)', async () => {
+    const exit = await Effect.runPromiseExit(
+      Bot.resilientTick(Effect.fail('transient rpc blip')).pipe(Effect.provide(SilentLogger)),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+  });
+
+  it('neutralizes a defect (die) too', async () => {
+    const exit = await Effect.runPromiseExit(
+      Bot.resilientTick(Effect.die(new Error('boom'))).pipe(Effect.provide(SilentLogger)),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+  });
+
+  it('passes a successful tick through unchanged', async () => {
+    const exit = await Effect.runPromiseExit(Bot.resilientTick(Effect.void));
+    expect(Exit.isSuccess(exit)).toBe(true);
   });
 });
