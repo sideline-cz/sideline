@@ -1447,7 +1447,7 @@ Records which team members have a seat in a car. The carpool owner is also recor
 
 #### `email_forwarding_config`
 
-Per-team configuration for the email forwarding and AI summarization feature. One row per team (PK = `team_id`). The `inbound_token` is a random secret embedded in the webhook URL; the UNIQUE constraint creates an implicit index that makes token-based lookups efficient.
+Per-team configuration for the email forwarding and AI summarization feature. One row per team (PK = `team_id`). The `inbound_token` is a random secret embedded in the webhook URL; the UNIQUE constraint creates an implicit index that makes token-based lookups efficient. The IMAP columns hold optional per-team mailbox credentials for polling-based ingestion as an alternative or complement to the webhook.
 
 | Column | Type | Constraints | Default |
 |---|---|---|---|
@@ -1457,12 +1457,24 @@ Per-team configuration for the email forwarding and AI summarization feature. On
 | `coach_channel_id` | TEXT | NOT NULL | `''` |
 | `monitored_addresses` | TEXT[] | NOT NULL | `'{}'` |
 | `inbound_token` | TEXT | NOT NULL, UNIQUE | — |
+| `imap_enabled` | BOOLEAN | NOT NULL | `false` |
+| `imap_host` | TEXT | — | — |
+| `imap_port` | INTEGER | — | — |
+| `imap_username` | TEXT | — | — |
+| `imap_secret_encrypted` | TEXT | — | — |
+| `imap_use_tls` | BOOLEAN | NOT NULL | `true` |
+| `imap_folder` | TEXT | — | — |
+| `imap_last_seen_uid` | INTEGER | NOT NULL | `0` |
+| `imap_uid_validity` | INTEGER | — | — |
+| `imap_last_synced_at` | TIMESTAMPTZ | — | — |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 | `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
-**Indexes**: implicit unique index on `(inbound_token)` from the UNIQUE constraint.
+**Indexes**:
+- Implicit unique index on `(inbound_token)` from the UNIQUE constraint.
+- `idx_email_forwarding_imap_enabled` — partial index on `(team_id) WHERE imap_enabled = true AND enabled = true AND imap_secret_encrypted IS NOT NULL`. Used by `ImapPoller` to efficiently scan only teams that have a fully configured and active IMAP mailbox.
 
-**Notes**: Added in migration `1789400000_create_email_forwarding_config`. `target_channel_id` is the Discord channel where the final post (approved summary or rejected original) is sent. `coach_channel_id` is the private Discord channel where the bot posts approval-request embeds. `monitored_addresses` is an allow-list of permitted **sender** addresses (matched against the email's `from`); an empty array means all inbound emails are accepted. `inbound_token` is the per-team secret appended to the webhook URL (`POST /email/inbound/:token`); it is regenerated via `POST /teams/:teamId/email-forwarding/regenerate-token` and is intentionally omitted from all API responses except the regenerate endpoint. Team deletion cascades and removes this row.
+**Notes**: Added in migration `1789400000_create_email_forwarding_config`; IMAP columns added in `1789400006_add_imap_to_email_forwarding_config`. `target_channel_id` is the Discord channel where the final post (approved summary or rejected original) is sent. `coach_channel_id` is the private Discord channel where the bot posts approval-request embeds. `monitored_addresses` is an allow-list of permitted **sender** addresses (matched against the email's `from`); an empty array means all inbound emails are accepted. `inbound_token` is the per-team secret appended to the webhook URL (`POST /email/inbound/:token`); it is regenerated via `POST /teams/:teamId/email-forwarding/regenerate-token` and is intentionally omitted from all API responses except the regenerate endpoint. `imap_secret_encrypted` stores the AES-256-GCM ciphertext of the IMAP app password produced by `EmailSecretCrypto`; the plaintext is never persisted. `imap_last_seen_uid` is the highest IMAP UID processed by the last successful poll run (0 = never polled); `imap_uid_validity` is the IMAP `UIDVALIDITY` value used to detect folder resets. `imap_last_synced_at` is the timestamp of the most recent successful poll. Team deletion cascades and removes this row.
 
 ---
 
@@ -1486,6 +1498,7 @@ One row per inbound email received via the webhook. Tracks the full lifecycle fr
 | `approved_by` | TEXT | — | — |
 | `rejected_by` | TEXT | — | — |
 | `posted_channel_id` | TEXT | — | — |
+| `message_id` | TEXT | — | — |
 | `received_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 | `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
@@ -1493,8 +1506,9 @@ One row per inbound email received via the webhook. Tracks the full lifecycle fr
 **Indexes**:
 - `idx_email_messages_status_received` — partial index on `(received_at) WHERE status = 'received'`. Used by the AI summarization pipeline to find newly received emails.
 - `idx_email_messages_team_id` — on `(team_id)`.
+- `uq_email_messages_team_message_id` — unique partial index on `(team_id, message_id) WHERE message_id IS NOT NULL`. Prevents duplicate ingestion of the same RFC 2822 `Message-ID` per team (used by `ImapPoller` for deduplication).
 
-**Notes**: Added in migration `1789400001_create_email_messages`; `short_summary` column added in `1789400004_add_short_summary_to_email_messages`. `body` contains the plain-text email body as received from the provider. `summary` is the detailed AI-generated (or manually edited) summary, populated by `LlmClient` or via `PUT /teams/:teamId/emails/:emailId/summary`. `short_summary` is the brief version (approx. one sentence + up to 6 emoji-led bullet points) shown in Discord team-post embeds and in the short summary card on the Email detail page. `approved_by` and `rejected_by` store the Discord user snowflake of the team member who performed the action (set via the bot buttons or the web UI). `approval_request_message_id` is the Discord message ID of the approval-request embed posted to `coach_channel_id` (set after the bot posts it). `posted_channel_id` records where the final post landed. **V1 limitation:** stored email bodies and attachments have no automatic retention/purge policy; this is planned as a follow-up.
+**Notes**: Added in migration `1789400001_create_email_messages`; `short_summary` column added in `1789400004_add_short_summary_to_email_messages`; `message_id` column added in `1789400006_add_imap_to_email_forwarding_config`. `body` contains the plain-text email body as received from the provider. `summary` is the detailed AI-generated (or manually edited) summary, populated by `LlmClient` or via `PUT /teams/:teamId/emails/:emailId/summary`. `short_summary` is the brief version (approx. one sentence + up to 6 emoji-led bullet points) shown in Discord team-post embeds and in the short summary card on the Email detail page. `approved_by` and `rejected_by` store the Discord user snowflake of the team member who performed the action (set via the bot buttons or the web UI). `approval_request_message_id` is the Discord message ID of the approval-request embed posted to `coach_channel_id` (set after the bot posts it). `posted_channel_id` records where the final post landed. `message_id` is the RFC 2822 `Message-ID` header value, populated for emails ingested via IMAP; NULL for webhook-ingested emails that lack this header. **V1 limitation:** stored email bodies and attachments have no automatic retention/purge policy; this is planned as a follow-up.
 
 ---
 
@@ -1636,6 +1650,7 @@ All 86 migration files in `packages/migrations/src/before/` plus 1 after-migrati
 | 1789400002 | `create_email_post_sync_events` | Creates `email_post_sync_events` outbox table for bot Discord posting pipeline. |
 | 1789400003 | `create_email_attachments` | Creates `email_attachments` table for binary attachment storage (BYTEA). |
 | 1789400004 | `add_short_summary_to_email_messages` | Adds nullable `short_summary TEXT` column to `email_messages` for the two-tier AI summary (short + detailed). |
+| 1789400006 | `add_imap_to_email_forwarding_config` | Adds 10 IMAP columns to `email_forwarding_config` (`imap_enabled`, `imap_host`, `imap_port`, `imap_username`, `imap_secret_encrypted`, `imap_use_tls`, `imap_folder`, `imap_last_seen_uid`, `imap_uid_validity`, `imap_last_synced_at`) and a partial index for the `ImapPoller` scan; adds `message_id TEXT` column to `email_messages` and a unique partial index `uq_email_messages_team_message_id` on `(team_id, message_id) WHERE message_id IS NOT NULL` for deduplication. |
 
 ### After Migrations (seed data)
 

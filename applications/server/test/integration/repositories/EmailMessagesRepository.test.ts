@@ -223,6 +223,185 @@ describe('EmailMessagesRepository', () => {
     ),
   );
 
+  // ---------------------------------------------------------------------------
+  // insertReceivedDedup — dedup / ON CONFLICT tests
+  // ---------------------------------------------------------------------------
+
+  it.effect('insertReceivedDedup fresh message_id → returns Some(id), row exists', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('920000000000000001', 'dedup-user-1')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('921111111111111111' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('result', ({ team }) =>
+        EmailMessagesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.insertReceivedDedup({
+              team_id: team.id,
+              from_address: 'sender@example.com',
+              subject: 'Dedup Test',
+              body: 'Body',
+              message_id: 'unique-msgid-001@example.com',
+              received_at: DateTime.makeUnsafe('2024-06-01T10:00:00Z'),
+            }),
+          ),
+        ),
+      ),
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(result)).toBe(true);
+        }),
+      ),
+      // Verify the row exists in DB
+      Effect.bind('row', ({ result }) =>
+        EmailMessagesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findById(Option.getOrThrow(result))),
+        ),
+      ),
+      Effect.tap(({ row }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(row)).toBe(true);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('insertReceivedDedup same message_id twice → second returns None, only one row', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('920000000000000002', 'dedup-user-2')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('922222222222222222' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('first', ({ team }) =>
+        EmailMessagesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.insertReceivedDedup({
+              team_id: team.id,
+              from_address: 'sender@example.com',
+              subject: 'Dedup Conflict',
+              body: 'Body',
+              message_id: 'conflict-msgid-001@example.com',
+              received_at: DateTime.makeUnsafe('2024-06-01T10:00:00Z'),
+            }),
+          ),
+        ),
+      ),
+      Effect.bind('second', ({ team }) =>
+        EmailMessagesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.insertReceivedDedup({
+              team_id: team.id,
+              from_address: 'sender@example.com',
+              subject: 'Dedup Conflict Again',
+              body: 'Body2',
+              message_id: 'conflict-msgid-001@example.com',
+              received_at: DateTime.makeUnsafe('2024-06-01T11:00:00Z'),
+            }),
+          ),
+        ),
+      ),
+      Effect.tap(({ first, second }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(first)).toBe(true);
+          // Second insert with same message_id → conflict → None
+          expect(Option.isNone(second)).toBe(true);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('insertReceivedDedup two different message_ids → both Some, two rows', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('920000000000000003', 'dedup-user-3')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('923333333333333333' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('first', ({ team }) =>
+        EmailMessagesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.insertReceivedDedup({
+              team_id: team.id,
+              from_address: 'sender@example.com',
+              subject: 'Message A',
+              body: 'Body A',
+              message_id: 'distinct-msgid-A@example.com',
+              received_at: DateTime.makeUnsafe('2024-06-01T10:00:00Z'),
+            }),
+          ),
+        ),
+      ),
+      Effect.bind('second', ({ team }) =>
+        EmailMessagesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.insertReceivedDedup({
+              team_id: team.id,
+              from_address: 'sender@example.com',
+              subject: 'Message B',
+              body: 'Body B',
+              message_id: 'distinct-msgid-B@example.com',
+              received_at: DateTime.makeUnsafe('2024-06-01T11:00:00Z'),
+            }),
+          ),
+        ),
+      ),
+      Effect.tap(({ first, second }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(first)).toBe(true);
+          expect(Option.isSome(second)).toBe(true);
+          // They should be different rows
+          expect(Option.getOrThrow(first)).not.toBe(Option.getOrThrow(second));
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('insertReceived (no message_id) — two NULL message_ids can coexist', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('920000000000000004', 'dedup-user-4')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('924444444444444444' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('first', ({ team }) =>
+        EmailMessagesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.insertReceived({
+              team_id: team.id,
+              from_address: 'sender@example.com',
+              subject: 'No Message-ID 1',
+              body: 'Body 1',
+              received_at: DateTime.makeUnsafe('2024-06-01T10:00:00Z'),
+            }),
+          ),
+        ),
+      ),
+      Effect.bind('second', ({ team }) =>
+        EmailMessagesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.insertReceived({
+              team_id: team.id,
+              from_address: 'sender@example.com',
+              subject: 'No Message-ID 2',
+              body: 'Body 2',
+              received_at: DateTime.makeUnsafe('2024-06-01T11:00:00Z'),
+            }),
+          ),
+        ),
+      ),
+      Effect.tap(({ first, second }) =>
+        Effect.sync(() => {
+          // Both inserts succeed — NULL message_id is not covered by the partial unique index
+          expect(first).toBeDefined();
+          expect(second).toBeDefined();
+          expect(first).not.toBe(second);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
   it.effect('setPosted after sendOriginal → status=posted_original, posted_channel_id set', () =>
     Effect.Do.pipe(
       Effect.bind('userId', () => createUser('910000000000000004', 'msg-repo-user-4')),

@@ -15,7 +15,7 @@ import { TeamId } from '~/models/Team.js';
 // ---------------------------------------------------------------------------
 
 /**
- * Config view returned to web clients — inbound_token is intentionally omitted.
+ * Config view returned to web clients — inbound_token and imap_secret_encrypted are intentionally omitted.
  */
 export class EmailForwardingConfigView extends Schema.Class<EmailForwardingConfigView>(
   'EmailForwardingConfigView',
@@ -25,6 +25,15 @@ export class EmailForwardingConfigView extends Schema.Class<EmailForwardingConfi
   targetChannelId: Snowflake,
   coachChannelId: Snowflake,
   monitoredAddresses: Schema.Array(Schema.String),
+  imapEnabled: Schema.Boolean,
+  imapHost: Schema.OptionFromNullOr(Schema.String),
+  imapPort: Schema.OptionFromNullOr(Schema.Int),
+  imapUsername: Schema.OptionFromNullOr(Schema.String),
+  imapUseTls: Schema.Boolean,
+  imapFolder: Schema.OptionFromNullOr(Schema.String),
+  imapSecretSet: Schema.Boolean,
+  imapLastSeenUid: Schema.OptionFromNullOr(Schema.Int),
+  imapLastSyncedAt: Schema.OptionFromNullOr(Schema.DateTimeUtc),
   createdAt: Schema.DateTimeUtc,
   updatedAt: Schema.DateTimeUtc,
 }) {}
@@ -63,6 +72,13 @@ export const UpsertEmailForwardingConfigRequest = Schema.Struct({
   target_channel_id: Snowflake,
   coach_channel_id: Snowflake,
   monitored_addresses: Schema.Array(Schema.String),
+  imap_enabled: Schema.Boolean,
+  imap_host: Schema.OptionFromNullOr(Schema.String),
+  imap_port: Schema.OptionFromNullOr(Schema.Int),
+  imap_username: Schema.OptionFromNullOr(Schema.String),
+  imap_use_tls: Schema.Boolean,
+  imap_folder: Schema.OptionFromNullOr(Schema.String),
+  imap_secret: Schema.OptionFromOptional(Schema.NonEmptyString),
 });
 export type UpsertEmailForwardingConfigRequest = Schema.Schema.Type<
   typeof UpsertEmailForwardingConfigRequest

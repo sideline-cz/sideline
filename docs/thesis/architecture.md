@@ -169,6 +169,7 @@ All cron jobs run inside the server process, launched as concurrent fibers along
 | `TrainingAutoLogCron` | `*/5 * * * *` (every 5 minutes) | Automatically logs training activity for members who had a "yes" RSVP on completed training events |
 | `TrainingClaimRequestCron` | `* * * * *` (every minute) | Emits `training_claim_request` sync events for training events that are within the team's configured `claim_request_days_before` window and have not yet had a claim-request message posted (`claim_request_sent_at IS NULL`) |
 | `CoachingStatusCron` | `* * * * *` (every minute) | Emits `coaching_status` sync events on the day of a claimed training (where `coaching_status_sent_at IS NULL`), causing the bot to post a "today's coach is X" announcement to the member training channel |
+| `ImapPoller` | `*/5 * * * *` (every 5 minutes) | Polls IMAP mailboxes for all teams that have `imap_enabled = true` and a stored encrypted app-password. Fetches unseen messages since the last-seen UID, stores them as `email_messages` rows (deduplicating by RFC 2822 `Message-ID`), and advances `imap_last_seen_uid` and `imap_last_synced_at` on success. Requires `EMAIL_IMAP_ENCRYPTION_KEY` to decrypt stored credentials at poll time. |
 
 ---
 

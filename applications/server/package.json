@@ -34,7 +34,9 @@
     "@t3-oss/env-core": "^0.13.11",
     "arctic": "^3.7.0",
     "dfx": "1.0.11",
-    "effect": "4.0.0-beta.40"
+    "effect": "4.0.0-beta.40",
+    "imapflow": "^1.0.169",
+    "mailparser": "^3.7.2"
   },
   "effect": {
     "generateExports": {
@@ -49,6 +51,7 @@
     }
   },
   "devDependencies": {
+    "@types/mailparser": "^3.4.5",
     "testcontainers": "^12.0.1"
   }
 }

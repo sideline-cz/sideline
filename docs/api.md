@@ -5386,10 +5386,19 @@ Returns the team's current email forwarding configuration.
 | `targetChannelId` | `Snowflake` | No | Discord channel where approved/rejected emails are posted |
 | `coachChannelId` | `Snowflake` | No | Discord channel where approval requests are posted |
 | `monitoredAddresses` | `string[]` | No | List of email addresses to accept; empty means accept all |
+| `imapEnabled` | `boolean` | No | Whether IMAP polling is active for this team |
+| `imapHost` | `string \| null` | Yes | IMAP server hostname |
+| `imapPort` | `integer \| null` | Yes | IMAP server port |
+| `imapUsername` | `string \| null` | Yes | IMAP account username |
+| `imapUseTls` | `boolean` | No | Whether TLS is used for the IMAP connection (default `true`) |
+| `imapFolder` | `string \| null` | Yes | IMAP folder/mailbox to poll (default `INBOX` when null) |
+| `imapSecretSet` | `boolean` | No | Whether an encrypted IMAP app-password is stored; the actual secret is never returned |
+| `imapLastSeenUid` | `integer \| null` | Yes | Highest IMAP UID successfully processed; null if not yet polled |
+| `imapLastSyncedAt` | `string \| null` (ISO 8601) | Yes | Timestamp of the most recent successful poll; null if not yet polled |
 | `createdAt` | `string` (ISO 8601) | No | Row creation timestamp |
 | `updatedAt` | `string` (ISO 8601) | No | Last update timestamp |
 
-**Notes:** `inbound_token` is intentionally omitted from this view. It is only returned by the regenerate-token endpoint.
+**Notes:** `inbound_token` and `imap_secret_encrypted` are intentionally omitted from this view. The token is only returned by the regenerate-token endpoint; the IMAP secret is write-only.
 
 **Errors:**
 
@@ -5414,6 +5423,13 @@ Creates or updates the email forwarding configuration for a team.
 | `target_channel_id` | `Snowflake` | Yes | Channel where approved/rejected emails are posted |
 | `coach_channel_id` | `Snowflake` | Yes | Channel where approval-request embeds are posted |
 | `monitored_addresses` | `string[]` | Yes | Addresses to accept; empty array accepts all |
+| `imap_enabled` | `boolean` | Yes | Enable or disable IMAP polling |
+| `imap_host` | `string \| null` | Yes | IMAP server hostname; null clears the field |
+| `imap_port` | `integer \| null` | Yes | IMAP server port; null clears the field |
+| `imap_username` | `string \| null` | Yes | IMAP account username; null clears the field |
+| `imap_use_tls` | `boolean` | Yes | Whether to use TLS (recommended) |
+| `imap_folder` | `string \| null` | Yes | IMAP folder to poll; null falls back to `INBOX` |
+| `imap_secret` | `string` | No | Write-only IMAP app-password. When omitted, the existing encrypted secret is preserved. When provided, the value is encrypted with AES-256-GCM (`EMAIL_IMAP_ENCRYPTION_KEY`) before storage; the plaintext is never persisted. Requires `EMAIL_IMAP_ENCRYPTION_KEY` to be set on the server — if it is missing, the request fails with a 500 logic error. |
 
 **Response:** `200 OK` — `EmailForwardingConfigView`
 

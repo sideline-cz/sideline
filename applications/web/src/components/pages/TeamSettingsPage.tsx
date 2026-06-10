@@ -1,5 +1,6 @@
 import type { EmailForwardingApi, GroupApi, TeamApi, TeamSettingsApi } from '@sideline/domain';
 import { ChannelSyncEvent, Discord, Team } from '@sideline/domain';
+import { getLocale } from '@sideline/i18n/runtime';
 import { applyTemplate, sanitizeRendered } from '@sideline/template-renderer';
 import { Link, useRouter } from '@tanstack/react-router';
 import { DateTime, Effect, Option, Schema } from 'effect';
@@ -1523,16 +1524,64 @@ function EmailForwardingCard({ teamId, discordChannels, initialConfig }: EmailFo
   const [showRegenerateConfirm, setShowRegenerateConfirm] = React.useState(false);
   const [copiedAddress, setCopiedAddress] = React.useState(false);
 
+  // IMAP form state
+  const [imapEnabled, setImapEnabled] = React.useState(initialConfig?.imapEnabled ?? false);
+  const [imapHost, setImapHost] = React.useState(
+    Option.getOrElse(initialConfig?.imapHost ?? Option.none<string>(), () => ''),
+  );
+  const [imapPort, setImapPort] = React.useState(
+    Option.match(initialConfig?.imapPort ?? Option.none<number>(), {
+      onNone: () => '993',
+      onSome: (p) => String(p),
+    }),
+  );
+  const [imapUseTls, setImapUseTls] = React.useState(initialConfig?.imapUseTls ?? true);
+  const [imapUsername, setImapUsername] = React.useState(
+    Option.getOrElse(initialConfig?.imapUsername ?? Option.none<string>(), () => ''),
+  );
+  const [imapFolder, setImapFolder] = React.useState(
+    Option.getOrElse(initialConfig?.imapFolder ?? Option.none<string>(), () => ''),
+  );
+  // Write-only password — 3-state
+  const [imapSecret, setImapSecret] = React.useState('');
+  const [replacingSecret, setReplacingSecret] = React.useState(false);
+
+  // IMAP validation errors
+  const [imapHostError, setImapHostError] = React.useState<string | null>(null);
+  const [imapPortError, setImapPortError] = React.useState<string | null>(null);
+  const [imapUsernameError, setImapUsernameError] = React.useState<string | null>(null);
+  const [imapSecretError, setImapSecretError] = React.useState<string | null>(null);
+
   const initialEnabled = config?.enabled ?? false;
   const initialCoach = config?.coachChannelId || NONE_VALUE;
   const initialTarget = config?.targetChannelId || NONE_VALUE;
   const initialAddresses = React.useMemo(() => [...(config?.monitoredAddresses ?? [])], [config]);
+  const initialImapEnabled = config?.imapEnabled ?? false;
+  const initialImapHost = Option.getOrElse(config?.imapHost ?? Option.none<string>(), () => '');
+  const initialImapPort = Option.match(config?.imapPort ?? Option.none<number>(), {
+    onNone: () => '993',
+    onSome: (p) => String(p),
+  });
+  const initialImapUseTls = config?.imapUseTls ?? true;
+  const initialImapUsername = Option.getOrElse(
+    config?.imapUsername ?? Option.none<string>(),
+    () => '',
+  );
+  const initialImapFolder = Option.getOrElse(config?.imapFolder ?? Option.none<string>(), () => '');
 
   const hasChanges =
     enabled !== initialEnabled ||
     coachChannelId !== initialCoach ||
     targetChannelId !== initialTarget ||
-    JSON.stringify(monitoredAddresses) !== JSON.stringify(initialAddresses);
+    JSON.stringify(monitoredAddresses) !== JSON.stringify(initialAddresses) ||
+    imapEnabled !== initialImapEnabled ||
+    imapHost !== initialImapHost ||
+    imapPort !== initialImapPort ||
+    imapUseTls !== initialImapUseTls ||
+    imapUsername !== initialImapUsername ||
+    imapFolder !== initialImapFolder ||
+    (replacingSecret && imapSecret.length > 0) ||
+    (!config?.imapSecretSet && imapSecret.length > 0);
 
   const hasInvalidSender = newSender.trim().length > 0 && !EMAIL_REGEX.test(newSender.trim());
 
@@ -1570,8 +1619,69 @@ function EmailForwardingCard({ teamId, discordChannels, initialConfig }: EmailFo
     setTimeout(() => setCopiedAddress(false), 2000);
   };
 
+  const validateImapFields = React.useCallback((): boolean => {
+    if (!imapEnabled) return true;
+    let valid = true;
+
+    if (!imapHost.trim()) {
+      setImapHostError(tr('team_email_forwarding_imap_host_required'));
+      valid = false;
+    } else {
+      setImapHostError(null);
+    }
+
+    if (!imapUsername.trim()) {
+      setImapUsernameError(tr('team_email_forwarding_imap_username_required'));
+      valid = false;
+    } else {
+      setImapUsernameError(null);
+    }
+
+    const portNum = Number(imapPort);
+    if (!imapPort.trim() || !Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+      setImapPortError(tr('team_email_forwarding_imap_port_invalid'));
+      valid = false;
+    } else {
+      setImapPortError(null);
+    }
+
+    // Secret required only when no existing secret is set and not replacing
+    const needsSecret = !config?.imapSecretSet || replacingSecret;
+    if (needsSecret && !imapSecret.trim()) {
+      setImapSecretError(tr('team_email_forwarding_imap_secret_required'));
+      valid = false;
+    } else {
+      setImapSecretError(null);
+    }
+
+    return valid;
+  }, [
+    imapEnabled,
+    imapHost,
+    imapUsername,
+    imapPort,
+    imapSecret,
+    config?.imapSecretSet,
+    replacingSecret,
+  ]);
+
   const handleSave = React.useCallback(async () => {
+    if (!validateImapFields()) return;
     setSaving(true);
+
+    // Build imap_secret payload:
+    // - State B (secretSet && !replacing): omit the key → Option.none()
+    // - State A (no secret set) or State C (replacing): include the value → Option.some(value)
+    const imapSecretPayload: Option.Option<string> =
+      config?.imapSecretSet && !replacingSecret
+        ? Option.none()
+        : imapSecret.trim()
+          ? Option.some(imapSecret.trim())
+          : Option.none();
+
+    const portNum = Number(imapPort);
+    const folderValue = imapFolder.trim() || 'INBOX';
+
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.emailForwarding.upsertEmailForwardingConfig({
@@ -1587,6 +1697,14 @@ function EmailForwardingCard({ teamId, discordChannels, initialConfig }: EmailFo
                 ? Discord.Snowflake.makeUnsafe(targetChannelId)
                 : Discord.Snowflake.makeUnsafe(''),
             monitored_addresses: monitoredAddresses,
+            imap_enabled: imapEnabled,
+            imap_host: imapHost.trim() ? Option.some(imapHost.trim()) : Option.none(),
+            imap_port:
+              Number.isInteger(portNum) && portNum >= 1 ? Option.some(portNum) : Option.none(),
+            imap_username: imapUsername.trim() ? Option.some(imapUsername.trim()) : Option.none(),
+            imap_use_tls: imapUseTls,
+            imap_folder: Option.some(folderValue),
+            imap_secret: imapSecretPayload,
           },
         }),
       ),
@@ -1601,9 +1719,35 @@ function EmailForwardingCard({ teamId, discordChannels, initialConfig }: EmailFo
       setCoachChannelId(cfg.coachChannelId || NONE_VALUE);
       setTargetChannelId(cfg.targetChannelId || NONE_VALUE);
       setMonitoredAddresses([...cfg.monitoredAddresses]);
+      setImapEnabled(cfg.imapEnabled);
+      setImapHost(Option.getOrElse(cfg.imapHost, () => ''));
+      setImapPort(Option.match(cfg.imapPort, { onNone: () => '993', onSome: (p) => String(p) }));
+      setImapUseTls(cfg.imapUseTls);
+      setImapUsername(Option.getOrElse(cfg.imapUsername, () => ''));
+      setImapFolder(Option.getOrElse(cfg.imapFolder, () => ''));
+      setImapSecret('');
+      setReplacingSecret(false);
       router.invalidate();
     }
-  }, [teamId, enabled, coachChannelId, targetChannelId, monitoredAddresses, run, router]);
+  }, [
+    teamId,
+    enabled,
+    coachChannelId,
+    targetChannelId,
+    monitoredAddresses,
+    imapEnabled,
+    imapHost,
+    imapPort,
+    imapUseTls,
+    imapUsername,
+    imapFolder,
+    imapSecret,
+    replacingSecret,
+    config,
+    run,
+    router,
+    validateImapFields,
+  ]);
 
   const handleRegenerate = React.useCallback(async () => {
     setRegenerating(true);
@@ -1637,6 +1781,38 @@ function EmailForwardingCard({ teamId, discordChannels, initialConfig }: EmailFo
   const showChannelsWarning =
     enabled && (coachChannelId === NONE_VALUE || targetChannelId === NONE_VALUE);
 
+  // Derived IMAP validation state for Save button
+  const imapHasErrors =
+    imapEnabled && (!!imapHostError || !!imapPortError || !!imapUsernameError || !!imapSecretError);
+
+  // IMAP sync status
+  const imapSyncStatus = React.useMemo(() => {
+    const lastSynced = config?.imapLastSyncedAt ?? Option.none<DateTime.DateTime>();
+    const lastUid = config?.imapLastSeenUid ?? Option.none<number>();
+    if (Option.isNone(lastSynced)) {
+      return tr('team_email_forwarding_imap_never_synced');
+    }
+    const syncedMs = DateTime.toEpochMillis(lastSynced.value);
+    const diff = Date.now() - Number(syncedMs);
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    const rtf = new Intl.RelativeTimeFormat(getLocale() ?? 'en', { numeric: 'auto' });
+    const relativeTime =
+      diff < 60000
+        ? rtf.format(-seconds, 'second')
+        : minutes < 60
+          ? rtf.format(-minutes, 'minute')
+          : hours < 24
+            ? rtf.format(-hours, 'hour')
+            : rtf.format(-days, 'day');
+    const uidSuffix = Option.isSome(lastUid)
+      ? ` (${tr('team_email_forwarding_imap_last_uid', { uid: String(lastUid.value) })})`
+      : '';
+    return tr('team_email_forwarding_imap_last_synced', { time: relativeTime }) + uidSuffix;
+  }, [config?.imapLastSyncedAt, config?.imapLastSeenUid]);
+
   return (
     <>
       <Card>
@@ -1668,39 +1844,268 @@ function EmailForwardingCard({ teamId, discordChannels, initialConfig }: EmailFo
 
             <Separator />
 
-            {/* Inbound address */}
-            <div>
-              <span className='text-sm font-medium mb-1 block'>
-                {tr('team_email_forwarding_inbound_address_label')}
-              </span>
-              <p className='text-xs text-muted-foreground mb-2'>
-                {tr('team_email_forwarding_inbound_address_help')}
-              </p>
-              <div className='flex gap-2 flex-wrap sm:flex-nowrap'>
-                <Input
-                  readOnly
-                  value={inboundUrl ?? (config ? '(regenerate token to reveal URL)' : '—')}
-                  className='font-mono text-xs'
-                />
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={handleCopyAddress}
-                  disabled={!inboundUrl}
-                >
-                  <Copy className='size-3 mr-1' />
-                  {copiedAddress
-                    ? tr('team_email_forwarding_copied')
-                    : tr('team_email_forwarding_copy')}
-                </Button>
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={() => setShowRegenerateConfirm(true)}
-                  disabled={!config}
-                >
-                  {tr('team_email_forwarding_regenerate')}
-                </Button>
+            {/* Ingestion methods */}
+            <div className='flex flex-col gap-5'>
+              <h4 className='text-sm font-semibold'>
+                {tr('team_email_forwarding_ingestion_methods')}
+              </h4>
+
+              {/* Webhook (push) */}
+              <div className='flex flex-col gap-3'>
+                <h4 className='text-sm font-semibold text-muted-foreground'>
+                  {tr('team_email_forwarding_webhook_subtitle')}
+                </h4>
+                <div>
+                  <span className='text-sm font-medium mb-1 block'>
+                    {tr('team_email_forwarding_inbound_address_label')}
+                  </span>
+                  <p className='text-xs text-muted-foreground mb-2'>
+                    {tr('team_email_forwarding_inbound_address_help')}
+                  </p>
+                  <div className='flex gap-2 flex-wrap sm:flex-nowrap'>
+                    <Input
+                      readOnly
+                      value={inboundUrl ?? (config ? '(regenerate token to reveal URL)' : '—')}
+                      className='font-mono text-xs'
+                    />
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      onClick={handleCopyAddress}
+                      disabled={!inboundUrl}
+                    >
+                      <Copy className='size-3 mr-1' />
+                      {copiedAddress
+                        ? tr('team_email_forwarding_copied')
+                        : tr('team_email_forwarding_copy')}
+                    </Button>
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      onClick={() => setShowRegenerateConfirm(true)}
+                      disabled={!config}
+                    >
+                      {tr('team_email_forwarding_regenerate')}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* IMAP mailbox (poll) */}
+              <div className='flex flex-col gap-3'>
+                <h4 className='text-sm font-semibold text-muted-foreground'>
+                  {tr('team_email_forwarding_imap_subtitle')}
+                </h4>
+
+                {/* IMAP enable switch */}
+                <div className='flex items-start justify-between gap-4'>
+                  <div>
+                    <label htmlFor='imap-enabled' className='text-sm font-medium block'>
+                      {tr('team_email_forwarding_imap_enabled_label')}
+                    </label>
+                    <p className='text-xs text-muted-foreground mt-1'>
+                      {tr('team_email_forwarding_imap_enabled_help')}
+                    </p>
+                  </div>
+                  <Switch
+                    id='imap-enabled'
+                    checked={imapEnabled}
+                    onCheckedChange={setImapEnabled}
+                  />
+                </div>
+
+                {/* IMAP fieldset — disabled and greyed when IMAP not enabled */}
+                <fieldset disabled={!imapEnabled} className={!imapEnabled ? 'opacity-60' : ''}>
+                  <div className='flex flex-col gap-4'>
+                    {/* Host + Port row */}
+                    <div className='grid gap-3 sm:grid-cols-[1fr_auto]'>
+                      {/* Host */}
+                      <div>
+                        <label htmlFor='imap-host' className='text-sm font-medium mb-1 block'>
+                          {tr('team_email_forwarding_imap_host_label')}
+                        </label>
+                        <p className='text-xs text-muted-foreground mb-1'>
+                          {tr('team_email_forwarding_imap_host_help')}
+                        </p>
+                        <Input
+                          id='imap-host'
+                          value={imapHost}
+                          onChange={(e) => {
+                            setImapHost(e.target.value);
+                            setImapHostError(null);
+                          }}
+                          aria-invalid={imapHostError !== null}
+                          aria-describedby={imapHostError ? 'imap-host-error' : undefined}
+                        />
+                        {imapHostError && (
+                          <p id='imap-host-error' className='text-xs text-destructive mt-1'>
+                            {imapHostError}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Port */}
+                      <div className='max-w-32'>
+                        <label htmlFor='imap-port' className='text-sm font-medium mb-1 block'>
+                          {tr('team_email_forwarding_imap_port_label')}
+                        </label>
+                        <p className='text-xs text-muted-foreground mb-1'>&nbsp;</p>
+                        <Input
+                          id='imap-port'
+                          type='number'
+                          min={1}
+                          max={65535}
+                          value={imapPort}
+                          onChange={(e) => {
+                            setImapPort(e.target.value);
+                            setImapPortError(null);
+                          }}
+                          className='max-w-32'
+                          aria-invalid={imapPortError !== null}
+                          aria-describedby={imapPortError ? 'imap-port-error' : undefined}
+                        />
+                        {imapPortError && (
+                          <p id='imap-port-error' className='text-xs text-destructive mt-1'>
+                            {imapPortError}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Use TLS switch */}
+                    <div className='flex items-start justify-between gap-4'>
+                      <div>
+                        <label htmlFor='imap-use-tls' className='text-sm font-medium block'>
+                          {tr('team_email_forwarding_imap_use_tls_label')}
+                        </label>
+                        <p className='text-xs text-muted-foreground mt-1'>
+                          {tr('team_email_forwarding_imap_use_tls_help')}
+                        </p>
+                      </div>
+                      <Switch
+                        id='imap-use-tls'
+                        checked={imapUseTls}
+                        onCheckedChange={setImapUseTls}
+                      />
+                    </div>
+
+                    {/* Username */}
+                    <div>
+                      <label htmlFor='imap-username' className='text-sm font-medium mb-1 block'>
+                        {tr('team_email_forwarding_imap_username_label')}
+                      </label>
+                      <p className='text-xs text-muted-foreground mb-1'>
+                        {tr('team_email_forwarding_imap_username_help')}
+                      </p>
+                      <Input
+                        id='imap-username'
+                        value={imapUsername}
+                        onChange={(e) => {
+                          setImapUsername(e.target.value);
+                          setImapUsernameError(null);
+                        }}
+                        aria-invalid={imapUsernameError !== null}
+                        aria-describedby={imapUsernameError ? 'imap-username-error' : undefined}
+                      />
+                      {imapUsernameError && (
+                        <p id='imap-username-error' className='text-xs text-destructive mt-1'>
+                          {imapUsernameError}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Password — 3 states */}
+                    <div aria-live='polite'>
+                      <Label htmlFor='imap-secret' className='text-sm font-medium mb-1 block'>
+                        {tr('team_email_forwarding_imap_secret_label')}
+                      </Label>
+                      {/* State B: secret is set and not replacing */}
+                      {config?.imapSecretSet && !replacingSecret ? (
+                        <div className='flex items-center gap-3 mt-1'>
+                          <ShieldCheck className='size-4 text-green-600' />
+                          <span className='text-sm text-muted-foreground'>
+                            {tr('team_email_forwarding_imap_secret_set')}
+                          </span>
+                          <Button
+                            variant='outline'
+                            size='sm'
+                            type='button'
+                            onClick={() => setReplacingSecret(true)}
+                          >
+                            {tr('team_email_forwarding_imap_secret_replace')}
+                          </Button>
+                        </div>
+                      ) : (
+                        <>
+                          <p className='text-xs text-muted-foreground mb-1'>
+                            {replacingSecret
+                              ? tr('team_email_forwarding_imap_secret_replace_help')
+                              : tr('team_email_forwarding_imap_secret_help')}
+                          </p>
+                          <div className='flex gap-2'>
+                            <Input
+                              id='imap-secret'
+                              type='password'
+                              autoComplete='new-password'
+                              placeholder={tr('team_email_forwarding_imap_secret_placeholder')}
+                              value={imapSecret}
+                              onChange={(e) => {
+                                setImapSecret(e.target.value);
+                                setImapSecretError(null);
+                              }}
+                              aria-invalid={imapSecretError !== null}
+                              aria-describedby={imapSecretError ? 'imap-secret-error' : undefined}
+                            />
+                            {/* State C: cancel button */}
+                            {replacingSecret && (
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                type='button'
+                                onClick={() => {
+                                  setImapSecret('');
+                                  setImapSecretError(null);
+                                  setReplacingSecret(false);
+                                }}
+                              >
+                                {tr('team_email_forwarding_imap_secret_cancel')}
+                              </Button>
+                            )}
+                          </div>
+                          {imapSecretError && (
+                            <p id='imap-secret-error' className='text-xs text-destructive mt-1'>
+                              {imapSecretError}
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    {/* Folder */}
+                    <div>
+                      <label htmlFor='imap-folder' className='text-sm font-medium mb-1 block'>
+                        {tr('team_email_forwarding_imap_folder_label')}
+                      </label>
+                      <p className='text-xs text-muted-foreground mb-1'>
+                        {tr('team_email_forwarding_imap_folder_help')}
+                      </p>
+                      <Input
+                        id='imap-folder'
+                        value={imapFolder}
+                        placeholder='INBOX'
+                        onChange={(e) => setImapFolder(e.target.value)}
+                      />
+                    </div>
+
+                    {/* Sync status row — a polite live region (not role=status) so it
+                        doesn't collide with the onboarding card's status output on this page */}
+                    <div aria-live='polite' className='text-xs text-muted-foreground'>
+                      {imapSyncStatus}
+                    </div>
+                  </div>
+                </fieldset>
               </div>
             </div>
 
@@ -1821,7 +2226,10 @@ function EmailForwardingCard({ teamId, discordChannels, initialConfig }: EmailFo
             </fieldset>
 
             <div className='flex items-center gap-3'>
-              <Button onClick={handleSave} disabled={saving || !hasChanges || hasInvalidSender}>
+              <Button
+                onClick={handleSave}
+                disabled={saving || !hasChanges || hasInvalidSender || imapHasErrors}
+              >
                 {saving ? tr('profile_saving') : tr('profile_saveChanges')}
               </Button>
               {hasChanges && (

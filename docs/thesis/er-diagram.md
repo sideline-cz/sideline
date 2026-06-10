@@ -1108,7 +1108,7 @@ erDiagram
 
 ### Email Forwarding
 
-`email_forwarding_config` holds the per-team configuration (one row per team that has enabled the feature). `email_messages` stores each inbound email with its full lifecycle status. `email_post_sync_events` is an outbox table drained by the bot's Email Sync worker to post Discord messages (approval requests, summaries, or original bodies). `email_attachments` stores binary attachment content in a `BYTEA` column alongside metadata.
+`email_forwarding_config` holds the per-team configuration (one row per team that has enabled the feature). It stores both the inbound webhook token and the optional IMAP mailbox credentials (host, port, username, encrypted app-password, TLS flag, folder, and sync state) for polling-based email ingestion. `email_messages` stores each inbound email with its full lifecycle status; the `message_id` column (RFC 2822 `Message-ID`) enables deduplication for IMAP-sourced emails. `email_post_sync_events` is an outbox table drained by the bot's Email Sync worker to post Discord messages (approval requests, summaries, or original bodies). `email_attachments` stores binary attachment content in a `BYTEA` column alongside metadata.
 
 ```mermaid
 erDiagram
@@ -1119,6 +1119,16 @@ erDiagram
         TEXT coach_channel_id
         TEXT_ARRAY monitored_addresses
         TEXT inbound_token
+        BOOLEAN imap_enabled
+        TEXT imap_host
+        INTEGER imap_port
+        TEXT imap_username
+        TEXT imap_secret_encrypted
+        BOOLEAN imap_use_tls
+        TEXT imap_folder
+        INTEGER imap_last_seen_uid
+        INTEGER imap_uid_validity
+        TIMESTAMPTZ imap_last_synced_at
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at
     }
@@ -1138,6 +1148,7 @@ erDiagram
         TEXT approved_by
         TEXT rejected_by
         TEXT posted_channel_id
+        TEXT message_id
         TIMESTAMPTZ received_at
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at
@@ -1235,7 +1246,7 @@ erDiagram
 | `carpools` | Top-level record for a Discord carpool board posted by `/carpool`. Optionally linked to an event. Tracks the board message ID and the Discord channel. |
 | `carpool_cars` | Individual car offered by a team member within a carpool. Capacity 1–8 including the driver/owner. Tracks the optional private Discord thread ID. Unique on `(carpool_id, owner_team_member_id)`. |
 | `carpool_seats` | Individual seat record in a car. Owner always occupies seat #1. `assigned_by` is set for owner-assigned seats. Unique on `(carpool_id, team_member_id)` prevents double-booking across cars in the same carpool. |
-| `email_forwarding_config` | Per-team configuration for the email forwarding feature (one row per team). Stores enabled flag, target Discord channel, coach channel, monitored sender addresses (allow-list matched against the email's `from`), and the per-team inbound webhook token. |
-| `email_messages` | One row per inbound email. Tracks the full status lifecycle from receipt through AI summarization, coach approval/rejection, and Discord posting. |
+| `email_forwarding_config` | Per-team configuration for the email forwarding feature (one row per team). Stores enabled flag, target Discord channel, coach channel, monitored sender addresses (allow-list matched against the email's `from`), the per-team inbound webhook token, and optional IMAP mailbox credentials (host, port, username, AES-256-GCM encrypted app-password, TLS flag, folder, and poll sync state). |
+| `email_messages` | One row per inbound email. Tracks the full status lifecycle from receipt through AI summarization, coach approval/rejection, and Discord posting. The `message_id` column (RFC 2822 `Message-ID`) is used for IMAP deduplication — a unique partial index prevents double-ingestion of the same message per team. |
 | `email_post_sync_events` | Outbox records for the bot's Email Sync worker to post Discord messages. Three kinds: `approval_request`, `post_summary`, `post_original`. Unique on `(email_message_id, kind)`. |
 | `email_attachments` | Binary attachment storage per email. `content` is a `BYTEA` column; no automatic retention in v1. |

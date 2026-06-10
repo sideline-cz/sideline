@@ -56,6 +56,9 @@ export const env = createEnv({
     LLM_API_KEY: Schema.toStandardSchemaV1(
       Schema.OptionFromNullishOr(Schema.RedactedFromValue(Schema.NonEmptyString)),
     ),
+    EMAIL_IMAP_ENCRYPTION_KEY: Schema.toStandardSchemaV1(
+      Schema.OptionFromNullishOr(Schema.RedactedFromValue(Schema.NonEmptyString)),
+    ),
     LLM_MODEL: Schema.String.pipe(
       Schemas.Optional(() => 'gpt-4o-mini'),
       Schema.toStandardSchemaV1,

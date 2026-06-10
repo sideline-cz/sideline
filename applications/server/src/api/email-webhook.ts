@@ -8,14 +8,13 @@ import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 import { EmailAttachmentsRepository } from '~/repositories/EmailAttachmentsRepository.js';
 import { EmailForwardingConfigRepository } from '~/repositories/EmailForwardingConfigRepository.js';
 import { EmailMessagesRepository } from '~/repositories/EmailMessagesRepository.js';
+import { validateAttachmentSizes } from '~/services/emailAttachmentLimits.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const MAX_BODY_BYTES = 36 * 1024 * 1024; // 36 MB
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10 MB
-const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
 
 // ---------------------------------------------------------------------------
 // HMAC validation
@@ -151,18 +150,9 @@ const handleInbound = (
             payload.attachments,
             () => [] as ReadonlyArray<EmailForwarding.EmailAttachmentPayload>,
           );
-          let totalBytes = 0;
-          for (const att of attachments) {
-            const decoded = Buffer.from(att.content_base64, 'base64').byteLength;
-            if (decoded > MAX_ATTACHMENT_BYTES) {
-              return earlyExit(HttpServerResponse.text('Attachment too large', { status: 413 }));
-            }
-            totalBytes += decoded;
-          }
-          if (totalBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
-            return earlyExit(
-              HttpServerResponse.text('Total attachments too large', { status: 413 }),
-            );
+          const check = validateAttachmentSizes(attachments);
+          if (!check.ok) {
+            return earlyExit(HttpServerResponse.text(check.reason, { status: 413 }));
           }
           return Effect.void;
         }),

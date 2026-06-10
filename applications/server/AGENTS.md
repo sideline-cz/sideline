@@ -439,6 +439,7 @@ Cron jobs are long-running Effects that repeat on a schedule. Each cron is defin
 | `TrainingClaimRequestCron` | `src/services/TrainingClaimRequestCron.ts` | every minute | Emit a `training_claim_request` event once per training, `team_settings.claim_request_days_before` days ahead of `start_at`. Candidate query `TeamSettingsRepository.findEventsNeedingClaimRequest`; idempotency via `events.claim_request_sent_at` — see "Self-Healing `*_sent_at` Date-Gated Crons" below. |
 | `CoachingStatusCron` | `src/services/CoachingStatusCron.ts` | every minute | Emit a `coaching_status` event once per claimed training on the day of `start_at` (gated to ≥ 07:00 local). Candidate query `TeamSettingsRepository.findEventsNeedingCoachingStatus`; idempotency via `events.coaching_status_sent_at` — see "Self-Healing `*_sent_at` Date-Gated Crons" below. |
 | `EmailSummarizer` | `src/services/EmailSummarizer.ts` | every minute | Claim `email_messages` rows in `received` status, summarize via `LlmClient`, set `pending_approval` + enqueue an `approval_request` `email_post_sync_events` row. The claim (`claimForSummarizing`: `UPDATE ... SET status='summarizing' WHERE status='received'`) is the per-row lock — skip when it returns `Option.none()`. On `LlmError`, `incrementAttemptsAndMaybeFail` caps at `MAX_SUMMARIZE_ATTEMPTS` (3) then sets status `failed` (transient attempts return the row to `received`). See "Status-Claim As Per-Row Lock" below. |
+| `ImapPoller` | `src/services/ImapPoller.ts` | every 5 minutes | Per-team IMAP pull producer feeding `email_messages` at `received` status (the second producer alongside `EmailWebhookLive` — see "Email Ingestion Has Two Producers" below). For each `findImapEnabled()` config: decrypt `imap_secret_encrypted` via `EmailSecretCrypto`, `ImapClient.fetchSince(sinceUid)`, then ingest in ascending UID order. Per-team failures (decrypt, IMAP connect) are isolated via a module-local `SkipTeam` tagged error; the per-team loop runs at `{ concurrency: 2 }`. See "IMAP Watermark Ingestion" below. |
 
 ### Pattern
 
@@ -589,6 +590,47 @@ Rules for any new unauthenticated raw route:
 3. **The handler's `E` channel is `never`.** A webhook returns an HTTP status for every outcome, including auth failures, rather than failing the Effect. Model early exits as a module-local tagged error (`WebhookEarlyExit` carrying the `HttpServerResponse`) raised via `Effect.fail`, then absorb them at the end with `Effect.catchTag('WebhookEarlyExit', (e) => Effect.succeed(e.response))`. Do not leak typed failures out of a raw route — there is no `HttpApi` error encoder to map them.
 4. **Map sender-distinguishable conditions to distinct statuses** but never leak whether a token exists: unknown/disabled token → `404`; bad signature → `401`; malformed/over-cap body → `413`/`400`; non-monitored recipient → `200`/`202` no-op (silently accept-and-drop so the sender does not retry). Successful ingest returns `202 Accepted`.
 5. **Wrap the durable write in `sql.withTransaction(...)`** so the parent row and its children (e.g. message + attachments) commit atomically, and apply `catchSqlErrors`.
+
+## Email Ingestion Has Two Producers (Webhook + IMAP Poller)
+
+`email_messages` rows at `received` status are written by **two independent producers**; everything downstream of `received` (the `EmailSummarizer` status-claim machine, approval RPCs, posting) is producer-agnostic. When you change the ingestion contract (sender filter, attachment limits, the `received`-row shape), you MUST update both producers or the two paths diverge.
+
+| Producer | Trigger | File | Write method |
+|----------|---------|------|--------------|
+| `EmailWebhookLive` | Inbound HTTP push from the mail relay | `src/api/email-webhook.ts` | `insertReceived` (always inserts) |
+| `ImapPoller` | Cron pull every 5 min | `src/services/ImapPoller.ts` | `insertReceivedDedup` (ON CONFLICT) |
+
+Shared ingestion logic that BOTH producers apply identically — keep these in sync:
+
+1. **Sender allow-list** — `monitored_addresses` empty ⇒ accept all; otherwise the `from` must substring-match (case-insensitive) one entry. `ImapPoller.senderAllowed` mirrors the webhook's filter; do not let them drift.
+2. **Attachment size cap** — `validateAttachmentSizes` (`src/services/emailAttachmentLimits.ts`) is the single source of truth; an over-limit message is an intentional skip (not a failure) on both paths.
+3. **Atomic message + attachments write** — both wrap the message insert and `attachmentsRepo.insertMany` in one `sql.withTransaction(...)`.
+
+**`insertReceivedDedup` (`EmailMessagesRepository`) is the IMAP-side idempotency guard.** Because a poll can re-fetch a UID range across `UIDVALIDITY`/watermark edge cases, the IMAP path dedups on `(team_id, message_id)`:
+
+- `INSERT ... ON CONFLICT (team_id, message_id) WHERE message_id IS NOT NULL DO NOTHING RETURNING id` (partial unique index `uq_email_messages_team_message_id`, migration `1789400006_add_imap_to_email_forwarding_config.ts`). Returns `Option<EmailMessageId>` — `None` means the conflict fired (already ingested) and the poller treats it as a successful no-op.
+- **When `message_id` is absent it falls back to `insertReceived` (always-insert) wrapped in `Option.some`** — a message with no `Message-ID` header cannot be deduped, so it is ingested unconditionally. The webhook producer always uses plain `insertReceived`.
+
+## IMAP Watermark Ingestion (`ImapPoller`)
+
+`ImapPoller` (`src/services/ImapPoller.ts`) pulls new mail per team using an IMAP UID watermark stored on `email_forwarding_config`: `imap_last_seen_uid` (INTEGER, default 0), `imap_uid_validity` (INTEGER, nullable), `imap_last_synced_at`. The watermark is advanced via `configRepo.updateImapSync(teamId, uid, uidValidity, syncedAt)`. The poller's correctness rests on three rules that MUST hold together:
+
+1. **Cold start and `UIDVALIDITY` reset both baseline without ingesting.** A team is cold-started when `imap_last_seen_uid === 0 AND imap_uid_validity IS NONE`; a `UIDVALIDITY` reset is when a stored validity exists and differs from the server's reported value. In both cases the poller sets the watermark to `uidNext - 1` and ingests **nothing** this cycle — it never replays a mailbox's entire history. Only after baselining do subsequent cycles ingest UIDs above the watermark.
+2. **The watermark advances per message, never past a failed insert.** Ingestion is a left-fold over messages in ascending UID order, threading `{ committed, stopped }`. `committed` advances for an intentional skip (sender-filtered, attachment over-limit) and for a successful insert OR a `insertReceivedDedup` `None` (already-ingested no-op). On a genuine insert failure (the `sql.withTransaction` `Effect.exit` is a failure/defect) the fold sets `stopped: true`, keeps the last good `committed`, and turns every remaining message into a no-op — so the watermark is persisted at the last successfully-ingested UID and the failed UID is retried next cycle. Never advance the watermark to `uidNext - 1` after a partial-failure cycle.
+3. **Per-team failures skip the team, not the cycle.** `decrypt` failures (`EmailSecretDecryptError` / `EmailSecretKeyMissing`) and `ImapConnectionError` are caught into a module-local `SkipTeam` tagged error and absorbed with `Effect.catchTag('SkipTeam', () => Effect.void)`; the per-team effect is additionally wrapped in `Effect.exit` inside the `{ concurrency: 2 }` loop so one team never aborts the cycle.
+
+`configRepo.findImapEnabled()` is the candidate query, backed by the partial index `idx_email_forwarding_imap_enabled ON email_forwarding_config (team_id) WHERE imap_enabled = true AND enabled = true AND imap_secret_encrypted IS NOT NULL`. Both `imap_enabled` AND the existing `enabled` flag must be true — IMAP is a per-team opt-in layered on the email-forwarding feature, not a replacement for it.
+
+## Optional Secret That Fails On Use, Not On Boot (`EmailSecretCrypto`)
+
+`EmailSecretCrypto` (`src/services/EmailSecretCrypto.ts`) encrypts/decrypts per-team IMAP credentials with AES-256-GCM. It is a **different** optional-dependency shape from the Config-Gated External Service Provider (`LlmClient`) below — there is no real-vs-stub split. Instead the key is resolved **at every `encrypt`/`decrypt` call** (`resolveKey`), not at layer build time, so the layer always builds even when `EMAIL_IMAP_ENCRYPTION_KEY` is unset; a call simply fails with the typed `EmailSecretKeyMissing`.
+
+Rules for this pattern (a secret-backed service that is optional at boot but required at use):
+
+1. **The env var is optional+redacted** (`Schema.OptionFromNullishOr(Schema.RedactedFromValue(Schema.NonEmptyString))` in `env.ts`, like `LLM_API_KEY`), and the layer (`Layer.effect`) reads it via `Redacted.value` into an `Option<string>` captured by `make` — it never throws at construction. Pick this over the real-vs-stub provider when there is no safe deterministic fallback behaviour (you cannot "stub" decryption of a real ciphertext).
+2. **Key validity is checked at use time, not boot time.** `resolveKey` fails with `EmailSecretKeyMissing` when the key is `None` OR does not base64-decode to exactly 32 bytes. Both `encrypt` and `decrypt` carry `EmailSecretKeyMissing` in their `E` channel; `decrypt` additionally carries `EmailSecretDecryptError`. Callers must handle these — `ImapPoller` maps both to `SkipTeam`.
+3. **The ciphertext is a self-describing string** `v1.<iv>.<tag>.<ct>` (all `base64url`, 12-byte IV, GCM auth tag). The `v1.` prefix is a format version — any future key-rotation/format change adds `v2.` and `decrypt` branches on the prefix. Never store raw ciphertext bytes or a bare blob; the stored column `email_forwarding_config.imap_secret_encrypted` always holds this string form.
+4. **Expose a `makeWithKey(Option<string>)` test seam** that builds the service shape from an explicit key Option, so tests exercise encrypt-roundtrip, missing-key, and bad-key-length paths without env-stubbing. Do not construct `Default` in tests.
 
 ## Status-Claim As Per-Row Lock (`UPDATE ... WHERE status = '<from>'`)
 

@@ -12,6 +12,8 @@ import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.
 import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { EmailAttachmentsRepository } from '~/repositories/EmailAttachmentsRepository.js';
+import { EmailForwardingConfigRepository } from '~/repositories/EmailForwardingConfigRepository.js';
 import { EmailMessagesRepository } from '~/repositories/EmailMessagesRepository.js';
 import { EmailPostSyncEventsRepository } from '~/repositories/EmailPostSyncEventsRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
@@ -32,9 +34,12 @@ import {
 import { AgeCheckCron } from '~/services/AgeCheckCron.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { CoachingStatusCron } from '~/services/CoachingStatusCron.js';
+import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
 import { EmailSummarizer } from '~/services/EmailSummarizer.js';
 import { EventHorizonCron } from '~/services/EventHorizonCron.js';
 import { EventStartCron } from '~/services/EventStartCron.js';
+import { ImapClient } from '~/services/ImapClient.js';
+import { ImapPoller } from '~/services/ImapPoller.js';
 import { LlmClient } from '~/services/LlmClient.js';
 import { PaymentReminderCron } from '~/services/PaymentReminderCron.js';
 import { RsvpReminderCron } from '~/services/RsvpReminderCron.js';
@@ -207,6 +212,18 @@ const EmailSummarizerCronEffect = EmailSummarizer.asEffect().pipe(
   Effect.provide(LlmClient.Default),
 );
 
+const ImapPollerRepositoriesLive = Layer.mergeAll(
+  EmailForwardingConfigRepository.Default,
+  EmailMessagesRepository.Default,
+  EmailAttachmentsRepository.Default,
+);
+
+const ImapPollerCronEffect = ImapPoller.asEffect().pipe(
+  Effect.provide(ImapPollerRepositoriesLive.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg)))),
+  Effect.provide(ImapClient.Default),
+  Effect.provide(EmailSecretCrypto.Default),
+);
+
 Effect.Do.pipe(
   Effect.tap(() => (env.DATABASE_MAIN !== env.DATABASE_NAME ? CreateDb : Effect.void)),
   Effect.tap(() => MigrateBefore),
@@ -226,6 +243,7 @@ Effect.Do.pipe(
         ClaimRequestCronEffect,
         CoachingStatusCronEffect,
         EmailSummarizerCronEffect,
+        ImapPollerCronEffect,
       ],
       {
         // These are all long-running, never-completing supervised effects (HTTP

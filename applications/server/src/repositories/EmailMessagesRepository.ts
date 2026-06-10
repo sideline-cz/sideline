@@ -36,6 +36,10 @@ class ConditionalId extends Schema.Class<ConditionalId>('EmailConditionalId')({
   id: EmailForwarding.EmailMessageId,
 }) {}
 
+class DedupInsertedId extends Schema.Class<DedupInsertedId>('EmailDedupInsertedId')({
+  id: EmailForwarding.EmailMessageId,
+}) {}
+
 // ---------------------------------------------------------------------------
 // make
 // ---------------------------------------------------------------------------
@@ -55,6 +59,24 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
       INSERT INTO email_messages (team_id, from_address, subject, body, received_at)
       VALUES (${input.team_id}::uuid, ${input.from_address}, ${input.subject}, ${input.body}, ${input.received_at})
+      RETURNING id
+    `,
+  });
+
+  const insertReceivedDedupQuery = SqlSchema.findOneOption({
+    Request: Schema.Struct({
+      team_id: Team.TeamId,
+      from_address: Schema.String,
+      subject: Schema.String,
+      body: Schema.String,
+      received_at: Schemas.DateTimeFromIsoString,
+      message_id: Schema.String,
+    }),
+    Result: DedupInsertedId,
+    execute: (input) => sql`
+      INSERT INTO email_messages (team_id, from_address, subject, body, received_at, message_id)
+      VALUES (${input.team_id}::uuid, ${input.from_address}, ${input.subject}, ${input.body}, ${input.received_at}, ${input.message_id})
+      ON CONFLICT (team_id, message_id) WHERE message_id IS NOT NULL DO NOTHING
       RETURNING id
     `,
   });
@@ -207,6 +229,28 @@ const make = Effect.gen(function* () {
       Effect.map((row) => row.id),
     );
 
+  const insertReceivedDedup = (input: {
+    readonly team_id: Team.TeamId;
+    readonly from_address: string;
+    readonly subject: string;
+    readonly body: string;
+    readonly message_id?: string | undefined;
+    readonly received_at: import('effect').DateTime.Utc;
+  }) => {
+    // If no message_id provided, fall back to always-insert behavior
+    if (input.message_id === undefined) {
+      return insertReceived(input).pipe(Effect.map(Option.some));
+    }
+    return insertReceivedDedupQuery({
+      team_id: input.team_id,
+      from_address: input.from_address,
+      subject: input.subject,
+      body: input.body,
+      received_at: input.received_at,
+      message_id: input.message_id,
+    }).pipe(catchSqlErrors, Effect.map(Option.map((row) => row.id)));
+  };
+
   const findById = (id: EmailForwarding.EmailMessageId) => findByIdQuery(id).pipe(catchSqlErrors);
 
   const findReceivedBatch = (limit: number) =>
@@ -260,6 +304,7 @@ const make = Effect.gen(function* () {
 
   return {
     insertReceived,
+    insertReceivedDedup,
     findById,
     findReceivedBatch,
     claimForSummarizing,

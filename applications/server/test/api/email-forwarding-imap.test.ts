@@ -1,6 +1,16 @@
-import type { Auth, EmailForwarding, Role, Team, TeamMember } from '@sideline/domain';
+/**
+ * API tests for the IMAP-specific parts of the email-forwarding endpoints.
+ *
+ * Covers:
+ * 1. PUT with imap_* fields + imap_secret → repo receives encrypted secret (not plaintext);
+ *    response EmailForwardingConfigView has imapSecretSet=true; JSON contains no secret value.
+ * 2. GET (findByTeam returns row with imap_secret_encrypted=Some('enc')) → imapSecretSet=true, no secret in JSON.
+ * 3. PUT WITHOUT imap_secret (key absent) → repo receives imap_secret_encrypted=None (preserve path).
+ */
+import type { Auth, Role, Team, TeamMember } from '@sideline/domain';
+import { Discord } from '@sideline/domain';
 import { OAuth2Tokens } from 'arctic';
-import { DateTime, Effect, Layer, Option } from 'effect';
+import { DateTime, Effect, Layer, Option, Schema } from 'effect';
 import { HttpClient, HttpClientResponse, HttpRouter, HttpServer } from 'effect/unstable/http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ApiLive } from '~/api/index.js';
@@ -18,7 +28,10 @@ import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsReposit
 import { DiscordRoleProvisionEventsRepository } from '~/repositories/DiscordRoleProvisionEventsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EmailAttachmentsRepository } from '~/repositories/EmailAttachmentsRepository.js';
-import { EmailForwardingConfigRepository } from '~/repositories/EmailForwardingConfigRepository.js';
+import {
+  EmailForwardingConfigRepository,
+  type EmailForwardingConfigRow,
+} from '~/repositories/EmailForwardingConfigRepository.js';
 import { EmailMessagesRepository } from '~/repositories/EmailMessagesRepository.js';
 import { EmailPostSyncEventsRepository } from '~/repositories/EmailPostSyncEventsRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
@@ -48,7 +61,7 @@ import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { EmailApprovalService } from '~/services/EmailApprovalService.js';
-import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
+import { EmailSecretCrypto, makeWithKey } from '~/services/EmailSecretCrypto.js';
 import { MockChannelManagementLayers } from '../mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from '../mocks/dashboardLayoutMocks.js';
 import { MockFinanceLayers } from '../mocks/financeMocks.js';
@@ -57,113 +70,127 @@ import { MockTeamChallengeRepositoryLayer } from '../mocks/teamChallengeMocks.js
 import { MockTranslationsLayers } from '../mocks/translationMocks.js';
 
 // ---------------------------------------------------------------------------
-// Test IDs
+// Test constants
 // ---------------------------------------------------------------------------
 
-const COACH_USER_ID = '00000000-0000-0000-0001-000000000001' as Auth.UserId;
-const MEMBER_USER_ID = '00000000-0000-0000-0001-000000000002' as Auth.UserId;
-const OUTSIDER_USER_ID = '00000000-0000-0000-0001-000000000003' as Auth.UserId;
-const TEAM_ID = '00000000-0000-0000-0001-000000000010' as Team.TeamId;
-const OTHER_TEAM_ID = '00000000-0000-0000-0001-000000000020' as Team.TeamId;
-const COACH_MEMBER_ID = '00000000-0000-0000-0001-000000000011' as TeamMember.TeamMemberId;
-const MEMBER_MEMBER_ID = '00000000-0000-0000-0001-000000000012' as TeamMember.TeamMemberId;
+const TEST_KEY_B64 = Buffer.alloc(32, 7).toString('base64');
 
-const EMAIL_ID_PENDING = '11111111-1111-1111-1111-111111111111' as EmailForwarding.EmailMessageId;
-const EMAIL_ID_RECEIVED = '22222222-2222-2222-2222-222222222222' as EmailForwarding.EmailMessageId;
-const EMAIL_ID_OTHER_TEAM =
-  '33333333-3333-3333-3333-333333333333' as EmailForwarding.EmailMessageId;
-const ATTACHMENT_ID = '44444444-4444-4444-4444-444444444444' as EmailForwarding.EmailAttachmentId;
-const BOGUS_EMAIL_ID = '99999999-9999-9999-9999-999999999999' as EmailForwarding.EmailMessageId;
-const BOGUS_ATTACHMENT_ID =
-  '99999999-9999-9999-9999-000000000001' as EmailForwarding.EmailAttachmentId;
-
+const COACH_USER_ID = '00000000-0000-0001-0001-000000000001' as Auth.UserId;
+const TEAM_ID = '00000000-0000-0001-0001-000000000010' as Team.TeamId;
+const COACH_MEMBER_ID = '00000000-0000-0001-0001-000000000011' as TeamMember.TeamMemberId;
 const COACH_PERMISSIONS: readonly Role.Permission[] = ['team:manage'];
-const MEMBER_PERMISSIONS: readonly Role.Permission[] = ['roster:view'];
-
-// ---------------------------------------------------------------------------
-// In-memory stores
-// ---------------------------------------------------------------------------
 
 const now = DateTime.makeUnsafe('2024-01-01T00:00:00Z');
 
-type EmailRecord = {
-  id: EmailForwarding.EmailMessageId;
-  team_id: string;
-  status: EmailForwarding.EmailStatus;
-  from_address: string;
-  subject: string;
-  body: string;
-  summary: Option.Option<string>;
-  short_summary: Option.Option<string>;
-  summarize_attempts: number;
-  last_error: Option.Option<string>;
-  approval_request_message_id: Option.Option<string>;
-  approved_by: Option.Option<string>;
-  rejected_by: Option.Option<string>;
-  posted_channel_id: Option.Option<string>;
-  received_at: DateTime.Utc;
-  created_at: DateTime.Utc;
-  updated_at: DateTime.Utc;
-};
+// ---------------------------------------------------------------------------
+// Stores for recording repo calls
+// ---------------------------------------------------------------------------
 
-let emailStore: Map<EmailForwarding.EmailMessageId, EmailRecord>;
-let summaryUpdateCalls: Array<{ id: EmailForwarding.EmailMessageId; summary: string }>;
-let enqueuedSyncEvents: Array<{ emailId: EmailForwarding.EmailMessageId; kind: string }>;
+// Explicit type (mirrors the contracted upsert signature, so tests are compile-independent of build)
+interface UpsertCall {
+  readonly team_id: string;
+  readonly enabled: boolean;
+  readonly target_channel_id: string;
+  readonly coach_channel_id: string;
+  readonly monitored_addresses: readonly string[];
+  readonly imap_enabled: boolean;
+  readonly imap_host: Option.Option<string>;
+  readonly imap_port: Option.Option<number>;
+  readonly imap_username: Option.Option<string>;
+  readonly imap_secret_encrypted: Option.Option<string>;
+  readonly imap_use_tls: boolean;
+  readonly imap_folder: Option.Option<string>;
+}
 
-const makeEmailRecord = (
-  id: EmailForwarding.EmailMessageId,
-  overrides: Partial<EmailRecord> = {},
-): EmailRecord => ({
-  id,
-  team_id: TEAM_ID,
-  status: 'pending_approval',
-  from_address: 'sender@example.com',
-  subject: 'Team Update',
-  body: 'Email body text',
-  summary: Option.some('AI-generated summary'),
-  short_summary: Option.none(),
-  summarize_attempts: 1,
-  last_error: Option.none(),
-  approval_request_message_id: Option.none(),
-  approved_by: Option.none(),
-  rejected_by: Option.none(),
-  posted_channel_id: Option.none(),
-  received_at: now,
-  created_at: now,
-  updated_at: now,
-  ...overrides,
-});
-
-const ATTACHMENT_CONTENT = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG magic bytes
+let upsertCalls: UpsertCall[];
+let configRowOverride: Option.Option<EmailForwardingConfigRow>;
 
 const resetStores = () => {
-  emailStore = new Map();
-  summaryUpdateCalls = [];
-  enqueuedSyncEvents = [];
-
-  emailStore.set(
-    EMAIL_ID_PENDING,
-    makeEmailRecord(EMAIL_ID_PENDING, { status: 'pending_approval' }),
-  );
-  emailStore.set(
-    EMAIL_ID_RECEIVED,
-    makeEmailRecord(EMAIL_ID_RECEIVED, { status: 'received', summary: Option.none() }),
-  );
-  emailStore.set(
-    EMAIL_ID_OTHER_TEAM,
-    makeEmailRecord(EMAIL_ID_OTHER_TEAM, { team_id: OTHER_TEAM_ID }),
-  );
+  upsertCalls = [];
+  configRowOverride = Option.none();
 };
 
 // ---------------------------------------------------------------------------
-// Auth stores
+// Shared mock builder
 // ---------------------------------------------------------------------------
 
-const sessionsStore = new Map<string, Auth.UserId>([
-  ['coach-token', COACH_USER_ID],
-  ['member-token', MEMBER_USER_ID],
-  ['outsider-token', OUTSIDER_USER_ID],
-]);
+const makeConfig = (overrides: Partial<EmailForwardingConfigRow> = {}): EmailForwardingConfigRow =>
+  ({
+    team_id: TEAM_ID as unknown as EmailForwardingConfigRow['team_id'],
+    enabled: true,
+    target_channel_id: Schema.decodeSync(Discord.Snowflake)('111111111111111111'),
+    coach_channel_id: Schema.decodeSync(Discord.Snowflake)('222222222222222222'),
+    monitored_addresses: [] as unknown as EmailForwardingConfigRow['monitored_addresses'],
+    inbound_token: 'tok',
+    imap_enabled: false,
+    imap_host: Option.none(),
+    imap_port: Option.none(),
+    imap_username: Option.none(),
+    imap_secret_encrypted: Option.none(),
+    imap_use_tls: true,
+    imap_folder: Option.none(),
+    imap_last_seen_uid: 0,
+    imap_uid_validity: Option.none(),
+    imap_last_synced_at: Option.none(),
+    created_at: now,
+    updated_at: now,
+    ...overrides,
+  }) as unknown as EmailForwardingConfigRow;
+
+// ---------------------------------------------------------------------------
+// noop builder (mirrors existing test helpers)
+// ---------------------------------------------------------------------------
+
+const buildNoop = (tag: string, extra: Record<string, any> = {}): never =>
+  new Proxy({ _tag: tag, ...extra } as any, {
+    get: (t, k) => (k in t ? t[k] : () => Effect.void),
+  }) as never;
+
+// ---------------------------------------------------------------------------
+// Config repo mock with recording
+// ---------------------------------------------------------------------------
+
+const MockEmailForwardingConfigRepositoryLayer = Layer.succeed(EmailForwardingConfigRepository, {
+  _tag: 'api/EmailForwardingConfigRepository' as const,
+  findByTeam: () => Effect.succeed(configRowOverride),
+  upsert: (rawInput: unknown) => {
+    const input = rawInput as UpsertCall;
+    upsertCalls.push(input);
+    // Return a row reflecting the call
+    return Effect.succeed(
+      makeConfig({
+        imap_enabled: input.imap_enabled ?? false,
+        imap_host: input.imap_host ?? Option.none(),
+        imap_port: input.imap_port ?? Option.none(),
+        imap_username: input.imap_username ?? Option.none(),
+        imap_secret_encrypted: input.imap_secret_encrypted ?? Option.none(),
+        imap_use_tls: input.imap_use_tls ?? true,
+        imap_folder: input.imap_folder ?? Option.none(),
+      }),
+    );
+  },
+  findByInboundToken: () => Effect.succeed(Option.none()),
+  regenerateToken: () => Effect.die(new Error('not implemented')),
+  findImapEnabled: () => Effect.succeed([]),
+  updateImapSync: () => Effect.void,
+} as never);
+
+// ---------------------------------------------------------------------------
+// EmailSecretCrypto layer using a real AES-256-GCM implementation via makeWithKey.
+// This gives us a real encrypt/decrypt for the test so we can assert the secret
+// stored in the repo differs from the plaintext input.
+// ---------------------------------------------------------------------------
+
+const TestEmailSecretCryptoLayer = Layer.effect(
+  EmailSecretCrypto,
+  makeWithKey(Option.some(TEST_KEY_B64)),
+);
+
+// ---------------------------------------------------------------------------
+// Other mocks (mirrors email-forwarding.test.ts)
+// ---------------------------------------------------------------------------
+
+const sessionsStore = new Map<string, Auth.UserId>([['coach-token', COACH_USER_ID]]);
 
 const usersMap = new Map<Auth.UserId, any>([
   [
@@ -172,42 +199,6 @@ const usersMap = new Map<Auth.UserId, any>([
       id: COACH_USER_ID,
       discord_id: '111111111111111111',
       username: 'coach',
-      avatar: Option.none(),
-      is_profile_complete: true,
-      name: Option.none(),
-      birth_date: Option.none(),
-      gender: Option.none(),
-      locale: 'en',
-      discord_display_name: Option.none(),
-      discord_nickname: Option.none(),
-      created_at: now,
-      updated_at: now,
-    },
-  ],
-  [
-    MEMBER_USER_ID,
-    {
-      id: MEMBER_USER_ID,
-      discord_id: '222222222222222222',
-      username: 'member',
-      avatar: Option.none(),
-      is_profile_complete: true,
-      name: Option.none(),
-      birth_date: Option.none(),
-      gender: Option.none(),
-      locale: 'en',
-      discord_display_name: Option.none(),
-      discord_nickname: Option.none(),
-      created_at: now,
-      updated_at: now,
-    },
-  ],
-  [
-    OUTSIDER_USER_ID,
-    {
-      id: OUTSIDER_USER_ID,
-      discord_id: '333333333333333333',
-      username: 'outsider',
       avatar: Option.none(),
       is_profile_complete: true,
       name: Option.none(),
@@ -234,31 +225,7 @@ const membersStore = new Map<string, MembershipWithRole>([
       permissions: COACH_PERMISSIONS as any,
     } as MembershipWithRole,
   ],
-  [
-    `${TEAM_ID}:${MEMBER_USER_ID}`,
-    {
-      id: MEMBER_MEMBER_ID,
-      team_id: TEAM_ID,
-      user_id: MEMBER_USER_ID,
-      active: true,
-      role_names: ['Player'],
-      permissions: MEMBER_PERMISSIONS as any,
-    } as MembershipWithRole,
-  ],
 ]);
-
-// ---------------------------------------------------------------------------
-// noop builder
-// ---------------------------------------------------------------------------
-
-const buildNoop = (tag: string, extra: Record<string, any> = {}): never =>
-  new Proxy({ _tag: tag, ...extra } as any, {
-    get: (t, k) => (k in t ? t[k] : () => Effect.void),
-  }) as never;
-
-// ---------------------------------------------------------------------------
-// Mock layers
-// ---------------------------------------------------------------------------
 
 const MockDiscordOAuthLayer = Layer.succeed(DiscordOAuth, {
   _tag: 'api/DiscordOAuth',
@@ -348,98 +315,31 @@ const MockHttpClientLayer = Layer.succeed(
   ),
 );
 
-// ---------------------------------------------------------------------------
-// Email-specific mocks with real in-memory behavior
-// ---------------------------------------------------------------------------
-
 const MockEmailMessagesRepositoryLayer = Layer.succeed(EmailMessagesRepository, {
   _tag: 'api/EmailMessagesRepository' as const,
   insertReceived: () => Effect.die(new Error('not implemented')),
-  findById: (id: EmailForwarding.EmailMessageId) => {
-    const row = emailStore.get(id);
-    return Effect.succeed(row ? Option.some(row) : Option.none());
-  },
+  findById: () => Effect.succeed(Option.none()),
   findReceivedBatch: () => Effect.succeed([]),
   claimForSummarizing: () => Effect.succeed(Option.none()),
   setSummaryPendingApproval: () => Effect.void,
-  updateSummary: (id: EmailForwarding.EmailMessageId, summary: string, _shortSummary?: string) => {
-    summaryUpdateCalls.push({ id, summary });
-    const row = emailStore.get(id);
-    if (row?.status !== 'pending_approval') return Effect.succeed(Option.none());
-    emailStore.set(id, { ...row, summary: Option.some(summary) });
-    return Effect.succeed(Option.some(id));
-  },
+  updateSummary: () => Effect.succeed(Option.none()),
   incrementAttemptsAndMaybeFail: () => Effect.void,
-  approve: (id: EmailForwarding.EmailMessageId, by: string) => {
-    const row = emailStore.get(id);
-    if (row?.status !== 'pending_approval') return Effect.succeed(Option.none());
-    emailStore.set(id, { ...row, status: 'approved', approved_by: Option.some(by) });
-    return Effect.succeed(Option.some(id));
-  },
-  sendOriginal: (id: EmailForwarding.EmailMessageId, by: string) => {
-    const row = emailStore.get(id);
-    if (row?.status !== 'pending_approval') return Effect.succeed(Option.none());
-    emailStore.set(id, { ...row, status: 'send_original', approved_by: Option.some(by) });
-    return Effect.succeed(Option.some(id));
-  },
-  dismiss: (id: EmailForwarding.EmailMessageId, by: string) => {
-    const row = emailStore.get(id);
-    if (row?.status !== 'pending_approval') return Effect.succeed(Option.none());
-    emailStore.set(id, { ...row, status: 'rejected', rejected_by: Option.some(by) });
-    return Effect.succeed(Option.some(id));
-  },
+  approve: () => Effect.succeed(Option.none()),
+  sendOriginal: () => Effect.succeed(Option.none()),
+  dismiss: () => Effect.succeed(Option.none()),
   setPosted: () => Effect.void,
 } as never);
-
-// Build EmailAttachmentMeta inline to avoid dynamic require
-const makeAttachmentMeta = (): EmailForwarding.EmailAttachmentMeta => {
-  // Use a plain object matching the schema shape
-  return {
-    attachmentId: ATTACHMENT_ID,
-    filename: 'report.png',
-    contentType: 'image/png',
-    sizeBytes: ATTACHMENT_CONTENT.length,
-    createdAt: now,
-  } as unknown as EmailForwarding.EmailAttachmentMeta;
-};
 
 const MockEmailAttachmentsRepositoryLayer = Layer.succeed(EmailAttachmentsRepository, {
   _tag: 'api/EmailAttachmentsRepository' as const,
   insertMany: () => Effect.void,
-  listMetaByEmail: (_emailId: EmailForwarding.EmailMessageId) =>
-    Effect.succeed([makeAttachmentMeta()]),
-  findByIdWithBytes: (
-    attachmentId: EmailForwarding.EmailAttachmentId,
-    _emailId: EmailForwarding.EmailMessageId,
-  ) => {
-    if (attachmentId === ATTACHMENT_ID) {
-      return Effect.succeed(
-        Option.some({
-          filename: 'report.png',
-          contentType: 'image/png',
-          sizeBytes: ATTACHMENT_CONTENT.length,
-          content: ATTACHMENT_CONTENT,
-        }),
-      );
-    }
-    return Effect.succeed(Option.none());
-  },
-} as never);
-
-const MockEmailForwardingConfigRepositoryLayer = Layer.succeed(EmailForwardingConfigRepository, {
-  _tag: 'api/EmailForwardingConfigRepository' as const,
-  findByTeam: () => Effect.succeed(Option.none()),
-  upsert: () => Effect.die(new Error('not implemented')),
-  findByInboundToken: () => Effect.succeed(Option.none()),
-  regenerateToken: () => Effect.die(new Error('not implemented')),
+  listMetaByEmail: () => Effect.succeed([]),
+  findByIdWithBytes: () => Effect.succeed(Option.none()),
 } as never);
 
 const MockEmailPostSyncEventsRepositoryLayer = Layer.succeed(EmailPostSyncEventsRepository, {
   _tag: 'api/EmailPostSyncEventsRepository' as const,
-  enqueue: (emailId: EmailForwarding.EmailMessageId, _teamId: string, kind: string) => {
-    enqueuedSyncEvents.push({ emailId, kind });
-    return Effect.void;
-  },
+  enqueue: () => Effect.void,
   findUnprocessed: () => Effect.succeed([]),
   markProcessed: () => Effect.void,
   markFailed: () => Effect.void,
@@ -451,7 +351,7 @@ const MockEmailApprovalServiceLayer = EmailApprovalService.Default.pipe(
 );
 
 // ---------------------------------------------------------------------------
-// Build full test layer following the Mock-Layer Cascade pattern
+// Build test layer (mirrors email-forwarding.test.ts TestLayer structure)
 // ---------------------------------------------------------------------------
 
 const TestLayer = ApiLive.pipe(
@@ -463,13 +363,14 @@ const TestLayer = ApiLive.pipe(
   Layer.provide(MockTeamsRepositoryLayer),
   Layer.provide(MockTeamMembersRepositoryLayer),
   Layer.provide(MockHttpClientLayer),
-  // Email repos (live behavior for these tests)
+  // Email repos
   Layer.provide(MockEmailMessagesRepositoryLayer),
   Layer.provide(MockEmailAttachmentsRepositoryLayer),
   Layer.provide(MockEmailForwardingConfigRepositoryLayer),
   Layer.provide(MockEmailPostSyncEventsRepositoryLayer),
-  Layer.provide(Layer.merge(MockEmailApprovalServiceLayer, EmailSecretCrypto.Default)),
-  // Remaining repos
+  // Crypto with test key (merged with approval service to stay within Layer.pipe arity limit)
+  Layer.provide(Layer.merge(MockEmailApprovalServiceLayer, TestEmailSecretCryptoLayer)),
+  // Remaining repos (noop)
   Layer.provide(
     Layer.mergeAll(
       Layer.succeed(
@@ -762,379 +663,194 @@ beforeEach(() => {
 // URL helpers
 // ---------------------------------------------------------------------------
 
-const emailUrl = (teamId: string, emailId: string) =>
-  `http://localhost/teams/${teamId}/emails/${emailId}`;
-
-const summaryUrl = (teamId: string, emailId: string) =>
-  `http://localhost/teams/${teamId}/emails/${emailId}/summary`;
-
-const approveUrl = (teamId: string, emailId: string) =>
-  `http://localhost/teams/${teamId}/emails/${emailId}/approve`;
-
-const sendOriginalUrl = (teamId: string, emailId: string) =>
-  `http://localhost/teams/${teamId}/emails/${emailId}/send-original`;
-
-const rejectUrl = (teamId: string, emailId: string) =>
-  `http://localhost/teams/${teamId}/emails/${emailId}/reject`;
-
-const attachmentUrl = (teamId: string, emailId: string, attachmentId: string) =>
-  `http://localhost/teams/${teamId}/emails/${emailId}/attachments/${attachmentId}`;
+const configUrl = (teamId: string) => `http://localhost/teams/${teamId}/email-forwarding`;
 
 // ---------------------------------------------------------------------------
-// getEmail
+// Helper: valid PUT payload
 // ---------------------------------------------------------------------------
 
-describe('getEmail — GET /teams/:teamId/emails/:emailId', () => {
-  it('coach member gets 200 with email detail and attachment meta (no bytes)', async () => {
-    const response = await handler(
-      new Request(emailUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        headers: { Authorization: 'Bearer coach-token' },
-      }),
-    );
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.emailId).toBe(EMAIL_ID_PENDING);
-    expect(body.subject).toBe('Team Update');
-    // Attachments should include meta but no bytes
-    expect(Array.isArray(body.attachments)).toBe(true);
-    expect(body.attachments.length).toBeGreaterThan(0);
-    // Should not have a 'content' or 'bytes' field
-    const att = body.attachments[0];
-    expect(att).not.toHaveProperty('content');
-    expect(att.attachmentId).toBe(ATTACHMENT_ID);
-  });
-
-  it('non-manager member gets 200 (read access)', async () => {
-    const response = await handler(
-      new Request(emailUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        headers: { Authorization: 'Bearer member-token' },
-      }),
-    );
-    expect(response.status).toBe(200);
-  });
-
-  it('non-member gets 403', async () => {
-    const response = await handler(
-      new Request(emailUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        headers: { Authorization: 'Bearer outsider-token' },
-      }),
-    );
-    expect(response.status).toBe(403);
-  });
-
-  it('unknown emailId returns 404', async () => {
-    const response = await handler(
-      new Request(emailUrl(TEAM_ID, BOGUS_EMAIL_ID), {
-        headers: { Authorization: 'Bearer coach-token' },
-      }),
-    );
-    expect(response.status).toBe(404);
-  });
-
-  it('email from another team returns 404 (not 403 — no info leak)', async () => {
-    const response = await handler(
-      new Request(emailUrl(TEAM_ID, EMAIL_ID_OTHER_TEAM), {
-        headers: { Authorization: 'Bearer coach-token' },
-      }),
-    );
-    expect(response.status).toBe(404);
-  });
-
-  it('unauthenticated request returns 401', async () => {
-    const response = await handler(new Request(emailUrl(TEAM_ID, EMAIL_ID_PENDING)));
-    expect(response.status).toBe(401);
-  });
-});
+const makePutPayload = (withSecret: boolean, secretValue?: string): Record<string, unknown> => {
+  const base: Record<string, unknown> = {
+    enabled: true,
+    target_channel_id: '111111111111111111',
+    coach_channel_id: '222222222222222222',
+    monitored_addresses: [],
+    imap_enabled: true,
+    imap_host: 'imap.example.com',
+    imap_port: 993,
+    imap_username: 'user@example.com',
+    imap_use_tls: true,
+    imap_folder: 'INBOX',
+  };
+  if (withSecret) {
+    base.imap_secret = secretValue ?? 'plaintext-pw';
+  }
+  // When withSecret=false, imap_secret key is OMITTED entirely (not null)
+  return base;
+};
 
 // ---------------------------------------------------------------------------
-// updateEmailSummary — PUT /teams/:teamId/emails/:emailId/summary
+// Test 1: PUT with imap_secret → encrypted in repo call; response has imapSecretSet=true; no plain secret in JSON
 // ---------------------------------------------------------------------------
 
-describe('updateEmailSummary — PUT /teams/:teamId/emails/:emailId/summary', () => {
-  it('coach updates summary on pending email → 200 with updated EmailDetailView', async () => {
+describe('PUT /teams/:teamId/email-forwarding — IMAP with secret', () => {
+  it('upsert receives encrypted secret (≠ plaintext); response has imapSecretSet=true; no plain secret in JSON', async () => {
+    const body = JSON.stringify(makePutPayload(true, 'plaintext-pw'));
+
     const response = await handler(
-      new Request(summaryUrl(TEAM_ID, EMAIL_ID_PENDING), {
+      new Request(configUrl(TEAM_ID), {
         method: 'PUT',
         headers: {
           Authorization: 'Bearer coach-token',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ summary: 'Coach-edited summary text', short_summary: 'Short edit' }),
+        body,
       }),
     );
+
     expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.summary).toBe('Coach-edited summary text');
-    // Should have persisted the update
-    expect(summaryUpdateCalls.some((c) => c.id === EMAIL_ID_PENDING)).toBe(true);
+
+    // Assert repo received an encrypted secret (not the plaintext)
+    expect(upsertCalls).toHaveLength(1);
+    const call = upsertCalls[0]!;
+    expect(Option.isSome(call.imap_secret_encrypted)).toBe(true);
+    const stored = Option.getOrThrow(call.imap_secret_encrypted);
+    expect(stored).not.toBe('plaintext-pw');
+    // Should be a v1. blob
+    expect(stored.startsWith('v1.')).toBe(true);
+
+    // Response view should have imapSecretSet=true
+    const responseBody = await response.json();
+    expect(responseBody.imapSecretSet).toBe(true);
+
+    // Serialized JSON must not contain plaintext password
+    const jsonText = JSON.stringify(responseBody);
+    expect(jsonText).not.toContain('plaintext-pw');
+    // Must not contain any raw secret field (imapSecretSet is a boolean flag, not a secret value)
+    expect(jsonText).not.toContain('"imapSecret":');
+    expect(jsonText).not.toContain('imap_secret_encrypted');
+    expect(jsonText).not.toContain('imap_secret"');
   });
 
-  it('non-coach member gets 403', async () => {
-    const response = await handler(
-      new Request(summaryUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        method: 'PUT',
-        headers: {
-          Authorization: 'Bearer member-token',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ summary: 'Should not be saved', short_summary: 'Short' }),
-      }),
-    );
-    expect(response.status).toBe(403);
-    expect(summaryUpdateCalls).toHaveLength(0);
-  });
+  it('other IMAP fields in the response match what was PUT', async () => {
+    const body = JSON.stringify(makePutPayload(true, 'any-pw'));
 
-  it('update on non-pending email returns 404 (updateSummary returns None)', async () => {
-    // EMAIL_ID_RECEIVED has status 'received', not 'pending_approval'
     const response = await handler(
-      new Request(summaryUrl(TEAM_ID, EMAIL_ID_RECEIVED), {
+      new Request(configUrl(TEAM_ID), {
         method: 'PUT',
         headers: {
           Authorization: 'Bearer coach-token',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ summary: 'Should not work', short_summary: 'Short' }),
+        body,
       }),
     );
-    // updateSummary returns None → 404 in the handler
-    expect(response.status).toBe(404);
+
+    expect(response.status).toBe(200);
+    const responseBody = await response.json();
+    // These imap fields should be reflected in the view
+    expect(responseBody.imapEnabled).toBe(true);
+    expect(responseBody.imapHost).toBe('imap.example.com');
+    expect(responseBody.imapPort).toBe(993);
+    expect(responseBody.imapUsername).toBe('user@example.com');
+    expect(responseBody.imapUseTls).toBe(true);
+    expect(responseBody.imapFolder).toBe('INBOX');
   });
 });
 
 // ---------------------------------------------------------------------------
-// approveEmail — POST /teams/:teamId/emails/:emailId/approve
+// Test 2: GET returns imapSecretSet=true when secret is Some; no secret in JSON
 // ---------------------------------------------------------------------------
 
-describe('approveEmail — POST /teams/:teamId/emails/:emailId/approve', () => {
-  it('coach approves pending email → 200 with outcome=approved, enqueues post_summary', async () => {
+describe('GET /teams/:teamId/email-forwarding — IMAP secret is set', () => {
+  it('GET when row has imap_secret_encrypted=Some → imapSecretSet=true, no secret in JSON', async () => {
+    // Override the config row returned by findByTeam to have a secret
+    configRowOverride = Option.some(
+      makeConfig({
+        imap_enabled: true,
+        imap_secret_encrypted: Option.some('enc-blob'),
+        imap_host: Option.some('imap.example.com' as unknown as any),
+        imap_port: Option.some(993),
+        imap_username: Option.some('user@example.com' as unknown as any),
+      }),
+    );
+
     const response = await handler(
-      new Request(approveUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        method: 'POST',
+      new Request(configUrl(TEAM_ID), {
         headers: { Authorization: 'Bearer coach-token' },
       }),
     );
+
     expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.outcome).toBe('approved');
-    expect(emailStore.get(EMAIL_ID_PENDING)?.status).toBe('approved');
-    expect(enqueuedSyncEvents.some((e) => e.kind === 'post_summary')).toBe(true);
+    const responseBody = await response.json();
+
+    // imapSecretSet must be true
+    expect(responseBody.imapSecretSet).toBe(true);
+
+    // The raw secret must NOT appear anywhere in the serialized response
+    const jsonText = JSON.stringify(responseBody);
+    expect(jsonText).not.toContain('enc-blob');
+    expect(jsonText).not.toContain('imap_secret_encrypted');
+    expect(jsonText).not.toContain('imapSecret"');
   });
 
-  it('non-coach gets 403', async () => {
-    const response = await handler(
-      new Request(approveUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        method: 'POST',
-        headers: { Authorization: 'Bearer member-token' },
+  it('GET when row has imap_secret_encrypted=None → imapSecretSet=false', async () => {
+    configRowOverride = Option.some(
+      makeConfig({
+        imap_enabled: true,
+        imap_secret_encrypted: Option.none(),
       }),
     );
-    expect(response.status).toBe(403);
-    expect(emailStore.get(EMAIL_ID_PENDING)?.status).toBe('pending_approval');
-  });
 
-  it('unknown emailId returns 404', async () => {
     const response = await handler(
-      new Request(approveUrl(TEAM_ID, BOGUS_EMAIL_ID), {
-        method: 'POST',
+      new Request(configUrl(TEAM_ID), {
         headers: { Authorization: 'Bearer coach-token' },
       }),
     );
-    expect(response.status).toBe(404);
-  });
 
-  it('already-handled email returns 200 with outcome=already_handled (idempotent)', async () => {
-    // First approval
-    await handler(
-      new Request(approveUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        method: 'POST',
-        headers: { Authorization: 'Bearer coach-token' },
-      }),
-    );
-    // Second approval
-    const response = await handler(
-      new Request(approveUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        method: 'POST',
-        headers: { Authorization: 'Bearer coach-token' },
-      }),
-    );
     expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.outcome).toBe('already_handled');
-    // Only one post_summary event
-    expect(enqueuedSyncEvents.filter((e) => e.kind === 'post_summary')).toHaveLength(1);
+    const responseBody = await response.json();
+    expect(responseBody.imapSecretSet).toBe(false);
+  });
+
+  it('GET when no config row exists → defaultConfigView has imapSecretSet=false', async () => {
+    // configRowOverride remains None (default)
+    const response = await handler(
+      new Request(configUrl(TEAM_ID), {
+        headers: { Authorization: 'Bearer coach-token' },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const responseBody = await response.json();
+    expect(responseBody.imapSecretSet).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// sendOriginalEmail — POST /teams/:teamId/emails/:emailId/send-original
+// Test 3: PUT WITHOUT imap_secret → repo receives imap_secret_encrypted=None (preserve path)
 // ---------------------------------------------------------------------------
 
-describe('sendOriginalEmail — POST /teams/:teamId/emails/:emailId/send-original', () => {
-  it('coach sends original on pending email → 200 with outcome=sent_original, enqueues post_original', async () => {
+describe('PUT /teams/:teamId/email-forwarding — IMAP without secret (preserve path)', () => {
+  it('PUT with imap_secret key absent → upsert receives imap_secret_encrypted=None', async () => {
+    const body = JSON.stringify(makePutPayload(false)); // no imap_secret key
+
     const response = await handler(
-      new Request(sendOriginalUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        method: 'POST',
-        headers: { Authorization: 'Bearer coach-token' },
+      new Request(configUrl(TEAM_ID), {
+        method: 'PUT',
+        headers: {
+          Authorization: 'Bearer coach-token',
+          'Content-Type': 'application/json',
+        },
+        body,
       }),
     );
+
     expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.outcome).toBe('sent_original');
-    expect(emailStore.get(EMAIL_ID_PENDING)?.status).toBe('send_original');
-    expect(enqueuedSyncEvents.some((e) => e.kind === 'post_original')).toBe(true);
-  });
 
-  it('non-coach gets 403', async () => {
-    const response = await handler(
-      new Request(sendOriginalUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        method: 'POST',
-        headers: { Authorization: 'Bearer member-token' },
-      }),
-    );
-    expect(response.status).toBe(403);
-    expect(emailStore.get(EMAIL_ID_PENDING)?.status).toBe('pending_approval');
-  });
-
-  it('unknown emailId returns 404', async () => {
-    const response = await handler(
-      new Request(sendOriginalUrl(TEAM_ID, BOGUS_EMAIL_ID), {
-        method: 'POST',
-        headers: { Authorization: 'Bearer coach-token' },
-      }),
-    );
-    expect(response.status).toBe(404);
-  });
-
-  it('already-handled email returns 200 with outcome=already_handled (idempotent)', async () => {
-    // First call
-    await handler(
-      new Request(sendOriginalUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        method: 'POST',
-        headers: { Authorization: 'Bearer coach-token' },
-      }),
-    );
-    // Second call
-    const response = await handler(
-      new Request(sendOriginalUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        method: 'POST',
-        headers: { Authorization: 'Bearer coach-token' },
-      }),
-    );
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.outcome).toBe('already_handled');
-    // Only one post_original event
-    expect(enqueuedSyncEvents.filter((e) => e.kind === 'post_original')).toHaveLength(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// rejectEmail — POST /teams/:teamId/emails/:emailId/reject
-// ---------------------------------------------------------------------------
-
-describe('rejectEmail — POST /teams/:teamId/emails/:emailId/reject', () => {
-  it('coach dismisses pending email → 200 with outcome=dismissed, NO sync event enqueued', async () => {
-    const response = await handler(
-      new Request(rejectUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        method: 'POST',
-        headers: { Authorization: 'Bearer coach-token' },
-      }),
-    );
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.outcome).toBe('dismissed');
-    expect(emailStore.get(EMAIL_ID_PENDING)?.status).toBe('rejected');
-    // dismiss does NOT enqueue any sync event
-    expect(enqueuedSyncEvents).toHaveLength(0);
-  });
-
-  it('non-coach gets 403', async () => {
-    const response = await handler(
-      new Request(rejectUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        method: 'POST',
-        headers: { Authorization: 'Bearer member-token' },
-      }),
-    );
-    expect(response.status).toBe(403);
-  });
-
-  it('unknown emailId returns 404 EmailMessageNotFound', async () => {
-    const response = await handler(
-      new Request(rejectUrl(TEAM_ID, BOGUS_EMAIL_ID), {
-        method: 'POST',
-        headers: { Authorization: 'Bearer coach-token' },
-      }),
-    );
-    expect(response.status).toBe(404);
-  });
-
-  it('already-handled email returns 200 with outcome=already_handled (idempotent)', async () => {
-    // First call
-    await handler(
-      new Request(rejectUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        method: 'POST',
-        headers: { Authorization: 'Bearer coach-token' },
-      }),
-    );
-    // Second call
-    const response = await handler(
-      new Request(rejectUrl(TEAM_ID, EMAIL_ID_PENDING), {
-        method: 'POST',
-        headers: { Authorization: 'Bearer coach-token' },
-      }),
-    );
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.outcome).toBe('already_handled');
-    expect(enqueuedSyncEvents).toHaveLength(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// downloadEmailAttachment — GET /teams/:teamId/emails/:emailId/attachments/:attachmentId
-// ---------------------------------------------------------------------------
-
-describe('downloadEmailAttachment — GET /teams/.../attachments/:attachmentId', () => {
-  it('member gets 200 with correct content-type and content-disposition', async () => {
-    const response = await handler(
-      new Request(attachmentUrl(TEAM_ID, EMAIL_ID_PENDING, ATTACHMENT_ID), {
-        headers: { Authorization: 'Bearer member-token' },
-      }),
-    );
-    expect(response.status).toBe(200);
-    expect(response.headers.get('content-type')).toBe('image/png');
-    const disposition = response.headers.get('content-disposition') ?? '';
-    expect(disposition).toContain('attachment');
-    expect(disposition).toContain('report.png');
-    // Verify content round-trips correctly
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    expect(bytes).toEqual(ATTACHMENT_CONTENT);
-  });
-
-  it('non-member gets 403', async () => {
-    const response = await handler(
-      new Request(attachmentUrl(TEAM_ID, EMAIL_ID_PENDING, ATTACHMENT_ID), {
-        headers: { Authorization: 'Bearer outsider-token' },
-      }),
-    );
-    expect(response.status).toBe(403);
-  });
-
-  it('attachmentId not belonging to emailId returns 404', async () => {
-    const response = await handler(
-      new Request(attachmentUrl(TEAM_ID, EMAIL_ID_PENDING, BOGUS_ATTACHMENT_ID), {
-        headers: { Authorization: 'Bearer member-token' },
-      }),
-    );
-    expect(response.status).toBe(404);
-  });
-
-  it('filename in content-disposition has no CR/LF injection', async () => {
-    const response = await handler(
-      new Request(attachmentUrl(TEAM_ID, EMAIL_ID_PENDING, ATTACHMENT_ID), {
-        headers: { Authorization: 'Bearer member-token' },
-      }),
-    );
-    const disposition = response.headers.get('content-disposition') ?? '';
-    expect(disposition).not.toMatch(/[\r\n]/);
+    // Repo must receive imap_secret_encrypted=None (signals "keep existing")
+    expect(upsertCalls).toHaveLength(1);
+    const call = upsertCalls[0]!;
+    expect(Option.isNone(call.imap_secret_encrypted)).toBe(true);
   });
 });

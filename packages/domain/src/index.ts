@@ -19,7 +19,7 @@ export * as DashboardApi from './api/DashboardApi.js';
 export * as DashboardLayoutApi from './api/DashboardLayoutApi.js';
 
 /**
- * Config view returned to web clients — inbound_token is intentionally omitted.
+ * Config view returned to web clients — inbound_token and imap_secret_encrypted are intentionally omitted.
  */
 export * as EmailForwardingApi from './api/EmailForwardingApi.js';
 

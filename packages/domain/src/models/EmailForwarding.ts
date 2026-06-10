@@ -1,3 +1,4 @@
+import * as Schemas from '@sideline/effect-lib/Schemas';
 import { Schema } from 'effect';
 import { Model } from 'effect/unstable/schema';
 import * as Discord from '~/models/Discord.js';
@@ -46,6 +47,16 @@ export class EmailForwardingConfig extends Model.Class<EmailForwardingConfig>(
   coach_channel_id: Discord.Snowflake,
   monitored_addresses: Schema.Array(Schema.String),
   inbound_token: Schema.String,
+  imap_enabled: Schema.Boolean,
+  imap_host: Schema.OptionFromNullOr(Schema.String),
+  imap_port: Schema.OptionFromNullOr(Schema.Int),
+  imap_username: Schema.OptionFromNullOr(Schema.String),
+  imap_secret_encrypted: Schema.OptionFromNullOr(Schema.String),
+  imap_use_tls: Schema.Boolean,
+  imap_folder: Schema.OptionFromNullOr(Schema.String),
+  imap_last_seen_uid: Schema.Int,
+  imap_uid_validity: Schema.OptionFromNullOr(Schema.Int),
+  imap_last_synced_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   created_at: Model.DateTimeInsertFromDate,
   updated_at: Model.DateTimeUpdateFromDate,
 }) {}

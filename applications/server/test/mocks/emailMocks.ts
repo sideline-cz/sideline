@@ -3,6 +3,7 @@ import { EmailAttachmentsRepository } from '~/repositories/EmailAttachmentsRepos
 import { EmailForwardingConfigRepository } from '~/repositories/EmailForwardingConfigRepository.js';
 import { EmailMessagesRepository } from '~/repositories/EmailMessagesRepository.js';
 import { EmailApprovalService } from '~/services/EmailApprovalService.js';
+import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
 
 const die = (msg: string) => () => Effect.die(new Error(msg));
 
@@ -14,12 +15,15 @@ export const MockEmailForwardingConfigRepositoryLayer = Layer.succeed(
     upsert: die('MockEmailForwardingConfigRepository.upsert not implemented'),
     findByInboundToken: () => Effect.succeed(Option.none()),
     regenerateToken: die('MockEmailForwardingConfigRepository.regenerateToken not implemented'),
+    findImapEnabled: () => Effect.succeed([]),
+    updateImapSync: () => Effect.void,
   } as never,
 );
 
 export const MockEmailMessagesRepositoryLayer = Layer.succeed(EmailMessagesRepository, {
   _tag: 'api/EmailMessagesRepository' as const,
   insertReceived: die('MockEmailMessagesRepository.insertReceived not implemented'),
+  insertReceivedDedup: die('MockEmailMessagesRepository.insertReceivedDedup not implemented'),
   findById: () => Effect.succeed(Option.none()),
   findReceivedBatch: () => Effect.succeed([]),
   claimForSummarizing: () => Effect.succeed(Option.none()),
@@ -55,4 +59,5 @@ export const MockEmailLayers = Layer.mergeAll(
   MockEmailMessagesRepositoryLayer,
   MockEmailAttachmentsRepositoryLayer,
   MockEmailApprovalServiceLayer,
+  EmailSecretCrypto.Default,
 );

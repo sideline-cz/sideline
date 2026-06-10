@@ -73,6 +73,7 @@ import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { EmailApprovalService } from '~/services/EmailApprovalService.js';
+import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
 import { LlmClient } from '~/services/LlmClient.js';
 import { TranslationCache } from '~/services/TranslationCache.js';
 import { env } from './env.js';
@@ -173,5 +174,6 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   ),
   Layer.provide(DiscordOAuth.Default),
   Layer.provide(LlmClient.Default),
+  Layer.provide(EmailSecretCrypto.Default),
   Layer.provide(FetchHttpClient.layer),
 );
