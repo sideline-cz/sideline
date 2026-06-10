@@ -23,3 +23,7 @@ scratchpad/*
 e2e/results/
 e2e/report/
 .plan/
+
+# Coolify CLI generated docs
+llms.txt
+llms-full.txt
