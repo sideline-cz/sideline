@@ -471,9 +471,6 @@ export const CarpoolAddModal = Ix.modalSubmit(
             content: m.bot_carpool_err_already_in_other({}, { locale }),
           }),
         ),
-        Effect.catchTag('CarpoolForbidden', () =>
-          replyWebhook(rest, interaction, { content: m.bot_carpool_no_permission({}, { locale }) }),
-        ),
       );
 
       return Effect.as(Effect.forkDetach(addCarAndFollowUp), ephemeralDeferred);

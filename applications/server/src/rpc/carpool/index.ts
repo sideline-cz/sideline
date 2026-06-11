@@ -142,11 +142,6 @@ const rpcHandlers = Effect.Do.pipe(
         Effect.Do.pipe(
           Effect.bind('team', () => resolveTeamByGuild(guild_id)),
           Effect.bind('membership', ({ team }) => resolveMember(discord_user_id, team.id)),
-          Effect.tap(({ membership }) =>
-            membership.permissions.includes('carpool:manage')
-              ? Effect.void
-              : Effect.fail(new CarpoolRpcModels.CarpoolForbidden()),
-          ),
           Effect.bind('addResult', ({ membership }) =>
             carpools.addCar({
               carpoolId: carpool_id,

@@ -617,7 +617,6 @@ Handles submission of the car-creation modal. Creates the car, spawns a private 
 | `CarpoolNotFound` | Carpool not found |
 | `CarpoolAlreadyOwnsCar` | You already own a car in this carpool |
 | `CarpoolAlreadyInAnotherCar` | You are already in another car in this carpool |
-| `CarpoolForbidden` | Missing permission |
 
 **Source file:** `applications/bot/src/interactions/carpool.ts` (`CarpoolAddModal`)
 
@@ -1446,7 +1445,7 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Carpool/SaveCarpoolMessageId` | `carpool_id`, `discord_message_id` | Persist the Discord message ID of the public board message after it is posted. |
 | `Carpool/SaveCarThreadId` | `car_id`, `thread_id` | Persist the Discord thread ID of a car's private thread after it is created. |
 | `Carpool/GetCarpoolView` | `carpool_id` | Fetch the current `CarpoolView` (cars + passengers) for a carpool; returns `Option<CarpoolView>`. |
-| `Carpool/AddCar` | `guild_id`, `discord_user_id`, `carpool_id`, `capacity: Int[1–8]`, `note: Option<string>` | Add a new car to a carpool; the owner occupies seat #1. Returns `AddCarResult` (new `car_id` + updated `CarpoolView`). Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolNotFound`, `CarpoolAlreadyOwnsCar`, `CarpoolAlreadyInAnotherCar`, `CarpoolForbidden`. |
+| `Carpool/AddCar` | `guild_id`, `discord_user_id`, `carpool_id`, `capacity: Int[1–8]`, `note: Option<string>` | Add a new car to a carpool; the owner occupies seat #1. Returns `AddCarResult` (new `car_id` + updated `CarpoolView`). Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolNotFound`, `CarpoolAlreadyOwnsCar`, `CarpoolAlreadyInAnotherCar`. |
 | `Carpool/ReserveSeat` | `guild_id`, `discord_user_id`, `car_id` | Reserve a seat in a car (any member except the owner). Returns `ReserveResult` (`thread_id` + updated `CarpoolView`). Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolCarNotFound`, `CarpoolFull`, `CarpoolAlreadyInThisCar`, `CarpoolAlreadyInAnotherCar`, `CarpoolOwnerCannotReserve`. |
 | `Carpool/AssignSeat` | `guild_id`, `discord_user_id`, `car_id`, `target_discord_user_id` | Owner assigns a seat to another team member. Returns `ReserveResult`. Errors: same as `ReserveSeat` plus `CarpoolNotCarOwner`, `CarpoolTargetNotMember`. |
 | `Carpool/LeaveSeat` | `guild_id`, `discord_user_id`, `car_id` | Release a reserved seat (passengers only; owner cannot leave). Returns updated `CarpoolView`. Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolCarNotFound`, `CarpoolNotInCar`, `CarpoolOwnerCannotLeave`. |

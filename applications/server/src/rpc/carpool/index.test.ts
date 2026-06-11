@@ -1,6 +1,7 @@
 // NOTE: These tests were originally written in TDD mode BEFORE the implementation.
-// The `carpool:manage` permission gate on CreateCarpool and AddCar returns CarpoolForbidden
-// (distinct from CarpoolNotMember, which is returned when the caller is not a team member at all).
+// The `carpool:manage` permission gate applies only to CreateCarpool — it returns CarpoolForbidden
+// for members who lack the permission (distinct from CarpoolNotMember, which fires when the caller
+// is not a team member at all). AddCar requires only team membership; any member may add their own car.
 
 import { it as itEffect } from '@effect/vitest';
 import type { Carpool, Discord, Event, Team, TeamMember, User } from '@sideline/domain';
@@ -471,6 +472,29 @@ describe('Carpool/AddCar RPC', () => {
       ),
       Effect.asVoid,
     ),
+  );
+
+  itEffect.effect(
+    'member without carpool:manage adds car → succeeds with AddCarResult, ownerTeamMemberId is MEMBER_MEMBER_ID',
+    () =>
+      callRpc('Carpool/AddCar', {
+        guild_id: GUILD_ID,
+        discord_user_id: MEMBER_DISCORD_ID,
+        carpool_id: CARPOOL_ID,
+        capacity: 4,
+        note: Option.none(),
+      }).pipe(
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result).toBeInstanceOf(CarpoolRpcModels.AddCarResult);
+            expect(result.car_id).toBe(CAR_ID_1);
+            expect(result.view).toBeInstanceOf(CarpoolRpcModels.CarpoolView);
+            expect(addCarCalls).toHaveLength(1);
+            expect(addCarCalls[0].ownerTeamMemberId).toBe(MEMBER_MEMBER_ID);
+          }),
+        ),
+        Effect.asVoid,
+      ),
   );
 
   itEffect.effect('repo propagates CarpoolAlreadyOwnsCar as typed error (not raw defect)', () => {

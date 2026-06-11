@@ -5,6 +5,10 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-11 — Any team member can now add a car to the carpool board
+
+Previously, adding a car required the `carpool:manage` permission (Admin and Captain roles only). Now **any team member** can volunteer as a driver by clicking **Add a car** on the carpool board — no special role needed. Posting the board itself (`/doprava`) still requires `carpool:manage`.
+
 ## 2026-06-10 — Event roster attendance: link a roster to a tournament event
 
 Captains can now link any named roster directly to an event (e.g. a tournament), then choose how "yes" RSVPs are handled:
