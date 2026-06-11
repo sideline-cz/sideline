@@ -1,5 +1,5 @@
 import { AchievementSyncService } from './achievement/index.js';
-import { ChannelSyncService } from './channel/index.js';
+import { ChannelBackfillService, ChannelSyncService } from './channel/index.js';
 import { EmailSyncService } from './email/index.js';
 import { EventSyncService } from './event/index.js';
 import { FinanceSyncService } from './finance/index.js';
@@ -13,6 +13,7 @@ import { WeeklySummarySyncService } from './weeklySummary/index.js';
 
 export {
   AchievementSyncService,
+  ChannelBackfillService,
   ChannelSyncService,
   EmailSyncService,
   EventSyncService,

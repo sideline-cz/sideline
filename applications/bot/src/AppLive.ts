@@ -4,6 +4,7 @@ import { HealthServerLive } from '~/HealthServerLive.js';
 import { ChannelReorderSemaphore } from '~/rcp/event/ChannelReorderSemaphore.js';
 import {
   AchievementSyncService,
+  ChannelBackfillService,
   ChannelSyncService,
   EmailSyncService,
   EventSyncService,
@@ -25,6 +26,7 @@ const SyncLive = Layer.mergeAll(
   RoleSyncService.Default,
   RoleProvisionSyncService.Default,
   ChannelSyncService.Default,
+  ChannelBackfillService.Default,
   EmailSyncService.Default,
   EventSyncService.Default,
   FinanceSyncService.Default,

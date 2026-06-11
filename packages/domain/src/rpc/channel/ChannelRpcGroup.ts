@@ -89,4 +89,12 @@ export const ChannelRpcGroup = RpcGroup.make(
   Rpc.make('DeleteManagedChannel', {
     payload: { team_channel_id: TeamChannelId },
   }),
+  // Backfill
+  Rpc.make('BackfillMissingGroupRoles', {
+    payload: {
+      team_id: Schema.OptionFromNullOr(Team.TeamId),
+      limit: Schema.OptionFromNullOr(Schema.Number),
+    },
+    success: Schema.Number,
+  }),
 ).prefix('Channel/');

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { Bot } from '~/index.js';
 import {
   AchievementSyncService,
+  ChannelBackfillService,
   ChannelSyncService,
   EmailSyncService,
   EventSyncService,
@@ -109,6 +110,10 @@ const MockEmailSyncServiceLayer = Layer.succeed(EmailSyncService, {
   processTick: Effect.void,
 } as never);
 
+const MockChannelBackfillServiceLayer = Layer.succeed(ChannelBackfillService, {
+  processTick: Effect.void,
+} as never);
+
 const MockOnboardingRoleCacheLayer = Layer.succeed(OnboardingRoleCache, {
   get: () => Effect.succeed(Option.none()),
   set: () => Effect.void,
@@ -150,6 +155,7 @@ describe('Bot', () => {
       MockWeeklySummarySyncServiceLayer,
       MockFinanceSyncServiceLayer,
       MockEmailSyncServiceLayer,
+      MockChannelBackfillServiceLayer,
       MockOnboardingRoleCacheLayer,
       MockSyncRpcLayer,
       MockInviteCacheLayer,

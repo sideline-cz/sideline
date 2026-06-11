@@ -5,6 +5,7 @@ export { eventHandlers } from '~/events/index.js';
 export { interactionBuilder } from '~/interactions/index.js';
 export {
   AchievementSyncService,
+  ChannelBackfillService,
   ChannelSyncService,
   EmailSyncService,
   EventSyncService,

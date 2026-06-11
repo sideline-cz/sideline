@@ -5,14 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
-## 2026-06-11 — Channel access grants for unprovisioned groups no longer silently fail
+## 2026-06-11 — Channel access grants for unprovisioned groups now auto-heal
 
-When you grant channel access to a group that does not yet have a Discord role, Sideline now saves the grant and shows you clearly that it is pending rather than silently skipping it.
+When you grant channel access to a group that does not yet have a Discord role, Sideline saves the grant and makes it take effect automatically once the group is provisioned — including for groups that were created before the team's Discord server was linked.
 
 - A **"Not yet active in Discord"** badge appears next to the group name in the channel Access sheet.
 - An info alert at the top of the Access sheet tells you that some grants are waiting for Discord to catch up.
 - When you add such a grant, you receive an informational toast (instead of the usual success toast) so you know the grant is saved but not yet active.
-- The access applies automatically once the group is provisioned in Discord — no further action is needed.
+- **Automatic backfill:** a background process runs every 5 minutes and automatically provisions any group that is missing a Discord role (for example, role-only groups created before the team's Discord link was established). No manual action is needed.
+- **Immediate best-effort provisioning:** when you save an access grant for an unprovisioned group, Sideline also enqueues provisioning right away, so you typically do not need to wait for the background cycle.
+- **Stored grants applied on provisioning:** when a group's Discord role is first created, all previously stored channel-access grants for that group are re-applied to every already-provisioned managed channel automatically.
 
 ## 2026-06-11 — Any team member can now add a car to the carpool board
 

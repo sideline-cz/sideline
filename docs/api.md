@@ -5922,12 +5922,14 @@ Manages Discord channel mappings and channel sync outbox processing. The outbox 
 | `Channel/MarkEventProcessed` | `id` | Marks a channel sync event as processed |
 | `Channel/MarkEventFailed` | `id`, `error` | Marks a channel sync event as failed |
 | `Channel/GetMapping` | `team_id`, `group_id` → `ChannelMapping \| null` | Gets the Discord channel mapping for a group |
-| `Channel/UpsertMapping` | `team_id`, `group_id`, `discord_channel_id`, `discord_role_id` | Creates or updates a channel mapping |
+| `Channel/UpsertMapping` | `team_id`, `group_id`, `discord_channel_id`, `discord_role_id` | Creates or updates a channel mapping. If the group had no `discord_role_id` before this call (i.e. `old_role_id` returned by the SQL upsert is `None`), immediately re-applies all stored `team_channel_access` grants for that group on every already-provisioned managed channel (group-axis reconcile). |
 | `Channel/DeleteMapping` | `team_id`, `group_id` | Removes a channel mapping |
 | `Channel/GetManagedChannel` | `team_channel_id` → `ManagedChannelMapping \| null` | Returns the `team_id` and current `discord_channel_id` for a managed channel row |
 | `Channel/UpsertManagedChannel` | `team_channel_id`, `discord_channel_id` | Writes the provisioned Discord channel ID to `team_channels`; then replays any access grants that were created before the channel was provisioned |
 | `Channel/ClearManagedChannel` | `team_channel_id` | Clears the `discord_channel_id` column on the managed channel row (called after delete only; **not** called after archive — the link is preserved so that restore can re-activate the same Discord channel without reprovisioning) |
 | `Channel/DeleteManagedChannel` | `team_channel_id` | Hard-deletes the `team_channels` row (reserved for future delete endpoint) |
+| `Channel/UpsertMappingRoleOnly` | `team_id`, `group_id`, `discord_role_id` | Creates or updates a role-only mapping (no channel). Performs the same group-axis reconcile as `Channel/UpsertMapping` when a role first appears for the group. |
+| `Channel/BackfillMissingGroupRoles` | `team_id` (optional), `limit` (optional, default 20) → `number` | Finds groups that have no `discord_role_id` in `discord_channel_mappings` and have no pending provisioning event, and emits a provisioning event for each. Returns the count of events enqueued. Called by the Channel Backfill Worker on a low-cadence loop to auto-heal groups that were created before their team's Discord link was established (e.g. role-only groups provisioned out of order). |
 
 #### Activity
 

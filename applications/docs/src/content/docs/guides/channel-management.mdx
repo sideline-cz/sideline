@@ -74,6 +74,8 @@ Access grants control which groups can see and interact with a channel. Changes 
   The bot applies permission overwrites per Discord role. If you grant access to a group that does not yet have a Discord role, the grant is saved immediately but is not synced to Discord. The access self-heals automatically once the group is provisioned with a Discord role — no action is needed on your part.
 
   The web app surfaces this state as a **"Not yet active in Discord"** badge next to the group name in the Access sheet. An info alert also appears at the top of the sheet when any grant is in this pending state. When you save a grant for an unprovisioned group, you receive an informational toast instead of the usual success toast.
+
+  Sideline also runs a background process every 5 minutes that finds groups which were never provisioned with a Discord role (for example, role-only groups created before the team's Discord server was linked) and automatically provisions them. Once a group's Discord role is created, all stored channel-access grants for that group are re-applied without any manual action. If you just added a grant for an unprovisioned group, Sideline also enqueues provisioning immediately as a best-effort step, so you typically do not need to wait for the background cycle.
 </Aside>
 
 ## Renaming a channel

@@ -104,7 +104,7 @@ The `Guild/UpdateChannelName` RPC updates the `discord_channels` table when the 
 
 The `Guild/UpsertChannel` and `Guild/DeleteChannel` RPCs are called by the bot's gateway event handlers (`ChannelCreate`, `ChannelUpdate`, `ChannelDelete`) to keep the `discord_channels` table in sync with real-time Discord channel changes. `UpsertChannel` inserts or updates a channel row (using `ON CONFLICT DO UPDATE`), and `DeleteChannel` removes a channel row by `guild_id` + `channel_id`.
 
-The `Channel/GetManagedChannel`, `Channel/UpsertManagedChannel`, `Channel/ClearManagedChannel`, and `Channel/DeleteManagedChannel` RPCs back the managed-channel flow (see "Managed Channels" below). They read/write `team_channels.discord_channel_id` (NOT `discord_channel_mappings`). `Channel/UpsertManagedChannel` also reconciles any access grants created before the channel was provisioned: it resolves each granted group's `discord_role_id` and emits `emitManagedAccessGrantedBatch`, so do not duplicate that reconcile logic at other call sites.
+The `Channel/GetManagedChannel`, `Channel/UpsertManagedChannel`, `Channel/ClearManagedChannel`, and `Channel/DeleteManagedChannel` RPCs back the managed-channel flow (see "Managed Channels" below). They read/write `team_channels.discord_channel_id` (NOT `discord_channel_mappings`). `Channel/UpsertManagedChannel` is the **channel-axis** reconcile: when a managed channel becomes provisioned, it resolves each granted group's `discord_role_id` and emits `emitManagedAccessGrantedBatch` for the grants on that channel. Its **group-axis** counterpart (`Channel/UpsertMapping` / `Channel/UpsertMappingRoleOnly` reapplying grants when a group's role becomes resolvable) is documented in "Group-role backfill and grant reapply" below. Both axes funnel through `buildManagedAccessGrantEntries` (see "Managed Channels" rule 4) — do not write a third reconcile path; extend one of these two.
 
 ### `Guild/RegisterMember` and Welcome Metadata
 
@@ -241,6 +241,29 @@ Rules:
 3. **`emitChannel{Deleted,Archived,Detached,Updated}` accept `discordChannelId: Option<Snowflake>` and `discordRoleId: Option<Snowflake>`.** Do not wrap the channel id in `Option.some(...)` at call sites — pass the mapping field through unchanged.
 4. **`emitChannelCreated` accepts `discordChannelName?: string`.** Pass `undefined` when the group is configured for role-only provisioning (`settings.create_discord_channel_on_group = false`); the wire field decodes to `Option<string>` on the bot side and triggers the role-only branch in `handleCreated`.
 5. **When checking "is this channel already linked?"** (e.g. in `LinkChannelToGroup`), filter mappings with `Option.isSome(m.discord_channel_id) && m.discord_channel_id.value === payload.discordChannelId`. The mapping may exist with `discord_channel_id = None` for a role-only group — that is not a conflict.
+
+### Group-role backfill and grant reapply (self-healing provisioning)
+
+Group→Discord-role provisioning is event-driven, so a group created BEFORE its team's guild was linked (or while the bot was down) can stay role-less, and any managed-channel access grant referencing that group silently never applies. Two server mechanisms heal this:
+
+**1. Backfill sweep — `Channel/BackfillMissingGroupRoles`** (`src/rpc/channel/index.ts`, polled by the bot's `slowPollLoop` every 5min; see `applications/bot/AGENTS.md` → "Channel Backfill"):
+
+- Payload `{ team_id: Option<TeamId>, limit: Option<number> }`; success `Schema.Number` = events enqueued. The cron passes `None`/`None`; the handler defaults the limit to 20.
+- `DiscordChannelMappingRepository.findGroupsMissingRole(teamId, limit)` selects non-archived `groups` whose mapping row is missing OR has `discord_role_id IS NULL`, AND that have no still-pending/un-errored `channel_sync_events` of type `channel_created`/`channel_updated` (the `NOT EXISTS` guard prevents re-enqueuing a group already mid-provision).
+- For each result, `emitMissingGroupRoleProvision` (`src/utils/emitGroupRoleBackfill.ts`) re-emits a `channel_created` event: if the group already has a `discord_channel_id` it attaches a role to that channel; otherwise it creates a channel only when the team's `create_discord_channel_on_group` setting allows. Names/colors are computed from team settings exactly as the normal emit path.
+
+**2. Group-axis grant reapply — none→present role transition** (`reapplyGroupGrants` in `src/rpc/channel/index.ts`):
+
+- `insert` / `insertRoleOnly` on `DiscordChannelMappingRepository` now return the **PRIOR** `discord_role_id` via a `WITH prev AS (SELECT ... )` CTE plus `RETURNING (SELECT old_role_id FROM prev)`. A `NoSuchElementError` (no prior row) maps to `Option.none()`.
+- The `Channel/UpsertMapping` and `Channel/UpsertMappingRoleOnly` handlers inspect that prior value: when it is `Option.none()` (role transitioned none→present), they call `reapplyGroupGrants(teamId, groupId)`. This re-emits managed access grants (`emitManagedAccessGrantedBatch`) for every `team_channel_access` row referencing the group whose channel is already provisioned (`discord_channel_id = Some`).
+- **The reapply is best-effort: it is wrapped in `Effect.catchCause(... logWarning)` so it can NEVER fail the mapping write.** A reapply failure logs a warning and the mapping still commits.
+
+Rules:
+
+1. **Detect the transition via the prior role id, never by re-reading the row after the write.** The CTE captures the pre-UPDATE value in the same statement; reading after the upsert would always see the new role.
+2. **Reapply funnels through `buildManagedAccessGrantEntries`** (`src/utils/managedAccessEntries.ts`) — the same single source of truth as the channel-axis reconcile in `Channel/UpsertManagedChannel`. Do not duplicate the grant-resolution logic.
+3. **Reapply must stay non-fatal.** Keep the `catchCause` wrapper on every call site — a grant-reapply error is observability noise, not a reason to reject the role mapping.
+4. **The backfill enqueues events only; it performs no Discord work and no grant reapply directly.** Grant reapply happens later, when the enqueued `channel_created` event causes the bot to write the role back via `Channel/UpsertMapping*` and triggers the none→present transition above.
 
 ### Managed Channels (`team_channels` + `team_channel_access`)
 

@@ -259,7 +259,7 @@ Rules:
 1. **`handleCreated`** dispatches on `(existing_channel_id, discord_channel_name)`:
    - `existing_channel_id = Some` → use `createRoleForChannel` against the existing channel, then `Channel/UpsertMapping` with both ids.
    - `existing_channel_id = None` AND `discord_channel_name = Some` → call `createChannelOnly`, then immediately `Channel/UpsertGroupChannel` (persist channel id), then `createRoleForChannel`, then `Channel/UpsertMapping`. The intermediate upsert prevents orphan Discord channels if role creation fails and the event retries.
-   - `existing_channel_id = None` AND `discord_channel_name = None` → call `createRoleOnly`, then `Channel/UpsertMappingRoleOnly`. No channel is created.
+   - `existing_channel_id = None` AND `discord_channel_name = None` → the role-only path is **`Channel/GetMapping`-first** (mirrors `handleMemberAdded`, rule 2) so a retried or backfilled event never mints a duplicate Discord role: mapping has `discord_role_id = Some` → NO-OP (no `createRoleOnly`, no upsert); mapping `None` → `createRoleOnly` + `Channel/UpsertMappingRoleOnly`; mapping has `discord_channel_id = Some, discord_role_id = None` → `createRoleForChannel` against the existing channel + `Channel/UpsertMapping` (NOT `UpsertMappingRoleOnly`). No channel is created. Regression coverage: `applications/bot/test/rcp/channel/handleCreated.test.ts`.
 2. **`handleMemberAdded`** must NEVER call `createGuildChannel`. It reads the mapping via `Channel/GetMapping` and:
    - mapping `None` → `createRoleOnly` + `Channel/UpsertMappingRoleOnly` + `addGuildMemberRole`.
    - mapping has `discord_role_id = Some` → `addGuildMemberRole` only.
@@ -269,6 +269,16 @@ Rules:
 5. **`handleArchived`** moves the channel to the archive category if `discord_channel_id = Some`; on failure falls back to deleting only the channel (`Option.none()` for role). It does NOT delete the role, does NOT call `Channel/DeleteMapping` — the server has already cleared `discord_channel_id` via `clearGroupChannel` before emitting.
 6. **`handleDetached`** deletes the role's permission overwrite from the channel when both ids are `Some`; otherwise no-op. It does NOT delete the role, does NOT delete the channel, does NOT call `Channel/DeleteMapping` — the server has already cleared `discord_channel_id`.
 7. **Never re-introduce `ensureMapping`.** The helper was removed; provisioning is split across `createChannelOnly` / `createRoleOnly` / `createRoleForChannel` / `createChannelWithRole`, each with a narrow contract. Splitting prevents racy fat-upserts that would nullify the unrelated column.
+
+#### Channel Backfill (self-healing role provisioning)
+
+Group→Discord-role provisioning is event-driven, so a group created BEFORE its team's guild was linked (or while the bot was down) can end up role-less forever — no `channel_created` event was ever emitted. `ChannelBackfillService` (`src/rcp/channel/BackfillService.ts`, wired in `src/rcp/channel/index.ts`) is the safety net: on each `slowPollLoop` (5min) tick it calls `Channel/BackfillMissingGroupRoles({ team_id: None, limit: None })`. The server finds non-archived groups whose mapping has no `discord_role_id` AND no unprocessed/un-errored `channel_created`/`channel_updated` event, then re-emits a provisioning `channel_created` event for each (see `applications/server/AGENTS.md` → "Group-role backfill and grant reapply").
+
+Rules:
+
+1. **The backfill only enqueues events — it never touches Discord directly.** The re-emitted `channel_created` events are processed by the normal `channels` `pollLoop` through the same `handleCreated` dispatch. The role-only GetMapping-first idempotency (rule 1 above) is what makes a backfilled event a NO-OP if the role already exists.
+2. **The backfill RPC returns the enqueued count** (`Schema.Number`); the service logs `Backfilled N missing group roles` only when `N > 0` and otherwise stays quiet.
+3. **`team_id` and `limit` are `Option`** (`Schema.OptionFromNullOr`) — the cron passes `None`/`None` (server defaults the limit to 20). Do not hard-code a team or a non-default limit in the cron tick.
 
 #### Channel Sync Event Failure Classification
 
@@ -488,7 +498,7 @@ Use this pattern (and not `Effect.Semaphore.make` at module top-level) whenever 
 
 ### Poll-Loop Cadences (`src/Bot.ts`)
 
-Two distinct schedules wrap processor `processTick` effects. Both wrap the tick in the exported `resilientTick` helper BEFORE `Effect.repeat`:
+Three distinct schedules wrap processor `processTick` effects. All wrap the tick in the exported `resilientTick` helper BEFORE `Effect.repeat`:
 
 ```ts
 export const resilientTick = <E, R>(processTick: Effect.Effect<void, E, R>) =>
@@ -502,13 +512,15 @@ const pollLoop = <E, R>(processTick: Effect.Effect<void, E, R>) =>
 |--------|---------|----------|---------|
 | `pollLoop` | 5s | `Schedule.spaced('5 seconds')` | `roles.processTick`, `channels.processTick`, `eventSync.processTick`, `guildJoin.processTick`, `onboarding.processTick`, `finance.processTick`, `email.processTick` |
 | `fastPollLoop` | 1s | `Schedule.spaced('1 seconds')` | `inviteGenerator.processTick` only |
+| `slowPollLoop` | 5min | `Schedule.spaced('5 minutes')` | `channelBackfill.processTick` only (see "Channel Backfill" below) |
 
 Rules:
 
-1. **A `processTick` failure or defect MUST NOT kill its repeat loop.** `Effect.repeat(Schedule.spaced(...))` stops permanently on the first failure — a single transient blip (e.g. an `RpcClientError` while the server redeploys) would silently stop that poller until the bot is restarted. The shared `resilientTick` boundary in `pollLoop` / `fastPollLoop` catches the whole `Cause` (failures AND defects), logs `'Sync poll tick failed'`, and returns void so the loop keeps ticking. NEVER route a `processTick` to `Effect.repeat` outside `pollLoop` / `fastPollLoop`, and never remove the `resilientTick` wrapper. Per-service `processTick`s still `tapError`-log their specific error; `resilientTick` is the catch-all safety net, not a substitute for that per-service logging. Mirrors the `ixProgram` interaction-handler boundary in the same file.
+1. **A `processTick` failure or defect MUST NOT kill its repeat loop.** `Effect.repeat(Schedule.spaced(...))` stops permanently on the first failure — a single transient blip (e.g. an `RpcClientError` while the server redeploys) would silently stop that poller until the bot is restarted. The shared `resilientTick` boundary in `pollLoop` / `fastPollLoop` / `slowPollLoop` catches the whole `Cause` (failures AND defects), logs `'Sync poll tick failed'`, and returns void so the loop keeps ticking. NEVER route a `processTick` to `Effect.repeat` outside `pollLoop` / `fastPollLoop` / `slowPollLoop`, and never remove the `resilientTick` wrapper. Per-service `processTick`s still `tapError`-log their specific error; `resilientTick` is the catch-all safety net, not a substitute for that per-service logging. Mirrors the `ixProgram` interaction-handler boundary in the same file.
 2. **`fastPollLoop` is reserved for the invite generator.** The web client begins polling `GET /invite/acceptances/:acceptanceId` immediately after a user accepts an invite; the 1s cadence keeps the wait between accept and the "Open Discord server" CTA under ~2s.
 3. **Never promote other services to `fastPollLoop`** without explicit justification — every additional 1s loop multiplies idle RPC load.
 4. **Never demote `inviteGenerator` back to `pollLoop`** — the user-visible latency on `InvitePage` depends on this cadence.
+5. **`slowPollLoop` is reserved for self-healing reconcile sweeps, not real-time sync.** It runs `channelBackfill.processTick`, which calls `Channel/BackfillMissingGroupRoles` (the server enqueues provisioning events for groups that never got a Discord role). Real-time provisioning still happens on the `channels` `pollLoop`; the backfill is the safety net for groups created before the guild was linked. Keep new reconcile/self-heal sweeps on `slowPollLoop` — never put one on `pollLoop`.
 
 ### Invite Generator (`src/rcp/inviteGenerator/ProcessorService.ts`)
 

@@ -1024,7 +1024,7 @@ Calls `Guild/UpsertChannel` RPC to update the channel's name and metadata in the
 
 ## RPC Sync Workers
 
-Nine background worker loops run continuously inside the bot process. Eight of them (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync, Weekly Challenge Sync, Email Sync) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those eight loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`). Several outbox workers pass a client-side `POLL_BATCH_SIZE = 50` limit to the server query (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync, Email Sync); the Weekly Challenge and Weekly Summary workers do not — their server-side queries are currently unbounded, which is acceptable because the per-team-per-week invariant naturally bounds the backlog. The ninth worker (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation.
+Ten background worker loops run continuously inside the bot process. Eight of them (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync, Weekly Challenge Sync, Email Sync) poll the server for unprocessed outbox events, process them sequentially, and mark each as processed or failed. Those eight loops use a **5-second polling interval** (`Schedule.spaced('5 seconds')`). Several outbox workers pass a client-side `POLL_BATCH_SIZE = 50` limit to the server query (Role Sync, Channel Sync, Event Sync, Achievement Sync, Role Provision, Finance Sync, Email Sync); the Weekly Challenge and Weekly Summary workers do not — their server-side queries are currently unbounded, which is acceptable because the per-team-per-week invariant naturally bounds the backlog. The ninth worker (Invite Generator) uses a **1-second polling interval** (`Schedule.spaced('1 seconds')`) for near-real-time Discord invite generation. The tenth worker (Channel Backfill) uses a **5-minute polling interval** (`Schedule.spaced('5 minutes')`) for low-cadence healing of groups that were never provisioned with a Discord role.
 
 The outbox workers implement the bot's side of the outbox pattern: the server inserts rows into `role_sync_events`, `channel_sync_events`, `event_sync_events`, `achievement_sync_events`, `discord_role_provision_events`, `payment_reminder_sync_events`, `weekly_challenge_sync_events`, and `email_post_sync_events`; the bot drains those queues.
 
@@ -1100,6 +1100,22 @@ Channel sync manages Discord channels and roles for Sideline groups. The Discord
 - `Channel/MarkEventPermanentlyFailed` — records permanent failures (Discord 403/404, parse errors); sets `processed_at` so the event is never retried (poison-pill prevention).
 
 **Permanent vs transient failure classification** (`ProcessorService.ts`): Discord `ErrorResponse` with HTTP status 403 or 404, or Discord JSON error codes 10xxx (Unknown Resource) and 50013 (Missing Permissions), and any `ParseError`/`SchemaError` are classified as permanent. All other errors are transient and will be retried.
+
+---
+
+### Channel Backfill Worker
+
+**Service class:** `ChannelBackfillService` (`applications/bot/src/rcp/channel/index.ts`)
+
+**RPC called:** `Channel/BackfillMissingGroupRoles`
+
+**Polling interval:** 5 minutes (`slowPollLoop` in `Bot.ts`).
+
+This worker heals groups that were never provisioned with a Discord role. A group can end up in this state when it was created as a role-only group before its team's Discord link was established — the normal `group_channel_created` outbox event either was never emitted or was emitted but could not succeed at the time.
+
+On each tick the worker calls `Channel/BackfillMissingGroupRoles` with no `team_id` filter and no explicit limit (the server defaults to 20 per call). The server queries for non-archived groups that have either no row in `discord_channel_mappings` or a row with `discord_role_id IS NULL`, and that have no pending unprocessed provisioning event in `channel_sync_events`. For each qualifying group it emits a provisioning event into the normal `channel_sync_events` outbox — the Channel Sync Worker then picks it up and creates the role (role-only, or attaches a role to an existing channel) via the standard `group_channel_created` handler.
+
+When the Channel Sync Worker calls `Channel/UpsertMapping` or `Channel/UpsertMappingRoleOnly` and the role is being set for the first time (previous `discord_role_id` was `null`), the server automatically re-applies all stored `team_channel_access` grants for that group on every already-provisioned managed channel (group-axis reconcile). This means previously stuck managed-channel access grants take effect without any manual action.
 
 ---
 

@@ -10,6 +10,19 @@ import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 
+class PrevRoleRow extends Schema.Class<PrevRoleRow>('PrevRoleRow')({
+  old_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
+}) {}
+
+export class GroupMissingRoleRow extends Schema.Class<GroupMissingRoleRow>('GroupMissingRoleRow')({
+  group_id: GroupModel.GroupId,
+  team_id: Team.TeamId,
+  name: Schema.String,
+  emoji: Schema.OptionFromNullOr(Schema.String),
+  color: Schema.OptionFromNullOr(Schema.String),
+  discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+}) {}
+
 class MappingRow extends Schema.Class<MappingRow>('MappingRow')({
   id: DiscordChannelMapping.DiscordChannelMappingId,
   team_id: Team.TeamId,
@@ -110,23 +123,37 @@ const make = Effect.gen(function* () {
     `,
   });
 
-  const insertGroupMapping = SqlSchema.void({
+  const insertGroupMapping = SqlSchema.findOne({
     Request: InsertGroupInput,
+    Result: PrevRoleRow,
     execute: (input) => sql`
+      WITH prev AS (
+        SELECT discord_role_id AS old_role_id
+        FROM discord_channel_mappings
+        WHERE team_id = ${input.team_id} AND group_id = ${input.group_id}
+      )
       INSERT INTO discord_channel_mappings (team_id, entity_type, group_id, discord_channel_id, discord_role_id)
       VALUES (${input.team_id}, 'group', ${input.group_id}, ${input.discord_channel_id}, ${input.discord_role_id})
       ON CONFLICT (team_id, group_id) WHERE group_id IS NOT NULL
       DO UPDATE SET discord_channel_id = ${input.discord_channel_id}, discord_role_id = ${input.discord_role_id}
+      RETURNING (SELECT old_role_id FROM prev) AS old_role_id
     `,
   });
 
-  const insertRoleOnlyMapping = SqlSchema.void({
+  const insertRoleOnlyMapping = SqlSchema.findOne({
     Request: InsertRoleOnlyInput,
+    Result: PrevRoleRow,
     execute: (input) => sql`
+      WITH prev AS (
+        SELECT discord_role_id AS old_role_id
+        FROM discord_channel_mappings
+        WHERE team_id = ${input.team_id} AND group_id = ${input.group_id}
+      )
       INSERT INTO discord_channel_mappings (team_id, entity_type, group_id, discord_role_id)
       VALUES (${input.team_id}, 'group', ${input.group_id}, ${input.discord_role_id})
       ON CONFLICT (team_id, group_id) WHERE group_id IS NOT NULL
       DO UPDATE SET discord_role_id = excluded.discord_role_id
+      RETURNING (SELECT old_role_id FROM prev) AS old_role_id
     `,
   });
 
@@ -199,7 +226,11 @@ const make = Effect.gen(function* () {
       group_id: groupId,
       discord_channel_id: discordChannelId,
       discord_role_id: discordRoleId,
-    }).pipe(catchSqlErrors);
+    }).pipe(
+      Effect.map((row) => row.old_role_id),
+      Effect.catchTag('NoSuchElementError', () => Effect.succeed(Option.none<Discord.Snowflake>())),
+      catchSqlErrors,
+    );
 
   const insertRoleOnly = (
     teamId: Team.TeamId,
@@ -210,7 +241,11 @@ const make = Effect.gen(function* () {
       team_id: teamId,
       group_id: groupId,
       discord_role_id: discordRoleId,
-    }).pipe(catchSqlErrors);
+    }).pipe(
+      Effect.map((row) => row.old_role_id),
+      Effect.catchTag('NoSuchElementError', () => Effect.succeed(Option.none<Discord.Snowflake>())),
+      catchSqlErrors,
+    );
 
   const upsertGroupChannel = (
     teamId: Team.TeamId,
@@ -283,6 +318,27 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  const decodeGroupsMissingRole = Schema.decodeUnknownEffect(Schema.Array(GroupMissingRoleRow));
+
+  const findGroupsMissingRole = (teamId: Option.Option<Team.TeamId>, limit: number) =>
+    sql`
+      SELECT g.id AS group_id, g.team_id, g.name, g.emoji, g.color, m.discord_channel_id
+      FROM groups g
+      LEFT JOIN discord_channel_mappings m ON m.team_id = g.team_id AND m.group_id = g.id
+      WHERE g.is_archived = false
+        AND (m.id IS NULL OR m.discord_role_id IS NULL)
+        AND NOT EXISTS (
+          SELECT 1 FROM channel_sync_events e
+          WHERE e.group_id = g.id
+            AND e.event_type IN ('channel_created', 'channel_updated')
+            AND e.processed_at IS NULL
+            AND e.error IS NULL
+        )
+        ${Option.isSome(teamId) ? sql`AND g.team_id = ${teamId.value}` : sql``}
+      ORDER BY g.created_at
+      LIMIT ${limit}
+    `.pipe(Effect.flatMap(decodeGroupsMissingRole), catchSqlErrors);
+
   const findClaimThread = (teamId: Team.TeamId, groupId: GroupModel.GroupId) =>
     _findClaimThread({ team_id: teamId, group_id: groupId }).pipe(
       Effect.map(Option.flatMap((row) => row.claim_thread_id)),
@@ -317,6 +373,7 @@ const make = Effect.gen(function* () {
     insertRoster,
     deleteByRosterId,
     findAllByTeam,
+    findGroupsMissingRole,
     findClaimThread,
     saveClaimThreadIfAbsent,
     clearClaimThread,

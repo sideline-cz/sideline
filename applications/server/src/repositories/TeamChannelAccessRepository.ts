@@ -21,6 +21,8 @@ class GroupRoleRow extends Schema.Class<GroupRoleRow>('GroupRoleRow')({
 
 const FindByChannelInput = Schema.Struct({ team_channel_id: TeamChannel.TeamChannelId });
 
+const FindByGroupInput = Schema.Struct({ group_id: GroupModel.GroupId });
+
 const UpsertGrantInput = Schema.Struct({
   team_channel_id: TeamChannel.TeamChannelId,
   group_id: GroupModel.GroupId,
@@ -88,6 +90,16 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  const findByGroupQuery = SqlSchema.findAll({
+    Request: FindByGroupInput,
+    Result: AccessRow,
+    execute: (input) => sql`
+      SELECT team_channel_id, group_id, access_level
+      FROM team_channel_access
+      WHERE group_id = ${input.group_id}
+    `,
+  });
+
   // Resolve discord_role_id for a list of group_ids via discord_channel_mappings
   const findGroupRoleIdsQuery = SqlSchema.findAll({
     Request: Schema.Array(GroupModel.GroupId),
@@ -136,6 +148,9 @@ const make = Effect.gen(function* () {
     return findGroupRoleIdsQuery([...groupIds]).pipe(catchSqlErrors);
   };
 
+  const findGrantsByGroup = (groupId: GroupModel.GroupId) =>
+    findByGroupQuery({ group_id: groupId }).pipe(catchSqlErrors);
+
   return {
     findByChannel,
     findByChannelForUpdate,
@@ -143,6 +158,7 @@ const make = Effect.gen(function* () {
     deleteGrant,
     countByChannel,
     findGroupRoleIds,
+    findGrantsByGroup,
   };
 });
 

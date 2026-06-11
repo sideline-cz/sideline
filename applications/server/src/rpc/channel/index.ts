@@ -16,6 +16,7 @@ import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMa
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
 import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
+import { emitMissingGroupRoleProvision } from '~/utils/emitGroupRoleBackfill.js';
 import { buildManagedAccessGrantEntries } from '~/utils/managedAccessEntries.js';
 import { constructEvent, EventPropertyMissing } from './events.js';
 
@@ -54,6 +55,72 @@ const toManagedChannelMapping = (m: {
     team_id: m.team_id,
     discord_channel_id: m.discord_channel_id,
   });
+
+/**
+ * After a group's discord_role_id transitions from None to Some, re-emit managed access grants
+ * for all team_channel_access rows that reference this group but belong to channels that are
+ * already provisioned (have a discord_channel_id).
+ */
+const reapplyGroupGrants = (teamId: Team.TeamId, groupId: GroupModel.GroupId) =>
+  Effect.Do.pipe(
+    Effect.bind('accessRepo', () => TeamChannelAccessRepository.asEffect()),
+    Effect.bind('channelsRepo', () => TeamChannelsRepository.asEffect()),
+    Effect.bind('channelSync', () => ChannelSyncEventsRepository.asEffect()),
+    Effect.bind('grants', ({ accessRepo }) => accessRepo.findGrantsByGroup(groupId)),
+    Effect.tap(({ grants }) =>
+      grants.length === 0
+        ? Effect.logInfo(`reapplyGroupGrants: no grants for group ${groupId}, nothing to reapply`)
+        : Effect.void,
+    ),
+    Effect.flatMap(({ grants, accessRepo, channelsRepo, channelSync }) => {
+      if (grants.length === 0) return Effect.void;
+      return Effect.Do.pipe(
+        Effect.bind('roleRows', () => accessRepo.findGroupRoleIds([groupId])),
+        Effect.flatMap(({ roleRows }) => {
+          const roleRow = roleRows.find((r) => r.group_id === groupId);
+          const discordRoleId =
+            roleRow !== undefined ? Option.getOrNull(roleRow.discord_role_id) : null;
+          if (discordRoleId === null) {
+            return Effect.logWarning(
+              `reapplyGroupGrants: no discord_role_id resolved for group ${groupId}, skipping`,
+            );
+          }
+          const roleMap = new Map<GroupModel.GroupId, Discord.Snowflake | null>([
+            [groupId, discordRoleId],
+          ]);
+          return Effect.forEach(
+            grants,
+            (grant) =>
+              channelsRepo.findById(grant.team_channel_id).pipe(
+                Effect.flatMap((maybeChannel) => {
+                  if (Option.isNone(maybeChannel)) {
+                    return Effect.logWarning(
+                      `reapplyGroupGrants: team_channel ${grant.team_channel_id} not found, skipping grant for group ${groupId}`,
+                    );
+                  }
+                  const channel = maybeChannel.value;
+                  const discordChannelId = Option.getOrNull(channel.discord_channel_id);
+                  if (discordChannelId === null) {
+                    return Effect.logWarning(
+                      `reapplyGroupGrants: team_channel ${grant.team_channel_id} has no discord_channel_id yet, skipping grant for group ${groupId}`,
+                    );
+                  }
+                  const { entries } = buildManagedAccessGrantEntries(
+                    [{ groupId: grant.group_id, accessLevel: grant.access_level }],
+                    roleMap,
+                    { teamChannelId: grant.team_channel_id, discordChannelId },
+                  );
+                  if (entries.length === 0) return Effect.void;
+                  return channelSync.emitManagedAccessGrantedBatch({ teamId, entries });
+                }),
+              ),
+            { concurrency: 'unbounded' },
+          ).pipe(Effect.asVoid);
+        }),
+      );
+    }),
+    Effect.asVoid,
+  );
 
 export const ChannelsRpcLive = Effect.Do.pipe(
   Effect.bind('syncEvents', () => ChannelSyncEventsRepository.asEffect()),
@@ -145,7 +212,18 @@ export const ChannelsRpcLive = Effect.Do.pipe(
         readonly discord_channel_id: Discord.Snowflake;
         readonly discord_role_id: Discord.Snowflake;
       }) =>
-        mappings.insert(team_id, group_id, discord_channel_id, discord_role_id),
+        mappings.insert(team_id, group_id, discord_channel_id, discord_role_id).pipe(
+          Effect.tap((old_role_id) =>
+            Option.isNone(old_role_id)
+              ? reapplyGroupGrants(team_id, group_id).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning('reapplyGroupGrants failed (non-fatal)', cause),
+                  ),
+                )
+              : Effect.void,
+          ),
+          Effect.asVoid,
+        ),
   ),
   Effect.let(
     'Channel/UpsertMappingRoleOnly',
@@ -159,7 +237,18 @@ export const ChannelsRpcLive = Effect.Do.pipe(
         readonly group_id: GroupModel.GroupId;
         readonly discord_role_id: Discord.Snowflake;
       }) =>
-        mappings.insertRoleOnly(team_id, group_id, discord_role_id),
+        mappings.insertRoleOnly(team_id, group_id, discord_role_id).pipe(
+          Effect.tap((old_role_id) =>
+            Option.isNone(old_role_id)
+              ? reapplyGroupGrants(team_id, group_id).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning('reapplyGroupGrants failed (non-fatal)', cause),
+                  ),
+                )
+              : Effect.void,
+          ),
+          Effect.asVoid,
+        ),
   ),
   Effect.let(
     'Channel/UpsertGroupChannel',
@@ -370,6 +459,40 @@ export const ChannelsRpcLive = Effect.Do.pipe(
       ({ team_channel_id }: { readonly team_channel_id: TeamChannel.TeamChannelId }) =>
         TeamChannelsRepository.asEffect().pipe(
           Effect.flatMap((repo) => repo.delete(team_channel_id)),
+        ),
+  ),
+  Effect.let(
+    'Channel/BackfillMissingGroupRoles',
+    () =>
+      ({
+        team_id,
+        limit,
+      }: {
+        readonly team_id: Option.Option<Team.TeamId>;
+        readonly limit: Option.Option<number>;
+      }) =>
+        Effect.Do.pipe(
+          Effect.bind('mappingsRepo', () => DiscordChannelMappingRepository.asEffect()),
+          Effect.bind('groups', ({ mappingsRepo }) =>
+            mappingsRepo.findGroupsMissingRole(
+              team_id,
+              Option.getOrElse(limit, () => 20),
+            ),
+          ),
+          Effect.tap(({ groups }) =>
+            Effect.logInfo(
+              `BackfillMissingGroupRoles: found ${groups.length} groups missing a role`,
+            ),
+          ),
+          Effect.bind('count', ({ groups }) =>
+            Effect.forEach(groups, emitMissingGroupRoleProvision, { concurrency: 1 }).pipe(
+              Effect.map((results) => results.length),
+            ),
+          ),
+          Effect.tap(({ count }) =>
+            Effect.logInfo(`BackfillMissingGroupRoles: enqueued ${count} provisioning events`),
+          ),
+          Effect.map(({ count }) => count),
         ),
   ),
   Bind.remove('syncEvents'),

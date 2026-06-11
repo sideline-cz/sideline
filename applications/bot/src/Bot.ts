@@ -9,6 +9,7 @@ import { SyncRpc } from '~/services/SyncRpc.js';
 import { APP_VERSION } from '~/version.js';
 import {
   AchievementSyncService,
+  ChannelBackfillService,
   ChannelSyncService,
   EmailSyncService,
   EventSyncService,
@@ -47,6 +48,9 @@ const pollLoop = <E, R>(processTick: Effect.Effect<void, E, R>) =>
 const fastPollLoop = <E, R>(processTick: Effect.Effect<void, E, R>) =>
   resilientTick(processTick).pipe(Effect.repeat(Schedule.spaced('1 seconds')));
 
+const slowPollLoop = <E, R>(processTick: Effect.Effect<void, E, R>) =>
+  resilientTick(processTick).pipe(Effect.repeat(Schedule.spaced('5 minutes')));
+
 export const program = Effect.Do.pipe(
   Effect.bind('rpc', () => SyncRpc.asEffect()),
   Effect.bind('reportVersion', ({ rpc }) =>
@@ -69,6 +73,7 @@ export const program = Effect.Do.pipe(
   Effect.bind('weeklySummary', () => WeeklySummarySyncService.asEffect()),
   Effect.bind('finance', () => FinanceSyncService.asEffect()),
   Effect.bind('emailSync', () => EmailSyncService.asEffect()),
+  Effect.bind('channelBackfill', () => ChannelBackfillService.asEffect()),
   Effect.tap(() => Effect.logInfo('Bot connected to Discord')),
   Effect.andThen(
     ({
@@ -85,6 +90,7 @@ export const program = Effect.Do.pipe(
       weeklySummary,
       finance,
       emailSync,
+      channelBackfill,
     }) =>
       Effect.all(
         [
@@ -102,6 +108,7 @@ export const program = Effect.Do.pipe(
           pollLoop(weeklySummary.processTick),
           pollLoop(finance.processTick),
           pollLoop(emailSync.processTick),
+          slowPollLoop(channelBackfill.processTick),
           recoverDeletedMessages,
         ],
         {
@@ -118,6 +125,7 @@ export const program = Effect.Do.pipe(
   | SyncRpc
   | RoleSyncService
   | ChannelSyncService
+  | ChannelBackfillService
   | EmailSyncService
   | EventSyncService
   | FinanceSyncService

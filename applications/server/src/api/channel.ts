@@ -15,6 +15,7 @@ import { hasPermission, requireMembership, requirePermission } from '~/api/permi
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
+import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
 import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
@@ -22,6 +23,7 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { applyDiscordFormat, DEFAULT_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
+import { emitMissingGroupRoleProvision } from '~/utils/emitGroupRoleBackfill.js';
 import { buildManagedAccessGrantEntries } from '~/utils/managedAccessEntries.js';
 
 const forbidden = new ChannelApi.ChannelForbidden();
@@ -648,6 +650,49 @@ export const ChannelApiLive = HttpApiBuilder.group(Api, 'channel', (handlers) =>
                           Effect.flatMap(() =>
                             channelSync.emitManagedAccessGrantedBatch({ teamId, entries }),
                           ),
+                          Effect.flatMap(() => {
+                            if (unresolvableGroupIds.length === 0) return Effect.void;
+                            // Best-effort: enqueue provisioning for role-less groups so they
+                            // self-heal once the role lands. Guarded by hasUnprocessedForGroups
+                            // to avoid duplicate events on repeated setAccess calls.
+                            // Must NOT fail the request.
+                            return DiscordChannelMappingRepository.asEffect().pipe(
+                              Effect.flatMap((mappingsRepo) =>
+                                channelSync.hasUnprocessedForGroups([...unresolvableGroupIds]).pipe(
+                                  Effect.flatMap((inFlightIds) => {
+                                    const inFlightSet = new Set(inFlightIds);
+                                    const toProvision = unresolvableGroupIds.filter(
+                                      (gid) => !inFlightSet.has(gid),
+                                    );
+                                    if (toProvision.length === 0) return Effect.void;
+                                    return mappingsRepo
+                                      .findGroupsMissingRole(
+                                        Option.some(teamId),
+                                        toProvision.length * 2,
+                                      )
+                                      .pipe(
+                                        Effect.flatMap((candidateGroups) => {
+                                          const provisionSet = new Set(toProvision);
+                                          const toEmit = candidateGroups.filter((g) =>
+                                            provisionSet.has(g.group_id),
+                                          );
+                                          return Effect.forEach(
+                                            toEmit,
+                                            emitMissingGroupRoleProvision,
+                                            { concurrency: 1 },
+                                          ).pipe(Effect.asVoid);
+                                        }),
+                                      );
+                                  }),
+                                ),
+                              ),
+                              Effect.catchCause((cause) =>
+                                Effect.logWarning(
+                                  `setAccess: best-effort backfill failed (non-fatal): ${cause}`,
+                                ),
+                              ),
+                            );
+                          }),
                         );
                       }),
                       // Emit access revoked batch
