@@ -69,7 +69,6 @@ export const CarpoolRpcGroup = RpcGroup.make(
       CarpoolNotFound,
       CarpoolAlreadyOwnsCar,
       CarpoolAlreadyInAnotherCar,
-      CarpoolForbidden,
     ]),
   }),
   Rpc.make('ReserveSeat', {
