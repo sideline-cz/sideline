@@ -1,7 +1,7 @@
 // Static top-of-file imports only (per AGENTS.md "Test File Imports — Static Only").
 
 import { describe, expect, it } from 'vitest';
-import { chunkForEmbedDescription } from '~/rest/email/chunkText.js';
+import { capPages, chunkForEmbedDescription } from '~/rest/email/chunkText.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -157,5 +157,93 @@ describe('chunkForEmbedDescription', () => {
     for (const chunk of chunks) {
       expect(chunk.length).toBeLessThanOrEqual(MAX);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// capPages
+// ---------------------------------------------------------------------------
+
+describe('capPages', () => {
+  // 1. Under cap — returns input unchanged
+  it('under cap: fewer chunks than maxPages — returns input array unchanged, no suffix anywhere', () => {
+    const input = ['a', 'b', 'c'];
+    const result = capPages(input, 20, 'SUF');
+
+    expect(result).toEqual(input);
+    for (const chunk of result) {
+      expect(chunk).not.toContain('SUF');
+    }
+  });
+
+  // 2. Exactly at cap (boundary) — unchanged, last chunk does NOT contain suffix
+  it('exactly at cap: 20 chunks, maxPages=20 — returns unchanged, last chunk has no suffix', () => {
+    const input = Array.from({ length: 20 }, (_, i) => `page-${i}`);
+    const result = capPages(input, 20, 'SUF');
+
+    expect(result).toHaveLength(20);
+    expect(result[19]).not.toContain('SUF');
+    expect(result).toEqual(input);
+  });
+
+  // 3. Over cap — truncates to maxPages, last page ends with suffix, first N-1 identical
+  it('over cap: 25 chunks, maxPages=20 — result.length===20, result[19] ends with suffix, result[0..18] identical to input', () => {
+    const input = Array.from({ length: 25 }, (_, i) => `chunk-content-${i}`);
+    const result = capPages(input, 20, '---TRUNCATED---');
+
+    expect(result.length).toBe(20);
+    expect(result[19]).toMatch(/---TRUNCATED---$/);
+    for (let i = 0; i < 19; i++) {
+      expect(result[i]).toBe(input[i]);
+    }
+  });
+
+  // 4. Last page trimmed to fit — combined content+suffix ≤ maxChars
+  it('last page trimmed to fit: long last chunk + suffix still ≤ maxChars', () => {
+    const longChunk = 'x'.repeat(4096);
+    const input = Array.from({ length: 21 }, (_, i) => (i < 20 ? `short-${i}` : 'extra'));
+    // Override index 19 with the long chunk
+    const inputWithLong = input.map((chunk, i) => (i === 19 ? longChunk : chunk));
+    const suffix = '\n---SUFFIX---';
+    const result = capPages(inputWithLong, 20, suffix, 4096);
+
+    expect(result.length).toBe(20);
+    expect(result[19].length).toBeLessThanOrEqual(4096);
+    expect(result[19]).toMatch(/---SUFFIX---$/);
+  });
+
+  // 5. Pathological suffix longer than maxChars — no throw, result[last].length ≤ maxChars
+  it('pathological suffix longer than maxChars — no throw, last page length ≤ maxChars', () => {
+    const input = Array.from({ length: 25 }, (_, i) => `c-${i}`);
+    const overLongSuffix = 'y'.repeat(80);
+
+    expect(() => {
+      const result = capPages(input, 20, overLongSuffix, 50);
+      expect(result[result.length - 1].length).toBeLessThanOrEqual(50);
+    }).not.toThrow();
+  });
+
+  // 6. Surrogate safety — no broken surrogate at the trim boundary
+  it('surrogate safety: trim boundary does not land mid-surrogate-pair, encodeURIComponent does not throw', () => {
+    // Build a string of emoji (each is 2 UTF-16 code units) that fills exactly 4096 chars
+    // then add a few extra so trimming is needed
+    const emoji = '😀'; // 2 UTF-16 code units
+    // 4096 / 2 = 2048 emoji = exactly 4096 chars; add 4 more to force a trim
+    const baseChunk = emoji.repeat(2048 + 4); // 4104 chars — must be trimmed to fit with suffix
+    const suffix = '\nTRUNCATED';
+    const input = Array.from({ length: 21 }, (_, i) => (i === 19 ? baseChunk : `short-${i}`));
+    const result = capPages(input, 20, suffix, 4096);
+
+    const last = result[result.length - 1];
+    expect(last.length).toBeLessThanOrEqual(4096);
+    // Surrogate safety: encodeURIComponent must not throw on a string with no lone surrogates
+    expect(() => encodeURIComponent(last)).not.toThrow();
+  });
+
+  // 7. Empty input passthrough
+  it("empty input: capPages([''], 20, 'SUF') returns [''] unchanged", () => {
+    const result = capPages([''], 20, 'SUF');
+
+    expect(result).toEqual(['']);
   });
 });

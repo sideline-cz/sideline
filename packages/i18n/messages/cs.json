@@ -641,6 +641,10 @@
   "bot_email_page_indicator": "Strana {current}/{total}",
   "bot_email_page_continued": "… (pokračování na další straně)",
   "bot_email_page_empty": "(žádný obsah)",
+  "bot_email_page_indicator_capped": "Strana {current}/{total} (zkráceno)",
+  "bot_email_truncation_notice": "✂️ Zpráva je příliš dlouhá a byla zkrácena. Celý e-mail najdeš na {link}.",
+  "bot_email_truncation_notice_no_link": "✂️ Zpráva je příliš dlouhá a byla zkrácena.",
+  "bot_email_truncation_link_label": "Sideline",
 
   "searchable_select_search": "Hledat...",
   "searchable_select_noResults": "Žádné výsledky.",

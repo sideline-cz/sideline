@@ -815,7 +815,9 @@ Appears on the green team-post embed after a coach approves an email.
 
 1. Returns a deferred ephemeral response.
 2. Calls `Email/GetEmailContent` RPC to fetch the detailed summary.
-3. Chunks the detailed summary text (max ~1900 chars per page) and renders the first page as a blurple embed with optional pagination buttons (`◀`/`▶`).
+3. Chunks the detailed summary text (up to 4 096 characters per embed page, capped at 20 pages) and renders the first page as a blurple embed with optional pagination buttons (`◀`/`▶`).
+4. If the content exceeds 20 pages it is capped: a truncation notice is appended to the last kept page (including a deep link to the Email detail page in the web app when `WEB_URL` is configured). The embed footer shows "Page X/Y (truncated)".
+5. Any error during rendering (RPC failure, unexpected exception) always resolves the ephemeral interaction with an error message — the interaction never hangs in a "loading" state.
 
 **Source file:** `applications/bot/src/interactions/email-pages.ts` (`EmailDetailOpenButton`)
 
@@ -827,7 +829,7 @@ Appears on the same green team-post embed as the Detail button.
 
 **Custom ID pattern:** `email-original:{teamId}:{emailId}`
 
-**Behavior:** identical to Email Detail Open, but uses the raw `body` text and renders a grey embed.
+**Behavior:** identical to Email Detail Open, but uses the raw `body` text and renders a grey embed. The same 20-page cap, truncation notice, and error-resolution guarantee apply.
 
 **Source file:** `applications/bot/src/interactions/email-pages.ts` (`EmailOriginalOpenButton`)
 
@@ -839,7 +841,7 @@ Pagination button inside the ephemeral detailed-summary embed. Appears when the 
 
 **Custom ID pattern:** `email-detail-page:{teamId}:{emailId}:{pageIndex}`
 
-**Behavior:** Defers an update, re-fetches the email content, chunks the detailed summary, and renders the requested page.
+**Behavior:** Defers an update, re-fetches the email content, applies the 20-page cap (with truncation notice on the last page if capped), and renders the requested page. Any error always resolves the interaction.
 
 **Source file:** `applications/bot/src/interactions/email-pages.ts` (`EmailDetailPageButton`)
 
@@ -851,7 +853,7 @@ Pagination button inside the ephemeral original-email embed. Appears when the em
 
 **Custom ID pattern:** `email-original-page:{teamId}:{emailId}:{pageIndex}`
 
-**Behavior:** identical to Email Detail Page but renders the raw body text.
+**Behavior:** identical to Email Detail Page but renders the raw body text. The same 20-page cap and error-resolution guarantee apply.
 
 **Source file:** `applications/bot/src/interactions/email-pages.ts` (`EmailOriginalPageButton`)
 

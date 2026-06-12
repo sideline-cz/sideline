@@ -1,11 +1,37 @@
 // Static top-of-file imports only (per AGENTS.md "Test File Imports — Static Only").
+//
+// vi.mock is hoisted before imports by Vitest. The factory returns a mutable
+// proxy so individual tests can override env.WEB_URL per test.
 
 import { type EmailForwarding, EmailRpcModels, type Team } from '@sideline/domain';
 import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
 import { Interaction, MessageComponentData } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
 import { Effect, Layer, Option } from 'effect';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// ---------------------------------------------------------------------------
+// env mock — WEB_URL toggleable per test via mockWebUrl
+// ---------------------------------------------------------------------------
+
+let mockWebUrl: Option.Option<string> = Option.none();
+
+vi.mock('~/env.js', () => ({
+  env: new Proxy({} as Record<string, unknown>, {
+    get: (_target: Record<string, unknown>, prop: string) => {
+      if (prop === 'WEB_URL') return mockWebUrl;
+      // Provide required env values so createEnv does not throw
+      if (prop === 'NODE_ENV') return 'test';
+      if (prop === 'SERVER_URL') return 'http://localhost:3000';
+      if (prop === 'APP_ENV') return 'test';
+      if (prop === 'APP_ORIGIN') return 'localhost';
+      if (prop === 'OTEL_EXPORTER_OTLP_ENDPOINT') return 'http://localhost:4318';
+      if (prop === 'OTEL_SERVICE_NAME') return 'sideline-bot';
+      return undefined;
+    },
+  }),
+}));
+
 import {
   EmailDetailOpenButton,
   EmailDetailPageButton,
@@ -13,6 +39,11 @@ import {
   EmailOriginalPageButton,
 } from '~/interactions/email-pages.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
+
+// Reset mockWebUrl to none() after each test so tests stay isolated.
+afterEach(() => {
+  mockWebUrl = Option.none();
+});
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -524,6 +555,182 @@ describe('EmailOriginalPageButton — page navigation handler', () => {
     await expect(
       runHandler(EmailOriginalPageButton, restStub.layer, rpcStub.layer, interaction),
     ).resolves.toBeDefined();
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Helpers for cap / truncation tests
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a body string large enough to produce more than `minPages` pages
+ * when split by chunkForEmbedDescription (4096 chars/page).
+ */
+const makeOversizedBody = (minPages: number): string =>
+  // Each "paragraph" is ~4000 chars so each lands on its own page
+  Array.from({ length: minPages + 1 }, (_, i) => `P${i}: ${'x'.repeat(3990)}`).join('\n\n');
+
+// ---------------------------------------------------------------------------
+// Tests — cap / truncation (new cases)
+// ---------------------------------------------------------------------------
+
+describe('EmailOriginalPageButton — cap / truncation (new)', () => {
+  // 1. Oversized body, WEB_URL None: last capped page contains no-link notice
+  it('oversized body, WEB_URL None — last capped page contains no-link truncation notice', async () => {
+    const body = makeOversizedBody(20);
+    const getContentFn = vi.fn(() => Effect.succeed(makeGetEmailContentResult('summary', body)));
+    const rpcStub = makeRpcStub({ 'Email/GetEmailContent': getContentFn });
+    const restStub = makeRestStub();
+    // Navigate to page index 19 (the last allowed page after cap)
+    const interaction = makeComponentInteraction(`email-original-page:${TEAM_ID}:${EMAIL_ID}:19`);
+    mockWebUrl = Option.none();
+
+    await runHandler(EmailOriginalPageButton, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const call = restStub.updateOriginalWebhookMessage.mock.calls[0];
+    const payloadStr = JSON.stringify(call);
+    // The no-link truncation notice: "✂️ This message is too long and was cut off."
+    expect(payloadStr).toContain('✂️');
+    expect(payloadStr).toContain('cut off');
+    // No markdown link should be present on the last page
+    expect(payloadStr).not.toMatch(/\]\(https?:\/\//);
+  });
+
+  // 2. Oversized body, WEB_URL Some — last capped page contains deep link
+  it('oversized body, WEB_URL Some — last capped page contains deep link to email', async () => {
+    const body = makeOversizedBody(20);
+    const getContentFn = vi.fn(() => Effect.succeed(makeGetEmailContentResult('summary', body)));
+    const rpcStub = makeRpcStub({ 'Email/GetEmailContent': getContentFn });
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-original-page:${TEAM_ID}:${EMAIL_ID}:19`);
+    mockWebUrl = Option.some('https://app.example.com');
+
+    await runHandler(EmailOriginalPageButton, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const call = restStub.updateOriginalWebhookMessage.mock.calls[0];
+    const payloadStr = JSON.stringify(call);
+    // Should contain a deep link to the email
+    expect(payloadStr).toContain(`https://app.example.com/teams/${TEAM_ID}/emails/${EMAIL_ID}`);
+    // Should contain the "Sideline" label
+    expect(payloadStr).toContain('Sideline');
+  });
+
+  // 3. Realistic long WEB_URL: last page embed description ≤ 4096 AND notice text present
+  it('long WEB_URL (~120 chars) — last page embed description ≤ 4096 AND notice text present', async () => {
+    const body = makeOversizedBody(20);
+    const getContentFn = vi.fn(() => Effect.succeed(makeGetEmailContentResult('summary', body)));
+    const rpcStub = makeRpcStub({ 'Email/GetEmailContent': getContentFn });
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-original-page:${TEAM_ID}:${EMAIL_ID}:19`);
+    // ~120-char WEB_URL
+    const longUrl =
+      'https://app.example.com/very/long/path/that/is/quite/long/and/tests/trimming/correctly';
+    mockWebUrl = Option.some(longUrl);
+
+    await runHandler(EmailOriginalPageButton, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const call = restStub.updateOriginalWebhookMessage.mock.calls[0];
+    const payload = call?.[2] ?? call?.[1] ?? call?.[0];
+    const embed = (payload as any)?.payload?.embeds?.[0];
+    expect(embed).toBeDefined();
+    const desc: string = embed?.description ?? '';
+    // Description must fit within Discord's embed limit
+    expect(desc.length).toBeLessThanOrEqual(4096);
+    // The truncation notice must be present — content was trimmed, not the notice
+    expect(desc).toContain('✂️');
+  });
+
+  // 4. Footer capped indicator: when truncated, footer uses bot_email_page_indicator_capped
+  it('footer capped indicator — truncated body uses (truncated) page indicator in footer', async () => {
+    const body = makeOversizedBody(20);
+    const getContentFn = vi.fn(() => Effect.succeed(makeGetEmailContentResult('summary', body)));
+    const rpcStub = makeRpcStub({ 'Email/GetEmailContent': getContentFn });
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-original-page:${TEAM_ID}:${EMAIL_ID}:19`);
+    mockWebUrl = Option.none();
+
+    await runHandler(EmailOriginalPageButton, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const call = restStub.updateOriginalWebhookMessage.mock.calls[0];
+    const payloadStr = JSON.stringify(call);
+    // The capped indicator contains "(truncated)" in English
+    expect(payloadStr).toContain('truncated');
+    // And must NOT use just the plain "Page X/Y" without the capped suffix
+    // (i.e. totalPages in the footer must be 20, the capped count)
+    expect(payloadStr).toContain('20');
+  });
+
+  // 5. Normal small body: single-page, no truncation, plain indicator
+  it('normal small body — single page, no truncation notice, no capped indicator', async () => {
+    const body = 'This is a short email body that fits in one page.';
+    const getContentFn = vi.fn(() => Effect.succeed(makeGetEmailContentResult('summary', body)));
+    const rpcStub = makeRpcStub({ 'Email/GetEmailContent': getContentFn });
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-original-page:${TEAM_ID}:${EMAIL_ID}:0`);
+    mockWebUrl = Option.none();
+
+    await runHandler(EmailOriginalPageButton, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const call = restStub.updateOriginalWebhookMessage.mock.calls[0];
+    const payloadStr = JSON.stringify(call);
+    // No truncation scissors
+    expect(payloadStr).not.toContain('✂️');
+    // No "(truncated)" capped indicator
+    expect(payloadStr).not.toContain('(truncated)');
+  });
+
+  // 6a. THE HANG FIX — uncaught RPC failure (RequestError): resolves without throw
+  it('hang fix — RequestError from GetEmailContent: resolves without throw, updateOriginalWebhookMessage called', async () => {
+    const getContentFn = vi.fn(() => Effect.fail({ _tag: 'RequestError', message: 'boom' } as any));
+    const rpcStub = makeRpcStub({ 'Email/GetEmailContent': getContentFn });
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-original-page:${TEAM_ID}:${EMAIL_ID}:0`);
+
+    await expect(
+      runHandler(EmailOriginalPageButton, restStub.layer, rpcStub.layer, interaction),
+    ).resolves.toBeDefined();
+
+    // Third setTimeout flush for the recovery path of the catch-all
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+  });
+
+  // 6b. THE HANG FIX — ErrorResponse not caught → interaction must resolve
+  it('hang fix — ErrorResponse from GetEmailContent: resolves without throw, updateOriginalWebhookMessage called', async () => {
+    const getContentFn = vi.fn(() => Effect.fail({ _tag: 'ErrorResponse', status: 500 } as any));
+    const rpcStub = makeRpcStub({ 'Email/GetEmailContent': getContentFn });
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-original-page:${TEAM_ID}:${EMAIL_ID}:0`);
+
+    await expect(
+      runHandler(EmailOriginalPageButton, restStub.layer, rpcStub.layer, interaction),
+    ).resolves.toBeDefined();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+  });
+
+  // 7. THE HANG FIX — defect (Effect.die): resolves without throw
+  it('hang fix — Effect.die from GetEmailContent: resolves without throw, updateOriginalWebhookMessage called', async () => {
+    const getContentFn = vi.fn(() => Effect.die(new Error('boom')));
+    const rpcStub = makeRpcStub({ 'Email/GetEmailContent': getContentFn });
+    const restStub = makeRestStub();
+    const interaction = makeComponentInteraction(`email-original-page:${TEAM_ID}:${EMAIL_ID}:0`);
+
+    await expect(
+      runHandler(EmailOriginalPageButton, restStub.layer, rpcStub.layer, interaction),
+    ).resolves.toBeDefined();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
   });

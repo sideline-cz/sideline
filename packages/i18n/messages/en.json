@@ -624,6 +624,10 @@
   "bot_email_page_indicator": "Page {current}/{total}",
   "bot_email_page_continued": "… (continued on the next page)",
   "bot_email_page_empty": "(no content)",
+  "bot_email_page_indicator_capped": "Page {current}/{total} (truncated)",
+  "bot_email_truncation_notice": "✂️ This message is too long and was cut off. Read the full email on {link}.",
+  "bot_email_truncation_notice_no_link": "✂️ This message is too long and was cut off.",
+  "bot_email_truncation_link_label": "Sideline",
 
   "searchable_select_search": "Search...",
   "searchable_select_noResults": "No results found.",

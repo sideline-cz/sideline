@@ -296,6 +296,7 @@ export interface BuildPageEmbedOptions {
   readonly totalPages: number;
   readonly subject: string;
   readonly locale: Locale;
+  readonly truncated?: boolean;
 }
 
 /**
@@ -310,6 +311,7 @@ export const buildPageEmbed = ({
   pageIndex,
   totalPages,
   locale,
+  truncated,
 }: BuildPageEmbedOptions): Discord.RichEmbed => {
   const color = kind === 'detailed' ? DETAILED_COLOR : ORIGINAL_COLOR;
   const title =
@@ -320,10 +322,16 @@ export const buildPageEmbed = ({
   const footer =
     totalPages > 1
       ? {
-          text: m.bot_email_page_indicator(
-            { current: pageIndex + 1, total: totalPages },
-            { locale },
-          ),
+          text:
+            truncated === true
+              ? m.bot_email_page_indicator_capped(
+                  { current: pageIndex + 1, total: totalPages },
+                  { locale },
+                )
+              : m.bot_email_page_indicator(
+                  { current: pageIndex + 1, total: totalPages },
+                  { locale },
+                ),
         }
       : undefined;
 

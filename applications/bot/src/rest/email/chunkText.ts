@@ -115,3 +115,42 @@ export const chunkForEmbedDescription = (text: string, maxChars = 4096): Readonl
 
   return chunks.length > 0 ? chunks : [''];
 };
+
+/**
+ * Surrogate-safe UTF-16 slice: trims `text` to at most `budget` code units,
+ * dropping a lone high surrogate at the cut boundary if present.
+ */
+const safeSlice = (text: string, budget: number): string => {
+  let t = text.slice(0, budget);
+  const last = t.charCodeAt(t.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) t = t.slice(0, -1);
+  return t;
+};
+
+/**
+ * Cap a chunked array to at most `maxPages` pages, appending a truncation
+ * `suffix` to the last page (trimmed to fit within `maxChars` code units).
+ * If the input already fits within the cap, it is returned unchanged.
+ */
+export const capPages = (
+  chunks: ReadonlyArray<string>,
+  maxPages: number,
+  suffix: string,
+  maxChars = 4096,
+): ReadonlyArray<string> => {
+  if (chunks.length <= maxPages) return chunks;
+
+  const kept = chunks.slice(0, maxPages);
+  const lastPage = kept[kept.length - 1] ?? '';
+
+  let newLastPage: string;
+  if (suffix.length >= maxChars) {
+    // Pathological: suffix alone exceeds budget — use just the suffix trimmed
+    newLastPage = safeSlice(suffix, maxChars);
+  } else {
+    const budget = maxChars - suffix.length;
+    newLastPage = safeSlice(lastPage, budget) + suffix;
+  }
+
+  return [...kept.slice(0, kept.length - 1), newLastPage];
+};

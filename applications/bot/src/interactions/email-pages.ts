@@ -5,11 +5,18 @@ import * as Ix from 'dfx/Interactions/index';
 import { Interaction, MessageComponentData } from 'dfx/Interactions/index';
 import * as Discord from 'dfx/types';
 import { Effect, Metric, Option, Schema } from 'effect';
+import { env } from '~/env.js';
 import { userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
-import { buildPageComponents, buildPageEmbed } from '~/rest/email/buildEmailEmbeds.js';
-import { chunkForEmbedDescription } from '~/rest/email/chunkText.js';
+import {
+  buildEmailDeepLink,
+  buildPageComponents,
+  buildPageEmbed,
+} from '~/rest/email/buildEmailEmbeds.js';
+import { capPages, chunkForEmbedDescription } from '~/rest/email/chunkText.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
+
+const MAX_PAGES = 20;
 
 const decodeTeamIdOption = Schema.decodeUnknownOption(Team.TeamId);
 const decodeEmailMessageIdOption = Schema.decodeUnknownOption(EmailForwarding.EmailMessageId);
@@ -53,9 +60,20 @@ const fetchAndRenderPage = (
       const text =
         kind === 'detailed' ? Option.getOrElse(content.summary, () => content.body) : content.body;
 
-      const chunks = chunkForEmbedDescription(text);
+      const rawChunks = chunkForEmbedDescription(text);
+      const deepLink = buildEmailDeepLink(env.WEB_URL, teamId, emailId);
+      const noticeText = Option.match(deepLink, {
+        onNone: () => m.bot_email_truncation_notice_no_link({}, { locale }),
+        onSome: (url) =>
+          m.bot_email_truncation_notice(
+            { link: `[${m.bot_email_truncation_link_label({}, { locale })}](${url})` },
+            { locale },
+          ),
+      });
+      const suffix = `\n\n──────────\n${noticeText}`;
+      const truncated = rawChunks.length > MAX_PAGES;
+      const chunks = capPages(rawChunks, MAX_PAGES, suffix);
       const totalPages = chunks.length;
-      // Clamp to valid range
       const pageIndex = Math.max(0, Math.min(requestedPageIndex, totalPages - 1));
       const pageText = chunks[pageIndex] ?? '';
 
@@ -68,6 +86,7 @@ const fetchAndRenderPage = (
         totalPages,
         subject: content.subject,
         locale,
+        truncated,
       });
 
       const components = buildPageComponents({
@@ -101,9 +120,20 @@ const fetchAndRenderPage = (
         );
     }),
     Effect.catchTag('EmailRpcMessageNotFound', () =>
-      errorUpdate(m.bot_email_page_empty({}, { locale })),
+      Effect.logDebug('email-pages: email content not found').pipe(
+        Effect.andThen(errorUpdate(m.bot_email_page_empty({}, { locale }))),
+      ),
     ),
-    Effect.catchTag('RpcClientError', () => errorUpdate(m.bot_email_page_empty({}, { locale }))),
+    Effect.catchTag('RpcClientError', (err) =>
+      Effect.logError('email-pages: RPC client error fetching email content', err).pipe(
+        Effect.andThen(errorUpdate(m.bot_email_page_empty({}, { locale }))),
+      ),
+    ),
+    Effect.catchCause((cause) =>
+      Effect.logError('email-pages: failed to render page', cause).pipe(
+        Effect.andThen(errorUpdate(m.bot_email_page_empty({}, { locale }))),
+      ),
+    ),
   );
 };
 

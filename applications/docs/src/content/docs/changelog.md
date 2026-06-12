@@ -5,6 +5,12 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-12 — Email preview pages no longer hang and very long emails are capped
+
+When clicking **Detailed summary** or **Original email** on an approved email post in Discord, the ephemeral preview now always resolves — even if an error occurs mid-render. Previously, an unexpected failure left the interaction in a permanent "loading" state.
+
+Additionally, emails that would span more than 20 Discord embed pages are now truncated at page 20. The last page shows a notice that the message was too long, with a link to the full email on the Sideline web app (when the web app is configured).
+
 ## 2026-06-11 — Channel access grants for unprovisioned groups now auto-heal
 
 When you grant channel access to a group that does not yet have a Discord role, Sideline saves the grant and makes it take effect automatically once the group is provisioned — including for groups that were created before the team's Discord server was linked.
