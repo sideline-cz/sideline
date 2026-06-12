@@ -1,5 +1,40 @@
 # @sideline/server
 
+## 0.28.1
+
+### Patch Changes
+
+- [#402](https://github.com/maxa-ondrej/sideline/pull/402) [`1681e50`](https://github.com/maxa-ondrej/sideline/commit/1681e5075b9f824075fcda935bd3dcf5b5a65410) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix carpool car creation: any team member can now add their own car (volunteer as
+  a driver), not just captains. Starting a carpool remains captain/admin-only
+  (`carpool:manage`). Previously the `Carpool/AddCar` action was incorrectly gated
+  behind `carpool:manage`, so the "Add Car" button shown to everyone always failed
+  for regular members. Membership is still required — non-members are rejected.
+
+- [#404](https://github.com/maxa-ondrej/sideline/pull/404) [`717bf0c`](https://github.com/maxa-ondrej/sideline/commit/717bf0c90f40c933951532327df4a5211311d0b2) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix channel access for groups that were never provisioned with a Discord role.
+
+  Granting channel access to such a group silently saved the grant but never
+  applied a Discord permission overwrite and gave no feedback — so the group
+  appeared to "do nothing" (confirmed in production for role-only groups created
+  before their team's Discord provisioning, which had no `discord_channel_mappings`
+  row and thus no resolvable role).
+
+  The server now backfills missing group roles (a low-cadence bot tick calls a new
+  `Channel/BackfillMissingGroupRoles` RPC; role-only groups get a role, groups that
+  already have a channel get the role attached to it — no duplicate channels), and
+  re-applies a group's stored channel-access grants automatically the moment its
+  Discord role first appears (group-axis reconcile on the role none→present
+  transition, generalising the existing channel-axis reconcile). `setAccess` also
+  best-effort enqueues provisioning when it encounters a role-less group, and the
+  bot's role provisioning is now idempotent (no duplicate roles on retry).
+
+  Channel detail responses also expose a per-grant `roleResolvable` flag, and the
+  channel access sheet shows a "Not yet active in Discord" badge, info notice, and
+  clearer toast so the saved-but-pending state is visible until it self-heals.
+
+- Updated dependencies [[`1681e50`](https://github.com/maxa-ondrej/sideline/commit/1681e5075b9f824075fcda935bd3dcf5b5a65410), [`717bf0c`](https://github.com/maxa-ondrej/sideline/commit/717bf0c90f40c933951532327df4a5211311d0b2)]:
+  - @sideline/domain@0.27.1
+  - @sideline/i18n@0.12.5
+
 ## 0.28.0
 
 ### Minor Changes
