@@ -61,6 +61,7 @@ import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
 import { MockEventRosterLayers } from './mocks/eventRosterMocks.js';
@@ -766,7 +767,8 @@ const buildFullLayer = (overrides?: {
     .pipe(Layer.provide(MockSqlClientLayer))
     .pipe(Layer.provide(MockEmailLayers))
     .pipe(Layer.provide(MockEventRosterLayers))
-    .pipe(Layer.provide(BotInfoStore.Default));
+    .pipe(Layer.provide(BotInfoStore.Default))
+    .pipe(Layer.provide(GlobalAdminAllowlist.Default));
 };
 
 const setAccessRequest = (grants: Array<{ groupId: string; accessLevel: string }>) =>

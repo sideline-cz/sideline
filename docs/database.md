@@ -42,6 +42,7 @@ Central identity record created during Discord OAuth sign-in.
 | `locale` | VARCHAR(5) | NOT NULL | `'en'` |
 | `is_profile_complete` | BOOLEAN | NOT NULL | `false` |
 | `is_global_admin` | BOOLEAN | NOT NULL | `false` |
+| `global_admin_granted_at` | TIMESTAMPTZ | — | — |
 | `discord_nickname` | TEXT | — | — |
 | `discord_display_name` | TEXT | — | — |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
@@ -49,7 +50,7 @@ Central identity record created during Discord OAuth sign-in.
 
 **Indexes**: `idx_users_discord_id` on `(discord_id)`
 
-**Notes**: `username` and `avatar` were originally named `discord_username` and `discord_avatar` (renamed in migration `1742300000`). `birth_date` replaced the integer `birth_year` column (migration `1741900000`). The `jersey_number`, `position`, and `proficiency` columns that existed briefly were moved to `team_members` or dropped (migration `1740990000`). `discord_nickname` added in migration `1744200000`; `discord_display_name` added in migration `1744300000`. `is_global_admin` added in migration `1787300000` — `false` for all existing rows. The very first user to register on a fresh database is automatically promoted (`is_global_admin = true`) via a `NOT EXISTS` sub-select evaluated during the `INSERT … ON CONFLICT` upsert. The effective global-admin check is `is_global_admin OR discord_id IN APP_GLOBAL_ADMIN_DISCORD_IDS` — the env allowlist is additive for backward compatibility.
+**Notes**: `username` and `avatar` were originally named `discord_username` and `discord_avatar` (renamed in migration `1742300000`). `birth_date` replaced the integer `birth_year` column (migration `1741900000`). The `jersey_number`, `position`, and `proficiency` columns that existed briefly were moved to `team_members` or dropped (migration `1740990000`). `discord_nickname` added in migration `1744200000`; `discord_display_name` added in migration `1744300000`. `is_global_admin` added in migration `1787300000` — `false` for all existing rows. The very first user to register on a fresh database is automatically promoted (`is_global_admin = true`) via a `NOT EXISTS` sub-select evaluated during the `INSERT … ON CONFLICT` upsert. The effective global-admin check is `is_global_admin OR discord_id IN APP_GLOBAL_ADMIN_DISCORD_IDS` — the env allowlist is additive for backward compatibility. `global_admin_granted_at` added in migration `1789500003` — records when `is_global_admin` was set to `true`; backfilled to `now()` for rows where `is_global_admin = true` at migration time. Set by `POST /auth/global-admins` and cleared by `DELETE /auth/global-admins/:userId`.
 
 ---
 

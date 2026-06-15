@@ -15,6 +15,7 @@ import {
   Rss,
   Settings,
   Shield,
+  ShieldCheck,
   Target,
   Trophy,
   UserCog,
@@ -285,6 +286,18 @@ export function AppSidebar({ user, teams, activeTeam, onLogout, ...props }: AppS
                     <Link to='/admin/translations'>
                       <Languages />
                       <span>Translations</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={!!matchRoute({ to: '/admin/global-admins', fuzzy: false })}
+                    tooltip={tr('admin_globalAdmins_pageTitle')}
+                  >
+                    <Link to='/admin/global-admins'>
+                      <ShieldCheck />
+                      <span>{tr('admin_globalAdmins_pageTitle')}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

@@ -1306,7 +1306,9 @@ Tests go in `test/` directory. When adding new repositories, add corresponding m
 
 ### HttpApi Mock-Layer Cascade
 
-Every test file that provides `ApiLive` (directly or transitively) MUST provide a mock layer for **every** repository that any `HttpApiBuilder.group(...)` registered in `ApiLive` depends on — even repositories the test does not exercise. Adding a new group to `ApiLive` without updating every existing `ApiLive`-providing test produces a missing-service runtime error at layer construction, not a compile error.
+Every test file that provides `ApiLive` (directly or transitively) MUST provide a layer for **every** service that any `HttpApiBuilder.group(...)` registered in `ApiLive` depends on — even services the test does not exercise. This covers both **repositories** (provide a `Mock<Repo>Layer`) and **non-repository services** (provide the service's own `.Default`, or a `Layer.succeed(Service, fake)` when the test needs to control its value). Adding a new group — or adding a new service dependency to an existing group's handler — without updating every existing `ApiLive`-providing test produces a missing-service runtime error at layer construction, not a compile error.
+
+> **Footgun (recurring):** wiring a new `ServiceMap.Service` into `ApiLive` (e.g. `GlobalAdminAllowlist` added one `Layer.provide(GlobalAdminAllowlist.Default)` to `AppLive.ts`) silently breaks **every** `ApiLive`-providing test suite at once — the `feat/manage-global-admins` change had to add `.pipe(Layer.provide(GlobalAdminAllowlist.Default))` to 34 test files. After adding any `Layer.provide(<NewService>.Default)` to `AppLive.ts` or `api/index.ts`, grep `Layer.provide(ApiLive)` / `Layer.provideMerge(ApiLive)` and the existing test layer composition (`Layer.provide(BotInfoStore.Default)` is a reliable anchor) and append the new provide to every match in the same PR.
 
 Reference: `applications/server/test/mocks/weeklyChallengeMocks.ts` is the canonical noop-mock shape. Every method returns the type's safe empty value (`Effect.succeed(Option.none())`, `Effect.succeed([])`, `Effect.void`); methods whose success type is non-trivial (e.g. `create` returning a domain model) return `Effect.die(new Error('Mock<X>.create not implemented'))` so a test that accidentally exercises an unimplemented path fails loudly instead of returning a partially-constructed value.
 
@@ -1329,3 +1331,31 @@ Rules:
 2. **The gating env vars are optional with safe defaults**, except the security-critical secret. Use `Schema.OptionFromNullishOr(Schema.RedactedFromValue(...))` for the optional API key and `Schemas.Optional(() => '<default>')` for the URL/model. The provider is real only when every required piece is present (`apiUrl !== '' && Option.isSome(apiKey)`); otherwise stub. Log a single warning at construction so operators see the fallback in startup logs.
 3. **The real provider's typed error is the service's only failure** (`LlmError`). Map every downstream failure (HTTP error, JSON parse, missing field) into it via `Effect.mapError`; never let `HttpClientError` / `ParseError` leak into the consumer.
 4. **Tests provide a fake via `Layer.succeed(Service, fakeImpl)`** rather than env-stubbing the real layer — `Layer.succeed(LlmClient, { summarizeEmail: () => Effect.succeed('...') })` (or an `Effect.fail(new LlmError(...))` to exercise the failure path). Do not construct `Default` in tests; it would attempt a real HTTP call or pick the stub by accident.
+
+## Injectable Env-Derived Config Service (Testable Allowlist)
+
+When a handler needs to read an **env-derived, process-wide constant** (parsed once at module load) AND that value must be **overridable in tests**, wrap it in a tiny `ServiceMap.Service` whose `Default` layer reads the module-level constant. Tests then provide `Layer.succeed(Service, fake)` instead of stubbing `process.env` (which a `@t3-oss/env-core`-style module snapshots at import, making post-import `vi.stubEnv` a no-op).
+
+Reference: `GlobalAdminAllowlist` (`src/services/GlobalAdminAllowlist.ts`) wraps the `globalAdminDiscordIds: ReadonlySet<string>` set parsed from `APP_GLOBAL_ADMIN_DISCORD_IDS` in `src/env.ts`.
+
+```typescript
+export interface GlobalAdminAllowlistShape {
+  readonly asEffect: Effect.Effect<ReadonlySet<string>>;
+}
+
+export class GlobalAdminAllowlist extends ServiceMap.Service<
+  GlobalAdminAllowlist,
+  GlobalAdminAllowlistShape
+>()('api/GlobalAdminAllowlist') {
+  static readonly Default = Layer.sync(GlobalAdminAllowlist, () => ({
+    asEffect: Effect.succeed(globalAdminDiscordIds),
+  }));
+}
+```
+
+Rules:
+
+1. **The service is a thin wrapper, not a second source of truth.** `Default` reads the existing module-level constant (`globalAdminDiscordIds`) — do NOT re-parse `process.env` inside the layer, and do NOT introduce a different parsing rule than the one in `env.ts`.
+2. **Tests override with `Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set([...])) } as any)`**, never by stubbing the env var. The `as any` is required because the `ServiceMap.Service` tag carries a private brand (same reason as the mock-repo cast in "HttpApi Mock-Layer Cascade").
+3. **Wrap in a service ONLY the consumers that must be test-injectable.** The per-request resolution helper `toCurrentUser` (`src/utils/toCurrentUser.ts`) still reads `globalAdminDiscordIds` directly from `env.ts` — only the allowlist-management API handlers in `src/api/global-admin.ts` (which list/grant/revoke admins and must run against a controlled allowlist in `test/GlobalAdmin.test.ts`) depend on `GlobalAdminAllowlist`. Do not route every read through the service; that would force every `toCurrentUser` call site to provide the layer.
+4. **Adding this service to `ApiLive` triggers the test-layer cascade** — see "HttpApi Mock-Layer Cascade" footgun: every `ApiLive`-providing test must `Layer.provide(GlobalAdminAllowlist.Default)` (or a `Layer.succeed` override) in the same PR.

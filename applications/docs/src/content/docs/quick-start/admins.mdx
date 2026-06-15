@@ -67,6 +67,26 @@ A user is a global admin when **either** of the following is true:
   On a brand-new installation, just sign in with Discord. You will be recognised as the global admin immediately and redirected to **Administration → Team onboarding** where you can start issuing onboarding links.
 </Aside>
 
+### Manage global admins
+
+Navigate to **Administration → Global admins** (`/admin/global-admins`) to view the current list of global admins and promote or demote users.
+
+**Grant admin access**
+
+Enter the Discord user ID of the person you want to promote into the **Grant admin** form and click **Grant**. The user must have signed in to Sideline at least once — the Discord ID must match an existing account. See [Find a captain's Discord user ID](#find-a-captains-discord-user-id) for how to copy a Discord ID.
+
+**Revoke admin access**
+
+Click **Revoke** next to a user in the list and confirm the dialog. A few safeguards apply:
+
+- You cannot revoke your own admin status.
+- You cannot revoke a user whose Discord ID is managed via the `APP_GLOBAL_ADMIN_DISCORD_IDS` environment variable (they show an **Env-managed** badge). Ask your server operator to remove them from the env var instead.
+- You cannot revoke the last remaining global admin — at least one must always exist.
+
+<Aside type="caution" title="Env-managed admins">
+  Users listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable cannot be revoked from the web UI. Their access is controlled by the server operator. The web page shows them with an **Env-managed** badge and no Revoke button.
+</Aside>
+
 ### Mint an onboarding link
 
 <Steps>

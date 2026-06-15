@@ -68,9 +68,11 @@ export const env = createEnv({
   emptyStringAsUndefined: true,
 });
 
+const SNOWFLAKE_RE = /^\d{17,20}$/;
+
 export const globalAdminDiscordIds: ReadonlySet<string> = new Set(
   (process.env.APP_GLOBAL_ADMIN_DISCORD_IDS ?? '')
     .split(',')
     .map((id) => id.trim())
-    .filter((id) => id.length > 0),
+    .filter((id) => SNOWFLAKE_RE.test(id)),
 );

@@ -65,6 +65,7 @@ import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { MockChannelManagementLayers } from './mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
@@ -972,7 +973,8 @@ const buildTestLayer = (
     .pipe(Layer.provide(MockChannelManagementLayers))
     .pipe(Layer.provide(MockEmailLayers))
     .pipe(Layer.provide(MockEventRosterLayers))
-    .pipe(Layer.provide(BotInfoStore.Default));
+    .pipe(Layer.provide(BotInfoStore.Default))
+    .pipe(Layer.provide(GlobalAdminAllowlist.Default));
 
 const makeSettingsLayer = (findByTeamId: () => Effect.Effect<Option.Option<unknown>>) =>
   Layer.succeed(TeamSettingsRepository, {
@@ -1202,7 +1204,8 @@ describe('B2 — createGroup emits channel_created regardless of create_discord_
       .pipe(Layer.provide(MockChannelManagementLayers))
       .pipe(Layer.provide(MockEmailLayers))
       .pipe(Layer.provide(MockEventRosterLayers))
-      .pipe(Layer.provide(BotInfoStore.Default));
+      .pipe(Layer.provide(BotInfoStore.Default))
+      .pipe(Layer.provide(GlobalAdminAllowlist.Default));
 
     const _app = HttpRouter.toWebHandler(customLayer);
     const handler: (...args: any) => Promise<Response> = _app.handler;

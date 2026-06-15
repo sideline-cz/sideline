@@ -5,6 +5,17 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-15 — Global admin management page
+
+Global admins can now manage the list of other global admins directly from the Sideline web app — no database access or environment-variable change required.
+
+- Navigate to **Administration → Global admins** to see the full list of current global admins, showing the source of each entry (database flag or `APP_GLOBAL_ADMIN_DISCORD_IDS` env variable).
+- **Grant admin access** by entering a Discord user ID in the form on the page. The user must have signed in to Sideline at least once.
+- **Revoke admin access** by clicking **Revoke** next to any DB-managed entry (env-managed entries show an **Env-managed** badge and cannot be revoked here).
+- Self-revoke and last-admin removal are blocked by the server to prevent lockout.
+
+See [Admin quick start](/quick-start/admins/#manage-global-admins) for step-by-step instructions.
+
 ## 2026-06-12 — Email preview pages no longer hang and very long emails are capped
 
 When clicking **Detailed summary** or **Original email** on an approved email post in Discord, the ephemeral preview now always resolves — even if an error occurs mid-render. Previously, an unexpected failure left the interaction in a permanent "loading" state.

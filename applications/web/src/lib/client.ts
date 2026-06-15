@@ -15,6 +15,7 @@ import {
   EventSeriesApi,
   ExpenseApi,
   FinanceApi,
+  GlobalAdminApi,
   GroupApi,
   ICalApi,
   Invite,
@@ -75,7 +76,8 @@ class ClientApi extends HttpApi.make('api')
   .add(TeamChallengeApi.TeamChallengeApiGroup)
   .add(ChannelApi.ChannelApiGroup)
   .add(EmailForwardingApi.EmailForwardingApiGroup)
-  .add(EventRosterApi.EventRosterApiGroup) {}
+  .add(EventRosterApi.EventRosterApiGroup)
+  .add(GlobalAdminApi.GlobalAdminApiGroup) {}
 
 export const client = ClientConfig.asEffect().pipe(
   Effect.flatMap(({ baseUrl }) =>

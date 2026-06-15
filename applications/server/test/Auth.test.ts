@@ -43,6 +43,7 @@ import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth, DiscordOAuthError } from '~/services/DiscordOAuth.js';
+import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { MockChannelManagementLayers } from './mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
@@ -580,7 +581,8 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockChannelManagementLayers))
   .pipe(Layer.provide(MockEmailLayers))
   .pipe(Layer.provide(MockEventRosterLayers))
-  .pipe(Layer.provide(BotInfoStore.Default));
+  .pipe(Layer.provide(BotInfoStore.Default))
+  .pipe(Layer.provide(GlobalAdminAllowlist.Default));
 
 let handler: (...args: any) => Promise<Response>;
 let dispose: () => Promise<void>;
@@ -777,7 +779,8 @@ describe('Auth API — isGlobalAdmin flag on GET /auth/me (TDD: first registered
       .pipe(Layer.provide(MockChannelManagementLayers))
       .pipe(Layer.provide(MockEmailLayers))
       .pipe(Layer.provide(MockEventRosterLayers))
-      .pipe(Layer.provide(BotInfoStore.Default));
+      .pipe(Layer.provide(BotInfoStore.Default))
+      .pipe(Layer.provide(GlobalAdminAllowlist.Default));
   };
 
   it('isGlobalAdmin true when db flag is true and env allowlist empty', async () => {
@@ -1093,7 +1096,8 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
       .pipe(Layer.provide(MockChannelManagementLayers))
       .pipe(Layer.provide(MockEmailLayers))
       .pipe(Layer.provide(MockEventRosterLayers))
-      .pipe(Layer.provide(BotInfoStore.Default));
+      .pipe(Layer.provide(BotInfoStore.Default))
+      .pipe(Layer.provide(GlobalAdminAllowlist.Default));
   };
 
   it('GET /auth/me/teams omits teams where user has been deactivated (findByUser returns only active)', async () => {
@@ -1368,7 +1372,8 @@ describe('Global admin read access', () => {
       .pipe(Layer.provide(MockChannelManagementLayers))
       .pipe(Layer.provide(MockEmailLayers))
       .pipe(Layer.provide(MockEventRosterLayers))
-      .pipe(Layer.provide(BotInfoStore.Default));
+      .pipe(Layer.provide(BotInfoStore.Default))
+      .pipe(Layer.provide(GlobalAdminAllowlist.Default));
 
   it('global admin non-member can GET /teams/:id/members → 200', async () => {
     const testLayer = buildGlobalAdminLayer();

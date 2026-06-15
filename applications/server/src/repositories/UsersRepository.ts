@@ -1,6 +1,6 @@
 import { User } from '@sideline/domain';
 import { Schemas } from '@sideline/effect-lib';
-import { Effect, Layer, Schema, ServiceMap } from 'effect';
+import { Effect, Layer, type Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 
@@ -55,8 +55,8 @@ const make = Effect.gen(function* () {
     Request: UpsertDiscordInput,
     Result: User.User,
     execute: (input) => sql`
-      INSERT INTO users (discord_id, username, avatar, discord_nickname, discord_display_name, is_global_admin)
-      VALUES (${input.discord_id}, ${input.username}, ${input.avatar}, ${input.discord_nickname}, ${input.discord_display_name}, (NOT EXISTS (SELECT 1 FROM users)))
+      INSERT INTO users (discord_id, username, avatar, discord_nickname, discord_display_name, is_global_admin, global_admin_granted_at)
+      VALUES (${input.discord_id}, ${input.username}, ${input.avatar}, ${input.discord_nickname}, ${input.discord_display_name}, (NOT EXISTS (SELECT 1 FROM users)), CASE WHEN NOT EXISTS (SELECT 1 FROM users) THEN now() ELSE NULL END)
       ON CONFLICT (discord_id) DO UPDATE SET
         username = ${input.username},
         avatar = ${input.avatar},
@@ -120,6 +120,52 @@ const make = Effect.gen(function* () {
   const updateAdminProfile = (input: Schema.Schema.Type<typeof AdminUpdateProfileInput>) =>
     updateAdminProfileQuery(input).pipe(catchSqlErrors);
 
+  const listGlobalAdminsQuery = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: User.User,
+    execute: () =>
+      sql`SELECT * FROM users WHERE is_global_admin = true ORDER BY global_admin_granted_at NULLS LAST, username`,
+  });
+
+  const listGlobalAdmins = () => listGlobalAdminsQuery(undefined).pipe(catchSqlErrors);
+
+  const grantGlobalAdminQuery = SqlSchema.findOneOption({
+    Request: Schema.String,
+    Result: User.User,
+    execute: (discordId) => sql`
+      UPDATE users
+      SET is_global_admin = true,
+          global_admin_granted_at = COALESCE(global_admin_granted_at, now()),
+          updated_at = now()
+      WHERE discord_id = ${discordId}
+      RETURNING *
+    `,
+  });
+
+  const grantGlobalAdmin = (discordId: string): Effect.Effect<Option.Option<User.User>> =>
+    grantGlobalAdminQuery(discordId).pipe(catchSqlErrors);
+
+  const revokeGlobalAdminGuardedQuery = SqlSchema.findOneOption({
+    Request: Schema.Struct({ userId: User.UserId, envAdminCount: Schema.Number }),
+    Result: User.User,
+    execute: (input) => sql`
+      UPDATE users
+      SET is_global_admin = false,
+          global_admin_granted_at = NULL,
+          updated_at = now()
+      WHERE id = ${input.userId}
+        AND is_global_admin = true
+        AND ((SELECT count(*) FROM users WHERE is_global_admin = true) + ${input.envAdminCount} > 1)
+      RETURNING *
+    `,
+  });
+
+  const revokeGlobalAdminGuarded = (
+    userId: User.UserId,
+    envAdminCount: number,
+  ): Effect.Effect<Option.Option<User.User>> =>
+    revokeGlobalAdminGuardedQuery({ userId, envAdminCount }).pipe(catchSqlErrors);
+
   return {
     findByDiscordId,
     findById,
@@ -127,6 +173,9 @@ const make = Effect.gen(function* () {
     completeProfile,
     updateLocale,
     updateAdminProfile,
+    listGlobalAdmins,
+    grantGlobalAdmin,
+    revokeGlobalAdminGuarded,
   };
 });
 

@@ -16,7 +16,7 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 | **Admin** | A team member holding the built-in `Admin` role. Holds the full permission set including `team:manage`, `team:invite`, `member:remove`, `role:manage`, `training-type:create`, `training-type:delete`, `finance:view`, `finance:manage_fees`, and `finance:record_payments`, in addition to all Captain permissions. |
 | **Treasurer** | A team member holding the built-in `Treasurer` role. Holds `finance:view`, `finance:manage_fees`, and `finance:record_payments`. Used to delegate finance authority without elevating the member to Captain or Admin. |
 | **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/carpool`, `/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination, carpool board buttons, email approval/reject buttons). Receives RPC calls from the server to synchronise Discord roles, channels, and email posts. |
-| **Global Admin** | A user who is a global admin by either having the `users.is_global_admin` database flag set to `true` or having their Discord ID listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable (the two sources are ORed). The first user to register on a fresh database is automatically promoted via the DB flag. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. Can also mint, list, and revoke team onboarding tokens, enabling new teams to be set up by a designated captain without requiring a pre-existing Sideline account. A global admin with no team memberships is redirected to `/admin/onboarding-tokens` instead of `/no-team`. Additionally, global admins have **read-only access to every team** regardless of membership: all read endpoints for members, rosters, roles, finance, activity stats, and team info use a `requireReadAccess` helper that synthesises a read-only membership (with `roster:view`, `member:view`, `role:view`, `finance:view` permissions) when the caller is a global admin but not a real team member. Write endpoints still require actual membership. |
+| **Global Admin** | A user who is a global admin by either having the `users.is_global_admin` database flag set to `true` or having their Discord ID listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable (the two sources are ORed). The first user to register on a fresh database is automatically promoted via the DB flag. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. Can also mint, list, and revoke team onboarding tokens, enabling new teams to be set up by a designated captain without requiring a pre-existing Sideline account. Can manage the global-admin roster via `GET/POST/DELETE /auth/global-admins` — granting or revoking `users.is_global_admin` for other users, subject to self-revoke, last-admin, and env-managed safeguards. A global admin with no team memberships is redirected to `/admin/onboarding-tokens` instead of `/no-team`. Additionally, global admins have **read-only access to every team** regardless of membership: all read endpoints for members, rosters, roles, finance, activity stats, and team info use a `requireReadAccess` helper that synthesises a read-only membership (with `roster:view`, `member:view`, `role:view`, `finance:view` permissions) when the caller is a global admin but not a real team member. Write endpoints still require actual membership. |
 | **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes, sending RSVP reminder notifications before events, auto-logging attendance from RSVP data, evaluating age-threshold rules to move members between groups, and queuing payment reminder DMs for members with upcoming or overdue fee assignments. |
 
 ---
@@ -43,6 +43,7 @@ flowchart LR
         UC_CREATE_TEAM["Create Team"]
         UC_MINT_TOKEN["Mint Onboarding Token"]
         UC_COMPLETE_ONBOARDING["Complete Team Onboarding Wizard"]
+        UC_MANAGE_GLOBAL_ADMINS["Manage Global Admins"]
     end
 
     subgraph TEAM["Team Management"]
@@ -164,6 +165,7 @@ flowchart LR
     UA --> UC_COMPLETE_ONBOARDING
 
     GLA --> UC_MINT_TOKEN
+    GLA --> UC_MANAGE_GLOBAL_ADMINS
 
     PL --> UC_COMPLETE_PROFILE
     PL --> UC_CREATE_TEAM
@@ -1022,3 +1024,21 @@ The following structured descriptions cover the most significant use cases in th
 | **Member view** | Team members who see the short summary in the team channel can click **Detailed summary** or **Original email** to receive an ephemeral paginated embed. The bot calls `Email/GetEmailContent` RPC to fetch the content. Multi-page content is navigated with `◀`/`▶` pagination buttons. |
 | **Postcondition** | The email status is `posted_summary` (approved) or `posted_original` (rejected). The target channel contains the post. The approval embed in the coach channel has disabled buttons. |
 | **Alternate Flow** | If the email was already handled (e.g. another coach approved from the web UI), `outcome = "already_handled"` is returned; the buttons are still disabled and an ephemeral "already handled" notice is shown. If the email is no longer in `pending_approval`, clicking approve or reject via the API returns `409 EmailNotPending`. |
+
+---
+
+### UC-27: Global Admin Manages the Global-Admin Roster
+
+| Field | Detail |
+|---|---|
+| **Actor** | Global Admin |
+| **Precondition** | The actor is authenticated and has `isGlobalAdmin = true`. |
+| **Main Flow — Grant** | 1. The global admin navigates to **Administration → Global admins** (`/admin/global-admins`) in the web app. 2. The page loads via `GET /auth/global-admins`, which returns the combined DB + env admin list. 3. The admin enters a Discord user ID (17–20 digit snowflake) into the **Grant admin** form and submits. 4. The web app calls `POST /auth/global-admins` with `{ discordId }`. 5. The server verifies the caller is a global admin, finds the user row by Discord ID, sets `users.is_global_admin = true` and `global_admin_granted_at = now()`, and returns the full updated admin list. 6. The page refreshes to show the newly promoted admin. |
+| **Main Flow — Revoke** | 1. On the admin list, the admin clicks **Revoke** next to a revocable entry and confirms the dialog. 2. The web app calls `DELETE /auth/global-admins/:userId`. 3. The server verifies the caller is a global admin, checks the target is not the caller, checks the target's Discord ID is not in `APP_GLOBAL_ADMIN_DISCORD_IDS`, checks that at least one effective global admin (DB + env count) will remain after the revoke, clears `users.is_global_admin` and `global_admin_granted_at`, and returns `204 No Content`. 4. The page calls `router.invalidate()` to refresh the list. |
+| **Postcondition — Grant** | The target user has `is_global_admin = true` and `global_admin_granted_at` recorded. They gain access to the admin pages immediately on their next request. |
+| **Postcondition — Revoke** | The target user has `is_global_admin = false` and `global_admin_granted_at = null`. They lose admin access on their next request. |
+| **Alternate Flow A** | If the Discord ID in the grant form does not match any `users` row, the server returns `404 GlobalAdminUserNotFound`; the form shows an inline error. |
+| **Alternate Flow B** | If the actor tries to revoke themselves, the server returns `409 GlobalAdminSelfRevokeError`. |
+| **Alternate Flow C** | If the target's Discord ID is in `APP_GLOBAL_ADMIN_DISCORD_IDS`, the revoke button is hidden (the entry shows an **Env-managed** badge) and the API returns `409 GlobalAdminEnvManaged` if attempted directly. |
+| **Alternate Flow D** | If revoking would leave zero effective global admins (no other DB-flagged user and no env-allowlisted IDs), the server returns `409 GlobalAdminLastAdminError`. |
+| **Notes** | The `Revoke` button is rendered only when `revocable = true` on the `GlobalAdminListItem`. Env-managed entries (`source = "env"`) always have `revocable = false`. The caller's own entry has `isSelf = true` and is also non-revocable. The effective-admin count is computed as DB admins ∪ env allowlist to ensure the last-admin safeguard accounts for both sources. |

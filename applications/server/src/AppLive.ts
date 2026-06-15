@@ -77,6 +77,7 @@ import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { EmailApprovalService } from '~/services/EmailApprovalService.js';
 import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
+import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { LlmClient } from '~/services/LlmClient.js';
 import { TranslationCache } from '~/services/TranslationCache.js';
 import { env } from './env.js';
@@ -174,6 +175,7 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   Layer.provide(AchievementEvaluator.Default),
   Layer.provide(AchievementPreview.Default),
   Layer.provide(BotInfoStore.Default),
+  Layer.provide(GlobalAdminAllowlist.Default),
   Layer.provide(TranslationCache.Default),
   Layer.provide(
     Layer.merge(Repositories, EmailApprovalService.Default.pipe(Layer.provide(Repositories))),

@@ -19,6 +19,7 @@ const BASE_USER = {
   avatar: Option.none<string>(),
   is_profile_complete: false,
   is_global_admin: false,
+  global_admin_granted_at: Option.none(),
   name: Option.none<string>(),
   birth_date: Option.none(),
   gender: Option.none(),

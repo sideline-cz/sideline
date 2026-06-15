@@ -17,6 +17,7 @@ import { EventRsvpApiLive } from '~/api/event-rsvp.js';
 import { EventSeriesApiLive } from '~/api/event-series.js';
 import { ExpenseApiLive } from '~/api/expenses.js';
 import { FinanceApiLive } from '~/api/finance.js';
+import { GlobalAdminApiLive } from '~/api/global-admin.js';
 import { GroupApiLive } from '~/api/group.js';
 import { ICalApiLive } from '~/api/ical.js';
 import { InviteApiLive } from '~/api/invite.js';
@@ -57,6 +58,7 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
     Layer.provide(OnboardingApiLive),
   )
   .pipe(
+    Layer.provide(GlobalAdminApiLive),
     Layer.provide(RosterApiLive),
     Layer.provide(RoleApiLive),
     Layer.provide(TeamApiLive),

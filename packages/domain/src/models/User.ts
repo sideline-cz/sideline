@@ -26,5 +26,6 @@ export class User extends Model.Class<User>('User')({
   created_at: Model.DateTimeInsertFromDate,
   is_profile_complete: Schema.Boolean,
   is_global_admin: Schema.Boolean,
+  global_admin_granted_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   updated_at: Model.DateTimeUpdateFromDate,
 }) {}

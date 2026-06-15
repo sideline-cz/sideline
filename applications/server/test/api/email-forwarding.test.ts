@@ -49,6 +49,7 @@ import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { EmailApprovalService } from '~/services/EmailApprovalService.js';
 import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
+import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { MockChannelManagementLayers } from '../mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from '../mocks/dashboardLayoutMocks.js';
 import { MockEventRosterLayers } from '../mocks/eventRosterMocks.js';
@@ -737,7 +738,8 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
   .pipe(Layer.provide(MockChannelManagementLayers))
   .pipe(Layer.provide(MockEventRosterLayers))
-  .pipe(Layer.provide(BotInfoStore.Default));
+  .pipe(Layer.provide(BotInfoStore.Default))
+  .pipe(Layer.provide(GlobalAdminAllowlist.Default));
 
 // ---------------------------------------------------------------------------
 // Handler setup

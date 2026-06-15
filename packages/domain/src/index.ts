@@ -35,6 +35,8 @@ export * as ExpenseApi from './api/ExpenseApi.js';
 
 export * as FinanceApi from './api/FinanceApi.js';
 
+export * as GlobalAdminApi from './api/GlobalAdminApi.js';
+
 export * as GroupApi from './api/GroupApi.js';
 
 export * as ICalApi from './api/ICalApi.js';

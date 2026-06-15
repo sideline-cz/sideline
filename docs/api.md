@@ -40,6 +40,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Channel](#29-channel)
    - [Email Forwarding](#30-email-forwarding)
    - [Event Roster](#31-event-roster)
+   - [Global Admin](#32-global-admin)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -176,7 +177,7 @@ Returns the currently authenticated user's profile.
 | `birthDate` | `string \| null` | Yes | Birth date (ISO 8601 date string) |
 | `gender` | `"male" \| "female" \| "other" \| null` | Yes | Gender |
 | `locale` | `"en" \| "cs"` | No | Preferred locale |
-| `isGlobalAdmin` | `boolean` | No | Whether the user is a global admin (Discord ID listed in `APP_GLOBAL_ADMIN_DISCORD_IDS`). Global admins can manage translation overrides, mint team onboarding tokens, and read data from any team regardless of membership. |
+| `isGlobalAdmin` | `boolean` | No | Whether the user is a global admin. `true` when the user's `users.is_global_admin` DB flag is set **or** their Discord ID is in `APP_GLOBAL_ADMIN_DISCORD_IDS`. Global admins can manage translation overrides, mint team onboarding tokens, manage the global-admin roster (`/admin/global-admins`), and read data from any team regardless of membership. |
 | `displayName` | `string` | No | Server-resolved display name. Precedence: profile name → Discord nickname → Discord display name → Discord username. Always non-empty. |
 
 **Errors:**
@@ -5821,6 +5822,93 @@ Declines a pending attendance request. The member is not added to the roster. Sa
 
 ---
 
+### 32. Global Admin
+
+**Source:** `packages/domain/src/api/GlobalAdminApi.ts`
+**Prefix:** `/auth`
+
+Provides the global-admin management surface. All three endpoints require the caller to be a global admin (`isGlobalAdmin = true`). The effective admin set is the union of `users.is_global_admin = true` rows and the `APP_GLOBAL_ADMIN_DISCORD_IDS` env allowlist; env-managed entries cannot be revoked via the API.
+
+---
+
+#### `GET /auth/global-admins`
+
+Returns the list of all current global admins, combining DB-flagged rows and env-allowlisted Discord IDs.
+
+**Auth:** Bearer token (AuthMiddleware) + `isGlobalAdmin`
+
+**Response:** `200 OK` — `GlobalAdminListItem[]`
+
+`GlobalAdminListItem`:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `discordId` | `Snowflake` (string) | No | Discord user snowflake |
+| `userId` | `UserId \| null` | Yes | Internal user ID; null if the Discord ID is in the env allowlist but the user has never signed in |
+| `username` | `string \| null` | Yes | Resolved display name (profile name → Discord nickname → Discord display name → Discord username); null for env-only entries with no matching user row |
+| `avatar` | `string \| null` | Yes | Discord avatar hash |
+| `source` | `"db" \| "env"` | No | `"db"` — granted via `users.is_global_admin`; `"env"` — Discord ID is in `APP_GLOBAL_ADMIN_DISCORD_IDS` |
+| `grantedAt` | `string \| null` | Yes | ISO 8601 timestamp of when `global_admin_granted_at` was set; null for env-only entries or legacy rows where the column predates migration `1789500003` |
+| `revocable` | `boolean` | No | `true` only for DB-sourced entries that are not the caller themselves and are not also in the env allowlist |
+| `isSelf` | `boolean` | No | Whether this entry represents the currently authenticated user |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `GlobalAdminForbidden` | 403 | Caller is not a global admin |
+
+---
+
+#### `POST /auth/global-admins`
+
+Grants global-admin status to a user identified by their Discord snowflake. Sets `users.is_global_admin = true` and records `global_admin_granted_at = now()`. Returns the full updated admin list.
+
+**Auth:** Bearer token (AuthMiddleware) + `isGlobalAdmin`
+
+**Request Body:** `GrantGlobalAdminRequest`
+
+| Field | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `discordId` | `Snowflake` (string) | Yes | 17–20 digit numeric string | Discord ID of the user to promote |
+
+**Response:** `200 OK` — `GlobalAdminListItem[]` (same schema as `GET /auth/global-admins`)
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `GlobalAdminForbidden` | 403 | Caller is not a global admin |
+| `GlobalAdminUserNotFound` | 404 | No user row exists for the given Discord ID |
+
+---
+
+#### `DELETE /auth/global-admins/:userId`
+
+Revokes global-admin status from a user by their internal `UserId`. Clears `users.is_global_admin` and `global_admin_granted_at`. Protected by several safeguards: self-revoke is blocked, env-managed admins cannot be revoked, and the last DB-only admin cannot be removed if that would leave zero effective admins.
+
+**Auth:** Bearer token (AuthMiddleware) + `isGlobalAdmin`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `userId` | `UserId` (string) | Internal user ID of the admin to revoke |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `GlobalAdminForbidden` | 403 | Caller is not a global admin |
+| `GlobalAdminUserNotFound` | 404 | User does not exist or does not have `is_global_admin = true` |
+| `GlobalAdminSelfRevokeError` | 409 | Caller attempted to revoke their own admin status |
+| `GlobalAdminEnvManaged` | 409 | Target user's Discord ID is in `APP_GLOBAL_ADMIN_DISCORD_IDS`; env-managed admins cannot be revoked via the API |
+| `GlobalAdminLastAdminError` | 409 | Revoking this user would leave zero effective global admins (DB + env combined) |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -6131,3 +6219,8 @@ The following table consolidates all error tags across all API groups.
 | `EventRosterRequestNotFound` | 404 | Event Roster | Request does not exist |
 | `EventRosterAlreadyLinked` | 409 | Event Roster | A roster is already linked to this event |
 | `EventRosterRequestAlreadyHandled` | 409 | Event Roster | Request was already approved or declined |
+| `GlobalAdminForbidden` | 403 | Global Admin | Caller is not a global admin |
+| `GlobalAdminUserNotFound` | 404 | Global Admin | User does not exist or is not a global admin |
+| `GlobalAdminLastAdminError` | 409 | Global Admin | Revoking would leave zero effective global admins |
+| `GlobalAdminSelfRevokeError` | 409 | Global Admin | Caller attempted to revoke their own admin status |
+| `GlobalAdminEnvManaged` | 409 | Global Admin | Target user's Discord ID is in the env allowlist and cannot be revoked via the API |
