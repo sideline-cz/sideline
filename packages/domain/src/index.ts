@@ -122,6 +122,7 @@ export * as EarnedAchievement from './models/EarnedAchievement.js';
  * Each player's K-factor is determined individually and ratings are rounded to
  * the nearest integer. Per-player K-factor + integer rounding means exact
  * zero-sum is NOT guaranteed; this is intentional (same as chess Elo).
+ * Ratings are floored at 0 — a long losing streak cannot produce a negative rating.
  */
 export * as Elo from './models/Elo.js';
 
