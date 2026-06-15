@@ -1,5 +1,15 @@
 # @sideline/i18n
 
+## 0.13.0
+
+### Minor Changes
+
+- [#410](https://github.com/maxa-ondrej/sideline/pull/410) [`57b267f`](https://github.com/maxa-ondrej/sideline/commit/57b267f2ba806dc0e3cf0ac8c91d0e4145631b12) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add a global-admin management area so existing global admins can view, grant, and revoke global-admin status from the web admin section. Grants are recorded with a new `global_admin_granted_at` timestamp. Safeguards prevent self-revocation and removing the last effective admin (counting both database admins and the `APP_GLOBAL_ADMIN_DISCORD_IDS` env allowlist); env-allowlisted admins are surfaced as non-revocable. The last-admin check uses a TOCTOU-safe guarded update.
+
+### Patch Changes
+
+- [#405](https://github.com/maxa-ondrej/sideline/pull/405) [`ff0a8aa`](https://github.com/maxa-ondrej/sideline/commit/ff0a8aa32b3bed9235110368a6de7fb77abbeb2f) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix the original/detailed email preview buttons hanging on a perpetual "loading" state for very large emails. The ephemeral interaction is now always resolved even when fetching/rendering fails, and oversized email bodies are capped at 20 pages with a truncation notice (plus a Sideline deep link when configured).
+
 ## 0.12.5
 
 ### Patch Changes

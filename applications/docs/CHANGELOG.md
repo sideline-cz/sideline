@@ -1,5 +1,15 @@
 # @sideline/docs
 
+## 0.2.1
+
+### Patch Changes
+
+- [#408](https://github.com/maxa-ondrej/sideline/pull/408) [`bee5d1d`](https://github.com/maxa-ondrej/sideline/commit/bee5d1dd461cde1e8cefd0f2b79146623f5192a8) Thanks [@dependabot](https://github.com/apps/dependabot)! - Bump @astrojs/mdx from 6.0.2 to 6.0.3
+
+- [#408](https://github.com/maxa-ondrej/sideline/pull/408) [`bee5d1d`](https://github.com/maxa-ondrej/sideline/commit/bee5d1dd461cde1e8cefd0f2b79146623f5192a8) Thanks [@dependabot](https://github.com/apps/dependabot)! - Bump @astrojs/starlight from 0.39.3 to 0.40.0
+
+- [#408](https://github.com/maxa-ondrej/sideline/pull/408) [`bee5d1d`](https://github.com/maxa-ondrej/sideline/commit/bee5d1dd461cde1e8cefd0f2b79146623f5192a8) Thanks [@dependabot](https://github.com/apps/dependabot)! - Bump astro from 6.4.4 to 6.4.6
+
 ## 0.2.0
 
 ### Minor Changes

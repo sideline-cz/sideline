@@ -1,5 +1,18 @@
 # @sideline/server
 
+## 0.29.0
+
+### Minor Changes
+
+- [#410](https://github.com/maxa-ondrej/sideline/pull/410) [`57b267f`](https://github.com/maxa-ondrej/sideline/commit/57b267f2ba806dc0e3cf0ac8c91d0e4145631b12) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add a global-admin management area so existing global admins can view, grant, and revoke global-admin status from the web admin section. Grants are recorded with a new `global_admin_granted_at` timestamp. Safeguards prevent self-revocation and removing the last effective admin (counting both database admins and the `APP_GLOBAL_ADMIN_DISCORD_IDS` env allowlist); env-allowlisted admins are surfaced as non-revocable. The last-admin check uses a TOCTOU-safe guarded update.
+
+### Patch Changes
+
+- Updated dependencies [[`ff0a8aa`](https://github.com/maxa-ondrej/sideline/commit/ff0a8aa32b3bed9235110368a6de7fb77abbeb2f), [`57b267f`](https://github.com/maxa-ondrej/sideline/commit/57b267f2ba806dc0e3cf0ac8c91d0e4145631b12)]:
+  - @sideline/i18n@0.13.0
+  - @sideline/domain@0.28.0
+  - @sideline/migrations@0.22.0
+
 ## 0.28.1
 
 ### Patch Changes
