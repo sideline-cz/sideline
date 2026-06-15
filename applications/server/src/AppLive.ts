@@ -50,6 +50,7 @@ import { PaymentReminderSyncEventsRepository } from '~/repositories/PaymentRemin
 import { PaymentRemindersSentRepository } from '~/repositories/PaymentRemindersSentRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
+import { PlayerRatingsRepository } from '~/repositories/PlayerRatingsRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
@@ -153,6 +154,7 @@ const Repositories = Layer.mergeAll(
   CarpoolsRepository.Default,
   TeamChannelsRepository.Default,
   TeamChannelAccessRepository.Default,
+  PlayerRatingsRepository.Default,
   EmailForwardingConfigRepository.Default,
   EmailMessagesRepository.Default,
   EmailAttachmentsRepository.Default,

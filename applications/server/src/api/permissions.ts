@@ -34,7 +34,7 @@ export const VIEW_PERMISSIONS: readonly Role.Permission[] = [
 
 // Sentinel id for synthetic global-admin membership — only used when the admin is not a real
 // team member. Handlers using requireReadAccess must NOT scope DB queries by membership.id.
-const GLOBAL_ADMIN_SENTINEL_ID = Schema.decodeSync(TeamMember.TeamMemberId)(
+export const GLOBAL_ADMIN_SENTINEL_ID = Schema.decodeSync(TeamMember.TeamMemberId)(
   '00000000-0000-0000-0000-000000000000',
 );
 

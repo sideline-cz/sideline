@@ -41,6 +41,7 @@ import { NotificationsRepository } from '~/repositories/NotificationsRepository.
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
+import { PlayerRatingsRepository } from '~/repositories/PlayerRatingsRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
@@ -626,6 +627,14 @@ const StubRepositoriesLayer = Layer.mergeAll(
     TeamChallengeRepository,
     new Proxy({} as any, { get: () => () => Effect.void }) as any,
   ),
+  Layer.succeed(PlayerRatingsRepository, {
+    _tag: 'api/PlayerRatingsRepository' as const,
+    getMemberRating: () => Effect.succeed(Option.none()),
+    getTeamRatings: () => Effect.succeed([]),
+    findHistoryByMember: () => Effect.succeed([]),
+    getOrInitMany: () => Effect.succeed([]),
+    applyGameUpdates: () => Effect.void,
+  } as never),
 );
 
 // ---------------------------------------------------------------------------

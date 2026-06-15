@@ -16,19 +16,32 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$me
     const memberId = Schema.decodeSync(TeamMember.TeamMemberId)(params.memberId);
     return ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
-        Effect.all({
-          player: api.roster.getMember({ params: { teamId, memberId } }),
-          myTeams: api.auth.myTeams(),
-          roles: api.role.listRoles({ params: { teamId } }),
-          activityStats: api.activityStats.getMemberStats({ params: { teamId, memberId } }),
-          activityLogs: api.activityLog.listLogs({ params: { teamId, memberId } }).pipe(
-            Effect.map((r) => ({ isOwnProfile: true as boolean, logs: r.logs })),
-            Effect.catch(() =>
-              Effect.succeed({ isOwnProfile: false as boolean, logs: [] as const }),
-            ),
-          ),
-          activityTypes: api.activityType.listActivityTypes({ params: { teamId } }),
-        }),
+        api.auth.myTeams().pipe(
+          Effect.flatMap((myTeams) => {
+            const myPermissions =
+              myTeams.find((t: Auth.UserTeam) => t.teamId === params.teamId)?.permissions ?? [];
+            const canEdit = myPermissions.includes('member:edit');
+            return Effect.all({
+              player: api.roster.getMember({ params: { teamId, memberId } }),
+              myTeams: Effect.succeed(myTeams),
+              roles: api.role.listRoles({ params: { teamId } }),
+              activityStats: api.activityStats.getMemberStats({ params: { teamId, memberId } }),
+              activityLogs: api.activityLog.listLogs({ params: { teamId, memberId } }).pipe(
+                Effect.map((r) => ({ isOwnProfile: true as boolean, logs: r.logs })),
+                Effect.catch(() =>
+                  Effect.succeed({ isOwnProfile: false as boolean, logs: [] as const }),
+                ),
+              ),
+              activityTypes: api.activityType.listActivityTypes({ params: { teamId } }),
+              rating: canEdit
+                ? api.playerRating.getMemberRating({ params: { teamId, memberId } }).pipe(
+                    Effect.tapError((e) => Effect.logWarning('Failed to load member rating', e)),
+                    Effect.catch(() => Effect.succeed(undefined)),
+                  )
+                : Effect.succeed(undefined),
+            });
+          }),
+        ),
       ),
       warnAndCatchAll,
       context.run,
@@ -50,6 +63,7 @@ function MemberDetailRoute() {
     activityStats,
     activityLogs,
     activityTypes: fetchedActivityTypes,
+    rating,
   } = Route.useLoaderData();
   const roles = roleListResponse.roles;
 
@@ -230,6 +244,7 @@ function MemberDetailRoute() {
       isOwnProfile={activityLogs.isOwnProfile}
       activityLogs={new ActivityLogApi.ActivityLogListResponse({ logs: activityLogs.logs })}
       activityTypes={activityTypes}
+      rating={rating}
       onSave={handleSave}
       onAssignRole={handleAssignRole}
       onUnassignRole={handleUnassignRole}

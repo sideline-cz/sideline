@@ -1605,9 +1605,61 @@ Binary attachment storage. Attachment bytes are stored directly in a `BYTEA` col
 
 ---
 
+### 17. Player Ratings
+
+Tracks per-member Elo ratings and their full game-by-game history within a team.
+
+#### `player_ratings`
+
+One row per team member per team. Holds the current rating and win/loss/draw counters.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE CASCADE | — |
+| `rating` | INT | NOT NULL | `1200` |
+| `games_played` | INT | NOT NULL, CHECK (`>= 0`) | `0` |
+| `wins` | INT | NOT NULL, CHECK (`>= 0`) | `0` |
+| `losses` | INT | NOT NULL, CHECK (`>= 0`) | `0` |
+| `draws` | INT | NOT NULL, CHECK (`>= 0`) | `0` |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(team_id, team_member_id)`
+
+**Indexes**: `idx_player_ratings_team` on `(team_id, rating DESC)` — used by the leaderboard query.
+
+**Notes**: Added in migration `1789600000_create_player_ratings`. Default rating of 1200 matches the standard Elo starting value (`DEFAULT_RATING` constant in `packages/domain/src/models/Elo.ts`). A row is created lazily on the first `applyGameResult` call for a member.
+
+---
+
+#### `player_rating_history`
+
+Append-only audit log of every rating change. One row per player per game result application.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE CASCADE | — |
+| `rating_before` | INT | NOT NULL | — |
+| `rating_after` | INT | NOT NULL | — |
+| `delta` | INT | NOT NULL | — |
+| `result` | TEXT | NOT NULL, CHECK (`'win'`, `'loss'`, `'draw'`) | — |
+| `game_id` | UUID | — | — |
+| `submitted_by` | UUID | FK → `team_members(id)` ON DELETE SET NULL | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Indexes**: `idx_player_rating_history_member` on `(team_member_id, created_at DESC, id DESC)` — used to retrieve a member's chronological history efficiently.
+
+**Notes**: Added in migration `1789600000_create_player_ratings`. `game_id` is a nullable UUID that can group all history entries belonging to the same `applyGameResult` call (allows correlating team-A and team-B deltas). `submitted_by` records which team member submitted the game result; set to `NULL` via `ON DELETE SET NULL` if that member is later deleted. The table is append-only from the application's perspective — no application code ever updates a row after insert — though `submitted_by` may be nulled by FK cleanup if the referenced member is deleted.
+
+---
+
 ## Migration History
 
-All 108 migration files in `packages/migrations/src/before/` plus 1 after-migration.
+All 109 migration files in `packages/migrations/src/before/` plus 1 after-migration.
 
 ### Before Migrations (schema changes)
 
@@ -1705,6 +1757,7 @@ All 108 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1789500001 | `create_event_roster_requests` | Creates `event_roster_requests` table tracking per-member approval requests (status CHECK `'pending'/'approved'/'declined'/'cancelled'`, source CHECK `'auto'/'approval'`, `discord_message_id`, `decided_by`, `decided_at`; UNIQUE on `(event_id, team_member_id)`); adds indexes on `(event_id, status)` and a partial index for pending rows. |
 | 1789500002 | `add_event_roster_sync_types` | Extends `event_sync_events.event_type` CHECK constraint to add three roster-workflow event types: `event_roster_approval_request`, `event_roster_approval_cancel`, and `event_roster_thread_delete`. |
 | 1789500003 | `add_user_global_admin_granted_at` | Adds nullable `global_admin_granted_at TIMESTAMPTZ` column to `users`; back-fills `now()` for existing global admins. |
+| 1789600000 | `create_player_ratings` | Creates `player_ratings` (id PK, team_id FK CASCADE, team_member_id FK CASCADE, rating INT DEFAULT 1200, games_played/wins/losses/draws INT CHECK ≥ 0, created_at, updated_at; UNIQUE (team_id, team_member_id)); index `idx_player_ratings_team` on `(team_id, rating DESC)`. Creates `player_rating_history` (id PK, team_id FK CASCADE, team_member_id FK CASCADE, rating_before/rating_after/delta INT, result TEXT CHECK `'win'/'loss'/'draw'`, game_id UUID nullable, submitted_by FK → team_members SET NULL, created_at); index `idx_player_rating_history_member` on `(team_member_id, created_at DESC, id DESC)`. |
 
 ### After Migrations (seed data)
 
@@ -1738,7 +1791,7 @@ The server inserts rows when the relevant domain action occurs. The bot polls `W
 
 ### Cascading Deletes
 
-Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events, fees, expenses, email_forwarding_config, email_messages, email_post_sync_events). Deletion of an `email_messages` row cascades to its `email_attachments` and `email_post_sync_events` rows. Fee deletion cascades to fee_assignments. Fee assignment deletion cascades to `payment_reminder_sync_events` and `payment_reminders_sent`. Expense deletion does not cascade to `expense_history` (no FK constraint on `expense_history.expense_id`). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, and achievement_sync_events. Member deletion is blocked (`ON DELETE RESTRICT`) when any fee_assignment or payment row references the member. User deletion is blocked (`ON DELETE RESTRICT`) when any expense or expense_history row references the user. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
+Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events, fees, expenses, email_forwarding_config, email_messages, email_post_sync_events, player_ratings, player_rating_history). Deletion of an `email_messages` row cascades to its `email_attachments` and `email_post_sync_events` rows. Fee deletion cascades to fee_assignments. Fee assignment deletion cascades to `payment_reminder_sync_events` and `payment_reminders_sent`. Expense deletion does not cascade to `expense_history` (no FK constraint on `expense_history.expense_id`). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, and achievement_sync_events. Member deletion is blocked (`ON DELETE RESTRICT`) when any fee_assignment or payment row references the member. User deletion is blocked (`ON DELETE RESTRICT`) when any expense or expense_history row references the user. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
 
 Role deletion uses `ON DELETE RESTRICT` on `member_roles` to prevent accidentally orphaning members. FK references from `role_sync_events.role_id` and `channel_sync_events.group_id` are stored as plain UUID (no FK constraint) so audit rows are retained after the referenced entity is deleted.
 

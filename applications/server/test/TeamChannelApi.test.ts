@@ -66,6 +66,7 @@ import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMock
 import { MockEmailLayers } from './mocks/emailMocks.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from './mocks/onboardingMocks.js';
+import { MockPlayerRatingsRepositoryLayer } from './mocks/playerRatingMocks.js';
 import { MockTeamChallengeRepositoryLayer } from './mocks/teamChallengeMocks.js';
 import { MockTranslationsLayers } from './mocks/translationMocks.js';
 
@@ -947,6 +948,7 @@ const buildLayer = (overrides?: {
     .pipe(Layer.provide(MockTranslationsLayers))
     .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
     .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
+    .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
     .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
     .pipe(Layer.provide(overrides?.channelsLayer ?? MockTeamChannelsRepositoryLayer))
     .pipe(Layer.provide(MockTeamChannelAccessRepositoryLayer))
