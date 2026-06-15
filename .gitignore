@@ -27,3 +27,6 @@ e2e/report/
 # Coolify CLI generated docs
 llms.txt
 llms-full.txt
+
+# Local planning scratch files
+.plans/
