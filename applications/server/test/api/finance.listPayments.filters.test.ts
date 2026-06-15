@@ -63,6 +63,7 @@ import { MockDashboardLayoutsRepositoryLayer } from '../mocks/dashboardLayoutMoc
 import { MockEmailLayers } from '../mocks/emailMocks.js';
 import { MockEventRosterLayers } from '../mocks/eventRosterMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from '../mocks/onboardingMocks.js';
+import { MockPlayerRatingsRepositoryLayer } from '../mocks/playerRatingMocks.js';
 import { MockTeamChallengeRepositoryLayer } from '../mocks/teamChallengeMocks.js';
 import { MockTranslationsLayers } from '../mocks/translationMocks.js';
 
@@ -603,6 +604,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockTranslationsLayers))
   .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
   .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
+  .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
   .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
   .pipe(Layer.provide(MockChannelManagementLayers))
   .pipe(Layer.provide(MockEmailLayers))

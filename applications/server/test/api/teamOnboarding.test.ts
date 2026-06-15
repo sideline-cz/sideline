@@ -42,6 +42,7 @@ import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
+import { PlayerRatingsRepository } from '~/repositories/PlayerRatingsRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
@@ -450,6 +451,7 @@ const MockNoopLayers = Layer.mergeAll(
   noopMockLayer(AgeThresholdRepository),
   noopMockLayer(OAuthConnectionsRepository),
   noopMockLayer(TeamChallengeRepository),
+  noopMockLayer(PlayerRatingsRepository),
   noopMockLayer(AgeCheckService),
   noopMockLayer(AchievementRoleMappingsRepository),
   noopMockLayer(AchievementSettingsRepository),

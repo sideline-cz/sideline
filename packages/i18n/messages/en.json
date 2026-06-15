@@ -1845,5 +1845,17 @@
   "admin_globalAdmins_error_lastAdmin": "Cannot revoke the last global admin.",
   "admin_globalAdmins_error_selfRevoke": "You cannot revoke your own admin access.",
   "admin_globalAdmins_error_envManaged": "This admin is managed via environment configuration and cannot be revoked here.",
-  "admin_globalAdmins_validation_discordIdInvalid": "Enter a valid Discord ID (17–20 digits, numbers only)."
+  "admin_globalAdmins_validation_discordIdInvalid": "Enter a valid Discord ID (17–20 digits, numbers only).",
+  "members_ratingTitle": "Player rating",
+  "members_ratingWins": "Wins",
+  "members_ratingLosses": "Losses",
+  "members_ratingDraws": "Draws",
+  "members_ratingTrendUp": "{delta} since last match",
+  "members_ratingTrendDown": "{delta} since last match",
+  "members_ratingTrendFlat": "No change since last match",
+  "members_ratingPreviousTooltip": "Was {previous}, now {current}",
+  "members_ratingCalibratingBadge": "Calibrating · {played}/{threshold}",
+  "members_ratingCalibratingHint": "Provisional rating — settles after {threshold} matches.",
+  "members_ratingNoGames": "No matches played yet.",
+  "members_ratingTooltip": "Skill rating based on match results."
 }

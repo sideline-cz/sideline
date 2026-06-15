@@ -1116,8 +1116,26 @@ Rules:
 1. **Lock parent before child, identically in every method.** In `CarpoolsRepository`, the first step of any multi-table mutating transaction is the `carpools` `FOR UPDATE` lock, then the `carpool_cars` `FOR UPDATE` lock.
 2. **A mutation that touches only one of the tables still takes the parent lock first** if it must serialize against a sibling method that touches both — otherwise the sibling's parent lock does not exclude it. This is why `reserveSeat` (which conceptually only touches `carpool_seats`/`carpool_cars`) locks the `carpools` row: to serialize against `addCar`.
 3. **Mirror cross-method guards in both directions.** When method A guards "owner cannot be a passenger" (`addCar`'s `checkOwnerIsPassengerQuery`), the inverse method must guard "passenger cannot already own a car in the same carpool" — `reserveSeat`'s `findOwnedCarQuery`, placed before the capacity check so `CarpoolAlreadyInAnotherCar` wins over `CarpoolFull`.
+4. **When the lock targets N sibling rows of the SAME table (not a parent/child pair), the lock SELECT MUST be `ORDER BY <pk>` and the application MUST dedupe + sort the id set in the same order before building the `IN` list.** Two concurrent transactions that lock overlapping row sets in different orders deadlock; a deterministic `ORDER BY` on the locking SELECT plus a sorted, deduped id array makes the lock-acquisition order identical for both. `PlayerRatingsRepository.applyGameUpdates` does this: it computes `Array.from(new Set([...teamAMemberIds, ...teamBMemberIds])).sort()`, then locks with `SELECT ... WHERE team_member_id IN ${sql.in(...)} ORDER BY team_member_id FOR UPDATE`.
 
-Reference: `CarpoolsRepository.reserveSeat` / `removeCar` / `addCar` (`src/repositories/CarpoolsRepository.ts`).
+Reference: `CarpoolsRepository.reserveSeat` / `removeCar` / `addCar` and `PlayerRatingsRepository.applyGameUpdates` (`src/repositories/`).
+
+### In-Transaction Read → Compute → Write
+
+When a mutation must derive new values from the current persisted values (e.g. recomputing Elo ratings from the players' existing ratings), the read, the pure computation, and the writes MUST all happen inside one `sql.withTransaction(...)` on rows held by `FOR UPDATE`. Reading outside the transaction (or computing before the lock) reintroduces a lost-update race: a concurrent game result could land between the read and the write.
+
+`PlayerRatingsRepository.applyGameUpdates` is the canonical shape, all inside one `sql.withTransaction`:
+1. `INSERT ... ON CONFLICT DO NOTHING` to ensure a row exists for every participant (`ensureRatingsExist`).
+2. `SELECT ... FOR UPDATE ORDER BY team_member_id` to lock the participants' rows (see the same-table lock rule above).
+3. Feed the **locked** values into the pure domain calculator (`Elo.computeTeamGameUpdate`) — never the values read before the lock.
+4. Apply the `UPDATE` + history `INSERT` for each participant with `Effect.forEach(..., { concurrency: 1 })`.
+
+Rules:
+1. **The pure calculation lives in `packages/domain` (e.g. `Elo.ts`); the repository only locks, calls it, and persists.** Do not inline domain math in the repository or the handler.
+2. **Compute from locked rows only.** Any value used in the computation must come from the `FOR UPDATE` SELECT inside the same transaction, not from a separate read.
+3. **A locked row that the computation expects but cannot find is an invariant violation, not a recoverable error** — fail with `LogicError.die(...)`, as `applyGameUpdates`'s `buildSide` does.
+
+Reference: `PlayerRatingsRepository.applyGameUpdates` (`src/repositories/PlayerRatingsRepository.ts`); calculator `packages/domain/src/models/Elo.ts`.
 
 ## Global Admin Authorization (`users.is_global_admin` + `APP_GLOBAL_ADMIN_DISCORD_IDS`)
 
@@ -1147,8 +1165,9 @@ Rules:
    - A write handler (create / update / delete) gates with `requireMembership(members, teamId, currentUser.id, forbidden)` — it MUST require actual team membership; a global admin must NOT be able to mutate a team they are not a member of.
    - `requireReadAccess` reads `Auth.CurrentUserContext` itself, so its signature is `(members, teamId, forbidden)` — it does NOT take `currentUser.id` (unlike `requireMembership(members, teamId, currentUser.id, forbidden)`).
    - A global admin who is not a member receives a synthetic `MembershipWithRole` with a sentinel id and `permissions = VIEW_PERMISSIONS`. Handlers using `requireReadAccess` MUST NOT scope DB queries by `membership.id` — that id is not a real `team_members` row for a synthetic membership. (Caller-scoped `my*` reads that hardcode `memberId: Option.some(membership.id)` therefore keep using `requireMembership`, never `requireReadAccess`.)
+7. **A "manage" gate that admits global admins is the ONLY sanctioned exception to rule 5, and it must be built as `requireReadAccess` + an `isGlobalAdmin`-branched `requirePermission`.** When an operator-facing feature (a feature with no Discord-facing or member-self-service side effect) must let a global admin both read and mutate any team's rows, compose a single helper that (a) calls `requireReadAccess(members, teamId, forbidden)`, then (b) `currentUser.isGlobalAdmin ? Effect.void : requirePermission(membership, '<perm>', forbidden)`. The `isGlobalAdmin` branch is required because a global admin's synthetic membership carries only `VIEW_PERMISSIONS`, so the `member:edit`/`<perm>` check would otherwise reject them. The canonical helper is `requireManageAccess` in `src/api/player-rating.ts` (gate = `member:edit`), used by every `playerRating` endpoint including the `applyGameResult` POST. Do NOT extend this exception to features with Discord-facing or member-self-service mutations — those keep using `requireMembership` per rule 6.
 
-Reference: read-access helper `src/api/permissions.ts` (`requireReadAccess`, `VIEW_PERMISSIONS`); read handlers `src/api/roster.ts`, `src/api/role.ts`, `src/api/finance.ts`, `src/api/activity-stats.ts`, `src/api/team.ts`. Global-admin-only mutating endpoints `src/api/translations.ts` (every mutating endpoint starts with `Effect.tap(() => requireGlobalAdmin(forbidden))`).
+Reference: read-access helper `src/api/permissions.ts` (`requireReadAccess`, `VIEW_PERMISSIONS`); read handlers `src/api/roster.ts`, `src/api/role.ts`, `src/api/finance.ts`, `src/api/activity-stats.ts`, `src/api/team.ts`; manage-gate helper `src/api/player-rating.ts` (`requireManageAccess`). Global-admin-only mutating endpoints `src/api/translations.ts` (every mutating endpoint starts with `Effect.tap(() => requireGlobalAdmin(forbidden))`).
 
 ## LISTEN/NOTIFY Cache Invalidation
 

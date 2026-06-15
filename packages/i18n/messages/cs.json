@@ -1845,5 +1845,17 @@
   "admin_globalAdmins_error_lastAdmin": "Nelze odebrat posledního globálního admina.",
   "admin_globalAdmins_error_selfRevoke": "Nemůžete odebrat svůj vlastní admin přístup.",
   "admin_globalAdmins_error_envManaged": "Tento admin je spravován přes konfiguraci prostředí a nelze ho odebrat zde.",
-  "admin_globalAdmins_validation_discordIdInvalid": "Zadejte platné Discord ID (17–20 číslic, pouze čísla)."
+  "admin_globalAdmins_validation_discordIdInvalid": "Zadejte platné Discord ID (17–20 číslic, pouze čísla).",
+  "members_ratingTitle": "Hodnocení hráče",
+  "members_ratingWins": "Výhry",
+  "members_ratingLosses": "Prohry",
+  "members_ratingDraws": "Remízy",
+  "members_ratingTrendUp": "{delta} od posledního zápasu",
+  "members_ratingTrendDown": "{delta} od posledního zápasu",
+  "members_ratingTrendFlat": "Beze změny od posledního zápasu",
+  "members_ratingPreviousTooltip": "Bylo {previous}, nyní {current}",
+  "members_ratingCalibratingBadge": "Kalibrace · {played}/{threshold}",
+  "members_ratingCalibratingHint": "Předběžné hodnocení — ustálí se po {threshold} zápasech.",
+  "members_ratingNoGames": "Zatím žádný odehraný zápas.",
+  "members_ratingTooltip": "Hodnocení dovedností podle výsledků zápasů."
 }

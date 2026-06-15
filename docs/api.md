@@ -41,6 +41,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Email Forwarding](#30-email-forwarding)
    - [Event Roster](#31-event-roster)
    - [Global Admin](#32-global-admin)
+   - [Player Rating](#33-player-rating)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -5909,6 +5910,177 @@ Revokes global-admin status from a user by their internal `UserId`. Clears `user
 
 ---
 
+### 33. Player Rating
+
+**Source:** `packages/domain/src/api/PlayerRatingApi.ts`
+**Prefix:** `/teams/:teamId`
+
+Manages per-member Elo ratings within a team. Uses a team-average Elo model: each player's individual rating is compared against the average of the opposing team. K-factor is 40 during the first 10 games (calibration) and 20 thereafter. Default starting rating is 1200.
+
+All endpoints require the caller to be an authenticated team member. The three read endpoints are accessible to **any** team member; the write endpoint (`applyGameResult`) requires the `member:edit` permission (i.e. Captain, Admin, or any role with that permission). Global admins who are not team members receive a 403 from all four endpoints (no `requireReadAccess` bypass is applied here).
+
+---
+
+#### `GET /teams/:teamId/ratings`
+
+Returns the current Elo leaderboard for all members in the team who have a rating record.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Response:** `200 OK` — `TeamRatingsResponse`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `canManage` | `boolean` | No | Whether the caller has `member:edit` permission (i.e. can submit game results) |
+| `calibrationThreshold` | `integer` | No | Number of games before a member is considered established (always 10) |
+| `entries` | `TeamRatingEntry[]` | No | Leaderboard entries, ordered by rating descending |
+
+`TeamRatingEntry`:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `memberId` | `TeamMemberId` | No | Team member ID |
+| `rating` | `integer` | No | Current Elo rating |
+| `gamesPlayed` | `integer` | No | Total games played |
+| `previousRating` | `integer \| null` | Yes | Rating before the last game (null if no history yet) |
+| `lastDelta` | `integer \| null` | Yes | Delta applied in the last game (null if no history yet) |
+| `wins` | `integer` | No | Total wins |
+| `losses` | `integer` | No | Total losses |
+| `draws` | `integer` | No | Total draws |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `PlayerRatingForbidden` | 403 | Not a member of this team |
+
+---
+
+#### `GET /teams/:teamId/members/:memberId/rating`
+
+Returns the current Elo rating details for a single member.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `memberId` | `TeamMemberId` (string) | Member ID |
+
+**Response:** `200 OK` — `MemberRatingResponse`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `memberId` | `TeamMemberId` | No | Team member ID |
+| `rating` | `integer` | No | Current Elo rating |
+| `gamesPlayed` | `integer` | No | Total games played |
+| `previousRating` | `integer \| null` | Yes | Rating before the last game |
+| `lastDelta` | `integer \| null` | Yes | Delta applied in the last game |
+| `wins` | `integer` | No | Total wins |
+| `losses` | `integer` | No | Total losses |
+| `draws` | `integer` | No | Total draws |
+| `isCalibrating` | `boolean` | No | `true` when `gamesPlayed < calibrationThreshold` |
+| `calibrationThreshold` | `integer` | No | Games needed to exit calibration (always 10) |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `PlayerRatingForbidden` | 403 | Not a member of this team |
+| `PlayerRatingPlayerNotFound` | 404 | Member does not have a rating record in this team |
+
+---
+
+#### `GET /teams/:teamId/members/:memberId/rating/history`
+
+Returns the full chronological game history for a single member, newest first.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `memberId` | `TeamMemberId` (string) | Member ID |
+
+**Response:** `200 OK` — `RatingHistoryResponse`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `entries` | `RatingHistoryEntry[]` | No | History entries, newest first |
+
+`RatingHistoryEntry`:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | `string` | No | History entry ID |
+| `ratingBefore` | `integer` | No | Rating before this game |
+| `ratingAfter` | `integer` | No | Rating after this game |
+| `delta` | `integer` | No | Change applied (`ratingAfter - ratingBefore`) |
+| `result` | `"win" \| "loss" \| "draw"` | No | Outcome for this member |
+| `gameId` | `string \| null` | Yes | UUID grouping all entries for the same `applyGameResult` call |
+| `submittedBy` | `TeamMemberId \| null` | Yes | Member who submitted the game result (null if that member was later deleted) |
+| `createdAt` | `string` (ISO 8601) | No | Timestamp of the rating change |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `PlayerRatingForbidden` | 403 | Not a member of this team |
+| `PlayerRatingPlayerNotFound` | 404 | Member does not have a rating record in this team |
+
+---
+
+#### `POST /teams/:teamId/ratings/games`
+
+Applies a game result, updating the Elo ratings for all members on both teams. Returns the updated leaderboard.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `member:edit`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `GameResultRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `teamA` | `TeamMemberId[]` | Yes | Member IDs on team A |
+| `teamB` | `TeamMemberId[]` | Yes | Member IDs on team B |
+| `outcome` | `"teamA" \| "teamB" \| "draw"` | Yes | Match outcome |
+
+**Response:** `200 OK` — `TeamRatingsResponse` (same schema as `GET /teams/:teamId/ratings`)
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `PlayerRatingForbidden` | 403 | Missing `member:edit` permission |
+| `PlayerRatingPlayerNotFound` | 404 | One or more member IDs do not exist in this team |
+| `PlayerRatingInvalidGameResult` | 422 | Invalid game setup — see `reason` field |
+
+`PlayerRatingInvalidGameResult.reason` values:
+
+| Value | Meaning |
+|---|---|
+| `emptyTeam` | `teamA` or `teamB` array is empty |
+| `overlap` | The same member appears on both teams |
+| `unknownMember` | A member ID is not found in this team |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -6224,3 +6396,6 @@ The following table consolidates all error tags across all API groups.
 | `GlobalAdminLastAdminError` | 409 | Global Admin | Revoking would leave zero effective global admins |
 | `GlobalAdminSelfRevokeError` | 409 | Global Admin | Caller attempted to revoke their own admin status |
 | `GlobalAdminEnvManaged` | 409 | Global Admin | Target user's Discord ID is in the env allowlist and cannot be revoked via the API |
+| `PlayerRatingForbidden` | 403 | Player Rating | Not a member of this team, or missing `member:edit` permission for the write endpoint |
+| `PlayerRatingPlayerNotFound` | 404 | Player Rating | Member does not have a rating record in this team |
+| `PlayerRatingInvalidGameResult` | 422 | Player Rating | Invalid game setup (`emptyTeam`, `overlap`, or `unknownMember`) |

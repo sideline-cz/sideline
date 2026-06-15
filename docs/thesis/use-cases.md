@@ -122,6 +122,12 @@ flowchart LR
         UC_NOTIFICATIONS["View & Mark Notifications"]
     end
 
+    subgraph RATINGS["Player Ratings"]
+        UC_VIEW_RATINGS["View Team Rating Leaderboard"]
+        UC_VIEW_MEMBER_RATING["View Member Rating & History"]
+        UC_APPLY_GAME_RESULT["Apply Game Result"]
+    end
+
     subgraph CHALLENGES["Weekly Challenges"]
         UC_LIST_CHALLENGES["View Weekly Challenges"]
         UC_CREATE_CHALLENGE["Create Weekly Challenge"]
@@ -251,6 +257,11 @@ flowchart LR
     CP --> UC_SET_CHANNEL_ACCESS
 
     PL --> UC_LIST_CHANNELS
+    PL --> UC_VIEW_RATINGS
+    PL --> UC_VIEW_MEMBER_RATING
+
+    CP --> UC_APPLY_GAME_RESULT
+    AD --> UC_APPLY_GAME_RESULT
 
     BOT --> UC_BOT_LIST
     BOT --> UC_BOT_OVERVIEW
@@ -1042,3 +1053,42 @@ The following structured descriptions cover the most significant use cases in th
 | **Alternate Flow C** | If the target's Discord ID is in `APP_GLOBAL_ADMIN_DISCORD_IDS`, the revoke button is hidden (the entry shows an **Env-managed** badge) and the API returns `409 GlobalAdminEnvManaged` if attempted directly. |
 | **Alternate Flow D** | If revoking would leave zero effective global admins (no other DB-flagged user and no env-allowlisted IDs), the server returns `409 GlobalAdminLastAdminError`. |
 | **Notes** | The `Revoke` button is rendered only when `revocable = true` on the `GlobalAdminListItem`. Env-managed entries (`source = "env"`) always have `revocable = false`. The caller's own entry has `isSelf = true` and is also non-revocable. The effective-admin count is computed as DB admins ∪ env allowlist to ensure the last-admin safeguard accounts for both sources. |
+
+---
+
+### UC-28: Member Views the Team Elo Rating Leaderboard
+
+| Field | Detail |
+|---|---|
+| **Actor** | Player (any authenticated team member) |
+| **Precondition** | The actor is an authenticated member of the team. At least one game result has been submitted for the team, creating `player_ratings` rows. |
+| **Main Flow** | 1. The actor navigates to a player profile page in the web app. 2. The web app calls `GET /teams/:teamId/ratings`. 3. The server verifies team membership, queries `player_ratings` ordered by `rating DESC`, and returns a `TeamRatingsResponse` including all rated members, the `calibrationThreshold` (10), and the `canManage` flag reflecting the caller's `member:edit` permission. 4. The web app renders the leaderboard, showing each member's rating, win/loss/draw record, and last-game delta. Members with fewer than 10 games played are displayed with a "calibrating" indicator. |
+| **Postcondition** | The actor sees the current Elo standings for the team. |
+| **Alternate Flow** | If no game results have been submitted yet, `entries` is empty and the page shows an empty-state message. |
+
+---
+
+### UC-29: Member Views Their Own Rating and Game History
+
+| Field | Detail |
+|---|---|
+| **Actor** | Player (any authenticated team member) |
+| **Precondition** | The actor is an authenticated member of the team. The target member has at least one `player_rating_history` row. |
+| **Main Flow** | 1. The actor opens a team member's profile page in the web app (rendered via `MemberRatingCard`). 2. The web app calls `GET /teams/:teamId/members/:memberId/rating` to fetch the current rating summary, and `GET /teams/:teamId/members/:memberId/rating/history` to fetch the full chronological history. 3. The server verifies team membership, queries `player_ratings` for the current state and `player_rating_history` ordered newest-first, and returns the respective responses. 4. The card displays current rating, `isCalibrating` status, and the list of past game results (before/after, delta, outcome, date). |
+| **Postcondition** | The actor sees the member's current Elo rating and their full game-by-game history. |
+| **Alternate Flow** | If the member has no rating record yet, the server returns `404 PlayerRatingPlayerNotFound` and the card shows an empty-state prompt. |
+
+---
+
+### UC-30: Captain or Admin Applies a Game Result
+
+| Field | Detail |
+|---|---|
+| **Actor** | Captain / Admin (any member holding `member:edit` permission) |
+| **Precondition** | The actor is an authenticated team member with the `member:edit` permission. Both teams have at least one member ID from the team. |
+| **Main Flow** | 1. The actor opens a player profile page that surfaces the `MemberRatingCard`. 2. The actor fills in the game result form: selects members for team A and team B, and chooses the outcome (`teamA`, `teamB`, or `draw`). 3. The web app calls `POST /teams/:teamId/ratings/games` with the `GameResultRequest` payload. 4. The server verifies the `member:edit` permission, validates the teams are non-empty and have no overlap, upserts `player_ratings` rows for all participants using the standard Elo formula (K=40 during calibration, K=20 thereafter), writes immutable `player_rating_history` rows (grouped by a shared `game_id` UUID), and returns the updated `TeamRatingsResponse`. 5. The web app refreshes the leaderboard and the submitting member's rating card. |
+| **Postcondition** | All participating members' `player_ratings` rows are updated (rating, games_played, wins/losses/draws). One `player_rating_history` row exists per participant recording the before/after delta. |
+| **Alternate Flow A** | If `teamA` or `teamB` is empty, the server returns `422 PlayerRatingInvalidGameResult` with `reason = "emptyTeam"`. |
+| **Alternate Flow B** | If the same member appears on both teams, the server returns `422 PlayerRatingInvalidGameResult` with `reason = "overlap"`. |
+| **Alternate Flow C** | If a member ID does not belong to this team, the server returns `422 PlayerRatingInvalidGameResult` with `reason = "unknownMember"`. |
+| **Notes** | The Elo engine uses team averages: each player's expected score is computed against the opposing team's mean rating. Per-player K-factor and integer rounding mean the sum of all deltas is not guaranteed to be zero (consistent with standard chess Elo). |

@@ -49,6 +49,8 @@ export * as NotificationApi from './api/NotificationApi.js';
 
 export * as OnboardingApi from './api/OnboardingApi.js';
 
+export * as PlayerRatingApi from './api/PlayerRatingApi.js';
+
 /**
  * Field state classification for cross-field schema filters.
  *
@@ -114,6 +116,15 @@ export * as DisplayName from './models/DisplayName.js';
 
 export * as EarnedAchievement from './models/EarnedAchievement.js';
 
+/**
+ * Compute per-player rating updates for a team game.
+ *
+ * Each player's K-factor is determined individually and ratings are rounded to
+ * the nearest integer. Per-player K-factor + integer rounding means exact
+ * zero-sum is NOT guaranteed; this is intentional (same as chess Elo).
+ */
+export * as Elo from './models/Elo.js';
+
 export * as EmailForwarding from './models/EmailForwarding.js';
 
 export * as Event from './models/Event.js';
@@ -149,6 +160,8 @@ export * as Onboarding from './models/Onboarding.js';
 export * as Payment from './models/Payment.js';
 
 export * as PaymentReminder from './models/PaymentReminder.js';
+
+export * as PlayerRating from './models/PlayerRating.js';
 
 export * as Role from './models/Role.js';
 

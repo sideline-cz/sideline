@@ -5,6 +5,7 @@ import type {
   ActivityLogApi,
   ActivityStatsApi,
   ActivityType,
+  PlayerRatingApi,
   RoleApi,
   Roster,
 } from '@sideline/domain';
@@ -16,6 +17,7 @@ import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 import { AchievementsGridI18n } from '~/components/organisms/AchievementsGrid.js';
 import { ActivityLogList } from '~/components/organisms/ActivityLogList';
 import { ActivityStatsCard } from '~/components/organisms/ActivityStatsCard';
+import { MemberRatingCard } from '~/components/organisms/MemberRatingCard.js';
 import { Button } from '~/components/ui/button';
 import { DatePicker } from '~/components/ui/date-picker';
 import {
@@ -69,6 +71,7 @@ interface PlayerDetailPageProps {
   isOwnProfile: boolean;
   activityLogs: ActivityLogApi.ActivityLogListResponse;
   activityTypes: ReadonlyArray<ActivityTypeOption>;
+  rating?: PlayerRatingApi.MemberRatingResponse;
   onSave: (values: PlayerEditValues) => Promise<void>;
   onAssignRole: (roleId: string) => Promise<void>;
   onUnassignRole: (roleId: string) => Promise<void>;
@@ -101,6 +104,7 @@ export function PlayerDetailPage({
   isOwnProfile,
   activityLogs,
   activityTypes,
+  rating,
   onSave,
   onAssignRole,
   onUnassignRole,
@@ -233,6 +237,7 @@ export function PlayerDetailPage({
           earned_at: new Date(a.earned_at),
         }))}
       />
+      {canEdit && rating ? <MemberRatingCard rating={rating} /> : null}
       <ActivityStatsCard stats={activityStats} />
       <ActivityLogList
         logs={activityLogs.logs}

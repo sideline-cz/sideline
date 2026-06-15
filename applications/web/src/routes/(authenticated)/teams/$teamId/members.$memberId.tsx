@@ -28,6 +28,10 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$me
             ),
           ),
           activityTypes: api.activityType.listActivityTypes({ params: { teamId } }),
+          rating: api.playerRating.getMemberRating({ params: { teamId, memberId } }).pipe(
+            Effect.tapError((e) => Effect.logWarning('Failed to load member rating', e)),
+            Effect.catch(() => Effect.succeed(undefined)),
+          ),
         }),
       ),
       warnAndCatchAll,
@@ -50,6 +54,7 @@ function MemberDetailRoute() {
     activityStats,
     activityLogs,
     activityTypes: fetchedActivityTypes,
+    rating,
   } = Route.useLoaderData();
   const roles = roleListResponse.roles;
 
@@ -230,6 +235,7 @@ function MemberDetailRoute() {
       isOwnProfile={activityLogs.isOwnProfile}
       activityLogs={new ActivityLogApi.ActivityLogListResponse({ logs: activityLogs.logs })}
       activityTypes={activityTypes}
+      rating={rating}
       onSave={handleSave}
       onAssignRole={handleAssignRole}
       onUnassignRole={handleUnassignRole}
