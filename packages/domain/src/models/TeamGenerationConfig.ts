@@ -19,11 +19,12 @@ export const DEFAULT_MAX_ITERATIONS = 1000;
 export class TeamGenerationConfig extends Model.Class<TeamGenerationConfig>('TeamGenerationConfig')(
   {
     team_id: TeamId,
-    weight_elo: Schema.Int,
-    weight_size: Schema.Int,
-    weight_gender: Schema.Int,
-    default_team_count: Schema.Int,
-    max_iterations: Schema.Int,
+    // Mirror the DB CHECK constraints so invalid config can never round-trip through the model.
+    weight_elo: Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 1000 }))),
+    weight_size: Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 1000 }))),
+    weight_gender: Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 1000 }))),
+    default_team_count: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(2))),
+    max_iterations: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
     created_at: Model.DateTimeInsertFromDate,
     updated_at: Model.DateTimeUpdateFromDate,
   },

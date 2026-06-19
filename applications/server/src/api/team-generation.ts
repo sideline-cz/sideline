@@ -319,19 +319,6 @@ export const TeamGenerationApiLive = HttpApiBuilder.group(Api, 'teamGeneration',
                 ? Effect.fail(new TeamGenerationApi.EventNotGeneratable())
                 : Effect.void,
             ),
-            // Anti-spam: reject if an unprocessed teams_generated event already exists for this event.
-            // TODO: Future work — edit the existing Discord message on repost instead of re-enqueuing.
-            Effect.tap(({ syncEvents }) =>
-              syncEvents
-                .hasUnprocessedTeamsGeneratedForEvent(eventId)
-                .pipe(
-                  Effect.flatMap((pending) =>
-                    pending
-                      ? Effect.fail(new TeamGenerationApi.TeamGenerationPostPending())
-                      : Effect.void,
-                  ),
-                ),
-            ),
             // Re-load the trusted roster from DB to build the Discord payload server-side
             Effect.bind('yesMembers', ({ genRepo }) => genRepo.findYesMembersForEvent(eventId)),
             // Validate submitted memberIds against trusted roster
@@ -412,6 +399,10 @@ export const TeamGenerationApiLive = HttpApiBuilder.group(Api, 'teamGeneration',
                 };
               });
 
+              // Atomic insert-if-not-pending. A `false` result means a post is already
+              // queued for this event — reject as pending (anti-spam). This closes the
+              // check-then-insert race against concurrent posts.
+              // TODO: Future work — edit the existing Discord message on repost instead of re-enqueuing.
               return syncEvents
                 .emitTeamsGenerated(
                   teamId,
@@ -422,8 +413,10 @@ export const TeamGenerationApiLive = HttpApiBuilder.group(Api, 'teamGeneration',
                   trustedTeams,
                 )
                 .pipe(
-                  Effect.tap(() =>
-                    Effect.logInfo(`Enqueued teams_generated for event ${event.id}`),
+                  Effect.flatMap((inserted) =>
+                    inserted
+                      ? Effect.logInfo(`Enqueued teams_generated for event ${event.id}`)
+                      : Effect.fail(new TeamGenerationApi.TeamGenerationPostPending()),
                   ),
                 );
             }),

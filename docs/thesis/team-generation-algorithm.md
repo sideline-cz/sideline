@@ -6,7 +6,7 @@ This document describes the algorithm behind the Balanced Training Team Generato
 
 ## 1. Problem Formalization
 
-Given a set of players `P = {p₁, p₂, …, pₙ}` and a desired team count `k`, the generator solves a constrained multi-way partition problem: distribute every player into exactly `k` disjoint, non-empty subsets `T₁, T₂, …, Tₖ` such that `T₁ ∪ T₂ ∪ … ∪ Tₖ = P` and `Tᵢ ∩ Tⱼ = ∅` for all `i ≠ j`.
+Given a set of players `P = {p₁, p₂, …, pₙ}` and a desired team count `k ≥ 1` (clamped to 1 if a smaller value is supplied), the generator solves a constrained multi-way partition problem: distribute every player into `k` disjoint subsets `T₁, T₂, …, Tₖ` such that `T₁ ∪ T₂ ∪ … ∪ Tₖ = P` and `Tᵢ ∩ Tⱼ = ∅` for all `i ≠ j`. In the non-degenerate case (`n ≥ k`) every subset is non-empty; in the degenerate case (`n < k`) the surplus subsets are empty rather than rejected, and the generator emits a warning rather than failing (see Section 4).
 
 Each player `pᵢ` carries three attributes:
 
@@ -16,7 +16,7 @@ Each player `pᵢ` carries three attributes:
 
 The objective is to minimize a weighted cost function that penalizes three kinds of imbalance simultaneously:
 
-```
+```text
 cost(T₁…Tₖ) = wElo   * f_elo(T₁…Tₖ)
              + wSize  * f_size(T₁…Tₖ)
              + wGender * f_gender(T₁…Tₖ)
@@ -40,7 +40,7 @@ Generation proceeds in two sequential phases: a snake-draft seed (Phase 1) that 
 
 **Distribution.** Players are assigned to teams in a snake-draft pattern. The pick order for a draft with `k` teams is:
 
-```
+```text
 Round 0 (forward):  team 0, team 1, …, team k-1
 Round 1 (backward): team k-1, …, team 1, team 0
 Round 2 (forward):  team 0, team 1, …, team k-1
@@ -49,7 +49,7 @@ Round 2 (forward):  team 0, team 1, …, team k-1
 
 For player at position `i` (zero-indexed) in the sorted array:
 
-```
+```text
 round = floor(i / k)
 pos   = i mod k
 teamIndex = (round mod 2 == 0) ? pos : (k - 1 - pos)
@@ -106,7 +106,7 @@ export const snakeDraftOnly = (
 
 ### 3.1 Formula
 
-```
+```text
 cost = wElo    * clamp(ratingSpread / SCALE_ELO, 0, 1)
      + wSize   * sizeImbalanceTerm
      + wGender * (genderImbalance / totalLabeled)
@@ -172,7 +172,7 @@ Sorting `n` players is `O(n log n)`. The distribution loop is `O(n)`. The overal
 
 Each iteration considers all ordered pairs of teams and all pairs of members within those teams. For `k` teams each of size approximately `n/k`, the number of candidate swaps per iteration is:
 
-```
+```text
 C(k, 2) × (n/k)² = (k(k-1)/2) × (n²/k²) = n²(k-1) / (2k)
 ```
 

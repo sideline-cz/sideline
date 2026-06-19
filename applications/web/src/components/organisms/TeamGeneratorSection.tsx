@@ -121,7 +121,10 @@ export function TeamGeneratorSection({
       Effect.catchTag('TeamGenerationEventNotGeneratable', () =>
         Effect.fail(ClientError.make(tr('teamGen_notGeneratable'))),
       ),
-      Effect.mapError(() => ClientError.make(tr('teamGen_generateFailed'))),
+      // Preserve the specific messages mapped above; only fall back for unhandled errors.
+      Effect.mapError((e) =>
+        e._tag === 'ClientError' ? e : ClientError.make(tr('teamGen_generateFailed')),
+      ),
       run({}),
     );
 
@@ -217,16 +220,19 @@ export function TeamGeneratorSection({
       ),
       Effect.catchTag('TeamGenerationRosterChanged', () => {
         onRefresh();
-        return Effect.fail(ClientError.make(tr('teamGen_postFailed')));
+        return Effect.fail(ClientError.make(tr('teamGen_rosterChanged')));
       }),
       Effect.catchTag('TeamGenerationPostPending', () =>
-        Effect.fail(ClientError.make(tr('teamGen_postFailed'))),
+        Effect.fail(ClientError.make(tr('teamGen_postPending'))),
       ),
       Effect.catchTag('TeamGenerationDiscordPostFailed', () => {
         onRefresh();
         return Effect.fail(ClientError.make(tr('teamGen_postFailed')));
       }),
-      Effect.mapError(() => ClientError.make(tr('teamGen_postFailed'))),
+      // Preserve the specific messages mapped above; only fall back for unhandled errors.
+      Effect.mapError((e) =>
+        e._tag === 'ClientError' ? e : ClientError.make(tr('teamGen_postFailed')),
+      ),
       run({ success: tr('teamGen_postSuccess') }),
     );
 

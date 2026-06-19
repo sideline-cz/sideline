@@ -10,7 +10,7 @@ This page lists user-visible changes to Sideline. For developer-level release no
 Captains and coaches can now generate balanced training teams directly from an event detail page — the algorithm splits RSVP-yes attendees into equal-skill groups using each player's Elo rating.
 
 - Open any active or started training event and scroll to the new **Team Generator** section.
-- Choose how many teams to create (2–20) and click **Generate**. The algorithm tries up to 1 000 random assignments and picks the one that minimises the average-rating spread, team-size imbalance, and gender imbalance.
+- Click **Generate** to split the attendees into two balanced teams. The algorithm seeds the teams with a snake-draft by rating, then runs a deterministic local-search optimisation (up to 1 000 swap iterations) that minimises the average-rating spread and gender imbalance. The same roster always produces the same teams.
 - Player cards show each person's current rating and a **calibrating** badge for members who have fewer than 10 rated games.
 - Regenerate as many times as you like — nothing is posted until you explicitly click **Post to Discord**.
 - When you click **Post to Discord**, the bot posts a formatted embed to the event's configured Discord channel listing all teams, their members, and each team's average Elo.

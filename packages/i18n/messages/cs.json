@@ -1935,6 +1935,7 @@
   "teamGen_notGeneratable": "Tento typ eventu nepodporuje generování týmů.",
   "teamGen_generateFailed": "Generování týmů selhalo.",
   "teamGen_postFailed": "Odeslání týmů na Discord selhalo.",
+  "teamGen_postPending": "Tyto týmy se na Discord právě odesílají. Chvíli počkejte, než to zkusíte znovu.",
   "teamGen_postSuccess": "Týmy zveřejněny na Discordu.",
   "teamGen_rosterChanged": "Sestava se změnila — týmy byly znovu načteny. Zkontrolujte je a znovu zveřejněte.",
   "teamGen_teamName": "Tým {n}",

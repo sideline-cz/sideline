@@ -545,26 +545,11 @@ const make = Effect.gen(function* () {
 
   // ---- Teams generated event --------------------------------------------------
 
-  const hasUnprocessedTeamsGeneratedForEventQuery = SqlSchema.findOneOption({
-    Request: Schema.Struct({ event_id: Event.EventId }),
-    Result: Schema.Struct({ exists: Schema.Boolean }),
-    execute: (input) => sql`
-      SELECT EXISTS(
-        SELECT 1 FROM event_sync_events
-        WHERE event_type = 'teams_generated'
-          AND event_id = ${input.event_id}
-          AND processed_at IS NULL
-      ) AS exists
-    `,
-  });
-
-  const hasUnprocessedTeamsGeneratedForEvent = (eventId: Event.EventId): Effect.Effect<boolean> =>
-    hasUnprocessedTeamsGeneratedForEventQuery({ event_id: eventId }).pipe(
-      Effect.map((opt) => Option.match(opt, { onNone: () => false, onSome: (row) => row.exists })),
-      catchSqlErrors,
-    );
-
-  const insertTeamsGeneratedEvent = SqlSchema.void({
+  // Atomic insert-if-not-pending: the row is only written when no unprocessed
+  // 'teams_generated' row already exists for the event. RETURNING id lets the caller
+  // distinguish "inserted" (Some) from "skipped because a post is already pending" (None),
+  // closing the check-then-insert TOCTOU race against concurrent posts.
+  const insertTeamsGeneratedEventQuery = SqlSchema.findOneOption({
     Request: Schema.Struct({
       team_id: Team.TeamId,
       guild_id: Discord.Snowflake,
@@ -573,6 +558,7 @@ const make = Effect.gen(function* () {
       discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
       teams_payload_json: Schema.String,
     }),
+    Result: Schema.Struct({ id: Schema.String }),
     execute: (input) => sql`
       INSERT INTO event_sync_events (
         team_id, guild_id, event_type, event_id, event_title, event_description,
@@ -580,17 +566,25 @@ const make = Effect.gen(function* () {
         event_location_url, event_event_type, discord_target_channel_id,
         member_group_id, discord_role_id, claimed_by_member_id, claimed_by_display_name,
         event_all_day, teams_payload
-      ) VALUES (
+      )
+      SELECT
         ${input.team_id}, ${input.guild_id}, ${'teams_generated'}, ${input.event_id},
         ${input.event_title}, ${null},
         ${null}, ${DateTime.makeUnsafe(0)}, ${null}, ${null},
         ${null}, ${'teams_generated'}, ${input.discord_target_channel_id},
         ${null}, ${null}, ${null}, ${null}, ${false},
         ${input.teams_payload_json}::jsonb
+      WHERE NOT EXISTS (
+        SELECT 1 FROM event_sync_events
+        WHERE event_type = 'teams_generated'
+          AND event_id = ${input.event_id}
+          AND processed_at IS NULL
       )
+      RETURNING id
     `,
   });
 
+  /** Returns true if a new sync event was enqueued, false if a post was already pending. */
   const emitTeamsGenerated = (
     teamId: Team.TeamId,
     guildId: Discord.Snowflake,
@@ -598,15 +592,15 @@ const make = Effect.gen(function* () {
     title: string,
     discordTargetChannelId: Option.Option<Discord.Snowflake>,
     teams: ReadonlyArray<EventRpcEvents.TeamsGeneratedTeam>,
-  ) =>
-    insertTeamsGeneratedEvent({
+  ): Effect.Effect<boolean> =>
+    insertTeamsGeneratedEventQuery({
       team_id: teamId,
       guild_id: guildId,
       event_id: eventId,
       event_title: title,
       discord_target_channel_id: discordTargetChannelId,
       teams_payload_json: JSON.stringify(teams),
-    }).pipe(catchSqlErrors);
+    }).pipe(Effect.map(Option.isSome), catchSqlErrors);
 
   // ---- Roster event helpers ---------------------------------------------------
 
@@ -775,7 +769,6 @@ const make = Effect.gen(function* () {
     emitUnclaimedTrainingReminder,
     emitCoachingStatus,
     emitTeamsGenerated,
-    hasUnprocessedTeamsGeneratedForEvent,
     emitEventRosterApprovalRequest,
     emitEventRosterApprovalCancel,
     emitEventRosterThreadDelete,

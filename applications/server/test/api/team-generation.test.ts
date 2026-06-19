@@ -353,11 +353,12 @@ const makeControlledEventSyncEventsRepositoryLayer = () =>
       channelId: Option.Option<Discord.Snowflake>,
       teams: unknown[],
     ) => {
+      // Atomic insert-if-not-pending: returns false (skipped) when a post is already pending,
+      // true (inserted) otherwise. Only record the call when a row is actually inserted.
+      if (hasPendingTeamsGenerated) return Effect.succeed(false);
       emitTeamsGeneratedCalls.push({ teamId, guildId, eventId, title, channelId, teams });
-      return Effect.void;
+      return Effect.succeed(true);
     },
-    hasUnprocessedTeamsGeneratedForEvent: (_eventId: Event.EventId) =>
-      Effect.succeed(hasPendingTeamsGenerated),
     emitEventRosterApprovalRequest: () => Effect.void,
     emitEventRosterApprovalCancel: () => Effect.void,
     emitEventRosterThreadDelete: () => Effect.void,

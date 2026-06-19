@@ -191,6 +191,17 @@ const recomputeTeam = (
 // ---------------------------------------------------------------------------
 
 /**
+ * Deterministic total order over players: rating descending, then teamMemberId ascending.
+ * Returns 0 only when both keys are equal, satisfying the comparator contract.
+ */
+const comparePlayers = (a: GeneratablePlayer, b: GeneratablePlayer): number => {
+  if (b.rating !== a.rating) return b.rating - a.rating;
+  if (a.teamMemberId < b.teamMemberId) return -1;
+  if (a.teamMemberId > b.teamMemberId) return 1;
+  return 0;
+};
+
+/**
  * Snake-draft only (Phase 1). Exported for testing: proves Phase 2 improves balance.
  *
  * Players are sorted by rating descending; ties are broken by teamMemberId ascending so
@@ -200,18 +211,23 @@ export const snakeDraftOnly = (
   players: ReadonlyArray<GeneratablePlayer>,
   teamCount: number,
 ): ReadonlyArray<ReadonlyArray<string>> => {
-  const sorted = [...players].sort(
-    (a, b) => b.rating - a.rating || (a.teamMemberId < b.teamMemberId ? -1 : 1),
-  );
+  // Defensive: a teamCount < 1 would make the modulo math below divide by zero.
+  const safeTeamCount = teamCount < 1 ? 1 : teamCount;
+  const sorted = [...players].sort(comparePlayers);
 
-  const teams: string[][] = Array.from({ length: teamCount }, () => []);
+  const teams: string[][] = Array.from({ length: safeTeamCount }, () => []);
 
   for (let i = 0; i < sorted.length; i++) {
-    const round = Math.floor(i / teamCount);
-    const pos = i % teamCount;
-    const teamIndex = round % 2 === 0 ? pos : teamCount - 1 - pos;
-    // Loop invariants guarantee teamIndex is in [0, teamCount-1] and sorted[i] is defined.
-    teams[teamIndex]?.push(sorted[i]?.teamMemberId);
+    const round = Math.floor(i / safeTeamCount);
+    const pos = i % safeTeamCount;
+    const teamIndex = round % 2 === 0 ? pos : safeTeamCount - 1 - pos;
+    const player = sorted[i];
+    const team = teams[teamIndex];
+    // Loop invariants guarantee teamIndex is in [0, teamCount-1] and sorted[i] is defined;
+    // the explicit guards keep the access type-safe without non-null assertions.
+    if (player !== undefined && team !== undefined) {
+      team.push(player.teamMemberId);
+    }
   }
 
   return teams;
@@ -271,6 +287,8 @@ export const generateTeams = (
   constraints: GenerationConstraints,
 ): GenerationResult => {
   const { teamCount, maxIterations } = constraints;
+  // Guard against teamCount < 1, which would make the modulo/snake-draft math divide by zero.
+  const safeTeamCount = teamCount < 1 ? 1 : teamCount;
 
   // Clamp negative weights to 0 so the optimizer cannot chase worse balance.
   const weightElo = Math.max(0, constraints.weightElo);
@@ -284,12 +302,12 @@ export const generateTeams = (
   // Collect warnings
   const warnings: GenerationWarning[] = [...detectWarnings(players)];
   // Emit UnevenTeamSizes whenever players.length % teamCount !== 0.
-  if (players.length % teamCount !== 0) {
+  if (players.length % safeTeamCount !== 0) {
     warnings.unshift({ _tag: 'UnevenTeamSizes' });
   }
 
   // Phase 1: snake-draft seed
-  const seededMemberArrays = snakeDraftOnly(players, teamCount);
+  const seededMemberArrays = snakeDraftOnly(players, safeTeamCount);
 
   // Build mutable team state
   const mutableTeams: MutableTeam[] = seededMemberArrays.map((members) => {
@@ -306,7 +324,7 @@ export const generateTeams = (
   if (maxIterations === 0) {
     const teams = mutableTeams.map((t, idx) => ({
       index: idx,
-      members: t.members as ReadonlyArray<string>,
+      members: t.members,
       averageRating: t.averageRating,
       genderCounts: buildGenderCounts(t.genderCounts),
     }));
@@ -341,14 +359,18 @@ export const generateTeams = (
     // Evaluate all single cross-team swaps
     for (let ti = 0; ti < mutableTeams.length; ti++) {
       for (let tj = ti + 1; tj < mutableTeams.length; tj++) {
-        const teamI = mutableTeams[ti]!;
-        const teamJ = mutableTeams[tj]!;
+        const teamI = mutableTeams[ti];
+        const teamJ = mutableTeams[tj];
+        // ti and tj are loop-bounded, so both teams are always defined; guard explicitly
+        // (rather than with `!`) to stay type-safe and survive formatter normalization.
+        if (teamI === undefined || teamJ === undefined) continue;
 
         for (let mi = 0; mi < teamI.members.length; mi++) {
           for (let mj = 0; mj < teamJ.members.length; mj++) {
             // Tentatively apply swap
-            const idI = teamI.members[mi]!;
-            const idJ = teamJ.members[mj]!;
+            const idI = teamI.members[mi];
+            const idJ = teamJ.members[mj];
+            if (idI === undefined || idJ === undefined) continue;
 
             teamI.members[mi] = idJ;
             teamJ.members[mj] = idI;
@@ -385,17 +407,19 @@ export const generateTeams = (
 
     if (bestSwap !== null && bestCost < currentCost - Number.EPSILON) {
       const { ti, tj, mi, mj } = bestSwap;
-      // Invariant: ti and tj are valid indices produced by the loop above, so these
-      // lookups are always defined.
-      const teamI = mutableTeams[ti]!;
-      const teamJ = mutableTeams[tj]!;
-      const idI = teamI.members[mi]!;
-      const idJ = teamJ.members[mj]!;
-      teamI.members[mi] = idJ;
-      teamJ.members[mj] = idI;
-      recomputeTeam(teamI, playerMap);
-      recomputeTeam(teamJ, playerMap);
-      improved = true;
+      // Invariant: ti/tj/mi/mj were valid indices when the swap was recorded; guard
+      // explicitly to stay type-safe without non-null assertions.
+      const teamI = mutableTeams[ti];
+      const teamJ = mutableTeams[tj];
+      const idI = teamI?.members[mi];
+      const idJ = teamJ?.members[mj];
+      if (teamI !== undefined && teamJ !== undefined && idI !== undefined && idJ !== undefined) {
+        teamI.members[mi] = idJ;
+        teamJ.members[mj] = idI;
+        recomputeTeam(teamI, playerMap);
+        recomputeTeam(teamJ, playerMap);
+        improved = true;
+      }
     }
 
     iterationsUsed++;
@@ -403,7 +427,7 @@ export const generateTeams = (
 
   const teams = mutableTeams.map((t, idx) => ({
     index: idx,
-    members: t.members as ReadonlyArray<string>,
+    members: t.members,
     averageRating: t.averageRating,
     genderCounts: buildGenderCounts(t.genderCounts),
   }));

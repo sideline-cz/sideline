@@ -100,12 +100,14 @@ export const generateHandler = Interaction.asEffect().pipe(
             const payload = Option.match(maybeEvent, {
               onNone: () => ({
                 content: m.bot_training_generate_not_loggable({}, { locale }),
+                allowed_mentions: { parse: [] as const },
               }),
               onSome: (event) => {
                 const deepLink = buildTrainingGenerateDeepLink(env.WEB_URL, teamId, event.event_id);
                 return Option.match(deepLink, {
                   onNone: () => ({
                     content: m.bot_training_generate_deeplink_no_url({}, { locale }),
+                    allowed_mentions: { parse: [] as const },
                   }),
                   onSome: (url) => ({
                     content: m.bot_training_generate_deeplink_message(
@@ -114,6 +116,7 @@ export const generateHandler = Interaction.asEffect().pipe(
                       },
                       { locale },
                     ),
+                    allowed_mentions: { parse: [] as const },
                   }),
                 });
               },
@@ -125,17 +128,26 @@ export const generateHandler = Interaction.asEffect().pipe(
               })
               .pipe(Effect.asVoid);
           }),
+          Effect.tapError((error) =>
+            Effect.logWarning('training/generate: RPC or upstream error', error),
+          ),
           Effect.catchTag('GuildNotFound', () =>
             rest
               .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
-                payload: { content: m.bot_training_generate_not_member({}, { locale }) },
+                payload: {
+                  content: m.bot_training_generate_not_member({}, { locale }),
+                  allowed_mentions: { parse: [] as const },
+                },
               })
               .pipe(Effect.asVoid),
           ),
           Effect.catchTag('RpcClientError', () =>
             rest
               .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
-                payload: { content: m.bot_training_generate_error({}, { locale }) },
+                payload: {
+                  content: m.bot_training_generate_error({}, { locale }),
+                  allowed_mentions: { parse: [] as const },
+                },
               })
               .pipe(Effect.asVoid),
           ),

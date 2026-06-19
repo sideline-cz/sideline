@@ -48,15 +48,17 @@ const bruteForceMinSpread = (players: ReadonlyArray<GeneratablePlayer>): number 
   function combos(arr: number[], size: number): number[][] {
     if (size === 0) return [[]];
     if (arr.length < size) return [];
-    const [first, ...rest] = arr;
-    return [...combos(rest, size - 1).map((c) => [first!, ...c]), ...combos(rest, size)];
+    const first = arr[0];
+    if (first === undefined) return [];
+    const rest = arr.slice(1);
+    return [...combos(rest, size - 1).map((c) => [first, ...c]), ...combos(rest, size)];
   }
 
   let best = Infinity;
   for (const t0idx of combos(indices, k)) {
     const t1idx = indices.filter((i) => !t0idx.includes(i));
-    const avg0 = t0idx.reduce((s, i) => s + ratings[i]!, 0) / t0idx.length;
-    const avg1 = t1idx.reduce((s, i) => s + ratings[i]!, 0) / t1idx.length;
+    const avg0 = t0idx.reduce((s, i) => s + (ratings[i] ?? 0), 0) / t0idx.length;
+    const avg1 = t1idx.reduce((s, i) => s + (ratings[i] ?? 0), 0) / t1idx.length;
     const spread = Math.abs(avg0 - avg1);
     if (spread < best) best = spread;
   }
@@ -301,7 +303,9 @@ describe('TeamGenerator — determinism', () => {
     // Compare the full unsorted member arrays — a pure function must return identical ordering.
     // Sorting before comparing would mask any non-determinism in member ordering.
     for (let i = 0; i < result1.teams.length; i++) {
-      expect([...result1.teams[i]!.members]).toEqual([...result2.teams[i]!.members]);
+      expect([...(result1.teams[i]?.members ?? [])]).toEqual([
+        ...(result2.teams[i]?.members ?? []),
+      ]);
     }
   });
 
@@ -340,12 +344,12 @@ describe('TeamGenerator — determinism with rating ties: Phase 1 teamMemberId-a
 
   it('team 0 contains exactly the members placed there by id-ascending snake order', () => {
     // Snake: sorted ids are a,b,c,d,e,f → t0 gets positions 0,3,4 → ['a','d','e']
-    expect([...result.teams[0]!.members].sort()).toEqual(['a', 'd', 'e']);
+    expect([...(result.teams[0]?.members ?? [])].sort()).toEqual(['a', 'd', 'e']);
   });
 
   it('team 1 contains exactly the members placed there by id-ascending snake order', () => {
     // Snake: sorted ids are a,b,c,d,e,f → t1 gets positions 1,2,5 → ['b','c','f']
-    expect([...result.teams[1]!.members].sort()).toEqual(['b', 'c', 'f']);
+    expect([...(result.teams[1]?.members ?? [])].sort()).toEqual(['b', 'c', 'f']);
   });
 
   it('a second call returns the identical unsorted member arrays (pure function)', () => {
@@ -354,7 +358,7 @@ describe('TeamGenerator — determinism with rating ties: Phase 1 teamMemberId-a
       defaultConstraints({ teamCount: 2, maxIterations: 100 }),
     );
     for (let i = 0; i < result.teams.length; i++) {
-      expect([...result.teams[i]!.members]).toEqual([...result2.teams[i]!.members]);
+      expect([...(result.teams[i]?.members ?? [])]).toEqual([...(result2.teams[i]?.members ?? [])]);
     }
   });
 });
@@ -666,17 +670,17 @@ describe('TeamGenerator — Phase 2 tie-break: lexicographically smallest swap i
   it('team 0 contains exactly p3, p4, p5 — as determined by lex-smallest swap (p1,p3)', () => {
     // The tie-break selects swap p1<->p3 (smallest min-id p1), placing p3 into t0.
     // If tie-break were different (e.g., last-found wins), t0 would contain p5,p6,p7 or similar.
-    expect([...result.teams[0]!.members].sort()).toEqual(['p3', 'p4', 'p5']);
+    expect([...(result.teams[0]?.members ?? [])].sort()).toEqual(['p3', 'p4', 'p5']);
   });
 
   it('team 1 contains exactly p1, p2, p6, p7 — the complement after applying swap (p1,p3)', () => {
-    expect([...result.teams[1]!.members].sort()).toEqual(['p1', 'p2', 'p6', 'p7']);
+    expect([...(result.teams[1]?.members ?? [])].sort()).toEqual(['p1', 'p2', 'p6', 'p7']);
   });
 
   it('result is deterministic: a second call produces identical unsorted member arrays', () => {
     const result2 = generateTeams(players, constraints);
     for (let i = 0; i < result.teams.length; i++) {
-      expect([...result.teams[i]!.members]).toEqual([...result2.teams[i]!.members]);
+      expect([...(result.teams[i]?.members ?? [])]).toEqual([...(result2.teams[i]?.members ?? [])]);
     }
   });
 });
@@ -706,7 +710,9 @@ describe('TeamGenerator — maxIterations=0 returns snake-draft unchanged', () =
 
   it('team member sets match snakeDraftOnly exactly', () => {
     for (let i = 0; i < snakeTeams.length; i++) {
-      expect([...result.teams[i]!.members].sort()).toEqual([...snakeTeams[i]!].sort());
+      expect([...(result.teams[i]?.members ?? [])].sort()).toEqual(
+        [...(snakeTeams[i] ?? [])].sort(),
+      );
     }
   });
 

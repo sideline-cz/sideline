@@ -23,20 +23,25 @@ export const handleTeamsGenerated = (event: EventRpcEvents.TeamsGeneratedEvent) 
           const locale = guildLocale({ guild_locale: guild.preferred_locale });
           const embed = buildGeneratedTeamsEmbed(event, locale);
 
-          return rest.createMessage(channelId, { embeds: [embed] }).pipe(
-            Effect.tap((msg) =>
-              Effect.logInfo(
-                `Posted generated teams for "${event.title}" to channel ${channelId}, message ${msg.id}`,
+          return rest
+            .createMessage(channelId, { embeds: [embed], allowed_mentions: { parse: [] } })
+            .pipe(
+              Effect.tap((msg) =>
+                Effect.logInfo(
+                  `Posted generated teams for "${event.title}" to channel ${channelId}, message ${msg.id}`,
+                ),
               ),
-            ),
-            Effect.asVoid,
-            Effect.catchCause((cause) =>
-              Effect.logWarning(
-                `handleTeamsGenerated: failed to post teams for event ${event.event_id}`,
-                cause,
+              Effect.asVoid,
+              // Best-effort post: log and swallow failures, matching every sibling sync-event
+              // handler (handleCoachingStatus, handleCreated, …). The outbox row is still
+              // marked processed; Discord delivery is not retried by design.
+              Effect.catchCause((cause) =>
+                Effect.logWarning(
+                  `handleTeamsGenerated: failed to post teams for event ${event.event_id}`,
+                  cause,
+                ),
               ),
-            ),
-          );
+            );
         }),
       ),
   });

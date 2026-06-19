@@ -13,7 +13,9 @@ This is the thesis centerpiece. Plan consolidates the architect + designer specs
    - `sizeTerm = sizeImbalance / maxPossibleSizeImbalance`.
    - `genderTerm = genderImbalance / maxPossibleGenderImbalance`.
    - `cost = wElo*eloTerm + wSize*sizeTerm + wGender*genderTerm`. A unit test asserts a gender-weighted run changes assignments vs. an unweighted run.
-2. **Fully stateless generate + post.** Nothing is persisted on generate. `post-teams-to-discord` takes the (hand-adjusted) assignment from the client and posts it. **No snapshot table.** Only the *config weights* are persisted. Re-post is guarded by returning/over-writing the Discord message id where feasible.
+2. **Stateless generate; outbox-backed post.** Nothing is persisted on generate. `post-teams-to-discord` re-derives the teams server-side from the trusted roster and enqueues them on the existing `event_sync_events` outbox (a `teams_generated` row with a `teams_payload` JSONB snapshot of just that delivery); the bot drains the outbox and posts the embed. **No dedicated snapshot table** is added. Only the *config weights* are persisted. Re-post is guarded by an atomic insert-if-not-pending on the outbox (rejects while a post is still unprocessed); editing the existing Discord message on repost is future work.
+
+   > **As-built note:** the original draft assumed the post could reach the bot via a `SyncRpcs` RPC, but `SyncRpcs` is bot→server only — server→Discord must go through the event-sync outbox, which is what shipped.
 3. **Separate `TeamGeneratorSection` organism** (designer's approach) — not an extension of `TrainingResultSection`. Generation and result-logging are distinct intents.
 4. **Unknown gender = its own bucket**, excluded from the gender-balance penalty but counted for size. `InsufficientGenderMix` warns when the labeled population is too small to balance.
 

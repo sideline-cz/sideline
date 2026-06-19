@@ -1935,6 +1935,7 @@
   "teamGen_notGeneratable": "This event type does not support team generation.",
   "teamGen_generateFailed": "Failed to generate teams.",
   "teamGen_postFailed": "Failed to post teams to Discord.",
+  "teamGen_postPending": "These teams are already being posted to Discord. Please wait a moment before trying again.",
   "teamGen_postSuccess": "Teams posted to Discord.",
   "teamGen_rosterChanged": "The roster has changed — teams were reloaded. Please review and post again.",
   "teamGen_teamName": "Team {n}",
