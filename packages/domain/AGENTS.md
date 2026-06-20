@@ -11,6 +11,18 @@ src/
 └── rpc/             — RPC endpoint definitions (schemas + groups)
 ```
 
+## Pure Algorithm Modules (`src/models/<Algorithm>.ts` + `test/<Algorithm>.test.ts`)
+
+A multi-step computation that several consumers must run identically (a rating update, a balanced-team assignment, a scoring/ranking pass) lives as a **pure algorithm module** in `src/models/` with a **paired unit test** at `packages/domain/test/<Algorithm>.test.ts`. Reference implementations: `src/models/Elo.ts` (← `test/Elo.test.ts`) and `src/models/TeamGenerator.ts` (← `test/TeamGenerator.test.ts`).
+
+Rules:
+
+1. **No Effect, no I/O, no `Schema` decoding** — the module exports plain functions over plain readonly input/output types and runs in browser (web), Node (bot), and Node (server). Pull only pure helpers from `effect` (`Array`/`Option`/`pipe`) if needed.
+2. **Deterministic — never call `Math.random()` or read the clock.** Break every tie with an explicit total order captured at decision time (e.g. `TeamGenerator` sorts by rating desc, then `teamMemberId` asc; swap ties break by `min(idI, idJ)` then `max(idI, idJ)`). The same inputs must always yield the same output so the test suite can assert exact results.
+3. **Document the algorithm in a module-level doc comment** — phases, cost/scoring function, normalization constants, and any term that is currently inert (e.g. `TeamGenerator`'s size weight under equal-size swaps). Constants that callers may tune are named exports (`SCALE_ELO`); internal-only thresholds stay module-private.
+4. **The paired test is required in the same PR** and asserts exact deterministic outputs (not just "ran without throwing") — including tie-breaking, boundary sizes, and warning emission. This is the only safety net since the module has no compile-time link to its consumers.
+5. **The server wraps the pure result into Effect at the call site**, never inside the module. Repository/API code calls the pure function and lifts failures/empty results into typed Effect errors itself.
+
 ## Model.Class
 
 Use `Model.Class` from `@effect/sql` to define database models with variant-based schemas:

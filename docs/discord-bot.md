@@ -423,6 +423,45 @@ At least one of `user` or `role` must be supplied.
 
 ---
 
+### /training generate
+
+**Description:** Get a private deep-link to the team generator UI for a specific training event.
+
+**Czech sub-command name:** `generovat`
+
+**Permission required:** Hidden in the Discord UI from members who lack `ManageEvents` (used as a proxy gate for captains/coaches). No server-side permission is checked beyond guild membership.
+
+**Constraints:**
+- `dm_permission: false` — the command cannot be used in DMs.
+- `default_member_permissions: ManageEvents` — Discord hides the command from members without this permission.
+
+**Options:**
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `event` | String (autocomplete) | Yes | Event ID; populated via autocomplete from loggable training events |
+
+**Flow:**
+
+1. Captain invokes `/training generate event:<autocomplete>`.
+2. The handler returns an immediate deferred ephemeral acknowledgement and forks a background fiber.
+3. The background fiber calls `Event/GetLoggableTrainingEvents` and `Event/GetUpcomingGuildEvents` (for `team_id`) concurrently.
+4. If the selected `event` value appears in the loggable list, the bot builds a deep-link URL (`{WEB_URL}/teams/{teamId}/events/{eventId}`) pointing to the team generator section of the event detail page and replies with a localised ephemeral message containing a clickable link.
+5. If the event is no longer loggable, the bot replies with an ephemeral "event not loggable" message.
+
+**Autocomplete behavior:** The `event` option reuses the same `Event/GetLoggableTrainingEvents` RPC call as `/training result`. Results are filtered case-insensitively by the user's current input (against title and ISO date), up to 25 choices formatted as `{date} · {title}`.
+
+**Errors handled:**
+- `GuildNotFound` — returns an ephemeral "not a member" message.
+- `RpcClientError` — returns a generic error message.
+- If `WEB_URL` is not configured on the bot, replies with a "deep link unavailable" message.
+
+**Source files:**
+- `applications/bot/src/commands/training/generate.ts` (command handler)
+- `applications/bot/src/commands/training/index.ts` (command registration)
+
+---
+
 ## Button and Modal Interactions
 
 All interaction handlers are registered in `applications/bot/src/interactions/index.ts`. Each handler pattern-matches on the `custom_id` prefix.
@@ -959,6 +998,16 @@ Provides loggable training-event suggestions for the `/training result event` op
 
 ---
 
+### Training Generate Autocomplete
+
+Provides loggable training-event suggestions for the `/training generate event` option.
+
+**Trigger condition:** command name is `training` and the focused option name is `event` (shared autocomplete handler with the `result` sub-command).
+
+**Behavior:** Identical to Training Result Autocomplete — calls `Event/GetLoggableTrainingEvents`, filters by the user's input, and returns up to 25 formatted choices. The choice value is the event ID string.
+
+---
+
 ## Gateway Event Handlers
 
 Gateway handlers are set up in `applications/bot/src/events/index.ts`. They react to Discord gateway dispatch events.
@@ -1209,6 +1258,7 @@ When the Channel Sync Worker calls `Channel/UpsertMapping` or `Channel/UpsertMap
 | `event_roster_approval_request` | `handleEventRosterApprovalRequest.ts` | Posts an Approve/Decline approval embed to a per-event Discord thread in the event's owner-group channel. Flow: (1) Resolve the stored thread ID via `Event/SaveEventRosterThreadIfAbsent`; if none exists, create a PUBLIC_THREAD (type 11, 7-day auto-archive, name `"Roster approval: {eventTitle}"` truncated to 100 chars) in `owner_channel_id` and save it with CAS — the loser of a concurrent race deletes its orphan thread and uses the winner's ID. (2) Build the approval embed (orange, pending state) via `buildRosterApprovalMessage` with event/candidate/roster fields and `rsv-approve:{eventId}:{memberId}` / `rsv-decline:{eventId}:{memberId}` button components. (3) Post the message to the resolved thread via `rest.createMessage`. (4) Persist the message ID via `Event/SaveApprovalRequestMessageId`. Emitted by `EventRosterProvisioningService` when a member RSVPs "yes" to an event whose linked roster has `auto_approve = false` and the member is not already a roster member. If `owner_channel_id` is absent (event has no owner group), the event is skipped with a warning. |
 | `event_roster_approval_cancel` | `handleEventRosterApprovalCancel.ts` | Deletes the specific approval embed message from the per-event thread. Uses `owners_thread_id` (the thread channel ID) and `discord_message_id` (the message ID) from the event payload. Discord 10008 errors (Unknown Message) are silently swallowed. Emitted when a pending approval request is cancelled — e.g. the member's RSVP changes away from "yes" or the event–roster link is removed. |
 | `event_roster_thread_delete` | `handleEventRosterThreadDelete.ts` | Deletes the entire per-event approval thread from Discord. Uses `owners_thread_id` from the event payload. Discord 10003 errors (Unknown Channel) are silently swallowed. Emitted when the event–roster link is removed and a thread previously existed. |
+| `teams_generated` | `handleTeamsGenerated.ts` | Posts a generated-teams embed to the event's `discord_target_channel_id`. Flow: (1) If `discord_target_channel_id` is `None`, logs a warning and skips. (2) Fetches the guild via `rest.getGuild` to resolve the preferred locale. (3) Builds the embed via `buildGeneratedTeamsEmbed` — lists each team with its members (display name, rating, calibrating indicator) and average rating. (4) Posts the embed to the target channel via `rest.createMessage`. Discord errors are caught and logged as warnings without rethrowing. Emitted by `POST /teams/:teamId/events/:eventId/post-teams-to-discord`. |
 
 **Lifecycle RPCs:**
 - `Event/MarkEventProcessed`

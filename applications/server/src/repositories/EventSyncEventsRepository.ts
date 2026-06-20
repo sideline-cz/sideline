@@ -2,6 +2,7 @@ import {
   Discord,
   Event,
   type EventRosterModel,
+  EventRpcEvents,
   GroupModel,
   type RosterModel,
   Team,
@@ -25,6 +26,7 @@ const EventSyncEventType = Schema.Literals([
   'event_roster_approval_request',
   'event_roster_approval_cancel',
   'event_roster_thread_delete',
+  'teams_generated',
 ]);
 type EventSyncEventType = typeof EventSyncEventType.Type;
 
@@ -94,6 +96,9 @@ export class EventSyncEventRow extends Schema.Class<EventSyncEventRow>('EventSyn
   claimed_by_user_display_name: Schema.OptionFromNullOr(Schema.String),
   claimed_by_username: Schema.OptionFromNullOr(Schema.String),
   event_all_day: Schema.Boolean,
+  // Nullable JSONB; only populated for 'teams_generated' rows.
+  // node-pg auto-parses JSONB into a JS object/array, so we use the array schema directly.
+  teams_payload: Schema.OptionFromNullOr(Schema.Array(EventRpcEvents.TeamsGeneratedTeam)),
 }) {}
 
 const MarkProcessedInput = Schema.Struct({
@@ -137,7 +142,8 @@ const make = Effect.gen(function* () {
              u.discord_nickname     AS claimed_by_nickname,
              u.discord_display_name AS claimed_by_user_display_name,
              u.username             AS claimed_by_username,
-             ese.event_all_day
+             ese.event_all_day,
+             ese.teams_payload
       FROM event_sync_events ese
       LEFT JOIN team_members tm ON tm.id = ese.claimed_by_member_id
       LEFT JOIN users u         ON u.id = tm.user_id
@@ -537,6 +543,70 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  // ---- Teams generated event --------------------------------------------------
+
+  // Idempotent insert-if-not-pending: the row is only written when no unprocessed
+  // 'teams_generated' row already exists for the event. The `WHERE NOT EXISTS` fast-path
+  // skips the common case, and `ON CONFLICT DO NOTHING` against the partial unique index
+  // `event_sync_events_teams_generated_pending_unique` makes it fully race-safe — two
+  // concurrent posts cannot both enqueue a pending row. RETURNING id lets the caller
+  // distinguish "inserted" (Some) from "skipped because a post is already pending" (None).
+  const insertTeamsGeneratedEventQuery = SqlSchema.findOneOption({
+    Request: Schema.Struct({
+      team_id: Team.TeamId,
+      guild_id: Discord.Snowflake,
+      event_id: Event.EventId,
+      event_title: Schema.String,
+      discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+      teams_payload_json: Schema.String,
+    }),
+    Result: Schema.Struct({ id: Schema.String }),
+    execute: (input) => sql`
+      INSERT INTO event_sync_events (
+        team_id, guild_id, event_type, event_id, event_title, event_description,
+        event_image_url, event_start_at, event_end_at, event_location,
+        event_location_url, event_event_type, discord_target_channel_id,
+        member_group_id, discord_role_id, claimed_by_member_id, claimed_by_display_name,
+        event_all_day, teams_payload
+      )
+      SELECT
+        ${input.team_id}, ${input.guild_id}, ${'teams_generated'}, ${input.event_id},
+        ${input.event_title}, ${null},
+        ${null}, ${DateTime.makeUnsafe(0)}, ${null}, ${null},
+        ${null}, ${'teams_generated'}, ${input.discord_target_channel_id},
+        ${null}, ${null}, ${null}, ${null}, ${false},
+        ${input.teams_payload_json}::jsonb
+      WHERE NOT EXISTS (
+        SELECT 1 FROM event_sync_events
+        WHERE event_type = 'teams_generated'
+          AND event_id = ${input.event_id}
+          AND processed_at IS NULL
+      )
+      ON CONFLICT (event_type, event_id)
+        WHERE event_type = 'teams_generated' AND processed_at IS NULL
+        DO NOTHING
+      RETURNING id
+    `,
+  });
+
+  /** Returns true if a new sync event was enqueued, false if a post was already pending. */
+  const emitTeamsGenerated = (
+    teamId: Team.TeamId,
+    guildId: Discord.Snowflake,
+    eventId: Event.EventId,
+    title: string,
+    discordTargetChannelId: Option.Option<Discord.Snowflake>,
+    teams: ReadonlyArray<EventRpcEvents.TeamsGeneratedTeam>,
+  ): Effect.Effect<boolean> =>
+    insertTeamsGeneratedEventQuery({
+      team_id: teamId,
+      guild_id: guildId,
+      event_id: eventId,
+      event_title: title,
+      discord_target_channel_id: discordTargetChannelId,
+      teams_payload_json: JSON.stringify(teams),
+    }).pipe(Effect.map(Option.isSome), catchSqlErrors);
+
   // ---- Roster event helpers ---------------------------------------------------
 
   const insertRosterEvent = SqlSchema.void({
@@ -703,6 +773,7 @@ const make = Effect.gen(function* () {
     emitTrainingClaimUpdate,
     emitUnclaimedTrainingReminder,
     emitCoachingStatus,
+    emitTeamsGenerated,
     emitEventRosterApprovalRequest,
     emitEventRosterApprovalCancel,
     emitEventRosterThreadDelete,

@@ -47,6 +47,16 @@ export const buildTrainingResultDeepLink = (
     (url) => `${url.replace(/\/$/, '')}/teams/${teamId}/events/${eventId}#training-result`,
   );
 
+export const buildTrainingGenerateDeepLink = (
+  webUrl: Option.Option<string>,
+  teamId: string,
+  eventId: string,
+): Option.Option<string> =>
+  Option.map(
+    webUrl,
+    (url) => `${url.replace(/\/$/, '')}/teams/${teamId}/events/${eventId}#team-generator`,
+  );
+
 // ---------------------------------------------------------------------------
 // Approval (two-embed)
 // ---------------------------------------------------------------------------

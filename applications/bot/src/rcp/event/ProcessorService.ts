@@ -14,6 +14,7 @@ import { handleEventRosterApprovalRequest } from './handleEventRosterApprovalReq
 import { handleEventRosterThreadDelete } from './handleEventRosterThreadDelete.js';
 import { handleRsvpReminder } from './handleRsvpReminder.js';
 import { handleStarted } from './handleStarted.js';
+import { handleTeamsGenerated } from './handleTeamsGenerated.js';
 import { handleTrainingClaimRequest } from './handleTrainingClaimRequest.js';
 import { handleTrainingClaimUpdate } from './handleTrainingClaimUpdate.js';
 import { handleUnclaimedTrainingReminder } from './handleUnclaimedTrainingReminder.js';
@@ -35,6 +36,7 @@ const action: (
     Match.tag('event_roster_approval_request', handleEventRosterApprovalRequest),
     Match.tag('event_roster_approval_cancel', handleEventRosterApprovalCancel),
     Match.tag('event_roster_thread_delete', handleEventRosterThreadDelete),
+    Match.tag('teams_generated', handleTeamsGenerated),
     Match.exhaustive,
   );
 

@@ -5,6 +5,7 @@ import {
   RosterModel,
   TeamMember,
 } from '@sideline/domain';
+import { LogicError } from '@sideline/effect-lib';
 import { Effect, Match, Option, Schema } from 'effect';
 import {
   type EventSyncEventRow,
@@ -269,5 +270,26 @@ export const constructEvent = Match.type<EventSyncEventRow>().pipe(
       }),
     ),
   ),
+  Match.when({ event_type: 'teams_generated' }, (r) => {
+    // A teams_generated row with a null or empty payload is malformed — fail so the
+    // ProcessorService marks the event FAILED for retry instead of posting empty teams.
+    const teamsOption = r.teams_payload;
+    if (Option.isNone(teamsOption) || teamsOption.value.length === 0) {
+      return LogicError.die(
+        `teams_generated event ${r.id} has a null or empty teams_payload — marking failed`,
+      );
+    }
+    return Effect.succeed(
+      new EventRpcEvents.TeamsGeneratedEvent({
+        id: r.id,
+        team_id: r.team_id,
+        guild_id: r.guild_id,
+        event_id: r.event_id,
+        title: r.event_title,
+        discord_target_channel_id: r.discord_target_channel_id,
+        teams: teamsOption.value,
+      }),
+    );
+  }),
   Match.exhaustive,
 );

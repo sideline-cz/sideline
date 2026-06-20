@@ -24,6 +24,10 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/settings')(
           emailForwardingConfig: api.emailForwarding
             .getEmailForwardingConfig({ params: { teamId } })
             .pipe(Effect.option),
+          generationConfig: api.teamGeneration.getGenerationConfig({ params: { teamId } }).pipe(
+            Effect.tapError((e) => Effect.logWarning('Failed to load generation config', e)),
+            Effect.catch(() => Effect.succeed(null)),
+          ),
         }),
       ),
       warnAndCatchAll,
@@ -34,8 +38,14 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/settings')(
 
 function TeamSettingsRoute() {
   const { teamId: teamIdRaw } = Route.useParams();
-  const { settings, discordChannels, discordRoles, teamInfo, emailForwardingConfig } =
-    Route.useLoaderData();
+  const {
+    settings,
+    discordChannels,
+    discordRoles,
+    teamInfo,
+    emailForwardingConfig,
+    generationConfig,
+  } = Route.useLoaderData();
 
   return (
     <TeamSettingsPage
@@ -45,6 +55,7 @@ function TeamSettingsRoute() {
       discordRoles={discordRoles}
       teamInfo={teamInfo}
       emailForwardingConfig={Option.getOrNull(emailForwardingConfig)}
+      initialGenerationConfig={generationConfig}
     />
   );
 }

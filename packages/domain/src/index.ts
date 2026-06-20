@@ -68,6 +68,8 @@ export * as TeamApi from './api/TeamApi.js';
 
 export * as TeamChallengeApi from './api/TeamChallengeApi.js';
 
+export * as TeamGenerationApi from './api/TeamGenerationApi.js';
+
 export * as TeamSettingsApi from './api/TeamSettingsApi.js';
 
 export * as TrainingTypeApi from './api/TrainingTypeApi.js';
@@ -183,6 +185,39 @@ export * as TeamChallenge from './models/TeamChallenge.js';
 export * as TeamChannel from './models/TeamChannel.js';
 
 export * as TeamChannelAccess from './models/TeamChannelAccess.js';
+
+export * as TeamGenerationConfig from './models/TeamGenerationConfig.js';
+
+/**
+ * Balanced Training Team Generator — pure algorithm module (no Effect).
+ *
+ * Phase 1 — seed: players are sorted by rating descending (ties broken by teamMemberId
+ * ascending) and distributed via snake-draft into N teams: round 0 goes 0→N-1, round 1
+ * goes N-1→0, alternating. This guarantees the max size difference between any two teams
+ * is at most 1 when player count is not divisible by teamCount. The ordering is fully
+ * deterministic because ties are broken by teamMemberId ascending — a stable, explicit
+ * total order that requires no randomness.
+ *
+ * Phase 2 — hill-climbing local search: all single cross-team swaps are evaluated; the
+ * best cost-reducing swap is applied; the process repeats until no improvement is found
+ * or maxIterations is reached. Ties in cost are broken deterministically: first by the
+ * smaller of the two member ids (min(idI, idJ) ascending), then by the larger
+ * (max(idI, idJ) ascending). The ids used for tie-breaking are captured at the moment the
+ * candidate swap is evaluated — never re-read from mutable array state.
+ *
+ * Cost function (fully normalized so weights are comparable):
+ *   cost = wElo * clamp(ratingSpread / SCALE_ELO, 0, 1)
+ *        + wSize * sizeImbalanceTerm   [constant under equal-size swaps — see note below]
+ *        + wGender * (genderImbalance / maxGenderImbalance)
+ *
+ * Size-term note: snake-draft guarantees team sizes differ by at most 1. Because the local
+ * search only performs equal-size 1-for-1 swaps the size imbalance never changes during
+ * Phase 2, so weightSize does not influence swap selection in the current implementation
+ * (reserved for future move operations that change team sizes).
+ *
+ * Unknown gender is counted for size balance but excluded from the gender penalty.
+ */
+export * as TeamGenerator from './models/TeamGenerator.js';
 
 export * as TeamInvite from './models/TeamInvite.js';
 

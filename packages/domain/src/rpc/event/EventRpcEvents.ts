@@ -205,6 +205,33 @@ export class EventRosterThreadDeleteEvent extends Schema.TaggedClass<EventRoster
   },
 ) {}
 
+export const TeamsGeneratedTeamMember = Schema.Struct({
+  display_name: Schema.String,
+  rating: Schema.Number,
+  is_calibrating: Schema.Boolean,
+});
+export type TeamsGeneratedTeamMember = Schema.Schema.Type<typeof TeamsGeneratedTeamMember>;
+
+export const TeamsGeneratedTeam = Schema.Struct({
+  name: Schema.String,
+  avg_rating: Schema.Number,
+  members: Schema.Array(TeamsGeneratedTeamMember),
+});
+export type TeamsGeneratedTeam = Schema.Schema.Type<typeof TeamsGeneratedTeam>;
+
+export class TeamsGeneratedEvent extends Schema.TaggedClass<TeamsGeneratedEvent>()(
+  'teams_generated',
+  {
+    id: Schema.String,
+    team_id: Team.TeamId,
+    guild_id: Discord.Snowflake,
+    event_id: Event.EventId,
+    title: Schema.String,
+    discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    teams: Schema.Array(TeamsGeneratedTeam),
+  },
+) {}
+
 export const UnprocessedEventSyncEvent = Schema.Union([
   EventCreatedEvent,
   EventUpdatedEvent,
@@ -218,6 +245,7 @@ export const UnprocessedEventSyncEvent = Schema.Union([
   EventRosterApprovalRequestEvent,
   EventRosterApprovalCancelEvent,
   EventRosterThreadDeleteEvent,
+  TeamsGeneratedEvent,
 ]);
 
 export type UnprocessedEventSyncEvent = Schema.Schema.Type<typeof UnprocessedEventSyncEvent>;

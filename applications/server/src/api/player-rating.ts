@@ -1,13 +1,9 @@
-import { Auth, Elo, PlayerRatingApi, type Team, type TeamMember } from '@sideline/domain';
+import { Elo, PlayerRatingApi, type Team, type TeamMember } from '@sideline/domain';
 import { DateTime, Effect, Option, type ServiceMap } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
-import {
-  GLOBAL_ADMIN_SENTINEL_ID,
-  hasPermission,
-  requirePermission,
-  requireReadAccess,
-} from '~/api/permissions.js';
+import { GLOBAL_ADMIN_SENTINEL_ID, hasPermission } from '~/api/permissions.js';
+import { requireManageAccess } from '~/api/training-shared.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
@@ -21,27 +17,10 @@ import { TrainingGamesRepository } from '~/repositories/TrainingGamesRepository.
 
 const HISTORY_LIMIT = 50;
 
-// ---------------------------------------------------------------------------
-// Gate: requires member:edit on ALL endpoints
-// Resolves read access then additionally checks member:edit.
-// Global admins bypass the permission check because VIEW_PERMISSIONS lacks member:edit.
-// ---------------------------------------------------------------------------
-
-const requireManageAccess = (
+const requirePlayerRatingManageAccess = (
   members: ServiceMap.Service.Shape<typeof TeamMembersRepository>,
   teamId: Team.TeamId,
-) =>
-  Effect.Do.pipe(
-    Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
-    Effect.bind('membership', () =>
-      requireReadAccess(members, teamId, new PlayerRatingApi.Forbidden()),
-    ),
-    Effect.tap(({ currentUser, membership }) =>
-      currentUser.isGlobalAdmin
-        ? Effect.void
-        : requirePermission(membership, 'member:edit', new PlayerRatingApi.Forbidden()),
-    ),
-  );
+) => requireManageAccess(members, teamId, new PlayerRatingApi.Forbidden());
 
 // ---------------------------------------------------------------------------
 // Helper: validate team composition (shared by applyGameResult + logTrainingGame)
@@ -121,7 +100,7 @@ export const PlayerRatingApiLive = HttpApiBuilder.group(Api, 'playerRating', (ha
         // ------------------------------------------------------------------
         .handle('getTeamRatings', ({ params: { teamId } }) =>
           Effect.Do.pipe(
-            Effect.bind('gate', () => requireManageAccess(members, teamId)),
+            Effect.bind('gate', () => requirePlayerRatingManageAccess(members, teamId)),
             Effect.bind('rows', () => ratings.getTeamRatings(teamId)),
             Effect.map(({ gate: { currentUser, membership }, rows }) => {
               const canManage =
@@ -135,7 +114,7 @@ export const PlayerRatingApiLive = HttpApiBuilder.group(Api, 'playerRating', (ha
         // ------------------------------------------------------------------
         .handle('getMemberRating', ({ params: { teamId, memberId } }) =>
           Effect.Do.pipe(
-            Effect.tap(() => requireManageAccess(members, teamId)),
+            Effect.tap(() => requirePlayerRatingManageAccess(members, teamId)),
             // Verify member belongs to this team
             Effect.tap(() =>
               members.findRosterMemberByIds(teamId, memberId).pipe(
@@ -186,7 +165,7 @@ export const PlayerRatingApiLive = HttpApiBuilder.group(Api, 'playerRating', (ha
         // ------------------------------------------------------------------
         .handle('getMemberRatingHistory', ({ params: { teamId, memberId } }) =>
           Effect.Do.pipe(
-            Effect.tap(() => requireManageAccess(members, teamId)),
+            Effect.tap(() => requirePlayerRatingManageAccess(members, teamId)),
             // Verify member belongs to this team
             Effect.tap(() =>
               members.findRosterMemberByIds(teamId, memberId).pipe(
@@ -226,7 +205,7 @@ export const PlayerRatingApiLive = HttpApiBuilder.group(Api, 'playerRating', (ha
         // ------------------------------------------------------------------
         .handle('applyGameResult', ({ params: { teamId }, payload }) =>
           Effect.Do.pipe(
-            Effect.bind('gate', () => requireManageAccess(members, teamId)),
+            Effect.bind('gate', () => requirePlayerRatingManageAccess(members, teamId)),
             // Verify all member ids belong to the team
             Effect.bind('rosterIds', () =>
               members
@@ -272,7 +251,7 @@ export const PlayerRatingApiLive = HttpApiBuilder.group(Api, 'playerRating', (ha
         // ------------------------------------------------------------------
         .handle('logTrainingGame', ({ params: { teamId, eventId }, payload }) =>
           Effect.Do.pipe(
-            Effect.bind('gate', () => requireManageAccess(members, teamId)),
+            Effect.bind('gate', () => requirePlayerRatingManageAccess(members, teamId)),
             // Acquire lazily to avoid requiring these services in the old test layer
             Effect.bind('trainingGames', () => TrainingGamesRepository.asEffect()),
             Effect.bind('events', () => EventsRepository.asEffect()),
@@ -375,7 +354,7 @@ export const PlayerRatingApiLive = HttpApiBuilder.group(Api, 'playerRating', (ha
         // ------------------------------------------------------------------
         .handle('getTrainingGames', ({ params: { teamId, eventId } }) =>
           Effect.Do.pipe(
-            Effect.tap(() => requireManageAccess(members, teamId)),
+            Effect.tap(() => requirePlayerRatingManageAccess(members, teamId)),
             Effect.bind('trainingGames', () => TrainingGamesRepository.asEffect()),
             Effect.bind('games', ({ trainingGames }) =>
               trainingGames.listGamesByEvent(teamId, eventId),

@@ -54,6 +54,12 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/events/$eve
             Effect.tapError((e) => Effect.logWarning('Failed to load team ratings for event', e)),
             Effect.catch(() => Effect.succeed({ canManage: false })),
           ),
+          generationConfig: api.teamGeneration.getGenerationConfig({ params: { teamId } }).pipe(
+            Effect.tapError((e) =>
+              Effect.logWarning('Failed to load generation config for event', e),
+            ),
+            Effect.catch(() => Effect.succeed({ canManage: false as const })),
+          ),
         }),
       ),
       warnAndCatchAll,
@@ -83,6 +89,7 @@ function EventDetailRoute() {
       rosters={data.rosters.rosters}
       canManageRosters={data.rosters.canManage}
       canManageRatings={data.teamRatings.canManage}
+      canGenerate={data.generationConfig.canManage}
       initialEventRosterLink={data.eventRosterLink}
       rsvpYesAttendees={rsvpYesAttendees}
       initialTrainingGames={data.trainingGames.games}

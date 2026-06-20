@@ -89,6 +89,8 @@ const repo = Model.makeRepository(User, {
 
 RPC groups are served via NDJSON over HTTP. Each group has a domain definition and a server handler:
 
+**RPC direction is bot→server only.** The server is always the RPC *server* (`RpcServer.layer(ObservableSyncRpcs)` in `src/AppLive.ts`); the bot is always the RPC *client* (`RpcClient.make(SyncRpcs.SyncRpcs)` in `applications/bot/src/services/SyncRpc.ts`). The server has NO RPC channel back to the bot and cannot call Discord directly. To push anything to Discord (post a message, create a channel/role, send a DM), the server's only path is to **enqueue an outbox row** in a `*_sync_events` table; the bot polls that table, decodes the row to an `UnprocessedEventSyncEvent` (or sibling union) variant, and performs the Discord side effect. When a new feature must reach Discord from the server, add an outbox event type (see "Adding an `event_sync_events` Event Type — Four Synchronized Places" below) — never look for a server→bot RPC, there is none.
+
 | Group | Domain definition | Server handler | Purpose |
 |-------|------------------|----------------|---------|
 | Role | `packages/domain/src/rpc/role/RoleRpcGroup.ts` | `src/rpc/role/index.ts` | Role sync events |
@@ -344,6 +346,20 @@ Rules:
 5. The `EventSyncEventRow` schema lists every aliased column; `Schema.OptionFromNullOr` decodes nullable JOIN results to `Option`
 
 Reference: `EventSyncEventsRepository.findUnprocessedEvents` resolves the claimer's `discord_id`, `name`, `nickname`, `display_name`, `username` from `users` via `team_members`.
+
+### JSONB payload column on an outbox event type
+
+The JOIN-resolution rule above covers **identity fields of existing rows**. When an outbox event must carry a **computed, point-in-time snapshot that has no stable source row to re-derive at read time** (e.g. the balanced-team assignment for `teams_generated` — players and ratings may change before the bot processes it), store the snapshot in a dedicated **nullable JSONB column** on the outbox table instead. This is the only sanctioned exception to "never add denormalised columns".
+
+Reference: `event_sync_events.teams_payload` (added by `packages/migrations/src/before/1789900000_add_teams_payload_to_event_sync_events.ts`), emitted by `EventSyncEventsRepository.emitTeamsGenerated` and decoded in `constructEvent` (`src/rpc/event/events.ts`).
+
+Rules:
+
+1. **The column is nullable and populated for exactly one `event_type`.** Every other event type inserts `NULL`. The migration adds the column nullable so existing in-flight rows are unaffected.
+2. **Define the payload element schema once in the domain RPC file** (`packages/domain/src/rpc/event/EventRpcEvents.ts` — `TeamsGeneratedTeam` / `TeamsGeneratedTeamMember`) and reuse it on both the row schema and the RPC event class. Never inline-shape the JSON in the repository.
+3. **The row schema decodes the column with `Schema.OptionFromNullOr(Schema.Array(<Element>))`.** node-pg auto-parses JSONB into a JS object/array, so the schema decodes the already-parsed value directly — do NOT wrap it in `Schema.parseJson`. `constructEvent` defaults the `None` case to `[]`.
+4. **The emitter serializes with `JSON.stringify` and casts `::jsonb` in the INSERT.** Pass the stringified payload as a `Schema.String` request field and write `${input.teams_payload_json}::jsonb` in the SQL.
+5. **Snapshot at emit time; never re-derive at read time.** The whole reason for the column is that the source (player ratings, roster) may have changed by the time the bot polls — re-running the JOIN/algorithm would produce a different result than the one the captain saw.
 
 ### Overloaded payload fields on event sync events (training vs non-training)
 

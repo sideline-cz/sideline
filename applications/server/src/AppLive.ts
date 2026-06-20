@@ -58,6 +58,7 @@ import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { TeamChallengeRepository } from '~/repositories/TeamChallengeRepository.js';
 import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
 import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
+import { TeamGenerationRepository } from '~/repositories/TeamGenerationRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamOnboardingTokensRepository } from '~/repositories/TeamOnboardingTokensRepository.js';
@@ -156,6 +157,7 @@ const Repositories = Layer.mergeAll(
   TeamChannelsRepository.Default,
   TeamChannelAccessRepository.Default,
   PlayerRatingsRepository.Default,
+  TeamGenerationRepository.Default,
   // TrainingGamesRepository depends on PlayerRatingsRepository; providing it inline
   // keeps the layer self-contained. The standalone PlayerRatingsRepository.Default above
   // satisfies other consumers (e.g. the HTTP API handlers).

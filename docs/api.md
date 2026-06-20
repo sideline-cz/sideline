@@ -42,6 +42,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Event Roster](#31-event-roster)
    - [Global Admin](#32-global-admin)
    - [Player Rating](#33-player-rating)
+   - [Team Generation](#34-team-generation)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -6164,6 +6165,193 @@ Returns all logged training-game rounds for an event, ordered by round number as
 
 ---
 
+### 34. Team Generation
+
+**Source:** `packages/domain/src/api/TeamGenerationApi.ts`
+**Prefix:** `/teams/:teamId`
+
+Generates balanced training teams for a specific event and manages per-team configuration for the generator algorithm. The generator uses a weighted scoring function that can balance by Elo rating spread, team-size equality, and gender distribution.
+
+All endpoints require the caller to be an authenticated team member. Write endpoints (`generateTeams`, `updateGenerationConfig`, `postTeamsToDiscord`) require the `member:edit` permission (Captain, Admin, or any role with that permission).
+
+---
+
+#### `POST /teams/:teamId/events/:eventId/generate-teams`
+
+Runs the balanced team generator for the event and returns the generated team assignments. Does **not** persist or post anything — the result is ephemeral until the caller explicitly posts it to Discord.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `member:edit`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `eventId` | `EventId` (string) | Event ID |
+
+**Request Body:** `GenerateTeamsRequest`
+
+| Field | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `teamCount` | `integer` | No | 2–20 | Number of teams to generate; falls back to team config `defaultTeamCount` when omitted |
+
+**Response:** `200 OK` — `GenerateTeamsResponse`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `teams` | `GeneratedTeamResponse[]` | No | Ordered list of generated teams |
+| `maxRatingSpread` | `number` | No | Maximum average-rating spread across all teams (quality indicator) |
+| `iterationsUsed` | `integer` | No | Number of optimisation iterations that were run |
+| `warnings` | `GenerationWarning[]` | No | Non-fatal quality warnings (see below) |
+
+`GeneratedTeamResponse`:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `index` | `integer` | No | Zero-based team index |
+| `members` | `GeneratedTeamMember[]` | No | Members assigned to this team |
+| `averageRating` | `number` | No | Mean Elo rating of the team |
+| `genderCounts` | `{ male, female, other, unknown: integer }` | No | Gender breakdown of this team |
+
+`GeneratedTeamMember`:
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `teamMemberId` | `TeamMemberId` | No | Team member ID |
+| `displayName` | `string` | No | Resolved display name |
+| `discordId` | `string \| null` | Yes | Discord user snowflake |
+| `avatar` | `string \| null` | Yes | Discord avatar hash |
+| `rating` | `integer` | No | Current Elo rating |
+| `isCalibrating` | `boolean` | No | `true` when the member has fewer than 10 games |
+| `role` | `string \| null` | Yes | Assigned role name |
+| `jerseyNumber` | `integer \| null` | Yes | Jersey number |
+| `gender` | `"male" \| "female" \| "other" \| null` | Yes | Gender |
+
+`GenerationWarning` is a tagged union — possible `_tag` values:
+
+| `_tag` | Meaning |
+|---|---|
+| `UnevenTeamSizes` | Player count is not evenly divisible — some teams have one fewer member |
+| `InsufficientGenderMix` | Not enough gender diversity in the RSVP pool to balance gender across teams |
+| `EloOutlier` | A specific member (`teamMemberId` field present) has a rating far outside the team average — their placement may inflate the spread |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `TeamGenerationForbidden` | 403 | Missing `member:edit` permission |
+| `TeamGenerationEventNotGeneratable` | 409 | Event is not a training, is cancelled, or has no eligible RSVPs |
+| `TeamGenerationUnsupportedTeamCount` | 422 | Requested `teamCount` is outside the 2–20 range |
+| `TeamGenerationInsufficientPlayers` | 422 | Not enough players with a "yes" RSVP to fill the requested number of teams |
+
+---
+
+#### `GET /teams/:teamId/generation-config`
+
+Returns the current team generation configuration.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Response:** `200 OK` — `GenerationConfigResponse`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `teamId` | `TeamId` | No | Team ID |
+| `weightElo` | `integer` | No | Weight for Elo-rating balance (0–1000, default 100) |
+| `weightSize` | `integer` | No | Weight for team-size equality (0–1000, default 50) |
+| `weightGender` | `integer` | No | Weight for gender distribution balance (0–1000, default 20) |
+| `defaultTeamCount` | `integer` | No | Default number of teams when `teamCount` is omitted from generate request (2–20, default 2) |
+| `maxIterations` | `integer` | No | Maximum optimisation iterations (0–10000, default 1000) |
+| `canManage` | `boolean` | No | Whether the caller has `member:edit` permission |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `TeamGenerationForbidden` | 403 | Not a member of this team |
+
+---
+
+#### `PATCH /teams/:teamId/generation-config`
+
+Updates the team generation configuration. All fields are optional; only provided fields are changed.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `member:edit`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** `UpdateGenerationConfigRequest`
+
+| Field | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `weightElo` | `integer` | No | 0–1000 | Weight for Elo-rating balance |
+| `weightSize` | `integer` | No | 0–1000 | Weight for team-size equality |
+| `weightGender` | `integer` | No | 0–1000 | Weight for gender distribution balance |
+| `defaultTeamCount` | `integer` | No | 2–20 | Default number of teams |
+| `maxIterations` | `integer` | No | 0–10000 | Maximum optimisation iterations |
+
+**Response:** `200 OK` — `GenerationConfigResponse` (see `GET /teams/:teamId/generation-config` for field descriptions)
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `TeamGenerationForbidden` | 403 | Missing `member:edit` permission |
+
+---
+
+#### `POST /teams/:teamId/events/:eventId/post-teams-to-discord`
+
+Posts a set of generated teams to the event's configured Discord channel. The server re-loads all member display names and ratings from the database — the client only supplies member ID arrays, preventing embed injection or rating spoofing.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `member:edit`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `eventId` | `EventId` (string) | Event ID |
+
+**Request Body:** `PostTeamsToDiscordRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `teams` | `PostTeamPayload[]` | Yes | Ordered list of teams to post |
+
+`PostTeamPayload`:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `memberIds` | `TeamMemberId[]` | Yes | Ordered list of member IDs on this team |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `TeamGenerationForbidden` | 403 | Missing `member:edit` permission |
+| `TeamGenerationEventNotGeneratable` | 409 | Event is not generatable (not a training, cancelled, or no target channel) |
+| `TeamGenerationRosterChanged` | 409 | The RSVP roster has changed since teams were generated — regenerate before posting |
+| `TeamGenerationPostPending` | 409 | A previous `post-teams-to-discord` request is still being processed |
+| `TeamGenerationDiscordPostFailed` | 502 | The Discord REST call succeeded at the server but the bot returned an error |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -6484,3 +6672,10 @@ The following table consolidates all error tags across all API groups.
 | `PlayerRatingPlayerNotFound` | 404 | Player Rating | Member does not have a rating record in this team |
 | `PlayerRatingEventNotLoggable` | 409 | Player Rating | The event is not a training, is cancelled, or its `start_at` is more than 2 days in the past |
 | `PlayerRatingInvalidGameResult` | 422 | Player Rating | Invalid game setup (`emptyTeam`, `overlap`, `unknownMember`, or `notRsvpYes`) |
+| `TeamGenerationForbidden` | 403 | Team Generation | Not a member of this team, or missing `member:edit` permission for write endpoints |
+| `TeamGenerationEventNotGeneratable` | 409 | Team Generation | Event is not a training, is cancelled, or has no eligible RSVPs |
+| `TeamGenerationRosterChanged` | 409 | Team Generation | RSVP roster changed since generation — regenerate before posting |
+| `TeamGenerationPostPending` | 409 | Team Generation | A previous post-to-Discord request is still in flight |
+| `TeamGenerationUnsupportedTeamCount` | 422 | Team Generation | Requested team count is outside the 2–20 range |
+| `TeamGenerationInsufficientPlayers` | 422 | Team Generation | Not enough RSVP-yes players to fill the requested number of teams |
+| `TeamGenerationDiscordPostFailed` | 502 | Team Generation | Bot-side Discord REST call failed |

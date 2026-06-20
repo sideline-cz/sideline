@@ -18,6 +18,7 @@ import { EventLocation } from '~/components/atoms/EventLocation.js';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 import { EventAttendanceRosterSection } from '~/components/organisms/EventAttendanceRosterSection.js';
 import { EventRsvpPanel } from '~/components/organisms/EventRsvpPanel.js';
+import { TeamGeneratorSection } from '~/components/organisms/TeamGeneratorSection.js';
 import { TrainingResultSection } from '~/components/organisms/TrainingResultSection.js';
 import { Button } from '~/components/ui/button';
 import { DatePicker } from '~/components/ui/date-picker';
@@ -120,6 +121,7 @@ interface EventDetailPageProps {
   rosters: ReadonlyArray<RosterDomain.RosterInfo>;
   canManageRosters: boolean;
   canManageRatings: boolean;
+  canGenerate: boolean;
   initialEventRosterLink: Option.Option<EventRosterApi.EventRosterLink>;
   rsvpYesAttendees: ReadonlyArray<EventRsvpApi.RsvpEntry>;
   initialTrainingGames: ReadonlyArray<PlayerRatingApi.LoggedGameEntry>;
@@ -173,6 +175,7 @@ export function EventDetailPage({
   rosters,
   canManageRosters,
   canManageRatings,
+  canGenerate,
   initialEventRosterLink,
   rsvpYesAttendees,
   initialTrainingGames,
@@ -907,6 +910,17 @@ export function EventDetailPage({
             eventId={eventId}
             attendees={rsvpYesAttendees}
             initialGames={initialTrainingGames}
+            onRefresh={() => router.invalidate()}
+          />
+        </div>
+      )}
+
+      {canGenerate && eventDetail.eventType === 'training' && status !== 'cancelled' && (
+        <div className='mt-6'>
+          <TeamGeneratorSection
+            teamId={teamId}
+            eventId={eventId}
+            rsvpYesAttendees={rsvpYesAttendees}
             onRefresh={() => router.invalidate()}
           />
         </div>

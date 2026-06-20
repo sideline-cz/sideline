@@ -5,6 +5,24 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-16 — Balanced training team generator
+
+Captains and coaches can now generate balanced training teams directly from an event detail page — the algorithm splits RSVP-yes attendees into equal-skill groups using each player's Elo rating.
+
+- Open any active or started training event and scroll to the new **Team Generator** section.
+- Click **Generate** to split the attendees into two balanced teams. The algorithm seeds the teams with a snake-draft by rating, then runs a deterministic local-search optimisation (up to 1 000 swap iterations) that minimises the average-rating spread and gender imbalance. The same roster always produces the same teams.
+- Player cards show each person's current rating and a **calibrating** badge for members who have fewer than 10 rated games.
+- Regenerate as many times as you like — nothing is posted until you explicitly click **Post to Discord**.
+- When you click **Post to Discord**, the bot posts a formatted embed to the event's configured Discord channel listing all teams, their members, and each team's average Elo.
+- Adjust the **balancing weights** (Elo, size, gender) and default team count in **Team settings → Team generator** (`GET/PATCH /teams/:teamId/generation-config`). Higher weight values push the algorithm to care more about that dimension; setting all three equal gives each equal importance.
+
+**Discord shortcut:** Captains with the `ManageEvents` Discord permission can use the new **`/training generate`** command (Czech: `/training generovat`) to get a direct link to the Team Generator section for a recent training event. The command's `event` autocomplete shows only training events from the past 2 days.
+
+**What triggers a warning:**
+- **Uneven team sizes** — the player count is not evenly divisible by the team count, so some teams have one fewer member.
+- **Insufficient gender mix** — not enough gender diversity in the RSVP pool to balance gender across all teams.
+- **Elo outlier** — a specific player has a rating far outside the team average, which inflates the spread regardless of placement.
+
 ## 2026-06-16 — Log training game results and track Elo per training event
 
 Captains and coaches can now log the result of each internal scrimmage round directly on the **event detail page** — no more switching between pages.

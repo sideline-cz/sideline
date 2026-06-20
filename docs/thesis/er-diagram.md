@@ -113,6 +113,8 @@ erDiagram
     training_games ||--o{ training_game_participants : "has"
     team_members ||--o{ training_game_participants : "participates in"
 
+    teams ||--o| team_generation_config : "configures"
+
     team_invites ||--o{ invite_acceptances : "tracks"
 
     fees ||--o{ fee_assignments : "assigned via"
@@ -1293,6 +1295,28 @@ erDiagram
     events ||--o{ training_games : "has"
     training_games ||--o{ training_game_participants : "has"
     team_members ||--o{ training_game_participants : "participates in"
+
+    teams ||--o| team_generation_config : "configures"
+```
+
+### Team Generation Config
+
+`team_generation_config` is a one-to-one extension of `teams` that stores the balancing weights and defaults for the training team generator. The row is created lazily on the first write.
+
+```mermaid
+erDiagram
+    team_generation_config {
+        UUID team_id PK
+        INT weight_elo
+        INT weight_size
+        INT weight_gender
+        INT default_team_count
+        INT max_iterations
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    teams ||--o| team_generation_config : "configures"
 ```
 
 ---
@@ -1370,3 +1394,4 @@ erDiagram
 | `player_rating_history` | Append-only rating-change log. One row per game result per member; tracks before/after rating, delta, result kind, the submitting member, and a `game_id` linking the row to `training_games.id` when logged via `logTrainingGame`. |
 | `training_games` | One row per logged training-game round for an event. Unique on `(event_id, round)`. Outcome is `teamA`, `teamB`, or `draw`. The row ID is used as `game_id` in the corresponding `player_rating_history` rows. |
 | `training_game_participants` | Junction table recording which team members participated in a training game round and their side (A or B). Unique on `(training_game_id, team_member_id)`. |
+| `team_generation_config` | One-to-one extension of `teams` holding the balancing weights (`weight_elo`, `weight_size`, `weight_gender`) and defaults (`default_team_count`, `max_iterations`) for the training team generator. Created lazily on the first write. |
