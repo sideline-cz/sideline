@@ -72,6 +72,8 @@ interface PlayerDetailPageProps {
   activityLogs: ActivityLogApi.ActivityLogListResponse;
   activityTypes: ReadonlyArray<ActivityTypeOption>;
   rating?: PlayerRatingApi.MemberRatingResponse;
+  teamMemberId?: string;
+  onRefresh?: () => void;
   onSave: (values: PlayerEditValues) => Promise<void>;
   onAssignRole: (roleId: string) => Promise<void>;
   onUnassignRole: (roleId: string) => Promise<void>;
@@ -105,6 +107,8 @@ export function PlayerDetailPage({
   activityLogs,
   activityTypes,
   rating,
+  teamMemberId,
+  onRefresh,
   onSave,
   onAssignRole,
   onUnassignRole,
@@ -237,7 +241,14 @@ export function PlayerDetailPage({
           earned_at: new Date(a.earned_at),
         }))}
       />
-      {canEdit && rating ? <MemberRatingCard rating={rating} /> : null}
+      {canEdit && rating ? (
+        <MemberRatingCard
+          rating={rating}
+          teamId={teamId}
+          teamMemberId={teamMemberId}
+          onRefresh={onRefresh}
+        />
+      ) : null}
       <ActivityStatsCard stats={activityStats} />
       <ActivityLogList
         logs={activityLogs.logs}

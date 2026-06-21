@@ -10,12 +10,15 @@ import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { PlayerRatingsRepository } from '~/repositories/PlayerRatingsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TrainingGamesRepository } from '~/repositories/TrainingGamesRepository.js';
+import { clampRating, LlmClient } from '~/services/LlmClient.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const HISTORY_LIMIT = 50;
+const RATING_MIN = 800;
+const RATING_MAX = 1800;
 
 const requirePlayerRatingManageAccess = (
   members: ServiceMap.Service.Shape<typeof TeamMembersRepository>,
@@ -361,6 +364,141 @@ export const PlayerRatingApiLive = HttpApiBuilder.group(Api, 'playerRating', (ha
             ),
             Effect.map(
               ({ games }) => new PlayerRatingApi.LoggedGamesResponse({ games: [...games] }),
+            ),
+          ),
+        )
+        // ------------------------------------------------------------------
+        // GET /teams/:teamId/members/:memberId/rating/insight
+        // ------------------------------------------------------------------
+        .handle('getRatingInsight', ({ params: { teamId, memberId } }) =>
+          Effect.Do.pipe(
+            Effect.bind('gate', () => requirePlayerRatingManageAccess(members, teamId)),
+            Effect.tap(() =>
+              members.findRosterMemberByIds(teamId, memberId).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () => Effect.fail(new PlayerRatingApi.PlayerNotFound()),
+                    onSome: () => Effect.void,
+                  }),
+                ),
+              ),
+            ),
+            Effect.bind('llm', () => LlmClient.asEffect()),
+            Effect.bind('row', () => ratings.getMemberRating(teamId, memberId)),
+            Effect.bind('history', () =>
+              ratings.findHistoryByMember(teamId, memberId, HISTORY_LIMIT),
+            ),
+            Effect.flatMap(({ gate: { currentUser }, llm, row, history }) => {
+              const locale: 'en' | 'cs' = currentUser.locale === 'cs' ? 'cs' : 'en';
+              const recentDeltas = history.map((h) => h.delta);
+              const ratingData = Option.isNone(row)
+                ? {
+                    rating: Elo.DEFAULT_RATING,
+                    gamesPlayed: 0,
+                    wins: 0,
+                    losses: 0,
+                    draws: 0,
+                    isCalibrating: true,
+                  }
+                : {
+                    rating: row.value.rating,
+                    gamesPlayed: row.value.games_played,
+                    wins: row.value.wins,
+                    losses: row.value.losses,
+                    draws: row.value.draws,
+                    isCalibrating: row.value.games_played < Elo.CALIBRATION_GAMES,
+                  };
+              return llm.generateRatingInsight({
+                ...ratingData,
+                calibrationThreshold: Elo.CALIBRATION_GAMES,
+                recentDeltas,
+                locale,
+              });
+            }),
+            Effect.map(
+              ({ insight, generated }) =>
+                new PlayerRatingApi.RatingInsightResponse({ insight, generated }),
+            ),
+          ),
+        )
+        // ------------------------------------------------------------------
+        // POST /teams/:teamId/members/:memberId/rating/estimate
+        // ------------------------------------------------------------------
+        .handle('estimateRatingFromDescription', ({ params: { teamId, memberId }, payload }) =>
+          Effect.Do.pipe(
+            Effect.bind('gate', () => requirePlayerRatingManageAccess(members, teamId)),
+            Effect.tap(() =>
+              members.findRosterMemberByIds(teamId, memberId).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () => Effect.fail(new PlayerRatingApi.PlayerNotFound()),
+                    onSome: () => Effect.void,
+                  }),
+                ),
+              ),
+            ),
+            Effect.bind('llm', () => LlmClient.asEffect()),
+            Effect.flatMap(({ gate: { currentUser }, llm }) => {
+              const locale: 'en' | 'cs' = currentUser.locale === 'cs' ? 'cs' : 'en';
+              return llm.estimateRatingFromDescription({
+                description: payload.description,
+                defaultRating: Elo.DEFAULT_RATING,
+                minRating: RATING_MIN,
+                maxRating: RATING_MAX,
+                locale,
+              });
+            }),
+            Effect.map(
+              ({ suggestedRating, rationale, generated }) =>
+                new PlayerRatingApi.EstimateRatingResponse({
+                  suggestedRating,
+                  rationale,
+                  minRating: RATING_MIN,
+                  maxRating: RATING_MAX,
+                  generated,
+                }),
+            ),
+          ),
+        )
+        // ------------------------------------------------------------------
+        // POST /teams/:teamId/members/:memberId/rating/seed
+        // ------------------------------------------------------------------
+        .handle('applySeedRating', ({ params: { teamId, memberId }, payload }) =>
+          Effect.Do.pipe(
+            Effect.tap(() => requirePlayerRatingManageAccess(members, teamId)),
+            Effect.tap(() =>
+              members.findRosterMemberByIds(teamId, memberId).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () => Effect.fail(new PlayerRatingApi.PlayerNotFound()),
+                    onSome: () => Effect.void,
+                  }),
+                ),
+              ),
+            ),
+            Effect.bind('result', () => {
+              const clamped = clampRating(payload.rating, RATING_MIN, RATING_MAX);
+              return ratings.seedRating(teamId, memberId, clamped);
+            }),
+            Effect.flatMap(({ result }) =>
+              Option.match(result, {
+                onNone: () => Effect.fail(new PlayerRatingApi.SeedNotAllowed()),
+                onSome: (row) =>
+                  Effect.succeed(
+                    new PlayerRatingApi.MemberRatingResponse({
+                      memberId: row.team_member_id,
+                      rating: row.rating,
+                      gamesPlayed: 0,
+                      previousRating: Option.none(),
+                      lastDelta: Option.none(),
+                      wins: 0,
+                      losses: 0,
+                      draws: 0,
+                      isCalibrating: true,
+                      calibrationThreshold: Elo.CALIBRATION_GAMES,
+                    }),
+                  ),
+              }),
             ),
           ),
         ),

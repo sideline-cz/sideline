@@ -74,6 +74,38 @@ export class RatingHistoryResponse extends Schema.Class<RatingHistoryResponse>(
   entries: Schema.Array(RatingHistoryEntry),
 }) {}
 
+export class RatingInsightResponse extends Schema.Class<RatingInsightResponse>(
+  'RatingInsightResponse',
+)({
+  insight: Schema.String,
+  generated: Schema.Boolean,
+}) {}
+
+export const EstimateRatingRequest = Schema.Struct({
+  description: Schema.String.pipe(Schema.check(Schema.isMaxLength(2000))),
+});
+export type EstimateRatingRequest = Schema.Schema.Type<typeof EstimateRatingRequest>;
+
+export class EstimateRatingResponse extends Schema.Class<EstimateRatingResponse>(
+  'EstimateRatingResponse',
+)({
+  suggestedRating: Schema.Int,
+  rationale: Schema.String,
+  minRating: Schema.Int,
+  maxRating: Schema.Int,
+  generated: Schema.Boolean,
+}) {}
+
+export const ApplySeedRatingRequest = Schema.Struct({
+  rating: Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 800, maximum: 1800 }))),
+});
+export type ApplySeedRatingRequest = Schema.Schema.Type<typeof ApplySeedRatingRequest>;
+
+export class SeedNotAllowed extends Schema.TaggedErrorClass<SeedNotAllowed>()(
+  'PlayerRatingSeedNotAllowed',
+  {},
+) {}
+
 export const GameResultRequest = Schema.Struct({
   teamA: Schema.Array(TeamMemberId),
   teamB: Schema.Array(TeamMemberId),
@@ -172,5 +204,42 @@ export class PlayerRatingApiGroup extends HttpApiGroup.make('playerRating')
       success: LoggedGamesResponse,
       error: Forbidden.pipe(HttpApiSchema.status(403)),
       params: { teamId: TeamId, eventId: EventId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.get('getRatingInsight', '/teams/:teamId/members/:memberId/rating/insight', {
+      success: RatingInsightResponse,
+      error: [
+        Forbidden.pipe(HttpApiSchema.status(403)),
+        PlayerNotFound.pipe(HttpApiSchema.status(404)),
+      ],
+      params: { teamId: TeamId, memberId: TeamMemberId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post(
+      'estimateRatingFromDescription',
+      '/teams/:teamId/members/:memberId/rating/estimate',
+      {
+        success: EstimateRatingResponse,
+        error: [
+          Forbidden.pipe(HttpApiSchema.status(403)),
+          PlayerNotFound.pipe(HttpApiSchema.status(404)),
+        ],
+        payload: EstimateRatingRequest,
+        params: { teamId: TeamId, memberId: TeamMemberId },
+      },
+    ).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post('applySeedRating', '/teams/:teamId/members/:memberId/rating/seed', {
+      success: MemberRatingResponse,
+      error: [
+        Forbidden.pipe(HttpApiSchema.status(403)),
+        PlayerNotFound.pipe(HttpApiSchema.status(404)),
+        SeedNotAllowed.pipe(HttpApiSchema.status(409)),
+      ],
+      payload: ApplySeedRatingRequest,
+      params: { teamId: TeamId, memberId: TeamMemberId },
     }).middleware(AuthMiddleware),
   ) {}
