@@ -621,6 +621,134 @@ describe('PlayerRatingsRepository', () => {
       ),
   );
 
+  // ---------------------------------------------------------------------------
+  // seedRating
+  // ---------------------------------------------------------------------------
+
+  it.effect(
+    'seedRating on no existing row → creates row with given rating, games_played=0, Option.some',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userId', () => createUser('100000000000000131', 'seed-new')),
+        Effect.bind('team', ({ userId }) =>
+          createTeam('999999999999999991' as Discord.Snowflake, userId),
+        ),
+        Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+        Effect.bind('ratings', () => PlayerRatingsRepository.asEffect()),
+        Effect.bind('result', ({ ratings, team, member }) =>
+          ratings.seedRating(team.id, member.id, 1350),
+        ),
+        Effect.tap(({ result, member }) =>
+          Effect.sync(() => {
+            expect(Option.isSome(result)).toBe(true);
+            const row = Option.getOrThrow(result);
+            expect(row.team_member_id).toBe(member.id);
+            expect(row.rating).toBe(1350);
+            expect(row.games_played).toBe(0);
+            expect(row.wins).toBe(0);
+            expect(row.losses).toBe(0);
+            expect(row.draws).toBe(0);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'seedRating on existing games_played=0 row → updates rating, still games_played=0, Option.some',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userId', () => createUser('100000000000000132', 'seed-update')),
+        Effect.bind('team', ({ userId }) =>
+          createTeam('999999999999999992' as Discord.Snowflake, userId),
+        ),
+        Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+        Effect.bind('ratings', () => PlayerRatingsRepository.asEffect()),
+        // First seed to create the row
+        Effect.tap(({ ratings, team, member }) => ratings.seedRating(team.id, member.id, 1200)),
+        // Second seed to update the rating
+        Effect.bind('result', ({ ratings, team, member }) =>
+          ratings.seedRating(team.id, member.id, 1400),
+        ),
+        Effect.tap(({ result }) =>
+          Effect.sync(() => {
+            expect(Option.isSome(result)).toBe(true);
+            const row = Option.getOrThrow(result);
+            expect(row.rating).toBe(1400);
+            expect(row.games_played).toBe(0);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect('seedRating on games_played>0 row → no change, Option.none', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId1', () => createUser('100000000000000141', 'seed-blocked-a')),
+      Effect.bind('userId2', () => createUser('100000000000000142', 'seed-blocked-b')),
+      Effect.bind('team', ({ userId1 }) =>
+        createTeam('999999999999999993' as Discord.Snowflake, userId1),
+      ),
+      Effect.bind('member1', ({ team, userId1 }) => addTeamMember(team.id, userId1)),
+      Effect.bind('member2', ({ team, userId2 }) => addTeamMember(team.id, userId2)),
+      Effect.bind('ratings', () => PlayerRatingsRepository.asEffect()),
+      // Play a game so games_played becomes 1
+      Effect.tap(({ ratings, team, member1, member2 }) =>
+        ratings.applyGameUpdates({
+          teamId: team.id,
+          teamAMemberIds: [member1.id],
+          teamBMemberIds: [member2.id],
+          outcome: 'teamA',
+          submittedBy: Option.none(),
+        }),
+      ),
+      // Attempt to seed — should return Option.none because games_played > 0
+      Effect.bind('result', ({ ratings, team, member1 }) =>
+        ratings.seedRating(team.id, member1.id, 1500),
+      ),
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          expect(Option.isNone(result)).toBe(true);
+        }),
+      ),
+      // Verify the rating was NOT changed
+      Effect.bind('ratingRow', ({ ratings, team, member1 }) =>
+        ratings.getMemberRating(team.id, member1.id),
+      ),
+      Effect.tap(({ ratingRow }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(ratingRow)).toBe(true);
+          const row = Option.getOrThrow(ratingRow);
+          // rating must NOT be 1500; it should be whatever the game set it to
+          expect(row.rating).not.toBe(1500);
+          expect(row.games_played).toBe(1);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('seedRating writes NO player_rating_history row', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('100000000000000151', 'seed-nohistory')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('999999999999999994' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.bind('ratings', () => PlayerRatingsRepository.asEffect()),
+      Effect.tap(({ ratings, team, member }) => ratings.seedRating(team.id, member.id, 1300)),
+      Effect.bind('history', ({ ratings, team, member }) =>
+        ratings.findHistoryByMember(team.id, member.id, 10),
+      ),
+      Effect.tap(({ history }) =>
+        Effect.sync(() => {
+          expect(history).toHaveLength(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
   it.effect(
     'applyGameUpdatesTx propagates SqlError to roll back the outer tx — no rating/history rows persist',
     () =>

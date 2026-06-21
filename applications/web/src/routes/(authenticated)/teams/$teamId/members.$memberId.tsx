@@ -232,6 +232,10 @@ function MemberDetailRoute() {
     [teamId, memberId, run, router],
   );
 
+  const handleRefresh = React.useCallback(() => {
+    router.invalidate();
+  }, [router]);
+
   return (
     <PlayerDetailPage
       teamId={teamIdRaw}
@@ -245,6 +249,8 @@ function MemberDetailRoute() {
       activityLogs={new ActivityLogApi.ActivityLogListResponse({ logs: activityLogs.logs })}
       activityTypes={activityTypes}
       rating={rating}
+      teamMemberId={memberIdRaw}
+      onRefresh={handleRefresh}
       onSave={handleSave}
       onAssignRole={handleAssignRole}
       onUnassignRole={handleUnassignRole}

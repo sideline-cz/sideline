@@ -49,6 +49,7 @@ import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
+import { LlmClient } from '~/services/LlmClient.js';
 import { MockChannelManagementLayers } from '../mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from '../mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from '../mocks/emailMocks.js';
@@ -215,6 +216,11 @@ let historyStore: Array<{
   created_at: Date;
 }>;
 
+// Records seedRating calls and controls its return value
+let seedRatingCallCount: number;
+// When true, seedRating returns Option.some(row); when false, Option.none()
+let seedRatingReturnsRow: boolean;
+
 // Records getOrInitMany calls
 let _getOrInitManyCallCount: number;
 
@@ -222,6 +228,8 @@ const resetState = () => {
   applyGameUpdatesCallCount = 0;
   lastApplyGameUpdatesParams = null;
   _getOrInitManyCallCount = 0;
+  seedRatingCallCount = 0;
+  seedRatingReturnsRow = true; // default: seed succeeds
 
   // Default: player member has 5 games played (still calibrating)
   memberRatingStore = new Map([
@@ -352,6 +360,24 @@ const makeControlledPlayerRatingsLayer = () =>
       applyGameUpdatesCallCount++;
       lastApplyGameUpdatesParams = params;
       return Effect.void;
+    },
+    seedRating: (teamId: Team.TeamId, memberId: TeamMember.TeamMemberId, rating: number) => {
+      seedRatingCallCount++;
+      if (!seedRatingReturnsRow) {
+        return Effect.succeed(Option.none());
+      }
+      const row = {
+        team_member_id: memberId,
+        team_id: teamId,
+        rating,
+        games_played: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        prev_rating: Option.none<number>(),
+        last_delta: Option.none<number>(),
+      };
+      return Effect.succeed(Option.some(row));
     },
   } as never);
 
@@ -783,6 +809,18 @@ const MockChannelEventDividersRepositoryLayer = Layer.succeed(ChannelEventDivide
 } as any);
 
 // ---------------------------------------------------------------------------
+// Mock LlmClient layer — deterministic responses, generated=true
+// ---------------------------------------------------------------------------
+
+const MockLlmClientLayer = Layer.succeed(LlmClient, {
+  _tag: 'api/LlmClient' as const,
+  summarizeEmail: () => Effect.die(new Error('summarizeEmail not used in player-rating tests')),
+  generateRatingInsight: () => Effect.succeed({ insight: 'mock insight', generated: true }),
+  estimateRatingFromDescription: () =>
+    Effect.succeed({ suggestedRating: 1350, rationale: 'mock rationale', generated: true }),
+} as never);
+
+// ---------------------------------------------------------------------------
 // Build the full test layer
 // ---------------------------------------------------------------------------
 
@@ -876,6 +914,7 @@ const buildTestLayer = (playerRatingsLayer: Layer.Layer<PlayerRatingsRepository>
     .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
     .pipe(Layer.provide(MockChannelManagementLayers))
     .pipe(Layer.provide(MockEmailLayers))
+    .pipe(Layer.provide(MockLlmClientLayer))
     .pipe(Layer.provide(BotInfoStore.Default))
     .pipe(
       Layer.provide(
@@ -895,6 +934,9 @@ const memberRatingUrl = (memberId: string) => `${TEAM_BASE}/members/${memberId}/
 const memberRatingHistoryUrl = (memberId: string) =>
   `${TEAM_BASE}/members/${memberId}/rating/history`;
 const applyGameResultUrl = `${TEAM_BASE}/ratings/games`;
+const insightUrl = (memberId: string) => `${TEAM_BASE}/members/${memberId}/rating/insight`;
+const estimateUrl = (memberId: string) => `${TEAM_BASE}/members/${memberId}/rating/estimate`;
+const seedUrl = (memberId: string) => `${TEAM_BASE}/members/${memberId}/rating/seed`;
 
 // ---------------------------------------------------------------------------
 // Test suite setup
@@ -1434,6 +1476,285 @@ describe('Unauthenticated requests → 401', () => {
 });
 
 // ===========================================================================
+// getRatingInsight — GET /teams/:teamId/members/:memberId/rating/insight
+// ===========================================================================
+
+describe('getRatingInsight — permission gating', () => {
+  it('player (no member:edit) → 403', async () => {
+    const response = await handler(
+      new Request(insightUrl(TEST_PLAYER_MEMBER_ID), {
+        headers: { Authorization: 'Bearer player-token' },
+      }),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it('unknown member → 404', async () => {
+    const response = await handler(
+      new Request(insightUrl(TEST_UNKNOWN_MEMBER_ID), {
+        headers: { Authorization: 'Bearer captain-token' },
+      }),
+    );
+    expect(response.status).toBe(404);
+  });
+});
+
+describe('getRatingInsight — captain → 200 with insight + generated', () => {
+  it('returns insight string and generated boolean for rated member', async () => {
+    const response = await handler(
+      new Request(insightUrl(TEST_PLAYER_MEMBER_ID), {
+        headers: { Authorization: 'Bearer captain-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(typeof body.insight).toBe('string');
+    expect(body.insight.length).toBeGreaterThan(0);
+    expect(typeof body.generated).toBe('boolean');
+  });
+
+  it('returns insight for unrated member (defaults used)', async () => {
+    // Captain member has no rating row in the default state
+    memberRatingStore.delete(TEST_CAPTAIN_MEMBER_ID);
+
+    const response = await handler(
+      new Request(insightUrl(TEST_CAPTAIN_MEMBER_ID), {
+        headers: { Authorization: 'Bearer captain-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(typeof body.insight).toBe('string');
+    expect(body.insight.length).toBeGreaterThan(0);
+    // generated comes from mock (true) or stub (false); either is valid
+    expect(typeof body.generated).toBe('boolean');
+  });
+});
+
+// ===========================================================================
+// estimateRatingFromDescription — POST /teams/:teamId/members/:memberId/rating/estimate
+// ===========================================================================
+
+describe('estimateRatingFromDescription — permission gating', () => {
+  it('player (no member:edit) → 403', async () => {
+    const response = await handler(
+      new Request(estimateUrl(TEST_PLAYER_MEMBER_ID), {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer player-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ description: 'I play recreationally.' }),
+      }),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it('unknown member → 404', async () => {
+    const response = await handler(
+      new Request(estimateUrl(TEST_UNKNOWN_MEMBER_ID), {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer captain-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ description: 'I play recreationally.' }),
+      }),
+    );
+    expect(response.status).toBe(404);
+  });
+});
+
+describe('estimateRatingFromDescription — captain → 200 with response shape', () => {
+  it('returns suggestedRating (int), rationale, minRating:800, maxRating:1800, generated', async () => {
+    const response = await handler(
+      new Request(estimateUrl(TEST_PLAYER_MEMBER_ID), {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer captain-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ description: 'I have been playing for 5 years at club level.' }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(Number.isInteger(body.suggestedRating)).toBe(true);
+    expect(typeof body.rationale).toBe('string');
+    expect(body.minRating).toBe(800);
+    expect(body.maxRating).toBe(1800);
+    expect(typeof body.generated).toBe('boolean');
+  });
+
+  it('description > 2000 chars → 4xx schema validation error', async () => {
+    const response = await handler(
+      new Request(estimateUrl(TEST_PLAYER_MEMBER_ID), {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer captain-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ description: 'A'.repeat(2001) }),
+      }),
+    );
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+  });
+
+  it('does NOT call seedRating or applyGameUpdates — no persist side effects', async () => {
+    const prevSeedCount = seedRatingCallCount;
+    const prevApplyCount = applyGameUpdatesCallCount;
+
+    await handler(
+      new Request(estimateUrl(TEST_PLAYER_MEMBER_ID), {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer captain-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ description: 'Casual player.' }),
+      }),
+    );
+
+    expect(seedRatingCallCount).toBe(prevSeedCount);
+    expect(applyGameUpdatesCallCount).toBe(prevApplyCount);
+  });
+});
+
+// ===========================================================================
+// applySeedRating — POST /teams/:teamId/members/:memberId/rating/seed
+// ===========================================================================
+
+describe('applySeedRating — permission gating', () => {
+  it('player (no member:edit) → 403', async () => {
+    const response = await handler(
+      new Request(seedUrl(TEST_PLAYER_MEMBER_ID), {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer player-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rating: 1200 }),
+      }),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it('unknown member → 404', async () => {
+    const response = await handler(
+      new Request(seedUrl(TEST_UNKNOWN_MEMBER_ID), {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer captain-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rating: 1200 }),
+      }),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('global-admin token → 200 (bypasses member:edit check)', async () => {
+    seedRatingReturnsRow = true;
+    const response = await handler(
+      new Request(seedUrl(TEST_PLAYER_MEMBER_ID), {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer global-admin-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rating: 1300 }),
+      }),
+    );
+    expect(response.status).toBe(200);
+  });
+});
+
+describe('applySeedRating — captain, seedRating returns Some → 200 MemberRatingResponse', () => {
+  it('returns MemberRatingResponse with clamped rating, gamesPlayed=0, isCalibrating=true', async () => {
+    seedRatingReturnsRow = true;
+
+    const response = await handler(
+      new Request(seedUrl(TEST_PLAYER_MEMBER_ID), {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer captain-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rating: 1350 }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.memberId).toBe(TEST_PLAYER_MEMBER_ID);
+    expect(body.rating).toBe(1350);
+    expect(body.gamesPlayed).toBe(0);
+    expect(body.wins).toBe(0);
+    expect(body.losses).toBe(0);
+    expect(body.draws).toBe(0);
+    expect(body.isCalibrating).toBe(true);
+    expect(body.calibrationThreshold).toBe(Elo.CALIBRATION_GAMES);
+    expect(body.previousRating).toBeNull();
+    expect(body.lastDelta).toBeNull();
+  });
+});
+
+describe('applySeedRating — captain, seedRating returns None → 409 SeedNotAllowed', () => {
+  it('returns 409 PlayerRatingSeedNotAllowed when member has games played', async () => {
+    seedRatingReturnsRow = false;
+
+    const response = await handler(
+      new Request(seedUrl(TEST_PLAYER_MEMBER_ID), {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer captain-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rating: 1200 }),
+      }),
+    );
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body._tag).toBe('PlayerRatingSeedNotAllowed');
+  });
+});
+
+describe('applySeedRating — schema validation', () => {
+  it('out-of-range rating (5000) → 4xx schema validation error', async () => {
+    const response = await handler(
+      new Request(seedUrl(TEST_PLAYER_MEMBER_ID), {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer captain-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rating: 5000 }),
+      }),
+    );
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+    // seedRating must NOT be called for invalid payloads
+    expect(seedRatingCallCount).toBe(0);
+  });
+
+  it('below-min rating (100) → 4xx schema validation error', async () => {
+    const response = await handler(
+      new Request(seedUrl(TEST_PLAYER_MEMBER_ID), {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer captain-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rating: 100 }),
+      }),
+    );
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+    expect(seedRatingCallCount).toBe(0);
+  });
+});
+
+// ===========================================================================
 // Epic 6.2 — logTrainingGame + getTrainingGames
 // ===========================================================================
 
@@ -1714,6 +2035,7 @@ const buildTgTestLayer = () =>
     .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
     .pipe(Layer.provide(MockChannelManagementLayers))
     .pipe(Layer.provide(MockEmailLayers))
+    .pipe(Layer.provide(MockLlmClientLayer))
     .pipe(Layer.provide(BotInfoStore.Default))
     .pipe(
       Layer.provide(

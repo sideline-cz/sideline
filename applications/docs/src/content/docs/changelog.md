@@ -5,6 +5,23 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-21 — AI rating insight and AI-assisted starting Elo for unrated players
+
+Captains and admins can now use two new AI-powered tools on the player Elo rating card (captain-only). Both features use the same AI assistant as email forwarding and degrade gracefully to a built-in fallback when the AI is unavailable — so they always return a result.
+
+**AI form insight**
+
+- On any member's rating card, click **Get AI insight** to generate a short plain-language summary of the player's current form: their trend (improving, declining, or stable), win/loss/draw record, and whether they are still in calibration.
+- The card shows a badge indicating whether the text was AI-generated or produced by the built-in fallback.
+
+**ELO from description (suggest and confirm)**
+
+- For a player who has never played a rated game, click **Estimate rating from description**, enter a short free-text description of their skill level, and the AI suggests a starting Elo (between 800 and 1800) with a rationale.
+- Review the suggested number, adjust it if needed, and click **Apply** to seed the player's rating. The player re-enters calibration (first 10 games use the higher K-factor of 40), so early game results will quickly refine the estimate.
+- The seed is blocked if the player already has rated games recorded — use the normal game-result flow instead.
+
+Both tools require the `member:edit` permission (Captain or Admin role).
+
 ## 2026-06-16 — Balanced training team generator
 
 Captains and coaches can now generate balanced training teams directly from an event detail page — the algorithm splits RSVP-yes attendees into equal-skill groups using each player's Elo rating.

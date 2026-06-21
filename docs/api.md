@@ -5916,9 +5916,11 @@ Revokes global-admin status from a user by their internal `UserId`. Clears `user
 **Source:** `packages/domain/src/api/PlayerRatingApi.ts`
 **Prefix:** `/teams/:teamId`
 
-Manages per-member Elo ratings within a team. Uses a team-average Elo model: each player's individual rating is compared against the average of the opposing team. K-factor is 40 during the first 10 games (calibration) and 20 thereafter. Default starting rating is 1200.
+Manages per-member Elo ratings within a team. Uses a team-average Elo model: each player's individual rating is compared against the average of the opposing team. K-factor is 40 during the first 10 games (calibration) and 20 thereafter. Default starting rating is 1200. Ratings are bounded to 800–1800 across all endpoints.
 
-All endpoints require the caller to be an authenticated team member. The read endpoints are accessible to **any** team member; the write endpoints (`applyGameResult`, `logTrainingGame`) require the `member:edit` permission (i.e. Captain, Admin, or any role with that permission). Global admins who are not team members receive a 403 from all endpoints (no `requireReadAccess` bypass is applied here).
+All endpoints require the caller to be an authenticated team member. The read endpoints are accessible to **any** team member; the write endpoints (`applyGameResult`, `logTrainingGame`) and the AI endpoints (`getRatingInsight`, `estimateRatingFromDescription`, `applySeedRating`) require the `member:edit` permission (i.e. Captain, Admin, or any role with that permission). Global admins who are not team members receive a 403 from all endpoints (no `requireReadAccess` bypass is applied here).
+
+**AI features** — Three endpoints use `LlmClient` (the same service used by email forwarding). All AI calls degrade gracefully: if the configured LLM is unreachable or returns an unparseable response, the server falls back to a deterministic response and sets `generated: false` in the response body. No request ever fails due to LLM unavailability.
 
 ---
 
@@ -6162,6 +6164,109 @@ Returns all logged training-game rounds for an event, ordered by round number as
 | Tag | Status | When |
 |---|---|---|
 | `PlayerRatingForbidden` | 403 | Not a member of this team |
+
+---
+
+#### `GET /teams/:teamId/members/:memberId/rating/insight`
+
+Returns an AI-generated plain-language summary of a member's recent Elo form. The summary describes the member's trend (upward / downward / flat based on the sum of recent deltas), win/loss/draw record, and calibration status. The response is always a success — when the LLM is unavailable the server falls back to a deterministic template and sets `generated: false`.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `member:edit` (Captain / Admin or any role with that permission)
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `memberId` | `TeamMemberId` (string) | Member ID |
+
+**Response:** `200 OK` — `RatingInsightResponse`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `insight` | `string` | No | Plain-language summary of the member's recent form |
+| `generated` | `boolean` | No | `true` when the text was produced by the LLM; `false` when the deterministic fallback was used |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `PlayerRatingForbidden` | 403 | Missing `member:edit` permission |
+| `PlayerRatingPlayerNotFound` | 404 | Member does not exist in this team |
+
+---
+
+#### `POST /teams/:teamId/members/:memberId/rating/estimate`
+
+Asks the AI to suggest a starting Elo rating for a member based on a free-text description of their skill level. **Does not persist anything** — the returned `suggestedRating` is only a suggestion for the captain to review and optionally confirm via `POST .../rating/seed`. Falls back to a deterministic response (the default rating) if the LLM is unavailable, setting `generated: false`.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `member:edit`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `memberId` | `TeamMemberId` (string) | Member ID |
+
+**Request Body:** `EstimateRatingRequest`
+
+| Field | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `description` | `string` | Yes | Max 2000 characters | Free-text description of the member's skill level |
+
+**Response:** `200 OK` — `EstimateRatingResponse`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `suggestedRating` | `integer` | No | AI-suggested starting rating, clamped to 800–1800 |
+| `rationale` | `string` | No | Short explanation of why this rating was suggested |
+| `minRating` | `integer` | No | Minimum allowed rating (always 800) |
+| `maxRating` | `integer` | No | Maximum allowed rating (always 1800) |
+| `generated` | `boolean` | No | `true` when the LLM produced the estimate; `false` when the deterministic fallback was used |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `PlayerRatingForbidden` | 403 | Missing `member:edit` permission |
+| `PlayerRatingPlayerNotFound` | 404 | Member does not exist in this team |
+
+---
+
+#### `POST /teams/:teamId/members/:memberId/rating/seed`
+
+Applies a captain-confirmed starting rating for a member. The rating is inserted (or updated if `games_played = 0`) in `player_ratings` with `games_played = 0`, so the player re-enters calibration and early games (K-factor 40) will quickly correct the seeded value. The operation is **rejected with 409** if the member already has one or more rated games recorded (`games_played > 0`) — use the normal `POST /teams/:teamId/ratings/games` flow for members who have already played. The rating is clamped server-side to 800–1800.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `member:edit`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `memberId` | `TeamMemberId` (string) | Member ID |
+
+**Request Body:** `ApplySeedRatingRequest`
+
+| Field | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `rating` | `integer` | Yes | 800–1800 | Starting Elo rating to apply |
+
+**Response:** `200 OK` — `MemberRatingResponse` (same schema as `GET /teams/:teamId/members/:memberId/rating`)
+
+The response always has `gamesPlayed: 0`, `wins: 0`, `losses: 0`, `draws: 0`, `previousRating: null`, `lastDelta: null`, and `isCalibrating: true`.
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `PlayerRatingForbidden` | 403 | Missing `member:edit` permission |
+| `PlayerRatingPlayerNotFound` | 404 | Member does not exist in this team |
+| `PlayerRatingSeedNotAllowed` | 409 | Member already has one or more rated games (`games_played > 0`) |
 
 ---
 
@@ -6672,6 +6777,7 @@ The following table consolidates all error tags across all API groups.
 | `PlayerRatingPlayerNotFound` | 404 | Player Rating | Member does not have a rating record in this team |
 | `PlayerRatingEventNotLoggable` | 409 | Player Rating | The event is not a training, is cancelled, or its `start_at` is more than 2 days in the past |
 | `PlayerRatingInvalidGameResult` | 422 | Player Rating | Invalid game setup (`emptyTeam`, `overlap`, `unknownMember`, or `notRsvpYes`) |
+| `PlayerRatingSeedNotAllowed` | 409 | Player Rating | Member already has one or more rated games (`games_played > 0`); seed is only allowed before any games |
 | `TeamGenerationForbidden` | 403 | Team Generation | Not a member of this team, or missing `member:edit` permission for write endpoints |
 | `TeamGenerationEventNotGeneratable` | 409 | Team Generation | Event is not a training, is cancelled, or has no eligible RSVPs |
 | `TeamGenerationRosterChanged` | 409 | Team Generation | RSVP roster changed since generation — regenerate before posting |

@@ -1,21 +1,73 @@
 import type { PlayerRatingApi } from '@sideline/domain';
-import { Option } from 'effect';
-import { Minus, TrendingDown, TrendingUp } from 'lucide-react';
+import { Team, TeamMember } from '@sideline/domain';
+import { Effect, Option, Schema } from 'effect';
+import { Minus, Sparkles, TrendingDown, TrendingUp } from 'lucide-react';
+import React from 'react';
+import { RatingFromDescription } from '~/components/organisms/RatingFromDescription.js';
 import { Badge } from '~/components/ui/badge.js';
+import { Button } from '~/components/ui/button.js';
+import { Skeleton } from '~/components/ui/skeleton.js';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '~/components/ui/tooltip.js';
+import { ApiClient, SilentClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
+
+type InsightState =
+  | { _tag: 'idle' }
+  | { _tag: 'loading' }
+  | { _tag: 'loaded'; insight: string; generated: boolean }
+  | { _tag: 'error' };
 
 interface MemberRatingCardProps {
   rating: PlayerRatingApi.MemberRatingResponse;
+  teamId?: string;
+  teamMemberId?: string;
+  onRefresh?: () => void;
 }
 
-export function MemberRatingCard({ rating }: MemberRatingCardProps) {
+export function MemberRatingCard({
+  rating,
+  teamId,
+  teamMemberId,
+  onRefresh,
+}: MemberRatingCardProps) {
   const isEmpty = rating.gamesPlayed === 0;
+  const run = useRun();
+
+  const [insightState, setInsightState] = React.useState<InsightState>({ _tag: 'idle' });
+
+  const handleGenerateInsight = React.useCallback(async () => {
+    if (!teamId || !teamMemberId) return;
+    setInsightState({ _tag: 'loading' });
+
+    const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
+    const memberIdBranded = Schema.decodeSync(TeamMember.TeamMemberId)(teamMemberId);
+
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.playerRating.getRatingInsight({
+          params: { teamId: teamIdBranded, memberId: memberIdBranded },
+        }),
+      ),
+      Effect.tapError((e) => Effect.logWarning('MemberRatingCard: getRatingInsight failed', e)),
+      Effect.mapError((e) => new SilentClientError({ message: String(e) })),
+      run({}),
+    );
+
+    if (Option.isSome(result)) {
+      setInsightState({
+        _tag: 'loaded',
+        insight: result.value.insight,
+        generated: result.value.generated,
+      });
+    } else {
+      setInsightState({ _tag: 'error' });
+    }
+  }, [teamId, teamMemberId, run]);
 
   return (
     <div className='mt-6'>
@@ -33,7 +85,16 @@ export function MemberRatingCard({ rating }: MemberRatingCardProps) {
       </TooltipProvider>
 
       {isEmpty ? (
-        <p className='text-muted-foreground'>{tr('members_ratingNoGames')}</p>
+        <>
+          <p className='text-muted-foreground'>{tr('members_ratingNoGames')}</p>
+          {teamId && teamMemberId && onRefresh ? (
+            <RatingFromDescription
+              teamId={teamId}
+              teamMemberId={teamMemberId}
+              onRefresh={onRefresh}
+            />
+          ) : null}
+        </>
       ) : (
         <>
           <div className='flex items-center gap-3 mb-4'>
@@ -124,6 +185,66 @@ export function MemberRatingCard({ rating }: MemberRatingCardProps) {
                   }}
                 />
               </div>
+            </div>
+          ) : null}
+
+          {/* AI Form Insight — only shown when player has games and teamId/teamMemberId are provided */}
+          {teamId && teamMemberId ? (
+            <div className='mt-4'>
+              <p className='text-sm font-medium mb-2'>{tr('members_ratingFormLabel')}</p>
+              {insightState._tag === 'idle' && (
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  className='text-muted-foreground hover:text-foreground gap-1.5'
+                  onClick={handleGenerateInsight}
+                >
+                  <Sparkles className='size-3.5' aria-hidden='true' />
+                  {tr('members_ratingFormGenerate')}
+                </Button>
+              )}
+              {insightState._tag === 'loading' && (
+                <div
+                  className='flex flex-col gap-1.5'
+                  role='status'
+                  aria-label={tr('members_ratingFormGenerating')}
+                >
+                  <Skeleton className='h-4 w-full' />
+                  <Skeleton className='h-4 w-3/4' />
+                </div>
+              )}
+              {insightState._tag === 'loaded' && (
+                <div className='flex items-start gap-2'>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className={`mt-1 inline-block size-2 shrink-0 rounded-full ${insightState.generated ? 'bg-primary' : 'bg-muted-foreground'}`}
+                          aria-hidden='true'
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>
+                          {insightState.generated
+                            ? tr('members_ratingFormSourceAi')
+                            : tr('members_ratingFormSourceFallback')}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <p
+                    aria-live='polite'
+                    className='text-sm text-muted-foreground italic leading-snug'
+                  >
+                    {insightState.insight}
+                  </p>
+                </div>
+              )}
+              {insightState._tag === 'error' && (
+                <p className='text-sm text-muted-foreground'>
+                  {tr('members_ratingFormUnavailable')}
+                </p>
+              )}
             </div>
           ) : null}
         </>

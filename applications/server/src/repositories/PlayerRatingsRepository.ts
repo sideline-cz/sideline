@@ -353,6 +353,51 @@ const make = Effect.gen(function* () {
   const applyGameUpdates = (params: ApplyGameUpdatesParams): Effect.Effect<void> =>
     applyGameUpdatesTx(params).pipe(sql.withTransaction, catchSqlErrors);
 
+  const seedRating = (
+    teamId: Team.TeamId,
+    memberId: TeamMember.TeamMemberId,
+    rating: number,
+  ): Effect.Effect<Option.Option<RatingWithHistoryRow>> =>
+    sql<{
+      team_member_id: TeamMember.TeamMemberId;
+      team_id: Team.TeamId;
+      rating: number;
+      games_played: number;
+      wins: number;
+      losses: number;
+      draws: number;
+      prev_rating: number | null;
+      last_delta: number | null;
+    }>`
+      INSERT INTO player_ratings (team_id, team_member_id, rating, games_played, wins, losses, draws)
+      VALUES (${teamId}, ${memberId}, ${rating}, 0, 0, 0, 0)
+      ON CONFLICT (team_id, team_member_id) DO UPDATE
+        SET rating = EXCLUDED.rating, updated_at = now()
+        WHERE player_ratings.games_played = 0
+      RETURNING
+        team_member_id,
+        team_id,
+        rating,
+        games_played,
+        wins,
+        losses,
+        draws,
+        NULL::int AS prev_rating,
+        NULL::int AS last_delta
+    `.pipe(
+      catchSqlErrors,
+      Effect.flatMap((rows) => {
+        const row = rows[0];
+        if (row === undefined) {
+          return Effect.succeed(Option.none<RatingWithHistoryRow>());
+        }
+        return Schema.decodeUnknownEffect(RatingWithHistoryRow)(row).pipe(
+          catchSqlErrors,
+          Effect.map(Option.some),
+        );
+      }),
+    );
+
   return {
     getMemberRating,
     getTeamRatings,
@@ -360,6 +405,7 @@ const make = Effect.gen(function* () {
     getOrInitMany,
     applyGameUpdates,
     applyGameUpdatesTx,
+    seedRating,
   };
 });
 
