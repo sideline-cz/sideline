@@ -35,8 +35,8 @@
     "arctic": "^3.7.0",
     "dfx": "1.0.11",
     "effect": "4.0.0-beta.40",
-    "imapflow": "^1.0.169",
-    "mailparser": "^3.7.2"
+    "imapflow": "^1.4.2",
+    "mailparser": "^3.9.11"
   },
   "effect": {
     "generateExports": {
@@ -52,6 +52,6 @@
   },
   "devDependencies": {
     "@types/mailparser": "^3.4.5",
-    "testcontainers": "^12.0.1"
+    "testcontainers": "^12.0.3"
   }
 }
