@@ -1,5 +1,27 @@
 # @sideline/server
 
+## 0.30.1
+
+### Patch Changes
+
+- [#427](https://github.com/maxa-ondrej/sideline/pull/427) [`860bef8`](https://github.com/maxa-ondrej/sideline/commit/860bef86e0a9aa2041a227069966ee7bcfefcdce) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix admins getting a 404 when opening an event detail for a group they don't belong to. The "All groups" events list lets admins (members with `team:manage`) see every team event, but the event detail endpoint still ran the member-group access check for everyone and rejected events outside the admin's groups before the admin status was even evaluated. The detail endpoint now bypasses the member-group check for admins, matching the list, update, and cancel handlers.
+
+- [#421](https://github.com/maxa-ondrej/sideline/pull/421) [`cfa325c`](https://github.com/maxa-ondrej/sideline/commit/cfa325c80c44b6701c52383e700d8f602d76d32f) Thanks [@dependabot](https://github.com/apps/dependabot)! - deps: bump the npm group across 1 directory with 27 updates
+
+- [#426](https://github.com/maxa-ondrej/sideline/pull/426) [`dcf58c5`](https://github.com/maxa-ondrej/sideline/commit/dcf58c5350d6de18f83b1e76e03e7fb8c507b7f2) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix: Discord role sync failing when more than one event row is produced
+
+  The multi-row batch INSERT helpers in `ChannelSyncEventsRepository` (and
+  `EmailAttachmentsRepository`) used `sql.join(',')`, whose default `addParens`
+  wraps the whole `VALUES` list in an extra pair of parens. Single-row inserts
+  worked, but two or more rows produced `VALUES ((row1),(row2))`, which Postgres
+  rejects with "INSERT has more target columns than expressions" — surfacing as
+  "Failed to start Discord role sync" on the group detail page. Switched these
+  inserts to `sql.join(',', false)`.
+
+- Updated dependencies [[`cfa325c`](https://github.com/maxa-ondrej/sideline/commit/cfa325c80c44b6701c52383e700d8f602d76d32f)]:
+  - @sideline/i18n@0.14.1
+  - @sideline/template-renderer@0.1.1
+
 ## 0.30.0
 
 ### Minor Changes
