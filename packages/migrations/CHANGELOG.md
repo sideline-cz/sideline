@@ -1,5 +1,17 @@
 # @sideline/migrations
 
+## 0.23.0
+
+### Minor Changes
+
+- [#413](https://github.com/maxa-ondrej/sideline/pull/413) [`dd91e63`](https://github.com/maxa-ondrej/sideline/commit/dd91e634678c34742ca8224fb7c9c9ced1c098f0) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add a team-average Elo rating system. Captains and admins (any member with `member:edit`) can record game results via `POST /teams/:teamId/ratings/games`; the server applies K=40 during calibration (first 10 games) and K=20 thereafter. Current standings are readable by all team members via `GET /teams/:teamId/ratings`; individual rating details and full game history are available per-member. Two new database tables (`player_ratings`, `player_rating_history`) back the feature. A `MemberRatingCard` component surfaces ratings on the player profile page.
+
+- [#416](https://github.com/maxa-ondrej/sideline/pull/416) [`39f23d6`](https://github.com/maxa-ondrej/sideline/commit/39f23d6fde5b1d997e22ea8c802def2e41d72141) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add a balanced training team generator. Captains and admins (any member with `member:edit`) can generate two balanced teams for a training event based on player Elo ratings, with optional gender-mix weighting, then review, manually swap players, and post the result to Discord.
+
+  The core is a pure, deterministic engine (`TeamGenerator`) that seeds teams via snake-draft and refines them with hill-climbing local search over a normalized weighted cost function (Elo spread, team size, gender distribution), surfacing warnings for uneven team sizes, Elo outliers, and insufficient gender mix. Per-team balancing weights are configurable per team (`team_generation_config` table). The web `TeamGeneratorSection` provides generation, live balance feedback, and accessible select-two-to-swap manual adjustment; the `/training generate` Discord command deep-links to it. Posting to Discord goes through the event-sync outbox (`teams_generated` event) and re-derives all embed content server-side from the trusted roster. MVP ships two teams with an N-ready API and engine.
+
+- [#415](https://github.com/maxa-ondrej/sideline/pull/415) [`30166b5`](https://github.com/maxa-ondrej/sideline/commit/30166b5b0245a31414028d2a8be06a2afdc8ddb7) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add training game result logging. Coaches (any member with `member:edit`) open a training event and split the RSVP-yes attendees into Team A / Team B, then record the winner (Team A / Team B / Draw); multiple games (rounds) can be logged per session. Saving a result applies an incremental Elo update via the existing rating engine — the new game's id is recorded on each `player_rating_history` row — and best-effort auto-logs training attendance for all RSVP-yes members (deduplicated per UTC day). Two new tables (`training_games`, `training_game_participants`) back the feature. The `/training result` Discord command is a convenience deep-link: it replies with an ephemeral link to the web result editor, listing loggable trainings (including just-finished ones) via the new `Event/GetLoggableTrainingEvents` RPC. Logged games are immutable for now.
+
 ## 0.22.0
 
 ### Minor Changes
