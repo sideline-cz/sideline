@@ -1,5 +1,23 @@
 # @sideline/i18n
 
+## 0.14.0
+
+### Minor Changes
+
+- [#423](https://github.com/maxa-ondrej/sideline/pull/423) [`bf0716c`](https://github.com/maxa-ondrej/sideline/commit/bf0716cd86155c06bf0ca16b8207ba5e30f86e4e) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add an admin-only "All groups" toggle to the team events list. By default members see only events for the groups they belong to; admins (members with `team:manage`) can now flip a toggle to see every team event regardless of group. The toggle is driven by a URL search param so it refetches from the server, and the server re-checks the `team:manage` permission — a non-admin cannot bypass group filtering by sending the flag. It composes with the existing client-side "Show past & cancelled" filter, and the calendar view inherits the broadened scope.
+
+- [#418](https://github.com/maxa-ondrej/sideline/pull/418) [`51f1048`](https://github.com/maxa-ondrej/sideline/commit/51f1048a4182556c315ee4b278253b8f597a2d32) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add two AI-assisted features to the captain-only player ELO rating card, reusing the existing LlmClient.
+  - **Rating insight**: an on-demand, plain-language summary of a player's recent form (trend from recent rating deltas, win/loss/draw record, calibration status), shown on the rating card with an AI-vs-fallback indicator. Backed by `GET /teams/:teamId/members/:memberId/rating/insight`.
+  - **ELO from description (suggest-and-confirm)**: for an unrated player, a captain describes the player's ability in free text and AI suggests a starting rating + rationale; the captain can edit the number before confirming. The applied rating seeds `player_ratings` while keeping `games_played = 0`, so the first calibration games (K=40) quickly correct the estimate. Backed by `POST .../rating/estimate` (no persist) and `POST .../rating/seed`.
+
+  Ratings stay 800–1800 (enforced in the domain schema, the server, and the UI). Both AI calls degrade to deterministic fallbacks when the LLM is unavailable and never fail the request. All endpoints require `member:edit` (captain/admin) and verify the member belongs to the team. No database migration.
+
+- [#416](https://github.com/maxa-ondrej/sideline/pull/416) [`39f23d6`](https://github.com/maxa-ondrej/sideline/commit/39f23d6fde5b1d997e22ea8c802def2e41d72141) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add a balanced training team generator. Captains and admins (any member with `member:edit`) can generate two balanced teams for a training event based on player Elo ratings, with optional gender-mix weighting, then review, manually swap players, and post the result to Discord.
+
+  The core is a pure, deterministic engine (`TeamGenerator`) that seeds teams via snake-draft and refines them with hill-climbing local search over a normalized weighted cost function (Elo spread, team size, gender distribution), surfacing warnings for uneven team sizes, Elo outliers, and insufficient gender mix. Per-team balancing weights are configurable per team (`team_generation_config` table). The web `TeamGeneratorSection` provides generation, live balance feedback, and accessible select-two-to-swap manual adjustment; the `/training generate` Discord command deep-links to it. Posting to Discord goes through the event-sync outbox (`teams_generated` event) and re-derives all embed content server-side from the trusted roster. MVP ships two teams with an N-ready API and engine.
+
+- [#415](https://github.com/maxa-ondrej/sideline/pull/415) [`30166b5`](https://github.com/maxa-ondrej/sideline/commit/30166b5b0245a31414028d2a8be06a2afdc8ddb7) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add training game result logging. Coaches (any member with `member:edit`) open a training event and split the RSVP-yes attendees into Team A / Team B, then record the winner (Team A / Team B / Draw); multiple games (rounds) can be logged per session. Saving a result applies an incremental Elo update via the existing rating engine — the new game's id is recorded on each `player_rating_history` row — and best-effort auto-logs training attendance for all RSVP-yes members (deduplicated per UTC day). Two new tables (`training_games`, `training_game_participants`) back the feature. The `/training result` Discord command is a convenience deep-link: it replies with an ephemeral link to the web result editor, listing loggable trainings (including just-finished ones) via the new `Event/GetLoggableTrainingEvents` RPC. Logged games are immutable for now.
+
 ## 0.13.0
 
 ### Minor Changes

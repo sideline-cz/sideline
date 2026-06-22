@@ -1,5 +1,11 @@
 # @sideline/docs
 
+## 0.2.2
+
+### Patch Changes
+
+- [#420](https://github.com/maxa-ondrej/sideline/pull/420) [`3c2207d`](https://github.com/maxa-ondrej/sideline/commit/3c2207d056d6ec46032d2a0cc33f953950c58ef1) Thanks [@dependabot](https://github.com/apps/dependabot)! - Bump astro from 6.4.6 to 6.4.8 in the astro group
+
 ## 0.2.1
 
 ### Patch Changes
