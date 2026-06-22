@@ -1,13 +1,14 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { EventApi, GroupApi, TrainingTypeApi } from '@sideline/domain';
 import { Discord, Event, EventSeries, GroupModel, Team, TrainingType } from '@sideline/domain';
-import { Link, useRouter } from '@tanstack/react-router';
+import { Link, useRouter, useRouterState } from '@tanstack/react-router';
 import { DateTime, Effect, Option, Schema } from 'effect';
-import { CalendarDays, List } from 'lucide-react';
+import { CalendarDays, List, Loader2, ShieldCheck } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 import { EventCalendarView } from '~/components/organisms/EventCalendarView';
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { DatePicker } from '~/components/ui/date-picker';
 import {
@@ -29,6 +30,7 @@ import {
 } from '~/components/ui/select';
 import { Switch } from '~/components/ui/switch';
 import { Textarea } from '~/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/components/ui/tooltip';
 import { dateOnlyToUtc, formatEventDateRange, formatUtcTime, localToUtc } from '~/lib/datetime.js';
 import { DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import {
@@ -110,6 +112,9 @@ interface EventsListPageProps {
   teamId: string;
   events: ReadonlyArray<EventApi.EventInfo>;
   canCreate: boolean;
+  canViewAll: boolean;
+  showAllGroups: boolean;
+  onShowAllGroupsChange: (value: boolean) => void;
   trainingTypes: ReadonlyArray<TrainingTypeApi.TrainingTypeInfo>;
   discordChannels: ReadonlyArray<GroupApi.DiscordChannelInfo>;
   groups: ReadonlyArray<GroupApi.GroupInfo>;
@@ -119,6 +124,9 @@ export function EventsListPage({
   teamId,
   events,
   canCreate,
+  canViewAll,
+  showAllGroups,
+  onShowAllGroupsChange,
   trainingTypes,
   discordChannels,
   groups,
@@ -130,6 +138,7 @@ export function EventsListPage({
   const [mode, setMode] = React.useState<'one-time' | 'recurring'>('one-time');
   // Started/cancelled events are hidden from the list by default; the calendar always shows all.
   const [showHidden, setShowHidden] = React.useState(false);
+  const isPending = useRouterState({ select: (s) => s.status === 'pending' });
   const hiddenCount = events.filter((e) => e.status !== 'active').length;
   const visibleEvents = showHidden ? events : events.filter((e) => e.status === 'active');
 
@@ -337,7 +346,12 @@ export function EventsListPage({
       </header>
 
       {viewMode === 'calendar' ? (
-        <EventCalendarView teamId={teamId} events={events} trainingTypes={trainingTypes} />
+        <div
+          className={isPending ? 'opacity-60 pointer-events-none transition-opacity' : undefined}
+          aria-busy={isPending}
+        >
+          <EventCalendarView teamId={teamId} events={events} trainingTypes={trainingTypes} />
+        </div>
       ) : (
         <div className='flex flex-col gap-6 lg:grid lg:grid-cols-[1fr_420px]'>
           <div className='order-2 lg:order-2 lg:sticky lg:top-20 lg:self-start'>
@@ -976,20 +990,61 @@ export function EventsListPage({
             )}
           </div>
           <div className='order-1 lg:order-1'>
-            {hiddenCount > 0 && (
-              <Button
-                variant='ghost'
-                size='sm'
-                className='mb-2 text-muted-foreground'
-                onClick={() => setShowHidden((v) => !v)}
-              >
-                {showHidden ? tr('event_hidePastCancelled') : tr('event_showPastCancelled')}
-              </Button>
-            )}
+            <div className='flex flex-wrap items-center gap-3 mb-2'>
+              {hiddenCount > 0 && (
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  className='text-muted-foreground'
+                  onClick={() => setShowHidden((v) => !v)}
+                >
+                  {showHidden ? tr('event_hidePastCancelled') : tr('event_showPastCancelled')}
+                </Button>
+              )}
+              {canViewAll && (
+                <div className='flex items-center gap-2'>
+                  <Switch
+                    id='events-all-groups'
+                    checked={showAllGroups}
+                    onCheckedChange={onShowAllGroupsChange}
+                    aria-describedby='events-all-groups-help'
+                  />
+                  <Label htmlFor='events-all-groups' className='flex items-center gap-1.5'>
+                    {tr('event_allGroups')}
+                    <Badge variant='secondary'>{tr('event_adminViewBadge')}</Badge>
+                  </Label>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type='button'
+                          className='text-muted-foreground'
+                          aria-label={tr('event_allGroupsHelp')}
+                        >
+                          <ShieldCheck className='size-4' />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent id='events-all-groups-help'>
+                        {tr('event_allGroupsHelp')}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  {isPending && (
+                    <Loader2
+                      className='size-4 animate-spin text-muted-foreground'
+                      aria-hidden='true'
+                    />
+                  )}
+                </div>
+              )}
+            </div>
             {visibleEvents.length === 0 ? (
               <p className='text-muted-foreground'>{tr('event_noEvents')}</p>
             ) : (
-              <div className='flex flex-col gap-2'>
+              <div
+                className={`flex flex-col gap-2${isPending ? ' opacity-60 pointer-events-none transition-opacity' : ''}`}
+                aria-busy={isPending}
+              >
                 {visibleEvents.map((event) => {
                   const { startDate, startTime, end } = formatEventDateRange(
                     event.startAt,

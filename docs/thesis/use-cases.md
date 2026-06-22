@@ -223,6 +223,7 @@ flowchart LR
     TR --> UC_MANAGE_EXPENSES
     TR --> UC_VIEW_BALANCE
 
+    AD --> UC_VIEW_EVENTS
     AD --> UC_REMOVE_MEMBER
     AD --> UC_MANAGE_ROLES
     AD --> UC_MANAGE_GROUPS
@@ -472,10 +473,11 @@ Events represent scheduled team activities (training, match, tournament, meeting
 flowchart LR
     PL(["Player"])
     CP(["Captain"])
+    AD(["Admin"])
     SYS(["System (Cron)"])
 
     subgraph SINGLE["Single Events"]
-        UC_LIST_EVENTS["List Events\n(GET /teams/:teamId/events)"]
+        UC_LIST_EVENTS["List Events\n(GET /teams/:teamId/events)\noptional ?all=true (team:manage only)\nreturns canViewAll flag"]
         UC_GET_EVENT["View Event Detail\n(GET /teams/:teamId/events/:eventId)"]
         UC_CREATE_EVENT["Create Event\n(POST /teams/:teamId/events)\nrequires: event:create\ntitle · type · startAt · endAt\nlocation · trainingTypeId\ndiscordChannelId · ownerGroupId · memberGroupId"]
         UC_EDIT_EVENT["Edit Event\n(PATCH /teams/:teamId/events/:eventId)\nrequires: event:edit"]
@@ -513,6 +515,8 @@ flowchart LR
     CP --> UC_EDIT_SERIES
     CP --> UC_CANCEL_SERIES
     CP --> UC_NON_RESPONDERS
+
+    AD --> UC_LIST_EVENTS
 
     SYS --> UC_GEN_EVENTS
     SYS --> UC_START_EVENT

@@ -26,23 +26,28 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
     Effect.bind('trainingTypes', () => TrainingTypesRepository.asEffect()),
     Effect.map(({ members, events, syncEvents, groups, trainingTypes }) =>
       handlers
-        .handle('listEvents', ({ params: { teamId } }) =>
+        .handle('listEvents', ({ params: { teamId }, query: { all } }) =>
           Effect.Do.pipe(
             Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
             Effect.let('canCreate', ({ membership }) => hasPermission(membership, 'event:create')),
+            Effect.let('canViewAll', ({ membership }) => hasPermission(membership, 'team:manage')),
             Effect.bind('list', () => events.findEventsByTeamId(teamId)),
-            Effect.bind('filteredList', ({ list, membership }) =>
-              Effect.filter(list, (e) =>
-                checkGroupAccess(groups, membership.id, e.member_group_id),
-              ),
-            ),
+            Effect.bind('filteredList', ({ list, membership, canViewAll }) => {
+              const wantsAll = Option.getOrElse(all, () => false);
+              return wantsAll && canViewAll
+                ? Effect.succeed(list)
+                : Effect.filter(list, (e) =>
+                    checkGroupAccess(groups, membership.id, e.member_group_id),
+                  );
+            }),
             Effect.map(
-              ({ filteredList, canCreate }) =>
+              ({ filteredList, canCreate, canViewAll }) =>
                 new EventApi.EventListResponse({
                   canCreate,
+                  canViewAll,
                   events: Array.map(
                     filteredList,
                     (e) =>

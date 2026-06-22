@@ -931,6 +931,29 @@ Rules:
 - **`TIME` columns** — node-postgres returns `'HH:MM:SS'`. If consumers expect `'HH:MM'`, normalize on read with `TO_CHAR(col, 'HH24:MI') AS col` in both `SELECT` and `RETURNING` clauses (see `TeamSettingsRepository._findByTeam`).
 - **`sql` template tag** — interpolated values become bind parameters, never SQL fragments. To pass "now" into a query, pass a real `Date` (or its ISO string) and cast in SQL (`${nowIso}::timestamptz`); never interpolate the literal string `'NOW()'` — it becomes a bound text value, not a function call.
 
+## Permission-Gated Data-Scope Flags Are Re-Checked Server-Side
+
+When an endpoint accepts a client-supplied boolean flag that **widens the set of rows the caller sees** beyond their normal scope (e.g. "show every team event, not just my groups'"), the handler MUST re-derive the permission server-side with `hasPermission(membership, '<perm>')` and AND it with the flag. The client flag alone is never sufficient to widen scope — a caller can always set the flag, so the gate is the permission, checked on the server, every request.
+
+Reference implementations: `applications/server/src/api/event.ts` (`listEvents` — `all` query flag gated on `team:manage`) and `applications/server/src/services/WeeklySummaryHandler.ts` (`includeTeam` flag gated on `roster:manage`).
+
+```typescript
+Effect.let('canViewAll', ({ membership }) => hasPermission(membership, 'team:manage')),
+Effect.bind('filteredList', ({ list, membership, canViewAll }) => {
+  const wantsAll = Option.getOrElse(all, () => false);
+  return wantsAll && canViewAll
+    ? Effect.succeed(list)
+    : Effect.filter(list, (e) => checkGroupAccess(groups, membership.id, e.member_group_id));
+}),
+```
+
+Rules:
+
+1. **The scope-widening condition is `Option.getOrElse(flag, () => false) && hasPermission(membership, '<perm>')`** — both terms required. Default the absent flag to `false` (never widen by default). The query flag is declared as `Schema.OptionFromOptional(BooleanFromString)` on the endpoint (see `packages/domain/AGENTS.md`); the handler resolves the default with `Option.getOrElse`, mirroring the PATCH-merge rule.
+2. **A caller lacking the permission with the flag set gets the narrow (filtered) result, NOT a 403.** The flag is an opt-in request to widen, not an assertion of entitlement — silently fall back to the normal scope. Reserve `Forbidden` for endpoints the caller cannot reach at all, not for an over-reaching scope hint.
+3. **The response carries the capability as a separate boolean field** (e.g. `canViewAll: hasPermission(membership, '<perm>')` on `EventListResponse`) computed from the SAME `hasPermission` call result, so the web can show/hide the toggle without guessing the caller's role. This field reports whether the caller MAY widen, independent of whether they DID this request. Pairs with web rule 6 in "Loader-Refetching Search Param Via `validateSearch` + `loaderDeps`" (`applications/web/AGENTS.md`).
+4. **Never trust the client flag to skip the per-row access filter unconditionally.** The `wantsAll && canViewAll` branch is the only place the filter is skipped; every other path runs `Effect.filter(list, checkGroupAccess(...))`. Do not hoist the unfiltered list into a shared binding that a later code path might return without re-checking.
+
 ## Team-Scoped Resources With Global Rows
 
 Some resource tables hold both **global** rows (shared across every team) and **team-specific** rows in the same table, distinguished by `team_id`:

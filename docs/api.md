@@ -1674,7 +1674,7 @@ Lists all known Discord channels for the team's linked guild.
 
 #### `GET /teams/:teamId/events`
 
-Lists all events for a team.
+Lists events for a team. By default the response is filtered to events that belong to groups the caller is a member of. Members with the `team:manage` permission (`Admin` role) can request all team events regardless of group by passing `?all=true`.
 
 **Auth:** Bearer token (AuthMiddleware)
 
@@ -1684,12 +1684,19 @@ Lists all events for a team.
 |---|---|---|
 | `teamId` | `TeamId` (string) | Team ID |
 
+**Query Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `all` | `"true" \| "false"` | No | When `"true"` **and** the caller has `team:manage`, returns every team event regardless of group membership. Ignored (and silently treated as `false`) for members without `team:manage`. |
+
 **Response:** `200 OK` — `EventListResponse`
 
 | Field | Type | Description |
 |---|---|---|
 | `canCreate` | `boolean` | Whether the user can create events |
-| `events` | `EventInfo[]` | List of events |
+| `canViewAll` | `boolean` | Whether the user has the `team:manage` permission and may therefore use `?all=true` to see all group events |
+| `events` | `EventInfo[]` | List of events (group-filtered by default; all events when `?all=true` and `canViewAll` is `true`) |
 
 `EventInfo`:
 

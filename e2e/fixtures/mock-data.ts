@@ -120,6 +120,7 @@ export const mockDashboardResponse = {
 
 export const mockEventList = {
   canCreate: true,
+  canViewAll: false,
   events: [
     {
       eventId: EVENT_ID,

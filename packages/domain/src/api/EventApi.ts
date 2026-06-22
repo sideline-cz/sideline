@@ -1,5 +1,5 @@
 import * as Schemas from '@sideline/effect-lib/Schemas';
-import { Schema } from 'effect';
+import { Schema, SchemaGetter } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
 import { fieldState } from '~/api/RequestFilters.js';
@@ -9,6 +9,13 @@ import { EventSeriesId } from '~/models/EventSeries.js';
 import { GroupId } from '~/models/GroupModel.js';
 import { TeamId } from '~/models/Team.js';
 import { TrainingTypeId } from '~/models/TrainingType.js';
+
+const BooleanFromString = Schema.Literals(['true', 'false']).pipe(
+  Schema.decodeTo(Schema.Boolean, {
+    decode: SchemaGetter.transform((s: 'true' | 'false') => s === 'true'),
+    encode: SchemaGetter.transform((b: boolean) => (b ? 'true' : 'false') as 'true' | 'false'),
+  }),
+);
 
 // Matches a literal IPv4 dotted-quad (exactly four decimal octets)
 const IPV4_LITERAL_PATTERN = /^\d{1,3}(\.\d{1,3}){3}$/;
@@ -144,6 +151,7 @@ export class EventDetail extends Schema.Class<EventDetail>('EventDetail')({
 
 export class EventListResponse extends Schema.Class<EventListResponse>('EventListResponse')({
   canCreate: Schema.Boolean,
+  canViewAll: Schema.Boolean,
   events: Schema.Array(EventInfo),
 }) {}
 
@@ -219,6 +227,7 @@ export class EventApiGroup extends HttpApiGroup.make('event')
       success: EventListResponse,
       error: Forbidden.pipe(HttpApiSchema.status(403)),
       params: { teamId: TeamId },
+      query: { all: Schema.OptionFromOptional(BooleanFromString) },
     }).middleware(AuthMiddleware),
   )
   .add(

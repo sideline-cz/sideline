@@ -238,6 +238,35 @@ function FinancesRoute() {
 4. **Define the tab literal union ONCE in the page component file** (`type ActiveTab = ...`) and re-declare an identical alias in the route file. Do not import the type across the page/route boundary — the route owns URL serialization, the page owns rendering; both keep their copy of the literal union so a rename touches both files and is visible in PR diffs.
 5. **The default tab is computed in the route, not in `validateSearch`.** `validateSearch` only narrows the parsed value; defaulting (`activeTab = searchTab ?? defaultTab`) happens in the component where `defaultTab` may depend on loader data (e.g. "show Overview tab only if `balanceSummaries` was fetched").
 
+## Loader-Refetching Search Param Via `validateSearch` + `loaderDeps`
+
+When a UI control changes **what the route loader fetches from the server** (not just what the already-loaded data renders), the control's state MUST live in a search param that is wired through `loaderDeps` into the `loader`, so toggling it re-runs the loader against the API. This is distinct from the "URL-Synced Tabs Via `validateSearch`" section above, which syncs a **client-only** selection and never touches the loader. Use this pattern only when the param feeds a fresh API call.
+
+Reference implementations: `applications/web/src/routes/(authenticated)/teams/$teamId/events.index.tsx` (`all` → `listEvents` `query.all`) and `applications/web/src/routes/(authenticated)/teams/$teamId/workout.weekly.tsx` (`includeTeam` → `getWeeklySummary` `query.includeTeam`). Both pair with the server-side scope-gating convention in `applications/server/AGENTS.md` ("Permission-Gated Data-Scope Flags Are Re-Checked Server-Side").
+
+```typescript
+const EventsSearchSchema = Schema.Struct({
+  all: Schema.optional(Schema.Boolean),
+});
+
+export const Route = createFileRoute('/(authenticated)/teams/$teamId/events/')({
+  ssr: false,
+  validateSearch: Schema.toStandardSchemaV1(EventsSearchSchema),
+  loaderDeps: ({ search }) => ({ all: search.all }),
+  loader: async ({ params, context, deps }) =>
+    /* ...api.event.listEvents({ params, query: { all: deps.all ? Option.some(true) : Option.none() } })... */,
+});
+```
+
+Rules:
+
+1. **Define the search schema with `Schema.Struct` + `Schema.toStandardSchemaV1`** and `Schema.optional(Schema.Boolean)` for an optional boolean toggle. Do NOT hand-write a type-guard `validateSearch` here (that form is for the client-only tab pattern) — the loader needs the decoded value, so a Schema is the source of truth.
+2. **`loaderDeps` MUST select exactly the params the loader reads** (`({ search }) => ({ all: search.all })`). A param that is only consumed by the component (not the loader) MUST NOT appear in `loaderDeps` — listing it there triggers needless loader refetches.
+3. **Map the search value to the API `Option` query field inside the loader** using the domain `Schema.OptionFromOptional(BooleanFromString)` contract: `deps.all ? Option.some(true) : Option.none()`. Never send `Option.some(false)` for the "off" state — omit the param (`Option.none()`) so the wire request carries no key, matching the server default (see the Query-String Boolean Helper section in `packages/domain/AGENTS.md`).
+4. **Write the param via `navigate({ search: (prev) => ({ ...prev, all: v ? true : undefined }) })`** — set the falsy/default value to `undefined` (not `false`) so it drops out of the URL, keeping the canonical URL clean and matching rule 3's omit-when-off contract.
+5. **Surface the in-flight refetch with `useRouterState({ select: (s) => s.status === 'pending' })`** and dim the affected region (`opacity-60 pointer-events-none transition-opacity` + `aria-busy`). The toggle stays interactive during the refetch; only the data region shows the pending state. Reference: `EventsListPage` (`isPending`).
+6. **Gate the control's visibility on the server-supplied capability flag** from the loader response (e.g. `canViewAll`), never on a locally-inferred role. The server owns whether the scope expansion is allowed (see the server-side rule); the web only renders the control when the flag is `true`.
+
 ## Forms — React Hook Form + Effect Schema
 
 **Always use Shadcn Form (`components/ui/form`) with React Hook Form and Effect Schema** for any form that collects user input.

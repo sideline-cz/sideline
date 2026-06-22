@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-22 — Admins can view all team events across every group
+
+Admins (members with the **Admin** role) can now see every team event in the events list — not just those for groups they belong to.
+
+- A new **All groups** toggle appears on the Events list page for admin users. Enable it to see every event on the team, regardless of which group owns the event. Disable it to return to the normal group-filtered view.
+- The toggle is only visible to members with the `team:manage` permission. All other members continue to see only events for their own groups and are unaffected by this change.
+- The toggle state is reflected in the URL (`?all=true`) so it persists on page refresh.
+
 ## 2026-06-21 — AI rating insight and AI-assisted starting Elo for unrated players
 
 Captains and admins can now use two new AI-powered tools on the player Elo rating card (captain-only). Both features use the same AI assistant as email forwarding and degrade gracefully to a built-in fallback when the AI is unavailable — so they always return a result.
