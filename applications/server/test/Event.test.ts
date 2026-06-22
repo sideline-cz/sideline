@@ -1,4 +1,13 @@
-import type { Auth, Discord, Event, Role, Team, TeamMember, TrainingType } from '@sideline/domain';
+import type {
+  Auth,
+  Discord,
+  Event,
+  GroupModel,
+  Role,
+  Team,
+  TeamMember,
+  TrainingType,
+} from '@sideline/domain';
 import { OAuth2Tokens } from 'arctic';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { HttpClient, HttpClientResponse, HttpRouter, HttpServer } from 'effect/unstable/http';
@@ -67,6 +76,8 @@ const TEST_EVENT_1 = '00000000-0000-0000-0000-000000000060' as Event.EventId;
 const TEST_EVENT_2 = '00000000-0000-0000-0000-000000000061' as Event.EventId;
 const TEST_EVENT_SCOPED = '00000000-0000-0000-0000-000000000062' as Event.EventId;
 const TEST_EVENT_WITH_IMAGE = '00000000-0000-0000-0000-000000000063' as Event.EventId;
+const TEST_EVENT_OTHER_GROUP = '00000000-0000-0000-0000-000000000064' as Event.EventId;
+const TEST_OTHER_GROUP_ID = '00000000-0000-0000-0000-000000000070' as GroupModel.GroupId;
 const TEST_TRAINING_TYPE_A = '00000000-0000-0000-0000-000000000050' as TrainingType.TrainingTypeId;
 const TEST_TRAINING_TYPE_B = '00000000-0000-0000-0000-000000000051' as TrainingType.TrainingTypeId;
 
@@ -340,6 +351,34 @@ const resetStores = () => {
     member_group_id: Option.none(),
     owner_group_name: Option.none(),
     member_group_name: Option.none(),
+  });
+  // Event scoped to a member group the test user is NOT a part of. The mock
+  // GroupsRepository.getDescendantMemberIds returns [], so checkGroupAccess
+  // fails for everyone — only admins (team:manage) may view it.
+  eventsStore.set(TEST_EVENT_OTHER_GROUP, {
+    id: TEST_EVENT_OTHER_GROUP,
+    team_id: TEST_TEAM_ID,
+    training_type_id: Option.none(),
+    event_type: 'training',
+    title: 'Other Group Training',
+    description: Option.none(),
+    image_url: Option.none(),
+    start_at: DateTime.makeUnsafe('2026-03-22T18:00:00Z'),
+    end_at: Option.some(DateTime.makeUnsafe('2026-03-22T20:00:00Z')),
+    location: Option.none(),
+    location_url: Option.none(),
+    status: 'active',
+    all_day: false,
+    created_by: TEST_ADMIN_MEMBER_ID,
+    training_type_name: Option.none(),
+    created_by_name: Option.some('Admin User'),
+    series_id: Option.none(),
+    series_modified: false,
+    discord_target_channel_id: Option.none(),
+    owner_group_id: Option.some(TEST_OTHER_GROUP_ID),
+    member_group_id: Option.some(TEST_OTHER_GROUP_ID),
+    owner_group_name: Option.some('Other Group'),
+    member_group_name: Option.some('Other Group'),
   });
 };
 
@@ -1270,6 +1309,26 @@ describe('Events API', () => {
       const response = await handler(
         new Request(`${BASE}/${unknownId}`, {
           headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(response.status).toBe(404);
+    });
+
+    it('returns 200 for admin viewing an event in a group they are not a member of', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_OTHER_GROUP}`, {
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.title).toBe('Other Group Training');
+    });
+
+    it('returns 404 for player viewing an event in a group they are not a member of', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_OTHER_GROUP}`, {
+          headers: { Authorization: 'Bearer user-token' },
         }),
       );
       expect(response.status).toBe(404);

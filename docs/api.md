@@ -1768,6 +1768,8 @@ Creates a new event.
 
 Returns full details for a specific event.
 
+Members without the `team:manage` permission can only retrieve events belonging to groups they are a member of; events in other groups return `404`. Members with `team:manage` (Admin role) can retrieve any team event regardless of group membership, consistent with the `?all=true` behaviour on the list endpoint.
+
 **Auth:** Bearer token (AuthMiddleware)
 
 **Path Parameters:**

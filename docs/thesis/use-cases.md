@@ -478,7 +478,7 @@ flowchart LR
 
     subgraph SINGLE["Single Events"]
         UC_LIST_EVENTS["List Events\n(GET /teams/:teamId/events)\noptional ?all=true (team:manage only)\nreturns canViewAll flag"]
-        UC_GET_EVENT["View Event Detail\n(GET /teams/:teamId/events/:eventId)"]
+        UC_GET_EVENT["View Event Detail\n(GET /teams/:teamId/events/:eventId)\nadmins (team:manage) bypass member-group filter"]
         UC_CREATE_EVENT["Create Event\n(POST /teams/:teamId/events)\nrequires: event:create\ntitle · type · startAt · endAt\nlocation · trainingTypeId\ndiscordChannelId · ownerGroupId · memberGroupId"]
         UC_EDIT_EVENT["Edit Event\n(PATCH /teams/:teamId/events/:eventId)\nrequires: event:edit"]
         UC_CANCEL_EVENT["Cancel Event\n(POST /teams/:teamId/events/:eventId/cancel)\nrequires: event:cancel"]
@@ -517,6 +517,7 @@ flowchart LR
     CP --> UC_NON_RESPONDERS
 
     AD --> UC_LIST_EVENTS
+    AD --> UC_GET_EVENT
 
     SYS --> UC_GEN_EVENTS
     SYS --> UC_START_EVENT

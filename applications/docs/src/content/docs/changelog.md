@@ -5,6 +5,10 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-22 — Fix: admins can now open event detail pages for any group
+
+Admins (members with the **Admin** role) can now open the detail page of any event on the team — including events in groups they do not belong to. Previously the event detail endpoint returned a 404 for those events, even though admins could already see them in the **All groups** events list. Both surfaces now behave consistently.
+
 ## 2026-06-22 — Admins can view all team events across every group
 
 Admins (members with the **Admin** role) can now see every team event in the events list — not just those for groups they belong to.

@@ -217,13 +217,15 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
             Effect.tap(({ event }) =>
               event.team_id !== teamId ? Effect.fail(notFound) : Effect.void,
             ),
-            // Check member group access
-            Effect.tap(({ event, membership }) =>
-              checkGroupAccess(groups, membership.id, event.member_group_id).pipe(
-                Effect.flatMap((ok) => (ok ? Effect.void : Effect.fail(notFound))),
-              ),
-            ),
             Effect.let('isAdmin', ({ membership }) => hasPermission(membership, 'team:manage')),
+            // Check member group access — admins managing the team can view any group's events
+            Effect.tap(({ event, membership, isAdmin }) =>
+              isAdmin
+                ? Effect.void
+                : checkGroupAccess(groups, membership.id, event.member_group_id).pipe(
+                    Effect.flatMap((ok) => (ok ? Effect.void : Effect.fail(notFound))),
+                  ),
+            ),
             // canEdit/canCancel: respect owner group
             Effect.bind('isOwnerGroupMember', ({ event, membership }) =>
               checkGroupAccess(groups, membership.id, event.owner_group_id),
