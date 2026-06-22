@@ -182,10 +182,10 @@ const completeDiscordLogin = ({
         : Effect.void;
     }),
     Effect.bind('session', ({ dbUser, sessionToken, expiresAt }) =>
-      // biome-ignore lint/suspicious/noExplicitAny: TypeScript can't resolve Session.insert.Type in this chain depth
       sessions.create({
         user_id: dbUser.id,
         token: sessionToken,
+        // biome-ignore lint/suspicious/noExplicitAny: TypeScript can't resolve Session.insert.Type in this chain depth
         expires_at: expiresAt as any,
         created_at: undefined,
       }),

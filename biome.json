@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/*.gen.ts", "!applications/web/src/components/ui/*.tsx"]
+    "includes": ["**", "!**/*.gen.ts", "!**/*.svg", "!applications/web/src/components/ui/*.tsx"]
   },
   "formatter": {
     "enabled": true,
@@ -96,7 +96,7 @@
   },
   "overrides": [
     {
-      "includes": ["*.test.ts", "*.test.tsx", "*.spec.ts", "*.spec.tsx"],
+      "includes": ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"],
       "linter": {
         "rules": {
           "suspicious": {
