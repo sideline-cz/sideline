@@ -56,6 +56,21 @@ execute: (input) => sql`INSERT INTO event_sync_events (event_start_at) VALUES ($
 
 Regression coverage: `applications/server/test/integration/repositories/EventSyncEventsRepository.test.ts` (the `teams_generated` outbox row's `event_start_at`/`event_end_at` must round-trip through the bot's read schema).
 
+### Multi-row VALUES inserts
+
+For batch `INSERT ... VALUES (row1),(row2),...` you MUST call `sql.join` with `addParens` explicitly set to `false`: `sql.join(',', false)`. The default `sql.join(',')` (i.e. `addParens` defaulting to `true`) wraps the entire joined fragment in an extra outer pair of parentheses, producing `VALUES ((row1),(row2))` — invalid SQL that Postgres rejects with `INSERT has more target columns than expressions`. Each row fragment already supplies its own parentheses, so the outer pair must be suppressed.
+
+```typescript
+// WRONG — addParens defaults to true; 2+ rows yield VALUES ((row1),(row2)).
+// A single row happens to work because the helper short-circuits, hiding the bug.
+sql`INSERT INTO t (a, b) VALUES ${sql.join(',')(rows.map((r) => sql`(${r.a}, ${r.b})`))}`
+
+// RIGHT — addParens = false; rows are joined into VALUES (row1),(row2).
+sql`INSERT INTO t (a, b) VALUES ${sql.join(',', false)(rows.map((r) => sql`(${r.a}, ${r.b})`))}`
+```
+
+Unit tests that mock the repository/emitter cannot catch this — the bug only surfaces against a real database. Cover multi-row inserts in DB-backed integration tests with at least 2 rows. Examples: `applications/server/src/repositories/ChannelSyncEventsRepository.ts`, `applications/server/src/repositories/EmailAttachmentsRepository.ts`.
+
 ### Repository Pattern
 
 Construct repositories by starting from `SqlClient.SqlClient.pipe(Effect.bindTo('sql'), ...)`. Use `Effect.bind` for effectful dependencies and `Effect.let` for pure method definitions. End with `Bind.remove` to strip internals.

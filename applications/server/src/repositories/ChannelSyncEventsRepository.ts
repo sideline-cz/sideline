@@ -267,7 +267,10 @@ const make = Effect.gen(function* () {
           onSome: ({ guild_id }) =>
             sql`
               INSERT INTO channel_sync_events (team_id, guild_id, event_type, entity_type, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, existing_channel_id, discord_role_id, archive_category_id, discord_channel_name, discord_role_name, discord_role_color)
-              VALUES ${sql.join(',')(
+              VALUES ${sql.join(
+                ',',
+                false,
+              )(
                 input.entries.map(
                   (e) =>
                     sql`(${input.teamId}, ${guild_id}, ${eventType}, ${'group'}, ${e.groupId}, ${e.groupName}, ${e.teamMemberId}, ${e.discordUserId}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null})`,
@@ -586,7 +589,10 @@ const make = Effect.gen(function* () {
           onSome: ({ guild_id }) =>
             sql`
               INSERT INTO channel_sync_events (team_id, guild_id, event_type, entity_type, existing_channel_id, discord_role_id, team_channel_id, access_level, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, archive_category_id, discord_channel_name, discord_role_name, discord_role_color)
-              VALUES ${sql.join(',')(
+              VALUES ${sql.join(
+                ',',
+                false,
+              )(
                 input.entries.map(
                   (e) =>
                     sql`(${input.teamId}, ${guild_id}, ${'member_added'}, ${'managed'}, ${e.discordChannelId}, ${e.discordRoleId}, ${e.teamChannelId}, ${e.accessLevel}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null})`,
@@ -611,7 +617,10 @@ const make = Effect.gen(function* () {
           onSome: ({ guild_id }) =>
             sql`
               INSERT INTO channel_sync_events (team_id, guild_id, event_type, entity_type, existing_channel_id, discord_role_id, team_channel_id, access_level, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, archive_category_id, discord_channel_name, discord_role_name, discord_role_color)
-              VALUES ${sql.join(',')(
+              VALUES ${sql.join(
+                ',',
+                false,
+              )(
                 input.entries.map(
                   (e) =>
                     sql`(${input.teamId}, ${guild_id}, ${'member_removed'}, ${'managed'}, ${e.discordChannelId}, ${e.discordRoleId}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null})`,

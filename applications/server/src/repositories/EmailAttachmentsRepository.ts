@@ -68,7 +68,10 @@ const make = Effect.gen(function* () {
     if (attachments.length === 0) return Effect.void;
     return sql`
       INSERT INTO email_attachments (email_message_id, filename, content_type, size_bytes, content)
-      VALUES ${sql.join(',')(
+      VALUES ${sql.join(
+        ',',
+        false,
+      )(
         attachments.map(
           (a) =>
             sql`(${emailMessageId}::uuid, ${a.filename}, ${a.content_type}, ${a.size_bytes}, ${Buffer.from(a.content_base64, 'base64')})`,
