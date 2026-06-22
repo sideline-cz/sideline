@@ -86,6 +86,15 @@ export function MemberRatingCard({
 
       {isEmpty ? (
         <>
+          <div className='flex items-center gap-3 mb-2'>
+            <p className='text-3xl font-bold tabular-nums'>{rating.rating}</p>
+            <Badge variant='secondary'>
+              {tr('members_ratingCalibratingBadge', {
+                played: rating.gamesPlayed,
+                threshold: rating.calibrationThreshold,
+              })}
+            </Badge>
+          </div>
           <p className='text-muted-foreground'>{tr('members_ratingNoGames')}</p>
           {teamId && teamMemberId && onRefresh ? (
             <RatingFromDescription
@@ -191,7 +200,28 @@ export function MemberRatingCard({
           {/* AI Form Insight — only shown when player has games and teamId/teamMemberId are provided */}
           {teamId && teamMemberId ? (
             <div className='mt-4'>
-              <p className='text-sm font-medium mb-2'>{tr('members_ratingFormLabel')}</p>
+              <div className='mb-2 flex items-center gap-1.5'>
+                <p className='text-sm font-medium'>{tr('members_ratingFormLabel')}</p>
+                {insightState._tag === 'loaded' ? (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className={`inline-block size-2 shrink-0 rounded-full ${insightState.generated ? 'bg-primary' : 'bg-muted-foreground'}`}
+                          aria-hidden='true'
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>
+                          {insightState.generated
+                            ? tr('members_ratingFormSourceAi')
+                            : tr('members_ratingFormSourceFallback')}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : null}
+              </div>
               {insightState._tag === 'idle' && (
                 <Button
                   variant='ghost'
@@ -214,31 +244,9 @@ export function MemberRatingCard({
                 </div>
               )}
               {insightState._tag === 'loaded' && (
-                <div className='flex items-start gap-2'>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span
-                          className={`mt-1 inline-block size-2 shrink-0 rounded-full ${insightState.generated ? 'bg-primary' : 'bg-muted-foreground'}`}
-                          aria-hidden='true'
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>
-                          {insightState.generated
-                            ? tr('members_ratingFormSourceAi')
-                            : tr('members_ratingFormSourceFallback')}
-                        </p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                  <p
-                    aria-live='polite'
-                    className='text-sm text-muted-foreground italic leading-snug'
-                  >
-                    {insightState.insight}
-                  </p>
-                </div>
+                <p aria-live='polite' className='text-sm text-muted-foreground italic leading-snug'>
+                  {insightState.insight}
+                </p>
               )}
               {insightState._tag === 'error' && (
                 <p className='text-sm text-muted-foreground'>
