@@ -4,6 +4,10 @@ on:
   pull_request_target:
     types: [opened, synchronize, labeled]
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   dependabot:
     name: Update Dependabot PR
@@ -11,19 +15,78 @@ jobs:
     if: github.actor == 'dependabot[bot]'
 
     steps:
-      - name: Checkout
+      # Ecosystem/metadata for the update. github-actions updates publish no
+      # package, so they get no changeset (an invalid changeset blocks the
+      # release train — see the recurring "package sideline not in workspace"
+      # failures).
+      - name: Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GH_PAT }}
+
+      - name: Checkout PR branch
+        if: steps.meta.outputs.package-ecosystem == 'npm'
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.ref }}
-          # PAT (not the default GITHUB_TOKEN) so the action's `git push` of the
-          # changeset commit authenticates as a user with write access — pushing
-          # as github-actions[bot] is denied (403).
+          # PAT (not the default GITHUB_TOKEN) so the `git push` of the
+          # changeset commit authenticates as a user with write access —
+          # pushing as github-actions[bot] is denied (403).
           token: ${{ secrets.GH_PAT }}
-      - name: Update PR
-        uses: StafflinePeoplePlus/dependabot-changesets@v0.1.5
-        with:
-          owner: maxa-ondrej
-          repo: sideline
-          pr-number: ${{ github.event.pull_request.number }}
-          token: ${{ secrets.GH_PAT }}
+
+      # Write a changeset that bumps EXACTLY the workspace packages whose
+      # package.json the update touched (e.g. an astro bump → @sideline/docs).
+      # The previous third-party action emitted one changeset for the repo
+      # name ("sideline"), which is not a workspace package and aborts
+      # `changeset version`. Root-only / non-workspace bumps (e.g. a root
+      # devDependency) affect no published package and get no changeset.
+      - name: Add changeset for affected workspace packages
+        if: steps.meta.outputs.package-ecosystem == 'npm'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          # Workspace package.json files changed by this update.
+          changed=$(git diff --name-only "$BASE_SHA"...HEAD \
+            | grep -E '^(applications|packages)/[^/]+/package.json$' || true)
+
+          names=()
+          while IFS= read -r f; do
+            [ -n "$f" ] && [ -f "$f" ] || continue
+            n=$(node -p "JSON.parse(require('fs').readFileSync('$f','utf8')).name")
+            [ -n "$n" ] && names+=("$n")
+          done <<< "$changed"
+
+          if [ ${#names[@]} -eq 0 ]; then
+            echo "No workspace packages affected by this update; no changeset needed."
+            exit 0
+          fi
+
+          # Dedupe (a dependency can live in more than one workspace package).
+          unique=$(printf '%s\n' "${names[@]}" | sort -u)
+
+          file=".changeset/dependabot-pr-${PR_NUMBER}.md"
+          {
+            echo "---"
+            while IFS= read -r n; do
+              [ -n "$n" ] && echo "\"$n\": patch"
+            done <<< "$unique"
+            echo "---"
+            echo ""
+            echo "$PR_TITLE"
+          } > "$file"
+
+          git config user.name 'dependabot[bot]'
+          git config user.email '49699333+dependabot[bot]@users.noreply.github.com'
+          git add "$file"
+          if git diff --cached --quiet; then
+            echo "Changeset already up to date; nothing to commit."
+            exit 0
+          fi
+          git commit -m "deps: add changeset for ${PR_TITLE}"
+          git push
