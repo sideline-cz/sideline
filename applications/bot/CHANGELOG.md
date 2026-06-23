@@ -1,5 +1,32 @@
 # @sideline/bot
 
+## 0.23.2
+
+### Patch Changes
+
+- [#430](https://github.com/maxa-ondrej/sideline/pull/430) [`a828d64`](https://github.com/maxa-ondrej/sideline/commit/a828d643a0d8546256146bb86e0571c4fb7f8389) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix: downgrade transient sync-poll upstream errors from Error to Warning
+
+  When the server/proxy returned a 502 with a non-JSON body, the bot's NDJSON RPC
+  deserializer threw a `SyntaxError` that surfaced as `Sync poll tick failed`
+  logged at Error with a full stack, even though the poll loop self-heals on the
+  next tick. Poll ticks now classify NDJSON parse failures and 5xx upstream
+  responses as transient: they log at Warning and increment
+  `syncEventsFailedTotal{sync_type:"poll_tick_transient"}` so a sustained outage
+  stays alertable, while genuine errors still log at Error.
+
+- [#429](https://github.com/maxa-ondrej/sideline/pull/429) [`5572d3a`](https://github.com/maxa-ondrej/sideline/commit/5572d3ae9356a5d244fa1bc12e7e50b42e5b4c8e) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix: channel sync events looping forever on permanent Discord errors
+
+  `isPermanentError` in the channel sync processor read the Discord error code
+  and HTTP status from the top level of the error (`e.code` / `e.status`), but
+  dfx's `DiscordRestError` nests them at `e.data.code` and `e.response.status`.
+  Both reads were therefore `undefined`, so every Discord REST failure — including
+  permanent ones like `10007 Unknown Member`, `10008 Unknown Message` and
+  `50013 Missing Permissions` — was misclassified as transient and marked
+  `MarkEventFailed` (no `processed_at`), causing the event to be re-polled every
+  ~5s forever. Fixed to read the nested fields and treat any non-429 4xx plus the
+  known Discord error codes as permanent (`MarkEventPermanentlyFailed`), so a
+  poison event is acknowledged once instead of looping.
+
 ## 0.23.1
 
 ### Patch Changes
