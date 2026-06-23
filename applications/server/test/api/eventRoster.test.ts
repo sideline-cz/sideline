@@ -1341,6 +1341,7 @@ describe('Event Roster API — web approve/decline (real service, B1 regression)
     Layer.provide(MockChannelSyncForRealServiceLayer),
     Layer.provide(MockEventSyncForRealServiceLayer),
     Layer.provide(MockGroupsForRealServiceLayer),
+    Layer.provide(MockTeamMembersRepositoryLayer),
   );
 
   // Build the full HTTP layer from scratch, substituting the real provisioning

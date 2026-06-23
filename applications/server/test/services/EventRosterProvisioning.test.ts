@@ -20,6 +20,7 @@ import { EventRostersRepository } from '~/repositories/EventRostersRepository.js
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
+import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 
 // ---------------------------------------------------------------------------
@@ -318,6 +319,50 @@ const makeGroupsRepository = (
 };
 
 // ---------------------------------------------------------------------------
+// Mock TeamMembersRepository — returns the test member's RosterEntry so that
+// addMemberToRoster can resolve a real discord_id from the team member record.
+// ---------------------------------------------------------------------------
+
+const makeTeamMembersRepository = (): Layer.Layer<TeamMembersRepository> =>
+  Layer.succeed(TeamMembersRepository, {
+    findRosterMemberByIds: (_teamId: any, memberId: any) =>
+      Effect.succeed(
+        memberId === MEMBER_ID
+          ? Option.some({
+              member_id: MEMBER_ID,
+              user_id: '00000000-0000-0000-0000-000000000001',
+              discord_id: DISCORD_USER_ID,
+              role_names: [],
+              permissions: [],
+              name: Option.none(),
+              birth_date: Option.none(),
+              gender: Option.none(),
+              jersey_number: Option.none(),
+              username: 'testuser',
+              avatar: Option.none(),
+              discord_nickname: Option.none(),
+              discord_display_name: Option.none(),
+            })
+          : Option.none(),
+      ),
+    addMember: () => Effect.die(new Error('addMember not expected')),
+    findById: () => Effect.succeed(Option.none()),
+    findByTeam: () => Effect.succeed([]),
+    findByUser: () => Effect.succeed([]),
+    findRosterByTeam: () => Effect.succeed([]),
+    findTeamMembersWithNames: () => Effect.succeed([]),
+    findMembershipByIds: () => Effect.succeed(Option.none()),
+    findMembershipByDiscordAndTeam: () => Effect.succeed(Option.none()),
+    deactivateMemberByIds: () => Effect.die(new Error('deactivateMemberByIds not expected')),
+    reactivateMember: () => Effect.die(new Error('reactivateMember not expected')),
+    getPlayerRoleId: () => Effect.succeed(Option.none()),
+    assignRole: () => Effect.void,
+    unassignRole: () => Effect.void,
+    setJerseyNumber: () => Effect.void,
+    hardDelete: () => Effect.void,
+  } as any);
+
+// ---------------------------------------------------------------------------
 // Build the test layer
 // ---------------------------------------------------------------------------
 
@@ -336,6 +381,7 @@ const buildTestLayer = (
     Layer.provide(channelSyncLayer),
     Layer.provide(eventSyncLayer),
     Layer.provide(groupsLayer),
+    Layer.provide(makeTeamMembersRepository()),
   );
 
 // ---------------------------------------------------------------------------

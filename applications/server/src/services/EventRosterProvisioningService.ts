@@ -30,7 +30,7 @@ import { EventRostersRepository } from '~/repositories/EventRostersRepository.js
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
-import type { RosterEntry } from '~/repositories/TeamMembersRepository.js';
+import { type RosterEntry, TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -126,7 +126,8 @@ const make = Effect.Do.pipe(
   Effect.bind('channelSync', () => ChannelSyncEventsRepository.asEffect()),
   Effect.bind('eventSync', () => EventSyncEventsRepository.asEffect()),
   Effect.bind('groups', () => GroupsRepository.asEffect()),
-  Effect.map(({ eventRosters, requests, rosters, channelSync, eventSync, groups }) => {
+  Effect.bind('teamMembers', () => TeamMembersRepository.asEffect()),
+  Effect.map(({ eventRosters, requests, rosters, channelSync, eventSync, groups, teamMembers }) => {
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
@@ -134,57 +135,96 @@ const make = Effect.Do.pipe(
     /**
      * Add a member to a roster (idempotent) and emit the sync event only if they
      * were not already a member.
+     *
+     * The discord_user_id is always resolved fresh from the team member's user
+     * record so the emitted event never carries a null discord_user_id, even
+     * when the caller did not supply one (e.g. auto-approve / backfill paths).
      */
     const addMemberToRoster = (
       teamId: Team.TeamId,
       rosterId: RosterModel.RosterId,
       rosterName: string,
       memberId: TeamMember.TeamMemberId,
-      discordUserId: Option.Option<Discord.Snowflake>,
     ) =>
       rosters.findMemberEntriesById(rosterId).pipe(
         Effect.flatMap((entries) => {
           const alreadyMember = entries.some((e) => resolveEntryMemberId(e) === memberId);
           if (alreadyMember) return Effect.void;
-          return rosters
-            .addMemberById(rosterId, memberId)
-            .pipe(
-              Effect.tap(() =>
-                channelSync
-                  .emitRosterMemberAdded(teamId, rosterId, rosterName, memberId, discordUserId)
-                  .pipe(Effect.ignore),
+          return rosters.addMemberById(rosterId, memberId).pipe(
+            Effect.tap(() =>
+              teamMembers.findRosterMemberByIds(teamId, memberId).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () =>
+                      Effect.logWarning(
+                        `EventRosterProvisioningService.addMemberToRoster: no active team member record found — skipping member_added emit`,
+                        { teamId, rosterId, memberId, path: 'add' },
+                      ),
+                    onSome: (entry) =>
+                      channelSync
+                        .emitRosterMemberAdded(
+                          teamId,
+                          rosterId,
+                          rosterName,
+                          memberId,
+                          Option.some(entry.discord_id),
+                        )
+                        .pipe(Effect.ignore),
+                  }),
+                ),
+                Effect.ignore,
               ),
-            );
+            ),
+          );
         }),
       );
 
     /**
      * Remove a member from a roster and emit the sync event.
+     *
+     * The discord_user_id is always resolved fresh from the team member's user
+     * record so the emitted event never carries a null discord_user_id, even
+     * when the caller did not supply one (e.g. REST RSVP withdraw path).
      */
     const removeMemberFromRoster = (
       teamId: Team.TeamId,
       rosterId: RosterModel.RosterId,
       rosterName: string,
       memberId: TeamMember.TeamMemberId,
-      discordUserId: Option.Option<Discord.Snowflake>,
     ) =>
-      rosters
-        .removeMemberById(rosterId, memberId)
-        .pipe(
-          Effect.tap(() =>
-            channelSync
-              .emitRosterMemberRemoved(teamId, rosterId, rosterName, memberId, discordUserId)
-              .pipe(Effect.ignore),
+      rosters.removeMemberById(rosterId, memberId).pipe(
+        Effect.tap(() =>
+          teamMembers.findRosterMemberByIds(teamId, memberId).pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () =>
+                  Effect.logWarning(
+                    `EventRosterProvisioningService.removeMemberFromRoster: no active team member record found — skipping member_removed emit`,
+                    { teamId, rosterId, memberId, path: 'remove' },
+                  ),
+                onSome: (entry) =>
+                  channelSync
+                    .emitRosterMemberRemoved(
+                      teamId,
+                      rosterId,
+                      rosterName,
+                      memberId,
+                      Option.some(entry.discord_id),
+                    )
+                    .pipe(Effect.ignore),
+              }),
+            ),
+            Effect.ignore,
           ),
-        );
+        ),
+      );
 
     // -------------------------------------------------------------------------
     // onRsvp — T1–T5, T8–T11
     // -------------------------------------------------------------------------
 
     const onRsvp = (params: OnRsvpParams): Effect.Effect<void, never, never> => {
-      const { teamId, event, memberId, discordUserId, priorResponse, newResponse, displayName } =
-        params;
+      const { teamId, event, memberId, priorResponse, newResponse, displayName } = params;
 
       const isYes = newResponse === 'yes';
       const wasYes = Option.isSome(priorResponse) && priorResponse.value === 'yes';
@@ -229,13 +269,7 @@ const make = Effect.Do.pipe(
                             .pipe(
                               Effect.flatMap(() => {
                                 if (wasMemberBefore) return Effect.void;
-                                return addMemberToRoster(
-                                  teamId,
-                                  roster_id,
-                                  roster_name,
-                                  memberId,
-                                  discordUserId,
-                                );
+                                return addMemberToRoster(teamId, roster_id, roster_name, memberId);
                               }),
                             );
                         }),
@@ -311,13 +345,7 @@ const make = Effect.Do.pipe(
 
                       if (prior.status === 'approved' && !prior.was_member_before) {
                         // T9: was approved + added by this flow → remove from roster
-                        return removeMemberFromRoster(
-                          teamId,
-                          roster_id,
-                          roster_name,
-                          memberId,
-                          discordUserId,
-                        );
+                        return removeMemberFromRoster(teamId, roster_id, roster_name, memberId);
                       }
 
                       // T10: was approved + was_member_before=true → provenance protection
@@ -378,13 +406,7 @@ const make = Effect.Do.pipe(
         // Add to roster if they weren't already a member
         Effect.tap(({ link, decisionRow }) => {
           if (decisionRow.was_member_before) return Effect.void;
-          return addMemberToRoster(
-            teamId,
-            link.roster_id,
-            link.roster_name,
-            memberId,
-            Option.none(),
-          );
+          return addMemberToRoster(teamId, link.roster_id, link.roster_name, memberId);
         }),
         // Disable the Discord approval thread message (idempotent — cancel handler swallows 10008)
         Effect.tap(({ link, requestRow }) =>
@@ -533,7 +555,7 @@ const make = Effect.Do.pipe(
               Effect.forEach(
                 yesResponders,
                 (responder) => {
-                  const { team_member_id, discord_user_id } = responder;
+                  const { team_member_id } = responder;
 
                   // Only process members who are in the member group scope
                   if (!memberGroupMemberIds.has(team_member_id)) {
@@ -549,15 +571,35 @@ const make = Effect.Do.pipe(
                         if (wasMemberBefore) return Effect.succeed(false);
                         return rosters.addMemberById(rosterId, team_member_id).pipe(
                           Effect.tap(() =>
-                            channelSync
-                              .emitRosterMemberAdded(
-                                teamId,
-                                rosterId,
-                                link.roster_name,
-                                team_member_id,
-                                discord_user_id,
-                              )
-                              .pipe(Effect.ignore),
+                            // Resolve the real discord_id from the team member record so
+                            // the emitted event never carries a null discord_user_id.
+                            teamMembers.findRosterMemberByIds(teamId, team_member_id).pipe(
+                              Effect.flatMap(
+                                Option.match({
+                                  onNone: () =>
+                                    Effect.logWarning(
+                                      `EventRosterProvisioningService.backfill: no active team member record found — skipping member_added emit`,
+                                      {
+                                        teamId,
+                                        rosterId,
+                                        memberId: team_member_id,
+                                        path: 'backfill',
+                                      },
+                                    ),
+                                  onSome: (entry) =>
+                                    channelSync
+                                      .emitRosterMemberAdded(
+                                        teamId,
+                                        rosterId,
+                                        link.roster_name,
+                                        team_member_id,
+                                        Option.some(entry.discord_id),
+                                      )
+                                      .pipe(Effect.ignore),
+                                }),
+                              ),
+                              Effect.ignore,
+                            ),
                           ),
                           Effect.map(() => true),
                         );
