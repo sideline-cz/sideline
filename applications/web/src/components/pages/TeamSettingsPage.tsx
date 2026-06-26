@@ -148,6 +148,9 @@ export function TeamSettingsPage({
   const [archiveCategory, setArchiveCategory] = React.useState(
     Option.getOrElse(settings.discordArchiveCategoryId, () => NONE_VALUE),
   );
+  const [rosterCategory, setRosterCategory] = React.useState(
+    Option.getOrElse(settings.discordRosterCategoryId, () => NONE_VALUE),
+  );
   const [cleanupOnGroupDelete, setCleanupOnGroupDelete] = React.useState(
     settings.discordChannelCleanupOnGroupDelete,
   );
@@ -245,6 +248,7 @@ export function TeamSettingsPage({
     channelOther !== Option.getOrElse(settings.discordChannelOther, () => NONE_VALUE) ||
     channelLateRsvp !== Option.getOrElse(settings.discordChannelLateRsvp, () => NONE_VALUE) ||
     archiveCategory !== Option.getOrElse(settings.discordArchiveCategoryId, () => NONE_VALUE) ||
+    rosterCategory !== Option.getOrElse(settings.discordRosterCategoryId, () => NONE_VALUE) ||
     cleanupOnGroupDelete !== settings.discordChannelCleanupOnGroupDelete ||
     cleanupOnRosterDeactivate !== settings.discordChannelCleanupOnRosterDeactivate ||
     createDiscordChannelOnGroup !== settings.createDiscordChannelOnGroup ||
@@ -335,6 +339,7 @@ export function TeamSettingsPage({
             discordChannelOther: Option.some(channelToOption(channelOther)),
             discordChannelLateRsvp: Option.some(channelToOption(channelLateRsvp)),
             discordArchiveCategoryId: Option.some(channelToOption(archiveCategory)),
+            discordRosterCategoryId: Option.some(channelToOption(rosterCategory)),
             discordChannelCleanupOnGroupDelete: Option.some(cleanupOnGroupDelete),
             discordChannelCleanupOnRosterDeactivate: Option.some(cleanupOnRosterDeactivate),
             createDiscordChannelOnGroup: Option.some(createDiscordChannelOnGroup),
@@ -369,6 +374,7 @@ export function TeamSettingsPage({
     channelOther,
     channelLateRsvp,
     archiveCategory,
+    rosterCategory,
     cleanupOnGroupDelete,
     cleanupOnRosterDeactivate,
     createDiscordChannelOnGroup,
@@ -998,6 +1004,27 @@ export function TeamSettingsPage({
                       <SelectItem value='archive'>{tr('teamSettings_cleanupArchive')}</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div>
+                  <label htmlFor='roster-category' className='text-sm font-medium mb-1 block'>
+                    {tr('teamSettings_rosterCategory')}
+                  </label>
+                  <p className='text-xs text-muted-foreground mb-2'>
+                    {tr('teamSettings_rosterCategoryHelp')}
+                  </p>
+                  <SearchableSelect
+                    id='roster-category'
+                    value={rosterCategory}
+                    onValueChange={setRosterCategory}
+                    placeholder={tr('teamSettings_channelNone')}
+                    pinnedValues={[NONE_VALUE]}
+                    options={[
+                      { value: NONE_VALUE, label: tr('teamSettings_channelNone') },
+                      ...discordChannels
+                        .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_CATEGORY)
+                        .map((ch) => ({ value: ch.id, label: ch.name })),
+                    ]}
+                  />
                 </div>
               </div>
 

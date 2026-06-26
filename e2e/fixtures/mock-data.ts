@@ -359,6 +359,7 @@ export const mockTeamSettings = {
   discordChannelOther: null,
   discordChannelLateRsvp: null,
   discordArchiveCategoryId: null,
+  discordRosterCategoryId: null,
   discordChannelCleanupOnGroupDelete: 'delete',
   discordChannelCleanupOnRosterDeactivate: 'delete',
   discordRoleFormat: '{emoji} {name}',

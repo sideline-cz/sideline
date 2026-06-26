@@ -2,7 +2,7 @@ import type { Auth, Discord, Role, RosterModel, Team, TeamMember } from '@sideli
 import { OAuth2Tokens } from 'arctic';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { HttpClient, HttpClientResponse, HttpRouter, HttpServer } from 'effect/unstable/http';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ApiLive } from '~/api/index.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
 import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
@@ -1465,5 +1465,554 @@ describe('Rosters API', () => {
       );
       expect(response.status).toBe(204);
     });
+  });
+});
+
+// =============================================================================
+// ROSTER CATEGORY TESTS — updateRoster → emitRosterChannelCreated target_category_id
+//
+// Tests the NEW behavior of PATCH /rosters/:id after the discord_roster_category_id
+// feature is implemented. These tests are expected to FAIL until the server
+// implementation is updated.
+//
+// Scenarios:
+//   R1: reactivation + category → roster_channel_created with target_category_id=Some
+//   R2: reactivation + no category → roster_channel_created with target_category_id=None
+//   R3: reactivation + create_discord_channel_on_roster=false → no event
+//   R4: reactivation + discord_channel_id already set → no roster_channel_created
+//   R5: link-existing (discordChannelId=Some) → existing_channel_id set, target_category_id=None
+//   R6: deactivation regression guard → cleanup event + mapping deleted
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Per-test call-recording state (reset in beforeEach)
+// ---------------------------------------------------------------------------
+
+type RosterCategoryCreatedCall = {
+  rosterId: RosterModel.RosterId;
+  existingChannelId: Option.Option<Discord.Snowflake>;
+  targetCategoryId: Option.Option<Discord.Snowflake>;
+};
+
+type RosterCategoryCleanupCall = {
+  eventType: 'channel_deleted' | 'channel_archived' | 'channel_detached';
+};
+
+const rcRosterCreatedCalls: RosterCategoryCreatedCall[] = [];
+const rcRosterCleanupCalls: RosterCategoryCleanupCall[] = [];
+let rcMappingDeletedForRoster = false;
+
+// ---------------------------------------------------------------------------
+// Layer factories for roster-category tests
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds a ChannelSyncEventsRepository that records emitRosterChannelCreated calls.
+ * The trailing `targetCategoryId` parameter is the new field added by this feature.
+ */
+const makeRcChannelSyncLayer = () =>
+  Layer.succeed(ChannelSyncEventsRepository, {
+    _tag: 'api/ChannelSyncEventsRepository',
+    emitChannelCreated: () => Effect.void,
+    emitChannelDeleted: () => Effect.void,
+    emitChannelArchived: () => Effect.void,
+    emitChannelDetached: () => Effect.void,
+    emitRosterChannelCreated: (
+      _teamId: Team.TeamId,
+      rosterId: RosterModel.RosterId,
+      _rosterName: string,
+      existingChannelId: Option.Option<Discord.Snowflake> = Option.none(),
+      _discordChannelName?: string,
+      _discordRoleName?: string,
+      _discordRoleColor?: Option.Option<number>,
+      targetCategoryId: Option.Option<Discord.Snowflake> = Option.none(),
+    ) => {
+      rcRosterCreatedCalls.push({ rosterId, existingChannelId, targetCategoryId });
+      return Effect.void;
+    },
+    emitRosterChannelDeleted: (
+      _teamId: Team.TeamId,
+      _rosterId: RosterModel.RosterId,
+      _rosterName: string,
+      _discordChannelId: Option.Option<Discord.Snowflake>,
+      _discordRoleId: Option.Option<Discord.Snowflake>,
+    ) => {
+      rcRosterCleanupCalls.push({ eventType: 'channel_deleted' });
+      return Effect.void;
+    },
+    emitRosterChannelArchived: (
+      _teamId: Team.TeamId,
+      _rosterId: RosterModel.RosterId,
+      _rosterName: string,
+      _discordChannelId: Option.Option<Discord.Snowflake>,
+      _discordRoleId: Option.Option<Discord.Snowflake>,
+      _archiveCategoryId: Discord.Snowflake,
+    ) => {
+      rcRosterCleanupCalls.push({ eventType: 'channel_archived' });
+      return Effect.void;
+    },
+    emitRosterChannelDetached: (
+      _teamId: Team.TeamId,
+      _rosterId: RosterModel.RosterId,
+      _rosterName: string,
+      _discordChannelId: Option.Option<Discord.Snowflake>,
+      _discordRoleId: Option.Option<Discord.Snowflake>,
+    ) => {
+      rcRosterCleanupCalls.push({ eventType: 'channel_detached' });
+      return Effect.void;
+    },
+    emitGroupChannelUpdated: () => Effect.void,
+    emitRosterChannelUpdated: () => Effect.void,
+    emitMemberAdded: () => Effect.void,
+    emitMemberRemoved: () => Effect.void,
+    emitRosterMemberAdded: () => Effect.void,
+    emitRosterMemberRemoved: () => Effect.void,
+    findUnprocessed: () => Effect.succeed([]),
+    markProcessed: () => Effect.void,
+    markFailed: () => Effect.void,
+    markPermanentlyFailed: () => Effect.void,
+    hasUnprocessedForGroups: () => Effect.succeed([]),
+    hasUnprocessedForRosters: () => Effect.succeed([]),
+  } as any);
+
+type RcMappingEntry = {
+  discord_channel_id: Option.Option<Discord.Snowflake>;
+  discord_role_id: Option.Option<Discord.Snowflake>;
+};
+
+const makeRcDiscordChannelMappingLayer = (rosterMapping: Option.Option<RcMappingEntry>) =>
+  Layer.succeed(DiscordChannelMappingRepository, {
+    findByGroupId: () => Effect.succeed(Option.none()),
+    findByRosterId: (_teamId: string, _rosterId: RosterModel.RosterId) =>
+      Effect.succeed(
+        Option.map(rosterMapping, (m) => ({
+          id: 'mock-mapping-id',
+          team_id: TEST_TEAM_ID,
+          entity_type: 'roster' as const,
+          group_id: Option.none(),
+          roster_id: Option.some(_rosterId),
+          discord_channel_id: m.discord_channel_id,
+          discord_role_id: m.discord_role_id,
+        })),
+      ),
+    insert: () => Effect.void,
+    insertRoster: () => Effect.void,
+    deleteByGroupId: () => Effect.void,
+    deleteByRosterId: (_teamId: string, _rosterId: RosterModel.RosterId) => {
+      rcMappingDeletedForRoster = true;
+      return Effect.void;
+    },
+    findAllByTeam: () => Effect.succeed([]),
+  } as any);
+
+const makeRcSettingsRow = (overrides: {
+  create_discord_channel_on_roster?: boolean;
+  discord_roster_category_id?: Option.Option<Discord.Snowflake>;
+  discord_channel_cleanup_on_roster_deactivate?: 'nothing' | 'delete' | 'archive';
+  discord_archive_category_id?: Option.Option<Discord.Snowflake>;
+}) => ({
+  team_id: TEST_TEAM_ID,
+  event_horizon_days: 30,
+  min_players_threshold: 0,
+  rsvp_reminder_hours: 0,
+  discord_channel_training: Option.none(),
+  discord_channel_match: Option.none(),
+  discord_channel_tournament: Option.none(),
+  discord_channel_meeting: Option.none(),
+  discord_channel_social: Option.none(),
+  discord_channel_other: Option.none(),
+  create_discord_channel_on_group: true,
+  create_discord_channel_on_roster: overrides.create_discord_channel_on_roster ?? true,
+  discord_role_format: '{emoji} {name}',
+  discord_channel_format: '{emoji}│{name}',
+  discord_channel_cleanup_on_group_delete: 'delete' as const,
+  discord_channel_cleanup_on_roster_deactivate:
+    overrides.discord_channel_cleanup_on_roster_deactivate ?? ('delete' as const),
+  discord_archive_category_id: overrides.discord_archive_category_id ?? Option.none(),
+  discord_roster_category_id: overrides.discord_roster_category_id ?? Option.none(),
+});
+
+const makeRcSettingsLayer = (settings: Option.Option<ReturnType<typeof makeRcSettingsRow>>) =>
+  Layer.succeed(TeamSettingsRepository, {
+    _tag: 'api/TeamSettingsRepository',
+    findByTeam: () => Effect.succeed(Option.none()),
+    findByTeamId: () => Effect.succeed(settings),
+    upsertSettings: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+    upsert: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+    getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),
+    getHorizonDays: () => Effect.succeed(30),
+  } as any);
+
+/**
+ * Builds a full test layer for roster-category tests, allowing per-test
+ * settings, channel-sync, and mapping layers.
+ */
+const buildRcTestLayer = (
+  settingsLayer: Layer.Layer<TeamSettingsRepository>,
+  channelSyncLayer: Layer.Layer<ChannelSyncEventsRepository>,
+  mappingLayer: Layer.Layer<DiscordChannelMappingRepository>,
+) =>
+  ApiLive.pipe(
+    Layer.provideMerge(AuthMiddlewareLive),
+    Layer.provideMerge(HttpServer.layerServices),
+    Layer.provide(MockDiscordOAuthLayer),
+    Layer.provide(MockUsersRepositoryLayer),
+    Layer.provide(MockSessionsRepositoryLayer),
+    Layer.provide(MockTeamsRepositoryLayer),
+    Layer.provide(MockTeamMembersRepositoryLayer),
+    Layer.provide(
+      Layer.merge(
+        Layer.merge(
+          Layer.merge(MockRostersRepositoryLayer, MockActivityLogsRepositoryLayer),
+          MockActivityTypesRepositoryLayer,
+        ),
+        MockLeaderboardRepositoryLayer,
+      ),
+    ),
+    Layer.provide(
+      Layer.merge(
+        MockTeamInvitesRepositoryLayer,
+        Layer.merge(
+          Layer.succeed(PendingGuildJoinsRepository, {
+            _tag: 'api/PendingGuildJoinsRepository',
+            enqueue: () => Effect.void,
+            listPending: () => Effect.succeed([]),
+            markDone: () => Effect.void,
+            markFailed: () => Effect.void,
+          } as never),
+          Layer.succeed(InviteAcceptancesRepository, {
+            _tag: 'api/InviteAcceptancesRepository',
+          } as never),
+        ),
+      ),
+    ),
+    Layer.provide(MockRolesRepositoryLayer),
+    Layer.provide(MockGroupsRepositoryLayer),
+    Layer.provide(MockTrainingTypesRepositoryLayer),
+    Layer.provide(MockHttpClientLayer),
+    Layer.provide(MockAgeCheckServiceLayer),
+    Layer.provide(MockAgeThresholdRepositoryLayer),
+    Layer.provide(Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer)),
+    Layer.provide(Layer.merge(channelSyncLayer, MockEventSyncEventsRepositoryLayer)),
+    Layer.provide(Layer.merge(mappingLayer, MockICalTokensRepositoryLayer)),
+    Layer.provide(
+      Layer.merge(
+        Layer.merge(
+          Layer.merge(
+            Layer.merge(
+              Layer.merge(
+                Layer.merge(MockEventsRepositoryLayer, MockEventRsvpsRepositoryLayer),
+                MockBotGuildsRepositoryLayer,
+              ),
+              Layer.merge(MockDiscordChannelsRepositoryLayer, MockDiscordRolesRepositoryLayer),
+            ),
+            MockEventSeriesRepositoryLayer,
+          ),
+          settingsLayer,
+        ),
+        MockOAuthConnectionsRepositoryLayer,
+      ),
+    ),
+    Layer.provide(MockAchievementAdminLayers),
+  )
+    .pipe(Layer.provide(MockFinanceLayers))
+    .pipe(Layer.provide(MockTranslationsLayers))
+    .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+    .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
+    .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
+    .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
+    .pipe(Layer.provide(MockChannelManagementLayers))
+    .pipe(Layer.provide(MockEmailLayers))
+    .pipe(Layer.provide(MockEventRosterLayers))
+    .pipe(Layer.provide(BotInfoStore.Default))
+    .pipe(
+      Layer.provide(
+        Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),
+      ),
+    );
+
+const rcDisposeHandlers: (() => Promise<void>)[] = [];
+
+afterAll(async () => {
+  for (const d of rcDisposeHandlers) {
+    await d();
+  }
+});
+
+/**
+ * Creates an HTTP handler from the roster-category test layer and issues a
+ * PATCH /teams/:teamId/rosters/:rosterId request as admin.
+ */
+const runRcPatchRoster = async (
+  settingsLayer: Layer.Layer<TeamSettingsRepository>,
+  channelSyncLayer: Layer.Layer<ChannelSyncEventsRepository>,
+  mappingLayer: Layer.Layer<DiscordChannelMappingRepository>,
+  payload: Record<string, unknown>,
+  rosterId: RosterModel.RosterId = TEST_ROSTER_ID,
+): Promise<{ status: number; body: unknown }> => {
+  const testLayer = buildRcTestLayer(settingsLayer, channelSyncLayer, mappingLayer);
+  const app = HttpRouter.toWebHandler(testLayer);
+  rcDisposeHandlers.push(app.dispose);
+  const h: (...args: any) => Promise<Response> = app.handler;
+
+  const response = await h(
+    new Request(`http://localhost/teams/${TEST_TEAM_ID}/rosters/${rosterId}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: 'Bearer admin-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    }),
+  );
+  const body = await response.json();
+  return { status: response.status, body };
+};
+
+describe('updateRoster — discord_roster_category_id feature', () => {
+  // Reset per-test recording state before each case. Also clear rostersStore
+  // so each test controls exactly which roster is present.
+  beforeEach(() => {
+    rcRosterCreatedCalls.length = 0;
+    rcRosterCleanupCalls.length = 0;
+    rcMappingDeletedForRoster = false;
+    rostersStore.clear();
+  });
+
+  /**
+   * R1: reactivation (active false→true), create_discord_channel_on_roster=true,
+   *     discord_channel_id=None, discord_roster_category_id=Some(cat123)
+   *     → exactly one roster_channel_created with target_category_id=Some(cat123)
+   */
+  it('R1: reactivation + discord_roster_category_id=Some(cat123) → roster_channel_created with target_category_id=Some(cat123)', async () => {
+    const ROSTER_CAT_ID = 'cat123000000000000' as Discord.Snowflake;
+
+    rostersStore.set(TEST_ROSTER_ID, {
+      id: TEST_ROSTER_ID,
+      team_id: TEST_TEAM_ID,
+      name: 'Test Roster',
+      active: false,
+      color: Option.none(),
+      emoji: Option.none(),
+      discord_channel_id: Option.none(),
+      created_at: DateTime.nowUnsafe(),
+    });
+
+    const settings = makeRcSettingsRow({
+      create_discord_channel_on_roster: true,
+      discord_roster_category_id: Option.some(ROSTER_CAT_ID),
+    });
+
+    const { status } = await runRcPatchRoster(
+      makeRcSettingsLayer(Option.some(settings)),
+      makeRcChannelSyncLayer(),
+      makeRcDiscordChannelMappingLayer(Option.none()),
+      { name: null, active: true, color: null, emoji: null },
+    );
+
+    expect(status).toBe(200);
+    // Exactly one roster_channel_created event
+    expect(rcRosterCreatedCalls).toHaveLength(1);
+    const call = rcRosterCreatedCalls[0]!;
+    // existing_channel_id must be None (re-create, not a link)
+    expect(Option.isNone(call.existingChannelId)).toBe(true);
+    // target_category_id must be Some(ROSTER_CAT_ID)
+    expect(Option.isSome(call.targetCategoryId)).toBe(true);
+    expect((call.targetCategoryId as Option.Some<Discord.Snowflake>).value).toBe(ROSTER_CAT_ID);
+    // No cleanup events
+    expect(rcRosterCleanupCalls).toHaveLength(0);
+  });
+
+  /**
+   * R2: reactivation + discord_roster_category_id=None
+   *     → roster_channel_created with target_category_id=None
+   */
+  it('R2: reactivation + discord_roster_category_id=None → roster_channel_created with target_category_id=None', async () => {
+    rostersStore.set(TEST_ROSTER_ID, {
+      id: TEST_ROSTER_ID,
+      team_id: TEST_TEAM_ID,
+      name: 'Test Roster',
+      active: false,
+      color: Option.none(),
+      emoji: Option.none(),
+      discord_channel_id: Option.none(),
+      created_at: DateTime.nowUnsafe(),
+    });
+
+    const settings = makeRcSettingsRow({
+      create_discord_channel_on_roster: true,
+      discord_roster_category_id: Option.none(),
+    });
+
+    const { status } = await runRcPatchRoster(
+      makeRcSettingsLayer(Option.some(settings)),
+      makeRcChannelSyncLayer(),
+      makeRcDiscordChannelMappingLayer(Option.none()),
+      { name: null, active: true, color: null, emoji: null },
+    );
+
+    expect(status).toBe(200);
+    expect(rcRosterCreatedCalls).toHaveLength(1);
+    const call = rcRosterCreatedCalls[0]!;
+    expect(Option.isNone(call.existingChannelId)).toBe(true);
+    expect(Option.isNone(call.targetCategoryId)).toBe(true);
+    expect(rcRosterCleanupCalls).toHaveLength(0);
+  });
+
+  /**
+   * R3: reactivation but create_discord_channel_on_roster=false
+   *     → no channel event emitted
+   */
+  it('R3: reactivation + create_discord_channel_on_roster=false → no roster_channel_created emitted', async () => {
+    rostersStore.set(TEST_ROSTER_ID, {
+      id: TEST_ROSTER_ID,
+      team_id: TEST_TEAM_ID,
+      name: 'Test Roster',
+      active: false,
+      color: Option.none(),
+      emoji: Option.none(),
+      discord_channel_id: Option.none(),
+      created_at: DateTime.nowUnsafe(),
+    });
+
+    const settings = makeRcSettingsRow({
+      create_discord_channel_on_roster: false,
+      discord_roster_category_id: Option.some('cat123000000000000' as Discord.Snowflake),
+    });
+
+    const { status } = await runRcPatchRoster(
+      makeRcSettingsLayer(Option.some(settings)),
+      makeRcChannelSyncLayer(),
+      makeRcDiscordChannelMappingLayer(Option.none()),
+      { name: null, active: true, color: null, emoji: null },
+    );
+
+    expect(status).toBe(200);
+    expect(rcRosterCreatedCalls).toHaveLength(0);
+    expect(rcRosterCleanupCalls).toHaveLength(0);
+  });
+
+  /**
+   * R4: reactivation but discord_channel_id already set
+   *     → no roster_channel_created (avoid double-create)
+   */
+  it('R4: reactivation + discord_channel_id already set → no roster_channel_created (avoid double-create)', async () => {
+    const EXISTING_CHANNEL = '777777777777777777' as Discord.Snowflake;
+
+    rostersStore.set(TEST_ROSTER_ID, {
+      id: TEST_ROSTER_ID,
+      team_id: TEST_TEAM_ID,
+      name: 'Test Roster',
+      active: false,
+      color: Option.none(),
+      emoji: Option.none(),
+      discord_channel_id: Option.some(EXISTING_CHANNEL),
+      created_at: DateTime.nowUnsafe(),
+    });
+
+    const settings = makeRcSettingsRow({
+      create_discord_channel_on_roster: true,
+      discord_roster_category_id: Option.some('cat123000000000000' as Discord.Snowflake),
+    });
+
+    const { status } = await runRcPatchRoster(
+      makeRcSettingsLayer(Option.some(settings)),
+      makeRcChannelSyncLayer(),
+      makeRcDiscordChannelMappingLayer(Option.none()),
+      { name: null, active: true, color: null, emoji: null },
+    );
+
+    expect(status).toBe(200);
+    expect(rcRosterCreatedCalls).toHaveLength(0);
+    expect(rcRosterCleanupCalls).toHaveLength(0);
+  });
+
+  /**
+   * R5: link-existing path (discordChannelId=Some(chan))
+   *     → roster_channel_created with existing_channel_id=Some(chan) and target_category_id=None
+   *       (category is ignored when linking an existing channel)
+   */
+  it('R5: link-existing (discordChannelId=Some) → roster_channel_created with existing_channel_id=Some and target_category_id=None', async () => {
+    const LINK_CHANNEL = '888888888888888888' as Discord.Snowflake;
+
+    rostersStore.set(TEST_ROSTER_ID, {
+      id: TEST_ROSTER_ID,
+      team_id: TEST_TEAM_ID,
+      name: 'Test Roster',
+      active: true,
+      color: Option.none(),
+      emoji: Option.none(),
+      discord_channel_id: Option.none(),
+      created_at: DateTime.nowUnsafe(),
+    });
+
+    const settings = makeRcSettingsRow({
+      create_discord_channel_on_roster: true,
+      discord_roster_category_id: Option.some('cat123000000000000' as Discord.Snowflake),
+    });
+
+    const { status } = await runRcPatchRoster(
+      makeRcSettingsLayer(Option.some(settings)),
+      makeRcChannelSyncLayer(),
+      makeRcDiscordChannelMappingLayer(Option.none()),
+      { name: null, active: null, color: null, emoji: null, discordChannelId: LINK_CHANNEL },
+    );
+
+    expect(status).toBe(200);
+    expect(rcRosterCreatedCalls).toHaveLength(1);
+    const call = rcRosterCreatedCalls[0]!;
+    // Link path: existing_channel_id=Some(LINK_CHANNEL)
+    expect(Option.isSome(call.existingChannelId)).toBe(true);
+    expect((call.existingChannelId as Option.Some<Discord.Snowflake>).value).toBe(LINK_CHANNEL);
+    // Category is ignored when linking — must be None
+    expect(Option.isNone(call.targetCategoryId)).toBe(true);
+    expect(rcRosterCleanupCalls).toHaveLength(0);
+  });
+
+  /**
+   * R6: deactivation (active true→false) regression guard
+   *     → cleanup event emitted (channel_deleted) and mapping deleted
+   */
+  it('R6: deactivation (active true→false), cleanup=delete → channel_deleted emitted and mapping deleted', async () => {
+    const EXISTING_CHANNEL = '444444444444444444' as Discord.Snowflake;
+    const EXISTING_ROLE = '555555555555555555' as Discord.Snowflake;
+
+    rostersStore.set(TEST_ROSTER_ID, {
+      id: TEST_ROSTER_ID,
+      team_id: TEST_TEAM_ID,
+      name: 'Test Roster',
+      active: true,
+      color: Option.none(),
+      emoji: Option.none(),
+      discord_channel_id: Option.some(EXISTING_CHANNEL),
+      created_at: DateTime.nowUnsafe(),
+    });
+
+    const settings = makeRcSettingsRow({
+      create_discord_channel_on_roster: true,
+      discord_channel_cleanup_on_roster_deactivate: 'delete',
+      discord_roster_category_id: Option.some('cat123000000000000' as Discord.Snowflake),
+    });
+
+    const { status } = await runRcPatchRoster(
+      makeRcSettingsLayer(Option.some(settings)),
+      makeRcChannelSyncLayer(),
+      makeRcDiscordChannelMappingLayer(
+        Option.some({
+          discord_channel_id: Option.some(EXISTING_CHANNEL),
+          discord_role_id: Option.some(EXISTING_ROLE),
+        }),
+      ),
+      { name: null, active: false, color: null, emoji: null },
+    );
+
+    expect(status).toBe(200);
+    // No create event on deactivation
+    expect(rcRosterCreatedCalls).toHaveLength(0);
+    // Cleanup event emitted
+    expect(rcRosterCleanupCalls).toHaveLength(1);
+    expect(rcRosterCleanupCalls[0]?.eventType).toBe('channel_deleted');
+    // Mapping deleted
+    expect(rcMappingDeletedForRoster).toBe(true);
   });
 });

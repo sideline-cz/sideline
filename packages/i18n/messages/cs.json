@@ -451,6 +451,8 @@
   "teamSettings_channelNone": "Žádný",
   "teamSettings_archiveCategory": "Archivní kategorie",
   "teamSettings_archiveCategoryHelp": "Kategorie Discord kanálu používaná pro archivované skupinové a soupiskové kanály.",
+  "teamSettings_rosterCategory": "Kategorie pro soupisky",
+  "teamSettings_rosterCategoryHelp": "Discord kategorie, do které se vytvářejí kanály nových soupisek. Kanály znovu aktivovaných soupisek se vytvoří zde také. Ponechte None pro výchozí umístění v Discordu.",
   "teamSettings_channelCleanupOnGroupDelete": "Při smazání skupiny",
   "teamSettings_channelCleanupOnGroupDeleteHelp": "Co udělat s Discord kanálem při smazání skupiny.",
   "teamSettings_channelCleanupOnRosterDeactivate": "Při deaktivaci soupisky",

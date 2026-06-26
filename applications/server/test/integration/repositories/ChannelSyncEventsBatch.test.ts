@@ -22,6 +22,7 @@ import { beforeEach } from 'vitest';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import { constructEvent } from '~/rpc/channel/events.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
 
 const TestLayer = Layer.mergeAll(
@@ -153,5 +154,211 @@ describe('ChannelSyncEventsRepository batch inserts (multi-row)', () => {
       });
       expect(yield* countEvents).toBe(2);
     }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// =============================================================================
+// ROSTER target_category_id round-trip tests
+//
+// Verifies the new `targetCategoryId` trailing parameter on emitRosterChannelCreated
+// is persisted to (and reconstructed from) the `target_category_id` column.
+//
+// These tests are expected to FAIL until:
+//   1. emitRosterChannelCreated gains the `targetCategoryId` trailing param
+//   2. The `target_category_id` column exists in channel_sync_events
+//   3. constructEvent/findUnprocessed deserialises the column back into the event
+// =============================================================================
+
+// Helper: read target_category_id from channel_sync_events (single row)
+const readTargetCategoryId = SqlClient.SqlClient.asEffect().pipe(
+  Effect.andThen(
+    (sql) =>
+      sql<{ val: string | null }>`
+        SELECT target_category_id AS val FROM channel_sync_events LIMIT 1
+      `,
+  ),
+  Effect.map((rows) => rows[0]?.val ?? null),
+);
+
+// Helper: read all target_category_id values ordered by id
+const readAllTargetCategoryIds = SqlClient.SqlClient.asEffect().pipe(
+  Effect.andThen(
+    (sql) =>
+      sql<{ val: string | null }>`
+        SELECT target_category_id AS val FROM channel_sync_events ORDER BY created_at ASC
+      `,
+  ),
+  Effect.map((rows) => rows.map((r) => r.val)),
+);
+
+describe('ChannelSyncEventsRepository — roster target_category_id round-trip', () => {
+  /**
+   * RC1: emitRosterChannelCreated with targetCategoryId=Some(cat123)
+   *      → target_category_id column = "cat123000000000000"
+   */
+  it.effect(
+    'RC1: emitRosterChannelCreated with targetCategoryId=Some(cat123) → target_category_id column persisted',
+    () =>
+      Effect.gen(function* () {
+        const teamId = yield* setup;
+        const repo = yield* ChannelSyncEventsRepository.asEffect();
+
+        yield* repo.emitRosterChannelCreated(
+          teamId,
+          '00000000-0000-0000-0000-000000000030' as any,
+          'Test Roster',
+          Option.none(),
+          '🏐│Test Roster',
+          '🏐 Test Roster',
+          Option.none(),
+          Option.some('cat123000000000000' as Discord.Snowflake),
+        );
+
+        expect(yield* countEvents).toBe(1);
+        const storedVal = yield* readTargetCategoryId;
+        expect(storedVal).toBe('cat123000000000000');
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  /**
+   * RC2: constructEvent reconstructs RosterChannelCreatedEvent.target_category_id = Some(cat123)
+   *      from the stored row. Uses constructEvent (server-side rpc builder) as the bot does.
+   */
+  it.effect(
+    'RC2: constructEvent reconstructs target_category_id=Some(cat123) from stored row',
+    () =>
+      Effect.gen(function* () {
+        const teamId = yield* setup;
+        const repo = yield* ChannelSyncEventsRepository.asEffect();
+
+        yield* repo.emitRosterChannelCreated(
+          teamId,
+          '00000000-0000-0000-0000-000000000030' as any,
+          'Test Roster',
+          Option.none(),
+          '🏐│Test Roster',
+          '🏐 Test Roster',
+          Option.none(),
+          Option.some('cat123000000000000' as Discord.Snowflake),
+        );
+
+        const rows = yield* repo.findUnprocessed(10);
+        expect(rows).toHaveLength(1);
+
+        // Construct the typed event from the raw EventRow
+        const typedEvent = yield* constructEvent(rows[0]!);
+        expect(typedEvent._tag).toBe('roster_channel_created');
+
+        if (typedEvent._tag === 'roster_channel_created') {
+          expect(Option.isSome(typedEvent.target_category_id)).toBe(true);
+          expect((typedEvent.target_category_id as Option.Some<Discord.Snowflake>).value).toBe(
+            'cat123000000000000',
+          );
+        }
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  /**
+   * RC3: Default (Option.none()) → NULL persisted → target_category_id=None on deserialize
+   */
+  it.effect(
+    'RC3: emitRosterChannelCreated without targetCategoryId → NULL persisted → target_category_id=None',
+    () =>
+      Effect.gen(function* () {
+        const teamId = yield* setup;
+        const repo = yield* ChannelSyncEventsRepository.asEffect();
+
+        // Call without the trailing targetCategoryId argument (default Option.none())
+        yield* repo.emitRosterChannelCreated(
+          teamId,
+          '00000000-0000-0000-0000-000000000030' as any,
+          'Test Roster',
+          Option.none(),
+          '🏐│Test Roster',
+          '🏐 Test Roster',
+          Option.none(),
+          // targetCategoryId omitted — uses default Option.none()
+        );
+
+        expect(yield* countEvents).toBe(1);
+        const storedVal = yield* readTargetCategoryId;
+        expect(storedVal).toBeNull();
+
+        const rows = yield* repo.findUnprocessed(10);
+        expect(rows).toHaveLength(1);
+        const typedEvent = yield* constructEvent(rows[0]!);
+        expect(typedEvent._tag).toBe('roster_channel_created');
+        if (typedEvent._tag === 'roster_channel_created') {
+          expect(Option.isNone(typedEvent.target_category_id)).toBe(true);
+        }
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  /**
+   * RC4: Two emitRosterChannelCreated calls with different target_category_ids
+   *      preserve values independently — regression guard for multi-row INSERT bug (dcf58c53).
+   */
+  it.effect(
+    'RC4: two roster-created events with different target_category_ids preserve per-row values',
+    () =>
+      Effect.gen(function* () {
+        const teamId = yield* setup;
+        const repo = yield* ChannelSyncEventsRepository.asEffect();
+
+        yield* repo.emitRosterChannelCreated(
+          teamId,
+          '00000000-0000-0000-0000-000000000031' as any,
+          'Roster A',
+          Option.none(),
+          '│Roster A',
+          'Roster A',
+          Option.none(),
+          Option.some('cat111000000000000' as Discord.Snowflake),
+        );
+
+        yield* repo.emitRosterChannelCreated(
+          teamId,
+          '00000000-0000-0000-0000-000000000032' as any,
+          'Roster B',
+          Option.none(),
+          '│Roster B',
+          'Roster B',
+          Option.none(),
+          Option.none(), // No category for second roster
+        );
+
+        expect(yield* countEvents).toBe(2);
+
+        const ids = yield* readAllTargetCategoryIds;
+        // One row has the category, one has null — order by created_at
+        expect(ids).toHaveLength(2);
+        expect(ids).toContain('cat111000000000000');
+        expect(ids).toContain(null);
+
+        // Also verify constructEvent round-trips both rows correctly
+        const rows = yield* repo.findUnprocessed(10);
+        expect(rows).toHaveLength(2);
+
+        const typedEvents = yield* Effect.all(rows.map(constructEvent));
+
+        const rosterCreatedEvents = typedEvents.filter((e) => e._tag === 'roster_channel_created');
+        expect(rosterCreatedEvents).toHaveLength(2);
+
+        const withCategory = rosterCreatedEvents.find(
+          (e) => e._tag === 'roster_channel_created' && Option.isSome(e.target_category_id),
+        );
+        const withoutCategory = rosterCreatedEvents.find(
+          (e) => e._tag === 'roster_channel_created' && Option.isNone(e.target_category_id),
+        );
+
+        expect(withCategory).toBeDefined();
+        expect(withoutCategory).toBeDefined();
+
+        if (withCategory && withCategory._tag === 'roster_channel_created') {
+          expect((withCategory.target_category_id as Option.Some<Discord.Snowflake>).value).toBe(
+            'cat111000000000000',
+          );
+        }
+      }).pipe(Effect.provide(TestLayer)),
   );
 });

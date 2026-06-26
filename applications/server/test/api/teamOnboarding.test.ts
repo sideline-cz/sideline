@@ -371,6 +371,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
             create_discord_channel_on_group: true,
             create_discord_channel_on_roster: true,
             discord_archive_category_id: Option.none(),
+            discord_roster_category_id: Option.none(),
             discord_channel_cleanup_on_group_delete: 'delete',
             discord_channel_cleanup_on_roster_deactivate: 'delete',
             discord_role_format: '{role}',
@@ -414,6 +415,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       create_discord_channel_on_group: input.createDiscordChannelOnGroup ?? true,
       create_discord_channel_on_roster: input.createDiscordChannelOnRoster ?? true,
       discord_archive_category_id: input.discordArchiveCategoryId ?? Option.none(),
+      discord_roster_category_id: input.discordRosterCategoryId ?? Option.none(),
       discord_channel_cleanup_on_group_delete: input.discordChannelCleanupOnGroupDelete ?? 'delete',
       discord_channel_cleanup_on_roster_deactivate:
         input.discordChannelCleanupOnRosterDeactivate ?? 'delete',

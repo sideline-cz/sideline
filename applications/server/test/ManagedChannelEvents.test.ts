@@ -54,6 +54,7 @@ const baseRow = (
     existing_channel_id: Option.none(),
     discord_role_id: Option.none(),
     archive_category_id: Option.none(),
+    target_category_id: Option.none(),
     discord_channel_name: Option.none(),
     discord_role_name: Option.none(),
     discord_role_color: Option.none(),

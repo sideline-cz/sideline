@@ -37,6 +37,7 @@ export class RosterChannelCreatedEvent extends Schema.TaggedClass<RosterChannelC
     discord_channel_name: Schema.String,
     discord_role_name: Schema.String,
     discord_role_color: Schema.OptionFromNullOr(Schema.Number),
+    target_category_id: Schema.OptionFromNullOr(Snowflake),
   },
 ) {}
 

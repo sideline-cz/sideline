@@ -290,6 +290,7 @@ erDiagram
         BOOLEAN create_discord_channel_on_group
         BOOLEAN create_discord_channel_on_roster
         TEXT discord_archive_category_id
+        TEXT discord_roster_category_id
         TEXT discord_channel_cleanup_on_group_delete
         TEXT discord_channel_cleanup_on_roster_deactivate
         TEXT discord_role_format
@@ -614,6 +615,7 @@ erDiagram
         TEXT discord_role_name
         INTEGER discord_role_color
         TEXT archive_category_id
+        TEXT target_category_id "nullable"
         UUID team_channel_id "nullable"
         TEXT access_level "nullable"
         TIMESTAMPTZ processed_at

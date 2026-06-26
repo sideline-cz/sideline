@@ -26,6 +26,7 @@ const InsertInput = Schema.Struct({
   existing_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
   archive_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  target_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_channel_name: Schema.OptionFromNullOr(Schema.String),
   discord_role_name: Schema.OptionFromNullOr(Schema.String),
   discord_role_color: Schema.OptionFromNullOr(Schema.Number),
@@ -52,6 +53,7 @@ export class EventRow extends Schema.Class<EventRow>('EventRow')({
   existing_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
   archive_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  target_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_channel_name: Schema.OptionFromNullOr(Schema.String),
   discord_role_name: Schema.OptionFromNullOr(Schema.String),
   discord_role_color: Schema.OptionFromNullOr(Schema.Number),
@@ -82,8 +84,8 @@ const make = Effect.gen(function* () {
   const insertEvent = SqlSchema.void({
     Request: InsertInput,
     execute: (input) => sql`
-      INSERT INTO channel_sync_events (team_id, guild_id, event_type, entity_type, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, existing_channel_id, discord_role_id, archive_category_id, discord_channel_name, discord_role_name, discord_role_color, team_channel_id, access_level)
-      VALUES (${input.team_id}, ${input.guild_id}, ${input.event_type}, ${input.entity_type}, ${input.group_id}, ${input.group_name}, ${input.team_member_id}, ${input.discord_user_id}, ${input.roster_id}, ${input.roster_name}, ${input.existing_channel_id}, ${input.discord_role_id}, ${input.archive_category_id}, ${input.discord_channel_name}, ${input.discord_role_name}, ${input.discord_role_color}, ${input.team_channel_id}, ${input.access_level})
+      INSERT INTO channel_sync_events (team_id, guild_id, event_type, entity_type, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, existing_channel_id, discord_role_id, archive_category_id, target_category_id, discord_channel_name, discord_role_name, discord_role_color, team_channel_id, access_level)
+      VALUES (${input.team_id}, ${input.guild_id}, ${input.event_type}, ${input.entity_type}, ${input.group_id}, ${input.group_name}, ${input.team_member_id}, ${input.discord_user_id}, ${input.roster_id}, ${input.roster_name}, ${input.existing_channel_id}, ${input.discord_role_id}, ${input.archive_category_id}, ${input.target_category_id}, ${input.discord_channel_name}, ${input.discord_role_name}, ${input.discord_role_color}, ${input.team_channel_id}, ${input.access_level})
     `,
   });
 
@@ -97,7 +99,7 @@ const make = Effect.gen(function* () {
     Request: Schema.Number,
     Result: EventRow,
     execute: (limit) => sql`
-      SELECT id, team_id, guild_id, event_type, entity_type, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, existing_channel_id, discord_role_id, archive_category_id, discord_channel_name, discord_role_name, discord_role_color, team_channel_id, access_level
+      SELECT id, team_id, guild_id, event_type, entity_type, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, existing_channel_id, discord_role_id, archive_category_id, target_category_id, discord_channel_name, discord_role_name, discord_role_color, team_channel_id, access_level
       FROM channel_sync_events
       WHERE processed_at IS NULL
       ORDER BY created_at ASC
@@ -164,6 +166,7 @@ const make = Effect.gen(function* () {
       existingChannelId?: Option.Option<Discord.Snowflake>;
       discordRoleId?: Option.Option<Discord.Snowflake>;
       archiveCategoryId?: Option.Option<Discord.Snowflake>;
+      targetCategoryId?: Option.Option<Discord.Snowflake>;
       discordChannelName?: Option.Option<string>;
       discordRoleName?: Option.Option<string>;
       discordRoleColor?: Option.Option<number>;
@@ -190,6 +193,7 @@ const make = Effect.gen(function* () {
               existing_channel_id: fields.existingChannelId ?? Option.none(),
               discord_role_id: fields.discordRoleId ?? Option.none(),
               archive_category_id: fields.archiveCategoryId ?? Option.none(),
+              target_category_id: fields.targetCategoryId ?? Option.none(),
               discord_channel_name: fields.discordChannelName ?? Option.none(),
               discord_role_name: fields.discordRoleName ?? Option.none(),
               discord_role_color: fields.discordRoleColor ?? Option.none(),
@@ -266,14 +270,14 @@ const make = Effect.gen(function* () {
           onNone: () => Effect.void,
           onSome: ({ guild_id }) =>
             sql`
-              INSERT INTO channel_sync_events (team_id, guild_id, event_type, entity_type, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, existing_channel_id, discord_role_id, archive_category_id, discord_channel_name, discord_role_name, discord_role_color)
+              INSERT INTO channel_sync_events (team_id, guild_id, event_type, entity_type, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, existing_channel_id, discord_role_id, archive_category_id, target_category_id, discord_channel_name, discord_role_name, discord_role_color)
               VALUES ${sql.join(
                 ',',
                 false,
               )(
                 input.entries.map(
                   (e) =>
-                    sql`(${input.teamId}, ${guild_id}, ${eventType}, ${'group'}, ${e.groupId}, ${e.groupName}, ${e.teamMemberId}, ${e.discordUserId}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null})`,
+                    sql`(${input.teamId}, ${guild_id}, ${eventType}, ${'group'}, ${e.groupId}, ${e.groupName}, ${e.teamMemberId}, ${e.discordUserId}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null})`,
                 ),
               )}
             `.pipe(Effect.asVoid),
@@ -343,6 +347,7 @@ const make = Effect.gen(function* () {
     discordChannelName?: string,
     discordRoleName?: string,
     discordRoleColor?: Option.Option<number>,
+    targetCategoryId: Option.Option<Discord.Snowflake> = Option.none(),
   ) =>
     _emitIfGuildLinked(teamId, 'channel_created', 'roster', {
       rosterId: Option.some(rosterId),
@@ -352,6 +357,7 @@ const make = Effect.gen(function* () {
         discordChannelName !== undefined ? Option.some(discordChannelName) : Option.none(),
       discordRoleName: discordRoleName !== undefined ? Option.some(discordRoleName) : Option.none(),
       discordRoleColor: discordRoleColor ?? Option.none(),
+      targetCategoryId,
     });
 
   const emitRosterChannelDeleted = (
@@ -588,14 +594,14 @@ const make = Effect.gen(function* () {
           onNone: () => Effect.void,
           onSome: ({ guild_id }) =>
             sql`
-              INSERT INTO channel_sync_events (team_id, guild_id, event_type, entity_type, existing_channel_id, discord_role_id, team_channel_id, access_level, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, archive_category_id, discord_channel_name, discord_role_name, discord_role_color)
+              INSERT INTO channel_sync_events (team_id, guild_id, event_type, entity_type, existing_channel_id, discord_role_id, team_channel_id, access_level, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, archive_category_id, target_category_id, discord_channel_name, discord_role_name, discord_role_color)
               VALUES ${sql.join(
                 ',',
                 false,
               )(
                 input.entries.map(
                   (e) =>
-                    sql`(${input.teamId}, ${guild_id}, ${'member_added'}, ${'managed'}, ${e.discordChannelId}, ${e.discordRoleId}, ${e.teamChannelId}, ${e.accessLevel}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null})`,
+                    sql`(${input.teamId}, ${guild_id}, ${'member_added'}, ${'managed'}, ${e.discordChannelId}, ${e.discordRoleId}, ${e.teamChannelId}, ${e.accessLevel}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null})`,
                 ),
               )}
             `.pipe(Effect.asVoid),
@@ -616,14 +622,14 @@ const make = Effect.gen(function* () {
           onNone: () => Effect.void,
           onSome: ({ guild_id }) =>
             sql`
-              INSERT INTO channel_sync_events (team_id, guild_id, event_type, entity_type, existing_channel_id, discord_role_id, team_channel_id, access_level, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, archive_category_id, discord_channel_name, discord_role_name, discord_role_color)
+              INSERT INTO channel_sync_events (team_id, guild_id, event_type, entity_type, existing_channel_id, discord_role_id, team_channel_id, access_level, group_id, group_name, team_member_id, discord_user_id, roster_id, roster_name, archive_category_id, target_category_id, discord_channel_name, discord_role_name, discord_role_color)
               VALUES ${sql.join(
                 ',',
                 false,
               )(
                 input.entries.map(
                   (e) =>
-                    sql`(${input.teamId}, ${guild_id}, ${'member_removed'}, ${'managed'}, ${e.discordChannelId}, ${e.discordRoleId}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null})`,
+                    sql`(${input.teamId}, ${guild_id}, ${'member_removed'}, ${'managed'}, ${e.discordChannelId}, ${e.discordRoleId}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null})`,
                 ),
               )}
             `.pipe(Effect.asVoid),

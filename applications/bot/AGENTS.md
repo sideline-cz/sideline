@@ -95,6 +95,35 @@ Effect.suspend(() => rest.createMessage(channelId, { embeds })).pipe(
    - `src/rcp/achievement/handleAchievementEarned.ts` has the correct catchTag/retry order but lacks `Effect.suspend`. When next touched, add the suspend wrapper.
 4. **Test the retry count.** A handler test that exercises a non-404 `ErrorResponse` MUST assert `rest.<method>` was called exactly `1 + Schedule.recurs(N)` times (4 for the standard `retryPolicy`). Without this assertion, the suspend bug regresses silently. Reference: the `403/50001` and `403/50013` tests in `applications/bot/test/rcp/weeklyChallenge/ProcessorService.test.ts` assert `createMessage.length === 4`.
 
+### Permanent-Error Fallback With a Relaxed Parameter (`retry({ schedule, while })` + `catchIf`)
+
+When a REST call carries an **optional input that may be stale at runtime** (e.g. a `parent_id` category that the user deleted in Discord after Sideline stored it), retry only the transient failures with the input intact, then on a permanent error fall back to the call WITHOUT that input. Use this exact two-stage shape — do NOT wrap the fallback in an outer retry, or a retry-on-re-entry can mint duplicate resources. Reference: `createDiscordChannelAndRole` in `src/rest/channels/createChannelWithRole.ts` (stale `parent_id` → guild-root fallback).
+
+```ts
+Effect.suspend(() => rest.createGuildChannel(guildId, withParentParams)).pipe(
+  // Retry only WHILE the error is transient; a permanent error exits immediately
+  // instead of burning the retry budget.
+  Effect.retry({ schedule: retryPolicy, while: (e) => !isPermanentError(e) }),
+  // Permanent error → log a warning and fall back to the relaxed call. The fallback
+  // has its OWN retryPolicy and is terminal — no outer retry wraps it.
+  Effect.catchIf(isPermanentError, () =>
+    Effect.logWarning(`... falling back ...`).pipe(
+      Effect.flatMap(() =>
+        Effect.suspend(() => rest.createGuildChannel(guildId, rootParams)).pipe(
+          Effect.retry(retryPolicy),
+        ),
+      ),
+    ),
+  ),
+);
+```
+
+Rules:
+
+1. **Use the shared `isPermanentError`** (`src/rcp/channel/ProcessorService.ts`) as both the retry `while` predicate (negated) and the `catchIf` predicate — never re-classify errors inline here. This keeps the transient/permanent decision in exactly one place (see "Channel Sync Event Failure Classification" below).
+2. **The fallback path is terminal.** Wrap only the fallback's own REST call in `Effect.retry(retryPolicy)`; never put an outer `Effect.retry` around the whole `retry`+`catchIf` pipe — re-entry after a permanent error must not re-create the already-created resource.
+3. **Only apply the parameter-relaxed branch when the optional input is present.** When the optional input is absent, issue the plain `Effect.suspend(() => ...).pipe(Effect.retry(retryPolicy))` call with no `catchIf` fallback.
+
 ## Gateway Event Handlers (`src/events/index.ts`)
 
 Gateway event handlers react to Discord gateway dispatch events (e.g. `GuildCreate`, `ChannelDelete`, `GuildMemberAdd`). All handlers are defined in `src/events/index.ts` and registered via `gateway.handleDispatch`.

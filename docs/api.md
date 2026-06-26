@@ -452,6 +452,7 @@ Returns the team's current settings.
 | `createDiscordChannelOnGroup` | `boolean` | No | Auto-create Discord channel when a group is created |
 | `createDiscordChannelOnRoster` | `boolean` | No | Auto-create Discord channel when a roster is created |
 | `discordArchiveCategoryId` | `Snowflake \| null` | Yes | Discord category channel used when cleanup mode is `archive` |
+| `discordRosterCategoryId` | `Snowflake \| null` | Yes | Discord category under which new roster channels are created; `null` means guild-root placement |
 | `discordChannelCleanupOnGroupDelete` | `'nothing' \| 'delete' \| 'archive'` | No | What to do with the Discord channel when a group is deleted: keep it (`nothing`), delete it (`delete`), or move it to the archive category (`archive`) |
 | `discordChannelCleanupOnRosterDeactivate` | `'nothing' \| 'delete' \| 'archive'` | No | What to do with the Discord channel when a roster is deactivated: keep it (`nothing`), delete it (`delete`), or move it to the archive category (`archive`) |
 | `discordRoleFormat` | `string` | No | Template string for Discord role names (must contain `{name}`; may contain `{emoji}`) |
@@ -498,6 +499,7 @@ Updates the team's settings. All fields are optional; only provided fields are c
 | `discordChannelOther` | `Snowflake \| null` | No | — | Channel for other events |
 | `discordChannelLateRsvp` | `Snowflake \| null` | No | — | Channel for late-RSVP notifications |
 | `discordArchiveCategoryId` | `Snowflake \| null` | No | — | Discord category used when cleanup mode is `archive` |
+| `discordRosterCategoryId` | `Snowflake \| null` | No | — | Discord category under which new roster channels are created; `null` clears the setting (guild-root placement) |
 | `discordChannelCleanupOnGroupDelete` | `'nothing' \| 'delete' \| 'archive'` | No | — | Cleanup mode applied when a group is deleted |
 | `discordChannelCleanupOnRosterDeactivate` | `'nothing' \| 'delete' \| 'archive'` | No | — | Cleanup mode applied when a roster is deactivated |
 | `discordRoleFormat` | `string` | No | Must contain `{name}` | Template string for Discord role names |
@@ -6561,6 +6563,8 @@ Manages Discord role mappings and role sync outbox processing.
 #### Channel
 
 Manages Discord channel mappings and channel sync outbox processing. The outbox uses `entity_type` values `'group'`, `'roster'`, `'managed'`, and `'discord'`. The `'discord'` entity type is emitted for `channel_archived` events triggered by `POST /teams/:teamId/discord-channels/:discordChannelId/archive` (carrying a `discord_channel_archived` event tag) and for `channel_restored` events triggered by `POST /teams/:teamId/discord-channels/:discordChannelId/restore` or the bulk-restore endpoint (carrying a `discord_channel_restored` event tag) — neither type sets `team_channel_id`. The `'managed'` entity type with `event_type = 'channel_updated'` is emitted by `POST /teams/:teamId/discord-channels/:discordChannelId/adopt` (`managed_channel_adopted` event). The `'managed'` entity type with `event_type = 'channel_restored'` is emitted when a managed channel is restored (`managed_channel_restored` event tag). Note: `Channel/ClearManagedChannel` is **not** called after `managed_channel_archived` — the `discord_channel_id` is preserved so that restore can re-activate the link without reprovisioning.
+
+`RosterChannelCreatedEvent` (the domain type decoded from `roster` / `channel_created` outbox rows) carries a `target_category_id` field (`Snowflake | null`) sourced from `channel_sync_events.target_category_id`. When non-null the bot passes `parent_id: target_category_id` to the Discord channel-create call. If the category ID is stale or deleted (permanent Discord error such as `10003` / `50035`), the bot falls back to guild-root placement without retrying. Only applies when a new channel is being created; when linking an existing channel (`existing_channel_id` is set) `target_category_id` is ignored.
 
 | Method | Payload / Returns | Description |
 |---|---|---|

@@ -16,7 +16,10 @@ export const handleRosterChannelCreated = (event: ChannelRpcEvents.RosterChannel
             event.discord_channel_name,
             event.discord_role_name,
             roleColor,
+            Option.getOrUndefined(event.target_category_id),
           ),
+        // Linking an existing channel: only create the role, ignore the roster category
+        // (moving an already-existing channel into a category is a separate concern).
         onSome: (channelId) =>
           createRoleForChannel(event.guild_id, channelId, event.discord_role_name, roleColor),
       }),

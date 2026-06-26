@@ -84,6 +84,7 @@ const channelCreatedFromSql = (r: EventRow) =>
               discord_channel_name: Option.getOrElse(r.discord_channel_name, () => roster_name),
               discord_role_name: Option.getOrElse(r.discord_role_name, () => roster_name),
               discord_role_color: r.discord_role_color,
+              target_category_id: r.target_category_id,
             }),
         ),
       ),

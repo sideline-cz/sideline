@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-26 — Discord category for new roster channels
+
+Captains can now choose which Discord category new roster channels are created in.
+
+- Open **Team settings → Discord integration** and set the new **Roster category** dropdown to any category channel in your Discord server.
+- New roster channels — created automatically when a roster is added, or when a deactivated roster is reactivated — are placed inside that category.
+- Leave the setting as **None** (the default) to place roster channels at the guild root without a category, preserving the previous behaviour.
+- If the configured category is deleted or becomes unavailable, the bot falls back to guild-root placement automatically — no manual action is needed.
+
 ## 2026-06-22 — Fix: admins can now open event detail pages for any group
 
 Admins (members with the **Admin** role) can now open the detail page of any event on the team — including events in groups they do not belong to. Previously the event detail endpoint returned a 404 for those events, even though admins could already see them in the **All groups** events list. Both surfaces now behave consistently.

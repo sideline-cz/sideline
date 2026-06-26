@@ -152,6 +152,18 @@ When you unlink a channel (via the **Disconnect** button), the channel is remove
 
 Deleting a group removes both the channel and the role.
 
+## Roster channel category
+
+When Sideline creates a Discord channel for a roster (on creation or reactivation), it can place that channel inside a Discord category you choose.
+
+Set the **Roster category** dropdown in **Team settings → Discord integration → Roster category**. The setting accepts any category channel in your Discord server, or **None** (the default) to place roster channels at the guild root without a category.
+
+When a roster channel is created and a category is configured, the bot passes `parent_id` to Discord. If the configured category has been deleted or is otherwise unreachable, the bot falls back to guild-root placement automatically — no manual intervention is needed.
+
+<Aside type="note" title="Existing channels are not moved">
+  Changing this setting only affects new roster channels created after the change. Existing roster channels are not moved. If you want to move an existing channel, do it manually in Discord or use the **Team → Channels** archive/restore flow.
+</Aside>
+
 ## Cleanup modes
 
 Old event posts accumulate. You pick a cleanup strategy per team:

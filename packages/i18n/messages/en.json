@@ -434,6 +434,8 @@
   "teamSettings_channelNone": "None",
   "teamSettings_archiveCategory": "Archive category",
   "teamSettings_archiveCategoryHelp": "Discord category channel used for archived group and roster channels.",
+  "teamSettings_rosterCategory": "Roster category",
+  "teamSettings_rosterCategoryHelp": "Discord category where new roster channels are created. Reactivated roster channels are created here too. Leave as None to use Discord's default placement.",
   "teamSettings_channelCleanupOnGroupDelete": "On group deletion",
   "teamSettings_channelCleanupOnGroupDeleteHelp": "What to do with the Discord channel when a group is deleted.",
   "teamSettings_channelCleanupOnRosterDeactivate": "On roster deactivation",

@@ -24,6 +24,7 @@ class TeamSettingsRow extends Schema.Class<TeamSettingsRow>('TeamSettingsRow')({
   create_discord_channel_on_group: Schema.Boolean,
   create_discord_channel_on_roster: Schema.Boolean,
   discord_archive_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  discord_roster_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_channel_cleanup_on_group_delete: ChannelSyncEvent.ChannelCleanupMode,
   discord_channel_cleanup_on_roster_deactivate: ChannelSyncEvent.ChannelCleanupMode,
   discord_role_format: Schema.String,
@@ -57,6 +58,7 @@ const TeamSettingsUpsertInput = Schema.Struct({
   create_discord_channel_on_group: Schema.Boolean,
   create_discord_channel_on_roster: Schema.Boolean,
   discord_archive_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  discord_roster_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_channel_cleanup_on_group_delete: ChannelSyncEvent.ChannelCleanupMode,
   discord_channel_cleanup_on_roster_deactivate: ChannelSyncEvent.ChannelCleanupMode,
   discord_role_format: Schema.String,
@@ -133,6 +135,7 @@ const make = Effect.gen(function* () {
              discord_channel_late_rsvp,
              create_discord_channel_on_group, create_discord_channel_on_roster,
              discord_archive_category_id,
+             discord_roster_category_id,
              discord_channel_cleanup_on_group_delete,
              discord_channel_cleanup_on_roster_deactivate,
              discord_role_format,
@@ -169,6 +172,7 @@ const make = Effect.gen(function* () {
                                  discord_channel_late_rsvp,
                                  create_discord_channel_on_group, create_discord_channel_on_roster,
                                  discord_archive_category_id,
+                                 discord_roster_category_id,
                                  discord_channel_cleanup_on_group_delete,
                                  discord_channel_cleanup_on_roster_deactivate,
                                  discord_role_format,
@@ -186,6 +190,7 @@ const make = Effect.gen(function* () {
               ${input.discord_channel_late_rsvp},
               ${input.create_discord_channel_on_group}, ${input.create_discord_channel_on_roster},
               ${input.discord_archive_category_id},
+              ${input.discord_roster_category_id},
               ${input.discord_channel_cleanup_on_group_delete},
               ${input.discord_channel_cleanup_on_roster_deactivate},
               ${input.discord_role_format},
@@ -210,6 +215,7 @@ const make = Effect.gen(function* () {
         create_discord_channel_on_group = ${input.create_discord_channel_on_group},
         create_discord_channel_on_roster = ${input.create_discord_channel_on_roster},
         discord_archive_category_id = ${input.discord_archive_category_id},
+        discord_roster_category_id = ${input.discord_roster_category_id},
         discord_channel_cleanup_on_group_delete = ${input.discord_channel_cleanup_on_group_delete},
         discord_channel_cleanup_on_roster_deactivate = ${input.discord_channel_cleanup_on_roster_deactivate},
         discord_role_format = ${input.discord_role_format},
@@ -228,6 +234,7 @@ const make = Effect.gen(function* () {
                 discord_channel_late_rsvp,
                 create_discord_channel_on_group, create_discord_channel_on_roster,
                 discord_archive_category_id,
+                discord_roster_category_id,
                 discord_channel_cleanup_on_group_delete,
                 discord_channel_cleanup_on_roster_deactivate,
                 discord_role_format,
@@ -339,6 +346,7 @@ const make = Effect.gen(function* () {
     createDiscordChannelOnGroup = true,
     createDiscordChannelOnRoster = true,
     discordArchiveCategoryId = Option.none(),
+    discordRosterCategoryId = Option.none(),
     discordChannelCleanupOnGroupDelete = 'delete' as ChannelSyncEvent.ChannelCleanupMode,
     discordChannelCleanupOnRosterDeactivate = 'delete' as ChannelSyncEvent.ChannelCleanupMode,
     discordRoleFormat = DEFAULT_ROLE_FORMAT,
@@ -364,6 +372,7 @@ const make = Effect.gen(function* () {
     createDiscordChannelOnGroup?: boolean;
     createDiscordChannelOnRoster?: boolean;
     discordArchiveCategoryId?: Option.Option<Discord.Snowflake>;
+    discordRosterCategoryId?: Option.Option<Discord.Snowflake>;
     discordChannelCleanupOnGroupDelete?: ChannelSyncEvent.ChannelCleanupMode;
     discordChannelCleanupOnRosterDeactivate?: ChannelSyncEvent.ChannelCleanupMode;
     discordRoleFormat?: string;
@@ -390,6 +399,7 @@ const make = Effect.gen(function* () {
       create_discord_channel_on_group: createDiscordChannelOnGroup,
       create_discord_channel_on_roster: createDiscordChannelOnRoster,
       discord_archive_category_id: discordArchiveCategoryId,
+      discord_roster_category_id: discordRosterCategoryId,
       discord_channel_cleanup_on_group_delete: discordChannelCleanupOnGroupDelete,
       discord_channel_cleanup_on_roster_deactivate: discordChannelCleanupOnRosterDeactivate,
       discord_role_format: discordRoleFormat,
