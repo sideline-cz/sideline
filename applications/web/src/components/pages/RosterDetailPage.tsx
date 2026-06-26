@@ -250,25 +250,28 @@ export function RosterDetailPage({
 
   const handleSyncRoleMembers = React.useCallback(async () => {
     setSyncingRoleMembers(true);
-    const result = await ApiClient.asEffect().pipe(
-      Effect.flatMap((api) =>
-        api.roster.syncRoleMembers({
-          params: { teamId: teamIdBranded, rosterId: rosterIdBranded },
-        }),
-      ),
-      Effect.mapError(() => ClientError.make(tr('roster_syncRoleMembersFailed'))),
-      run({}),
-    );
-    if (Option.isSome(result)) {
-      toast.success(
-        tr('roster_syncRoleMembersQueued', {
-          addedCount: result.value.addedCount,
-          removedCount: result.value.removedCount,
-          skippedCount: result.value.skippedCount,
-        }),
+    try {
+      const result = await ApiClient.asEffect().pipe(
+        Effect.flatMap((api) =>
+          api.roster.syncRoleMembers({
+            params: { teamId: teamIdBranded, rosterId: rosterIdBranded },
+          }),
+        ),
+        Effect.mapError(() => ClientError.make(tr('roster_syncRoleMembersFailed'))),
+        run({}),
       );
+      if (Option.isSome(result)) {
+        toast.success(
+          tr('roster_syncRoleMembersQueued', {
+            addedCount: result.value.addedCount,
+            removedCount: result.value.removedCount,
+            skippedCount: result.value.skippedCount,
+          }),
+        );
+      }
+    } finally {
+      setSyncingRoleMembers(false);
     }
-    setSyncingRoleMembers(false);
   }, [teamIdBranded, rosterIdBranded, run]);
 
   return (
