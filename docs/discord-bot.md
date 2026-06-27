@@ -30,7 +30,7 @@ The bot is built with **dfx**, an Effect-native Discord framework. It connects t
 
 ## Slash Commands
 
-Seven top-level commands are registered globally: `/carpool`, `/event`, `/finance`, `/info`, `/makanicko`, `/summon`, and `/training`. `/event`, `/finance`, `/makanicko`, and `/training` each have sub-commands.
+Eight top-level commands are registered globally: `/carpool`, `/event`, `/finance`, `/info`, `/makanicko`, `/summarize`, `/summon`, and `/training`. `/event`, `/finance`, `/makanicko`, and `/training` each have sub-commands.
 
 ### /carpool
 
@@ -130,6 +130,73 @@ At least one of `user` or `role` must be supplied.
 **Source files:**
 - `applications/bot/src/commands/summon/index.ts`
 - `applications/bot/src/commands/summon/handler.ts`
+
+---
+
+### /summarize
+
+**Description:** Summarize the recent messages in the current channel or thread using the server's LLM.
+
+**Czech command name:** `shrnout`
+
+**Options:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `messages` | Integer | No | How many recent messages to summarize (1–200, default 50) |
+| `since` | String | No | Summarize messages since a point in time — e.g. `24h`, `7d`, `3d12h`, or `2026-06-20` |
+
+When both options are omitted the command summarizes the last 50 messages. When `since` is provided the bot collects all messages in the window (up to `messages` after filtering); when omitted the bot simply takes the newest `messages` messages.
+
+**Constraints:**
+- `dm_permission: false` — the command cannot be used in DMs.
+- No `default_member_permissions` gate — any member with channel access can use it.
+
+**Flow:**
+
+1. User invokes `/summarize` (optionally with `messages` and/or `since`) in a channel or thread.
+2. The handler (`applications/bot/src/commands/summarize/handler.ts`) validates the inputs:
+   - If the interaction has no `channel_id` (e.g. invoked in a DM), replies ephemerally with an error.
+   - If `since` is present but unparseable, replies ephemerally with an invalid-input error.
+3. Returns a `DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE` with `Ephemeral` flag and forks a background fiber (the LLM call may be slow).
+4. The background fiber paginates `rest.listMessages(channelId)` in pages of 100, stopping when:
+   - The page cursor crosses the `since` cutoff (if provided),
+   - The channel is exhausted (page < 100 messages), or
+   - The 2-page fetch budget (200 messages max) is reached.
+5. Bot-author messages and empty-content messages are filtered out.
+6. Messages are sorted chronologically (oldest first) and trimmed to `effectiveLimit` (the resolved value of `messages`, capped at 200).
+7. The resulting transcript is wrapped in `TranscriptMessage` records and sent to the server via `Summarize/SummarizeChannel` RPC with `messages`, `channelName`, and `locale`.
+8. The server's `LlmClient.summarizeChannel` builds a system-prompt-guarded chat-completion request with a 12 000-character transcript budget (oldest messages are dropped whole until the budget is met). The JSON response is parsed for `{ summary }`.
+9. If the LLM is unavailable or the response cannot be parsed, the server returns `generated: false` and a deterministic fallback prose summary (participant count, message count, channel name).
+10. The bot edits the original deferred message:
+    - `generated: false` → ephemeral text: "I couldn't generate a summary right now."
+    - `generated: true` → ephemeral embed titled "📝 Channel summary" with the summary text and a footer reporting the message count, participant count, time range, and a "(capped)" flag if the window was truncated.
+
+**`since` accepted formats:**
+
+| Format | Examples | Behaviour |
+|--------|----------|-----------|
+| Duration | `24h`, `7d`, `3d12h`, `90m`, `1d2h30m` | Relative to interaction time; units `d`/`h`/`m`; multi-unit additive |
+| ISO date | `2026-06-20` | Start of that UTC day |
+| ISO datetime | `2026-06-20T10:00:00Z` | Exact UTC timestamp |
+
+Maximum duration: 10 years (3 650 days). Out-of-range or zero-value inputs return an ephemeral parse error.
+
+**Errors:**
+
+| Condition | User-visible message |
+|-----------|----------------------|
+| No channel ID on interaction | This command can only be used in a server channel or thread. |
+| `since` is present but unparseable | I couldn't read "{input}". Use something like 24h, 7d, or 2026-06-20. |
+| No messages found (or only bot messages) | Appropriate ephemeral message per case. |
+| Discord HTTP 403 / code 50013 on `listMessages` | I don't have permission to read this channel's history. |
+| LLM unavailable / `generated: false` | I couldn't generate a summary right now. Please try again in a moment. |
+| RPC or unexpected error | Something went wrong while summarizing. Please try again. |
+
+**Source files:**
+- `applications/bot/src/commands/summarize/index.ts`
+- `applications/bot/src/commands/summarize/handler.ts`
+- `applications/bot/src/commands/summarize/buildSummaryEmbed.ts`
 
 ---
 
@@ -1638,6 +1705,16 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 Status values: `pending`, `partial`, `paid`, `overdue`, `waived`.
 
 `UnprocessedPaymentReminderEvent` fields: `id`, `team_id`, `guild_id`, `assignment_id`, `kind` (`due_in_3d | due_today | overdue_3d | overdue_10d | overdue_21d`), `fee_name`, `effective_due_at`, `currency`, `amount_minor`, `paid_minor`, `user_discord_id`.
+
+### Summarize group (`Summarize/`)
+
+| Method | Payload | Returns | Description |
+|--------|---------|---------|-------------|
+| `Summarize/SummarizeChannel` | `messages: TranscriptMessage[]`, `channelName: Option<string>`, `locale: 'en' \| 'cs'` | `SummarizeChannelResult` | Summarizes a Discord channel transcript using `LlmClient.summarizeChannel`. Applies a 12 000-character budget (drops oldest messages whole). Returns `{ summary, generated, summarizedCount }`. When the LLM is unavailable or the response is unparseable, `generated` is `false` and a deterministic fallback prose is returned. |
+
+`TranscriptMessage` fields: `author: string`, `content: string`, `timestamp: DateTimeUtc`.
+
+`SummarizeChannelResult` fields: `summary: string`, `generated: boolean`, `summarizedCount: number`.
 
 ---
 
