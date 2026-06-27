@@ -33,6 +33,16 @@ export const SummarizeCommand = Ix.global(
         },
         required: false,
       },
+      {
+        type: DiscordTypes.ApplicationCommandOptionType.BOOLEAN,
+        name: 'private',
+        name_localizations: { cs: 'soukrome' },
+        description: m.bot_summarize_private_option_description({}, { locale: 'en' }),
+        description_localizations: {
+          cs: m.bot_summarize_private_option_description({}, { locale: 'cs' }),
+        },
+        required: false,
+      },
     ],
   } as const,
   summarizeHandler,

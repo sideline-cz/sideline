@@ -204,6 +204,14 @@ export const summarizeHandler = Interaction.asEffect().pipe(
         const messagesOption = readOption(options, 'messages');
         const sinceOption = readOption(options, 'since');
 
+        // `private` controls response visibility — default true (ephemeral). The
+        // option value arrives as a boolean (stringified by readOption); only an
+        // explicit `false` makes the response public.
+        const isEphemeral = Option.match(readOption(options, 'private'), {
+          onNone: () => true,
+          onSome: (value) => value !== 'false',
+        });
+
         // Resolve `since` option if provided — parseSince is total (never throws)
         const maybeParsed = Option.isSome(sinceOption)
           ? parseSince(sinceOption.value, now)
@@ -483,9 +491,12 @@ export const summarizeHandler = Interaction.asEffect().pipe(
           ),
         );
 
+        // The defer flag is immutable for the rest of the interaction, so the
+        // visibility chosen here applies to every follow-up (summary + post-fetch
+        // edge messages). Pre-defer input errors above stay ephemeral regardless.
         const deferred: DiscordTypes.CreateMessageInteractionCallbackRequest = {
           type: DiscordTypes.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
-          data: { flags: DiscordTypes.MessageFlags.Ephemeral },
+          data: isEphemeral ? { flags: DiscordTypes.MessageFlags.Ephemeral } : {},
         };
 
         return Effect.as(Effect.forkDetach(work), deferred);

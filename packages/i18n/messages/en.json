@@ -591,6 +591,7 @@
   "bot_summarize_description": "Summarize the recent messages in this channel",
   "bot_summarize_messages_option_description": "How many recent messages to summarize (1–200, default 50)",
   "bot_summarize_since_option_description": "Summarize messages since… e.g. 24h, 7d, 3d12h, or 2026-06-20",
+  "bot_summarize_private_option_description": "Only you can see the summary (default: true)",
   "bot_summarize_embed_title": "📝 Channel summary",
   "bot_summarize_footer": "Summarized {count} messages · {participants} participants · {range}",
   "bot_summarize_footer_capped": "Summarized the latest {count} messages (capped) · {participants} participants · {range}",

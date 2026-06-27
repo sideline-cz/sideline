@@ -132,7 +132,7 @@ const makeSyncRpcStub = (options: SyncRpcOptions = {}) => {
 interface InteractionOptionFixture {
   type: number;
   name: string;
-  value?: string | number;
+  value?: string | number | boolean;
 }
 
 interface InteractionFixtureOptions {
@@ -197,6 +197,12 @@ const messagesOption = (value: number): InteractionOptionFixture => ({
 const sinceOption = (value: string): InteractionOptionFixture => ({
   type: DiscordTypes.ApplicationCommandOptionType.STRING,
   name: 'since',
+  value,
+});
+
+const privateOption = (value: boolean): InteractionOptionFixture => ({
+  type: DiscordTypes.ApplicationCommandOptionType.BOOLEAN,
+  name: 'private',
   value,
 });
 
@@ -930,6 +936,65 @@ describe('summarizeHandler', () => {
       DiscordTypes.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
     );
     expect((response as any).data?.flags).toBe(DiscordTypes.MessageFlags.Ephemeral);
+  });
+
+  it('private: true (explicit) → deferred response carries the Ephemeral flag', async () => {
+    const rest = makeRestStub({ listMessages: vi.fn(() => Effect.succeed([])) });
+    const rpc = makeSyncRpcStub();
+
+    const response = await runHandler(
+      makeInteraction({ options: [privateOption(true)] }),
+      rest.layer,
+      rpc.layer,
+    );
+
+    expect((response as any).data?.flags).toBe(DiscordTypes.MessageFlags.Ephemeral);
+  });
+
+  it('private: false → deferred response is public (no Ephemeral flag)', async () => {
+    const rest = makeRestStub({ listMessages: vi.fn(() => Effect.succeed([])) });
+    const rpc = makeSyncRpcStub();
+
+    const response = await runHandler(
+      makeInteraction({ options: [privateOption(false)] }),
+      rest.layer,
+      rpc.layer,
+    );
+
+    expect((response as any).type).toBe(
+      DiscordTypes.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+    );
+    const flags = (response as any).data?.flags ?? 0;
+    expect(flags & DiscordTypes.MessageFlags.Ephemeral).toBe(0);
+  });
+
+  it('private: false → success follow-up still clears mentions (allowed_mentions parse: [])', async () => {
+    const now = new Date('2026-06-20T12:00:00Z').getTime();
+    const messages = [makeMessage({ timestamp: new Date(now).toISOString(), content: 'hi' })];
+    const update = vi.fn(() => Effect.succeed(undefined));
+    const rest = makeRestStub({
+      listMessages: vi.fn(() => Effect.succeed(messages)),
+      updateOriginalWebhookMessage: update,
+    });
+    const rpc = makeSyncRpcStub({
+      'Summarize/SummarizeChannel': vi.fn(() =>
+        Effect.succeed(
+          new SummarizeRpcModels.SummarizeChannelResult({
+            summary: 'Public summary',
+            generated: true,
+            summarizedCount: 1,
+          }),
+        ),
+      ),
+    });
+
+    await runHandler(makeInteraction({ options: [privateOption(false)] }), rest.layer, rpc.layer);
+
+    expect(update).toHaveBeenCalled();
+    const payload = (update.mock.calls as ReadonlyArray<ReadonlyArray<unknown>>)[0]?.[2] as {
+      payload?: { allowed_mentions?: { parse?: unknown[] } };
+    };
+    expect(payload.payload?.allowed_mentions?.parse).toEqual([]);
   });
 
   it('cs locale: invalid-since renders Czech text', async () => {

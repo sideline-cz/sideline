@@ -145,8 +145,9 @@ At least one of `user` or `role` must be supplied.
 |------|------|----------|-------------|
 | `messages` | Integer | No | How many recent messages to summarize (1–200, default 50) |
 | `since` | String | No | Summarize messages since a point in time — e.g. `24h`, `7d`, `3d12h`, or `2026-06-20` |
+| `private` | Boolean | No | Whether the response is visible only to you (default: `true`). Set to `false` to post the summary publicly to the channel. Czech name: `soukrome` |
 
-When both options are omitted the command summarizes the last 50 messages. When `since` is provided the bot collects all messages in the window (up to `messages` after filtering); when omitted the bot simply takes the newest `messages` messages.
+When both `messages` and `since` are omitted the command summarizes the last 50 messages. When `since` is provided the bot collects all messages in the window (up to `messages` after filtering); when omitted the bot simply takes the newest `messages` messages.
 
 **Constraints:**
 - `dm_permission: false` — the command cannot be used in DMs.
@@ -154,11 +155,11 @@ When both options are omitted the command summarizes the last 50 messages. When 
 
 **Flow:**
 
-1. User invokes `/summarize` (optionally with `messages` and/or `since`) in a channel or thread.
+1. User invokes `/summarize` (optionally with `messages`, `since`, and/or `private`) in a channel or thread.
 2. The handler (`applications/bot/src/commands/summarize/handler.ts`) validates the inputs:
-   - If the interaction has no `channel_id` (e.g. invoked in a DM), replies ephemerally with an error.
-   - If `since` is present but unparseable, replies ephemerally with an invalid-input error.
-3. Returns a `DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE` with `Ephemeral` flag and forks a background fiber (the LLM call may be slow).
+   - If the interaction has no `channel_id` (e.g. invoked in a DM), replies ephemerally with an error (regardless of `private`).
+   - If `since` is present but unparseable, replies ephemerally with an invalid-input error (regardless of `private`).
+3. Resolves response visibility: `private: false` → public; omitted or `true` → ephemeral (default). Returns a `DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE` — with the `Ephemeral` flag when private, without it when public — and forks a background fiber (the LLM call may be slow). **The defer flag is immutable for the rest of the interaction**, so the chosen visibility also applies to all subsequent follow-up edits (summary embed and post-fetch edge-case messages).
 4. The background fiber paginates `rest.listMessages(channelId)` in pages of 100, stopping when:
    - The page cursor crosses the `since` cutoff (if provided),
    - The channel is exhausted (page < 100 messages), or
@@ -168,9 +169,9 @@ When both options are omitted the command summarizes the last 50 messages. When 
 7. The resulting transcript is wrapped in `TranscriptMessage` records and sent to the server via `Summarize/SummarizeChannel` RPC with `messages`, `channelName`, and `locale`.
 8. The server's `LlmClient.summarizeChannel` builds a system-prompt-guarded chat-completion request with a 12 000-character transcript budget (oldest messages are dropped whole until the budget is met). The JSON response is parsed for `{ summary }`.
 9. If the LLM is unavailable or the response cannot be parsed, the server returns `generated: false` and a deterministic fallback prose summary (participant count, message count, channel name).
-10. The bot edits the original deferred message:
-    - `generated: false` → ephemeral text: "I couldn't generate a summary right now."
-    - `generated: true` → ephemeral embed titled "📝 Channel summary" with the summary text and a footer reporting the message count, participant count, time range, and a "(capped)" flag if the window was truncated.
+10. The bot edits the original deferred message (visibility matches the deferred response — ephemeral when `private: true`, public when `private: false`):
+    - `generated: false` → text: "I couldn't generate a summary right now."
+    - `generated: true` → embed titled "📝 Channel summary" with the summary text and a footer reporting the message count, participant count, time range, and a "(capped)" flag if the window was truncated.
 
 **`since` accepted formats:**
 

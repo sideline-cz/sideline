@@ -44,6 +44,17 @@ describe('SummarizeCommand', () => {
     expect(sinceOpt?.type).toBe(DiscordTypes.ApplicationCommandOptionType.STRING);
   });
 
+  it('has a "private" option of type BOOLEAN', () => {
+    const cmd = SummarizeCommand as unknown as {
+      command?: { options?: ReadonlyArray<{ name: string; type: number }> };
+      definition?: { options?: ReadonlyArray<{ name: string; type: number }> };
+    };
+    const options = cmd.command?.options ?? cmd.definition?.options ?? [];
+    const privateOpt = options.find((o) => o.name === 'private');
+    expect(privateOpt).toBeDefined();
+    expect(privateOpt?.type).toBe(DiscordTypes.ApplicationCommandOptionType.BOOLEAN);
+  });
+
   it('"messages" option has min_value=1 and max_value=200', () => {
     const cmd = SummarizeCommand as unknown as {
       command?: {
