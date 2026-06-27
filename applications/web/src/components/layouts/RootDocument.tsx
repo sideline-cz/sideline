@@ -1,10 +1,9 @@
 import { getLocale } from '@sideline/i18n/runtime';
-import { TanStackDevtools } from '@tanstack/react-devtools';
 import { HeadContent, Scripts } from '@tanstack/react-router';
-import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
 import React from 'react';
 import { Toaster } from '~/components/ui/sonner';
-import TanStackQueryDevtools from '~/integrations/tanstack-query/devtools';
+import { PRE_MOUNT_GUARD_SOURCE } from '~/lib/preMountGuard.js';
+import { RESETTING_KEY, requestSwReload } from '~/lib/reloadGuard.js';
 import { shouldReloadOnControllerChange } from '~/lib/sw-reload.js';
 
 interface RootDocumentProps {
@@ -32,8 +31,16 @@ export function RootDocument({ children }: RootDocumentProps) {
       if (!shouldReloadOnControllerChange(hadController, swReloaded)) {
         return;
       }
+      // Skip if we're in the middle of an SW reset (sw-recovery sets this flag)
+      try {
+        if (sessionStorage.getItem(RESETTING_KEY)) {
+          return;
+        }
+      } catch {
+        // sessionStorage unavailable — proceed with reload
+      }
       swReloaded = true;
-      window.location.reload();
+      requestSwReload();
     };
 
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
@@ -50,24 +57,60 @@ export function RootDocument({ children }: RootDocumentProps) {
     <html lang={locale}>
       <head>
         <HeadContent />
+        {/* Pre-mount watchdog: injected before the bundle to set up error guards.
+            The source is a build-time constant (no user input), so XSS is not a concern. */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: build-time constant guard script, no user input */}
+        <script dangerouslySetInnerHTML={{ __html: PRE_MOUNT_GUARD_SOURCE }} />
       </head>
       <body>
         {children}
-        <TanStackDevtools
-          config={{
-            position: 'bottom-right',
-          }}
-          plugins={[
-            {
-              name: 'Tanstack Router',
-              render: <TanStackRouterDevtoolsPanel />,
-            },
-            TanStackQueryDevtools,
-          ]}
-        />
+        {import.meta.env.DEV && <DevtoolsPanel />}
         <Toaster position='top-right' richColors closeButton />
         <Scripts />
       </body>
     </html>
   );
+}
+
+// Devtools are lazily imported and only included in dev builds.
+// The dynamic import ensures the devtools packages are fully tree-shaken in production.
+function DevtoolsPanel() {
+  const [DevtoolsComponent, setDevtoolsComponent] = React.useState<React.ComponentType | null>(
+    null,
+  );
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const [
+        { TanStackDevtools },
+        { TanStackRouterDevtoolsPanel },
+        { default: TanStackQueryDevtools },
+      ] = await Promise.all([
+        import('@tanstack/react-devtools'),
+        import('@tanstack/react-router-devtools'),
+        import('~/integrations/tanstack-query/devtools'),
+      ]);
+      if (!cancelled) {
+        const Devtools = () => (
+          <div data-testid='tanstack-devtools'>
+            <TanStackDevtools
+              config={{ position: 'bottom-right' }}
+              plugins={[
+                { name: 'Tanstack Router', render: <TanStackRouterDevtoolsPanel /> },
+                TanStackQueryDevtools,
+              ]}
+            />
+          </div>
+        );
+        setDevtoolsComponent(() => Devtools);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!DevtoolsComponent) return null;
+  return <DevtoolsComponent />;
 }

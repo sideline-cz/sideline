@@ -24,7 +24,11 @@ const config = defineConfig({
   plugins: [
     devtools(),
     nitro({
-      plugins: ['./server/plugins/og-url.ts', './server/plugins/sw-cache-headers.ts'],
+      plugins: [
+        './server/plugins/og-url.ts',
+        './server/plugins/sw-cache-headers.ts',
+        './server/plugins/otlp-endpoint.ts',
+      ],
     }),
     // this is the plugin that enables path aliases
     viteTsConfigPaths({

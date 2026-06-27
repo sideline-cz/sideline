@@ -452,6 +452,8 @@ Runtime.runMain(
 
 **Web frontend** uses its own `makeTelemetryLayer` in `applications/web/src/lib/telemetry.ts`, initialised from `fetchEnv` in the root route's `beforeLoad` hook. The web layer uses the browser Fetch API as the OTLP transport instead of Node.js HTTP. Telemetry is optional — when `OTEL_EXPORTER_OTLP_ENDPOINT` is not set, the layer is a no-op.
 
+**Crash beacons (pre-runtime OTLP):** The Nitro server plugin `server/plugins/otlp-endpoint.ts` injects `window.__SIDELINE_OTLP__ = "<endpoint>"` into the HTML `<head>` of every SSR response. This allows `crashBeacon.ts` (and the inline `preMountGuard` watchdog script) to fire `navigator.sendBeacon` directly to the OTLP collector for crashes that occur before the Effect runtime is initialised — for example, a JS bundle load failure or a React mount crash before `beforeLoad` completes. Requires `OTEL_EXPORTER_OTLP_ENDPOINT` to be set on the web service; when it is unset no script tag is injected and crash beacons are silently dropped.
+
 In addition to traces, the web frontend reports the following OTEL histogram metrics:
 
 | Metric | Description |
@@ -628,7 +630,28 @@ Discord caches slash command registrations globally. After adding or modifying c
 - For immediate testing, use guild-specific command registration (add a `GUILD_ID` env var if supported by the bot command registration logic)
 - Restart the bot container to trigger re-registration on startup
 
-### 9.8 OTEL Telemetry Not Appearing
+### 9.8 Web App Shows a Blank or White Screen
+
+**Symptom:** The app URL loads but the browser displays a blank or white screen — no UI renders.
+
+**What the app does automatically:** The web frontend has a layered crash-recovery system that handles most cases without user intervention:
+
+1. **Pre-mount watchdog (`preMountGuard`):** An inline ES5 script injected before the JS bundle sets a 10-second watchdog timer. If the React root has not mounted within 10 seconds (e.g. due to a JS bundle fetch failure), the watchdog replaces the page body with a recovery UI offering two buttons: **Reload** and **Reset app**. Reload retries the page (capped at 2 automatic attempts via a session-storage counter). Reset app unregisters the service worker and clears caches before reloading.
+2. **Vite preload-error guard:** If a JS chunk fails to load (stale service-worker cache after a deployment), the app automatically reloads once to fetch the latest bundle.
+3. **`AppErrorBoundary` (React error boundary):** Wraps the entire component tree. If React throws during render, the boundary renders the same **Reload / Reset app** fallback screen and sends a crash beacon to the OTLP collector (`crashBeacon.ts`).
+
+**Manual recovery steps for users:**
+
+- Click **Reload** on the error screen (or reload the browser tab manually).
+- If blank screen persists: click **Reset app**. This unregisters the service worker and clears the offline cache, then reloads a fresh copy. The user stays logged in — only cached offline data is cleared.
+- If the problem persists: force-clear site data from the browser (DevTools → Application → Storage → Clear site data) and reload.
+
+**Operator checks:**
+
+- A blank screen with no JS errors often means a stale service worker is serving a cached `index.html` that references chunks from a previous build. Check `OTEL_EXPORTER_OTLP_ENDPOINT` is set so crash beacons reach SigNoz — filter by `service.name = 'sideline-web'` and `body CONTAINS 'pre-mount'` or `body CONTAINS 'boundary'`.
+- If the crash happened before the Effect runtime initialised, the beacon arrives via `navigator.sendBeacon` to the OTLP endpoint directly (not via the Effect logging pipeline). These events will appear as raw JSON payloads; their `phase` field will be `pre-mount`, `boundary`, or `preload-error`.
+
+### 9.9 OTEL Telemetry Not Appearing
 
 **Checks:**
 - Verify `OTEL_EXPORTER_OTLP_ENDPOINT` is reachable from the container network (for server/bot) or from the browser (for web)

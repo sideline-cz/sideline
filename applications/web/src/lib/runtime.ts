@@ -89,6 +89,17 @@ export const resolveServerExit = async <A>(
   if (aborted || Cause.hasInterruptsOnly(exit.cause)) {
     // Navigation was superseded (or the fiber was interrupted) — drop this run so a bare
     // interrupt/undefined never escapes to the router. The new navigation owns the outcome.
+    // B2: fire-and-forget diagnostic log so operators can observe dropped navigations in telemetry.
+    try {
+      runEffect(
+        Effect.logWarning('Navigation superseded/interrupted — dropping run', {
+          aborted,
+          hasInterruptsOnly: Cause.hasInterruptsOnly(exit.cause),
+        }),
+      );
+    } catch {
+      // fire-and-forget: swallow all errors from logging
+    }
     return new Promise<never>(() => {});
   }
   const squashed = Cause.squash(exit.cause);
@@ -188,6 +199,13 @@ export const runEffect = (effect: Effect.Effect<void>): void => {
   if (_runtime === null) return;
   void _runtime.runFork(effect);
 };
+
+/**
+ * Whether the Effect runtime has been initialized. Used by the app error boundary
+ * to decide between Effect-based logging (live runtime) and a direct crash beacon
+ * (runtime not yet up, e.g. a shell crash before `beforeLoad`).
+ */
+export const isRuntimeInitialized = (): boolean => _runtime !== null;
 
 export const runPromiseClient =
   (_serverUrl: string) =>

@@ -1016,7 +1016,77 @@ describe('MyComponent', () => {
 - Test files live in `applications/web/test/` with `.test.tsx` extension.
 - Use `@testing-library/react` (`render`, `screen`, `fireEvent`) for DOM assertions.
 
+## Crash Recovery & Error Fallbacks
+
+The app renders three distinct crash surfaces, each of which must survive the very failure it reports. Their source files: `src/components/layouts/AppErrorBoundary.tsx` (React error boundary wrapping `ThemeProvider` in `__root.tsx`), `src/components/layouts/AppCrashFallback.tsx` (the boundary's fallback UI), `src/components/layouts/RouteErrorComponent.tsx` (TanStack Router's inner `errorComponent`), and the pre-mount watchdog in `src/lib/preMountGuard.ts`.
+
+### Crash UIs Must Be Self-Contained
+
+A crash surface MUST NOT depend on anything that can itself be the crash source. `AppCrashFallback`, `RouteErrorComponent`'s fallback rendering, and the pre-mount recovery HTML therefore use **inline styles only** and import nothing from:
+
+- the design system (`components/ui/*`, Shadcn, Tailwind class names that resolve via `ThemeProvider`)
+- `tr()` / i18n (`~/lib/translations.js`, `@sideline/i18n/*`) — copy is hard-coded English
+- the Effect runtime (`useRun`, `ApiClient`, `runPromiseClient`) — the runtime may not be initialized
+- `ThemeProvider` or any React context provider rendered above the boundary
+
+Rules:
+
+1. **Hard-code colors and copy inline.** Do not add a `className` that relies on `bg-background`/`text-foreground` — those resolve to white when `.dark` is absent (see next section). Resolve `bg`/`fg` from `resolveStoredTheme()` and apply them via the `style` prop.
+2. **Never throw from a crash surface.** `AppErrorBoundary.getDerivedStateFromError`/`componentDidCatch` and every helper they call (`reassertThemeOnDocument`, `beaconCrash`) wrap their bodies in `try { ... } catch {}`. The fallback crashing must not re-enter the boundary.
+3. **Log via the runtime only when it is up.** `AppErrorBoundary.componentDidCatch` branches on `isRuntimeInitialized()` (`~/lib/runtime`): `runEffect(Effect.logError(...))` when live, else `beaconCrash(...)` (`~/lib/crashBeacon`) which posts directly via `navigator.sendBeacon` to `window.__SIDELINE_OTLP__`.
+
+### The `.dark`-class White-Screen Failure Mode
+
+A render crash unmounts `ThemeProvider`, which drops the `.dark` class from `<html>`. Because `<body>` uses `bg-background` and `--background` reverts to white without `.dark`, the crash UI would otherwise paint on a white background even in dark mode.
+
+Rules:
+
+1. **Every crash surface MUST call `reassertThemeOnDocument()` (`~/lib/resolveStoredTheme`)** to re-add `.dark` / set `color-scheme` and an explicit `backgroundColor` on `<html>` and `<body>`. Call it synchronously where possible: `AppErrorBoundary` calls it from `getDerivedStateFromError` AND `componentDidCatch`; `RouteErrorComponent` calls it from `React.useLayoutEffect` and additionally sets an inline `backgroundColor` on its root `<div>` as a belt-and-suspenders guard until the effect fires.
+2. **Resolve the theme from `localStorage['sideline-theme']` via `resolveStoredTheme()`, NOT from the OS `prefers-color-scheme` directly.** `prefers-color-scheme` is only the fallback for the `'system'`/unset case inside `resolveStoredTheme`. A user who chose dark in-app on a light-mode OS must still get the dark crash screen.
+3. **Crash backgrounds are the literals `#0a0a0a` (dark) / `#ffffff` (light).** These match `reassertThemeOnDocument` and the pre-mount recovery HTML; keep all three in sync if the app background changes.
+
+### Reload Triggers Route Through `reloadGuard`
+
+All programmatic reloads MUST go through `~/lib/reloadGuard` so reload loops are capped via `sessionStorage`. There are two independent counters:
+
+| Trigger | Function | Counter key | Cap |
+|---------|----------|-------------|-----|
+| Crash / recovery reload | `requestReload(reason)` | `sideline-reload-count` (`RELOAD_COUNT_KEY`) | `RELOAD_CAP` = 2 |
+| Service-worker `controllerchange` update | `requestSwReload()` | `sideline-sw-reload-count` (`SW_RELOAD_COUNT_KEY`) | `SW_RELOAD_CAP` = 1 |
+
+Rules:
+
+1. **Never call `window.location.reload()` directly outside `reloadGuard`** (the pre-mount IIFE has its own ES5 copy of the cap logic — see below). `AppCrashFallback`, `resetApp` (`~/lib/sw-recovery`), and the SW `controllerchange` handler in `RootDocument` all route through it.
+2. **SW updates must use the separate counter** so a normal SW update plus one unrelated hiccup does not consume the crash cap and trip the recovery UI.
+3. **The guard is cleared only on a confirmed-healthy render.** `markRouteHealthy()` (called from `HealthyOutlet`'s effect in `__root.tsx`, i.e. once a real child route commits) calls `clearReloadGuard()`. `markAppMounted()` (called from `RootComponent`) MUST NOT clear it — `RootComponent` commits even when the `<Outlet />` crashes.
+4. **`resetApp` sets `sessionStorage['sideline-resetting']` (`RESETTING_KEY`) before unregistering the SW** so the `controllerchange` handler skips its own reload during the reset.
+
+### `preMountGuard.ts` IIFE Must Stay ES5-Safe and Self-Contained
+
+`PRE_MOUNT_GUARD_SOURCE` is a string injected via `dangerouslySetInnerHTML` into `<head>` (in `RootDocument`) so it runs **before** the app bundle and before any transpilation. Inside the IIFE string body:
+
+1. **Use ES5 syntax only** — `var` (no `const`/`let`), `function` expressions (no arrow functions), string concatenation (no template literals). The body is not transpiled.
+2. **No imports / no module references.** Build-time constants (`RELOAD_COUNT_KEY`, `RELOAD_CAP`, `WATCHDOG_MS`, the recovery HTML) are interpolated into the template literal that *produces* the source string; the runtime body references only globals and its own `var`s.
+3. **Swallow every error** (`try { ... } catch (e) {}`) — the guard must never itself break page load.
+4. The watchdog shows the recovery HTML after `WATCHDOG_MS` if neither `window.__SIDELINE_MOUNTED__` (set by `markAppMounted`) nor `window.__SIDELINE_CRASHED__` (set by `AppErrorBoundary`) is set.
+
+### Devtools Are Dev-Only and Lazy-Imported
+
+TanStack devtools (`@tanstack/react-devtools`, `@tanstack/react-router-devtools`, `@tanstack/react-query-devtools`) live in `devDependencies`, NOT `dependencies`.
+
+1. **Render devtools only behind `import.meta.env.DEV`** (`RootDocument` renders `{import.meta.env.DEV && <DevtoolsPanel />}`).
+2. **Lazy-import the devtools packages** inside `DevtoolsPanel`'s effect (`await import('@tanstack/react-devtools')`, etc.) so they are fully tree-shaken from the production bundle. Never add a top-level `import` of a devtools package.
+3. Do not move the devtools packages back to `dependencies`.
+
+## Nitro Server Plugins
+
+Nitro server plugins live in `applications/web/server/plugins/*.ts` and are **NOT auto-discovered** — each one MUST be registered explicitly in the `nitro({ plugins: [...] })` array in `applications/web/vite.config.ts`. A plugin file added without that registration silently never runs.
+
+Current plugins: `og-url.ts`, `sw-cache-headers.ts`, `otlp-endpoint.ts` (injects `window.__SIDELINE_OTLP__` = `OTEL_EXPORTER_OTLP_ENDPOINT` into the HTML `<head>` so the pre-mount crash beacon has an endpoint before the bundle loads).
+
 ## Troubleshooting
 
 - **TanStack Router serialization errors with Effect `Option`**: Add `ssr: false` to every route's `createFileRoute` options
 - **"Cannot find module" errors**: Ensure imports use `.js` extensions, run `pnpm install`
+- **White crash screen in dark mode**: A crash surface is rendering without calling `reassertThemeOnDocument()` or is using a `bg-background` class instead of an inline color (see "Crash Recovery & Error Fallbacks")
+- **A new `server/plugins/*.ts` plugin never runs**: It is not registered in `nitro({ plugins: [...] })` in `vite.config.ts` (plugins are not auto-discovered)

@@ -212,6 +212,18 @@ The clean separation means `AppLive` never imports `node:http`, never reads envi
 
 The web frontend follows a slightly different pattern. Rather than a Node.js `run.ts`, it uses a TanStack Start root route (`src/routes/__root.tsx`) whose `beforeLoad` hook calls `initRuntime` (initialising a `ManagedRuntime` singleton from `src/lib/runtime.ts`) and `registerWebVitals` (wiring Web Vitals and page-load reporters). The `makeTelemetryLayer` in `src/lib/telemetry.ts` uses the browser Fetch API as its OTLP transport and is silently disabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is not set.
 
+The web frontend also includes a PWA crash-recovery system composed of several modules:
+
+- **`preMountGuard` (inline watchdog):** An ES5-safe IIFE injected into every HTML `<head>` response (before the JS bundle) by `RootDocument.tsx`. It sets a 10-second watchdog timer. If the React root has not mounted within that window (e.g. because a JS bundle chunk failed to fetch), the watchdog injects a full-screen recovery UI with **Reload** and **Reset app** buttons. It also captures pre-mount `window.onerror` / `onunhandledrejection` events and beacons them to the OTLP collector via `window.__SIDELINE_OTLP__`.
+- **`AppErrorBoundary`:** A React class error boundary wrapping the entire component tree (outside `ThemeProvider`). On a render throw it renders `AppCrashFallback` — the same **Reload / Reset app** screen — and logs the error via the Effect runtime if it is initialised, or via `crashBeacon.ts` (direct `navigator.sendBeacon`) if the runtime is not yet up.
+- **`reloadGuard`:** A session-storage counter that caps automatic page reloads at 2 (crash reloads) and 1 (SW-update reloads on separate counters) so a persistent crash does not loop forever.
+- **`sw-recovery` (`resetApp`):** Called by the Reset app button. Unregisters all service worker registrations, clears all caches, then triggers a guarded reload.
+- **`resolveStoredTheme`:** A dependency-free helper used by all crash surfaces (boundary, watchdog, route error component) to read `localStorage['sideline-theme']` and ensure the recovery UI respects the user's dark/light preference even when `ThemeProvider` has unmounted.
+- **`otlp-endpoint.ts` (Nitro server plugin):** Rewrites every HTML SSR response to inject `<script>window.__SIDELINE_OTLP__ = "...";</script>` from `OTEL_EXPORTER_OTLP_ENDPOINT`. This makes the OTLP endpoint available to both the inline watchdog and `crashBeacon.ts` before the Effect runtime is ready.
+- **Devtools tree-shaking:** TanStack devtools packages (`@tanstack/react-devtools`, `@tanstack/react-router-devtools`, `@tanstack/react-query-devtools`) are imported via a dynamic `import()` inside a `DevtoolsPanel` component gated by `import.meta.env.DEV`. The Vite build therefore omits all devtools code from production bundles.
+
+The `markAppMounted()` / `markRouteHealthy()` functions signal the watchdog and the reload guard respectively: `markAppMounted` is called from `RootComponent`'s `useEffect` (clears the watchdog timer), and `markRouteHealthy` is called from `HealthyOutlet`'s `useEffect` (clears the reload counter) once a real child route has committed successfully.
+
 ---
 
 ## 7. Achievement System Flow

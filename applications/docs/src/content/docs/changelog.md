@@ -5,6 +5,18 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-27 — PWA crash recovery: Reload and Reset app
+
+The web app now recovers automatically from blank/white-screen crashes instead of leaving the browser stuck on an empty page.
+
+- A **pre-mount watchdog** detects startup failures (e.g. a stale service-worker cache after a deployment serving an outdated JS bundle) and displays a recovery screen within 10 seconds.
+- An **app-level error boundary** catches React render crashes and shows the same recovery screen.
+- The recovery screen offers two actions: **Reload** (retries the page, up to a safe limit) and **Reset app** (unregisters the service worker and clears the offline cache, then reloads a fresh copy — your account and data are unaffected).
+- Automatic reloads are capped so a persistent crash does not loop forever.
+- All crash events are reported to our monitoring system so we can investigate and fix root causes.
+- The recovery screen respects your chosen dark/light theme even when the theme system itself has crashed.
+- TanStack developer tools are no longer bundled in production builds, reducing the JavaScript payload for all users.
+
 ## 2026-06-26 — Fix: roster reactivation now re-adds members to the Discord role
 
 When a roster was reactivated, the bot re-created its Discord role but never re-added the roster's members — so the role came back empty. This is now fixed: on reactivation (and on any manual sync) the bot backfills all current roster members onto the role automatically.

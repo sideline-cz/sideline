@@ -3,12 +3,14 @@ import type { QueryClient } from '@tanstack/react-query';
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router';
 import { Effect, Option } from 'effect';
 import type React from 'react';
-import { Profiler } from 'react';
+import { Profiler, useEffect } from 'react';
+import { AppErrorBoundary } from '~/components/layouts/AppErrorBoundary.js';
 import { RootDocument } from '~/components/layouts/RootDocument';
 import { RouteErrorComponent } from '~/components/layouts/RouteErrorComponent';
 import { RouteNotFoundComponent } from '~/components/layouts/RouteNotFoundComponent';
 import { RoutePendingComponent } from '~/components/layouts/RoutePendingComponent';
 import { fetchEnv } from '~/env.js';
+import { markAppMounted, markRouteHealthy } from '~/lib/preMountGuard.js';
 import {
   ApiClient,
   initRuntime,
@@ -33,6 +35,11 @@ const getCurrentUser = ApiClient.asEffect().pipe(
   Effect.catchTag('Unauthorized', () => Effect.succeed(Option.none())),
   Effect.tap((user) => Effect.logInfo('Logged in as', user)),
 );
+
+// Timeout for the initial user fetch — if it takes too long, treat as logged-out
+// rather than hanging indefinitely. On a genuine navigation supersede, the
+// abortController.signal.aborted guard takes precedence.
+const USER_FETCH_TIMEOUT_MS = 10000;
 
 interface MyRouterContext {
   queryClient: QueryClient;
@@ -133,8 +140,35 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
     registerErrorHandlers(runEffect);
     const makeRun = runPromiseServer(environment.SERVER_URL);
     const run = makeRun(abortController);
-    // On a superseded navigation this intentionally never resolves — do not add a timeout.
-    const user = await getCurrentUser.pipe(Effect.option, Effect.map(Option.flatten), run);
+    // B3: timeout the user fetch so the initial load produces a definite outcome.
+    // A genuine supersede (abortController.signal.aborted) is handled inside run()
+    // via resolveServerExit — those never resolve, which is correct.
+    // The timeout only guards against the initial non-superseded load hanging.
+    const _timeoutSentinel = Symbol('timeout');
+    const userFetchPromise = getCurrentUser.pipe(Effect.option, Effect.map(Option.flatten), run);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<typeof _timeoutSentinel>((resolve) => {
+      timeoutId = setTimeout(() => resolve(_timeoutSentinel), USER_FETCH_TIMEOUT_MS);
+    });
+    const raceResult = await Promise.race([userFetchPromise, timeoutPromise]);
+    // Always clear the timeout to prevent it from firing after a successful fetch
+    clearTimeout(timeoutId);
+    // If the navigation was superseded while we were waiting, never resolve —
+    // preserve the original supersede semantics (the router discards this load).
+    if (abortController.signal.aborted) {
+      return new Promise<never>(() => {});
+    }
+    // If timeout won on a genuine (non-superseded) initial load, treat as logged-out
+    // and emit a diagnostic so we can measure slow-but-healthy connections.
+    if (raceResult === _timeoutSentinel) {
+      runEffect(
+        Effect.logWarning('User fetch timed out on initial load — treating as logged-out', {
+          timeoutMs: USER_FETCH_TIMEOUT_MS,
+          url: typeof window !== 'undefined' ? window.location.href : '',
+        }),
+      );
+    }
+    const user = raceResult === _timeoutSentinel ? Option.none() : raceResult;
     if (Option.isSome(user)) {
       setLocale(user.value.locale);
     }
@@ -153,9 +187,11 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 // `serverUrl` from `beforeLoad`) must live in `RootComponent` instead.
 function RootDocumentRoute({ children }: { children: React.ReactNode }) {
   return (
-    <ThemeProvider>
-      <RootDocument>{children}</RootDocument>
-    </ThemeProvider>
+    <AppErrorBoundary>
+      <ThemeProvider>
+        <RootDocument>{children}</RootDocument>
+      </ThemeProvider>
+    </AppErrorBoundary>
   );
 }
 
@@ -166,6 +202,11 @@ function RootDocumentRoute({ children }: { children: React.ReactNode }) {
 function RootComponent() {
   const { serverUrl } = Route.useRouteContext();
 
+  // Signal the pre-mount watchdog that the app has successfully mounted.
+  // Note: does NOT clear the reload guard here — that only happens once a
+  // child route renders successfully (see HealthyOutlet below).
+  useEffect(() => markAppMounted(), []);
+
   return (
     <RunProvider value={runPromiseClient(serverUrl)}>
       <TranslationOverridesProvider serverUrl={serverUrl}>
@@ -173,9 +214,19 @@ function RootComponent() {
           id='app'
           onRender={(_id, _phase, actualDuration) => recordReactRender(runEffect, actualDuration)}
         >
-          <Outlet />
+          <HealthyOutlet />
         </Profiler>
       </TranslationOverridesProvider>
     </RunProvider>
   );
+}
+
+// Wrapper that clears the reload guard once the Outlet has committed — i.e.
+// a real child route rendered without crashing. This is the "healthy" signal
+// that tells the watchdog the app is genuinely working.
+function HealthyOutlet() {
+  useEffect(() => {
+    markRouteHealthy();
+  }, []);
+  return <Outlet />;
 }

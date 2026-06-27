@@ -8,6 +8,7 @@ export default defineProject({
   },
   test: {
     environment: 'jsdom',
+    env: { DEV: '' },
     alias: { '~': path.resolve(__dirname, 'src') },
     setupFiles: [path.resolve(__dirname, 'test/setup.ts')],
     clearMocks: true,

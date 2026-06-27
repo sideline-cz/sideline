@@ -17,6 +17,17 @@ Partially. The web app works standalone, but you lose the best part of Sideline 
 
 Your data stays yours. Sideline stores what's needed for the product to work: your Discord profile, team membership, roster entries, events, and RSVPs. You can export or delete your data from **Profile → Settings** at any time.
 
+## Troubleshooting
+
+### The app shows a blank or white screen — what do I do?
+
+The app will usually recover on its own. If it detects a problem during startup it shows a recovery screen with two buttons:
+
+- **Reload** — retries the page. Try this first.
+- **Reset app** — unregisters the app's offline cache and downloads a fresh copy. Your account and all your data stay intact; you just need to be online for the first load after a reset.
+
+If the app just shows a blank page with no recovery screen, reload your browser tab manually. If that does not help, open your browser settings, clear site data for the Sideline domain (cookies, cache, and service workers), and reload.
+
 ## For players
 
 ### Why did I get a payment reminder DM from the bot?
