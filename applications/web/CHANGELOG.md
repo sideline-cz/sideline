@@ -1,5 +1,83 @@
 # @sideline/web
 
+## 0.24.2
+
+### Patch Changes
+
+- [#435](https://github.com/maxa-ondrej/sideline/pull/435) [`2f92bbc`](https://github.com/maxa-ondrej/sideline/commit/2f92bbc547a1d70c14c1b7641565d7b2c69ee883) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix: add admin tool to backfill members into existing Discord roster roles
+
+  Adds an on-demand, team-scoped admin tool to re-sync members into existing
+  Discord roster roles — for roster members who should hold a role but don't due
+  to past sync failures. A new team-level "Re-sync roster role members" button on
+  the rosters list page (gated by `roster:manage`) calls a new
+  `POST /teams/:teamId/rosters/backfill-role-members` endpoint, which sweeps active
+  rosters that already have a Discord role and re-emits the idempotent
+  `roster_channel_created` event to re-add members. A dedup guard excludes rosters
+  that already have an unprocessed channel sync event, so repeated clicks don't
+  enqueue duplicates. The sweep is members-only (it does not create missing roles),
+  batched (limit 50) and returns a `remainingCount` so an admin can click again to
+  continue. No bot poll loop and no database migration.
+
+- [#438](https://github.com/maxa-ondrej/sideline/pull/438) [`72f3a3b`](https://github.com/maxa-ondrej/sideline/commit/72f3a3bad411aab4fcd4eeea78fafa9647116e77) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - feat: add a custom `/poll` command
+
+  Captains can create polls in a team channel with `/poll`, choosing a question and
+  2–10 options (semicolon-separated). Members vote by clicking option buttons; results
+  render live in the embed with per-option bars, counts, and percentages. Two optional
+  features: restrict who may add new options to a selected Discord role, and set a
+  deadline after which voting closes.
+
+  Polls support single-choice (click to vote, click again to retract, click another to
+  move) and multiple-choice (`multiple:true`, toggle each option independently). Voting
+  is serialized per poll with a `FOR UPDATE` lock for deterministic toggle behavior.
+  Authorization is enforced server-side: a new `poll:manage` permission (granted to
+  Admin and Captain) gates creating and closing polls, and the add-option role gate is
+  checked against the member's raw Discord roles on the server (members with
+  `poll:manage` or the poll's creator may always add). Deadlines are parsed in the
+  team's timezone and the poll closes lazily on the next interaction after the deadline,
+  rebuilding the message to its closed, read-only state. Fully localized (EN/CS).
+
+- [#437](https://github.com/maxa-ondrej/sideline/pull/437) [`9649f60`](https://github.com/maxa-ondrej/sideline/commit/9649f60d6236e7e7e0889279888030b643387c7b) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix(web): prevent PWA dead white screen via layered crash recovery
+
+  The installed PWA could show a dark loading screen followed by a permanent
+  white dead screen. Root cause: a render-time crash unmounts the React tree,
+  which unmounts `ThemeProvider`, dropping the `.dark` class from `<html>` so the
+  `--background` CSS variable reverts from dark to white.
+
+  Adds a layered defense so no crash path can render white: a top-level
+  `AppErrorBoundary` with a self-themed `AppCrashFallback`, a hardened
+  `RouteErrorComponent`, and deterministic re-assertion of the resolved theme on
+  `<html>`/`<body>` in both crash surfaces (robust regardless of which error
+  boundary catches the throw). The crash UI now resolves the user's chosen theme
+  (`localStorage` `sideline-theme`) rather than the OS preference. A non-React
+  pre-mount `<head>` watchdog plus a crash beacon and an OTLP server plugin cover
+  the case where the bundle never executes (e.g. a stale/404 chunk after a
+  deploy) and emit telemetry so the next occurrence is diagnosable. Reload loops
+  are capped (separate crash and service-worker-update counters), a safe
+  `resetApp` recovery is added, the root loader's initial fetch now always
+  reaches a definite outcome, and devtools are gated out of production builds.
+
+- [#432](https://github.com/maxa-ondrej/sideline/pull/432) [`e61cfd9`](https://github.com/maxa-ondrej/sideline/commit/e61cfd996344ee3f05ce70017b7f491ad5ac7a9a) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix: add a per-team Discord category for new roster channels
+
+  Teams can now choose a Discord category under which new roster channels are
+  created, configured on the Team Settings page (mirrors the existing archive
+  category). When a deactivated roster is reactivated, its channel is re-created
+  in that category. The bot applies the category as `parent_id` on channel
+  creation; if the category is stale or deleted (permanent Discord error) it
+  falls back to creating the channel at the guild root, while transient errors
+  retry with the category intact. Persisted via a new `discord_roster_category_id`
+  column on `team_settings` and carried to the bot through a dedicated
+  `target_category_id` on the roster channel-created event.
+
+- [#434](https://github.com/maxa-ondrej/sideline/pull/434) [`3a85212`](https://github.com/maxa-ondrej/sideline/commit/3a852129456d030bf7fe68f3b7fc633af234fce1) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix roster reactivation not re-adding members to the Discord role
+
+  When a roster was reactivated, the bot re-created the Discord role but never re-added the roster's members, so the role came back empty. The bot's roster channel-created handler now backfills all current roster members onto the role, and is idempotent — if a role mapping already exists it reuses that role instead of creating a duplicate. Members are added with per-member failure isolation (a single failed add no longer aborts the sync) and no retries on permanent errors.
+
+  Adds a manual "Sync with Discord" action on rosters (matching the existing group action) so captains can re-apply members on demand. This first phase re-adds members (add/heal); pruning stale role-holders is a planned follow-up.
+
+- Updated dependencies [[`2f92bbc`](https://github.com/maxa-ondrej/sideline/commit/2f92bbc547a1d70c14c1b7641565d7b2c69ee883), [`72f3a3b`](https://github.com/maxa-ondrej/sideline/commit/72f3a3bad411aab4fcd4eeea78fafa9647116e77), [`e61cfd9`](https://github.com/maxa-ondrej/sideline/commit/e61cfd996344ee3f05ce70017b7f491ad5ac7a9a), [`3a85212`](https://github.com/maxa-ondrej/sideline/commit/3a852129456d030bf7fe68f3b7fc633af234fce1), [`1eb4e9a`](https://github.com/maxa-ondrej/sideline/commit/1eb4e9a3199f38c2613373b40b38c13d4b2bd637), [`1eb4e9a`](https://github.com/maxa-ondrej/sideline/commit/1eb4e9a3199f38c2613373b40b38c13d4b2bd637)]:
+  - @sideline/domain@0.30.0
+  - @sideline/i18n@0.15.0
+
 ## 0.24.1
 
 ### Patch Changes

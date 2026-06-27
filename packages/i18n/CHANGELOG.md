@@ -1,5 +1,91 @@
 # @sideline/i18n
 
+## 0.15.0
+
+### Minor Changes
+
+- [#438](https://github.com/maxa-ondrej/sideline/pull/438) [`72f3a3b`](https://github.com/maxa-ondrej/sideline/commit/72f3a3bad411aab4fcd4eeea78fafa9647116e77) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - feat: add a custom `/poll` command
+
+  Captains can create polls in a team channel with `/poll`, choosing a question and
+  2–10 options (semicolon-separated). Members vote by clicking option buttons; results
+  render live in the embed with per-option bars, counts, and percentages. Two optional
+  features: restrict who may add new options to a selected Discord role, and set a
+  deadline after which voting closes.
+
+  Polls support single-choice (click to vote, click again to retract, click another to
+  move) and multiple-choice (`multiple:true`, toggle each option independently). Voting
+  is serialized per poll with a `FOR UPDATE` lock for deterministic toggle behavior.
+  Authorization is enforced server-side: a new `poll:manage` permission (granted to
+  Admin and Captain) gates creating and closing polls, and the add-option role gate is
+  checked against the member's raw Discord roles on the server (members with
+  `poll:manage` or the poll's creator may always add). Deadlines are parsed in the
+  team's timezone and the poll closes lazily on the next interaction after the deadline,
+  rebuilding the message to its closed, read-only state. Fully localized (EN/CS).
+
+### Patch Changes
+
+- [#435](https://github.com/maxa-ondrej/sideline/pull/435) [`2f92bbc`](https://github.com/maxa-ondrej/sideline/commit/2f92bbc547a1d70c14c1b7641565d7b2c69ee883) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix: add admin tool to backfill members into existing Discord roster roles
+
+  Adds an on-demand, team-scoped admin tool to re-sync members into existing
+  Discord roster roles — for roster members who should hold a role but don't due
+  to past sync failures. A new team-level "Re-sync roster role members" button on
+  the rosters list page (gated by `roster:manage`) calls a new
+  `POST /teams/:teamId/rosters/backfill-role-members` endpoint, which sweeps active
+  rosters that already have a Discord role and re-emits the idempotent
+  `roster_channel_created` event to re-add members. A dedup guard excludes rosters
+  that already have an unprocessed channel sync event, so repeated clicks don't
+  enqueue duplicates. The sweep is members-only (it does not create missing roles),
+  batched (limit 50) and returns a `remainingCount` so an admin can click again to
+  continue. No bot poll loop and no database migration.
+
+- [#432](https://github.com/maxa-ondrej/sideline/pull/432) [`e61cfd9`](https://github.com/maxa-ondrej/sideline/commit/e61cfd996344ee3f05ce70017b7f491ad5ac7a9a) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix: add a per-team Discord category for new roster channels
+
+  Teams can now choose a Discord category under which new roster channels are
+  created, configured on the Team Settings page (mirrors the existing archive
+  category). When a deactivated roster is reactivated, its channel is re-created
+  in that category. The bot applies the category as `parent_id` on channel
+  creation; if the category is stale or deleted (permanent Discord error) it
+  falls back to creating the channel at the guild root, while transient errors
+  retry with the category intact. Persisted via a new `discord_roster_category_id`
+  column on `team_settings` and carried to the bot through a dedicated
+  `target_category_id` on the roster channel-created event.
+
+- [#434](https://github.com/maxa-ondrej/sideline/pull/434) [`3a85212`](https://github.com/maxa-ondrej/sideline/commit/3a852129456d030bf7fe68f3b7fc633af234fce1) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix roster reactivation not re-adding members to the Discord role
+
+  When a roster was reactivated, the bot re-created the Discord role but never re-added the roster's members, so the role came back empty. The bot's roster channel-created handler now backfills all current roster members onto the role, and is idempotent — if a role mapping already exists it reuses that role instead of creating a duplicate. Members are added with per-member failure isolation (a single failed add no longer aborts the sync) and no retries on permanent errors.
+
+  Adds a manual "Sync with Discord" action on rosters (matching the existing group action) so captains can re-apply members on demand. This first phase re-adds members (add/heal); pruning stale role-holders is a planned follow-up.
+
+- [#436](https://github.com/maxa-ondrej/sideline/pull/436) [`1eb4e9a`](https://github.com/maxa-ondrej/sideline/commit/1eb4e9a3199f38c2613373b40b38c13d4b2bd637) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add a `/summarize` Discord command that summarizes the current channel or thread
+
+  Members can now run `/summarize` in any channel or thread to get an LLM-generated
+  summary of the recent conversation. Two optional parameters refine the scope:
+  `messages` (1–200, default 50) caps how many recent messages are summarized, and
+  `since` accepts either a relative duration (`24h`, `7d`, `3d12h`) or an ISO date
+  (`2026-06-20`) to summarize only messages from that point onward. When neither is
+  given, the last 50 messages are used.
+
+  The bot fetches and paginates the channel history (newest-first, up to 200),
+  filters out bot and empty messages, and sends a fenced, author-labeled transcript
+  to the server. The server reuses the existing OpenAI-compatible `LlmClient` via a
+  new `Summarize/SummarizeChannel` RPC, treating the transcript as untrusted content
+  (prompt-injection guard) and falling back to a deterministic summary when no LLM is
+  configured or the call fails. The response is an ephemeral embed with a footer that
+  honestly reports how many messages were summarized and flags when the window was
+  capped or truncated; `allowed_mentions` is cleared so an echoed `@mention` never
+  pings. Available in English and Czech.
+
+- [#436](https://github.com/maxa-ondrej/sideline/pull/436) [`1eb4e9a`](https://github.com/maxa-ondrej/sideline/commit/1eb4e9a3199f38c2613373b40b38c13d4b2bd637) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add an optional `private` flag to `/summarize`
+
+  `/summarize` now takes an optional `private` boolean (default true). Left at the
+  default the summary stays ephemeral (only the invoker sees it, as before); set
+  `private: false` to post the summary publicly to the channel so the whole team
+  can read it. Because Discord's defer flag is fixed for the rest of the
+  interaction, the chosen visibility applies to the summary and any post-fetch
+  status messages alike; pre-defer input errors (no channel, invalid `since`)
+  remain ephemeral regardless. `allowed_mentions` is still cleared in all cases, so
+  a public summary never pings anyone. Available in English and Czech.
+
 ## 0.14.1
 
 ### Patch Changes

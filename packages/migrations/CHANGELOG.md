@@ -1,5 +1,41 @@
 # @sideline/migrations
 
+## 0.24.0
+
+### Minor Changes
+
+- [#438](https://github.com/maxa-ondrej/sideline/pull/438) [`72f3a3b`](https://github.com/maxa-ondrej/sideline/commit/72f3a3bad411aab4fcd4eeea78fafa9647116e77) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - feat: add a custom `/poll` command
+
+  Captains can create polls in a team channel with `/poll`, choosing a question and
+  2–10 options (semicolon-separated). Members vote by clicking option buttons; results
+  render live in the embed with per-option bars, counts, and percentages. Two optional
+  features: restrict who may add new options to a selected Discord role, and set a
+  deadline after which voting closes.
+
+  Polls support single-choice (click to vote, click again to retract, click another to
+  move) and multiple-choice (`multiple:true`, toggle each option independently). Voting
+  is serialized per poll with a `FOR UPDATE` lock for deterministic toggle behavior.
+  Authorization is enforced server-side: a new `poll:manage` permission (granted to
+  Admin and Captain) gates creating and closing polls, and the add-option role gate is
+  checked against the member's raw Discord roles on the server (members with
+  `poll:manage` or the poll's creator may always add). Deadlines are parsed in the
+  team's timezone and the poll closes lazily on the next interaction after the deadline,
+  rebuilding the message to its closed, read-only state. Fully localized (EN/CS).
+
+### Patch Changes
+
+- [#432](https://github.com/maxa-ondrej/sideline/pull/432) [`e61cfd9`](https://github.com/maxa-ondrej/sideline/commit/e61cfd996344ee3f05ce70017b7f491ad5ac7a9a) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix: add a per-team Discord category for new roster channels
+
+  Teams can now choose a Discord category under which new roster channels are
+  created, configured on the Team Settings page (mirrors the existing archive
+  category). When a deactivated roster is reactivated, its channel is re-created
+  in that category. The bot applies the category as `parent_id` on channel
+  creation; if the category is stale or deleted (permanent Discord error) it
+  falls back to creating the channel at the guild root, while transient errors
+  retry with the category intact. Persisted via a new `discord_roster_category_id`
+  column on `team_settings` and carried to the bot through a dedicated
+  `target_category_id` on the roster channel-created event.
+
 ## 0.23.0
 
 ### Minor Changes
