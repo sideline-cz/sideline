@@ -19,9 +19,11 @@
  */
 
 import type { Auth, Discord, Role, Roster, RosterModel, Team, TeamMember } from '@sideline/domain';
+import { LogicError } from '@sideline/effect-lib';
 import { OAuth2Tokens } from 'arctic';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { HttpClient, HttpClientResponse, HttpRouter, HttpServer } from 'effect/unstable/http';
+import { SqlClient } from 'effect/unstable/sql';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { ApiLive } from '~/api/index.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
@@ -33,7 +35,10 @@ import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
-import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import {
+  DiscordChannelMappingRepository,
+  type RosterMissingRoleRow,
+} from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRoleProvisionEventsRepository } from '~/repositories/DiscordRoleProvisionEventsRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
@@ -73,22 +78,6 @@ import { MockTeamOnboardingTokensRepositoryLayer } from './mocks/onboardingMocks
 import { MockPlayerRatingsRepositoryLayer } from './mocks/playerRatingMocks.js';
 import { MockTeamChallengeRepositoryLayer } from './mocks/teamChallengeMocks.js';
 import { MockTranslationsLayers } from './mocks/translationMocks.js';
-
-// ---------------------------------------------------------------------------
-// RosterMissingRoleRow — local definition matching the production type spec.
-// Production code (not yet written) will export this from
-// ~/repositories/DiscordChannelMappingRepository.js. Once it exists, replace
-// this with the real import.
-// ---------------------------------------------------------------------------
-
-type RosterMissingRoleRow = {
-  readonly roster_id: RosterModel.RosterId;
-  readonly team_id: Team.TeamId;
-  readonly name: string;
-  readonly emoji: Option.Option<string>;
-  readonly color: Option.Option<string>;
-  readonly discord_channel_id: Option.Option<Discord.Snowflake>;
-};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -311,8 +300,8 @@ const makeRostersRepositoryLayer = () =>
     _tag: 'api/RostersRepository',
     findByTeamId: () => Effect.succeed([]),
     findRosterById: () => Effect.succeed(Option.none()),
-    insert: () => Effect.die(new Error('Not implemented')),
-    update: () => Effect.die(new Error('Not implemented')),
+    insert: () => LogicError.die('Not implemented'),
+    update: () => LogicError.die('Not implemented'),
     delete: () => Effect.void,
     findMemberEntriesById: () => Effect.succeed([]),
     addMemberById: () => Effect.void,
@@ -344,7 +333,7 @@ const MockUsersRepositoryLayer = Layer.succeed(UsersRepository, {
   upsertFromDiscord: () => Effect.succeed(testAdmin),
   completeProfile: () => Effect.succeed(testAdmin),
   updateLocale: () => Effect.succeed(testAdmin),
-  updateAdminProfile: () => Effect.die(new Error('Not implemented')),
+  updateAdminProfile: () => LogicError.die('Not implemented'),
 } as any);
 
 const MockSessionsRepositoryLayer = Layer.succeed(SessionsRepository, {
@@ -387,7 +376,7 @@ const MockTeamsRepositoryLayer = Layer.succeed(TeamsRepository, {
 
 const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   _tag: 'api/TeamMembersRepository',
-  addMember: () => Effect.die(new Error('Not implemented')),
+  addMember: () => LogicError.die('Not implemented'),
   findMembershipByIds: (teamId: Team.TeamId, userId: Auth.UserId) => {
     const member = Array.from(membersStore.values()).find(
       (m) => m.team_id === teamId && m.user_id === userId,
@@ -398,7 +387,7 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   findByUser: () => Effect.succeed([]),
   findRosterByTeam: () => Effect.succeed([]),
   findRosterMemberByIds: () => Effect.succeed(Option.none()),
-  deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
+  deactivateMemberByIds: () => LogicError.die('Not implemented'),
   getPlayerRoleId: () => Effect.succeed(Option.some({ id: TEST_PLAYER_ROLE_ID })),
   assignRole: () => Effect.void,
   unassignRole: () => Effect.void,
@@ -410,8 +399,8 @@ const MockRolesRepositoryLayer = Layer.succeed(RolesRepository, {
   findRolesByTeamId: () => Effect.succeed([]),
   findRoleById: () => Effect.succeed(Option.none()),
   getPermissionsForRoleId: () => Effect.succeed([]),
-  insertRole: () => Effect.die(new Error('Not implemented')),
-  updateRole: () => Effect.die(new Error('Not implemented')),
+  insertRole: () => LogicError.die('Not implemented'),
+  updateRole: () => LogicError.die('Not implemented'),
   archiveRoleById: () => Effect.void,
   setRolePermissions: () => Effect.void,
   initializeTeamRoles: () => Effect.void,
@@ -427,10 +416,10 @@ const MockGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
   _tag: 'api/GroupsRepository',
   findGroupsByTeamId: () => Effect.succeed([]),
   findGroupById: () => Effect.succeed(Option.none()),
-  insertGroup: () => Effect.die(new Error('Not implemented')),
-  updateGroupById: () => Effect.die(new Error('Not implemented')),
+  insertGroup: () => LogicError.die('Not implemented'),
+  updateGroupById: () => LogicError.die('Not implemented'),
   archiveGroupById: () => Effect.void,
-  moveGroup: () => Effect.die(new Error('Not implemented')),
+  moveGroup: () => LogicError.die('Not implemented'),
   findMembersByGroupId: () => Effect.succeed([]),
   addMemberById: () => Effect.void,
   removeMemberById: () => Effect.void,
@@ -444,8 +433,8 @@ const MockGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
 const MockTrainingTypesRepositoryLayer = Layer.succeed(TrainingTypesRepository, {
   findByTeamId: () => Effect.succeed([]),
   findById: () => Effect.succeed(Option.none()),
-  insert: () => Effect.die(new Error('Not implemented')),
-  update: () => Effect.die(new Error('Not implemented')),
+  insert: () => LogicError.die('Not implemented'),
+  update: () => LogicError.die('Not implemented'),
   deleteTrainingTypeById: () => Effect.void,
   addCoach: () => Effect.void,
   removeCoach: () => Effect.void,
@@ -457,8 +446,8 @@ const MockTrainingTypesRepositoryLayer = Layer.succeed(TrainingTypesRepository, 
 const MockAgeThresholdRepositoryLayer = Layer.succeed(AgeThresholdRepository, {
   findByTeamId: () => Effect.succeed([]),
   findById: () => Effect.succeed(Option.none()),
-  insert: () => Effect.die(new Error('Not implemented')),
-  updateRule: () => Effect.die(new Error('Not implemented')),
+  insert: () => LogicError.die('Not implemented'),
+  updateRule: () => LogicError.die('Not implemented'),
   deleteRule: () => Effect.void,
   findAllTeamsWithRules: () => Effect.succeed([]),
   findMembersWithBirthYears: () => Effect.succeed([]),
@@ -466,7 +455,7 @@ const MockAgeThresholdRepositoryLayer = Layer.succeed(AgeThresholdRepository, {
 
 const MockNotificationsRepositoryLayer = Layer.succeed(NotificationsRepository, {
   findByUserId: () => Effect.succeed([]),
-  insertOne: () => Effect.die(new Error('Not implemented')),
+  insertOne: () => LogicError.die('Not implemented'),
   markOneAsRead: () => Effect.void,
   markAllRead: () => Effect.void,
   findOneById: () => Effect.succeed(Option.none()),
@@ -506,24 +495,24 @@ const MockEventSyncEventsRepositoryLayer = Layer.succeed(EventSyncEventsReposito
 const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   findByTeamId: () => Effect.succeed([]),
   findByIdWithDetails: () => Effect.succeed(Option.none()),
-  insert: () => Effect.die(new Error('Not implemented')),
-  update: () => Effect.die(new Error('Not implemented')),
+  insert: () => LogicError.die('Not implemented'),
+  update: () => LogicError.die('Not implemented'),
   cancel: () => Effect.void,
   findScopedTrainingTypeIds: () => Effect.succeed([]),
 } as any);
 
 const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
-  insertSeries: () => Effect.die(new Error('Not implemented')),
+  insertSeries: () => LogicError.die('Not implemented'),
   findByTeamId: () => Effect.succeed([]),
   findById: () => Effect.succeed(Option.none()),
-  updateSeries: () => Effect.die(new Error('Not implemented')),
+  updateSeries: () => LogicError.die('Not implemented'),
   cancelSeries: () => Effect.void,
 } as any);
 
 const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
   findByEventId: () => Effect.succeed([]),
   findByEventAndMember: () => Effect.succeed(Option.none()),
-  upsert: () => Effect.die(new Error('Not implemented')),
+  upsert: () => LogicError.die('Not implemented'),
   countByEventId: () => Effect.succeed([]),
 } as any);
 
@@ -546,8 +535,8 @@ const MockDiscordRolesRepositoryLayer = Layer.succeed(
 );
 
 const MockOAuthConnectionsRepositoryLayer = Layer.succeed(OAuthConnectionsRepository, {
-  upsertConnection: () => Effect.die(new Error('Not implemented')),
-  upsert: () => Effect.die(new Error('Not implemented')),
+  upsertConnection: () => LogicError.die('Not implemented'),
+  upsert: () => LogicError.die('Not implemented'),
   findByUserAndProvider: () => Effect.succeed(Option.none()),
   findByUser: () => Effect.succeed(Option.none()),
   findAccessToken: () => Effect.succeed(Option.some({ access_token: 'mock-access-token' })),
@@ -574,7 +563,7 @@ const MockICalTokensRepositoryLayer = Layer.succeed(ICalTokensRepository, {
 } as any);
 
 const MockActivityLogsRepositoryLayer = Layer.succeed(ActivityLogsRepository, {
-  insert: () => Effect.die(new Error('not implemented')),
+  insert: () => LogicError.die('not implemented'),
   findByTeamMember: () => Effect.succeed([]),
 } as any);
 
@@ -605,8 +594,8 @@ const MockAchievementAdminLayers = Layer.mergeAll(
   Layer.succeed(CustomAchievementsRepository, {
     findByTeam: () => Effect.succeed([]),
     findById: () => Effect.succeed(Option.none()),
-    insert: () => Effect.die(new Error('Not implemented')),
-    update: () => Effect.die(new Error('Not implemented')),
+    insert: () => LogicError.die('Not implemented'),
+    update: () => LogicError.die('Not implemented'),
     delete: () => Effect.void,
     setRoleMapping: () => Effect.void,
   } as any),
@@ -640,7 +629,7 @@ const MockHttpClientLayer = Layer.succeed(
 const MockTeamInvitesRepositoryLayer = Layer.succeed(TeamInvitesRepository, {
   findByCode: () => Effect.succeed(Option.none()),
   findByTeam: () => Effect.succeed([]),
-  create: () => Effect.die(new Error('Not implemented')),
+  create: () => LogicError.die('Not implemented'),
   deactivateByTeam: () => Effect.void,
   deactivateByTeamExcept: () => Effect.void,
 } as any);
@@ -654,6 +643,41 @@ const defaultSettingsLayer = Layer.succeed(TeamSettingsRepository, {
   getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),
   getHorizonDays: () => Effect.succeed(30),
 } as any);
+
+// SqlClient mock — needed for backfillRosterRoleMembers which uses sql.withTransaction
+// and pg_advisory_xact_lock. The mock passes transactions through synchronously and
+// returns empty rows for any raw SQL template literals (including the advisory lock).
+const MockSqlClientLayer = Layer.succeed(
+  SqlClient.SqlClient,
+  Object.assign(
+    function mockSql(_strings: TemplateStringsArray, ..._args: unknown[]) {
+      return Effect.succeed([] as never[]);
+    },
+    {
+      safe: undefined as any,
+      withoutTransforms: function (this: any) {
+        return this;
+      },
+      reserve: LogicError.die('reserve not implemented'),
+      withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | any, R> =>
+        effect,
+      reactive: () => Effect.succeed([] as never[]),
+      reactiveMailbox: () => LogicError.die('reactiveMailbox not implemented'),
+      unsafe: (_sql: string, _params?: ReadonlyArray<unknown>) => Effect.succeed([] as never[]),
+      literal: (_sql: string) => ({ _tag: 'Fragment' as const, segments: [] }),
+      in: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      insert: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      update: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      updateValues: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      and: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      or: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      join:
+        (..._args: unknown[]) =>
+        (_arr: unknown[]) =>
+          Effect.succeed([] as never[]),
+    },
+  ) as unknown as SqlClient.SqlClient,
+);
 
 // ---------------------------------------------------------------------------
 // Layer builder (mirrors RosterSyncRoleMembers.test.ts)
@@ -745,7 +769,8 @@ const buildTestLayer = (
           asEffect: Effect.succeed(new Set<string>()),
         } as any),
       ),
-    );
+    )
+    .pipe(Layer.provide(MockSqlClientLayer));
 };
 
 // ---------------------------------------------------------------------------

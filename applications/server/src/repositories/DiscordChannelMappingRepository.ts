@@ -360,17 +360,17 @@ const make = Effect.gen(function* () {
     sql`
       SELECT r.id AS roster_id, r.team_id, r.name, r.emoji, r.color, m.discord_channel_id
       FROM rosters r
-      JOIN discord_channel_mappings m ON m.team_id = r.team_id AND m.roster_id = r.id
+      JOIN discord_channel_mappings m ON m.team_id = r.team_id AND m.roster_id = r.id::text
       WHERE r.team_id = ${teamId}::uuid
         AND r.active = true
         AND m.discord_role_id IS NOT NULL
         AND NOT EXISTS (
           SELECT 1 FROM channel_sync_events e
-          WHERE e.roster_id = r.id
+          WHERE e.roster_id = r.id::text
             AND e.event_type IN ('channel_created', 'channel_updated')
             AND e.processed_at IS NULL
         )
-      ORDER BY r.created_at
+      ORDER BY r.created_at, r.id
       LIMIT ${limit}
     `.pipe(Effect.flatMap(decodeRostersMissingRole), catchSqlErrors);
 
@@ -378,13 +378,13 @@ const make = Effect.gen(function* () {
     sql`
       SELECT COUNT(*)::int AS count
       FROM rosters r
-      JOIN discord_channel_mappings m ON m.team_id = r.team_id AND m.roster_id = r.id
+      JOIN discord_channel_mappings m ON m.team_id = r.team_id AND m.roster_id = r.id::text
       WHERE r.team_id = ${teamId}::uuid
         AND r.active = true
         AND m.discord_role_id IS NOT NULL
         AND NOT EXISTS (
           SELECT 1 FROM channel_sync_events e
-          WHERE e.roster_id = r.id
+          WHERE e.roster_id = r.id::text
             AND e.event_type IN ('channel_created', 'channel_updated')
             AND e.processed_at IS NULL
         )

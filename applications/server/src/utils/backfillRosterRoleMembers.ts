@@ -1,6 +1,8 @@
 import type { Discord, Team } from '@sideline/domain';
 import { Effect, Option } from 'effect';
+import { SqlClient } from 'effect/unstable/sql';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
+import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 import type { RosterMissingRoleRow } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
@@ -46,24 +48,47 @@ const emitRosterRoleMemberBackfill = (row: RosterMissingRoleRow) =>
 
 export const backfillRosterRoleMembers = (teamId: Team.TeamId) =>
   Effect.Do.pipe(
-    Effect.bind('channelMappings', () => DiscordChannelMappingRepository.asEffect()),
-    Effect.bind('count', ({ channelMappings }) =>
-      channelMappings.countActiveRostersWithRole(teamId),
+    Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
+    Effect.flatMap(({ sql }) =>
+      sql
+        .withTransaction(
+          Effect.Do.pipe(
+            // Serialize concurrent backfill sweeps for the same team via a
+            // transaction-scoped advisory lock. A second concurrent request for the
+            // same teamId blocks here until the first transaction commits, at which
+            // point the dedup guard (NOT EXISTS unprocessed event) prevents it from
+            // re-queueing events that the first sweep already emitted.
+            Effect.tap(() =>
+              sql`SELECT pg_advisory_xact_lock(hashtext(${teamId}))`.pipe(
+                catchSqlErrors,
+                Effect.asVoid,
+              ),
+            ),
+            Effect.bind('channelMappings', () => DiscordChannelMappingRepository.asEffect()),
+            Effect.bind('count', ({ channelMappings }) =>
+              channelMappings.countActiveRostersWithRole(teamId),
+            ),
+            Effect.bind('rows', ({ channelMappings }) =>
+              channelMappings.findActiveRostersWithRole(teamId, BACKFILL_LIMIT),
+            ),
+            Effect.tap(({ rows }) =>
+              Effect.forEach(rows, emitRosterRoleMemberBackfill, { concurrency: 1 }),
+            ),
+            Effect.let('processedCount', ({ rows }) => rows.length),
+            Effect.let('remainingCount', ({ count, processedCount }) =>
+              Math.max(0, count - processedCount),
+            ),
+            Effect.tap(({ processedCount, remainingCount }) =>
+              Effect.logInfo(
+                `Roster role backfill: processed=${processedCount}, remaining=${remainingCount}`,
+              ),
+            ),
+            Effect.map(({ processedCount, remainingCount }) => ({
+              processedCount,
+              remainingCount,
+            })),
+          ),
+        )
+        .pipe(catchSqlErrors),
     ),
-    Effect.bind('rows', ({ channelMappings }) =>
-      channelMappings.findActiveRostersWithRole(teamId, BACKFILL_LIMIT),
-    ),
-    Effect.tap(({ rows }) =>
-      Effect.forEach(rows, emitRosterRoleMemberBackfill, { concurrency: 1 }),
-    ),
-    Effect.let('processedCount', ({ rows }) => rows.length),
-    Effect.let('remainingCount', ({ count, processedCount }) =>
-      Math.max(0, count - processedCount),
-    ),
-    Effect.tap(({ processedCount, remainingCount }) =>
-      Effect.logInfo(
-        `Roster role backfill: processed=${processedCount}, remaining=${remainingCount}`,
-      ),
-    ),
-    Effect.map(({ processedCount, remainingCount }) => ({ processedCount, remainingCount })),
   );

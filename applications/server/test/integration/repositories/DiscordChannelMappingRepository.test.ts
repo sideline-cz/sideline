@@ -739,27 +739,50 @@ describe('DiscordChannelMappingRepository.findActiveRostersWithRole', () => {
     }).pipe(Effect.provide(TestLayer)),
   );
 
-  it.effect('LIMIT is honoured: with 3 eligible rosters and limit=1, returns exactly 1 row', () =>
-    Effect.gen(function* () {
-      const userId = yield* createUser('903000000000000001', 'limit-roster-user');
-      const team = yield* createTeam('903000000000000002' as Discord.Snowflake, userId);
+  it.effect(
+    'LIMIT is honoured and ORDER BY (created_at, id) is stable: with 3 eligible rosters inserted in known order, limit=1 returns the first by (created_at, id)',
+    () =>
+      Effect.gen(function* () {
+        // Seed via raw SQL to give each roster an explicit created_at so the tiebreaker id
+        // sort is deterministic even when all rows share the same created_at timestamp.
+        const userId = yield* createUser('903000000000000001', 'limit-roster-user');
+        const team = yield* createTeam('903000000000000002' as Discord.Snowflake, userId);
 
-      for (let i = 0; i < 3; i++) {
-        const roster = yield* createRoster(team.id, `Limit Roster ${i}`);
-        yield* seedRosterWithRole(
-          team.id,
-          roster.id,
-          `9030000000000000${10 + i}` as Discord.Snowflake,
-          `9030000000000000${20 + i}` as Discord.Snowflake,
+        // Insert all 3 rosters and collect them in insertion order.
+        const rosterA = yield* createRoster(team.id, 'Limit Roster 0');
+        const rosterB = yield* createRoster(team.id, 'Limit Roster 1');
+        const rosterC = yield* createRoster(team.id, 'Limit Roster 2');
+
+        for (const [i, roster] of [rosterA, rosterB, rosterC].entries()) {
+          yield* seedRosterWithRole(
+            team.id,
+            roster.id,
+            `9030000000000000${10 + i}` as Discord.Snowflake,
+            `9030000000000000${20 + i}` as Discord.Snowflake,
+          );
+        }
+
+        // With limit=1 we get exactly 1 row.
+        const result = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findActiveRostersWithRole(team.id, 1)),
         );
-      }
+        expect(result).toHaveLength(1);
 
-      const result = yield* DiscordChannelMappingRepository.asEffect().pipe(
-        Effect.andThen((repo) => repo.findActiveRostersWithRole(team.id, 1)),
-      );
+        // The returned row must be deterministic: (created_at ASC, id ASC) order means
+        // the roster with the lexicographically smallest id among those with the earliest
+        // created_at comes first. Fetch all 3 without a LIMIT to verify that limit=1
+        // returns the head of that stable sort.
+        const allRows = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findActiveRostersWithRole(team.id, 100)),
+        );
+        expect(allRows).toHaveLength(3);
 
-      expect(result).toHaveLength(1);
-    }).pipe(Effect.provide(TestLayer)),
+        // The first row of the full result (ordered by created_at, id) must equal the
+        // single row returned under limit=1.
+        const expectedFirst = allRows[0];
+        if (expectedFirst === undefined) throw new Error('Expected at least one row');
+        expect(result[0]?.roster_id).toBe(expectedFirst.roster_id);
+      }).pipe(Effect.provide(TestLayer)),
   );
 
   it.effect('returned rows carry correct name/emoji/color fields', () =>

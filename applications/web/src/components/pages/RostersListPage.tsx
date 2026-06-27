@@ -56,7 +56,9 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
         run({}),
       );
       if (Option.isSome(result)) {
-        if (result.value.remainingCount === 0) {
+        if (result.value.processedCount === 0 && result.value.remainingCount === 0) {
+          toast.success(tr('roster_backfillRolesNone'));
+        } else if (result.value.remainingCount === 0) {
           toast.success(tr('roster_backfillRolesQueued', { count: result.value.processedCount }));
         } else {
           toast.success(

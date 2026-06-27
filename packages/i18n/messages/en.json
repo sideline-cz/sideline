@@ -809,6 +809,7 @@
   "roster_backfillRoles": "Re-sync roster role members",
   "roster_backfillRolesHelp": "Re-adds members to existing roster Discord roles. Does not create missing roles.",
   "roster_backfillRolesBusy": "Syncing…",
+  "roster_backfillRolesNone": "All roster roles are already in sync.",
   "roster_backfillRolesQueued": "Queued sync for {count} roster roles. The sync runs in the background.",
   "roster_backfillRolesQueuedPartial": "Queued {count} roster roles, {remaining} remaining. Click again to continue.",
   "roster_backfillRolesFailed": "Failed to queue roster role sync.",

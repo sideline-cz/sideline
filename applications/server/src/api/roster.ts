@@ -999,6 +999,8 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
               ),
             ),
           )
+          // backfillRosterRoles reuses roster:manage — same permission cluster as createRoster,
+          // updateRoster, and syncRoleMembers; backfill is an admin-only bulk operation.
           .handle('backfillRosterRoles', ({ params: { teamId } }) =>
             Effect.Do.pipe(
               Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
