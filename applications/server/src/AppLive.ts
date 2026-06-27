@@ -51,6 +51,7 @@ import { PaymentRemindersSentRepository } from '~/repositories/PaymentRemindersS
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { PlayerRatingsRepository } from '~/repositories/PlayerRatingsRepository.js';
+import { PollsRepository } from '~/repositories/PollsRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
@@ -154,6 +155,7 @@ const Repositories = Layer.mergeAll(
   PaymentReminderSyncEventsRepository.Default,
   PaymentRemindersSentRepository.Default,
   CarpoolsRepository.Default,
+  PollsRepository.Default,
   TeamChannelsRepository.Default,
   TeamChannelAccessRepository.Default,
   PlayerRatingsRepository.Default,
