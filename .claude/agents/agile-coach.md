@@ -69,7 +69,11 @@ If no active sprint exists, report this and stop.
 
 **CRITICAL: Bugs ALWAYS come before stories.** You MUST complete Step 2a before even looking at stories. Only proceed to Step 2b if Step 2a yields zero actionable bugs.
 
-If `$ARGUMENTS` is provided, use it to match a specific story/bug by name or keyword instead of auto-selecting. Otherwise follow the steps below.
+If `$ARGUMENTS` is provided, use it to select a specific story/bug instead of auto-selecting:
+- **If it is a Notion page ID (a 32-hex UUID, with or without dashes) or a `notion.so` URL** (extract the trailing 32-hex ID from the URL), fetch that exact page directly with `notion page props <id>` — do not keyword-match. This is the precise path used by the worktree flow.
+- **Otherwise**, match a specific story/bug by name or keyword.
+
+Otherwise follow the steps below.
 
 #### Step 2a: Check for bugs FIRST
 
@@ -134,6 +138,15 @@ Update **ALL** statuses **immediately**:
 **Do not skip updating tasks.** All tasks must be marked In Progress before proceeding.
 
 ### 5. Create a feature branch
+
+**First, detect whether you are in a linked git worktree** (the `/worktree` flow runs you inside one):
+
+```bash
+test -f .git && echo "linked-worktree" || echo "main-checkout"
+```
+
+- **If `.git` is a file (linked worktree):** the correct feature branch is **already checked out** here, and you **must NOT** run `git checkout main` — `main` is checked out in the primary repo and git will refuse it (`fatal: 'main' is already used by worktree`). Do **not** create or switch branches. Just confirm the current branch with `git branch --show-current`, report it, and proceed.
+- **If `.git` is a directory (normal checkout):** follow the flow below.
 
 Before any code is written, ensure you're starting from a clean, up-to-date `main`:
 
