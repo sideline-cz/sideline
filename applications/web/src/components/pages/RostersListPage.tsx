@@ -3,8 +3,10 @@ import type { Roster as RosterDomain } from '@sideline/domain';
 import { Team } from '@sideline/domain';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
+import { Loader2 } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
+import { toast } from 'sonner';
 import { ColorDot } from '~/components/atoms/ColorDot.js';
 import { ColorPicker } from '~/components/atoms/ColorPicker.js';
 import { Button } from '~/components/ui/button';
@@ -39,6 +41,36 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
   const [createEmoji, setCreateEmoji] = React.useState('');
   const [createColor, setCreateColor] = React.useState<string | undefined>(undefined);
+  const [backfillingRoles, setBackfillingRoles] = React.useState(false);
+
+  const handleBackfillRoles = React.useCallback(async () => {
+    setBackfillingRoles(true);
+    try {
+      const result = await ApiClient.asEffect().pipe(
+        Effect.flatMap((api) =>
+          api.roster.backfillRosterRoles({
+            params: { teamId: teamIdBranded },
+          }),
+        ),
+        Effect.mapError(() => ClientError.make(tr('roster_backfillRolesFailed'))),
+        run({}),
+      );
+      if (Option.isSome(result)) {
+        if (result.value.remainingCount === 0) {
+          toast.success(tr('roster_backfillRolesQueued', { count: result.value.processedCount }));
+        } else {
+          toast.success(
+            tr('roster_backfillRolesQueuedPartial', {
+              count: result.value.processedCount,
+              remaining: result.value.remainingCount,
+            }),
+          );
+        }
+      }
+    } finally {
+      setBackfillingRoles(false);
+    }
+  }, [teamIdBranded, run]);
 
   const form = useForm({
     resolver: standardSchemaResolver(Schema.toStandardSchemaV1(CreateRosterSchema)),
@@ -81,52 +113,67 @@ export function RostersListPage({ teamId, rosters, canManage }: RostersListPageP
       </header>
 
       {canManage && (
-        <Form {...form}>
-          <form
-            onSubmit={form.handleSubmit(onSubmit)}
-            className='flex flex-col gap-4 mb-6 sm:flex-row sm:items-end sm:max-w-lg'
-          >
-            <div className='flex gap-2 items-end'>
-              <div className='flex flex-col'>
-                <label htmlFor='roster-create-emoji' className='text-sm font-medium mb-1'>
-                  {tr('roster_emoji')}
-                </label>
-                <Input
-                  id='roster-create-emoji'
-                  value={createEmoji}
-                  onChange={(e) => setCreateEmoji(e.target.value)}
-                  className='w-16 shrink-0'
-                  placeholder='🏅'
+        <>
+          <Form {...form}>
+            <form
+              onSubmit={form.handleSubmit(onSubmit)}
+              className='flex flex-col gap-4 mb-6 sm:flex-row sm:items-end sm:max-w-lg'
+            >
+              <div className='flex gap-2 items-end'>
+                <div className='flex flex-col'>
+                  <label htmlFor='roster-create-emoji' className='text-sm font-medium mb-1'>
+                    {tr('roster_emoji')}
+                  </label>
+                  <Input
+                    id='roster-create-emoji'
+                    value={createEmoji}
+                    onChange={(e) => setCreateEmoji(e.target.value)}
+                    className='w-16 shrink-0'
+                    placeholder='🏅'
+                  />
+                </div>
+                <div className='flex flex-col'>
+                  <label htmlFor='roster-create-color' className='text-sm font-medium mb-1'>
+                    {tr('common_color')}
+                  </label>
+                  <ColorPicker
+                    id='roster-create-color'
+                    value={createColor}
+                    onChange={setCreateColor}
+                  />
+                </div>
+                <FormField
+                  {...form.register('name')}
+                  render={({ field }) => (
+                    <FormItem className='flex-1'>
+                      <FormLabel>{tr('roster_rosterName')}</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder={tr('roster_rosterNamePlaceholder')} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
                 />
               </div>
-              <div className='flex flex-col'>
-                <label htmlFor='roster-create-color' className='text-sm font-medium mb-1'>
-                  {tr('common_color')}
-                </label>
-                <ColorPicker
-                  id='roster-create-color'
-                  value={createColor}
-                  onChange={setCreateColor}
-                />
-              </div>
-              <FormField
-                {...form.register('name')}
-                render={({ field }) => (
-                  <FormItem className='flex-1'>
-                    <FormLabel>{tr('roster_rosterName')}</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder={tr('roster_rosterNamePlaceholder')} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            <Button type='submit' disabled={form.formState.isSubmitting} className='self-end'>
-              {tr('roster_createRoster')}
+              <Button type='submit' disabled={form.formState.isSubmitting} className='self-end'>
+                {tr('roster_createRoster')}
+              </Button>
+            </form>
+          </Form>
+          <div className='mb-6'>
+            <Button variant='outline' onClick={handleBackfillRoles} disabled={backfillingRoles}>
+              {backfillingRoles ? (
+                <>
+                  <Loader2 className='mr-2 size-4 animate-spin' />
+                  {tr('roster_backfillRolesBusy')}
+                </>
+              ) : (
+                tr('roster_backfillRoles')
+              )}
             </Button>
-          </form>
-        </Form>
+            <p className='text-xs text-muted-foreground mt-1'>{tr('roster_backfillRolesHelp')}</p>
+          </div>
+        </>
       )}
 
       {rosters.length === 0 ? (

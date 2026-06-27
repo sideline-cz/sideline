@@ -978,6 +978,38 @@ Triggers a Discord role member sync for a roster. Emits a `roster_channel_create
 
 ---
 
+#### `POST /teams/:teamId/rosters/backfill-role-members`
+
+Team-wide, on-demand tool that re-emits the idempotent `roster_channel_created` event for every active roster in the team that already has a Discord role, causing the bot to re-add any missing members. Useful when role membership has drifted across multiple rosters at once (e.g. after a Discord outage or a bulk membership change).
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `roster:manage`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** None
+
+**Response:** `200 OK` — `BackfillRosterRolesResult`
+
+| Field | Type | Description |
+|---|---|---|
+| `processedCount` | `number` | Number of rosters whose sync event was emitted in this call (capped at 50 per call) |
+| `remainingCount` | `number` | Number of eligible rosters not yet processed (non-zero when more than 50 rosters qualify) |
+
+**Notes:** The backfill is batched — a maximum of 50 rosters are processed per call. When `remainingCount > 0`, call the endpoint again to process the next batch. Only rosters that already have a Discord role are eligible; rosters with no role are skipped (this endpoint does not create missing roles). Rosters that have an unprocessed channel sync event already queued are also excluded to avoid duplicate work. The sync runs asynchronously — the endpoint returns immediately after enqueuing.
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `Forbidden` | 403 | Missing `roster:manage` permission or not a member of this team |
+
+---
+
 ### 6. Role
 
 **Source:** `packages/domain/src/api/RoleApi.ts`

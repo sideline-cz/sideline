@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-27 — New: team-wide "Re-sync roster role members" tool
+
+Admins and captains can now re-sync Discord role membership across all rosters at once, without visiting each roster individually.
+
+- A new **Re-sync roster role members** button appears on the rosters list page (visible to anyone with the **roster:manage** permission).
+- It sweeps every active roster that already has a Discord role and re-queues the member sync for each one — useful after a Discord outage or any other situation where multiple rosters have drifted out of sync simultaneously.
+- Processes up to 50 rosters per click. If more than 50 rosters qualify, the button reports how many remain and can be clicked again to process the next batch.
+- The tool re-adds missing members only. It does not create roles for rosters that have none, and it does not remove former members from existing roles.
+
 ## 2026-06-27 — PWA crash recovery: Reload and Reset app
 
 The web app now recovers automatically from blank/white-screen crashes instead of leaving the browser stuck on an empty page.

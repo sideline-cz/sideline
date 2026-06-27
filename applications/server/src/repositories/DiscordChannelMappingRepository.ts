@@ -23,6 +23,17 @@ export class GroupMissingRoleRow extends Schema.Class<GroupMissingRoleRow>('Grou
   discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
 }) {}
 
+export class RosterMissingRoleRow extends Schema.Class<RosterMissingRoleRow>(
+  'RosterMissingRoleRow',
+)({
+  roster_id: RosterModel.RosterId,
+  team_id: Team.TeamId,
+  name: Schema.String,
+  emoji: Schema.OptionFromNullOr(Schema.String),
+  color: Schema.OptionFromNullOr(Schema.String),
+  discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+}) {}
+
 class MappingRow extends Schema.Class<MappingRow>('MappingRow')({
   id: DiscordChannelMapping.DiscordChannelMappingId,
   team_id: Team.TeamId,
@@ -99,6 +110,10 @@ const SaveClaimThreadInput = Schema.Struct({
   group_id: GroupModel.GroupId,
   thread_id: Discord.Snowflake,
 });
+
+class CountRow extends Schema.Class<CountRow>('CountRow')({
+  count: Schema.Number,
+}) {}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -319,6 +334,8 @@ const make = Effect.gen(function* () {
   });
 
   const decodeGroupsMissingRole = Schema.decodeUnknownEffect(Schema.Array(GroupMissingRoleRow));
+  const decodeRostersMissingRole = Schema.decodeUnknownEffect(Schema.Array(RosterMissingRoleRow));
+  const decodeCountRow = Schema.decodeUnknownEffect(Schema.Array(CountRow));
 
   const findGroupsMissingRole = (teamId: Option.Option<Team.TeamId>, limit: number) =>
     sql`
@@ -338,6 +355,44 @@ const make = Effect.gen(function* () {
       ORDER BY g.created_at
       LIMIT ${limit}
     `.pipe(Effect.flatMap(decodeGroupsMissingRole), catchSqlErrors);
+
+  const findActiveRostersWithRole = (teamId: Team.TeamId, limit: number) =>
+    sql`
+      SELECT r.id AS roster_id, r.team_id, r.name, r.emoji, r.color, m.discord_channel_id
+      FROM rosters r
+      JOIN discord_channel_mappings m ON m.team_id = r.team_id AND m.roster_id = r.id
+      WHERE r.team_id = ${teamId}::uuid
+        AND r.active = true
+        AND m.discord_role_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM channel_sync_events e
+          WHERE e.roster_id = r.id
+            AND e.event_type IN ('channel_created', 'channel_updated')
+            AND e.processed_at IS NULL
+        )
+      ORDER BY r.created_at
+      LIMIT ${limit}
+    `.pipe(Effect.flatMap(decodeRostersMissingRole), catchSqlErrors);
+
+  const countActiveRostersWithRole = (teamId: Team.TeamId) =>
+    sql`
+      SELECT COUNT(*)::int AS count
+      FROM rosters r
+      JOIN discord_channel_mappings m ON m.team_id = r.team_id AND m.roster_id = r.id
+      WHERE r.team_id = ${teamId}::uuid
+        AND r.active = true
+        AND m.discord_role_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM channel_sync_events e
+          WHERE e.roster_id = r.id
+            AND e.event_type IN ('channel_created', 'channel_updated')
+            AND e.processed_at IS NULL
+        )
+    `.pipe(
+      Effect.flatMap(decodeCountRow),
+      Effect.map((rows) => rows[0]?.count ?? 0),
+      catchSqlErrors,
+    );
 
   const findClaimThread = (teamId: Team.TeamId, groupId: GroupModel.GroupId) =>
     _findClaimThread({ team_id: teamId, group_id: groupId }).pipe(
@@ -374,6 +429,8 @@ const make = Effect.gen(function* () {
     deleteByRosterId,
     findAllByTeam,
     findGroupsMissingRole,
+    findActiveRostersWithRole,
+    countActiveRostersWithRole,
     findClaimThread,
     saveClaimThreadIfAbsent,
     clearClaimThread,

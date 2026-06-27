@@ -344,6 +344,8 @@ flowchart LR
         UC_DELETE_ROSTER["Delete Roster\n(DELETE /teams/:teamId/rosters/:rosterId)"]
         UC_ADD_ROSTER_MEMBER["Add Member to Roster\n(POST /teams/:teamId/rosters/:rosterId/members)"]
         UC_REMOVE_ROSTER_MEMBER["Remove Member from Roster\n(DELETE /teams/:teamId/rosters/:rosterId/members/:memberId)"]
+        UC_SYNC_ROSTER_ROLE["Sync Roster Role Members\n(POST /teams/:teamId/rosters/:rosterId/sync-role-members)\nrequires: roster:manage"]
+        UC_BACKFILL_ROSTER_ROLES["Backfill All Roster Role Members\n(POST /teams/:teamId/rosters/backfill-role-members)\nrequires: roster:manage · batched (limit 50)"]
     end
 
     subgraph SETTINGS["Team Settings & Invites"]
@@ -363,6 +365,8 @@ flowchart LR
     CP --> UC_DELETE_ROSTER
     CP --> UC_ADD_ROSTER_MEMBER
     CP --> UC_REMOVE_ROSTER_MEMBER
+    CP --> UC_SYNC_ROSTER_ROLE
+    CP --> UC_BACKFILL_ROSTER_ROLES
     AD --> UC_REMOVE_MEMBER
     AD --> UC_GET_SETTINGS
     AD --> UC_UPDATE_SETTINGS

@@ -156,6 +156,8 @@ Deleting a group removes both the channel and the role.
 
 Each roster that has a Discord channel also has an associated Discord role. When members are added to the roster, they are given the role automatically. If the role gets out of sync — for example after a roster is reactivated — you can re-apply it manually.
 
+### Per-roster sync
+
 Open the roster detail page and click **Sync with Discord**. The bot will:
 
 1. Ensure the roster's Discord role exists (creating it if necessary, or reusing the existing one).
@@ -166,6 +168,14 @@ Open the roster detail page and click **Sync with Discord**. The bot will:
 </Aside>
 
 The button is available to any member with the **roster:manage** permission (Captain and Admin by default). The sync runs asynchronously — the page returns a count of members queued immediately, and the bot applies the role changes within seconds.
+
+### Team-wide re-sync
+
+If multiple rosters have drifted out of sync at once — for example after a Discord outage — use the **Re-sync roster role members** button on the rosters list page. It sweeps all active rosters that already have a Discord role and re-queues the member sync for each one.
+
+- Processes up to 50 rosters per click. If your team has more than 50 eligible rosters, click again to process the next batch. The button shows how many rosters remain.
+- This tool re-adds missing members; it does not create roles for rosters that have none, and it does not remove former members from existing roles.
+- Requires the **roster:manage** permission (Captain or Admin).
 
 ## Roster channel category
 

@@ -1,32 +1,42 @@
 /**
- * Integration test for DiscordChannelMappingRepository.findGroupsMissingRole.
+ * Integration tests for DiscordChannelMappingRepository.
  *
- * This is the LOAD-BEARING test for the detection query — it proves the actual
- * WHERE clause works against a real PostgreSQL database with real rows.
+ * Covers:
+ *   1. findGroupsMissingRole — LOAD-BEARING test for the detection query.
+ *      Proves the actual WHERE clause works against a real PostgreSQL database.
+ *      The old unit test (FindGroupsMissingRole.test.ts) used a mocked SqlClient that
+ *      returned canned rows unconditionally, meaning it could NEVER detect a wrong WHERE
+ *      clause.  This integration test replaces it as the source of truth.
  *
- * The old unit test (FindGroupsMissingRole.test.ts) used a mocked SqlClient that
- * returned canned rows unconditionally, meaning it could NEVER detect a wrong WHERE
- * clause.  This integration test replaces it as the source of truth.
+ *      Canonical 7-fixture matrix:
+ *        GROUP_NO_MAPPING     — group, no discord_channel_mappings row          → EXPECTED returned
+ *        GROUP_NULL_ROLE      — mapping row with discord_channel_id, role NULL  → EXPECTED returned
+ *        GROUP_HAS_ROLE       — mapping row with discord_role_id set            → EXCLUDED
+ *        GROUP_ARCHIVED       — is_archived=true, no role                       → EXCLUDED
+ *        GROUP_TEAM_NO_GUILD  — in a team whose guild_id IS NULL                → EXCLUDED
+ *        GROUP_IN_FLIGHT      — no role + unprocessed channel_created event     → EXCLUDED
+ *        GROUP_PROCESSED_ONLY — no role + only PROCESSED channel_created event  → EXPECTED returned
  *
- * Canonical 7-fixture matrix:
+ *   2. findActiveRostersWithRole — roster-scoped backfill detection query.
+ *      Filters: active=true, discord_role_id IS NOT NULL, NOT EXISTS unprocessed event.
+ *      "Unprocessed" means processed_at IS NULL (regardless of error — both pending and
+ *      failed-but-not-permanently-failed events block the roster from the batch).
+ *      Cross-team isolation and LIMIT honored.
  *
- *   GROUP_NO_MAPPING     — group, no discord_channel_mappings row          → EXPECTED returned
- *   GROUP_NULL_ROLE      — mapping row with discord_channel_id, role NULL  → EXPECTED returned
- *   GROUP_HAS_ROLE       — mapping row with discord_role_id set            → EXCLUDED
- *   GROUP_ARCHIVED       — is_archived=true, no role                       → EXCLUDED
- *   GROUP_TEAM_NO_GUILD  — in a team whose guild_id IS NULL                → EXCLUDED
- *   GROUP_IN_FLIGHT      — no role + unprocessed channel_created event     → EXCLUDED
- *   GROUP_PROCESSED_ONLY — no role + only PROCESSED channel_created event  → EXPECTED returned
+ *   3. countActiveRostersWithRole — roster-scoped count matching findActiveRostersWithRole
+ *      population. Used for remainingCount arithmetic in the backfill response.
+ *      Applies the same dedup guard (processed_at IS NULL only, no error IS NULL check).
  */
 
 import { describe, expect, it } from '@effect/vitest';
-import type { Discord, User } from '@sideline/domain';
+import type { Discord, RosterModel, Team, User } from '@sideline/domain';
 import { Effect, Layer, Option } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
@@ -39,6 +49,7 @@ const TestLayer = Layer.mergeAll(
   DiscordChannelMappingRepository.Default,
   ChannelSyncEventsRepository.Default,
   GroupsRepository.Default,
+  RostersRepository.Default,
   TeamsRepository.Default,
   UsersRepository.Default,
 ).pipe(Layer.provideMerge(TestPgClient));
@@ -394,5 +405,591 @@ describe('DiscordChannelMappingRepository.findGroupsMissingRole', () => {
         const returnedIds = result.map((r) => r.group_id);
         expect(returnedIds).toContain(group.id);
       }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Roster seed helpers (for findActiveRostersWithRole / countActiveRostersWithRole)
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates an active roster and returns it.
+ * Production code: RostersRepository.insert
+ */
+const createRoster = (teamId: Team.TeamId, name: string) =>
+  RostersRepository.asEffect().pipe(
+    Effect.andThen((repo) =>
+      repo.insert({
+        team_id: teamId,
+        name,
+        active: true,
+        color: Option.none(),
+        emoji: Option.none(),
+      }),
+    ),
+  );
+
+/**
+ * Creates an inactive roster and returns it.
+ */
+const createInactiveRoster = (teamId: Team.TeamId, name: string) =>
+  RostersRepository.asEffect().pipe(
+    Effect.andThen((repo) =>
+      repo.insert({
+        team_id: teamId,
+        name,
+        active: false,
+        color: Option.none(),
+        emoji: Option.none(),
+      }),
+    ),
+  );
+
+/**
+ * Seeds a discord_channel_mappings row for a roster with a discord_role_id set.
+ * This is the "has role" state — the roster SHOULD be returned by findActiveRostersWithRole.
+ *
+ * Uses DiscordChannelMappingRepository.insertRoster which requires both channelId and roleId.
+ */
+const seedRosterWithRole = (
+  teamId: Team.TeamId,
+  rosterId: RosterModel.RosterId,
+  channelSnowflake: Discord.Snowflake,
+  roleSnowflake: Discord.Snowflake,
+) =>
+  DiscordChannelMappingRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.insertRoster(teamId, rosterId, channelSnowflake, roleSnowflake)),
+  );
+
+/** Find the first unprocessed channel_sync_event for a roster (error IS NULL — pending events only). */
+const findFirstUnprocessedEventForRoster = (rosterId: RosterModel.RosterId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) =>
+        sql`
+        SELECT id FROM channel_sync_events
+        WHERE roster_id = ${rosterId} AND processed_at IS NULL AND error IS NULL
+        ORDER BY created_at ASC
+        LIMIT 1
+      `,
+    ),
+    Effect.map((rows) => {
+      const row = rows[0] as { id: string } | undefined;
+      return row
+        ? Option.some(row.id as import('@sideline/domain').ChannelSyncEvent.ChannelSyncEventId)
+        : Option.none<import('@sideline/domain').ChannelSyncEvent.ChannelSyncEventId>();
+    }),
+  );
+
+// ---------------------------------------------------------------------------
+// findActiveRostersWithRole
+//
+// The query must:
+//   • Return rosters where active=true AND discord_role_id IS NOT NULL
+//     AND NOT EXISTS an unprocessed channel_sync_events row for the roster
+//   • Exclude: inactive rosters, rosters with no role, rosters with an
+//     unprocessed (in-flight) event (but return them once the event is processed)
+//   • Scope to teamId
+//   • Honour the LIMIT parameter
+// ---------------------------------------------------------------------------
+
+describe('DiscordChannelMappingRepository.findActiveRostersWithRole', () => {
+  it.effect(
+    'canonical fixture matrix: returns only active rosters with a role, no in-flight event',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('900000000000000001', 'roster-backfill-user');
+        const team = yield* createTeam('900000000000000002' as Discord.Snowflake, userId);
+
+        // ROSTER_ACTIVE_WITH_ROLE: active=true + role set + no event → MUST be returned
+        const rosterActive = yield* createRoster(team.id, 'ROSTER_ACTIVE_WITH_ROLE');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterActive.id,
+          '900000000000000010' as Discord.Snowflake,
+          '900000000000000011' as Discord.Snowflake,
+        );
+
+        // ROSTER_INACTIVE: active=false + role set → MUST be excluded
+        const rosterInactive = yield* createInactiveRoster(team.id, 'ROSTER_INACTIVE');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterInactive.id,
+          '900000000000000020' as Discord.Snowflake,
+          '900000000000000021' as Discord.Snowflake,
+        );
+
+        // ROSTER_NO_ROLE: active=true + no mapping row at all → MUST be excluded
+        const rosterNoRole = yield* createRoster(team.id, 'ROSTER_NO_ROLE');
+        // (no insertRoster call — no discord_channel_mappings row)
+
+        // ROSTER_IN_FLIGHT: active=true + role set + unprocessed event → MUST be excluded
+        const rosterInFlight = yield* createRoster(team.id, 'ROSTER_IN_FLIGHT');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterInFlight.id,
+          '900000000000000030' as Discord.Snowflake,
+          '900000000000000031' as Discord.Snowflake,
+        );
+        yield* ChannelSyncEventsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.emitRosterChannelCreated(
+              team.id,
+              rosterInFlight.id,
+              'ROSTER_IN_FLIGHT',
+              Option.some('900000000000000030' as Discord.Snowflake),
+            ),
+          ),
+        );
+        // Leave unprocessed (processed_at IS NULL, error IS NULL)
+
+        // ROSTER_PROCESSED_ONLY: active=true + role set + only processed event → MUST be returned
+        const rosterProcessed = yield* createRoster(team.id, 'ROSTER_PROCESSED_ONLY');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterProcessed.id,
+          '900000000000000040' as Discord.Snowflake,
+          '900000000000000041' as Discord.Snowflake,
+        );
+        yield* ChannelSyncEventsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.emitRosterChannelCreated(
+              team.id,
+              rosterProcessed.id,
+              'ROSTER_PROCESSED_ONLY',
+              Option.some('900000000000000040' as Discord.Snowflake),
+            ),
+          ),
+        );
+        // Mark event processed
+        const maybeEventId = yield* findFirstUnprocessedEventForRoster(rosterProcessed.id);
+        const eventId = Option.getOrThrow(maybeEventId);
+        yield* ChannelSyncEventsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.markProcessed(eventId)),
+        );
+
+        // ---- Run query ----
+        const result = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findActiveRostersWithRole(team.id, 100)),
+        );
+
+        const returnedIds = new Set(result.map((r) => r.roster_id));
+
+        // MUST be returned
+        expect(returnedIds.has(rosterActive.id), 'ROSTER_ACTIVE_WITH_ROLE must be returned').toBe(
+          true,
+        );
+        expect(returnedIds.has(rosterProcessed.id), 'ROSTER_PROCESSED_ONLY must be returned').toBe(
+          true,
+        );
+
+        // MUST be excluded
+        expect(returnedIds.has(rosterInactive.id), 'ROSTER_INACTIVE must be excluded').toBe(false);
+        expect(returnedIds.has(rosterNoRole.id), 'ROSTER_NO_ROLE must be excluded').toBe(false);
+        expect(returnedIds.has(rosterInFlight.id), 'ROSTER_IN_FLIGHT must be excluded').toBe(false);
+
+        // Exactly 2 results
+        expect(result).toHaveLength(2);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('in-flight roster reappears once its event is marked processed', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('901000000000000001', 'reappear-user');
+      const team = yield* createTeam('901000000000000002' as Discord.Snowflake, userId);
+
+      const roster = yield* createRoster(team.id, 'Reappearing Roster');
+      yield* seedRosterWithRole(
+        team.id,
+        roster.id,
+        '901000000000000010' as Discord.Snowflake,
+        '901000000000000011' as Discord.Snowflake,
+      );
+      yield* ChannelSyncEventsRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.emitRosterChannelCreated(
+            team.id,
+            roster.id,
+            'Reappearing Roster',
+            Option.some('901000000000000010' as Discord.Snowflake),
+          ),
+        ),
+      );
+
+      // While event is unprocessed — roster must NOT appear
+      const resultBefore = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findActiveRostersWithRole(team.id, 100)),
+      );
+      expect(resultBefore.map((r) => r.roster_id)).not.toContain(roster.id);
+
+      // Mark event processed
+      const maybeEventId = yield* findFirstUnprocessedEventForRoster(roster.id);
+      const eventId = Option.getOrThrow(maybeEventId);
+      yield* ChannelSyncEventsRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.markProcessed(eventId)),
+      );
+
+      // After processing — roster MUST reappear
+      const resultAfter = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findActiveRostersWithRole(team.id, 100)),
+      );
+      expect(resultAfter.map((r) => r.roster_id)).toContain(roster.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'failed-unprocessed event (error SET, processed_at NULL) also excludes the roster',
+    () =>
+      Effect.gen(function* () {
+        // A roster whose only channel_sync_events row has processed_at IS NULL AND error IS NOT NULL
+        // (i.e. markFailed was called, transient failure, still awaiting retry) must be excluded.
+        // Before fix: AND e.error IS NULL in the NOT EXISTS guard let such rosters through.
+        // After fix: the guard checks only processed_at IS NULL — any unprocessed event blocks the roster.
+        const userId = yield* createUser('901500000000000001', 'failed-event-user');
+        const team = yield* createTeam('901500000000000002' as Discord.Snowflake, userId);
+
+        // One clean roster — must still appear
+        const rosterOk = yield* createRoster(team.id, 'Ok Roster (no event)');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterOk.id,
+          '901500000000000010' as Discord.Snowflake,
+          '901500000000000011' as Discord.Snowflake,
+        );
+
+        // Roster with a failed-unprocessed event — must be EXCLUDED
+        const rosterFailed = yield* createRoster(team.id, 'Roster With Failed Event');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterFailed.id,
+          '901500000000000020' as Discord.Snowflake,
+          '901500000000000021' as Discord.Snowflake,
+        );
+        yield* ChannelSyncEventsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.emitRosterChannelCreated(
+              team.id,
+              rosterFailed.id,
+              'Roster With Failed Event',
+              Option.some('901500000000000020' as Discord.Snowflake),
+            ),
+          ),
+        );
+        // Mark the event as failed (sets error, leaves processed_at NULL)
+        const maybeEventId = yield* findFirstUnprocessedEventForRoster(rosterFailed.id);
+        const eventId = Option.getOrThrow(maybeEventId);
+        yield* ChannelSyncEventsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.markFailed(eventId, 'Discord API error')),
+        );
+
+        const result = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findActiveRostersWithRole(team.id, 100)),
+        );
+
+        const returnedIds = result.map((r) => r.roster_id);
+
+        // Clean roster must appear
+        expect(returnedIds).toContain(rosterOk.id);
+        // Roster with failed-unprocessed event must be excluded
+        expect(returnedIds).not.toContain(rosterFailed.id);
+        // Exactly 1 result
+        expect(result).toHaveLength(1);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('cross-team isolation: returns only rosters belonging to the queried team', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('902000000000000001', 'cross-team-user');
+      const teamA = yield* createTeam('902000000000000002' as Discord.Snowflake, userId);
+      const teamB = yield* createTeam('902000000000000003' as Discord.Snowflake, userId);
+
+      // Roster in team A
+      const rosterA = yield* createRoster(teamA.id, 'Roster Team A');
+      yield* seedRosterWithRole(
+        teamA.id,
+        rosterA.id,
+        '902000000000000010' as Discord.Snowflake,
+        '902000000000000011' as Discord.Snowflake,
+      );
+
+      // Roster in team B
+      const rosterB = yield* createRoster(teamB.id, 'Roster Team B');
+      yield* seedRosterWithRole(
+        teamB.id,
+        rosterB.id,
+        '902000000000000020' as Discord.Snowflake,
+        '902000000000000021' as Discord.Snowflake,
+      );
+
+      const resultA = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findActiveRostersWithRole(teamA.id, 100)),
+      );
+      const resultB = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findActiveRostersWithRole(teamB.id, 100)),
+      );
+
+      const idsA = resultA.map((r) => r.roster_id);
+      const idsB = resultB.map((r) => r.roster_id);
+
+      expect(idsA).toContain(rosterA.id);
+      expect(idsA).not.toContain(rosterB.id);
+
+      expect(idsB).toContain(rosterB.id);
+      expect(idsB).not.toContain(rosterA.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('LIMIT is honoured: with 3 eligible rosters and limit=1, returns exactly 1 row', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('903000000000000001', 'limit-roster-user');
+      const team = yield* createTeam('903000000000000002' as Discord.Snowflake, userId);
+
+      for (let i = 0; i < 3; i++) {
+        const roster = yield* createRoster(team.id, `Limit Roster ${i}`);
+        yield* seedRosterWithRole(
+          team.id,
+          roster.id,
+          `9030000000000000${10 + i}` as Discord.Snowflake,
+          `9030000000000000${20 + i}` as Discord.Snowflake,
+        );
+      }
+
+      const result = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findActiveRostersWithRole(team.id, 1)),
+      );
+
+      expect(result).toHaveLength(1);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('returned rows carry correct name/emoji/color fields', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('904000000000000001', 'metadata-roster-user');
+      const team = yield* createTeam('904000000000000002' as Discord.Snowflake, userId);
+
+      // Create roster with emoji and color
+      const roster = yield* RostersRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.insert({
+            team_id: team.id,
+            name: 'Fancy Roster',
+            active: true,
+            color: Option.some('#ff6600'),
+            emoji: Option.some('🔥'),
+          }),
+        ),
+      );
+      yield* seedRosterWithRole(
+        team.id,
+        roster.id,
+        '904000000000000010' as Discord.Snowflake,
+        '904000000000000011' as Discord.Snowflake,
+      );
+
+      const result = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findActiveRostersWithRole(team.id, 100)),
+      );
+
+      expect(result).toHaveLength(1);
+      const row = result[0];
+      if (row === undefined) throw new Error('Expected a row');
+      expect(row.roster_id).toBe(roster.id);
+      expect(row.name).toBe('Fancy Roster');
+      expect(Option.getOrNull(row.emoji)).toBe('🔥');
+      expect(Option.getOrNull(row.color)).toBe('#ff6600');
+      // discord_channel_id should be Some (we called insertRoster with a channelSnowflake)
+      expect(Option.isSome(row.discord_channel_id)).toBe(true);
+      expect(Option.getOrNull(row.discord_channel_id)).toBe('904000000000000010');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// countActiveRostersWithRole
+//
+// Must return the same count as the number of rows findActiveRostersWithRole
+// would return with limit=∞ for the same teamId.
+// ---------------------------------------------------------------------------
+
+describe('DiscordChannelMappingRepository.countActiveRostersWithRole', () => {
+  it.effect('returns 0 when no eligible rosters exist', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('910000000000000001', 'count-zero-user');
+      const team = yield* createTeam('910000000000000002' as Discord.Snowflake, userId);
+
+      // Roster with no role (should not count)
+      yield* createRoster(team.id, 'No Role Roster');
+
+      const count = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.countActiveRostersWithRole(team.id)),
+      );
+
+      expect(count).toBe(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('count matches findActiveRostersWithRole population', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('911000000000000001', 'count-match-user');
+      const team = yield* createTeam('911000000000000002' as Discord.Snowflake, userId);
+
+      // Seed 3 eligible rosters
+      for (let i = 0; i < 3; i++) {
+        const roster = yield* createRoster(team.id, `Count Roster ${i}`);
+        yield* seedRosterWithRole(
+          team.id,
+          roster.id,
+          `9110000000000000${10 + i}` as Discord.Snowflake,
+          `9110000000000000${20 + i}` as Discord.Snowflake,
+        );
+      }
+
+      // Seed 1 ineligible roster (no role) — must not count
+      yield* createRoster(team.id, 'Ineligible No Role');
+
+      const count = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.countActiveRostersWithRole(team.id)),
+      );
+      const rows = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findActiveRostersWithRole(team.id, 1000)),
+      );
+
+      expect(count).toBe(3);
+      expect(rows).toHaveLength(3);
+      expect(count).toBe(rows.length);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('count excludes in-flight rosters (unprocessed event blocks them)', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('912000000000000001', 'count-inflight-user');
+      const team = yield* createTeam('912000000000000002' as Discord.Snowflake, userId);
+
+      // One eligible roster (no event)
+      const rosterOk = yield* createRoster(team.id, 'Ok Roster');
+      yield* seedRosterWithRole(
+        team.id,
+        rosterOk.id,
+        '912000000000000010' as Discord.Snowflake,
+        '912000000000000011' as Discord.Snowflake,
+      );
+
+      // One in-flight roster (unprocessed event)
+      const rosterInFlight = yield* createRoster(team.id, 'In-Flight Roster');
+      yield* seedRosterWithRole(
+        team.id,
+        rosterInFlight.id,
+        '912000000000000020' as Discord.Snowflake,
+        '912000000000000021' as Discord.Snowflake,
+      );
+      yield* ChannelSyncEventsRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.emitRosterChannelCreated(
+            team.id,
+            rosterInFlight.id,
+            'In-Flight Roster',
+            Option.some('912000000000000020' as Discord.Snowflake),
+          ),
+        ),
+      );
+
+      const count = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.countActiveRostersWithRole(team.id)),
+      );
+
+      // Only the non-in-flight roster counts
+      expect(count).toBe(1);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'count excludes rosters with a failed-unprocessed event (error SET, processed_at NULL)',
+    () =>
+      Effect.gen(function* () {
+        // Same semantics as the findActiveRostersWithRole version but for countActiveRostersWithRole.
+        // Before fix: AND e.error IS NULL in the NOT EXISTS guard let failed-unprocessed events
+        // through, so the count was inflated (roster counted AND re-enqueued each admin click).
+        // After fix: processed_at IS NULL alone is sufficient to block the roster from the count.
+        const userId = yield* createUser('912500000000000001', 'count-failed-event-user');
+        const team = yield* createTeam('912500000000000002' as Discord.Snowflake, userId);
+
+        // One clean roster (no event) — must count
+        const rosterOk = yield* createRoster(team.id, 'Ok Roster');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterOk.id,
+          '912500000000000010' as Discord.Snowflake,
+          '912500000000000011' as Discord.Snowflake,
+        );
+
+        // One roster with a failed-unprocessed event — must NOT count
+        const rosterFailed = yield* createRoster(team.id, 'Roster With Failed Event');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterFailed.id,
+          '912500000000000020' as Discord.Snowflake,
+          '912500000000000021' as Discord.Snowflake,
+        );
+        yield* ChannelSyncEventsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.emitRosterChannelCreated(
+              team.id,
+              rosterFailed.id,
+              'Roster With Failed Event',
+              Option.some('912500000000000020' as Discord.Snowflake),
+            ),
+          ),
+        );
+        const maybeEventId = yield* findFirstUnprocessedEventForRoster(rosterFailed.id);
+        const eventId = Option.getOrThrow(maybeEventId);
+        yield* ChannelSyncEventsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.markFailed(eventId, 'Discord API error')),
+        );
+
+        const count = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.countActiveRostersWithRole(team.id)),
+        );
+
+        // Only the clean roster should count; the failed-event roster is excluded
+        expect(count).toBe(1);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('cross-team isolation: count for teamA does not include teamB rosters', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('913000000000000001', 'count-cross-team-user');
+      const teamA = yield* createTeam('913000000000000002' as Discord.Snowflake, userId);
+      const teamB = yield* createTeam('913000000000000003' as Discord.Snowflake, userId);
+
+      // 2 eligible in teamA, 3 in teamB
+      for (let i = 0; i < 2; i++) {
+        const r = yield* createRoster(teamA.id, `Team A Roster ${i}`);
+        yield* seedRosterWithRole(
+          teamA.id,
+          r.id,
+          `9130000000000000${10 + i}` as Discord.Snowflake,
+          `9130000000000000${20 + i}` as Discord.Snowflake,
+        );
+      }
+      for (let i = 0; i < 3; i++) {
+        const r = yield* createRoster(teamB.id, `Team B Roster ${i}`);
+        yield* seedRosterWithRole(
+          teamB.id,
+          r.id,
+          `9130000000000000${30 + i}` as Discord.Snowflake,
+          `9130000000000000${40 + i}` as Discord.Snowflake,
+        );
+      }
+
+      const countA = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.countActiveRostersWithRole(teamA.id)),
+      );
+      const countB = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.countActiveRostersWithRole(teamB.id)),
+      );
+
+      expect(countA).toBe(2);
+      expect(countB).toBe(3);
+    }).pipe(Effect.provide(TestLayer)),
   );
 });

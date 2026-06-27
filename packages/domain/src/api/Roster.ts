@@ -11,6 +11,13 @@ import { Gender, UserId } from '~/models/User.js';
 
 export { HexColor, SyncRoleMembersResult };
 
+export class BackfillRosterRolesResult extends Schema.Class<BackfillRosterRolesResult>(
+  'BackfillRosterRolesResult',
+)({
+  processedCount: Schema.Number,
+  remainingCount: Schema.Number,
+}) {}
+
 export class RosterPlayer extends Schema.Class<RosterPlayer>('RosterPlayer')({
   memberId: TeamMemberId,
   userId: UserId,
@@ -238,5 +245,12 @@ export class RosterApiGroup extends HttpApiGroup.make('roster')
         RosterNotFound.pipe(HttpApiSchema.status(404)),
       ],
       params: { teamId: TeamId, rosterId: RosterId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post('backfillRosterRoles', '/teams/:teamId/rosters/backfill-role-members', {
+      success: BackfillRosterRolesResult,
+      error: [Forbidden.pipe(HttpApiSchema.status(403))],
+      params: { teamId: TeamId },
     }).middleware(AuthMiddleware),
   ) {}
