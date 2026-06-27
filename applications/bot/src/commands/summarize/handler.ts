@@ -103,11 +103,19 @@ export const parseSince = (
   }
 
   // --- ISO date: YYYY-MM-DD ---
-  const isoDateMatch = /^(\d{4}-\d{2}-\d{2})$/.exec(input);
+  const isoDateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input);
   if (isoDateMatch !== null) {
-    const ms = Date.parse(`${isoDateMatch[1]}T00:00:00Z`);
+    const year = Number(isoDateMatch[1]);
+    const month = Number(isoDateMatch[2]);
+    const day = Number(isoDateMatch[3]);
+    const ms = Date.parse(`${input}T00:00:00Z`);
     if (!Number.isNaN(ms) && isValidDateMs(ms)) {
-      return Option.some({ cutoff: DateTime.fromDateUnsafe(new Date(ms)), window: null });
+      // Date.parse normalizes invalid calendar dates (e.g. 2026-02-31 → Mar 3),
+      // so reject anything that doesn't round-trip to the same Y-M-D.
+      const d = new Date(ms);
+      if (d.getUTCFullYear() === year && d.getUTCMonth() + 1 === month && d.getUTCDate() === day) {
+        return Option.some({ cutoff: DateTime.fromDateUnsafe(d), window: null });
+      }
     }
   }
 
@@ -236,14 +244,19 @@ export const summarizeHandler = Interaction.asEffect().pipe(
           Option.flatMap((p) => (p.window !== null ? Option.some(p.window) : Option.none())),
         );
 
-        const effectiveLimit = Math.min(
-          pipe(
-            messagesOption,
-            Option.map((s) => parseInt(s, 10)),
-            Option.filter((n) => !Number.isNaN(n)),
-            Option.getOrElse(() => DEFAULT_MESSAGE_LIMIT),
+        // Clamp to the documented 1–200 range. Discord enforces min_value/max_value
+        // in the UI, but a malformed interaction could send 0/negative — floor to 1.
+        const effectiveLimit = Math.max(
+          1,
+          Math.min(
+            pipe(
+              messagesOption,
+              Option.map((s) => parseInt(s, 10)),
+              Option.filter((n) => !Number.isNaN(n)),
+              Option.getOrElse(() => DEFAULT_MESSAGE_LIMIT),
+            ),
+            MAX_MESSAGE_LIMIT,
           ),
-          MAX_MESSAGE_LIMIT,
         );
 
         const channelName = interaction.channel?.name ?? undefined;

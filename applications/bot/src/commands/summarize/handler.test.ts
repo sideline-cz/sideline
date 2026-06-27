@@ -426,6 +426,35 @@ describe('summarizeHandler', () => {
     expect(payload.messages.length).toBeLessThanOrEqual(MAX_MESSAGE_LIMIT);
   });
 
+  it('messages: 0 (malformed, below min) → clamped up to 1 message', async () => {
+    const now = new Date('2026-06-20T12:00:00Z').getTime();
+    const allMessages = Array.from({ length: 20 }, (_, i) => {
+      const ts = new Date(now - i * 60_000).toISOString();
+      return makeMessage({ timestamp: ts, id: makeSnowflake(now - i * 60_000) });
+    });
+
+    const summarizeChannel = vi.fn(() =>
+      Effect.succeed(
+        new SummarizeRpcModels.SummarizeChannelResult({
+          summary: 'Summary',
+          generated: true,
+          summarizedCount: 1,
+        }),
+      ),
+    );
+
+    const rest = makeRestStub({ listMessages: vi.fn(() => Effect.succeed(allMessages)) });
+    const rpc = makeSyncRpcStub({ 'Summarize/SummarizeChannel': summarizeChannel });
+
+    await runHandler(makeInteraction({ options: [messagesOption(0)] }), rest.layer, rpc.layer);
+
+    expect(summarizeChannel).toHaveBeenCalled();
+    const payload = (
+      summarizeChannel.mock.calls as ReadonlyArray<ReadonlyArray<unknown>>
+    )[0]?.[0] as unknown as { messages: unknown[] };
+    expect(payload.messages.length).toBe(1);
+  });
+
   it('messages: 1 → exactly 1 message in RPC payload', async () => {
     const now = new Date('2026-06-20T12:00:00Z').getTime();
     const allMessages = Array.from({ length: 20 }, (_, i) => {
@@ -1254,6 +1283,13 @@ describe('parseSince', () => {
   it('"2026-13-45" (invalid calendar date) → Option.none()', () => {
     // Month 13 is invalid — Date.parse returns NaN for invalid ISO dates
     const result = parseSince('2026-13-45', NOW);
+    expect(Option.isNone(result)).toBe(true);
+  });
+
+  it('"2026-02-31" (non-existent day, Date.parse would normalize) → Option.none()', () => {
+    // Date.parse('2026-02-31') silently rolls over to Mar 3 — must be rejected,
+    // not accepted as a different cutoff date.
+    const result = parseSince('2026-02-31', NOW);
     expect(Option.isNone(result)).toBe(true);
   });
 });
