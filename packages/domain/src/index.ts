@@ -265,6 +265,10 @@ export * as RoleRpcModels from './rpc/role/RoleRpcModels.js';
 export * as RoleProvisionRpcGroup from './rpc/roleProvision/RoleProvisionRpcGroup.js';
 export * as SyncRpcs from './rpc/SyncRpcs.js';
 
+export * as SummarizeRpcGroup from './rpc/summarize/SummarizeRpcGroup.js';
+
+export * as SummarizeRpcModels from './rpc/summarize/SummarizeRpcModels.js';
+
 export * as TeamChallengeRpcGroup from './rpc/teamChallenge/TeamChallengeRpcGroup.js';
 
 export * as TeamChallengeSyncEvents from './rpc/teamChallenge/TeamChallengeSyncEvents.js';

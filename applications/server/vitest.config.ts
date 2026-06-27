@@ -27,6 +27,9 @@ export default defineProject({
       OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
       OTEL_SERVICE_NAME: 'sideline-server',
       EMAIL_WEBHOOK_SIGNING_SECRET: 'test-signing-secret-for-vitest',
+      LLM_API_URL: '',
+      LLM_API_KEY: '',
+      LLM_MODEL: '',
     },
   },
 });

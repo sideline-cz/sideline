@@ -5,6 +5,18 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-27 — New Discord command: `/summarize`
+
+Members can now ask the bot to summarize recent conversation in any channel or thread.
+
+- Run `/summarize` to get an AI-generated summary of the last 50 messages, visible only to you.
+- Use the `messages` option (1–200) to change how many messages are included.
+- Use the `since` option to cover a time window instead — for example `since:24h`, `since:7d`, or `since:2026-06-20`. Multi-unit durations like `3d12h` are also accepted.
+- Use the `private` option to control who sees the result: the default (`true`) shows the summary only to you; set `private:false` to post it publicly to the channel.
+- The bot skips bot messages and empty posts, labels the result with participant count and time range, and marks the footer as "(capped)" when the window was truncated.
+- If the AI is temporarily unavailable the bot says so rather than showing a partial result.
+- The command is available in English and Czech (`/shrnout`). No additional configuration or permissions are needed — any member with access to the channel can use it.
+
 ## 2026-06-27 — New: team-wide "Re-sync roster role members" tool
 
 Admins and captains can now re-sync Discord role membership across all rosters at once, without visiting each roster individually.

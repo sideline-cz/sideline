@@ -4,6 +4,7 @@ import { PgClient } from '@effect/sql-pg';
 import { Runtime, Telemetry } from '@sideline/effect-lib';
 import { AfterMigrator, BeforeMigrator } from '@sideline/migrations';
 import { Config, Effect, Layer } from 'effect';
+import { FetchHttpClient } from 'effect/unstable/http';
 import { SqlClient } from 'effect/unstable/sql';
 import { env } from '~/env.js';
 import { AppLive, HealthServerLive } from '~/index.js';
@@ -209,7 +210,7 @@ const EmailSummarizerCronEffect = EmailSummarizer.asEffect().pipe(
   Effect.provide(
     EmailPostSyncEventsRepository.Default.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
   ),
-  Effect.provide(LlmClient.Default),
+  Effect.provide(LlmClient.Default.pipe(Layer.provide(FetchHttpClient.layer))),
 );
 
 const ImapPollerRepositoriesLive = Layer.mergeAll(

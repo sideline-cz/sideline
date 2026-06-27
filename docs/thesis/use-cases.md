@@ -15,7 +15,7 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 | **Captain** | A team member holding the built-in `Captain` role. Inherits all Player capabilities and additionally holds `roster:manage`, `member:edit`, `role:view`, `event:create`, `event:edit`, `event:cancel`, and `finance:view` permissions. |
 | **Admin** | A team member holding the built-in `Admin` role. Holds the full permission set including `team:manage`, `team:invite`, `member:remove`, `role:manage`, `training-type:create`, `training-type:delete`, `finance:view`, `finance:manage_fees`, and `finance:record_payments`, in addition to all Captain permissions. |
 | **Treasurer** | A team member holding the built-in `Treasurer` role. Holds `finance:view`, `finance:manage_fees`, and `finance:record_payments`. Used to delegate finance authority without elevating the member to Captain or Admin. |
-| **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/carpool`, `/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination, carpool board buttons, email approval/reject buttons). Receives RPC calls from the server to synchronise Discord roles, channels, and email posts. |
+| **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/carpool`, `/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`, `/summarize`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination, carpool board buttons, email approval/reject buttons). Receives RPC calls from the server to synchronise Discord roles, channels, and email posts. |
 | **Global Admin** | A user who is a global admin by either having the `users.is_global_admin` database flag set to `true` or having their Discord ID listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable (the two sources are ORed). The first user to register on a fresh database is automatically promoted via the DB flag. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. Can also mint, list, and revoke team onboarding tokens, enabling new teams to be set up by a designated captain without requiring a pre-existing Sideline account. Can manage the global-admin roster via `GET/POST/DELETE /auth/global-admins` — granting or revoking `users.is_global_admin` for other users, subject to self-revoke, last-admin, and env-managed safeguards. A global admin with no team memberships is redirected to `/admin/onboarding-tokens` instead of `/no-team`. Additionally, global admins have **read-only access to every team** regardless of membership: all read endpoints for members, rosters, roles, finance, activity stats, and team info use a `requireReadAccess` helper that synthesises a read-only membership (with `roster:view`, `member:view`, `role:view`, `finance:view` permissions) when the caller is a global admin but not a real team member. Write endpoints still require actual membership. |
 | **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes, sending RSVP reminder notifications before events, auto-logging attendance from RSVP data, evaluating age-threshold rules to move members between groups, and queuing payment reminder DMs for members with upcoming or overdue fee assignments. |
 
@@ -107,6 +107,7 @@ flowchart LR
         UC_BOT_CARPOOL_ASSIGN["Assign Seat to Member"]
         UC_BOT_CARPOOL_LEAVE["Leave Car"]
         UC_BOT_CARPOOL_REMOVE["Remove Own Car"]
+        UC_BOT_SUMMARIZE["Summarize Channel via Bot"]
     end
 
     subgraph CARPOOLS["Carpools"]
@@ -282,6 +283,7 @@ flowchart LR
     BOT --> UC_BOT_CARPOOL_ASSIGN
     BOT --> UC_BOT_CARPOOL_LEAVE
     BOT --> UC_BOT_CARPOOL_REMOVE
+    BOT --> UC_BOT_SUMMARIZE
 
     SYS --> UC_CREATE_EVENT
     SYS --> UC_START_EVENT
@@ -619,6 +621,7 @@ flowchart LR
         UC_MAK_LOG["\/makanicko log\nLogs an activity for the invoking user\nactivity type · optional duration · optional note"]
         UC_MAK_STATS["\/makanicko stats\nDisplays personal activity stats and streak"]
         UC_MAK_LB["\/makanicko leaderboard\nDisplays top-10 leaderboard embed\nshows requesting user's own rank in footer"]
+        UC_SUMMARIZE["\/summarize\nAI-generated summary of recent channel messages\nephemeral embed · no permission required\n(Summarize/SummarizeChannel RPC → LlmClient)"]
     end
 
     subgraph BUTTONS["Button Interactions on Embeds"]
@@ -642,6 +645,7 @@ flowchart LR
     DU --> UC_MAK_LOG
     DU --> UC_MAK_STATS
     DU --> UC_MAK_LB
+    DU --> UC_SUMMARIZE
     DU --> UC_BTN_RSVP
     DU --> UC_BTN_PAGE
     DU --> UC_BTN_OVERVIEW_SHOW
@@ -653,6 +657,7 @@ flowchart LR
     BOT --> UC_MAK_LOG
     BOT --> UC_MAK_STATS
     BOT --> UC_MAK_LB
+    BOT --> UC_SUMMARIZE
     BOT --> UC_BTN_RSVP
     BOT --> UC_BTN_PAGE
     BOT --> UC_BTN_OVERVIEW_SHOW

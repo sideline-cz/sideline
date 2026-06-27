@@ -11,6 +11,7 @@ import { GuildsRpcLive } from './guild/index.js';
 import { InvitesRpcLive } from './invite/index.js';
 import { RolesRpcLive } from './role/index.js';
 import { RoleProvisionRpcLive } from './roleProvision/index.js';
+import { SummarizeRpcLive } from './summarize/index.js';
 import { TeamChallengeSyncEventsRpcLive } from './teamChallenge/index.js';
 import { WeeklySummaryRpcLive } from './weeklySummary/index.js';
 
@@ -29,4 +30,5 @@ export const SyncRpcsLive = Layer.mergeAll(
   FinanceRpcLive,
   CarpoolsRpcLive,
   EmailRpcLive,
+  SummarizeRpcLive,
 );
