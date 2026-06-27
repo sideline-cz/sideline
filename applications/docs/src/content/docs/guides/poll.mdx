@@ -1,0 +1,94 @@
+---
+title: Polls (/anketa)
+description: How to use the Discord poll feature to collect votes from your team.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+The poll feature lets captains post interactive polls directly in Discord. Members vote using buttons, and the board updates in real time with counts and percentages.
+
+## Creating a poll
+
+Only members with the `poll:manage` permission (Admin and Captain by default) can create polls.
+
+<Steps>
+
+1. Go to the Discord channel where you want the poll to appear.
+2. Type `/anketa` (or `/poll` in English) and press Enter.
+3. Fill in the required options:
+   - **question** — the poll question (up to 300 characters).
+   - **options** — the choices, separated by semicolons, e.g. `Pizza; Sushi; Tacos`. You need at least 2 and at most 10 options. Duplicate options are not allowed.
+4. Optionally configure:
+   - **multiple** — set to `True` to let members vote for more than one option (default: single-choice).
+   - **deadline** — an optional closing time in the team's timezone, format `YYYY-MM-DD HH:mm`. After the deadline the poll closes automatically on the next interaction.
+   - **allowed_role** — a Discord role whose members are allowed to add new options. Leave blank to allow only the creator and captains to add options.
+5. The bot posts a public **Poll** embed in the channel with vote buttons. Only you see the ephemeral "poll created" confirmation — the embed itself is visible to everyone.
+
+</Steps>
+
+<Aside type="note" title="One poll per command">
+  Each `/anketa` invocation creates a separate poll. There is no automatic cleanup of old polls.
+</Aside>
+
+## Voting
+
+Any team member can vote by clicking the option buttons on the poll embed.
+
+- **Single-choice polls** — tap an option button to vote. Tapping the same option again retracts your vote. Tapping a different option moves your vote.
+- **Multiple-choice polls** — tap any number of option buttons to toggle them on or off.
+
+The poll embed updates immediately for everyone, showing the current vote counts and percentages.
+
+<Aside type="note" title="Vote confirmation">
+  After voting you receive an ephemeral (private) confirmation message describing what changed (vote counted, moved, retracted, added, or removed).
+</Aside>
+
+## Adding options
+
+Members can suggest new options by clicking **➕ Add option** on the open poll embed.
+
+<Steps>
+
+1. Click **➕ Add option**.
+2. A small form appears. Enter the option label (up to 80 characters).
+3. Click **Submit**. The new option is added to the poll and the embed updates.
+
+</Steps>
+
+Who can add options depends on the `allowed_role` setting:
+
+- If **no role is set**, only the poll creator and team members with `poll:manage` can add options.
+- If a **role is set**, any member who has that Discord role can add options (in addition to captains/admins).
+
+Duplicate labels (case-insensitive) and labels longer than 80 characters are rejected. The poll can hold at most 10 options in total.
+
+## Closing a poll
+
+Members with the `poll:manage` permission (Admin and Captain by default) can close a poll by clicking **🔒 Close poll** on the embed.
+
+- Closing is permanent — the poll can no longer receive votes or new options.
+- The embed updates to show a grey "closed" state with the final results, including the winner (or a tie/empty notice).
+- The vote and close buttons are disabled on closed polls.
+
+<Aside type="note" title="Lazy deadline close">
+  If you set a deadline, the poll does not close automatically on a timer. Instead, it closes on the next interaction (vote or add option attempt) after the deadline has passed. The interacting member will see a "poll has closed" notice.
+</Aside>
+
+## Troubleshooting
+
+| Problem | Likely cause |
+|---------|--------------|
+| `/anketa` does not appear | You do not have the `poll:manage` permission. Ask your captain or admin. |
+| "Provide between 2 and 10 options" error | You entered fewer than 2 or more than 10 semicolon-separated options. |
+| "Duplicate options are not allowed" error | Two or more options have the same label (ignoring case). |
+| "Each option must be at most 80 characters" error | At least one option is too long. |
+| "Invalid deadline format" error | The deadline must be in `YYYY-MM-DD HH:mm` format. |
+| "The deadline must be in the future" error | The deadline you entered has already passed. |
+| "Only captains and admins can do that" error | You tried to close the poll or add an option without the required permission. |
+| "This poll has already been closed" notice | The poll's deadline passed or it was manually closed. |
+| Cannot add an option | The poll has reached the 10-option limit, or you do not have the required role/permission. |
+
+## See also
+
+- [Discord integration](/guides/discord-integration/)
+- [Quick start for Captains](/quick-start/captains/)

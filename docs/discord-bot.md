@@ -30,7 +30,7 @@ The bot is built with **dfx**, an Effect-native Discord framework. It connects t
 
 ## Slash Commands
 
-Eight top-level commands are registered globally: `/carpool`, `/event`, `/finance`, `/info`, `/makanicko`, `/summarize`, `/summon`, and `/training`. `/event`, `/finance`, `/makanicko`, and `/training` each have sub-commands.
+Nine top-level commands are registered globally: `/carpool`, `/event`, `/finance`, `/info`, `/makanicko`, `/poll`, `/summarize`, `/summon`, and `/training`. `/event`, `/finance`, `/makanicko`, and `/training` each have sub-commands.
 
 ### /carpool
 
@@ -65,6 +65,41 @@ Eight top-level commands are registered globally: `/carpool`, `/event`, `/financ
 **Source files:**
 - `applications/bot/src/commands/carpool/index.ts`
 - `applications/bot/src/commands/carpool/handler.ts`
+
+---
+
+### /poll
+
+**Description:** Create an interactive poll in the current channel.
+
+**Czech command name:** `anketa`
+
+**Options:**
+- `question` (STRING, required) — the poll question (up to 300 characters).
+- `options` (STRING, required) — semicolon-separated choices, e.g. `Pizza; Sushi; Tacos` (2–10 options, each ≤80 characters, no duplicates).
+- `multiple` (BOOLEAN, optional) — allow voting for more than one option (default: false).
+- `deadline` (STRING, optional) — closing time in the team's timezone, format `YYYY-MM-DD HH:mm`.
+- `allowed_role` (ROLE, optional) — Discord role whose members may add new options; omit to restrict to creator/captains only.
+
+**Permission required:** `poll:manage` (Admin and Captain by default). The command is hidden in the Discord UI from members who lack `ManageEvents`.
+
+**Constraints:**
+- `dm_permission: false`
+- `default_member_permissions: ManageEvents`
+
+**Flow:**
+
+1. Captain invokes `/poll` (or `/anketa`) in the channel where the poll should live.
+2. The handler returns a deferred ephemeral acknowledgement and forks a background fiber.
+3. The fiber calls `Poll/CreatePoll` RPC with `guild_id`, `discord_user_id`, `discord_channel_id`, `question`, `options_raw`, `multiple`, `allowed_role_id`, and `deadline_raw`.
+4. On success the bot posts a public `buildPollEmbed` message with option vote buttons, an **Add option** button, and a **Close poll** button. The message ID is saved via `Poll/SavePollMessageId`.
+5. The ephemeral reply is updated with a localised "poll created" confirmation.
+
+**Source files:**
+- `applications/bot/src/commands/poll/index.ts`
+- `applications/bot/src/commands/poll/handler.ts`
+- `applications/bot/src/rest/poll/buildPollEmbed.ts`
+- `applications/bot/src/interactions/poll.ts`
 
 ---
 

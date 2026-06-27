@@ -318,11 +318,11 @@ Individual permission strings granted to a role.
 
 **Primary Key**: `(role_id, permission)`
 
-**Built-in permission values**: `team:manage`, `team:invite`, `roster:view`, `roster:manage`, `member:view`, `member:edit`, `member:remove`, `role:view`, `role:manage`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `training-type:delete`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `finance:manage_fees`, `finance:record_payments`, `challenge:manage`, `carpool:manage`
+**Built-in permission values**: `team:manage`, `team:invite`, `roster:view`, `roster:manage`, `member:view`, `member:edit`, `member:remove`, `role:view`, `role:manage`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `training-type:delete`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `finance:manage_fees`, `finance:record_payments`, `challenge:manage`, `carpool:manage`, `poll:manage`
 
 **Built-in role defaults**:
 - **Admin**: all permissions (see `defaultPermissions.Admin` in `packages/domain/src/models/Role.ts`)
-- **Captain**: `roster:view`, `roster:manage`, `member:view`, `member:edit`, `role:view`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `carpool:manage`
+- **Captain**: `roster:view`, `roster:manage`, `member:view`, `member:edit`, `role:view`, `activity-type:create`, `activity-type:delete`, `training-type:create`, `event:create`, `event:edit`, `event:cancel`, `group:manage`, `finance:view`, `carpool:manage`, `poll:manage`
 - **Player**: `roster:view`, `member:view`
 - **Treasurer**: `finance:view`, `finance:manage_fees`, `finance:record_payments`
 
@@ -1496,7 +1496,71 @@ Records which team members have a seat in a car. The carpool owner is also recor
 
 ---
 
-### 16. Email Forwarding
+### 16. Polls
+
+#### `polls`
+
+Top-level record for a Discord poll. Each `/poll` invocation creates one row. `discord_channel_id` identifies the channel where the poll message was posted; `discord_message_id` is the ID of the public poll embed (populated after posting via `Poll/SavePollMessageId`). `status` is `'open'` or `'closed'`. `multiple` controls whether members can vote for more than one option. `allowed_role_id` is an optional Discord role ID whose members may add new options; `NULL` means only the creator/captains can add options. `deadline` is an optional UTC timestamp; the poll closes lazily (on the next interaction) after this time.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `guild_id` | TEXT | NOT NULL | — |
+| `discord_channel_id` | TEXT | NOT NULL | — |
+| `discord_message_id` | TEXT | — | — |
+| `question` | VARCHAR(300) | NOT NULL | — |
+| `status` | TEXT | NOT NULL, CHECK (`'open'` or `'closed'`) | `'open'` |
+| `multiple` | BOOLEAN | NOT NULL | `false` |
+| `allowed_role_id` | TEXT | — | — |
+| `deadline` | TIMESTAMPTZ | — | — |
+| `created_by` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE RESTRICT | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Notes**: Added in migration `1790200000_create_polls`. `created_by` uses `ON DELETE RESTRICT` to prevent deleting the creator's member record while the poll exists.
+
+#### `poll_options`
+
+One row per option within a poll. `position` is 0-based and drives the regional-indicator letter (🇦 🇧 🇨…) displayed in the embed. `UNIQUE (poll_id, position)` and `UNIQUE (poll_id, label)` ensure no duplicate positions or duplicate labels per poll.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `poll_id` | UUID | NOT NULL, FK → `polls(id)` ON DELETE CASCADE | — |
+| `label` | VARCHAR(80) | NOT NULL | — |
+| `position` | INT | NOT NULL | — |
+| `added_by` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE RESTRICT | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(poll_id, position)`, `(poll_id, label)`
+
+**Indexes**: `idx_poll_options_poll` on `(poll_id)`
+
+**Notes**: Added in migration `1790200000_create_polls`.
+
+#### `poll_votes`
+
+One row per (poll, member, option) vote combination. `UNIQUE (poll_id, team_member_id, option_id)` supports both single-choice (one row per member per poll) and multiple-choice (one row per member per option). Single-choice uniqueness is enforced in application logic, not database constraints.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `poll_id` | UUID | NOT NULL, FK → `polls(id)` ON DELETE CASCADE | — |
+| `option_id` | UUID | NOT NULL, FK → `poll_options(id)` ON DELETE CASCADE | — |
+| `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE CASCADE | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(poll_id, team_member_id, option_id)`
+
+**Indexes**: `idx_poll_votes_poll` on `(poll_id)`, `idx_poll_votes_member` on `(poll_id, team_member_id)`
+
+**Notes**: Added in migration `1790200000_create_polls`.
+
+---
+
+### 17. Email Forwarding
 
 #### `email_forwarding_config`
 

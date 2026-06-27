@@ -9,6 +9,7 @@ import { EventRpcGroup } from './event/EventRpcGroup.js';
 import { FinanceRpcGroup } from './finance/FinanceRpcGroup.js';
 import { GuildRpcGroup } from './guild/GuildRpcGroup.js';
 import { InviteRpcGroup } from './invite/InviteRpcGroup.js';
+import { PollRpcGroup } from './poll/PollRpcGroup.js';
 import { RoleRpcGroup } from './role/RoleRpcGroup.js';
 import { RoleProvisionRpcGroup } from './roleProvision/RoleProvisionRpcGroup.js';
 import { SummarizeRpcGroup } from './summarize/SummarizeRpcGroup.js';
@@ -31,4 +32,5 @@ export class SyncRpcs extends RpcGroup.make().merge(
   CarpoolRpcGroup,
   EmailRpcGroup,
   SummarizeRpcGroup,
+  PollRpcGroup,
 ) {}

@@ -166,6 +166,8 @@ export * as PaymentReminder from './models/PaymentReminder.js';
 
 export * as PlayerRating from './models/PlayerRating.js';
 
+export * as Poll from './models/Poll.js';
+
 export * as Role from './models/Role.js';
 
 export * as RoleGroup from './models/RoleGroup.js';
@@ -259,6 +261,8 @@ export * as FinanceRpcGroup from './rpc/finance/FinanceRpcGroup.js';
 export * as FinanceRpcModels from './rpc/finance/FinanceRpcModels.js';
 export * as GuildRpcGroup from './rpc/guild/GuildRpcGroup.js';
 export * as InviteRpcGroup from './rpc/invite/InviteRpcGroup.js';
+export * as PollRpcGroup from './rpc/poll/PollRpcGroup.js';
+export * as PollRpcModels from './rpc/poll/PollRpcModels.js';
 export * as RoleRpcEvents from './rpc/role/RoleRpcEvents.js';
 export * as RoleRpcGroup from './rpc/role/RoleRpcGroup.js';
 export * as RoleRpcModels from './rpc/role/RoleRpcModels.js';

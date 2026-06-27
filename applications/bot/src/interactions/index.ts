@@ -26,6 +26,12 @@ import { EventCreateModal } from './event-create.js';
 import { EventCreateAutocomplete } from './event-create-autocomplete.js';
 import { MakanickoLogAutocomplete } from './makanicko-log-autocomplete.js';
 import { OverviewShowButton } from './overview-channel.js';
+import {
+  PollAddButtonReg,
+  PollAddModalReg,
+  PollCloseButtonReg,
+  PollVoteButtonReg,
+} from './poll.js';
 import { RosterApproveButton, RosterDeclineButton } from './roster-approval.js';
 import { RsvpAddMessageButton, RsvpButton, RsvpClearMessageButton, RsvpModal } from './rsvp.js';
 import { TrainingResultAutocomplete } from './training-result-autocomplete.js';
@@ -70,4 +76,8 @@ export const interactionBuilder = Ix.builder
   .add(CarpoolAssignButton)
   .add(CarpoolAssignPickSelect)
   .add(RosterApproveButton)
-  .add(RosterDeclineButton);
+  .add(RosterDeclineButton)
+  .add(PollVoteButtonReg)
+  .add(PollAddButtonReg)
+  .add(PollAddModalReg)
+  .add(PollCloseButtonReg);
