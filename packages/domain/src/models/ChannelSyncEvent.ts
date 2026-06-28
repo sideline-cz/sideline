@@ -19,6 +19,7 @@ export const ChannelSyncEventType = Schema.Literals([
   'channel_detached',
   'member_added',
   'member_removed',
+  'roster_role_reconcile',
 ]);
 
 export const ChannelCleanupMode = Schema.Literals(['nothing', 'delete', 'archive']);

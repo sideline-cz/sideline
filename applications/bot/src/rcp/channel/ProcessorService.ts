@@ -20,6 +20,7 @@ import { handleManagedRestored } from './handleManagedRestored.js';
 import { handleMemberAdded, handleRosterMemberAdded } from './handleMemberAdded.js';
 import { handleMemberRemoved, handleRosterMemberRemoved } from './handleMemberRemoved.js';
 import { handleRosterChannelCreated } from './handleRosterChannelCreated.js';
+import { handleRosterRoleReconcile } from './handleRosterRoleReconcile.js';
 import { handleGroupChannelUpdated, handleRosterChannelUpdated } from './handleUpdated.js';
 
 // Split into two pipe chains to stay within the 20-argument overload limit.
@@ -52,6 +53,7 @@ const action: (
   Match.tag('managed_channel_adopted', handleManagedAdopted),
   Match.tag('managed_channel_restored', handleManagedRestored),
   Match.tag('discord_channel_restored', handleDiscordRestored),
+  Match.tag('roster_role_reconcile', handleRosterRoleReconcile),
   Match.exhaustive,
 );
 

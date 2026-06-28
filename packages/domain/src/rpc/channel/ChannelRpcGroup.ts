@@ -67,6 +67,10 @@ export const ChannelRpcGroup = RpcGroup.make(
     payload: { team_id: Team.TeamId, group_id: GroupModel.GroupId },
     success: Schema.Array(GroupMemberDiscord),
   }),
+  Rpc.make('GetExpectedRoleHolders', {
+    payload: { team_id: Team.TeamId, discord_role_id: Discord.Snowflake },
+    success: Schema.Array(RosterMemberDiscord),
+  }),
   Rpc.make('UpsertRosterMapping', {
     payload: {
       team_id: Team.TeamId,

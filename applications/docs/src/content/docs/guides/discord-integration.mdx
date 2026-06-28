@@ -166,18 +166,17 @@ Open the roster detail page and click **Sync with Discord**. The bot will:
 1. Ensure the roster's Discord role exists (creating it if necessary, or reusing the existing one).
 2. Add every current roster member to that role.
 
-<Aside type="note" title="Add-only in this release">
-  The sync button currently **adds** members to the role and **does not remove** anyone. If a former member still holds the role after being removed from the roster, remove them from the Discord role manually. Automatic pruning of stale role-holders is planned for a future release.
-</Aside>
-
 The button is available to any member with the **roster:manage** permission (Captain and Admin by default). The sync runs asynchronously — the page returns a count of members queued immediately, and the bot applies the role changes within seconds.
 
-### Team-wide re-sync
+### Team-wide sync
 
-If multiple rosters have drifted out of sync at once — for example after a Discord outage — use the **Re-sync roster role members** button on the rosters list page. It sweeps all active rosters that already have a Discord role and re-queues the member sync for each one.
+If multiple rosters have drifted out of sync at once — for example after a Discord outage — use the **Sync roster roles with Discord** button on the rosters list page. It sweeps all active rosters that already have a Discord role and runs a full bidirectional reconcile for each one.
 
+- **Re-adds** any active roster member who is missing their Discord role.
+- **Removes** the roster Discord role from anyone who is no longer an active member of any roster sharing that role.
 - Processes up to 50 rosters per click. If your team has more than 50 eligible rosters, click again to process the next batch. The button shows how many rosters remain.
-- This tool re-adds missing members; it does not create roles for rosters that have none, and it does not remove former members from existing roles.
+- This tool does not create roles for rosters that have none.
+- **Fail-closed:** if the bot cannot read the current list of Discord role holders for a roster, it skips the removal step for that roster entirely — no legitimate member is ever accidentally stripped.
 - Requires the **roster:manage** permission (Captain or Admin).
 
 ## Roster channel category

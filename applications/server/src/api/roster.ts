@@ -25,6 +25,7 @@ import {
 } from '~/utils/applyDiscordFormat.js';
 import { backfillRosterRoleMembers } from '~/utils/backfillRosterRoleMembers.js';
 import { hexColorToDiscordInt } from '~/utils/hexColorToDiscordInt.js';
+import { reconcileRosterRoleExtras } from '~/utils/reconcileRosterRoleExtras.js';
 
 const toRosterPlayer = (entry: RosterEntry) =>
   new Roster.RosterPlayer({
@@ -1010,10 +1011,14 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
               Effect.tap(({ membership }) =>
                 requirePermission(membership, 'roster:manage', new Roster.Forbidden()),
               ),
-              Effect.flatMap(() => backfillRosterRoleMembers(teamId)),
+              Effect.bind('backfill', () => backfillRosterRoleMembers(teamId)),
+              Effect.bind('reconcile', () => reconcileRosterRoleExtras(teamId)),
               Effect.map(
-                ({ processedCount, remainingCount }) =>
-                  new Roster.BackfillRosterRolesResult({ processedCount, remainingCount }),
+                ({ backfill, reconcile }) =>
+                  new Roster.BackfillRosterRolesResult({
+                    processedCount: backfill.processedCount + reconcile.processedCount,
+                    remainingCount: backfill.remainingCount + reconcile.remainingCount,
+                  }),
               ),
             ),
           ),

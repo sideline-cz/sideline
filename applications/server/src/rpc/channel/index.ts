@@ -368,6 +368,18 @@ export const ChannelsRpcLive = Effect.Do.pipe(
         ),
   ),
   Effect.let(
+    'Channel/GetExpectedRoleHolders',
+    ({ mappings }) =>
+      ({
+        team_id,
+        discord_role_id,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly discord_role_id: Discord.Snowflake;
+      }) =>
+        mappings.findExpectedRoleHolders(team_id, discord_role_id),
+  ),
+  Effect.let(
     'Channel/UpsertRosterMapping',
     ({ mappings }) =>
       ({

@@ -586,6 +586,22 @@ const channelRestoredFromSql = (r: EventRow) =>
     Match.exhaustive,
   );
 
+const rosterRoleReconcileFromSql = (r: EventRow) =>
+  Effect.Do.pipe(
+    Effect.bind('roster_id', () => nullable(r, 'roster_id')),
+    Effect.bind('discord_role_id', () => nullable(r, 'discord_role_id')),
+    Effect.map(
+      ({ roster_id, discord_role_id }) =>
+        new ChannelRpcEvents.RosterRoleReconcileEvent({
+          id: r.id,
+          team_id: r.team_id,
+          guild_id: r.guild_id,
+          roster_id,
+          discord_role_id,
+        }),
+    ),
+  );
+
 export const constructEvent = Match.type<EventRow>().pipe(
   Match.when({ event_type: 'channel_created' }, channelCreatedFromSql),
   Match.when({ event_type: 'channel_updated' }, channelUpdatedFromSql),
@@ -595,5 +611,6 @@ export const constructEvent = Match.type<EventRow>().pipe(
   Match.when({ event_type: 'channel_detached' }, channelDetachedFromSql),
   Match.when({ event_type: 'member_added' }, memberAddedFromSql),
   Match.when({ event_type: 'member_removed' }, memberRemovedFromSql),
+  Match.when({ event_type: 'roster_role_reconcile' }, rosterRoleReconcileFromSql),
   Match.exhaustive,
 );

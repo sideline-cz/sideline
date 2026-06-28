@@ -362,6 +362,17 @@ export class ManagedChannelAdoptedEvent extends Schema.TaggedClass<ManagedChanne
   },
 ) {}
 
+export class RosterRoleReconcileEvent extends Schema.TaggedClass<RosterRoleReconcileEvent>()(
+  'roster_role_reconcile',
+  {
+    id: ChannelSyncEventId,
+    team_id: TeamId,
+    guild_id: Snowflake,
+    roster_id: RosterId,
+    discord_role_id: Snowflake,
+  },
+) {}
+
 // --- union of all ---
 
 export const UnprocessedChannelEvent = Schema.Union([
@@ -381,6 +392,7 @@ export const UnprocessedChannelEvent = Schema.Union([
   ManagedChannelAccessGrantedEvent,
   ManagedChannelAccessRevokedEvent,
   ManagedChannelAdoptedEvent,
+  RosterRoleReconcileEvent,
 ]);
 
 export type UnprocessedChannelEvent = Schema.Schema.Type<typeof UnprocessedChannelEvent>;

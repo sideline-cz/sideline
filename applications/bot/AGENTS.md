@@ -333,6 +333,15 @@ Rules:
 2. **The backfill RPC returns the enqueued count** (`Schema.Number`); the service logs `Backfilled N missing group roles` only when `N > 0` and otherwise stays quiet.
 3. **`team_id` and `limit` are `Option`** (`Schema.OptionFromNullOr`) — the cron passes `None`/`None` (server defaults the limit to 20). Do not hard-code a team or a non-default limit in the cron tick.
 
+#### Roster role remove-extras reconcile (fail-closed)
+
+`handleRosterRoleReconcile` (`src/rcp/channel/handleRosterRoleReconcile.ts`) processes the `roster_role_reconcile` RPC event tag — the REMOVE half of the team-wide "Sync roster roles with Discord" button (the ADD half is `roster_channel_created` backfill). It is the ONLY channel handler that does a LIVE Discord read to compute a delete diff: it paginates `listGuildMembers` to find every current holder of `event.discord_role_id`, asks the server `Channel/GetExpectedRoleHolders` for who SHOULD hold it, and removes the role (`deleteGuildMemberRole`, per-member concurrency-1 loop, same shape as rule 9) from holders not in the expected set. The server-side shared-role union contract lives in `applications/server/AGENTS.md` → "Roster-role remove-extras reconcile".
+
+Rules (all MUST be preserved — this is the only handler that strips roles in bulk):
+
+1. **Fail closed: never remove a role when the holder list or the expected set could not be fully read.** `collectRoleHolders` catches every `listGuildMembers` page failure (`HttpClientError | RatelimitedResponse | ErrorResponse`) and returns `[]` — an empty holder list yields an empty `extras` set, so a partial/failed read removes NOBODY rather than treating unread members as extras. If `Channel/GetExpectedRoleHolders` fails, the whole handler fails and the event is retried (never falls through to a removal with an empty expected set). Any future bulk role/member removal handler MUST adopt the same fail-closed default: a read error means "remove nothing", never "remove everything not seen".
+2. **`listGuildMembers` MUST be paginated with a STRING `after` cursor.** Discord snowflakes exceed `Number.MAX_SAFE_INTEGER`, so the cursor cannot be a JS number. dfx mistypes `after` as `number`; pass the string id with a `// @ts-expect-error` and compute the next cursor as the max id on the page via `BigInt(a) > BigInt(b)` comparison (page order is not guaranteed). Cap the walk at `MAX_PAGES` (50) and treat hitting the cap as a partial read (log a warning) — combined with rule 1, a truncated walk still removes only confirmed extras, never members on unread pages.
+
 #### Channel Sync Event Failure Classification
 
 `ProcessorService.processEvent` wraps each handler in `Effect.catch` and routes failures via `isPermanentError(error)`:

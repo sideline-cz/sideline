@@ -374,6 +374,16 @@ const make = Effect.gen(function* () {
       discordRoleId,
     });
 
+  const emitRosterRoleReconcile = (
+    teamId: Team.TeamId,
+    rosterId: RosterModel.RosterId,
+    discordRoleId: Discord.Snowflake,
+  ) =>
+    _emitIfGuildLinked(teamId, 'roster_role_reconcile', 'roster', {
+      rosterId: Option.some(rosterId),
+      discordRoleId: Option.some(discordRoleId),
+    });
+
   const emitChannelArchived = (
     teamId: Team.TeamId,
     groupId: GroupModel.GroupId,
@@ -677,6 +687,7 @@ const make = Effect.gen(function* () {
     emitRosterMemberRemoved,
     emitRosterChannelCreated,
     emitRosterChannelDeleted,
+    emitRosterRoleReconcile,
     emitChannelArchived,
     emitRosterChannelArchived,
     emitChannelDetached,

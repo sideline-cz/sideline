@@ -1016,3 +1016,504 @@ describe('DiscordChannelMappingRepository.countActiveRostersWithRole', () => {
     }).pipe(Effect.provide(TestLayer)),
   );
 });
+
+// ---------------------------------------------------------------------------
+// findActiveRoleIdsForReconcile
+//
+// NEW — planned, not yet implemented. These tests drive the implementation of:
+//   DiscordChannelMappingRepository.findActiveRoleIdsForReconcile(teamId, limit)
+//
+// The query must:
+//   • Return DISTINCT active discord_role_ids from rosters where:
+//       active=true AND discord_role_id IS NOT NULL
+//       AND NOT EXISTS an unprocessed roster_role_reconcile channel_sync_events row
+//         (processed_at IS NULL — regardless of error column)
+//   • Each row carries { roster_id, guild_id, discord_role_id } — one row per
+//     distinct role (or per roster sharing that role, depending on implementation;
+//     at minimum, each DISTINCT role must appear exactly once).
+//   • Results are deterministic: ORDER BY (discord_role_id, roster_id) or similar stable key.
+//   • Honours the LIMIT parameter.
+//   • Cross-team isolation via teamId filter.
+//
+// NOTE: The "DISTINCT" requirement means that if two active rosters share the same
+// discord_role_id, findActiveRoleIdsForReconcile must return only ONE row per
+// distinct role (not two rows for that role). This is the key difference from
+// findActiveRostersWithRole which returns one row per roster.
+//
+// The "unprocessed roster_role_reconcile event blocks the role" guard means:
+//   A role is excluded from the batch if ANY of its associated rosters has an
+//   unprocessed (processed_at IS NULL) roster_role_reconcile channel_sync_event.
+//
+// SEED HELPERS NOTE: We add emitRosterRoleReconcile as a raw SQL insert because
+// ChannelSyncEventsRepository does not yet expose it as a typed method.
+// ---------------------------------------------------------------------------
+
+/**
+ * Seeds a roster_role_reconcile channel_sync_event via raw SQL.
+ * This is the planned emitRosterRoleReconcile event — not yet in ChannelSyncEventsRepository.
+ * The event blocks the role from findActiveRoleIdsForReconcile while unprocessed.
+ */
+const seedRosterRoleReconcileEvent = (
+  teamId: Team.TeamId,
+  rosterId: RosterModel.RosterId,
+  guildId: Discord.Snowflake,
+  discordRoleId: Discord.Snowflake,
+) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) => sql`
+      INSERT INTO channel_sync_events
+        (team_id, guild_id, event_type, entity_type, roster_id, discord_role_id,
+         group_id, group_name, team_member_id, discord_user_id, roster_name,
+         existing_channel_id, archive_category_id, target_category_id,
+         discord_channel_name, discord_role_name, discord_role_color,
+         team_channel_id, access_level)
+      VALUES
+        (${teamId}, ${guildId}, 'roster_role_reconcile', 'roster', ${rosterId}, ${discordRoleId},
+         NULL, NULL, NULL, NULL, NULL,
+         NULL, NULL, NULL,
+         NULL, NULL, NULL,
+         NULL, NULL)
+    `,
+    ),
+    Effect.asVoid,
+  );
+
+describe('DiscordChannelMappingRepository.findActiveRoleIdsForReconcile', () => {
+  // -------------------------------------------------------------------------
+  // (a) Returns DISTINCT active roles with non-null role; excludes roles with
+  //     unprocessed roster_role_reconcile event; honours LIMIT; deterministic order.
+  // -------------------------------------------------------------------------
+  it.effect(
+    'canonical fixture matrix: returns only active+non-null roles with no in-flight reconcile event; DISTINCT-deduplicates',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('950000000000000001', 'reconcile-user');
+        const team = yield* createTeam('950000000000000002' as Discord.Snowflake, userId);
+        const guildId = '950000000000000002' as Discord.Snowflake;
+        const roleIdA = '950000000000000010' as Discord.Snowflake;
+        const roleIdB = '950000000000000011' as Discord.Snowflake;
+
+        // ROSTER_ACTIVE_ROLE_A: active + role A + no event → MUST be returned with role A
+        const rosterA1 = yield* createRoster(team.id, 'Roster A1 (role A)');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterA1.id,
+          '950000000000000020' as Discord.Snowflake,
+          roleIdA,
+        );
+
+        // ROSTER_ACTIVE_ROLE_A_SHARED: another active roster sharing role A
+        // → DISTINCT must return role A exactly ONCE (not twice)
+        const rosterA2 = yield* createRoster(team.id, 'Roster A2 (role A shared)');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterA2.id,
+          '950000000000000021' as Discord.Snowflake,
+          roleIdA, // same role as rosterA1
+        );
+
+        // ROSTER_ACTIVE_ROLE_B: active + role B + no event → MUST be returned with role B
+        const rosterB = yield* createRoster(team.id, 'Roster B (role B)');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterB.id,
+          '950000000000000030' as Discord.Snowflake,
+          roleIdB,
+        );
+
+        // ROSTER_INACTIVE: inactive + role → MUST be excluded
+        const rosterInactive = yield* createInactiveRoster(team.id, 'Roster Inactive');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterInactive.id,
+          '950000000000000040' as Discord.Snowflake,
+          '950000000000000041' as Discord.Snowflake, // unique role — must not appear
+        );
+
+        // ROSTER_IN_FLIGHT: active + role + unprocessed reconcile event → MUST be excluded
+        const rosterInFlight = yield* createRoster(team.id, 'Roster In Flight');
+        const inFlightRoleId = '950000000000000050' as Discord.Snowflake;
+        yield* seedRosterWithRole(
+          team.id,
+          rosterInFlight.id,
+          '950000000000000051' as Discord.Snowflake,
+          inFlightRoleId,
+        );
+        yield* seedRosterRoleReconcileEvent(team.id, rosterInFlight.id, guildId, inFlightRoleId);
+        // Leave unprocessed (processed_at IS NULL, error IS NULL)
+
+        // ---- Run query ----
+        const result = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findActiveRoleIdsForReconcile(team.id, 100)),
+        );
+
+        const returnedRoleIds = result.map((r) => r.discord_role_id);
+
+        // role A must appear exactly once (DISTINCT dedup of rosterA1 + rosterA2)
+        expect(
+          returnedRoleIds.filter((id) => id === roleIdA).length,
+          'role A must appear exactly once (DISTINCT)',
+        ).toBe(1);
+
+        // role B must appear once
+        expect(
+          returnedRoleIds.filter((id) => id === roleIdB).length,
+          'role B must appear once',
+        ).toBe(1);
+
+        // in-flight role must NOT appear
+        expect(returnedRoleIds).not.toContain(inFlightRoleId);
+
+        // inactive role must NOT appear
+        const inactiveRoleId = '950000000000000041';
+        expect(returnedRoleIds).not.toContain(inactiveRoleId);
+
+        // Exactly 2 distinct roles returned
+        expect(new Set(returnedRoleIds).size).toBe(2);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // -------------------------------------------------------------------------
+  // (a continued) LIMIT is honoured; ORDER BY is deterministic
+  // -------------------------------------------------------------------------
+  it.effect('LIMIT is honoured and ORDER BY is deterministic', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('951000000000000001', 'reconcile-limit-user');
+      const team = yield* createTeam('951000000000000002' as Discord.Snowflake, userId);
+
+      // Seed 3 rosters each with a distinct role
+      const roles = [
+        '951000000000000010' as Discord.Snowflake,
+        '951000000000000011' as Discord.Snowflake,
+        '951000000000000012' as Discord.Snowflake,
+      ];
+
+      for (const [i, roleId] of roles.entries()) {
+        const roster = yield* createRoster(team.id, `Limit Reconcile Roster ${i}`);
+        yield* seedRosterWithRole(
+          team.id,
+          roster.id,
+          `9510000000000000${20 + i}` as Discord.Snowflake,
+          roleId,
+        );
+      }
+
+      // With limit=1 we get exactly 1 row
+      const resultLimit1 = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findActiveRoleIdsForReconcile(team.id, 1)),
+      );
+      expect(resultLimit1).toHaveLength(1);
+
+      // With limit=100 we get all 3
+      const resultAll = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findActiveRoleIdsForReconcile(team.id, 100)),
+      );
+      expect(resultAll).toHaveLength(3);
+
+      // limit=1 must return the head of the full stable-sorted result
+      const expectedFirst = resultAll[0];
+      if (expectedFirst === undefined) throw new Error('Expected at least one row');
+      expect(resultLimit1[0]?.discord_role_id).toBe(expectedFirst.discord_role_id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // -------------------------------------------------------------------------
+  // (a continued) Excludes roles with an unprocessed roster_role_reconcile event
+  //   (i.e., processed_at IS NULL regardless of error column)
+  // -------------------------------------------------------------------------
+  it.effect(
+    'excludes a role blocked by an unprocessed reconcile event (processed_at IS NULL)',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('952000000000000001', 'reconcile-inflight-user');
+        const team = yield* createTeam('952000000000000002' as Discord.Snowflake, userId);
+        const guildId = '952000000000000002' as Discord.Snowflake;
+
+        // One clean role (no event) — must appear
+        const rosterOk = yield* createRoster(team.id, 'Ok Roster');
+        const okRoleId = '952000000000000010' as Discord.Snowflake;
+        yield* seedRosterWithRole(
+          team.id,
+          rosterOk.id,
+          '952000000000000011' as Discord.Snowflake,
+          okRoleId,
+        );
+
+        // One role with an unprocessed reconcile event — must be excluded
+        const rosterBlocked = yield* createRoster(team.id, 'Blocked Roster');
+        const blockedRoleId = '952000000000000020' as Discord.Snowflake;
+        yield* seedRosterWithRole(
+          team.id,
+          rosterBlocked.id,
+          '952000000000000021' as Discord.Snowflake,
+          blockedRoleId,
+        );
+        yield* seedRosterRoleReconcileEvent(team.id, rosterBlocked.id, guildId, blockedRoleId);
+
+        const result = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findActiveRoleIdsForReconcile(team.id, 100)),
+        );
+
+        const returnedRoleIds = result.map((r) => r.discord_role_id);
+        expect(returnedRoleIds).toContain(okRoleId);
+        expect(returnedRoleIds).not.toContain(blockedRoleId);
+        expect(result).toHaveLength(1);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // -------------------------------------------------------------------------
+  // (a continued) Cross-team isolation
+  // -------------------------------------------------------------------------
+  it.effect('cross-team isolation: returns only roles belonging to the queried team', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('953000000000000001', 'reconcile-cross-team-user');
+      const teamA = yield* createTeam('953000000000000002' as Discord.Snowflake, userId);
+      const teamB = yield* createTeam('953000000000000003' as Discord.Snowflake, userId);
+
+      const roleForA = '953000000000000010' as Discord.Snowflake;
+      const roleForB = '953000000000000020' as Discord.Snowflake;
+
+      const rosterA = yield* createRoster(teamA.id, 'Roster Team A');
+      yield* seedRosterWithRole(
+        teamA.id,
+        rosterA.id,
+        '953000000000000011' as Discord.Snowflake,
+        roleForA,
+      );
+
+      const rosterB = yield* createRoster(teamB.id, 'Roster Team B');
+      yield* seedRosterWithRole(
+        teamB.id,
+        rosterB.id,
+        '953000000000000021' as Discord.Snowflake,
+        roleForB,
+      );
+
+      const resultA = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findActiveRoleIdsForReconcile(teamA.id, 100)),
+      );
+      const resultB = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findActiveRoleIdsForReconcile(teamB.id, 100)),
+      );
+
+      const idsA = resultA.map((r) => r.discord_role_id);
+      const idsB = resultB.map((r) => r.discord_role_id);
+
+      expect(idsA).toContain(roleForA);
+      expect(idsA).not.toContain(roleForB);
+      expect(idsB).toContain(roleForB);
+      expect(idsB).not.toContain(roleForA);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// countActiveRoleIdsForReconcile
+//
+// NEW — planned. Must return the count of DISTINCT eligible roles matching the
+// same population as findActiveRoleIdsForReconcile(teamId, ∞). Used for
+// remainingCount arithmetic in the reconcile response.
+// ---------------------------------------------------------------------------
+
+describe('DiscordChannelMappingRepository.countActiveRoleIdsForReconcile', () => {
+  // -------------------------------------------------------------------------
+  // (b) countActiveRoleIdsForReconcile matches row count
+  // -------------------------------------------------------------------------
+  it.effect('count matches findActiveRoleIdsForReconcile row count', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('960000000000000001', 'count-reconcile-user');
+      const team = yield* createTeam('960000000000000002' as Discord.Snowflake, userId);
+
+      // Seed 3 eligible rosters each with a distinct role
+      for (let i = 0; i < 3; i++) {
+        const roster = yield* createRoster(team.id, `Count Reconcile Roster ${i}`);
+        yield* seedRosterWithRole(
+          team.id,
+          roster.id,
+          `9600000000000000${10 + i}` as Discord.Snowflake,
+          `9600000000000000${20 + i}` as Discord.Snowflake,
+        );
+      }
+
+      // One ineligible roster (no role) — must not count
+      yield* createRoster(team.id, 'Ineligible No Role');
+
+      const count = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.countActiveRoleIdsForReconcile(team.id)),
+      );
+      const rows = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findActiveRoleIdsForReconcile(team.id, 1000)),
+      );
+
+      expect(count).toBe(3);
+      expect(rows).toHaveLength(3);
+      // Count must equal the row count from findActiveRoleIdsForReconcile (DISTINCT roles)
+      expect(count).toBe(rows.length);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('DISTINCT dedup: two rosters sharing one role count as ONE, not two', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('961000000000000001', 'count-distinct-user');
+      const team = yield* createTeam('961000000000000002' as Discord.Snowflake, userId);
+      const sharedRoleId = '961000000000000010' as Discord.Snowflake;
+
+      // Two rosters sharing one discord_role_id
+      const rosterX = yield* createRoster(team.id, 'Shared Role Roster X');
+      yield* seedRosterWithRole(
+        team.id,
+        rosterX.id,
+        '961000000000000020' as Discord.Snowflake,
+        sharedRoleId,
+      );
+      const rosterY = yield* createRoster(team.id, 'Shared Role Roster Y');
+      yield* seedRosterWithRole(
+        team.id,
+        rosterY.id,
+        '961000000000000021' as Discord.Snowflake,
+        sharedRoleId, // same role
+      );
+
+      const count = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.countActiveRoleIdsForReconcile(team.id)),
+      );
+      const rows = yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findActiveRoleIdsForReconcile(team.id, 1000)),
+      );
+
+      // DISTINCT: one shared role → count = 1
+      expect(count).toBe(1);
+      expect(new Set(rows.map((r) => r.discord_role_id)).size).toBe(1);
+      expect(count).toBe(new Set(rows.map((r) => r.discord_role_id)).size);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// findExpectedRoleHolders
+//
+// NEW — planned. Server RPC handler for Channel/GetExpectedRoleHolders.
+//   findExpectedRoleHolders(teamId, discordRoleId)
+//     → Array<{ team_member_id, discord_user_id }>
+//
+// The query must:
+//   • Union members across ALL active rosters sharing the given discordRoleId
+//     (a single discord role can be provisioned for multiple rosters — the bot
+//      must NOT remove anyone who belongs to ANY of those rosters)
+//   • DISTINCT-dedup by discord_user_id (a member can be in multiple rosters)
+//   • Exclude members with null discord_user_id
+//   • Exclude members of inactive rosters (roster.active=false)
+//   • Scope to teamId
+// ---------------------------------------------------------------------------
+
+describe('DiscordChannelMappingRepository.findExpectedRoleHolders', () => {
+  // -------------------------------------------------------------------------
+  // (c) unions members across TWO active rosters sharing one role,
+  //     DISTINCT-dedups, excludes inactive-roster members and null-discord members
+  // -------------------------------------------------------------------------
+  it.effect(
+    'unions members across two active rosters sharing a role; DISTINCT-dedup; excludes inactive-roster members',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('970000000000000001', 'expected-holders-user');
+        const team = yield* createTeam('970000000000000002' as Discord.Snowflake, userId);
+        const sharedRoleId = '970000000000000010' as Discord.Snowflake;
+
+        // Create two active rosters sharing the same discord role
+        const rosterX = yield* createRoster(team.id, 'Expected Roster X');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterX.id,
+          '970000000000000020' as Discord.Snowflake,
+          sharedRoleId,
+        );
+        const rosterY = yield* createRoster(team.id, 'Expected Roster Y');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterY.id,
+          '970000000000000021' as Discord.Snowflake,
+          sharedRoleId,
+        );
+
+        // Create an inactive roster also sharing the same role (members must be excluded)
+        const rosterInactive = yield* createInactiveRoster(team.id, 'Expected Roster Inactive');
+        yield* seedRosterWithRole(
+          team.id,
+          rosterInactive.id,
+          '970000000000000022' as Discord.Snowflake,
+          sharedRoleId,
+        );
+
+        // Seed team members via raw SQL (TeamMembersRepository is not yet stubbed here;
+        // we use direct SQL inserts to create the roster_members table rows).
+        // For the purposes of this test we use the SqlClient directly.
+        const sql = yield* SqlClient.SqlClient;
+
+        // Users: A (in both rosters → union), B (in both rosters → DISTINCT check),
+        //        D (in inactive roster → must be excluded).
+        // Note: users.discord_id is NOT NULL UNIQUE (see 1739630400_create_auth), so a
+        // null-discord member is not representable; the query's IS NOT NULL filter is a
+        // harmless defensive guard and is not exercised here.
+        const discordA = '970000000000000030' as Discord.Snowflake;
+        const discordB = '970000000000000031' as Discord.Snowflake;
+        const discordD = '970000000000000034' as Discord.Snowflake;
+
+        // Insert test users
+        yield* sql`
+          INSERT INTO users (id, discord_id, username, is_profile_complete, locale)
+          VALUES
+            ('97000000-0000-0000-0000-000000000001', ${discordA}, 'user-a', true, 'en'),
+            ('97000000-0000-0000-0000-000000000002', ${discordB}, 'user-b', true, 'en'),
+            ('97000000-0000-0000-0000-000000000004', ${discordD}, 'user-d', true, 'en')
+        `;
+
+        // Insert team members (all in this team)
+        yield* sql`
+          INSERT INTO team_members (id, team_id, user_id, active)
+          VALUES
+            ('97000000-0000-0000-0001-000000000001', ${team.id}, '97000000-0000-0000-0000-000000000001', true),
+            ('97000000-0000-0000-0001-000000000002', ${team.id}, '97000000-0000-0000-0000-000000000002', true),
+            ('97000000-0000-0000-0001-000000000004', ${team.id}, '97000000-0000-0000-0000-000000000004', true)
+        `;
+
+        // Roster membership:
+        //   rosterX: member A, member B
+        //   rosterY: member B (DISTINCT test), member A (also in X → union)
+        //   rosterInactive: member D (excluded because the roster is inactive)
+        yield* sql`
+          INSERT INTO roster_members (roster_id, team_member_id)
+          VALUES
+            (${rosterX.id}, '97000000-0000-0000-0001-000000000001'),
+            (${rosterX.id}, '97000000-0000-0000-0001-000000000002'),
+            (${rosterY.id}, '97000000-0000-0000-0001-000000000002'),
+            (${rosterY.id}, '97000000-0000-0000-0001-000000000001'),
+            (${rosterInactive.id}, '97000000-0000-0000-0001-000000000004')
+        `;
+
+        // ---- Run query ----
+        const result = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findExpectedRoleHolders(team.id, sharedRoleId)),
+        );
+
+        const returnedDiscordIds = result.map((r) => r.discord_user_id);
+
+        // A must be returned (in rosterX and rosterY — via union)
+        expect(returnedDiscordIds).toContain(discordA);
+        // B must be returned (in both rosterX and rosterY — DISTINCT ensures once)
+        expect(returnedDiscordIds).toContain(discordB);
+
+        // DISTINCT: B appears exactly once despite being in two rosters
+        expect(
+          returnedDiscordIds.filter((id) => id === discordB).length,
+          'B must appear exactly once (DISTINCT across rosters)',
+        ).toBe(1);
+
+        // D must NOT be returned (only in the inactive roster)
+        expect(returnedDiscordIds).not.toContain(discordD);
+
+        // Exactly A and B (2 members) — DISTINCT union of rosterX ∪ rosterY, active only
+        expect(new Set(returnedDiscordIds).size).toBe(2);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+});

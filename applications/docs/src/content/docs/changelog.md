@@ -25,6 +25,16 @@ Members can now ask the bot to summarize recent conversation in any channel or t
 - If the AI is temporarily unavailable the bot says so rather than showing a partial result.
 - The command is available in English and Czech (`/shrnout`). No additional configuration or permissions are needed — any member with access to the channel can use it.
 
+## 2026-06-28 — Fix: "Sync roster roles with Discord" now removes extras too
+
+The team-wide roster role sync button now performs a full bidirectional reconcile — it re-adds missing members AND removes the roster Discord role from anyone who is no longer an active member of any roster sharing that role.
+
+- Previously the sync was add-only; former members who were removed from a roster kept their Discord role until it was cleared manually.
+- The reconcile reads the live list of Discord role holders, computes the union of active roster members across all rosters that share a given role, and removes anyone present in Discord but absent from the union.
+- The sync is **fail-closed**: if the bot cannot read the current guild member list for a roster, it skips the removal step for that roster so no legitimate member is accidentally stripped.
+- The button label is updated to **Sync roster roles with Discord** to reflect the bidirectional behaviour.
+- Requires the **roster:manage** permission (Captain or Admin).
+
 ## 2026-06-27 — New: team-wide "Re-sync roster role members" tool
 
 Admins and captains can now re-sync Discord role membership across all rosters at once, without visiting each roster individually.

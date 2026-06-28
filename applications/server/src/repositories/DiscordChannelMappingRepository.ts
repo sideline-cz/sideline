@@ -1,10 +1,12 @@
 import {
+  ChannelRpcModels,
   ChannelSyncEvent,
   Discord,
   DiscordChannelMapping,
   GroupModel,
   RosterModel,
   Team,
+  TeamMember,
 } from '@sideline/domain';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -113,6 +115,20 @@ const SaveClaimThreadInput = Schema.Struct({
 
 class CountRow extends Schema.Class<CountRow>('CountRow')({
   count: Schema.Number,
+}) {}
+
+export class RosterRoleReconcileTargetRow extends Schema.Class<RosterRoleReconcileTargetRow>(
+  'RosterRoleReconcileTargetRow',
+)({
+  roster_id: RosterModel.RosterId,
+  team_id: Team.TeamId,
+  guild_id: Discord.Snowflake,
+  discord_role_id: Discord.Snowflake,
+}) {}
+
+class ExpectedRoleHolderRow extends Schema.Class<ExpectedRoleHolderRow>('ExpectedRoleHolderRow')({
+  team_member_id: TeamMember.TeamMemberId,
+  discord_user_id: Discord.Snowflake,
 }) {}
 
 const make = Effect.gen(function* () {
@@ -336,6 +352,10 @@ const make = Effect.gen(function* () {
   const decodeGroupsMissingRole = Schema.decodeUnknownEffect(Schema.Array(GroupMissingRoleRow));
   const decodeRostersMissingRole = Schema.decodeUnknownEffect(Schema.Array(RosterMissingRoleRow));
   const decodeCountRow = Schema.decodeUnknownEffect(Schema.Array(CountRow));
+  const decodeRoleReconcileTargets = Schema.decodeUnknownEffect(
+    Schema.Array(RosterRoleReconcileTargetRow),
+  );
+  const decodeExpectedRoleHolders = Schema.decodeUnknownEffect(Schema.Array(ExpectedRoleHolderRow));
 
   const findGroupsMissingRole = (teamId: Option.Option<Team.TeamId>, limit: number) =>
     sql`
@@ -394,6 +414,75 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  const findActiveRoleIdsForReconcile = (teamId: Team.TeamId, limit: number) =>
+    sql`
+      SELECT m.discord_role_id,
+             MIN(r.id::text)::uuid AS roster_id,
+             r.team_id,
+             t.guild_id
+      FROM rosters r
+      JOIN discord_channel_mappings m ON m.team_id = r.team_id AND m.roster_id = r.id::text
+      JOIN teams t ON t.id = r.team_id
+      WHERE r.team_id = ${teamId}::uuid
+        AND r.active = true
+        AND m.discord_role_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM channel_sync_events e
+          WHERE e.event_type = 'roster_role_reconcile'
+            AND e.processed_at IS NULL
+            AND e.discord_role_id = m.discord_role_id
+        )
+      GROUP BY m.discord_role_id, r.team_id, t.guild_id
+      ORDER BY m.discord_role_id
+      LIMIT ${limit}
+    `.pipe(Effect.flatMap(decodeRoleReconcileTargets), catchSqlErrors);
+
+  const countActiveRoleIdsForReconcile = (teamId: Team.TeamId) =>
+    sql`
+      SELECT COUNT(DISTINCT m.discord_role_id)::int AS count
+      FROM rosters r
+      JOIN discord_channel_mappings m ON m.team_id = r.team_id AND m.roster_id = r.id::text
+      WHERE r.team_id = ${teamId}::uuid
+        AND r.active = true
+        AND m.discord_role_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM channel_sync_events e
+          WHERE e.event_type = 'roster_role_reconcile'
+            AND e.processed_at IS NULL
+            AND e.discord_role_id = m.discord_role_id
+        )
+    `.pipe(
+      Effect.flatMap(decodeCountRow),
+      Effect.map((rows) => rows[0]?.count ?? 0),
+      catchSqlErrors,
+    );
+
+  const findExpectedRoleHolders = (teamId: Team.TeamId, discordRoleId: Discord.Snowflake) =>
+    sql`
+      SELECT DISTINCT tm.id AS team_member_id, u.discord_id AS discord_user_id
+      FROM rosters r
+      JOIN discord_channel_mappings m ON m.team_id = r.team_id AND m.roster_id = r.id::text
+      JOIN roster_members rmb ON rmb.roster_id = r.id
+      JOIN team_members tm ON tm.id = rmb.team_member_id
+      JOIN users u ON u.id = tm.user_id
+      WHERE r.team_id = ${teamId}::uuid
+        AND r.active = true
+        AND m.discord_role_id = ${discordRoleId}
+        AND u.discord_id IS NOT NULL
+    `.pipe(
+      Effect.flatMap(decodeExpectedRoleHolders),
+      Effect.map((rows) =>
+        rows.map(
+          (row) =>
+            new ChannelRpcModels.RosterMemberDiscord({
+              team_member_id: row.team_member_id,
+              discord_user_id: row.discord_user_id,
+            }),
+        ),
+      ),
+      catchSqlErrors,
+    );
+
   const findClaimThread = (teamId: Team.TeamId, groupId: GroupModel.GroupId) =>
     _findClaimThread({ team_id: teamId, group_id: groupId }).pipe(
       Effect.map(Option.flatMap((row) => row.claim_thread_id)),
@@ -431,6 +520,9 @@ const make = Effect.gen(function* () {
     findGroupsMissingRole,
     findActiveRostersWithRole,
     countActiveRostersWithRole,
+    findActiveRoleIdsForReconcile,
+    countActiveRoleIdsForReconcile,
+    findExpectedRoleHolders,
     findClaimThread,
     saveClaimThreadIfAbsent,
     clearClaimThread,
