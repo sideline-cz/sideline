@@ -1,5 +1,53 @@
 # @sideline/bot
 
+## 0.24.1
+
+### Patch Changes
+
+- [#440](https://github.com/maxa-ondrej/sideline/pull/440) [`64488ad`](https://github.com/maxa-ondrej/sideline/commit/64488ad91e4d3859fe79b3ad4900564bda827298) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix: backfill members into existing Discord group roles on channel-created
+
+  The group channel-created handler provisioned or reused a Discord role but never
+  re-added existing members to it — the same gap that was fixed for rosters. When a
+  group's Discord role already existed, the handler logged "skipped" and added no
+  one, so members who joined before the role existed (or were dropped by a past sync
+  failure) never regained access.
+
+  The handler now resolves a single role id across all branches and then runs one
+  shared, idempotent member-backfill step (retry-while-not-permanent, per-member
+  failure isolation, concurrency 1), mirroring the roster handler. Backfill is
+  descendant-aware: a group's role includes members of the group plus all descendant
+  subgroups, matching how adding a member emits `member_added` for the group and
+  every ancestor. Adds a team-scoped `Channel/GetGroupMembers` RPC backed by a
+  recursive descendant query. No database migration.
+
+- [#443](https://github.com/maxa-ondrej/sideline/pull/443) [`0bae4c3`](https://github.com/maxa-ondrej/sideline/commit/0bae4c302b4114adb20e476d5ed2472b7ddb374b) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix: "Sync roster roles with Discord" button now also removes extras
+
+  The existing team-wide "Sync roster roles with Discord" button (formerly
+  labelled "Re-sync roster role members") now performs a bidirectional
+  reconcile: it re-adds roster members who are missing their Discord role
+  AND removes the roster Discord role from users who are no longer active
+  members of any roster that shares that role.
+
+  Implementation details:
+  - A new `roster_role_reconcile` channel-sync event is emitted once per
+    active roster role when the sync is triggered and is processed
+    asynchronously by the bot.
+  - The bot reads the live list of Discord role holders (paginated),
+    computes the union of active roster members across all rosters sharing
+    that role, diffs the two sets, and removes anyone in the holder set but
+    not in the union set.
+  - Removal is retried on transient Discord errors. The bot is fail-closed:
+    if the guild member list cannot be read, no removals are performed so
+    legitimate members are never accidentally stripped.
+  - A new database migration extends the channel-sync event-type CHECK
+    constraint to include `roster_role_reconcile`.
+  - The `roster_backfillRoles` / `roster_backfillRolesHelp` i18n keys are
+    updated in both English and Czech to reflect the two-way sync.
+
+- Updated dependencies [[`64488ad`](https://github.com/maxa-ondrej/sideline/commit/64488ad91e4d3859fe79b3ad4900564bda827298), [`0bae4c3`](https://github.com/maxa-ondrej/sideline/commit/0bae4c302b4114adb20e476d5ed2472b7ddb374b), [`defddbd`](https://github.com/maxa-ondrej/sideline/commit/defddbd3ce5650450753aa21c3cc320525ecd815)]:
+  - @sideline/domain@0.31.0
+  - @sideline/i18n@0.16.0
+
 ## 0.24.0
 
 ### Minor Changes
