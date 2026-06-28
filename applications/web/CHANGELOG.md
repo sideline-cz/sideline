@@ -1,5 +1,48 @@
 # @sideline/web
 
+## 0.25.0
+
+### Minor Changes
+
+- [#442](https://github.com/maxa-ondrej/sideline/pull/442) [`defddbd`](https://github.com/maxa-ondrej/sideline/commit/defddbd3ce5650450753aa21c3cc320525ecd815) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - feat: rework RSVP reminder notifications with missed-RSVP threshold
+
+  RSVP reminders now only notify built-in "Player" role members whose consecutive
+  missed-RSVP streak is below a per-team configurable threshold (`max_missed_rsvps`,
+  default 4). A `missed_rsvps` counter on `team_members` increments when an event
+  starts and an invited Player hadn't responded; it resets to 0 on any RSVP response
+  (both via the web UI and Discord buttons). Captains can adjust the threshold in team
+  settings.
+
+### Patch Changes
+
+- [#443](https://github.com/maxa-ondrej/sideline/pull/443) [`0bae4c3`](https://github.com/maxa-ondrej/sideline/commit/0bae4c302b4114adb20e476d5ed2472b7ddb374b) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix: "Sync roster roles with Discord" button now also removes extras
+
+  The existing team-wide "Sync roster roles with Discord" button (formerly
+  labelled "Re-sync roster role members") now performs a bidirectional
+  reconcile: it re-adds roster members who are missing their Discord role
+  AND removes the roster Discord role from users who are no longer active
+  members of any roster that shares that role.
+
+  Implementation details:
+  - A new `roster_role_reconcile` channel-sync event is emitted once per
+    active roster role when the sync is triggered and is processed
+    asynchronously by the bot.
+  - The bot reads the live list of Discord role holders (paginated),
+    computes the union of active roster members across all rosters sharing
+    that role, diffs the two sets, and removes anyone in the holder set but
+    not in the union set.
+  - Removal is retried on transient Discord errors. The bot is fail-closed:
+    if the guild member list cannot be read, no removals are performed so
+    legitimate members are never accidentally stripped.
+  - A new database migration extends the channel-sync event-type CHECK
+    constraint to include `roster_role_reconcile`.
+  - The `roster_backfillRoles` / `roster_backfillRolesHelp` i18n keys are
+    updated in both English and Czech to reflect the two-way sync.
+
+- Updated dependencies [[`64488ad`](https://github.com/maxa-ondrej/sideline/commit/64488ad91e4d3859fe79b3ad4900564bda827298), [`0bae4c3`](https://github.com/maxa-ondrej/sideline/commit/0bae4c302b4114adb20e476d5ed2472b7ddb374b), [`defddbd`](https://github.com/maxa-ondrej/sideline/commit/defddbd3ce5650450753aa21c3cc320525ecd815)]:
+  - @sideline/domain@0.31.0
+  - @sideline/i18n@0.16.0
+
 ## 0.24.2
 
 ### Patch Changes
