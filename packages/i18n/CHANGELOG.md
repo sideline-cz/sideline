@@ -1,5 +1,13 @@
 # @sideline/i18n
 
+## 0.16.1
+
+### Patch Changes
+
+- [#444](https://github.com/maxa-ondrej/sideline/pull/444) [`a20acad`](https://github.com/maxa-ondrej/sideline/commit/a20acad5dd92081758ce5ae070556f01735d413d) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add a "Who voted?" button to the `/poll` public board
+
+  Members can now click **👥 Who voted?** on a poll (open or closed) to get an ephemeral message listing each option with the people who voted for it, rendered as `Name (@mention)` without pinging anyone. Backed by a new `Poll/GetPollVoters` RPC and a team-scoped `findPollVoters` query that returns the true per-option vote counts (the displayed voter list is capped at 60 per option, with the remainder shown as "…and N more"). Voter identities are visible to all team members.
+
 ## 0.16.0
 
 ### Minor Changes
