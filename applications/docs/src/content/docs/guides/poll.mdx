@@ -62,13 +62,28 @@ Who can add options depends on the `allowed_role` setting:
 
 Duplicate labels (case-insensitive) and labels longer than 80 characters are rejected. The poll can hold at most 10 options in total.
 
+## Seeing who voted
+
+Any team member can see who voted for each option by clicking **👥 Who voted?** on the poll embed. The button is available on both open and closed polls.
+
+The bot replies with a private (ephemeral) message — visible only to you — that lists each option with:
+
+- The option label and its current vote count.
+- The names of members who voted for it, formatted as `Name (@mention)` (no actual Discord pings are sent).
+
+If more than 60 people voted for the same option, the list shows the first 60 voters and a "…and N more" note.
+
+<Aside type="note" title="Private view">
+  The voter breakdown is always ephemeral — only you see it after clicking. This lets captains review results without broadcasting them to the channel.
+</Aside>
+
 ## Closing a poll
 
 Members with the `poll:manage` permission (Admin and Captain by default) can close a poll by clicking **🔒 Close poll** on the embed.
 
 - Closing is permanent — the poll can no longer receive votes or new options.
 - The embed updates to show a grey "closed" state with the final results, including the winner (or a tie/empty notice).
-- The vote and close buttons are disabled on closed polls.
+- The vote and close buttons are removed; the **👥 Who voted?** button remains so members can still inspect the final voter breakdown.
 
 <Aside type="note" title="Lazy deadline close">
   If you set a deadline, the poll does not close automatically on a timer. Instead, it closes on the next interaction (vote or add option attempt) after the deadline has passed. The interacting member will see a "poll has closed" notice.

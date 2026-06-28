@@ -1201,3 +1201,226 @@ describe('Poll/GetPollView RPC', () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Poll/GetPollVoters RPC (TDD mode — implementation pending)
+// ---------------------------------------------------------------------------
+
+describe('Poll/GetPollVoters RPC', () => {
+  itEffect.effect('unknown guild → PollGuildNotFound', () =>
+    callRpc('Poll/GetPollVoters', {
+      guild_id: UNKNOWN_GUILD_ID,
+      discord_user_id: MEMBER_DISCORD_ID,
+      poll_id: POLL_ID,
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('PollGuildNotFound');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect('non-member → PollNotMember', () =>
+    callRpc('Poll/GetPollVoters', {
+      guild_id: GUILD_ID,
+      discord_user_id: NON_MEMBER_DISCORD_ID,
+      poll_id: POLL_ID,
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('PollNotMember');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect(
+    'member + existing poll → Option.some(PollVotersView), handler forwards resolved team_id',
+    () => {
+      // Capture the args that findPollVoters is called with to verify the handler
+      // passes the team resolved from guild_id — not a raw value from the request.
+      const findPollVotersCalls: Array<{ pollId: Poll.PollId; teamId: Team.TeamId }> = [];
+
+      const MockPollsRepoWithVoters = Layer.succeed(PollsRepository, {
+        createPoll: () => Effect.die(new Error('Not used')),
+        saveMessageId: () => Effect.void,
+        findPollView: () => Effect.succeed(Option.none()),
+        castVote: () => Effect.die(new Error('Not used')),
+        addOption: () => Effect.die(new Error('Not used')),
+        closePoll: () => Effect.die(new Error('Not used')),
+        findPollVoters: (pollId: Poll.PollId, teamId: Team.TeamId) => {
+          findPollVotersCalls.push({ pollId, teamId });
+          return Effect.succeed(
+            Option.some(
+              new PollRpcModels.PollVotersView({
+                poll_id: POLL_ID,
+                question: 'Test question?',
+                status: 'open',
+                total_votes: 2,
+                options: [
+                  new PollRpcModels.PollOptionVoters({
+                    option_id: OPTION_ID_A,
+                    label: 'Option A',
+                    position: 0,
+                    vote_count: 2,
+                    voters: [
+                      new PollRpcModels.PollVoter({
+                        discord_id: Option.some(MEMBER_DISCORD_ID),
+                        name: Option.none(),
+                        nickname: Option.none(),
+                        display_name: Option.none(),
+                        username: Option.some('member-user'),
+                      }),
+                    ],
+                  }),
+                ],
+              }),
+            ),
+          );
+        },
+      } as any);
+
+      const layerWithVoters = PollsRpcLive.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            MockTeamsRepository,
+            MockTeamMembersRepository,
+            MockTeamSettingsRepository,
+            MockPollsRepoWithVoters,
+          ),
+        ),
+      );
+
+      return callRpc('Poll/GetPollVoters', {
+        guild_id: GUILD_ID,
+        discord_user_id: MEMBER_DISCORD_ID,
+        poll_id: POLL_ID,
+      }).pipe(
+        Effect.provide(layerWithVoters),
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(Option.isSome(result)).toBe(true);
+            if (Option.isSome(result)) {
+              const votersView = result.value as PollRpcModels.PollVotersView;
+              expect(votersView).toBeInstanceOf(PollRpcModels.PollVotersView);
+              expect(votersView.total_votes).toBe(2);
+            }
+            // Handler must have called findPollVoters with the team id resolved from guild_id
+            expect(findPollVotersCalls).toHaveLength(1);
+            expect(findPollVotersCalls[0]?.teamId).toBe(TEAM_ID);
+            expect(findPollVotersCalls[0]?.pollId).toBe(POLL_ID);
+          }),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  itEffect.effect('missing poll → Option.none()', () => {
+    const MockPollsRepoMissingPoll = Layer.succeed(PollsRepository, {
+      createPoll: () => Effect.die(new Error('Not used')),
+      saveMessageId: () => Effect.void,
+      findPollView: () => Effect.succeed(Option.none()),
+      castVote: () => Effect.die(new Error('Not used')),
+      addOption: () => Effect.die(new Error('Not used')),
+      closePoll: () => Effect.die(new Error('Not used')),
+      findPollVoters: (_pollId: Poll.PollId, _teamId: Team.TeamId) => Effect.succeed(Option.none()),
+    } as any);
+
+    const layerMissingPoll = PollsRpcLive.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          MockTeamsRepository,
+          MockTeamMembersRepository,
+          MockTeamSettingsRepository,
+          MockPollsRepoMissingPoll,
+        ),
+      ),
+    );
+
+    const NON_EXISTENT_POLL_ID = '00000000-0000-0000-0000-eeeeeeeeeeee' as Poll.PollId;
+    return callRpc('Poll/GetPollVoters', {
+      guild_id: GUILD_ID,
+      discord_user_id: MEMBER_DISCORD_ID,
+      poll_id: NON_EXISTENT_POLL_ID,
+    }).pipe(
+      Effect.provide(layerMissingPoll),
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(Option.isNone(result)).toBe(true);
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+
+  itEffect.effect('other-team poll for resolved guild → Option.none (IDOR)', () => {
+    // The repo is scoped by team_id; a poll belonging to another team returns Option.none.
+    // The mock deliberately returns Option.some(view) for the KNOWN poll (POLL_ID + TEAM_ID)
+    // and Option.none() for any other combination — proving the handler threads team_id correctly.
+    const OTHER_TEAM_POLL_ID = '00000000-0000-0000-0000-000000000099' as Poll.PollId;
+
+    const MockPollsRepoOtherTeam = Layer.succeed(PollsRepository, {
+      createPoll: () => Effect.die(new Error('Not used')),
+      saveMessageId: () => Effect.void,
+      findPollView: () => Effect.succeed(Option.none()),
+      castVote: () => Effect.die(new Error('Not used')),
+      addOption: () => Effect.die(new Error('Not used')),
+      closePoll: () => Effect.die(new Error('Not used')),
+      findPollVoters: (pollId: Poll.PollId, teamId: Team.TeamId) => {
+        // Only return data for the known poll scoped to the correct team
+        if (pollId === POLL_ID && teamId === TEAM_ID) {
+          return Effect.succeed(
+            Option.some(
+              new PollRpcModels.PollVotersView({
+                poll_id: POLL_ID,
+                question: 'Test question?',
+                status: 'open',
+                total_votes: 0,
+                options: [],
+              }),
+            ),
+          );
+        }
+        // Cross-team poll: returns none (IDOR protection)
+        return Effect.succeed(Option.none());
+      },
+    } as any);
+
+    const layerOtherTeam = PollsRpcLive.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          MockTeamsRepository,
+          MockTeamMembersRepository,
+          MockTeamSettingsRepository,
+          MockPollsRepoOtherTeam,
+        ),
+      ),
+    );
+
+    return callRpc('Poll/GetPollVoters', {
+      guild_id: GUILD_ID,
+      discord_user_id: MEMBER_DISCORD_ID,
+      poll_id: OTHER_TEAM_POLL_ID,
+    }).pipe(
+      Effect.provide(layerOtherTeam),
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(Option.isNone(result)).toBe(true);
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+});

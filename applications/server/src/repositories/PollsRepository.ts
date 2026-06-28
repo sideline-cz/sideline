@@ -762,6 +762,165 @@ const make = Effect.gen(function* () {
       ),
     ).pipe(catchSqlErrors);
 
+  // ---- findPollVoters ----
+
+  class PollVoterRow extends Schema.Class<PollVoterRow>('PollVoterRow')({
+    poll_id: Poll.PollId,
+    question: Schema.String,
+    status: Poll.PollStatus,
+    total_votes: Schema.Number,
+    option_id: Poll.PollOptionId,
+    label: Schema.String,
+    position: Schema.OptionFromNullOr(Schema.Number),
+    vote_count: Schema.Number,
+    // Voter columns are nullable: NULL when an option has zero votes (LEFT JOIN).
+    team_member_id: Schema.OptionFromNullOr(TeamMember.TeamMemberId),
+    discord_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    name: Schema.OptionFromNullOr(Schema.String),
+    username: Schema.OptionFromNullOr(Schema.String),
+    nickname: Schema.OptionFromNullOr(Schema.String),
+    display_name: Schema.OptionFromNullOr(Schema.String),
+  }) {}
+
+  const findPollVotersQuery = SqlSchema.findAll({
+    Request: Schema.Struct({
+      poll_id: Poll.PollId,
+      team_id: Team.TeamId,
+    }),
+    Result: PollVoterRow,
+    execute: (input) => sql`
+      WITH
+        poll_info AS (
+          SELECT p.id, p.question, p.status,
+                 COUNT(DISTINCT pv.team_member_id)::int AS total_votes
+          FROM polls p
+          LEFT JOIN poll_votes pv ON pv.poll_id = p.id
+          WHERE p.id = ${input.poll_id} AND p.team_id = ${input.team_id}
+          GROUP BY p.id
+        ),
+        option_counts AS (
+          SELECT po.id AS option_id,
+                 COUNT(DISTINCT pv.team_member_id)::int AS vote_count
+          FROM poll_options po
+          LEFT JOIN poll_votes pv ON pv.option_id = po.id
+          WHERE po.poll_id = ${input.poll_id}
+          GROUP BY po.id
+        ),
+        ranked_voters AS (
+          SELECT
+            pv.option_id,
+            pv.team_member_id,
+            MIN(pv.created_at) AS first_voted_at,
+            ROW_NUMBER() OVER (
+              PARTITION BY pv.option_id
+              ORDER BY MIN(pv.created_at) ASC
+            ) AS rn
+          FROM poll_votes pv
+          WHERE pv.poll_id = ${input.poll_id}
+          GROUP BY pv.option_id, pv.team_member_id
+        )
+      SELECT
+        pi.id       AS poll_id,
+        pi.question,
+        pi.status,
+        pi.total_votes,
+        po.id       AS option_id,
+        po.label,
+        po.position,
+        oc.vote_count,
+        rv.team_member_id,
+        u.discord_id,
+        u.name,
+        u.username,
+        u.discord_nickname  AS nickname,
+        u.discord_display_name AS display_name
+      FROM poll_info pi
+      JOIN poll_options po ON po.poll_id = pi.id
+      JOIN option_counts oc ON oc.option_id = po.id
+      LEFT JOIN ranked_voters rv ON rv.option_id = po.id AND rv.rn <= 60
+      LEFT JOIN team_members tm ON tm.id = rv.team_member_id
+      LEFT JOIN users u ON u.id = tm.user_id
+      ORDER BY po.position ASC NULLS LAST, rv.first_voted_at ASC NULLS LAST
+    `,
+  });
+
+  const buildPollVotersView = (
+    rows: ReadonlyArray<PollVoterRow>,
+  ): Effect.Effect<PollRpcModels.PollVotersView> => {
+    const firstRow = rows[0];
+    if (firstRow === undefined) {
+      return LogicError.die('poll voters view has no rows but buildPollVotersView was called');
+    }
+
+    // Group rows by option_id, preserving order (rows are already sorted by position ASC NULLS LAST).
+    const optionMap = new Map<
+      Poll.PollOptionId,
+      {
+        option_id: Poll.PollOptionId;
+        label: string;
+        position: number;
+        vote_count: number;
+        voters: PollRpcModels.PollVoter[];
+      }
+    >();
+
+    for (const row of rows) {
+      let entry = optionMap.get(row.option_id);
+      if (entry === undefined) {
+        entry = {
+          option_id: row.option_id,
+          label: row.label,
+          position: Option.getOrElse(row.position, () => 0),
+          vote_count: row.vote_count,
+          voters: [],
+        };
+        optionMap.set(row.option_id, entry);
+      }
+      // Only add a voter when this row represents an actual voter (not a zero-vote LEFT JOIN null).
+      if (Option.isSome(row.team_member_id)) {
+        entry.voters.push(
+          new PollRpcModels.PollVoter({
+            discord_id: row.discord_id,
+            name: row.name,
+            username: row.username,
+            nickname: row.nickname,
+            display_name: row.display_name,
+          }),
+        );
+      }
+    }
+
+    const options = [...optionMap.values()].map(
+      (entry) =>
+        new PollRpcModels.PollOptionVoters({
+          option_id: entry.option_id,
+          label: entry.label,
+          position: entry.position,
+          vote_count: entry.vote_count,
+          voters: entry.voters,
+        }),
+    );
+
+    return Effect.succeed(
+      new PollRpcModels.PollVotersView({
+        poll_id: firstRow.poll_id,
+        question: firstRow.question,
+        status: firstRow.status,
+        total_votes: firstRow.total_votes,
+        options,
+      }),
+    );
+  };
+
+  const findPollVoters = (pollId: Poll.PollId, teamId: Team.TeamId) =>
+    findPollVotersQuery({ poll_id: pollId, team_id: teamId }).pipe(
+      catchSqlErrors,
+      Effect.flatMap((rows) => {
+        if (rows.length === 0) return Effect.succeed(Option.none<PollRpcModels.PollVotersView>());
+        return buildPollVotersView(rows).pipe(Effect.map(Option.some));
+      }),
+    );
+
   return {
     createPoll,
     saveMessageId,
@@ -769,6 +928,7 @@ const make = Effect.gen(function* () {
     castVote,
     addOption,
     closePoll,
+    findPollVoters,
   };
 });
 

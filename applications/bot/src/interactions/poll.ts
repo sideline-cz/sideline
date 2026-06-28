@@ -9,6 +9,7 @@ import { guildLocale, type Locale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { buildPollEmbed } from '~/rest/poll/buildPollEmbed.js';
 import { buildPollPrivateView } from '~/rest/poll/buildPollPrivateView.js';
+import { buildPollVotersView } from '~/rest/poll/buildPollVotersView.js';
 import { interactionUserId } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
@@ -828,4 +829,140 @@ export const PollCloseButton = Effect.Do.pipe(
 export const PollCloseButtonReg = Ix.messageComponent(
   Ix.idStartsWith('poll-close:'),
   PollCloseButton,
+);
+
+// ---------------------------------------------------------------------------
+// poll-voters:{pollId} button — shows ephemeral "Who voted?" view
+// ---------------------------------------------------------------------------
+
+export const PollVotersButton = Effect.Do.pipe(
+  Effect.tap(() =>
+    Metric.update(
+      Metric.withAttributes(discordInteractionsTotal, { interaction_type: 'button' }),
+      1,
+    ),
+  ),
+  Effect.bind('interaction', () => Interaction.asEffect()),
+  Effect.bind('rpc', () => SyncRpc.asEffect()),
+  Effect.bind('rest', () => DiscordREST.asEffect()),
+  Effect.flatMap(({ interaction, rpc, rest }) => {
+    const locale = userLocale(interaction);
+    const guildId = interaction.guild_id;
+    const discordUserIdOption = interactionUserId(interaction);
+    const customId = getCustomId(interaction);
+
+    // custom_id: poll-voters:{pollId}
+    const colonIdx = customId.indexOf(':');
+    const pollIdRaw = customId.slice(colonIdx + 1);
+
+    // Guard: DM-context interactions have no guild_id — return ephemeral error immediately.
+    if (guildId === undefined) {
+      return Effect.as(
+        Effect.forkDetach(
+          replyWebhook(
+            rest,
+            interaction,
+            { content: m.bot_poll_err_no_guild({}, { locale }) },
+            'Failed to update poll-voters no-guild response',
+          ),
+        ),
+        ephemeralDeferred,
+      );
+    }
+
+    if (Option.isNone(discordUserIdOption)) {
+      return Effect.as(
+        Effect.forkDetach(
+          replyWebhook(
+            rest,
+            interaction,
+            { content: m.bot_poll_err_not_member({}, { locale }) },
+            'Failed to update poll-voters no-user response',
+          ),
+        ),
+        ephemeralDeferred,
+      );
+    }
+
+    const discordUserId = discordUserIdOption.value;
+    const pollId = decodePollId(pollIdRaw);
+    const guild_id = decodeSnowflake(guildId);
+
+    const votersAndFollowUp = rpc['Poll/GetPollVoters']({
+      guild_id,
+      discord_user_id: discordUserId,
+      poll_id: pollId,
+    }).pipe(
+      Effect.flatMap((viewOption) =>
+        Option.match(viewOption, {
+          onNone: () =>
+            replyWebhook(
+              rest,
+              interaction,
+              { content: m.bot_poll_err_not_found({}, { locale }) },
+              'Failed to update poll-voters not-found response',
+            ),
+          onSome: (view) =>
+            replyWebhook(
+              rest,
+              interaction,
+              { ...buildPollVotersView(view, locale), allowed_mentions: { parse: [] } },
+              'Failed to update poll-voters view',
+            ),
+        }),
+      ),
+      Effect.catchTag('PollGuildNotFound', () =>
+        replyWebhook(
+          rest,
+          interaction,
+          { content: m.bot_poll_err_no_guild({}, { locale }) },
+          'Failed to update poll-voters guild-not-found response',
+        ),
+      ),
+      Effect.catchTag('PollNotMember', () =>
+        replyWebhook(
+          rest,
+          interaction,
+          { content: m.bot_poll_err_not_member({}, { locale }) },
+          'Failed to update poll-voters not-member response',
+        ),
+      ),
+      // RPC transport failure: resolve the deferred reply with a generic error instead of
+      // leaving the ephemeral spinner loading forever.
+      Effect.catchTag('RpcClientError', (e) =>
+        Effect.logError('Poll voters RPC failed', e).pipe(
+          Effect.flatMap(() =>
+            replyWebhook(
+              rest,
+              interaction,
+              { content: m.bot_poll_err_generic({}, { locale }) },
+              'Failed to update poll-voters RPC-error response',
+            ),
+          ),
+        ),
+      ),
+      // Defensive: a defect in the renderer (buildPollVotersView) would otherwise die in the
+      // forked fiber, leaving the ephemeral deferred blank. Resolve it with a generic error.
+      Effect.catchDefect((defect) =>
+        Effect.logError('Poll voters view defect', defect).pipe(
+          Effect.flatMap(() =>
+            replyWebhook(
+              rest,
+              interaction,
+              { content: m.bot_poll_err_generic({}, { locale }) },
+              'Failed to update poll-voters defect response',
+            ),
+          ),
+        ),
+      ),
+    );
+
+    return Effect.as(Effect.forkDetach(votersAndFollowUp), ephemeralDeferred);
+  }),
+  Effect.withSpan('interaction/poll-voters-button'),
+);
+
+export const PollVotersButtonReg = Ix.messageComponent(
+  Ix.idStartsWith('poll-voters:'),
+  PollVotersButton,
 );

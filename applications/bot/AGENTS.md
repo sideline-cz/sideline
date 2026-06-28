@@ -749,6 +749,14 @@ This pattern is used in:
 
 When building new embed functions that display user names, always use `formatName` for the bold name portion and follow this priority: bold name first, mention as parenthetical supplement.
 
+#### Total embed-text budget (the 6000-code-point cap)
+
+`EMBED_FIELD_VALUE_LIMIT` (1024, `src/rest/utils.ts`) caps a SINGLE field value, but it is NOT sufficient on its own. Discord rejects an embed whose **combined** text (title + description + every field name + every field value + footer) exceeds **6000 code points**. Any embed that fans out a variable number of fields from server data (e.g. one field per poll option, one per group) MUST guard the cumulative total, not just each field:
+
+1. **Count code points with `[...str].length`, never `str.length`.** Discord counts code points, so a `.length` measurement under-counts emoji and astral characters and lets a too-large embed through. Reference: the `cpLen` helper in `src/rest/poll/buildPollVotersView.ts`.
+2. **Track cumulative usage and collapse later fields once a headroom budget is exceeded.** Seed the running total with `title + footer`, then for each field add `name + value`; if the next field would push the total over a budget BELOW 6000 (`buildPollVotersView` uses `EMBED_TEXT_BUDGET = 5800` to leave room for the last field), emit a collapsed value (e.g. a count-only "…and N more") instead of the full list. Never assume the per-field 1024 limit alone keeps the embed valid.
+3. **When a server-side cap already hid rows** (see `applications/server/AGENTS.md` → "Capping a per-group child list while keeping the true count uncapped"), the "…and N more" suffix count MUST include BOTH the rows the field-length limit dropped AND the rows the server cap dropped: `hiddenByCap = vote_count - voters.length`, and the suffix count is `shownRemaining + hiddenByCap`. Use the uncapped count column from the RPC payload, never `voters.length`, as the source of truth for the displayed total.
+
 ### Discord Markdown Link Injection
 
 Whenever an embed/message renders a `[label](url)` Discord markdown link from user-supplied data, follow the canonical pattern in `src/rest/events/locationDisplay.ts`:

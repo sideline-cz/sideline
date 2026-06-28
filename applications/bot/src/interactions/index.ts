@@ -32,6 +32,7 @@ import {
   PollCloseButtonReg,
   PollOpenButtonReg,
   PollVoteButtonReg,
+  PollVotersButtonReg,
 } from './poll.js';
 import { RosterApproveButton, RosterDeclineButton } from './roster-approval.js';
 import { RsvpAddMessageButton, RsvpButton, RsvpClearMessageButton, RsvpModal } from './rsvp.js';
@@ -82,4 +83,5 @@ export const interactionBuilder = Ix.builder
   .add(PollVoteButtonReg)
   .add(PollAddButtonReg)
   .add(PollAddModalReg)
-  .add(PollCloseButtonReg);
+  .add(PollCloseButtonReg)
+  .add(PollVotersButtonReg);

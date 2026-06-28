@@ -2093,5 +2093,10 @@
   "bot_poll_err_generic": "Něco se nepovedlo. Zkus to prosím znovu.",
   "bot_poll_err_not_member": "Nejste členem tohoto týmu.",
   "bot_poll_err_not_found": "Tato anketa již neexistuje.",
-  "bot_poll_err_option_not_found": "Tato možnost již neexistuje."
+  "bot_poll_err_option_not_found": "Tato možnost již neexistuje.",
+  "bot_poll_voters_button": "👥 Kdo hlasoval?",
+  "bot_poll_voters_title": "👥 {question}",
+  "bot_poll_voters_none": "_Zatím nikdo_",
+  "bot_poll_voters_more": "…a {count} dalších",
+  "bot_poll_voters_footer": "Hlasovalo {total} lidí"
 }

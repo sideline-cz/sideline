@@ -227,7 +227,7 @@ describe('buildPollEmbed — row layout (aggregate fields)', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildPollEmbed — closed poll behavior', () => {
-  it('closed poll → zero components (no poll-vote:, no poll-open:, no poll-add:, no poll-close:)', () => {
+  it('closed poll → no poll-vote:, no poll-open:, no poll-add:, no poll-close: buttons; only poll-voters: remains', () => {
     const options = [
       makeOptionView('opt-a', 'Pizza', 0, 3),
       makeOptionView('opt-b', 'Sushi', 1, 1),
@@ -236,9 +236,16 @@ describe('buildPollEmbed — closed poll behavior', () => {
 
     const { components } = buildPollEmbed(view, locale);
 
-    // Closed board must have ZERO action rows (no buttons at all)
-    const allButtons = components.flatMap((row) => (row as any).components ?? []);
-    expect(allButtons).toHaveLength(0);
+    // Closed board must NOT have vote/open/add/close buttons
+    const allCustomIds = components
+      .flatMap((row) => (row as any).components ?? [])
+      .map((c: any) => c.custom_id as string);
+    expect(allCustomIds.every((id) => !id?.startsWith('poll-vote:'))).toBe(true);
+    expect(allCustomIds.every((id) => !id?.startsWith('poll-open:'))).toBe(true);
+    expect(allCustomIds.every((id) => !id?.startsWith('poll-add:'))).toBe(true);
+    expect(allCustomIds.every((id) => !id?.startsWith('poll-close:'))).toBe(true);
+    // But the voters button IS present
+    expect(allCustomIds.some((id) => id?.startsWith('poll-voters:'))).toBe(true);
   });
 
   it('closed poll → no poll-add: or poll-close: buttons', () => {

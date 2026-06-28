@@ -71,6 +71,36 @@ sql`INSERT INTO t (a, b) VALUES ${sql.join(',', false)(rows.map((r) => sql`(${r.
 
 Unit tests that mock the repository/emitter cannot catch this — the bug only surfaces against a real database. Cover multi-row inserts in DB-backed integration tests with at least 2 rows. Examples: `applications/server/src/repositories/ChannelSyncEventsRepository.ts`, `applications/server/src/repositories/EmailAttachmentsRepository.ts`.
 
+### Capping a per-group child list while keeping the true count uncapped
+
+When a query returns a parent with a bounded list of children per group (e.g. a poll option with at most N voters) but a downstream consumer still needs the **true** total per group, compute the total in a separate aggregate and cap the child rows with a `ROW_NUMBER()` window — never `LIMIT` the whole result set or slice the rows in application code. The cap and the count are two independent columns on the result.
+
+```sql
+WITH
+  option_counts AS (
+    -- TRUE per-option total (uncapped) — the consumer renders "…and N more" from this.
+    SELECT po.id AS option_id, COUNT(DISTINCT pv.team_member_id)::int AS vote_count
+    FROM poll_options po LEFT JOIN poll_votes pv ON pv.option_id = po.id
+    GROUP BY po.id
+  ),
+  ranked_voters AS (
+    SELECT pv.option_id, pv.team_member_id,
+           ROW_NUMBER() OVER (PARTITION BY pv.option_id ORDER BY MIN(pv.created_at) ASC) AS rn
+    FROM poll_votes pv GROUP BY pv.option_id, pv.team_member_id
+  )
+SELECT ..., oc.vote_count
+FROM poll_options po
+JOIN option_counts oc ON oc.option_id = po.id
+-- Cap the per-option voter rows; the JOIN to oc.vote_count stays uncapped.
+LEFT JOIN ranked_voters rv ON rv.option_id = po.id AND rv.rn <= 60
+```
+
+Rules:
+
+1. **The cap lives in the `JOIN ... AND rn <= <cap>` predicate, not in a `LIMIT`** — a `LIMIT` would cap the entire flattened result, not per group.
+2. **The uncapped count is a separate aggregate column** (`option_counts.vote_count`); the consumer derives the hidden remainder as `vote_count - <rows returned for that group>`. Reference: `PollsRepository.findPollVoters` (60-voter cap per option) and the bot's `buildPollVotersView` "…and N more" math (see `applications/bot/AGENTS.md` → "Total embed-text budget").
+3. **`LEFT JOIN` the capped child CTE** so a group with zero children still returns one row (with `Option.none()` child columns) and the count column is preserved.
+
 ### Repository Pattern
 
 Construct repositories by starting from `SqlClient.SqlClient.pipe(Effect.bindTo('sql'), ...)`. Use `Effect.bind` for effectful dependencies and `Effect.let` for pure method definitions. End with `Bind.remove` to strip internals.

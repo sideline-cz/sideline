@@ -316,6 +316,24 @@ const rpcHandlers = Effect.Do.pipe(
           ),
         ),
   ),
+  Effect.let(
+    'Poll/GetPollVoters',
+    ({ polls }) =>
+      ({
+        guild_id,
+        discord_user_id,
+        poll_id,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly discord_user_id: Discord.Snowflake;
+        readonly poll_id: Poll.PollId;
+      }) =>
+        Effect.Do.pipe(
+          Effect.bind('team', () => resolveTeamByGuild(guild_id)),
+          Effect.tap(({ team }) => resolveMember(discord_user_id, team.id)),
+          Effect.flatMap(({ team }) => polls.findPollVoters(poll_id, team.id)),
+        ),
+  ),
   Bind.remove('polls'),
   (handlers) => PollRpcGroup.PollRpcGroup.toLayer(handlers),
 );

@@ -20,6 +20,7 @@ import {
   PollTooFewOptions,
   PollTooManyOptions,
   PollView,
+  PollVotersView,
 } from './PollRpcModels.js';
 
 export const PollRpcGroup = RpcGroup.make(
@@ -107,6 +108,15 @@ export const PollRpcGroup = RpcGroup.make(
       poll_id: PollId,
     },
     success: Schema.OptionFromNullOr(PollView),
+    error: Schema.Union([PollGuildNotFound, PollNotMember]),
+  }),
+  Rpc.make('GetPollVoters', {
+    payload: {
+      guild_id: Discord.Snowflake,
+      discord_user_id: Discord.Snowflake,
+      poll_id: PollId,
+    },
+    success: Schema.OptionFromNullOr(PollVotersView),
     error: Schema.Union([PollGuildNotFound, PollNotMember]),
   }),
 ).prefix('Poll/');

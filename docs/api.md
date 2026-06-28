@@ -6754,6 +6754,28 @@ Handles the coach approval flow (approve/reject via Discord buttons) and the ema
 
 ---
 
+#### Poll
+
+Handles poll creation, voting, option management, closing, and voter lookup from Discord bot interactions.
+
+| Method | Payload / Returns | Description |
+|--------|---------|-------------|
+| `Poll/CreatePoll` | `guild_id`, `discord_user_id`, `discord_channel_id`, `question`, `options_raw`, `multiple`, `allowed_role_id`, `deadline_raw` → `PollView` | Creates a new poll. Errors: `PollGuildNotFound`, `PollNotMember`, `PollForbidden`, `PollTooFewOptions`, `PollTooManyOptions`, `PollDuplicateOption`, `PollOptionTooLong`, `PollInvalidDeadline`, `PollDeadlineInPast`. |
+| `Poll/SavePollMessageId` | `guild_id`, `poll_id`, `discord_message_id` | Persists the Discord message ID for the poll embed after posting. Errors: `PollGuildNotFound`, `PollNotFound`. |
+| `Poll/CastVote` | `guild_id`, `discord_user_id`, `poll_id`, `option_id` → `CastVoteResult` | Casts or retracts a vote on an option. On a single-choice poll, moves an existing vote. On a multiple-choice poll, toggles the option. Errors: `PollGuildNotFound`, `PollNotMember`, `PollNotFound`, `PollOptionNotFound`, `PollClosed`. |
+| `Poll/AddOption` | `guild_id`, `discord_user_id`, `poll_id`, `label`, `member_role_ids` → `AddOptionResult` | Adds a new option to an open poll. Permission check uses `member_role_ids` to determine if the invoker holds the `allowed_role`. Errors: `PollGuildNotFound`, `PollNotMember`, `PollNotFound`, `PollClosed`, `PollOptionLimitReached`, `PollDuplicateOption`, `PollOptionTooLong`, `PollAddOptionForbidden`. |
+| `Poll/ClosePoll` | `guild_id`, `discord_user_id`, `poll_id` → `PollView` | Closes a poll permanently. Errors: `PollGuildNotFound`, `PollNotMember`, `PollForbidden`, `PollNotFound`. |
+| `Poll/GetPollView` | `guild_id`, `discord_user_id`, `poll_id` → `PollView \| null` | Fetches the current view of a poll (or `null` when not found). Errors: `PollGuildNotFound`, `PollNotMember`. |
+| `Poll/GetPollVoters` | `guild_id`, `discord_user_id`, `poll_id` → `PollVotersView \| null` | Fetches a full voter breakdown for a poll, including per-option voter lists (server caps returned voters at 60 per option, ordered by first-vote time). Returns `null` when the poll is not found. Errors: `PollGuildNotFound`, `PollNotMember`. |
+
+`PollVotersView` fields: `poll_id`, `question`, `status` (`"open" | "closed"`), `total_votes`, `options: PollOptionVoters[]`.
+
+`PollOptionVoters` fields: `option_id`, `label`, `position`, `vote_count`, `voters: PollVoter[]` (≤ 60 entries per option).
+
+`PollVoter` fields: `discord_id`, `name`, `nickname`, `display_name`, `username` (all nullable `string | null`).
+
+---
+
 ## Error Reference
 
 The following table consolidates all error tags across all API groups.

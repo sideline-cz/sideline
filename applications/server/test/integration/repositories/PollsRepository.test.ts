@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Poll, Team, TeamMember, User } from '@sideline/domain';
+import { PollRpcModels } from '@sideline/domain';
 import { Effect, Layer, Option } from 'effect';
 import { beforeEach } from 'vitest';
 import { PollsRepository } from '~/repositories/PollsRepository.js';
@@ -1011,6 +1012,336 @@ describe('PollsRepository — findPollView', () => {
         // vote_count per option must be exact — NOT multiplied by total_votes
         expect(optAView?.vote_count).toBe(3);
         expect(optBView?.vote_count).toBe(2);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Tests — findPollVoters (TDD mode — implementation does not exist yet)
+// ---------------------------------------------------------------------------
+// NOTE: These tests reference repo.findPollVoters which is not yet implemented.
+// They will fail until the method is added to PollsRepository.
+// ---------------------------------------------------------------------------
+
+const findPollVoters = (pollId: Poll.PollId, teamId: Team.TeamId) =>
+  PollsRepository.asEffect().pipe(Effect.andThen((repo) => repo.findPollVoters(pollId, teamId)));
+
+describe('PollsRepository — findPollVoters', () => {
+  it.effect(
+    'groups voters by option; both vote_count and voters correct; total_votes = distinct participants',
+    () =>
+      Effect.gen(function* () {
+        const userId1 = yield* createUser('600000000000000001', 'voter-fv-1');
+        const userId2 = yield* createUser('600000000000000002', 'voter-fv-2');
+        const team = yield* createTeam('610000000000000001' as Discord.Snowflake, userId1);
+        const member1 = yield* addTeamMember(team.id, userId1);
+        const member2 = yield* addTeamMember(team.id, userId2);
+        const poll = yield* createPoll(
+          team.id,
+          team.guild_id,
+          '610000000000000010' as Discord.Snowflake,
+          member1.id,
+          ['Option A', 'Option B'],
+          false,
+        );
+
+        const optionA = poll.options[0].option_id;
+        const optionB = poll.options[1].option_id;
+
+        yield* castVote(poll.poll_id, optionA, member1.id, team.id);
+        yield* castVote(poll.poll_id, optionB, member2.id, team.id);
+
+        const result = yield* findPollVoters(poll.poll_id, team.id);
+        expect(Option.isSome(result)).toBe(true);
+        const view = Option.getOrThrow(result);
+
+        // Structural type check — view must be a proper PollVotersView instance
+        expect(view).toBeInstanceOf(PollRpcModels.PollVotersView);
+
+        // total_votes = 2 distinct participants
+        expect(view.total_votes).toBe(2);
+
+        const optA = view.options.find((o: any) => o.option_id === optionA);
+        const optB = view.options.find((o: any) => o.option_id === optionB);
+
+        expect(optA).toBeDefined();
+        expect(optB).toBeDefined();
+        expect(optA?.vote_count).toBe(1);
+        expect(optA?.voters).toHaveLength(1);
+        expect(optB?.vote_count).toBe(1);
+        expect(optB?.voters).toHaveLength(1);
+
+        // Each voter entry must be a proper PollVoter instance
+        const voterA = optA?.voters[0];
+        expect(voterA).toBeInstanceOf(PollRpcModels.PollVoter);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('zero-voter option → vote_count 0, voters []', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('600000000000000010', 'voter-fv-zero');
+      const team = yield* createTeam('611000000000000001' as Discord.Snowflake, userId);
+      const member = yield* addTeamMember(team.id, userId);
+      const poll = yield* createPoll(
+        team.id,
+        team.guild_id,
+        '611000000000000010' as Discord.Snowflake,
+        member.id,
+        ['Option A', 'Option B'],
+        false,
+      );
+
+      const optionA = poll.options[0].option_id;
+
+      // Only vote for option A; option B gets no votes
+      yield* castVote(poll.poll_id, optionA, member.id, team.id);
+
+      const result = yield* findPollVoters(poll.poll_id, team.id);
+      const view = Option.getOrThrow(result);
+
+      const optB = view.options.find((o: any) => o.option_id === poll.options[1].option_id);
+      expect(optB?.vote_count).toBe(0);
+      expect(optB?.voters).toHaveLength(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'multiple-choice: a member voting two options appears in both, counted once in total_votes',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('600000000000000020', 'voter-fv-multi');
+        const team = yield* createTeam('612000000000000001' as Discord.Snowflake, userId);
+        const member = yield* addTeamMember(team.id, userId);
+        const poll = yield* createPoll(
+          team.id,
+          team.guild_id,
+          '612000000000000010' as Discord.Snowflake,
+          member.id,
+          ['Option A', 'Option B'],
+          true, // multiple choice
+        );
+
+        const optionA = poll.options[0].option_id;
+        const optionB = poll.options[1].option_id;
+
+        // Single member votes for both options
+        yield* castVote(poll.poll_id, optionA, member.id, team.id);
+        yield* castVote(poll.poll_id, optionB, member.id, team.id);
+
+        const result = yield* findPollVoters(poll.poll_id, team.id);
+        const view = Option.getOrThrow(result);
+
+        // Member counted once in total_votes (distinct participants)
+        expect(view.total_votes).toBe(1);
+
+        // But the member appears in both options' voters lists
+        const optA = view.options.find((o: any) => o.option_id === optionA);
+        const optB = view.options.find((o: any) => o.option_id === optionB);
+        expect(optA?.voters).toHaveLength(1);
+        expect(optB?.voters).toHaveLength(1);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    '>60 voters in an option → voters.length capped at 60, vote_count equals true total (75)',
+    () =>
+      Effect.gen(function* () {
+        // We need 75 unique voters all voting for option A
+        const creatorUserId = yield* createUser('613000000000000000', 'creator-fv-cap');
+        const teamReal = yield* createTeam(
+          '614000000000000001' as Discord.Snowflake,
+          creatorUserId,
+        );
+        const creatorMember = yield* addTeamMember(teamReal.id, creatorUserId);
+        const poll = yield* createPoll(
+          teamReal.id,
+          teamReal.guild_id,
+          '614000000000000010' as Discord.Snowflake,
+          creatorMember.id,
+          ['Option A', 'Option B'],
+          false,
+        );
+
+        const optionA = poll.options[0].option_id;
+
+        // Create 75 voters and cast votes for option A
+        const memberIds: TeamMember.TeamMemberId[] = [];
+        for (let i = 1; i <= 75; i++) {
+          const discordId = `6130000000000${String(i).padStart(5, '0')}`;
+          const uid = yield* createUser(discordId, `cap-voter-${i}`);
+          const m = yield* addTeamMember(teamReal.id, uid);
+          memberIds.push(m.id);
+        }
+
+        // All 75 vote for option A
+        for (const memberId of memberIds) {
+          yield* castVote(poll.poll_id, optionA, memberId, teamReal.id);
+        }
+
+        const result = yield* findPollVoters(poll.poll_id, teamReal.id);
+        const view = Option.getOrThrow(result);
+
+        const optA = view.options.find((o: any) => o.option_id === optionA);
+        expect(optA).toBeDefined();
+        // true vote_count = 75 (all voters)
+        expect(optA?.vote_count).toBe(75);
+        // voters list capped at 60
+        expect(optA?.voters).toHaveLength(60);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'voter name parts mapped from users columns; NULL discord_nickname/name → Option.none',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('620000000000000001', 'named-voter-fv');
+        const team = yield* createTeam('621000000000000001' as Discord.Snowflake, userId);
+        const member = yield* addTeamMember(team.id, userId);
+        const poll = yield* createPoll(
+          team.id,
+          team.guild_id,
+          '621000000000000010' as Discord.Snowflake,
+          member.id,
+          ['Option A', 'Option B'],
+          false,
+        );
+
+        const optionA = poll.options[0].option_id;
+        yield* castVote(poll.poll_id, optionA, member.id, team.id);
+
+        const result = yield* findPollVoters(poll.poll_id, team.id);
+        const view = Option.getOrThrow(result);
+
+        const optA = view.options.find((o: any) => o.option_id === optionA);
+        expect(optA?.voters).toHaveLength(1);
+
+        const voter = optA?.voters[0];
+        expect(voter).toBeDefined();
+        if (voter === undefined) return;
+        // discord_id must be present and equal the seeded value
+        expect(Option.isSome(voter.discord_id)).toBe(true);
+        if (Option.isSome(voter.discord_id)) {
+          expect(voter.discord_id.value).toBe('620000000000000001');
+        }
+        // nickname is NULL → Option.none
+        expect(Option.isNone(voter.nickname)).toBe(true);
+        // username should be 'named-voter-fv'
+        expect(Option.isSome(voter.username)).toBe(true);
+        if (Option.isSome(voter.username)) {
+          expect(voter.username.value).toBe('named-voter-fv');
+        }
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('wrong team → Option.none (team scoping)', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('630000000000000001', 'scoping-fv');
+      const team = yield* createTeam('631000000000000001' as Discord.Snowflake, userId);
+      const member = yield* addTeamMember(team.id, userId);
+      const poll = yield* createPoll(
+        team.id,
+        team.guild_id,
+        '631000000000000010' as Discord.Snowflake,
+        member.id,
+        ['Option A', 'Option B'],
+        false,
+      );
+
+      const optionA = poll.options[0].option_id;
+      yield* castVote(poll.poll_id, optionA, member.id, team.id);
+
+      // Query with wrong teamId → should return Option.none
+      const wrongTeamId = 'ffffffff-ffff-ffff-ffff-000000000099' as Team.TeamId;
+      const result = yield* findPollVoters(poll.poll_id, wrongTeamId);
+      expect(Option.isNone(result)).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('missing poll → Option.none', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('640000000000000001', 'missing-fv');
+      const team = yield* createTeam('641000000000000001' as Discord.Snowflake, userId);
+
+      const result = yield* findPollVoters(
+        'ffffffff-ffff-ffff-ffff-ffffffffffff' as Poll.PollId,
+        team.id,
+      );
+      expect(Option.isNone(result)).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('closed poll still returns voters, status closed', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('650000000000000001', 'closed-fv');
+      const team = yield* createTeam('651000000000000001' as Discord.Snowflake, userId);
+      const member = yield* addTeamMember(team.id, userId);
+      const poll = yield* createPoll(
+        team.id,
+        team.guild_id,
+        '651000000000000010' as Discord.Snowflake,
+        member.id,
+        ['Option A', 'Option B'],
+        false,
+      );
+
+      const optionA = poll.options[0].option_id;
+      yield* castVote(poll.poll_id, optionA, member.id, team.id);
+      yield* closePoll(poll.poll_id, team.id);
+
+      const result = yield* findPollVoters(poll.poll_id, team.id);
+      expect(Option.isSome(result)).toBe(true);
+      const view = Option.getOrThrow(result);
+      expect(view.status).toBe('closed');
+      const optA = view.options.find((o: any) => o.option_id === optionA);
+      expect(optA?.vote_count).toBe(1);
+      expect(optA?.voters).toHaveLength(1);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'mixed cardinality: member1 votes A+B, member2 votes A only → total_votes=2, optA.voters=2, optB.voters=1',
+    () =>
+      Effect.gen(function* () {
+        const userId1 = yield* createUser('660000000000000001', 'mixed-fv-1');
+        const userId2 = yield* createUser('660000000000000002', 'mixed-fv-2');
+        const team = yield* createTeam('661000000000000001' as Discord.Snowflake, userId1);
+        const member1 = yield* addTeamMember(team.id, userId1);
+        const member2 = yield* addTeamMember(team.id, userId2);
+        const poll = yield* createPoll(
+          team.id,
+          team.guild_id,
+          '661000000000000010' as Discord.Snowflake,
+          member1.id,
+          ['Option A', 'Option B'],
+          true, // multiple choice so both members can vote for multiple options
+        );
+
+        const optionA = poll.options[0].option_id;
+        const optionB = poll.options[1].option_id;
+
+        // member1 votes for both A and B
+        yield* castVote(poll.poll_id, optionA, member1.id, team.id);
+        yield* castVote(poll.poll_id, optionB, member1.id, team.id);
+        // member2 votes for A only
+        yield* castVote(poll.poll_id, optionA, member2.id, team.id);
+
+        const result = yield* findPollVoters(poll.poll_id, team.id);
+        const view = Option.getOrThrow(result);
+
+        // 2 distinct participants → total_votes = 2
+        expect(view.total_votes).toBe(2);
+
+        const optA = view.options.find((o: any) => o.option_id === optionA);
+        const optB = view.options.find((o: any) => o.option_id === optionB);
+
+        expect(optA).toBeDefined();
+        expect(optB).toBeDefined();
+        // Option A: 2 vote_count, 2 voters
+        expect(optA?.vote_count).toBe(2);
+        expect(optA?.voters).toHaveLength(2);
+        // Option B: 1 vote_count, 1 voter (member1 only)
+        expect(optB?.vote_count).toBe(1);
+        expect(optB?.voters).toHaveLength(1);
       }).pipe(Effect.provide(TestLayer)),
   );
 });

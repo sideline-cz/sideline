@@ -5,9 +5,9 @@ import { DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
 
 /** Discord blurple — open poll color */
-const COLOR_OPEN = 0x5865f2;
+export const COLOR_OPEN = 0x5865f2;
 /** Grey — closed poll color */
-const COLOR_CLOSED = 0x95a5a6;
+export const COLOR_CLOSED = 0x95a5a6;
 
 /** Regional indicator letter: position 0 → 🇦, 1 → 🇧, etc. */
 export const regionalIndicator = (position: number): string =>
@@ -123,12 +123,28 @@ export const buildPollEmbed = (
     },
   ];
 
-  // Closed board: no components at all
+  // The "Who voted?" button is shown on both open and closed boards.
+  const votersButton: Discord.ButtonComponentForMessageRequest = {
+    type: 2 as const,
+    style: 2, // Secondary
+    label: m.bot_poll_voters_button({}, { locale }),
+    custom_id: `poll-voters:${view.poll_id}`,
+  };
+
+  // Closed board: action row with only the voters button (vote/add/close are omitted).
   if (isClosed) {
-    return { embeds, components: [] };
+    return {
+      embeds,
+      components: [
+        {
+          type: 1 as const,
+          components: [votersButton],
+        } satisfies Discord.ActionRowComponentForMessageRequest,
+      ],
+    };
   }
 
-  // Open board: one action row with Vote + Add option + Close poll buttons
+  // Open board: one action row with Vote + Add option + Close poll + Who voted? buttons
   const actionRow: Discord.ActionRowComponentForMessageRequest = {
     type: 1,
     components: [
@@ -150,6 +166,7 @@ export const buildPollEmbed = (
         label: m.bot_poll_close_button({}, { locale }),
         custom_id: `poll-close:${view.poll_id}`,
       },
+      votersButton,
     ],
   };
 

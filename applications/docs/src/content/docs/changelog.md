@@ -5,6 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-28 — New: "Who voted?" button on Discord polls
+
+Any team member can now see who voted for each option by clicking the **👥 Who voted?** button on any poll embed — open or closed.
+
+- The result is a private (ephemeral) message visible only to you, so it does not clutter the channel.
+- Each option is listed with its vote count and the names of voters, formatted as `Name (@mention)` (no real Discord pings are sent).
+- When more than 60 people voted for the same option, the first 60 voters are shown followed by "…and N more".
+- On closed polls the Vote and Close buttons are gone, but the Who voted? button stays so you can still review the final breakdown.
+- No permission is required — any team member can click it.
+
 ## 2026-06-28 — Fix: group channel creation now backfills existing members onto the Discord role
 
 When a Discord channel was created or linked for a group, existing group members were never added to the group's Discord role — only members added _after_ channel creation received it. This is now fixed: the bot backfills all current members (including members of any nested subgroups) onto the role as soon as the channel is provisioned.

@@ -34,6 +34,30 @@ export class AddOptionResult extends Schema.Class<AddOptionResult>('AddOptionRes
   view: PollView,
 }) {}
 
+export class PollVoter extends Schema.Class<PollVoter>('PollVoter')({
+  discord_id: Schema.OptionFromNullOr(Snowflake),
+  name: Schema.OptionFromNullOr(Schema.String),
+  nickname: Schema.OptionFromNullOr(Schema.String),
+  display_name: Schema.OptionFromNullOr(Schema.String),
+  username: Schema.OptionFromNullOr(Schema.String),
+}) {}
+
+export class PollOptionVoters extends Schema.Class<PollOptionVoters>('PollOptionVoters')({
+  option_id: PollOptionId,
+  label: Schema.String,
+  position: Schema.Number,
+  vote_count: Schema.Number,
+  voters: Schema.Array(PollVoter),
+}) {}
+
+export class PollVotersView extends Schema.Class<PollVotersView>('PollVotersView')({
+  poll_id: PollId,
+  question: Schema.String,
+  status: PollStatus,
+  total_votes: Schema.Number,
+  options: Schema.Array(PollOptionVoters),
+}) {}
+
 export class PollGuildNotFound extends Schema.TaggedErrorClass<PollGuildNotFound>()(
   'PollGuildNotFound',
   {},

@@ -92,7 +92,7 @@ Nine top-level commands are registered globally: `/carpool`, `/event`, `/finance
 1. Captain invokes `/poll` (or `/anketa`) in the channel where the poll should live.
 2. The handler returns a deferred ephemeral acknowledgement and forks a background fiber.
 3. The fiber calls `Poll/CreatePoll` RPC with `guild_id`, `discord_user_id`, `discord_channel_id`, `question`, `options_raw`, `multiple`, `allowed_role_id`, and `deadline_raw`.
-4. On success the bot posts a public `buildPollEmbed` message with option vote buttons, an **Add option** button, and a **Close poll** button. The message ID is saved via `Poll/SavePollMessageId`.
+4. On success the bot posts a public `buildPollEmbed` message with option vote buttons, an **Add option** button, a **Close poll** button, and a **👥 Who voted?** button. The message ID is saved via `Poll/SavePollMessageId`.
 5. The ephemeral reply is updated with a localised "poll created" confirmation.
 
 **Errors from `Poll/CreatePoll`:**
@@ -113,6 +113,7 @@ Nine top-level commands are registered globally: `/carpool`, `/event`, `/finance
 - `applications/bot/src/commands/poll/index.ts`
 - `applications/bot/src/commands/poll/handler.ts`
 - `applications/bot/src/rest/poll/buildPollEmbed.ts`
+- `applications/bot/src/rest/poll/buildPollVotersView.ts`
 - `applications/bot/src/interactions/poll.ts`
 
 ---
@@ -1091,6 +1092,41 @@ Declines a roster attendance request from the per-event approval thread.
 
 ---
 
+### Poll "Who voted?" Button — `poll-voters:{pollId}`
+
+Appears on every poll embed (both open and closed). Sends an ephemeral "Who voted?" breakdown to the clicking user, listing each option with the voters' names and a true total count. No Discord @-mentions are sent — voter names are rendered as `Name (@mention)` text.
+
+**Custom ID pattern:** `poll-voters:{pollId}`
+
+**Visibility:** available to all team members (no `poll:manage` permission required).
+
+**Behavior:**
+
+1. Parses `pollId` from the custom ID.
+2. Returns a `DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE` with the `Ephemeral` flag (ephemeral deferred), and forks a background fiber.
+3. The background fiber calls `Poll/GetPollVoters` RPC with `guild_id`, `discord_user_id`, and `poll_id`.
+4. On success (`Some(PollVotersView)`): builds a rich embed via `buildPollVotersView` (one field per option, vote count in the field name, voter names in the field value) and sends it as the ephemeral follow-up with `allowed_mentions: { parse: [] }` (suppresses any accidental pings).
+5. On `None` (poll not found): sends an ephemeral "poll not found" message.
+6. Each option field value is constructed by `buildPollVoterFieldValue`:
+   - Zero-vote options show a "no votes yet" string.
+   - Otherwise, voters are listed as `Name (@mention)` (display name preferred, username fallback).
+   - The server caps returned voters to 60 per option; any extras from the server-side cap are counted into a "…and N more" suffix alongside any Discord embed-length truncation.
+   - The embed respects Discord's 6000 code-point total limit; options near the budget are collapsed to a count-only value.
+
+**Errors from `Poll/GetPollVoters`:**
+
+| Error tag | User-visible message |
+|-----------|----------------------|
+| `PollGuildNotFound` | Team not found for this Discord server |
+| `PollNotMember` | Not a member of this team |
+| `RpcClientError` | Generic error (interaction is always resolved, never left loading) |
+
+**Source files:**
+- `applications/bot/src/interactions/poll.ts` (`PollVotersButton`, `PollVotersButtonReg`)
+- `applications/bot/src/rest/poll/buildPollVotersView.ts`
+
+---
+
 ### Event Create Autocomplete
 
 Provides training type suggestions for the `/event create training_type` option.
@@ -1758,6 +1794,26 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 Status values: `pending`, `partial`, `paid`, `overdue`, `waived`.
 
 `UnprocessedPaymentReminderEvent` fields: `id`, `team_id`, `guild_id`, `assignment_id`, `kind` (`due_in_3d | due_today | overdue_3d | overdue_10d | overdue_21d`), `fee_name`, `effective_due_at`, `currency`, `amount_minor`, `paid_minor`, `user_discord_id`.
+
+### Poll group (`Poll/`)
+
+| Method | Payload | Purpose |
+|--------|---------|---------|
+| `Poll/CreatePoll` | `guild_id`, `discord_user_id`, `discord_channel_id`, `question`, `options_raw`, `multiple`, `allowed_role_id`, `deadline_raw` | Create a new poll; errors: `PollGuildNotFound`, `PollNotMember`, `PollForbidden`, `PollTooFewOptions`, `PollTooManyOptions`, `PollDuplicateOption`, `PollOptionTooLong`, `PollInvalidDeadline`, `PollDeadlineInPast` |
+| `Poll/SavePollMessageId` | `guild_id`, `poll_id`, `discord_message_id` | Persist the Discord message ID after posting the poll embed; errors: `PollGuildNotFound`, `PollNotFound` |
+| `Poll/CastVote` | `guild_id`, `discord_user_id`, `poll_id`, `option_id` | Cast or retract a vote; returns `CastVoteResult`; errors: `PollGuildNotFound`, `PollNotMember`, `PollNotFound`, `PollOptionNotFound`, `PollClosed` |
+| `Poll/AddOption` | `guild_id`, `discord_user_id`, `poll_id`, `label`, `member_role_ids` | Add a new option to an open poll; returns `AddOptionResult`; errors: `PollGuildNotFound`, `PollNotMember`, `PollNotFound`, `PollClosed`, `PollOptionLimitReached`, `PollDuplicateOption`, `PollOptionTooLong`, `PollAddOptionForbidden` |
+| `Poll/ClosePoll` | `guild_id`, `discord_user_id`, `poll_id` | Close a poll permanently; returns updated `PollView`; errors: `PollGuildNotFound`, `PollNotMember`, `PollForbidden`, `PollNotFound` |
+| `Poll/GetPollView` | `guild_id`, `discord_user_id`, `poll_id` | Fetch the current `PollView` for a poll; returns `Option<PollView>`; errors: `PollGuildNotFound`, `PollNotMember` |
+| `Poll/GetPollVoters` | `guild_id`, `discord_user_id`, `poll_id` | Fetch a `PollVotersView` containing per-option voter lists (server-side 60-voter cap per option); returns `Option<PollVotersView>`; errors: `PollGuildNotFound`, `PollNotMember` |
+
+`PollVotersView` fields: `poll_id`, `question`, `status` (`open | closed`), `total_votes`, `options: PollOptionVoters[]`.
+
+`PollOptionVoters` fields: `option_id`, `label`, `position`, `vote_count`, `voters: PollVoter[]` (at most 60 entries, ordered by first-vote time ascending).
+
+`PollVoter` fields: `discord_id`, `name`, `nickname`, `display_name`, `username` (all nullable; the bot applies `display_name → nickname → username → name` display precedence).
+
+---
 
 ### Summarize group (`Summarize/`)
 

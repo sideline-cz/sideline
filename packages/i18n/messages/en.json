@@ -2093,5 +2093,10 @@
   "bot_poll_err_generic": "Something went wrong. Please try again.",
   "bot_poll_err_not_member": "You are not a member of this team.",
   "bot_poll_err_not_found": "This poll no longer exists.",
-  "bot_poll_err_option_not_found": "That option no longer exists."
+  "bot_poll_err_option_not_found": "That option no longer exists.",
+  "bot_poll_voters_button": "👥 Who voted?",
+  "bot_poll_voters_title": "👥 {question}",
+  "bot_poll_voters_none": "_No votes yet_",
+  "bot_poll_voters_more": "…and {count} more",
+  "bot_poll_voters_footer": "{total} people voted"
 }
