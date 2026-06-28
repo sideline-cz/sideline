@@ -1,5 +1,6 @@
 import { Array, Effect, Option, Schedule } from 'effect';
 import { withCronMetrics } from '~/metrics.js';
+import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { resolveGroupRoleId, resolveReminderChannel } from '~/services/EventChannelResolver.js';
@@ -7,9 +8,10 @@ import { resolveGroupRoleId, resolveReminderChannel } from '~/services/EventChan
 export const eventStartCronEffect = Effect.Do.pipe(
   Effect.bind('eventsRepo', () => EventsRepository.asEffect()),
   Effect.bind('syncRepo', () => EventSyncEventsRepository.asEffect()),
+  Effect.bind('eventsRsvpsRepo', () => EventRsvpsRepository.asEffect()),
   Effect.tap(() => Effect.logInfo('EventStartCron: starting cycle')),
   Effect.bind('events', ({ eventsRepo }) => eventsRepo.findEventsToStart()),
-  Effect.tap(({ events, syncRepo, eventsRepo }) =>
+  Effect.tap(({ events, syncRepo, eventsRepo, eventsRsvpsRepo }) =>
     Effect.all(
       Array.map(events, (event) =>
         Effect.Do.pipe(
@@ -22,6 +24,25 @@ export const eventStartCronEffect = Effect.Do.pipe(
                 ).pipe(Effect.asVoid),
               onSome: () =>
                 Effect.Do.pipe(
+                  // Increment missed-RSVP counters immediately after active→started flip,
+                  // before Discord resolution so a Discord failure can't cause the increment
+                  // to be lost (the event won't reprocess since it's already started).
+                  Effect.tap(() =>
+                    eventsRsvpsRepo
+                      .incrementMissedForEventNonRespondersByEventId(
+                        event.id,
+                        event.team_id,
+                        event.member_group_id,
+                      )
+                      .pipe(
+                        Effect.catchCause((cause) =>
+                          Effect.logWarning(
+                            `EventStartCron: failed to increment missed RSVPs for event ${event.id}, continuing`,
+                            cause,
+                          ),
+                        ),
+                      ),
+                  ),
                   Effect.bind('discordRoleId', () =>
                     event.event_type === 'training'
                       ? resolveGroupRoleId(event.team_id, event.owner_group_id)

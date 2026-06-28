@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@effect/vitest';
 import type { Discord, Event, GroupModel, Team, TeamMember } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { eventStartCronEffect } from '~/services/EventStartCron.js';
@@ -57,9 +58,16 @@ type EmittedStarted = {
   claimedByMemberId: Option.Option<TeamMember.TeamMemberId>;
 };
 
+type IncrementedNonResponders = {
+  eventId: Event.EventId;
+  teamId: string;
+  memberGroupId: Option.Option<GroupModel.GroupId>;
+};
+
 let eventsToStart: StartableEvent[];
 let startedEvents: StartedEvent[];
 let emittedStarted: EmittedStarted[];
+let incrementedNonResponders: IncrementedNonResponders[];
 let channelMappings: Map<
   string,
   { discord_channel_id: Discord.Snowflake; discord_role_id: Option.Option<Discord.Snowflake> }
@@ -69,6 +77,7 @@ const resetStores = () => {
   eventsToStart = [];
   startedEvents = [];
   emittedStarted = [];
+  incrementedNonResponders = [];
   channelMappings = new Map();
 };
 
@@ -153,10 +162,31 @@ const MockChannelMappingRepositoryLayer = Layer.succeed(DiscordChannelMappingRep
   findAllByTeam: () => Effect.succeed([]),
 } as any);
 
+const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
+  findRsvpsByEventId: () => Effect.die(new Error('Not implemented')),
+  findRsvpByEventAndMember: () => Effect.die(new Error('Not implemented')),
+  upsertRsvp: () => Effect.die(new Error('Not implemented')),
+  countRsvpsByEventId: () => Effect.die(new Error('Not implemented')),
+  findRsvpAttendeesPage: () => Effect.die(new Error('Not implemented')),
+  findNonRespondersByEventId: () => Effect.die(new Error('Not implemented')),
+  countRsvpTotal: () => Effect.die(new Error('Not implemented')),
+  findYesAttendeesForEmbed: () => Effect.die(new Error('Not implemented')),
+  findYesRsvpMemberIdsByEventId: () => Effect.die(new Error('Not implemented')),
+  incrementMissedForEventNonRespondersByEventId: (
+    eventId: Event.EventId,
+    teamId: string,
+    memberGroupId: Option.Option<GroupModel.GroupId>,
+  ) => {
+    incrementedNonResponders.push({ eventId, teamId, memberGroupId });
+    return Effect.void;
+  },
+} as any);
+
 const MockProvideLayer = Layer.mergeAll(
   MockEventsRepositoryLayer,
   MockEventSyncEventsRepositoryLayer,
   MockChannelMappingRepositoryLayer,
+  MockEventRsvpsRepositoryLayer,
 );
 
 beforeEach(() => {
@@ -195,6 +225,11 @@ describe('eventStartCronEffect', () => {
           expect(emittedStarted).toHaveLength(1);
           expect(emittedStarted[0].eventId).toBe(EVENT_ID_1);
           expect(emittedStarted[0].teamId).toBe(TEAM_ID);
+          // incrementMissedForEventNonRespondersByEventId IS called when active→started
+          expect(incrementedNonResponders).toHaveLength(1);
+          expect(incrementedNonResponders[0].eventId).toBe(EVENT_ID_1);
+          expect(incrementedNonResponders[0].teamId).toBe(TEAM_ID);
+          expect(Option.isNone(incrementedNonResponders[0].memberGroupId)).toBe(true);
         }),
       ),
       Effect.provide(MockProvideLayer),
@@ -335,6 +370,7 @@ describe('eventStartCronEffect', () => {
       OrderTrackingEventsRepo,
       OrderTrackingSyncRepo,
       MockChannelMappingRepositoryLayer,
+      MockEventRsvpsRepositoryLayer,
     );
 
     return eventStartCronEffect.pipe(
@@ -382,6 +418,8 @@ describe('eventStartCronEffect', () => {
           Effect.sync(() => {
             // Should not throw — NoSuchElementError is caught and logged
             expect(emittedStarted).toHaveLength(0);
+            // incrementMissedForEventNonRespondersByEventId is NOT called when no transition
+            expect(incrementedNonResponders).toHaveLength(0);
           }),
         ),
         Effect.provide(
@@ -389,6 +427,7 @@ describe('eventStartCronEffect', () => {
             ReturnsNoneRepo,
             MockEventSyncEventsRepositoryLayer,
             MockChannelMappingRepositoryLayer,
+            MockEventRsvpsRepositoryLayer,
           ),
         ),
         Effect.asVoid,
@@ -452,6 +491,7 @@ describe('eventStartCronEffect', () => {
           PartiallyFailingEventsRepo,
           MockEventSyncEventsRepositoryLayer,
           MockChannelMappingRepositoryLayer,
+          MockEventRsvpsRepositoryLayer,
         ),
       ),
       Effect.asVoid,
@@ -562,6 +602,95 @@ describe('eventStartCronEffect', () => {
       Effect.asVoid,
     );
   });
+
+  // -------------------------------------------------------------------------
+  // incrementMissedForEventNonRespondersByEventId — cron seam assertions
+  // -------------------------------------------------------------------------
+
+  it.effect(
+    'incrementMissedForEventNonRespondersByEventId called with event member_group_id on active→started',
+    () => {
+      eventsToStart = [
+        {
+          id: EVENT_ID_1,
+          team_id: TEAM_ID,
+          title: 'Group Event',
+          description: Option.none(),
+          start_at: START_AT,
+          end_at: Option.none(),
+          location: Option.none(),
+          event_type: 'match',
+          member_group_id: Option.some(GROUP_ID_A),
+          discord_target_channel_id: Option.none(),
+          owner_group_id: Option.none(),
+          reminders_channel_id: Option.none(),
+          claimed_by: Option.none(),
+        },
+      ];
+
+      return eventStartCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(incrementedNonResponders).toHaveLength(1);
+            expect(incrementedNonResponders[0].eventId).toBe(EVENT_ID_1);
+            expect(incrementedNonResponders[0].teamId).toBe(TEAM_ID);
+            expect(Option.isSome(incrementedNonResponders[0].memberGroupId)).toBe(true);
+            if (Option.isSome(incrementedNonResponders[0].memberGroupId)) {
+              expect(incrementedNonResponders[0].memberGroupId.value).toBe(GROUP_ID_A);
+            }
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'incrementMissedForEventNonRespondersByEventId NOT called when startEvent returns None (idempotency at cron seam)',
+    () => {
+      eventsToStart = [
+        {
+          id: EVENT_ID_1,
+          team_id: TEAM_ID,
+          title: 'Already Started',
+          description: Option.none(),
+          start_at: START_AT,
+          end_at: Option.none(),
+          location: Option.none(),
+          event_type: 'training',
+          member_group_id: Option.some(GROUP_ID_A),
+          discord_target_channel_id: Option.none(),
+          owner_group_id: Option.none(),
+          reminders_channel_id: Option.none(),
+          claimed_by: Option.none(),
+        },
+      ];
+
+      const ReturnsNoneEventsRepo = Layer.succeed(EventsRepository, {
+        findEventsToStart: () => Effect.succeed(eventsToStart),
+        startEvent: (_eventId: Event.EventId) => Effect.succeed(Option.none()),
+      } as any);
+
+      return eventStartCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            // No transition → NOT called
+            expect(incrementedNonResponders).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(
+          Layer.mergeAll(
+            ReturnsNoneEventsRepo,
+            MockEventSyncEventsRepositoryLayer,
+            MockChannelMappingRepositoryLayer,
+            MockEventRsvpsRepositoryLayer,
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
 
   // -------------------------------------------------------------------------
   // T12.C — Change A server: training role routing + claimedByMemberId

@@ -13,6 +13,19 @@ When a Discord channel was created or linked for a group, existing group members
 - Members of subgroups nested under the group are included — because adding a member to any subgroup also emits an event on every ancestor, the full descendant membership is used to ensure the role assignment is complete.
 - The backfill is add-only: existing role assignments are not touched, and members who no longer belong to the group are not removed. Automatic pruning of stale role-holders is planned for a future release.
 
+## 2026-06-28 — RSVP reminders now stop for disengaged members
+
+The bot no longer sends reminder DMs to Players who have consistently not responded to recent events.
+
+- Each member with the built-in **Player** role has a consecutive missed-RSVP counter. The counter goes up by 1 each time an event starts and they had not responded (yes, no, or maybe). It resets to 0 the moment they respond to any event.
+- When the counter reaches the team's **"Stop reminding after N missed RSVPs"** threshold (default: 4), the member is excluded from:
+  - Personal RSVP reminder DMs sent by the bot.
+  - The public "who hasn't responded yet" list in the reminder embed.
+  - The non-responder list captains see on the event detail page.
+- Captains and admins can change the threshold in **Team settings → RSVP reminders → Stop reminding after N missed RSVPs** (range 1–50). Setting it higher means the bot waits longer before giving up; setting it lower stops reminders more aggressively.
+- Only the built-in Player role is affected. Members without a Player role are never included in reminder lists regardless of this setting.
+- No action is needed — existing members start with a counter of 0 and the threshold defaults to 4.
+
 ## 2026-06-27 — New Discord command: `/summarize`
 
 Members can now ask the bot to summarize recent conversation in any channel or thread.

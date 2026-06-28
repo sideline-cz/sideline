@@ -438,6 +438,7 @@ Returns the team's current settings.
 | `minPlayersThreshold` | `integer` | No | Minimum players for an event to show a warning |
 | `rsvpRemindersEnabled` | `boolean` | No | Whether RSVP reminders are enabled for this team |
 | `rsvpReminderDaysBefore` | `integer` | No | Days before an event the RSVP reminder is sent |
+| `maxMissedRsvps` | `integer` | No | Consecutive missed-RSVP threshold; built-in Players whose `missed_rsvps` counter reaches this value stop receiving reminder DMs and are excluded from the non-responder list (range 1–50; default 4) |
 | `claimRequestDaysBefore` | `integer` | No | Days before a training the coach claim-board message is posted (0 = on the training day; range 0–30) |
 | `rsvpReminderTime` | `string` | No | Time of day the RSVP reminder fires (HH:MM in the team's timezone, e.g. `18:00`) |
 | `remindersChannelId` | `Snowflake \| null` | Yes | Discord channel where reminders and event-start announcements are posted; falls back to the event's owner-group channel if unset |
@@ -487,6 +488,7 @@ Updates the team's settings. All fields are optional; only provided fields are c
 | `minPlayersThreshold` | `integer` | No | 0–100 | Minimum player threshold |
 | `rsvpRemindersEnabled` | `boolean` | No | — | Enable or disable RSVP reminders |
 | `rsvpReminderDaysBefore` | `integer` | No | 0–14 | Days before the event the reminder fires |
+| `maxMissedRsvps` | `integer` | No | 1–50 | Consecutive missed-RSVP threshold above which a Player stops receiving reminders (default 4) |
 | `claimRequestDaysBefore` | `integer` | No | 0–30 | Days before a training the coach claim-board message is posted; 0 posts on the training day |
 | `rsvpReminderTime` | `string` | No | Valid HH:MM, max `23:54` | Time of day the reminder fires in the team's timezone |
 | `remindersChannelId` | `Snowflake \| null` | No | — | Channel for reminders; null clears the field |
@@ -2046,7 +2048,7 @@ Submits or updates the authenticated user's RSVP for an event.
 
 #### `GET /teams/:teamId/events/:eventId/rsvps/non-responders`
 
-Returns the list of eligible members who have not yet submitted an RSVP.
+Returns the list of eligible members who have not yet submitted an RSVP. The list is filtered to active team members who (a) hold the built-in `Player` role and (b) have a `missed_rsvps` count below the team's `max_missed_rsvps` threshold. Members who have exceeded the threshold are considered disengaged and are excluded from all reminder surfaces.
 
 **Auth:** Bearer token (AuthMiddleware)
 

@@ -54,6 +54,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     discordChannelCleanupOnRosterDeactivate: 'delete',
                     discordRoleFormat: DEFAULT_ROLE_FORMAT,
                     discordChannelFormat: DEFAULT_CHANNEL_FORMAT,
+                    maxMissedRsvps: 4,
                   }),
                 onSome: (s) =>
                   new TeamSettingsApi.TeamSettingsInfo({
@@ -82,6 +83,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                       s.discord_channel_cleanup_on_roster_deactivate,
                     discordRoleFormat: s.discord_role_format,
                     discordChannelFormat: s.discord_channel_format,
+                    maxMissedRsvps: s.max_missed_rsvps,
                   }),
               }),
             ),
@@ -164,6 +166,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     ...(Option.isSome(payload.discordChannelFormat)
                       ? { discordChannelFormat: payload.discordChannelFormat.value }
                       : {}),
+                    maxMissedRsvps: Option.getOrElse(payload.maxMissedRsvps, () => 4),
                   }),
                 onSome: (s) =>
                   settings.upsert({
@@ -257,6 +260,10 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                       payload.discordChannelFormat,
                       () => s.discord_channel_format,
                     ),
+                    maxMissedRsvps: Option.getOrElse(
+                      payload.maxMissedRsvps,
+                      () => s.max_missed_rsvps,
+                    ),
                   }),
               }),
             ),
@@ -295,6 +302,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     result.discord_channel_cleanup_on_roster_deactivate,
                   discordRoleFormat: result.discord_role_format,
                   discordChannelFormat: result.discord_channel_format,
+                  maxMissedRsvps: result.max_missed_rsvps,
                 }),
             ),
             Effect.catchTag(

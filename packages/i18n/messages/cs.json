@@ -518,6 +518,8 @@
   "teamSettings_profileSaveFailed": "Nepodarilo se ulozit profil tymu.",
   "teamSettings_rsvpRemindersEnabled": "Povolit připomínky RSVP",
   "teamSettings_rsvpReminderDaysBefore": "Dny před událostí",
+  "teamSettings_maxMissedRsvps": "Přestat připomínat po N zmeškaných RSVP",
+  "teamSettings_maxMissedRsvps_help": "Člen, který tuto hodnotu překročí za sebou jdoucích zmeškaných RSVP, přestane dostávat připomínky, dokud na některou událost neodpoví.",
   "teamSettings_rsvpReminderTime": "Čas připomínky",
   "teamSettings_rsvpReminderHelp": "Pošle připomínku tolik dní před událostí v nastavený čas v časovém pásmu týmu. Nastavte 0 dní pro připomínku v den události.",
   "teamSettings_coachAssignment": "Obsazení trenérů",

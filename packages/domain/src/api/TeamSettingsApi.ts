@@ -28,6 +28,7 @@ export class TeamSettingsInfo extends Schema.Class<TeamSettingsInfo>('TeamSettin
   minPlayersThreshold: Schema.Int,
   rsvpRemindersEnabled: Schema.Boolean,
   rsvpReminderDaysBefore: Schema.Int,
+  maxMissedRsvps: Schema.Int,
   claimRequestDaysBefore: Schema.Int,
   rsvpReminderTime: Schema.String,
   remindersChannelId: Schema.OptionFromNullOr(Snowflake),
@@ -59,6 +60,9 @@ export const UpdateTeamSettingsRequest = Schema.Struct({
   rsvpRemindersEnabled: Schema.OptionFromOptional(Schema.Boolean),
   rsvpReminderDaysBefore: Schema.OptionFromOptional(
     Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 14 }))),
+  ),
+  maxMissedRsvps: Schema.OptionFromOptional(
+    Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 50 }))),
   ),
   claimRequestDaysBefore: Schema.OptionFromOptional(
     Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 30 }))),

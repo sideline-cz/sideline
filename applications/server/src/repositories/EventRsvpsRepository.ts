@@ -228,6 +228,7 @@ const make = Effect.gen(function* () {
       event_id: Schema.String,
       team_id: Schema.String,
       member_group_id: Schema.OptionFromNullOr(Schema.String),
+      max_missed_rsvps: Schema.Number,
     }),
     Result: NonResponderRow,
     execute: (input) => sql`
@@ -236,6 +237,7 @@ const make = Effect.gen(function* () {
         FROM team_members tm
         WHERE tm.team_id = ${input.team_id}
           AND tm.active = true
+          AND tm.missed_rsvps < ${input.max_missed_rsvps}
           AND (
             ${input.member_group_id}::uuid IS NULL
             OR tm.id IN (
@@ -249,6 +251,11 @@ const make = Effect.gen(function* () {
               JOIN descendant_groups dg ON dg.id = gm.group_id
             )
           )
+          AND EXISTS (
+            SELECT 1 FROM member_roles mr JOIN roles r ON r.id = mr.role_id
+            WHERE mr.team_member_id = tm.id AND r.team_id = ${input.team_id}
+              AND r.name = 'Player' AND r.is_built_in = true
+          )
       )
       SELECT em.team_member_id, u.name AS member_name, u.discord_nickname AS nickname, u.username, u.discord_display_name AS display_name, u.discord_id
       FROM eligible_members em
@@ -256,6 +263,39 @@ const make = Effect.gen(function* () {
       LEFT JOIN event_rsvps er ON er.team_member_id = em.team_member_id AND er.event_id = ${input.event_id}
       WHERE er.id IS NULL
       ORDER BY u.name ASC
+    `,
+  });
+
+  const incrementMissedForEventNonResponders = SqlSchema.void({
+    Request: Schema.Struct({
+      event_id: Schema.String,
+      team_id: Schema.String,
+      member_group_id: Schema.OptionFromNullOr(Schema.String),
+    }),
+    execute: (input) => sql`
+      WITH RECURSIVE descendant_groups AS (
+        SELECT id FROM groups WHERE id = ${input.member_group_id}::uuid
+        UNION ALL
+        SELECT g.id FROM groups g JOIN descendant_groups dg ON g.parent_id = dg.id
+      )
+      UPDATE team_members tm
+      SET missed_rsvps = missed_rsvps + 1
+      WHERE tm.team_id = ${input.team_id}
+        AND tm.active = true
+        AND (
+          ${input.member_group_id}::uuid IS NULL
+          OR tm.id IN (SELECT gm.team_member_id FROM group_members gm
+                       JOIN descendant_groups dg ON dg.id = gm.group_id)
+        )
+        AND EXISTS (
+          SELECT 1 FROM member_roles mr JOIN roles r ON r.id = mr.role_id
+          WHERE mr.team_member_id = tm.id AND r.team_id = ${input.team_id}
+            AND r.name = 'Player' AND r.is_built_in = true
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM event_rsvps er
+          WHERE er.team_member_id = tm.id AND er.event_id = ${input.event_id}
+        )
     `,
   });
 
@@ -302,8 +342,21 @@ const make = Effect.gen(function* () {
     eventId: Event.EventId,
     teamId: string,
     memberGroupId: Option.Option<string> = Option.none(),
+    maxMissedRsvps = 4,
   ) =>
     findNonResponders({
+      event_id: eventId,
+      team_id: teamId,
+      member_group_id: memberGroupId,
+      max_missed_rsvps: maxMissedRsvps,
+    }).pipe(catchSqlErrors);
+
+  const incrementMissedForEventNonRespondersByEventId = (
+    eventId: Event.EventId,
+    teamId: string,
+    memberGroupId: Option.Option<string>,
+  ) =>
+    incrementMissedForEventNonResponders({
       event_id: eventId,
       team_id: teamId,
       member_group_id: memberGroupId,
@@ -339,6 +392,7 @@ const make = Effect.gen(function* () {
     countRsvpTotal,
     findYesAttendeesForEmbed,
     findYesRsvpMemberIdsByEventId,
+    incrementMissedForEventNonRespondersByEventId,
   };
 });
 

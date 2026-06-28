@@ -432,6 +432,7 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   assignRole: () => Effect.void,
   unassignRole: () => Effect.void,
   setJerseyNumber: () => Effect.void,
+  resetMissedRsvps: () => Effect.void,
 } as any);
 
 const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
@@ -583,6 +584,7 @@ const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
       })),
     );
   },
+  incrementMissedForEventNonRespondersByEventId: () => Effect.void,
 } as any);
 
 const MockRostersRepositoryLayer = Layer.succeed(RostersRepository, {
@@ -1493,6 +1495,7 @@ const MockRpcEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
   findRsvpAttendeesPage: () => Effect.succeed([]),
   countRsvpTotal: () => Effect.succeed(0),
   findYesAttendeesForEmbed: () => Effect.succeed([]),
+  incrementMissedForEventNonRespondersByEventId: () => Effect.void,
 } as any);
 
 const MockRpcTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
@@ -1579,6 +1582,7 @@ const MockRpcTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   assignRole: () => Effect.void,
   unassignRole: () => Effect.void,
   setJerseyNumber: () => Effect.void,
+  resetMissedRsvps: () => Effect.void,
 } as any);
 
 const MockRpcGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
@@ -1933,6 +1937,63 @@ describe('Event/SubmitRsvp RPC — RSVP message preservation', () => {
         }),
       ),
       Effect.provide(RpcTestLayer),
+      Effect.asVoid,
+    );
+  });
+});
+
+// ============================================================
+// resetMissedRsvps called on Discord RSVP submit
+// ============================================================
+
+describe('Event/SubmitRsvp RPC — resetMissedRsvps', () => {
+  beforeEach(() => {
+    resetRpcStores();
+  });
+
+  itEffect.effect('resetMissedRsvps is called for the responding member', () => {
+    let resetCalledForMemberId: string | undefined;
+
+    const MockMembersWithSpy = Layer.succeed(TeamMembersRepository, {
+      addMember: () => Effect.die(new Error('Not implemented')),
+      findMembershipByIds: () => Effect.succeed(Option.none()),
+      findByTeam: () => Effect.succeed([]),
+      findByUser: () => Effect.succeed([]),
+      findRosterByTeam: () => Effect.succeed([]),
+      findRosterMemberByIds: () => Effect.succeed(Option.none()),
+      deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
+      getPlayerRoleId: () => Effect.succeed(Option.none()),
+      assignRole: () => Effect.void,
+      unassignRole: () => Effect.void,
+      setJerseyNumber: () => Effect.void,
+      resetMissedRsvps: (memberId: string) => {
+        resetCalledForMemberId = memberId;
+        return Effect.void;
+      },
+    } as any);
+
+    const RpcTestLayerWithSpy = EventsRpcLive.pipe(
+      Layer.provide(MockRpcEventsRepositoryLayer),
+      Layer.provide(MockRpcEventRsvpsRepositoryLayer),
+      Layer.provide(MockRpcTeamSettingsRepositoryLayer),
+      Layer.provide(MockRpcEventSyncEventsRepositoryLayer),
+      Layer.provide(MockMembersWithSpy),
+      Layer.provide(MockRpcGroupsRepositoryLayer),
+      Layer.provide(MockRpcTeamsRepositoryLayer),
+      Layer.provide(MockRpcTrainingTypesRepositoryLayer),
+      Layer.provide(MockRpcChannelEventDividersRepositoryLayer),
+      Layer.provide(MockDiscordChannelMappingRepositoryLayer),
+      Layer.provide(MockSqlClientLayer),
+      Layer.provide(MockEventRosterLayers),
+    );
+
+    return makeSubmitRsvp({ response: 'yes' }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(resetCalledForMemberId).toBe(RPC_TEST_MEMBER_ID);
+        }),
+      ),
+      Effect.provide(RpcTestLayerWithSpy),
       Effect.asVoid,
     );
   });

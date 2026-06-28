@@ -412,6 +412,14 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  const resetMissedRsvpsQuery = SqlSchema.void({
+    Request: TeamMember.TeamMemberId,
+    execute: (id) => sql`UPDATE team_members SET missed_rsvps = 0 WHERE id = ${id}`,
+  });
+
+  const resetMissedRsvps = (teamMemberId: TeamMember.TeamMemberId) =>
+    resetMissedRsvpsQuery(teamMemberId).pipe(catchSqlErrors);
+
   // Test helper — bypasses soft-delete to exercise FK constraints.
   // Intentionally does NOT use catchSqlErrors so FK violations propagate as Effect failures.
   const hardDelete = (id: TeamMember.TeamMemberId) =>
@@ -436,6 +444,7 @@ const make = Effect.gen(function* () {
     assignRole,
     unassignRole,
     setJerseyNumber,
+    resetMissedRsvps,
     // test helper
     hardDelete,
   };

@@ -181,6 +181,7 @@ let teamSettingsStore: {
   rsvp_reminder_time: string;
   reminders_channel_id: Option.Option<string>;
   timezone: string;
+  max_missed_rsvps: number;
 };
 
 const resetStores = () => {
@@ -194,6 +195,7 @@ const resetStores = () => {
     rsvp_reminder_time: '18:00',
     reminders_channel_id: Option.none(),
     timezone: 'Europe/Prague',
+    max_missed_rsvps: 4,
   };
 };
 
@@ -327,6 +329,7 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   assignRole: () => Effect.void,
   unassignRole: () => Effect.void,
   setJerseyNumber: () => Effect.void,
+  resetMissedRsvps: () => Effect.void,
 } as any);
 
 const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
@@ -488,7 +491,12 @@ const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
       });
     return Effect.succeed(nonResponders);
   },
-  findNonRespondersByEventId: (eventId: Event.EventId, teamId: string) => {
+  findNonRespondersByEventId: (
+    eventId: Event.EventId,
+    teamId: string,
+    _memberGroupId?: unknown,
+    _maxMissedRsvps?: number,
+  ) => {
     const responded = new Set(
       Array.from(rsvpsStore.values())
         .filter((r) => r.event_id === eventId)
@@ -509,6 +517,7 @@ const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
       });
     return Effect.succeed(nonResponders);
   },
+  incrementMissedForEventNonRespondersByEventId: () => Effect.void,
 } as any);
 
 const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
@@ -525,6 +534,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
         timezone: teamSettingsStore.timezone,
+        max_missed_rsvps: teamSettingsStore.max_missed_rsvps,
         discord_channel_training: Option.none(),
         discord_channel_match: Option.none(),
         discord_channel_tournament: Option.none(),
@@ -554,6 +564,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
         timezone: teamSettingsStore.timezone,
+        max_missed_rsvps: teamSettingsStore.max_missed_rsvps,
         discord_channel_training: Option.none(),
         discord_channel_match: Option.none(),
         discord_channel_tournament: Option.none(),
@@ -580,6 +591,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
     rsvp_reminder_time?: string;
     reminders_channel_id?: Option.Option<string>;
     timezone?: string;
+    max_missed_rsvps?: number;
     discord_channel_training: Option.Option<string>;
     discord_channel_match: Option.Option<string>;
     discord_channel_tournament: Option.Option<string>;
@@ -599,6 +611,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       rsvp_reminder_time: input.rsvp_reminder_time ?? teamSettingsStore.rsvp_reminder_time,
       reminders_channel_id: input.reminders_channel_id ?? teamSettingsStore.reminders_channel_id,
       timezone: input.timezone ?? teamSettingsStore.timezone,
+      max_missed_rsvps: input.max_missed_rsvps ?? teamSettingsStore.max_missed_rsvps,
       discord_channel_training: Option.none(),
       discord_channel_match: Option.none(),
       discord_channel_tournament: Option.none(),
@@ -624,6 +637,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
     rsvpReminderTime?: string;
     remindersChannelId?: Option.Option<string>;
     timezone?: string;
+    maxMissedRsvps?: number;
     discordChannelTraining?: Option.Option<string>;
     discordChannelMatch?: Option.Option<string>;
     discordChannelTournament?: Option.Option<string>;
@@ -642,6 +656,8 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
     if (input.remindersChannelId !== undefined)
       teamSettingsStore.reminders_channel_id = input.remindersChannelId;
     if (input.timezone !== undefined) teamSettingsStore.timezone = input.timezone;
+    if (input.maxMissedRsvps !== undefined)
+      teamSettingsStore.max_missed_rsvps = input.maxMissedRsvps;
     return Effect.succeed({
       team_id: TEST_TEAM_ID,
       event_horizon_days: input.eventHorizonDays,
@@ -652,6 +668,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       rsvp_reminder_time: teamSettingsStore.rsvp_reminder_time,
       reminders_channel_id: teamSettingsStore.reminders_channel_id,
       timezone: teamSettingsStore.timezone,
+      max_missed_rsvps: teamSettingsStore.max_missed_rsvps,
       discord_channel_training: Option.none(),
       discord_channel_match: Option.none(),
       discord_channel_tournament: Option.none(),
@@ -1380,6 +1397,108 @@ describe('RSVP Reminder Features', () => {
       expect(response.status).toBe(200);
       const body = await response.json();
       expect(body.rsvpReminderTime).toBe('23:54');
+    });
+  });
+
+  describe('Team Settings - maxMissedRsvps field', () => {
+    it('GET returns maxMissedRsvps with default value 4', async () => {
+      const response = await handler(
+        new Request(SETTINGS_URL, { headers: { Authorization: 'Bearer admin-token' } }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.maxMissedRsvps).toBe(4);
+    });
+
+    it('PATCH with valid maxMissedRsvps (6) returns 200 with echoed value', async () => {
+      const response = await handler(
+        new Request(SETTINGS_URL, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            eventHorizonDays: 30,
+            maxMissedRsvps: 6,
+          }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.maxMissedRsvps).toBe(6);
+    });
+
+    it('PATCH with maxMissedRsvps = 0 returns 400 (below minimum of 1)', async () => {
+      const response = await handler(
+        new Request(SETTINGS_URL, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            eventHorizonDays: 30,
+            maxMissedRsvps: 0,
+          }),
+        }),
+      );
+      expect(response.status).toBe(400);
+    });
+
+    it('PATCH with maxMissedRsvps = 51 returns 400 (above maximum of 50)', async () => {
+      const response = await handler(
+        new Request(SETTINGS_URL, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            eventHorizonDays: 30,
+            maxMissedRsvps: 51,
+          }),
+        }),
+      );
+      expect(response.status).toBe(400);
+    });
+
+    it('PATCH with maxMissedRsvps = 1 (boundary minimum) returns 200', async () => {
+      const response = await handler(
+        new Request(SETTINGS_URL, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            eventHorizonDays: 30,
+            maxMissedRsvps: 1,
+          }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.maxMissedRsvps).toBe(1);
+    });
+
+    it('PATCH with maxMissedRsvps = 50 (boundary maximum) returns 200', async () => {
+      const response = await handler(
+        new Request(SETTINGS_URL, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            eventHorizonDays: 30,
+            maxMissedRsvps: 50,
+          }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.maxMissedRsvps).toBe(50);
     });
   });
 });

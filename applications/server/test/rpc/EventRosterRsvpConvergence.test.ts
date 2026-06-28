@@ -225,6 +225,7 @@ const MockRpcTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   assignRole: () => Effect.void,
   unassignRole: () => Effect.void,
   setJerseyNumber: () => Effect.void,
+  resetMissedRsvps: () => Effect.void,
 } as any);
 
 const MockRpcGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
