@@ -3,7 +3,12 @@ import { Rpc, RpcGroup } from 'effect/unstable/rpc';
 import { ChannelSyncEvent, Discord, GroupModel, RosterModel, Team } from '~/index.js';
 import { TeamChannelId } from '~/models/TeamChannel.js';
 import { UnprocessedChannelEvent } from './ChannelRpcEvents.js';
-import { ChannelMapping, ManagedChannelMapping, RosterMemberDiscord } from './ChannelRpcModels.js';
+import {
+  ChannelMapping,
+  GroupMemberDiscord,
+  ManagedChannelMapping,
+  RosterMemberDiscord,
+} from './ChannelRpcModels.js';
 
 export const ChannelRpcGroup = RpcGroup.make(
   Rpc.make('GetUnprocessedEvents', {
@@ -57,6 +62,10 @@ export const ChannelRpcGroup = RpcGroup.make(
   Rpc.make('GetRosterMembers', {
     payload: { team_id: Team.TeamId, roster_id: RosterModel.RosterId },
     success: Schema.Array(RosterMemberDiscord),
+  }),
+  Rpc.make('GetGroupMembers', {
+    payload: { team_id: Team.TeamId, group_id: GroupModel.GroupId },
+    success: Schema.Array(GroupMemberDiscord),
   }),
   Rpc.make('UpsertRosterMapping', {
     payload: {

@@ -412,3 +412,206 @@ describe('GroupsRepository — getMemberCount', () => {
       ),
   );
 });
+
+describe('GroupsRepository — findDescendantMembersWithDiscordIdByGroupId', () => {
+  // (a) Multi-level recursion: G → C → GC; a member only in GC appears when querying G.
+  it.effect(
+    'multi-level recursion — member only in grandchild GC appears when querying root G',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('100000000000000010', 'owner10')),
+        Effect.bind('userId1', () => createUser('200000000000000010', 'user10a')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('101010101010101010' as Discord.Snowflake, ownerId),
+        ),
+        Effect.bind('groupG', ({ team }) => createGroup(team.id, 'Group G')),
+        Effect.bind('groupC', ({ team, groupG }) =>
+          createGroup(team.id, 'Group C', Option.some(groupG.id)),
+        ),
+        Effect.bind('groupGC', ({ team, groupC }) =>
+          createGroup(team.id, 'Group GC', Option.some(groupC.id)),
+        ),
+        Effect.bind('tm1', ({ team, userId1 }) => addTeamMember(team.id, userId1)),
+        // Member only in the grandchild
+        Effect.tap(({ groupGC, tm1 }) => addGroupMember(groupGC.id, tm1.id)),
+        Effect.bind('result', ({ groupG }) =>
+          GroupsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.findDescendantMembersWithDiscordIdByGroupId(groupG.id)),
+          ),
+        ),
+        Effect.tap(({ result, tm1 }) =>
+          Effect.sync(() => {
+            expect(result).toHaveLength(1);
+            expect(result[0]?.teamMemberId).toBe(tm1.id);
+            // The users table has discord_id NOT NULL, so this is always non-null in practice
+            expect(result[0]?.discordUserId).toBe('200000000000000010');
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  // (b) DISTINCT dedup: a member in both parent G and child C appears exactly once.
+  it.effect('DISTINCT dedup — member in both parent G and child C appears exactly once', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('100000000000000011', 'owner11')),
+      Effect.bind('userId1', () => createUser('200000000000000011', 'user11a')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('111011101110111011' as Discord.Snowflake, ownerId),
+      ),
+      Effect.bind('groupG', ({ team }) => createGroup(team.id, 'Group G')),
+      Effect.bind('groupC', ({ team, groupG }) =>
+        createGroup(team.id, 'Group C', Option.some(groupG.id)),
+      ),
+      Effect.bind('tm1', ({ team, userId1 }) => addTeamMember(team.id, userId1)),
+      // Same member in both parent and child
+      Effect.tap(({ groupG, tm1 }) => addGroupMember(groupG.id, tm1.id)),
+      Effect.tap(({ groupC, tm1 }) => addGroupMember(groupC.id, tm1.id)),
+      Effect.bind('result', ({ groupG }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findDescendantMembersWithDiscordIdByGroupId(groupG.id)),
+        ),
+      ),
+      Effect.tap(({ result, tm1 }) =>
+        Effect.sync(() => {
+          // Must appear exactly once despite being in two groups
+          expect(result).toHaveLength(1);
+          expect(result[0]?.teamMemberId).toBe(tm1.id);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  // (c) Archived subgroups excluded: a member only in an archived child does NOT appear.
+  it.effect(
+    'archived subgroups excluded — member only in archived child C does not appear when querying G',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('100000000000000012', 'owner12')),
+        Effect.bind('userId1', () => createUser('200000000000000012', 'user12a')),
+        Effect.bind('userId2', () => createUser('300000000000000012', 'user12b')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('121212121212121212' as Discord.Snowflake, ownerId),
+        ),
+        Effect.bind('groupG', ({ team }) => createGroup(team.id, 'Group G')),
+        Effect.bind('groupC', ({ team, groupG }) =>
+          createGroup(team.id, 'Group C', Option.some(groupG.id)),
+        ),
+        Effect.bind('tm1', ({ team, userId1 }) => addTeamMember(team.id, userId1)),
+        Effect.bind('tm2', ({ team, userId2 }) => addTeamMember(team.id, userId2)),
+        // tm1 in root G, tm2 only in child C which will be archived
+        Effect.tap(({ groupG, tm1 }) => addGroupMember(groupG.id, tm1.id)),
+        Effect.tap(({ groupC, tm2 }) => addGroupMember(groupC.id, tm2.id)),
+        // Archive the child
+        Effect.tap(({ groupC }) =>
+          GroupsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.archiveGroupById(groupC.id)),
+          ),
+        ),
+        Effect.bind('result', ({ groupG }) =>
+          GroupsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.findDescendantMembersWithDiscordIdByGroupId(groupG.id)),
+          ),
+        ),
+        Effect.tap(({ result, tm1 }) =>
+          Effect.sync(() => {
+            // Only tm1 (in the non-archived root G) must appear; tm2 (in archived C) must not
+            expect(result).toHaveLength(1);
+            expect(result[0]?.teamMemberId).toBe(tm1.id);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  // (d) Cross-team isolation: a misparented subgroup belonging to another team is not traversed.
+  it.effect('cross-team isolation — subgroup belonging to another team is not traversed', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerIdA', () => createUser('100000000000000013', 'owner13a')),
+      Effect.bind('ownerIdB', () => createUser('400000000000000013', 'owner13b')),
+      Effect.bind('userId1', () => createUser('200000000000000013', 'user13a')),
+      Effect.bind('userId2', () => createUser('300000000000000013', 'user13b')),
+      // Two separate teams
+      Effect.bind('teamA', ({ ownerIdA }) =>
+        createTeam('131313131313131313' as Discord.Snowflake, ownerIdA),
+      ),
+      Effect.bind('teamB', ({ ownerIdB }) =>
+        createTeam('313131313131313131' as Discord.Snowflake, ownerIdB),
+      ),
+      // Root group belongs to teamA
+      Effect.bind('groupG', ({ teamA }) => createGroup(teamA.id, 'Group G')),
+      // Child group belongs to teamB (cross-team misparent — SQL guard: g.team_id = d.team_id)
+      Effect.bind('groupCrossTeam', ({ teamB, groupG }) =>
+        createGroup(teamB.id, 'Cross-team Child', Option.some(groupG.id)),
+      ),
+      Effect.bind('tm1', ({ teamA, userId1 }) => addTeamMember(teamA.id, userId1)),
+      Effect.bind('tm2', ({ teamB, userId2 }) => addTeamMember(teamB.id, userId2)),
+      // tm1 in root G (teamA), tm2 in the cross-team child (teamB)
+      Effect.tap(({ groupG, tm1 }) => addGroupMember(groupG.id, tm1.id)),
+      Effect.tap(({ groupCrossTeam, tm2 }) => addGroupMember(groupCrossTeam.id, tm2.id)),
+      Effect.bind('result', ({ groupG }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findDescendantMembersWithDiscordIdByGroupId(groupG.id)),
+        ),
+      ),
+      Effect.tap(({ result, tm1 }) =>
+        Effect.sync(() => {
+          // Only tm1 (same-team root member) must appear; tm2 (cross-team child) must not
+          expect(result).toHaveLength(1);
+          const memberIds = result.map((r) => r.teamMemberId);
+          expect(memberIds).toContain(tm1.id);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  // (e) discord_id passthrough / null note.
+  //
+  // The users table has discord_id NOT NULL, so in practice every user reachable via
+  // the INNER JOIN always has a non-null discord_id. The repository schema uses
+  // Schema.NullOr(Discord.Snowflake) for forward-compatibility, but the NOT NULL
+  // constraint prevents null values from reaching the result set.
+  //
+  // This test verifies: members joined via the query carry their discord_id through
+  // correctly, and members whose team_member row has NO matching users row are never
+  // returned (the INNER JOIN on users drops them — but FK constraints prevent orphaned
+  // team_members anyway, so this is guaranteed structurally rather than exercisable
+  // directly in integration tests).
+  it.effect('discord_id passthrough — all returned members carry their discord_id correctly', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('100000000000000014', 'owner14')),
+      Effect.bind('userId1', () => createUser('200000000000000014', 'user14a')),
+      Effect.bind('userId2', () => createUser('300000000000000014', 'user14b')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('141414141414141414' as Discord.Snowflake, ownerId),
+      ),
+      Effect.bind('groupG', ({ team }) => createGroup(team.id, 'Group G')),
+      Effect.bind('groupC', ({ team, groupG }) =>
+        createGroup(team.id, 'Group C', Option.some(groupG.id)),
+      ),
+      Effect.bind('tm1', ({ team, userId1 }) => addTeamMember(team.id, userId1)),
+      Effect.bind('tm2', ({ team, userId2 }) => addTeamMember(team.id, userId2)),
+      Effect.tap(({ groupG, tm1 }) => addGroupMember(groupG.id, tm1.id)),
+      Effect.tap(({ groupC, tm2 }) => addGroupMember(groupC.id, tm2.id)),
+      Effect.bind('result', ({ groupG }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findDescendantMembersWithDiscordIdByGroupId(groupG.id)),
+        ),
+      ),
+      Effect.tap(({ result, tm1, tm2 }) =>
+        Effect.sync(() => {
+          expect(result).toHaveLength(2);
+          const byMemberId = new Map(result.map((r) => [r.teamMemberId, r.discordUserId]));
+          // discord_id is NOT NULL in the schema, so these are always non-null
+          expect(byMemberId.get(tm1.id)).toBe('200000000000000014');
+          expect(byMemberId.get(tm2.id)).toBe('300000000000000014');
+          // Confirm no null discord ids come through (NOT NULL schema constraint guarantees this)
+          expect(result.every((r) => r.discordUserId !== null)).toBe(true);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});

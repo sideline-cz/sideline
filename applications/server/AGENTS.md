@@ -297,6 +297,11 @@ Group→Discord-role provisioning is event-driven, so a group created BEFORE its
 - The `Channel/UpsertMapping` and `Channel/UpsertMappingRoleOnly` handlers inspect that prior value: when it is `Option.none()` (role transitioned none→present), they call `reapplyGroupGrants(teamId, groupId)`. This re-emits managed access grants (`emitManagedAccessGrantedBatch`) for every `team_channel_access` row referencing the group whose channel is already provisioned (`discord_channel_id = Some`).
 - **The reapply is best-effort: it is wrapped in `Effect.catchCause(... logWarning)` so it can NEVER fail the mapping write.** A reapply failure logs a warning and the mapping still commits.
 
+**3. Member backfill source — `Channel/GetGroupMembers`** (`src/rpc/channel/index.ts`, read by the bot's `handleCreated`; see `applications/bot/AGENTS.md` → rule 1):
+
+- Payload `{ team_id: TeamId, group_id: GroupId }`; success `Schema.Array(GroupMemberDiscord)` (`team_member_id` + `discord_user_id`, `packages/domain/src/rpc/channel/ChannelRpcModels.ts`). The handler returns an empty array (never an error) when the group is missing or its `team_id` does not match `team_id`; members with no linked `discord_id` are filtered out via `Array.filterMap`.
+- **A group's Discord role is held by the group's direct members PLUS all members of every non-archived descendant subgroup.** The handler therefore MUST resolve members via `GroupsRepository.findDescendantMembersWithDiscordIdByGroupId(groupId)` (a recursive descendant CTE returning `DISTINCT team_member_id`), NOT the direct-only `findMembersWithDiscordIdByGroupId`. The CTE walks `groups.parent_id`, filtering `is_archived = false` and same `team_id`; the `DISTINCT` collapses a member who appears in multiple subgroups. When mirroring this for any other group-role member read, always use the descendant-aware query.
+
 Rules:
 
 1. **Detect the transition via the prior role id, never by re-reading the row after the write.** The CTE captures the pre-UPDATE value in the same statement; reading after the upsert would always see the new role.

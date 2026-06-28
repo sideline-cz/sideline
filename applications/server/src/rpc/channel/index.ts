@@ -13,6 +13,7 @@ import { Bind, LogicError } from '@sideline/effect-lib';
 import { Array, Cause, Data, Effect, flow, Option, Result } from 'effect';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
+import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
 import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
@@ -318,6 +319,45 @@ export const ChannelsRpcLive = Effect.Do.pipe(
                                   team_member_id: entry.member_id,
                                   discord_user_id: entry.discord_id,
                                 }),
+                            ),
+                          ),
+                        ),
+                }),
+              ),
+            ),
+          ),
+        ),
+  ),
+  Effect.let(
+    'Channel/GetGroupMembers',
+    () =>
+      ({
+        team_id,
+        group_id,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly group_id: GroupModel.GroupId;
+      }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.flatMap((groups) =>
+            groups.findGroupById(group_id).pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.succeed(Array.empty<ChannelRpcModels.GroupMemberDiscord>()),
+                  onSome: (group) =>
+                    group.team_id !== team_id
+                      ? Effect.succeed(Array.empty<ChannelRpcModels.GroupMemberDiscord>())
+                      : groups.findDescendantMembersWithDiscordIdByGroupId(group_id).pipe(
+                          Effect.map((rows) =>
+                            Array.filterMap(rows, (row) =>
+                              row.discordUserId === null
+                                ? Result.failVoid
+                                : Result.succeed(
+                                    new ChannelRpcModels.GroupMemberDiscord({
+                                      team_member_id: row.teamMemberId,
+                                      discord_user_id: row.discordUserId,
+                                    }),
+                                  ),
                             ),
                           ),
                         ),

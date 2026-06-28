@@ -256,6 +256,23 @@ const make = Effect.gen(function* () {
           `,
   });
 
+  const findDescendantMembersWithDiscordIdQuery = SqlSchema.findAll({
+    Request: GroupModel.GroupId,
+    Result: GroupMemberWithDiscordRow,
+    execute: (groupId) => sql`
+            WITH RECURSIVE descendants AS (
+              SELECT g.id, g.team_id FROM groups g WHERE g.id = ${groupId}
+              UNION ALL
+              SELECT g.id, g.team_id FROM groups g JOIN descendants d ON g.parent_id = d.id WHERE g.is_archived = false AND g.team_id = d.team_id
+            )
+            SELECT DISTINCT gm.team_member_id, u.discord_id AS discord_user_id
+            FROM descendants d
+            JOIN group_members gm ON gm.group_id = d.id
+            JOIN team_members tm ON tm.id = gm.team_member_id
+            JOIN users u ON u.id = tm.user_id
+          `,
+  });
+
   const findGroupsByTeamId = (teamId: Team.TeamId) => findByTeamId(teamId).pipe(catchSqlErrors);
 
   const findGroupById = (groupId: GroupModel.GroupId) => findById(groupId).pipe(catchSqlErrors);
@@ -334,6 +351,17 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  const findDescendantMembersWithDiscordIdByGroupId = (groupId: GroupModel.GroupId) =>
+    findDescendantMembersWithDiscordIdQuery(groupId).pipe(
+      Effect.map((rows) =>
+        rows.map((r) => ({
+          teamMemberId: r.team_member_id,
+          discordUserId: r.discord_user_id,
+        })),
+      ),
+      catchSqlErrors,
+    );
+
   return {
     findGroupsByTeamId,
     findGroupById,
@@ -351,6 +379,7 @@ const make = Effect.gen(function* () {
     getAncestors,
     getDescendantMemberIds,
     findMembersWithDiscordIdByGroupId,
+    findDescendantMembersWithDiscordIdByGroupId,
   };
 });
 

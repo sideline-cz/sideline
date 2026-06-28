@@ -149,6 +149,8 @@ A **Discord channel** is separate and only created when you explicitly request i
 - **Create channel** — the bot creates a hidden text channel and links the group's existing role to it, so only group members can see it.
 - **Link existing channel** — pick a channel already in your Discord server; the bot creates and attaches the role to it.
 
+When a channel is created or linked, the bot automatically **backfills all current group members** onto the role — including members of any subgroups nested under this group. Members who already hold the role are unaffected.
+
 When you unlink a channel (via the **Disconnect** button), the channel is removed from Discord (or archived/left alone, depending on your cleanup mode setting), but the group's Discord **role is kept**. This means members retain their role assignment and it can be linked to a new channel later without losing the membership data.
 
 Deleting a group removes both the channel and the role.

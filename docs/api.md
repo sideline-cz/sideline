@@ -6643,6 +6643,7 @@ Manages Discord channel mappings and channel sync outbox processing. The outbox 
 | `Channel/DeleteMapping` | `team_id`, `group_id` | Removes a channel mapping |
 | `Channel/GetRosterMapping` | `team_id`, `roster_id` → `ChannelMapping \| null` | Gets the Discord channel/role mapping for a roster |
 | `Channel/GetRosterMembers` | `team_id`, `roster_id` → `RosterMemberDiscord[]` | Returns all roster members who have a linked Discord account; scoped to `team_id` — an unknown roster or team mismatch returns an empty array |
+| `Channel/GetGroupMembers` | `team_id`, `group_id` → `GroupMemberDiscord[]` | Returns all members of the group and its descendant subgroups who have a linked Discord account; scoped to `team_id` — an unknown group or team mismatch returns an empty array. Uses a recursive CTE so ancestor groups receive the full transitive membership. Called by `handleCreated.ts` to backfill the role after it is resolved |
 | `Channel/UpsertRosterMapping` | `team_id`, `roster_id`, `discord_channel_id`, `discord_role_id` | Creates or updates the Discord channel+role mapping for a roster |
 | `Channel/DeleteRosterMapping` | `team_id`, `roster_id` | Removes the roster channel mapping |
 | `Channel/UpdateRosterChannel` | `roster_id`, `discord_channel_id` | Updates the `discord_channel_id` on the roster's Sideline record |

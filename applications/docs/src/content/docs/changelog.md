@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-28 — Fix: group channel creation now backfills existing members onto the Discord role
+
+When a Discord channel was created or linked for a group, existing group members were never added to the group's Discord role — only members added _after_ channel creation received it. This is now fixed: the bot backfills all current members (including members of any nested subgroups) onto the role as soon as the channel is provisioned.
+
+- Applies to all three creation paths: creating a new channel, linking an existing channel, and the role-only provisioning flow.
+- Members of subgroups nested under the group are included — because adding a member to any subgroup also emits an event on every ancestor, the full descendant membership is used to ensure the role assignment is complete.
+- The backfill is add-only: existing role assignments are not touched, and members who no longer belong to the group are not removed. Automatic pruning of stale role-holders is planned for a future release.
+
 ## 2026-06-27 — New Discord command: `/summarize`
 
 Members can now ask the bot to summarize recent conversation in any channel or thread.

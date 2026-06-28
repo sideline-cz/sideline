@@ -25,6 +25,11 @@ export class RosterMemberDiscord extends Schema.Class<RosterMemberDiscord>('Rost
   discord_user_id: Discord.Snowflake,
 }) {}
 
+export class GroupMemberDiscord extends Schema.Class<GroupMemberDiscord>('GroupMemberDiscord')({
+  team_member_id: TeamMember.TeamMemberId,
+  discord_user_id: Discord.Snowflake,
+}) {}
+
 // Managed channels never carry a per-channel role: access is enforced via Discord permission
 // overwrites whose role ids are resolved per-group at emit time (see api/channel.ts setAccess and
 // rpc/channel UpsertManagedChannel reconcile). No managed flow writes or reads team_channels.discord_role_id.
