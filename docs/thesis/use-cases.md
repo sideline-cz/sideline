@@ -17,7 +17,7 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 | **Treasurer** | A team member holding the built-in `Treasurer` role. Holds `finance:view`, `finance:manage_fees`, and `finance:record_payments`. Used to delegate finance authority without elevating the member to Captain or Admin. |
 | **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/carpool`, `/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`, `/summarize`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination, carpool board buttons, email approval/reject buttons). Receives RPC calls from the server to synchronise Discord roles, channels, and email posts. |
 | **Global Admin** | A user who is a global admin by either having the `users.is_global_admin` database flag set to `true` or having their Discord ID listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable (the two sources are ORed). The first user to register on a fresh database is automatically promoted via the DB flag. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. Can also mint, list, and revoke team onboarding tokens, enabling new teams to be set up by a designated captain without requiring a pre-existing Sideline account. Can manage the global-admin roster via `GET/POST/DELETE /auth/global-admins` — granting or revoking `users.is_global_admin` for other users, subject to self-revoke, last-admin, and env-managed safeguards. A global admin with no team memberships is redirected to `/admin/onboarding-tokens` instead of `/no-team`. Additionally, global admins have **read-only access to every team** regardless of membership: all read endpoints for members, rosters, roles, finance, activity stats, and team info use a `requireReadAccess` helper that synthesises a read-only membership (with `roster:view`, `member:view`, `role:view`, `finance:view` permissions) when the caller is a global admin but not a real team member. Write endpoints still require actual membership. |
-| **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes, sending RSVP reminder notifications before events, auto-logging attendance from RSVP data, evaluating age-threshold rules to move members between groups, and queuing payment reminder DMs for members with upcoming or overdue fee assignments. |
+| **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes (and incrementing the `missed_rsvps` counter for non-responding built-in Players in the event's member group), sending RSVP reminder notifications before events (targeting only Players whose `missed_rsvps` count is below the team's `max_missed_rsvps` threshold), auto-logging attendance from RSVP data, evaluating age-threshold rules to move members between groups, and queuing payment reminder DMs for members with upcoming or overdue fee assignments. |
 
 ---
 
@@ -488,7 +488,7 @@ flowchart LR
         UC_CREATE_EVENT["Create Event\n(POST /teams/:teamId/events)\nrequires: event:create\ntitle · type · startAt · endAt\nlocation · trainingTypeId\ndiscordChannelId · ownerGroupId · memberGroupId"]
         UC_EDIT_EVENT["Edit Event\n(PATCH /teams/:teamId/events/:eventId)\nrequires: event:edit"]
         UC_CANCEL_EVENT["Cancel Event\n(POST /teams/:teamId/events/:eventId/cancel)\nrequires: event:cancel"]
-        UC_START_EVENT["Mark Event as Started\n(background scheduler)\ntransitions status: active → started\nremoves RSVP buttons in Discord\nfor trainings: @-mentions assigned coach (or owners role if unclaimed)\nfor other events: @-mentions member-group role"]
+        UC_START_EVENT["Mark Event as Started\n(background scheduler)\ntransitions status: active → started\nincrements missed_rsvps for non-responding Players in member group\nremoves RSVP buttons in Discord\nfor trainings: @-mentions assigned coach (or owners role if unclaimed)\nfor other events: @-mentions member-group role"]
     end
 
     subgraph SERIES["Event Series (Recurring)"]
@@ -503,8 +503,8 @@ flowchart LR
     subgraph RSVP["RSVP"]
         UC_GET_RSVPS["View RSVP List\n(GET /teams/:teamId/events/:eventId/rsvps)"]
         UC_SUBMIT_RSVP["Submit RSVP\n(PUT /teams/:teamId/events/:eventId/rsvp)\nresponse: yes / no / maybe\noptional message"]
-        UC_NON_RESPONDERS["View Non-Responders\n(GET /teams/:teamId/events/:eventId/rsvps/non-responders)"]
-        UC_RSVP_REMINDER["Send RSVP Reminder Notification\n(background scheduler)"]
+        UC_NON_RESPONDERS["View Non-Responders\n(GET /teams/:teamId/events/:eventId/rsvps/non-responders)\nbuilt-in Players with missed_rsvps < max_missed_rsvps"]
+        UC_RSVP_REMINDER["Send RSVP Reminder Notification\n(background scheduler)\nDMs and embed target Players with missed_rsvps < max_missed_rsvps"]
     end
 
     PL --> UC_LIST_EVENTS
@@ -774,7 +774,7 @@ The following structured descriptions cover the most significant use cases in th
 | **Actor** | Player (web); Discord User (via bot button) |
 | **Precondition** | The event exists and has not been cancelled. The RSVP deadline has not passed. The actor is a member of the team (or, if the event has a member group, is a member of that group). |
 | **Main Flow** | 1. The actor opens the event detail page (web) or sees the event embed in Discord. 2. The actor clicks a response button: Yes, No, or Maybe. 3. Both the web app and the Discord bot immediately call the RSVP endpoint on click (no separate confirmation step). **Web:** calls `PUT /teams/:teamId/events/:eventId/rsvp` with the selected response and the actor's existing message (if any). **Discord bot:** calls `Event/SubmitRsvp` via RPC; the bot replies with an ephemeral confirmation. 4. The server records the response and returns updated counts. 5. The bot updates the RSVP count display on the Discord embed. 6. **Web (optional note):** After a response is recorded, the actor can type a note and click "Save note", which triggers a second `PUT /teams/:teamId/events/:eventId/rsvp` call carrying the updated message. **Discord bot (optional message):** The ephemeral confirmation includes a `[💬 Add a message]` button. Clicking it opens a modal where the actor can type an optional message; submitting saves the message via a second `Event/SubmitRsvp` call. If a message already exists the buttons shown are `[💬 Edit message]` and `[🗑️ Clear message]`. |
-| **Postcondition** | The actor's RSVP response is recorded. The Discord embed shows up-to-date attendance counts. |
+| **Postcondition** | The actor's RSVP response is recorded. The Discord embed shows up-to-date attendance counts. The actor's `missed_rsvps` counter on `team_members` is reset to 0 (best-effort; failure does not abort the RSVP). |
 | **Alternate Flow** | If the RSVP deadline has passed the API returns `400 RsvpDeadlinePassed` and the UI informs the user. |
 
 ---

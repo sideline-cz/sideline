@@ -144,6 +144,7 @@ const AutoLogCron = TrainingAutoLogCron.asEffect().pipe(
 const EventStartRepositoriesLive = Layer.mergeAll(
   EventsRepository.Default,
   EventSyncEventsRepository.Default,
+  EventRsvpsRepository.Default,
   // EventStartCron resolves reminder channels/roles via EventChannelResolver,
   // which requires DiscordChannelMappingRepository.
   DiscordChannelMappingRepository.Default,

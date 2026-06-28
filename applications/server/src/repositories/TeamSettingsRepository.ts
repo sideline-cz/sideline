@@ -31,6 +31,7 @@ class TeamSettingsRow extends Schema.Class<TeamSettingsRow>('TeamSettingsRow')({
   discord_channel_format: Schema.String,
   weekly_summary_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   claim_request_days_before: Schema.Number,
+  max_missed_rsvps: Schema.Number,
 }) {}
 
 class WeeklySummaryTeamRow extends Schema.Class<WeeklySummaryTeamRow>('WeeklySummaryTeamRow')({
@@ -65,6 +66,7 @@ const TeamSettingsUpsertInput = Schema.Struct({
   discord_channel_format: Schema.String,
   weekly_summary_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   claim_request_days_before: Schema.Number,
+  max_missed_rsvps: Schema.Number,
 });
 
 class EventNeedingClaimRequest extends Schema.Class<EventNeedingClaimRequest>(
@@ -141,7 +143,8 @@ const make = Effect.gen(function* () {
              discord_role_format,
              discord_channel_format,
              weekly_summary_channel_id,
-             claim_request_days_before
+             claim_request_days_before,
+             max_missed_rsvps
       FROM team_settings
       WHERE team_id = ${teamId}
     `,
@@ -178,7 +181,8 @@ const make = Effect.gen(function* () {
                                  discord_role_format,
                                  discord_channel_format,
                                  weekly_summary_channel_id,
-                                 claim_request_days_before)
+                                 claim_request_days_before,
+                                 max_missed_rsvps)
       VALUES (${input.team_id}, ${input.event_horizon_days},
               ${input.min_players_threshold},
               ${input.rsvp_reminders_enabled},
@@ -196,7 +200,8 @@ const make = Effect.gen(function* () {
               ${input.discord_role_format},
               ${input.discord_channel_format},
               ${input.weekly_summary_channel_id},
-              ${input.claim_request_days_before})
+              ${input.claim_request_days_before},
+              ${input.max_missed_rsvps})
       ON CONFLICT (team_id) DO UPDATE SET
         event_horizon_days = ${input.event_horizon_days},
         min_players_threshold = ${input.min_players_threshold},
@@ -222,6 +227,7 @@ const make = Effect.gen(function* () {
         discord_channel_format = ${input.discord_channel_format},
         weekly_summary_channel_id = ${input.weekly_summary_channel_id},
         claim_request_days_before = ${input.claim_request_days_before},
+        max_missed_rsvps = ${input.max_missed_rsvps},
         updated_at = now()
       RETURNING team_id, event_horizon_days,
                 min_players_threshold,
@@ -240,7 +246,8 @@ const make = Effect.gen(function* () {
                 discord_role_format,
                 discord_channel_format,
                 weekly_summary_channel_id,
-                claim_request_days_before
+                claim_request_days_before,
+                max_missed_rsvps
     `,
   });
 
@@ -353,6 +360,7 @@ const make = Effect.gen(function* () {
     discordChannelFormat = DEFAULT_CHANNEL_FORMAT,
     weeklySummaryChannelId = Option.none<Discord.Snowflake>(),
     claimRequestDaysBefore = 3,
+    maxMissedRsvps = 4,
   }: {
     teamId: Team.TeamId;
     eventHorizonDays: number;
@@ -379,6 +387,7 @@ const make = Effect.gen(function* () {
     discordChannelFormat?: string;
     weeklySummaryChannelId?: Option.Option<Discord.Snowflake>;
     claimRequestDaysBefore?: number;
+    maxMissedRsvps?: number;
   }) =>
     _upsertSettings({
       team_id: teamId,
@@ -406,6 +415,7 @@ const make = Effect.gen(function* () {
       discord_channel_format: discordChannelFormat,
       weekly_summary_channel_id: weeklySummaryChannelId,
       claim_request_days_before: claimRequestDaysBefore,
+      max_missed_rsvps: maxMissedRsvps,
     }).pipe(catchSqlErrors);
 
   const getHorizonDays = (teamId: Team.TeamId) =>

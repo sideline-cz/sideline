@@ -476,6 +476,16 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
               ),
             ),
           ),
+          // Best-effort: reset missed RSVP streak on any response
+          Effect.tap(({ member }) =>
+            svc.members
+              .resetMissedRsvps(member.id)
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning('Failed to reset missed RSVPs, continuing', cause),
+                ),
+              ),
+          ),
           // Best-effort: call provisioning after RSVP — failure must NOT fail the write
           Effect.tap(({ event, member, upsertResult }) =>
             svc.provisioning
@@ -623,10 +633,18 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
           Effect.bind('event', () =>
             svc.events.findEventByIdWithDetails(event_id).pipe(Effect.map(Option.getOrUndefined)),
           ),
+          Effect.bind('settings', ({ event }) =>
+            event ? svc.teamSettings.findByTeamId(event.team_id) : Effect.succeed(Option.none()),
+          ),
           Effect.bind('counts', () => svc.rsvps.countRsvpsByEventId(event_id)),
-          Effect.bind('nonResponders', ({ event }) =>
+          Effect.bind('nonResponders', ({ event, settings }) =>
             event
-              ? svc.rsvps.findNonRespondersByEventId(event_id, event.team_id, event.member_group_id)
+              ? svc.rsvps.findNonRespondersByEventId(
+                  event_id,
+                  event.team_id,
+                  event.member_group_id,
+                  Option.match(settings, { onNone: () => 4, onSome: (s) => s.max_missed_rsvps }),
+                )
               : Effect.succeed([]),
           ),
           Effect.bind('yesAttendees', ({ event }) =>

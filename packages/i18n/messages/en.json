@@ -501,6 +501,8 @@
   "teamSettings_profileSaveFailed": "Failed to save team profile.",
   "teamSettings_rsvpRemindersEnabled": "Enable RSVP reminders",
   "teamSettings_rsvpReminderDaysBefore": "Days before event",
+  "teamSettings_maxMissedRsvps": "Stop reminding after N missed RSVPs",
+  "teamSettings_maxMissedRsvps_help": "A member who misses this many RSVPs in a row stops receiving reminders until they respond to an event again.",
   "teamSettings_rsvpReminderTime": "Reminder time",
   "teamSettings_rsvpReminderHelp": "Sends a reminder this many days before the event, at the configured time in the team's timezone. Set days to 0 to remind on the event day itself.",
   "teamSettings_coachAssignment": "Coach assignment",

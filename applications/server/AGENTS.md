@@ -567,6 +567,53 @@ Rules:
 2. Use `Option.isNone` to detect first-time inserts vs `Option.exists` to detect changed values
 3. Derive the boolean in an `Effect.let` after the upsert so the write is not conditional on the check
 
+## RSVP Has Two Write Surfaces — Apply Side Effects to Both
+
+An RSVP response is written through **exactly two** handlers, and any per-response side effect MUST be added to **both** or it silently applies on only one surface:
+
+| Surface | Handler | RSVP write |
+|---------|---------|-----------|
+| Web HTTP | `submitRsvp` (`src/api/event-rsvp.ts`) | `rsvps.upsertRsvp(...)` |
+| Discord button | `Event/SubmitRsvp` (`src/rpc/event/index.ts`) | `svc.rsvps.upsertRsvp(...)` |
+
+Reference: the consecutive missed-RSVP streak reset (`team_members.missed_rsvps`). Both handlers call `members.resetMissedRsvps(membership.id)` in a best-effort `Effect.tap` after the upsert, wrapped in `Effect.catchCause((cause) => Effect.logWarning('Failed to reset missed RSVPs, continuing', cause))` so a reset failure never fails the RSVP write.
+
+Rules:
+1. **Any new per-response side effect (counter reset, streak update, derived flag) goes in BOTH handlers.** Grep `upsertRsvp` before shipping — two call sites in `src/` is the invariant. A side effect on only the web path leaves Discord RSVPs (the majority) unhandled.
+2. **Side effects that are not part of the RSVP's own correctness are best-effort** — `Effect.tap` after the upsert, wrapped in `Effect.catchCause(... logWarning)`. The same rule already governs roster provisioning (`provisioning.onRsvp`) on both surfaces.
+
+## Idempotent Counter Increment Folded Into the `active`→`started` Status Flip
+
+`EventStartCron` increments `team_members.missed_rsvps` for each non-responding eligible member when an event starts (`EventRsvpsRepository.incrementMissedForEventNonRespondersByEventId`). Idempotency comes **for free from the status flip**: the cron's candidate query (`findEventsToStart`) only returns `active` events, and the first thing the per-event effect does is flip the event to `started`, so a re-run never re-processes the same event. This is a third idempotency pattern, distinct from `*_sent_at` markers and bot-ack `<resource>_sent` logs — use it only when a single irreversible status transition already gates re-processing.
+
+Rules:
+1. **Run the increment immediately after the `active`→`started` flip and BEFORE any Discord resolution** (`resolveGroupRoleId` / `resolveReminderChannel`). A Discord-resolution failure aborts the rest of the per-event effect, but the event is already `started`, so it will never reprocess — running the increment first guarantees it is not lost. See the ordering comment in `EventStartCron.ts`.
+2. **The increment is best-effort**: wrap it in `Effect.catchCause((cause) => Effect.logWarning(...))` so a counter-update failure never blocks event start or the `event_started` emission.
+3. **Add the repository's layer to the cron's repo bundle in `run.ts`.** `incrementMissedForEventNonRespondersByEventId` lives on `EventRsvpsRepository`, which had to be added to `EventStartRepositoriesLive` — a new repo dependency on an existing cron requires editing that cron's `Layer.mergeAll` block.
+
+## The Shared Non-Responder Query Filters to Below-Threshold Built-in Players
+
+`EventRsvpsRepository.findNonRespondersByEventId(eventId, teamId, memberGroupId, maxMissedRsvps = 4)` is the single source of truth for "who still needs to RSVP". Both the reminder count surfaces (web `submitRsvp` non-responder list and `Event/GetRsvpBoard`) and the increment query (`incrementMissedForEventNonResponders`) apply the **same three eligibility filters**: `tm.active = true`, an `EXISTS` on the built-in **Player** role (`r.name = 'Player' AND r.is_built_in = true`), and (for the read path) `tm.missed_rsvps < max_missed_rsvps`. A member who has missed `max_missed_rsvps` consecutive RSVPs drops off the reminder list until they respond and `resetMissedRsvps` clears the streak.
+
+Rules:
+1. **Resolve `maxMissedRsvps` from `team_settings.max_missed_rsvps`, defaulting to `4` when settings are absent** — `Option.match(settings, { onNone: () => 4, onSome: (s) => s.max_missed_rsvps })`. Both call sites (`src/api/event-rsvp.ts`, `src/rpc/event/index.ts`) `Effect.bind` the settings first, then pass the resolved number.
+2. **The built-in-Player `EXISTS` filter must stay identical** between the read query and the increment query — they target the same population, so a divergence would increment a counter for a member who never appears in the reminder list (or vice versa).
+
+## Adding a Team Setting End-to-End
+
+A configurable per-team setting (e.g. `team_settings.max_missed_rsvps`, following the existing `rsvp_reminder_days_before` / `claim_request_days_before` shape) touches **six** synchronized places across server, domain, web, and migrations. Miss one and the setting fails to persist, fails to validate, or fails to compile:
+
+| # | Place | File | What to add |
+|---|-------|------|-------------|
+| 1 | DB column (nullable or `NOT NULL DEFAULT`) | new migration in `packages/migrations/src/before/` | `ALTER TABLE team_settings ADD COLUMN IF NOT EXISTS <col> <type> NOT NULL DEFAULT <default>` |
+| 2 | Domain model | `packages/domain/src/models/TeamSettings.ts` | the snake_case field on `TeamSettings` |
+| 3 | Domain API contract | `packages/domain/src/api/TeamSettingsApi.ts` | the camelCase field on `TeamSettingsInfo` AND on `UpdateTeamSettingsRequest` as `Schema.OptionFromOptional(Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum, maximum }))))` — the bounds live here |
+| 4 | Server repository | `src/repositories/TeamSettingsRepository.ts` | the snake_case column on `TeamSettingsRow`, `TeamSettingsUpsertInput`, the SELECT/INSERT/`ON CONFLICT DO UPDATE`/`RETURNING` column lists, and the `_upsertSettings` named param (with its default) |
+| 5 | Server API handler | `src/api/team-settings.ts` | map the column in the read mapper (both the `onNone` default-object branch and the `onSome` branch), and in both upsert branches use `Option.getOrElse(payload.<field>, () => <default-or-existing>)` |
+| 6 | Web settings UI | `applications/web/src/components/pages/TeamSettingsPage.tsx` | a `useState` seeded from `settings.<field>`, a dirty-check comparison, a client-side bounds guard (mirroring the domain `isBetween`), the `Option.some(parsed)` in the save payload, and the form `Input` — plus i18n keys in `packages/i18n/messages/{en,cs}.json` |
+
+The default value MUST be identical in places 1, 4, and 5 (and in the read mapper's `onNone` branch), and the bounds MUST be identical in places 3 and 6. Reference end-to-end implementation: `max_missed_rsvps` (default `4`, bounds `1`–`50`).
+
 ## Cron Jobs
 
 Cron jobs are long-running Effects that repeat on a schedule. Each cron is defined in `src/services/` and wired as a concurrent fiber in `run.ts`.
@@ -577,7 +624,7 @@ Cron jobs are long-running Effects that repeat on a schedule. Each cron is defin
 | `EventHorizonCron` | `src/services/EventHorizonCron.ts` | daily 03:00 UTC | Generate recurring events from series, emit Discord sync events |
 | `RsvpReminderCron` | `src/services/RsvpReminderCron.ts` | every minute | Send RSVP reminder sync events |
 | `TrainingAutoLogCron` | `src/services/TrainingAutoLogCron.ts` | every 5 minutes | Auto-log ended trainings |
-| `EventStartCron` | `src/services/EventStartCron.ts` | every minute | Mark active events as `started` when `start_at <= NOW()`, emit `event_started` sync events |
+| `EventStartCron` | `src/services/EventStartCron.ts` | every minute | Mark active events as `started` when `start_at <= NOW()`, increment `team_members.missed_rsvps` for non-responders (see "Idempotent Counter Increment Folded Into the `active`→`started` Status Flip"), emit `event_started` sync events |
 | `WeeklySummaryCron` | `src/services/WeeklySummaryCron.ts` | every minute (gated to Sun 20:00 in team timezone) | Build a per-team weekly digest and insert one `weekly_summary_sync_events` row per team-week |
 | `PaymentReminderCron` | `src/services/PaymentReminderCron.ts` | every minute | For each unpaid fee assignment whose `effective_due_at` matches a `PaymentReminderKind` offset (−3 / 0 / +3 / +10 / +21 days in team timezone), insert one `payment_reminder_sync_events` row. Idempotency lives in `FeeAssignmentsRepository.findReminderCandidates` (NOT EXISTS against both `payment_reminders_sent` and the outbox) — see "Bot-Ack Idempotency for Discord-Side-Effect Crons" below. |
 | `TrainingClaimRequestCron` | `src/services/TrainingClaimRequestCron.ts` | every minute | Emit a `training_claim_request` event once per training, `team_settings.claim_request_days_before` days ahead of `start_at`. Candidate query `TeamSettingsRepository.findEventsNeedingClaimRequest`; idempotency via `events.claim_request_sent_at` — see "Self-Healing `*_sent_at` Date-Gated Crons" below. |

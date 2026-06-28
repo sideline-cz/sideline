@@ -376,6 +376,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
             discord_channel_cleanup_on_roster_deactivate: 'delete',
             discord_role_format: '{role}',
             discord_channel_format: '{channel}',
+            max_missed_rsvps: 4,
           }),
         )
       : Effect.succeed(Option.none()),
@@ -421,6 +422,7 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         input.discordChannelCleanupOnRosterDeactivate ?? 'delete',
       discord_role_format: input.discordRoleFormat ?? '{role}',
       discord_channel_format: input.discordChannelFormat ?? '{channel}',
+      max_missed_rsvps: input.maxMissedRsvps ?? 4,
     });
   },
   getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),

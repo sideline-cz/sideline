@@ -193,6 +193,16 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
                 ),
               ),
             ),
+            // Best-effort: reset missed RSVP streak on any response
+            Effect.tap(({ membership }) =>
+              members
+                .resetMissedRsvps(membership.id)
+                .pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning('Failed to reset missed RSVPs, continuing', cause),
+                  ),
+                ),
+            ),
             // Best-effort: trigger roster provisioning after RSVP
             Effect.tap(({ event, membership, upsertResult }) =>
               provisioning.onRsvp({
@@ -250,8 +260,14 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
             Effect.tap(({ event }) =>
               event.team_id !== teamId ? Effect.fail(notFound) : Effect.void,
             ),
-            Effect.bind('nonResponders', ({ event }) =>
-              rsvps.findNonRespondersByEventId(eventId, teamId, event.member_group_id),
+            Effect.bind('settings', () => teamSettings.findByTeamId(teamId)),
+            Effect.bind('nonResponders', ({ event, settings }) =>
+              rsvps.findNonRespondersByEventId(
+                eventId,
+                teamId,
+                event.member_group_id,
+                Option.match(settings, { onNone: () => 4, onSome: (s) => s.max_missed_rsvps }),
+              ),
             ),
             Effect.map(
               ({ nonResponders }) =>

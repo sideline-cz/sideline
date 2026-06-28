@@ -112,6 +112,7 @@ export function TeamSettingsPage({
   const [rsvpReminderDaysBefore, setRsvpReminderDaysBefore] = React.useState(
     String(settings.rsvpReminderDaysBefore),
   );
+  const [maxMissedRsvps, setMaxMissedRsvps] = React.useState(String(settings.maxMissedRsvps));
   const [claimRequestDaysBefore, setClaimRequestDaysBefore] = React.useState(
     String(settings.claimRequestDaysBefore),
   );
@@ -236,6 +237,7 @@ export function TeamSettingsPage({
     minPlayersThreshold !== String(settings.minPlayersThreshold) ||
     rsvpRemindersEnabled !== settings.rsvpRemindersEnabled ||
     rsvpReminderDaysBefore !== String(settings.rsvpReminderDaysBefore) ||
+    maxMissedRsvps !== String(settings.maxMissedRsvps) ||
     claimRequestDaysBefore !== String(settings.claimRequestDaysBefore) ||
     rsvpReminderTime !== (settings.rsvpReminderTime || '18:00') ||
     timezone !== (settings.timezone || 'Europe/Prague') ||
@@ -309,6 +311,9 @@ export function TeamSettingsPage({
       parsedReminderDaysBefore > 14
     )
       return;
+    const parsedMaxMissedRsvps = Number.parseInt(maxMissedRsvps, 10);
+    if (Number.isNaN(parsedMaxMissedRsvps) || parsedMaxMissedRsvps < 1 || parsedMaxMissedRsvps > 50)
+      return;
     const parsedClaimDaysBefore = Number(claimRequestDaysBefore);
     if (
       !Number.isInteger(parsedClaimDaysBefore) ||
@@ -327,6 +332,7 @@ export function TeamSettingsPage({
             minPlayersThreshold: Option.some(parsedThreshold),
             rsvpRemindersEnabled: Option.some(rsvpRemindersEnabled),
             rsvpReminderDaysBefore: Option.some(parsedReminderDaysBefore),
+            maxMissedRsvps: Option.some(parsedMaxMissedRsvps),
             claimRequestDaysBefore: Option.some(parsedClaimDaysBefore),
             rsvpReminderTime: Option.some(rsvpReminderTime),
             timezone: Option.some(timezone),
@@ -362,6 +368,7 @@ export function TeamSettingsPage({
     minPlayersThreshold,
     rsvpRemindersEnabled,
     rsvpReminderDaysBefore,
+    maxMissedRsvps,
     claimRequestDaysBefore,
     rsvpReminderTime,
     timezone,
@@ -735,6 +742,24 @@ export function TeamSettingsPage({
                   max={14}
                   value={rsvpReminderDaysBefore}
                   onChange={(e) => setRsvpReminderDaysBefore(e.target.value)}
+                  disabled={!rsvpRemindersEnabled}
+                  className='max-w-32'
+                />
+              </div>
+              <div>
+                <label htmlFor='max-missed-rsvps' className='text-sm font-medium mb-1 block'>
+                  {tr('teamSettings_maxMissedRsvps')}
+                </label>
+                <p className='text-xs text-muted-foreground mb-2'>
+                  {tr('teamSettings_maxMissedRsvps_help')}
+                </p>
+                <Input
+                  id='max-missed-rsvps'
+                  type='number'
+                  min={1}
+                  max={50}
+                  value={maxMissedRsvps}
+                  onChange={(e) => setMaxMissedRsvps(e.target.value)}
                   disabled={!rsvpRemindersEnabled}
                   className='max-w-32'
                 />
