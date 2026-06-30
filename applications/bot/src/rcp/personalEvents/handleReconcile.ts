@@ -5,10 +5,7 @@ import { Array as Arr, Effect, Option, Schedule, Schema } from 'effect';
 import { guildLocale, type Locale } from '~/locale.js';
 import type { ChannelReorderSemaphore } from '~/rcp/event/ChannelReorderSemaphore.js';
 import { buildEventEmbed, YES_EMBED_LIMIT } from '~/rest/events/buildEventEmbed.js';
-import {
-  buildPersonalMessagePayload,
-  hashPersonalMessagePayload,
-} from '~/rest/events/buildPersonalEventMessage.js';
+import { buildPersonalMessage } from '~/rest/events/buildPersonalEventMessage.js';
 import { DfxGuild } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 import { reorderPersonalChannel } from './reorderPersonalChannel.js';
@@ -94,13 +91,13 @@ const reconcileMemberMessage = (params: {
         );
       }
 
-      const payload = buildPersonalMessagePayload({
+      const render = buildPersonalMessage({
         entry,
         yesAttendees,
         discordId: member.discord_id,
         locale,
       });
-      const hash = hashPersonalMessagePayload(payload);
+      const hash = render.hash;
 
       const storedHash = Option.isSome(stored) ? stored.value.payload_hash : null;
       if (storedHash === hash) {
@@ -108,9 +105,11 @@ const reconcileMemberMessage = (params: {
       }
 
       if (Option.isSome(stored)) {
-        // Update existing message in place — ordering is unaffected.
+        // Update existing message in place — ordering is unaffected. Editing the
+        // message (rather than creating) means an unanswered-event mention in
+        // editPayload registers + highlights but never pings.
         const messageId = stored.value.discord_message_id;
-        return rest.updateMessage(member.personal_channel_id, messageId, payload).pipe(
+        return rest.updateMessage(member.personal_channel_id, messageId, render.editPayload).pipe(
           Effect.tap(() =>
             rpc['PersonalEvents/UpsertPersonalEventMessage']({
               event_id: event.event_id,
@@ -139,39 +138,58 @@ const reconcileMemberMessage = (params: {
 
       // No stored message — CREATE it (new member or new event). A create appends
       // at the bottom, so the channel may need a reorder afterwards → return Some.
+      // We always create mention-free, then add an unanswered-event mention via an
+      // edit so it highlights the message without pinging the member.
       // Dedup safety: if the persist fails after retries, delete the just-created
       // Discord message (compensating action) and propagate so the event stays dirty.
       const upsertRetryPolicy = Schedule.exponential('200 millis').pipe(
         Schedule.both(Schedule.recurs(3)),
       );
-      return rest.createMessage(member.personal_channel_id, payload).pipe(
+      const persist = (discordMessageId: DiscordSchemas.Snowflake, payloadHash: string) =>
+        rpc['PersonalEvents/UpsertPersonalEventMessage']({
+          event_id: event.event_id,
+          team_member_id: member.team_member_id,
+          personal_channel_id: member.personal_channel_id,
+          discord_message_id: discordMessageId,
+          payload_hash: payloadHash,
+        }).pipe(
+          Effect.retry(upsertRetryPolicy),
+          Effect.catchTag('RpcClientError', (rpcErr) =>
+            rest.deleteMessage(member.personal_channel_id, discordMessageId).pipe(
+              Effect.catchCause((deleteCause) =>
+                Effect.logWarning(
+                  `Compensating delete failed for orphan message ${discordMessageId} (member ${member.team_member_id})`,
+                  deleteCause,
+                ),
+              ),
+              Effect.andThen(Effect.fail(rpcErr)),
+            ),
+          ),
+        );
+      return rest.createMessage(member.personal_channel_id, render.createPayload).pipe(
         Effect.flatMap((msg) => {
           const discordMessageId = msg.id as DiscordSchemas.Snowflake;
-          return rpc['PersonalEvents/UpsertPersonalEventMessage']({
-            event_id: event.event_id,
-            team_member_id: member.team_member_id,
-            personal_channel_id: member.personal_channel_id,
-            discord_message_id: discordMessageId,
-            payload_hash: hash,
-          }).pipe(
-            Effect.retry(upsertRetryPolicy),
-            Effect.tap(() =>
-              Effect.logInfo(
-                `Created personal event message ${discordMessageId} for member ${member.team_member_id} event ${event.event_id}`,
-              ),
-            ),
-            Effect.catchTag('RpcClientError', (rpcErr) =>
-              rest.deleteMessage(member.personal_channel_id, discordMessageId).pipe(
-                Effect.catchCause((deleteCause) =>
-                  Effect.logWarning(
-                    `Compensating delete failed for orphan message ${discordMessageId} (member ${member.team_member_id})`,
-                    deleteCause,
-                  ),
-                ),
-                Effect.andThen(Effect.fail(rpcErr)),
-              ),
-            ),
+          const logCreated = Effect.logInfo(
+            `Created personal event message ${discordMessageId} for member ${member.team_member_id} event ${event.event_id}`,
           );
+          if (!render.needsMentionEdit) {
+            return persist(discordMessageId, hash).pipe(Effect.tap(() => logCreated));
+          }
+          // Add the mention via edit (no ping). On failure, persist '' so the next
+          // reconcile re-applies it; on success persist the final hash.
+          return rest
+            .updateMessage(member.personal_channel_id, discordMessageId, render.editPayload)
+            .pipe(
+              Effect.matchEffect({
+                onSuccess: () => persist(discordMessageId, hash),
+                onFailure: (e) =>
+                  Effect.logWarning(
+                    `Failed to apply mention edit for member ${member.team_member_id}`,
+                    e,
+                  ).pipe(Effect.andThen(persist(discordMessageId, ''))),
+              }),
+              Effect.tap(() => logCreated),
+            );
         }),
         Effect.as(Option.some(member)),
         Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (e) =>

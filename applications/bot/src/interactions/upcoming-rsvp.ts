@@ -14,7 +14,7 @@ import { Effect, Metric, Option, Schema } from 'effect';
 import { type Locale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { YES_EMBED_LIMIT } from '~/rest/events/buildEventEmbed.js';
-import { buildPersonalMessagePayload } from '~/rest/events/buildPersonalEventMessage.js';
+import { buildPersonalMessage } from '~/rest/events/buildPersonalEventMessage.js';
 import { interactionUserId } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 import { postRsvpDiscordUpdates } from './rsvp.js';
@@ -38,8 +38,8 @@ const localizeRsvpResponse = (response: EventRsvp.RsvpResponse, locale: Locale):
 /**
  * Re-render a member's personal event message after they interact with it.
  * Fetches the yes-attendees so the "Going" list matches the global channel, and
- * routes through buildPersonalMessagePayload so the unanswered-event mention is
- * cleared (content: '') once the member has responded.
+ * uses the edit payload so the unanswered-event mention is cleared (content: '')
+ * once the member has responded (this path always runs post-response).
  */
 const renderUpcomingPagePayload = (params: {
   eventId: Event.EventId;
@@ -64,13 +64,14 @@ const renderUpcomingPagePayload = (params: {
         member_group_id: Option.none(),
       }),
     ),
-    Effect.map((yesAttendees) =>
-      buildPersonalMessagePayload({
-        entry,
-        yesAttendees,
-        discordId: params.discordUserId,
-        locale: params.locale,
-      }),
+    Effect.map(
+      (yesAttendees) =>
+        buildPersonalMessage({
+          entry,
+          yesAttendees,
+          discordId: params.discordUserId,
+          locale: params.locale,
+        }).editPayload,
     ),
   );
 };

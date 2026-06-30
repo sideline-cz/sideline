@@ -5,10 +5,7 @@ import type { Locale } from '~/locale.js';
 import { ChannelReorderSemaphore } from '~/rcp/event/ChannelReorderSemaphore.js';
 import { longestKeepablePrefix } from '~/rcp/event/reorderChannelMessages.js';
 import { YES_EMBED_LIMIT } from '~/rest/events/buildEventEmbed.js';
-import {
-  buildPersonalMessagePayload,
-  hashPersonalMessagePayload,
-} from '~/rest/events/buildPersonalEventMessage.js';
+import { buildPersonalMessage } from '~/rest/events/buildPersonalEventMessage.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 type MemberMessage = {
@@ -90,26 +87,40 @@ const reorderWithMessages = (
                 member_group_id: Option.none(),
               }).pipe(
                 Effect.flatMap((yesAttendees) => {
-                  const payload = buildPersonalMessagePayload({
+                  const render = buildPersonalMessage({
                     entry,
                     yesAttendees,
                     discordId: params.discord_id,
                     locale: params.locale,
                   });
-                  const hash = hashPersonalMessagePayload(payload);
-                  // Delete the old (out-of-order) message, then recreate it at the end.
+                  const persist = (
+                    discordMessageId: DiscordSchemas.Snowflake,
+                    payloadHash: string,
+                  ) =>
+                    rpc['PersonalEvents/UpsertPersonalEventMessage']({
+                      event_id: msg.event_id,
+                      team_member_id: params.team_member_id,
+                      personal_channel_id: channelId,
+                      discord_message_id: discordMessageId,
+                      payload_hash: payloadHash,
+                    });
+                  // Delete the old (out-of-order) message, then recreate it at the end,
+                  // mention-free, adding any unanswered-event mention via a follow-up edit.
                   return rest.deleteMessage(channelId, msg.discord_message_id).pipe(
                     Effect.catch(() => Effect.void),
-                    Effect.andThen(rest.createMessage(channelId, payload)),
-                    Effect.flatMap((created) =>
-                      rpc['PersonalEvents/UpsertPersonalEventMessage']({
-                        event_id: msg.event_id,
-                        team_member_id: params.team_member_id,
-                        personal_channel_id: channelId,
-                        discord_message_id: created.id as DiscordSchemas.Snowflake,
-                        payload_hash: hash,
-                      }),
-                    ),
+                    Effect.andThen(rest.createMessage(channelId, render.createPayload)),
+                    Effect.flatMap((created) => {
+                      const id = created.id as DiscordSchemas.Snowflake;
+                      if (!render.needsMentionEdit) {
+                        return persist(id, render.hash);
+                      }
+                      return rest.updateMessage(channelId, id, render.editPayload).pipe(
+                        Effect.matchEffect({
+                          onSuccess: () => persist(id, render.hash),
+                          onFailure: () => persist(id, ''),
+                        }),
+                      );
+                    }),
                     Effect.asVoid,
                   );
                 }),

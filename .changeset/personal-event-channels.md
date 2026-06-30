@@ -15,7 +15,7 @@ Rework the Discord events overview into private per-member event channels plus a
 - Hybrid sync keeps both surfaces consistent: the clicker's message updates instantly, and a bot reconcile loop converges all other personal copies and the global aggregate via a timestamp-guarded dirty marker.
 - Personal channels are ordered the same way as the global channel (soonest upcoming event nearest the input box) via a per-channel reorder pass.
 - Personal event messages now show the "Going" attendee list and an "Attendees" button, matching the global channel.
-- Unanswered events mention the member in their personal message (rendered as a highlight with `allowed_mentions` suppressed, so it never pings); the mention clears once they respond.
+- Unanswered events mention the member in their personal message so Discord highlights it, without ever pinging them (the mention is applied via a message edit, which never notifies); the mention clears once they respond.
 - New optional team setting to restrict personal channels to a single group (and its descendant groups) — members outside the group rely on the global channel only, and channels for excluded members are de-provisioned.
 - New optional team setting for the generated personal channel name format (`{name}` / `{discord_id}` placeholders; defaults to `events-{discord_id}`). A static name (no placeholder) is allowed.
 - A freshly-provisioned personal channel is immediately populated with the member's existing upcoming events.
