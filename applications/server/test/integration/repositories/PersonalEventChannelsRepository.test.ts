@@ -796,3 +796,80 @@ describe('PersonalEventChannelsRepository — getChannelsToRename', () => {
     ),
   );
 });
+
+// ---------------------------------------------------------------------------
+// Tests: findOwnedPersonalChannel (backs /refresh-events channel detection)
+// ---------------------------------------------------------------------------
+
+describe('PersonalEventChannelsRepository — findOwnedPersonalChannel', () => {
+  it.effect('returns the member when the channel is theirs, None for others/unknown channel', () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithMember(
+          '417000000000000001',
+          'owns-channel-1',
+          '417070707070707070' as Discord.Snowflake,
+        ),
+      ),
+      Effect.tap(({ seed }) =>
+        PersonalEventChannelsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo
+              .reservePersonalChannel(seed.team.id, seed.member.id)
+              .pipe(
+                Effect.andThen(
+                  repo.savePersonalChannelId(
+                    seed.team.id,
+                    seed.member.id,
+                    '417111111111111111' as Discord.Snowflake,
+                    'events-{discord_id}',
+                  ),
+                ),
+              ),
+          ),
+        ),
+      ),
+      Effect.bind('owner', ({ seed }) =>
+        PersonalEventChannelsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.findOwnedPersonalChannel(
+              seed.team.id,
+              '417111111111111111' as Discord.Snowflake,
+              '417000000000000001' as Discord.Snowflake,
+            ),
+          ),
+        ),
+      ),
+      Effect.bind('wrongUser', ({ seed }) =>
+        PersonalEventChannelsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.findOwnedPersonalChannel(
+              seed.team.id,
+              '417111111111111111' as Discord.Snowflake,
+              '999999999999999999' as Discord.Snowflake,
+            ),
+          ),
+        ),
+      ),
+      Effect.bind('wrongChannel', ({ seed }) =>
+        PersonalEventChannelsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.findOwnedPersonalChannel(
+              seed.team.id,
+              '417999999999999999' as Discord.Snowflake,
+              '417000000000000001' as Discord.Snowflake,
+            ),
+          ),
+        ),
+      ),
+      Effect.tap(({ owner, wrongUser, wrongChannel, seed }) =>
+        Effect.sync(() => {
+          expect(Option.getOrNull(owner)).toBe(seed.member.id);
+          expect(Option.isNone(wrongUser)).toBe(true);
+          expect(Option.isNone(wrongChannel)).toBe(true);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});

@@ -12,7 +12,7 @@ src/
 ├── env.ts           — Environment config (token, intents, health port)
 ├── run.ts           — Runtime entrypoint (config, logging, NodeRuntime)
 ├── schemas.ts       — Dfx decode schemas (DfxTextChannel, DfxSyncableChannel, DfxGuildMember, DfxUser incl. global_name)
-├── commands/        — Slash command registry (event/create, event/list, event/setupOverview, makanicko/*, finance/*, info, summon)
+├── commands/        — Slash command registry (event/create, event/list, refresh-events, training/*, carpool/*, makanicko/*, finance/*, poll, info, summon, summarize)
 ├── interactions/    — Component interaction registry (buttons/selects/modals)
 ├── events/          — Gateway event handler registry (guild, member, invite, channel lifecycle)
 ├── services/        — Sync services (RoleSyncService, ChannelSyncService) and welcome helpers (InviteCache, inviteDiff, welcomeRenderer)
@@ -713,6 +713,38 @@ Interaction.pipe(
 ```
 
 Prefer `guild_locale` (server-configured language) over `locale` (individual user's language) for server-wide consistency.
+
+## Slash Commands (`src/commands/<command>/`)
+
+Each top-level slash command lives in its own folder under `src/commands/`: `index.ts` builds the `Ix.global(definition, handler)` and is registered in `src/commands/index.ts` via `commandBuilder.add(...)`; `handler.ts` holds the handler effect. Localize `description`/`description_localizations` with `m.bot_<command>_description({}, { locale })` and add `name_localizations` for the Czech command name.
+
+### Admin-Gating via `default_member_permissions` (no runtime permission check)
+
+Captain/admin-only commands are gated **natively by Discord**, not by a runtime check in the handler. Set both fields on the command definition:
+
+```ts
+// Hides the command from members lacking ManageEvents in Discord's UI.
+default_member_permissions: Number(DiscordTypes.Permissions.ManageEvents),
+dm_permission: false,
+```
+
+Rules:
+
+1. **Use `default_member_permissions: Number(DiscordTypes.Permissions.ManageEvents)` + `dm_permission: false`** for every captain/admin command. Reference commands sharing this exact convention: `/training`, `/carpool`, `/summon`, `/poll`, `/refresh-events`. Do NOT re-check the permission in the handler — Discord enforces it before dispatch.
+2. **Subcommands cannot carry their own `default_member_permissions`** — the field is honored only on the top-level command. When an admin action must be permission-gated, declare it as a **top-level command** (`/refresh-events`), NOT a subcommand of an existing member-visible command (e.g. not `/event refresh`).
+
+### 3-Second Ack: Fork Heavy Work With `Effect.forkDetach`
+
+Discord requires an interaction ack within 3s. When a command handler's work (RPC round-trips + Discord REST renders) may exceed that, ack immediately and fork the heavy work with `Effect.forkDetach`, returning an ephemeral acknowledgement synchronously. Reference: `src/commands/refreshEvents/handler.ts` classifies the channel via `Guild/IdentifyEventsChannel`, then `Effect.forkDetach`s the reorder/dirty-mark work and returns an ephemeral reply. For handlers that DEFER (rather than reply immediately), the deferred-response resolution rules in "Paginated Embed Pattern" rule 6 apply.
+
+### Locale Split: Channel Content vs. Ephemeral Reply (`guildLocale` / `userLocale`)
+
+`src/locale.ts` exports two helpers. A command that both renders into a shared channel AND replies to the caller MUST split locales:
+
+1. **`guildLocale(interaction)`** (`guild_locale`, server-configured language) — for content written into a channel everyone sees (the reordered/refreshed event messages). Mirrors the existing "prefer `guild_locale` for server-wide consistency" rule under "Discord Built-in Localization".
+2. **`userLocale(interaction)`** (caller's `locale`, falling back to `guildLocale`) — for the ephemeral reply only the caller sees.
+
+Reference: `src/commands/refreshEvents/handler.ts` renders channel content in `guildLocale(interaction)` and the ephemeral reply in `userLocale(interaction)`.
 
 ## Autocomplete Handlers (`src/interactions/*-autocomplete.ts`)
 

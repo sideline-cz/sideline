@@ -30,7 +30,7 @@ The bot is built with **dfx**, an Effect-native Discord framework. It connects t
 
 ## Slash Commands
 
-Nine top-level commands are registered globally: `/carpool`, `/event`, `/finance`, `/info`, `/makanicko`, `/poll`, `/summarize`, `/summon`, and `/training`. `/event`, `/finance`, `/makanicko`, and `/training` each have sub-commands. `/event` has two sub-commands: `create` and `list`.
+Ten top-level commands are registered globally: `/carpool`, `/event`, `/finance`, `/info`, `/makanicko`, `/poll`, `/refresh-events`, `/summarize`, `/summon`, and `/training`. `/event`, `/finance`, `/makanicko`, and `/training` each have sub-commands. `/event` has two sub-commands: `create` and `list`.
 
 ### /carpool
 
@@ -115,6 +115,44 @@ Nine top-level commands are registered globally: `/carpool`, `/event`, `/finance
 - `applications/bot/src/rest/poll/buildPollEmbed.ts`
 - `applications/bot/src/rest/poll/buildPollVotersView.ts`
 - `applications/bot/src/interactions/poll.ts`
+
+---
+
+### /refresh-events
+
+**Description:** Re-sync the current channel's event messages. Run this inside a global events channel or a personal events channel to force an immediate re-render and reorder.
+
+**Czech command name:** `obnovit-udalosti`
+
+**Options:** None.
+
+**Permission required:** Hidden in the Discord UI from members who lack `ManageEvents` (used as a proxy gate for captains/admins). No additional server-side permission is checked.
+
+**Constraints:**
+- `dm_permission: false` — the command cannot be used in DMs.
+- `default_member_permissions: ManageEvents` — Discord hides the command from regular members.
+
+**Flow:**
+
+1. Captain invokes `/refresh-events` (or `/obnovit-udalosti`) inside an events channel.
+2. The handler (`applications/bot/src/commands/refreshEvents/handler.ts`) calls `Guild/IdentifyEventsChannel` RPC with `guild_id`, `channel_id`, and `discord_user_id` to classify the channel.
+3. The handler acks the interaction immediately (ephemeral); the heavy work is forked to a detached fiber so the 3-second Discord window is always met.
+4. **Global events channel** (`kind: 'global'`): calls `reorderChannelMessages` — re-renders all event embeds in place and reorders channel messages. Channel content is rendered in the guild locale.
+5. **Personal events channel** (`kind: 'personal'`): calls `Guild/MarkTeamPersonalEventsDirty` to mark the team's upcoming events dirty (triggering content re-render via the reconcile loop), then calls `reorderPersonalChannel` to reorder the member's personal channel. If `MarkTeamPersonalEventsDirty` fails with an `RpcClientError` it is logged as a warning and the reorder still proceeds.
+6. **Neither** (`kind: 'none'`): replies ephemerally with a "not an events channel" message and does nothing else.
+7. The ephemeral reply (always visible only to the invoking captain) is rendered in the caller's Discord client locale.
+
+**Errors:**
+
+| Condition | Behavior |
+|-----------|----------|
+| No `guild_id`, no `channel_id`, or user ID unavailable | Ephemeral "not an events channel" reply; no work forked |
+| `Guild/IdentifyEventsChannel` returns `RpcClientError` | Logged as a warning; ephemeral "not an events channel" reply |
+| Channel is neither global nor personal | Ephemeral "not an events channel" reply |
+
+**Source files:**
+- `applications/bot/src/commands/refreshEvents/index.ts`
+- `applications/bot/src/commands/refreshEvents/handler.ts`
 
 ---
 

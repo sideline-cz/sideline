@@ -288,6 +288,20 @@ export const GuildRpcGroup = RpcGroup.make(
   Rpc.make('MarkTeamPersonalEventsDirty', {
     payload: { team_id: TeamId },
   }),
+  // Classifies a channel for the /refresh-events command: the team's global events
+  // channel, the calling member's own personal events channel, or neither.
+  Rpc.make('IdentifyEventsChannel', {
+    payload: {
+      guild_id: Discord.Snowflake,
+      channel_id: Discord.Snowflake,
+      discord_user_id: Discord.Snowflake,
+    },
+    success: Schema.Struct({
+      kind: Schema.Literals(['global', 'personal', 'none']),
+      team_id: Schema.OptionFromNullOr(TeamId),
+      team_member_id: Schema.OptionFromNullOr(Schema.String),
+    }),
+  }),
   Rpc.make('GetPersonalChannel', {
     payload: { team_id: TeamId, team_member_id: Schema.String },
     success: Schema.OptionFromNullOr(Discord.Snowflake),

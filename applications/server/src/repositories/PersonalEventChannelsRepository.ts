@@ -281,6 +281,24 @@ const make = Effect.Do.pipe(
       `,
     });
 
+    const _findOwnedChannel = SqlSchema.findOneOption({
+      Request: Schema.Struct({
+        team_id: Schema.String,
+        channel_id: Schema.String,
+        discord_user_id: Schema.String,
+      }),
+      Result: Schema.Struct({ team_member_id: TeamMember.TeamMemberId }),
+      execute: (input) => sql`
+        SELECT pec.team_member_id
+        FROM personal_event_channels pec
+        JOIN team_members tm ON tm.id = pec.team_member_id
+        JOIN users u ON u.id = tm.user_id
+        WHERE pec.team_id = ${input.team_id}
+          AND pec.discord_channel_id = ${input.channel_id}
+          AND u.discord_id = ${input.discord_user_id}
+      `,
+    });
+
     const _listForEvent = SqlSchema.findAll({
       Request: Schema.Struct({ event_id: Schema.String }),
       Result: PersonalChannelForEvent,
@@ -365,6 +383,17 @@ const make = Effect.Do.pipe(
     const listPersonalChannelsForEvent = (eventId: string) =>
       _listForEvent({ event_id: eventId }).pipe(catchSqlErrors);
 
+    const findOwnedPersonalChannel = (
+      teamId: Team.TeamId,
+      channelId: Discord.Snowflake,
+      discordUserId: Discord.Snowflake,
+    ) =>
+      _findOwnedChannel({
+        team_id: teamId,
+        channel_id: channelId,
+        discord_user_id: discordUserId,
+      }).pipe(Effect.map(Option.map((row) => row.team_member_id)), catchSqlErrors);
+
     return {
       reservePersonalChannel,
       savePersonalChannelId,
@@ -376,6 +405,7 @@ const make = Effect.Do.pipe(
       getChannelsToRename,
       getGuildsNeedingPersonalProvisioning,
       listPersonalChannelsForEvent,
+      findOwnedPersonalChannel,
     };
   }),
 );

@@ -5,6 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-30 — New Discord command: `/refresh-events`
+
+Captains and admins can now force an immediate re-sync of any events channel without waiting for the next reconcile cycle.
+
+- Run `/refresh-events` (Czech: `/obnovit-udalosti`) inside a **global events channel** to re-render all event embeds in place and reorder the channel messages so the soonest upcoming event is nearest the input box.
+- Run it inside your own **personal events channel** to trigger a fresh content render for all your upcoming events and reorder your personal channel.
+- The command is only visible to members with the **Manage Events** Discord permission (captains and admins by default). Regular members cannot see or invoke it.
+- The bot always replies ephemerally (visible only to you) and does the heavy work in the background, so the response is instant.
+- If used in any other channel the bot replies with a quiet "not an events channel" notice.
+
 ## 2026-06-30 — Personal event channels: instant backfill and automatic rename on format change
 
 Two further improvements to personal event channels:

@@ -27,6 +27,14 @@ import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
 
+type IdentifyEventsChannelResult = {
+  readonly kind: 'global' | 'personal' | 'none';
+  readonly team_id: Option.Option<Team.TeamId>;
+  readonly team_member_id: Option.Option<string>;
+};
+/** Widens the `kind` literal so all branches share one return type. */
+const identifyResult = (r: IdentifyEventsChannelResult): IdentifyEventsChannelResult => r;
+
 type RegisterMemberPayload = {
   readonly guild_id: Discord.Snowflake;
   readonly discord_id: string;
@@ -678,6 +686,68 @@ export const GuildsRpcLive = Effect.Do.pipe(
 
       'Guild/MarkTeamPersonalEventsDirty': ({ team_id }: { readonly team_id: Team.TeamId }) =>
         deps.events.markTeamUpcomingEventsPersonalMessagesDirty(team_id),
+
+      'Guild/IdentifyEventsChannel': ({
+        guild_id,
+        channel_id,
+        discord_user_id,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly channel_id: Discord.Snowflake;
+        readonly discord_user_id: Discord.Snowflake;
+      }) =>
+        deps.teams.findByGuildId(guild_id).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.succeed(
+                  identifyResult({
+                    kind: 'none',
+                    team_id: Option.none(),
+                    team_member_id: Option.none(),
+                  }),
+                ),
+              onSome: (team) =>
+                deps.teamSettings.findByTeamId(team.id).pipe(
+                  Effect.flatMap((settingsOpt) => {
+                    const globalChannel = Option.flatMap(
+                      settingsOpt,
+                      (s) => s.discord_events_channel_id,
+                    );
+                    if (Option.isSome(globalChannel) && globalChannel.value === channel_id) {
+                      return Effect.succeed(
+                        identifyResult({
+                          kind: 'global',
+                          team_id: Option.some(team.id),
+                          team_member_id: Option.none(),
+                        }),
+                      );
+                    }
+                    return deps.personalChannels
+                      .findOwnedPersonalChannel(team.id, channel_id, discord_user_id)
+                      .pipe(
+                        Effect.map(
+                          Option.match({
+                            onNone: () =>
+                              identifyResult({
+                                kind: 'none',
+                                team_id: Option.some(team.id),
+                                team_member_id: Option.none(),
+                              }),
+                            onSome: (teamMemberId) =>
+                              identifyResult({
+                                kind: 'personal',
+                                team_id: Option.some(team.id),
+                                team_member_id: Option.some(String(teamMemberId)),
+                              }),
+                          }),
+                        ),
+                      );
+                  }),
+                ),
+            }),
+          ),
+        ),
 
       'Guild/GetPersonalChannelsToRename': ({
         guild_id,
