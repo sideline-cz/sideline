@@ -20,6 +20,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/settings')(
           settings: api.teamSettings.getTeamSettings({ params: { teamId } }),
           discordChannels: api.group.listDiscordChannels({ params: { teamId } }),
           discordRoles: api.group.listDiscordRoles({ params: { teamId } }),
+          groups: api.group.listGroups({ params: { teamId } }),
           teamInfo: api.team.getTeamInfo({ params: { teamId } }),
           emailForwardingConfig: api.emailForwarding
             .getEmailForwardingConfig({ params: { teamId } })
@@ -42,6 +43,7 @@ function TeamSettingsRoute() {
     settings,
     discordChannels,
     discordRoles,
+    groups,
     teamInfo,
     emailForwardingConfig,
     generationConfig,
@@ -53,6 +55,7 @@ function TeamSettingsRoute() {
       settings={settings}
       discordChannels={discordChannels}
       discordRoles={discordRoles}
+      groups={groups}
       teamInfo={teamInfo}
       emailForwardingConfig={Option.getOrNull(emailForwardingConfig)}
       initialGenerationConfig={generationConfig}

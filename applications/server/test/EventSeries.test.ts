@@ -583,6 +583,8 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   cancelFutureInSeries: () => Effect.void,
   updateFutureUnmodified: () => Effect.void,
   updateFutureUnmodifiedInSeries: () => Effect.void,
+  markEventPersonalMessagesDirty: () => Effect.void,
+  markSeriesFuturePersonalMessagesDirty: () => Effect.void,
 } as any);
 
 const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
@@ -1237,7 +1239,6 @@ describe('Event Series API', () => {
     startTime: '18:00',
     endTime: '20:00',
     location: 'Main Field',
-    discordChannelId: null,
     ownerGroupId: null,
     memberGroupId: null,
   };

@@ -5,6 +5,33 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-06-30 — New Discord sub-command: `/event refresh`
+
+Force an immediate re-sync of an events channel without waiting for the next reconcile cycle.
+
+- Run `/event refresh` (Czech: `/event obnovit`) inside **your own personal events channel** — any member can do this, no special permission needed. The bot triggers a fresh content render for all your upcoming events and reorders your personal channel.
+- Run it inside the **global events channel** or **another member's personal channel** to re-render and reorder that channel. This requires the `team:manage` permission (team admins only).
+- The sub-command is visible to all members under `/event`. Members without the required permission for the channel they are in receive a quiet ephemeral notice.
+- The bot always replies ephemerally (visible only to you) and does the heavy work in the background, so the response is instant.
+- If used in any other channel the bot replies with a quiet "not an events channel" notice.
+
+## 2026-06-30 — Personal event channels: instant backfill and automatic rename on format change
+
+Two further improvements to personal event channels:
+
+- **New channels show existing events immediately.** When the bot creates a personal channel for a member, it immediately backfills all of that member's upcoming events into the new channel. The channel is populated within seconds of provisioning — no waiting for the next reconcile cycle.
+- **Changing the channel-name format renames existing channels.** When a captain updates the **Personal channel name format** setting, the bot automatically renames every existing personal channel to match the new format. Channels are processed one at a time to respect Discord rate limits, so renaming a large team may take a few seconds.
+
+## 2026-06-30 — Personal event channels: group restriction, custom names, Going list, and smart mentions
+
+Personal event channels — private per-member Discord channels showing that member's upcoming events — now have several new capabilities:
+
+- **Group restriction.** Captains can limit personal channels to a specific group (and its sub-groups) by setting **Personal events group** in **Team settings → Discord integration**. Members outside the group use the global events channel instead. If an existing personal channel falls outside the group after a restriction is applied, the bot removes it automatically.
+- **Custom channel name format.** The default channel name `events-{discord_id}` can now be changed via **Personal channel name format** in **Team settings → Discord integration**. The format must include `{name}` (member's display name) or `{discord_id}`. Example: `events-{name}`.
+- **Going list and Attendees button.** Each event message in a personal channel now shows the same **Going** attendee list and **Attendees** button as the global events channel, so you always see who else is coming without switching channels.
+- **Quiet mention on unanswered events.** When a new event appears in your personal channel and you have not yet responded, the message silently highlights as unread (no actual ping). The highlight clears as soon as you respond.
+- **Ordered like the global channel.** Events inside your personal channel are now sorted in the same order as the global events channel — soonest upcoming event nearest the input box.
+
 ## 2026-06-28 — New: "Who voted?" button on Discord polls
 
 Any team member can now see who voted for each option by clicking the **👥 Who voted?** button on any poll embed — open or closed.

@@ -26,7 +26,6 @@ const resolveStrings = (
       channels_rules: m.bot_onboarding_welcomeScreen_channels_rules({}, opts),
       channels_welcome: m.bot_onboarding_welcomeScreen_channels_welcome({}, opts),
       channels_training: m.bot_onboarding_welcomeScreen_channels_training({}, opts),
-      channels_overview: m.bot_onboarding_welcomeScreen_channels_overview({}, opts),
     },
   };
 };

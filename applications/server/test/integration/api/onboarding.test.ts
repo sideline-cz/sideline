@@ -351,7 +351,6 @@ const MockTeamsRepositoryLayer = Layer.succeed(TeamsRepository, {
       system_log_channel_id: input.system_log_channel_id ?? Option.none(),
       welcome_message_template: input.welcome_message_template ?? Option.none(),
       rules_channel_id: input.rules_channel_id ?? Option.none(),
-      overview_channel_id: input.overview_channel_id ?? Option.none(),
       achievement_channel_id: input.achievement_channel_id ?? Option.none(),
       onboarding_rules_role_id: input.onboarding_rules_role_id ?? Option.none(),
       onboarding_rules_prompt_id: input.onboarding_rules_prompt_id ?? Option.none(),

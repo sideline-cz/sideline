@@ -3,7 +3,11 @@ import { Schemas } from '@sideline/effect-lib';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
-import { DEFAULT_CHANNEL_FORMAT, DEFAULT_ROLE_FORMAT } from '~/utils/applyDiscordFormat.js';
+import {
+  DEFAULT_CHANNEL_FORMAT,
+  DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT,
+  DEFAULT_ROLE_FORMAT,
+} from '~/utils/applyDiscordFormat.js';
 
 class TeamSettingsRow extends Schema.Class<TeamSettingsRow>('TeamSettingsRow')({
   team_id: Team.TeamId,
@@ -25,6 +29,10 @@ class TeamSettingsRow extends Schema.Class<TeamSettingsRow>('TeamSettingsRow')({
   create_discord_channel_on_roster: Schema.Boolean,
   discord_archive_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_roster_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  discord_personal_events_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  discord_personal_events_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
+  discord_personal_events_channel_format: Schema.String,
+  discord_events_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_channel_cleanup_on_group_delete: ChannelSyncEvent.ChannelCleanupMode,
   discord_channel_cleanup_on_roster_deactivate: ChannelSyncEvent.ChannelCleanupMode,
   discord_role_format: Schema.String,
@@ -60,6 +68,10 @@ const TeamSettingsUpsertInput = Schema.Struct({
   create_discord_channel_on_roster: Schema.Boolean,
   discord_archive_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_roster_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  discord_personal_events_category_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  discord_personal_events_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
+  discord_personal_events_channel_format: Schema.String,
+  discord_events_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_channel_cleanup_on_group_delete: ChannelSyncEvent.ChannelCleanupMode,
   discord_channel_cleanup_on_roster_deactivate: ChannelSyncEvent.ChannelCleanupMode,
   discord_role_format: Schema.String,
@@ -80,7 +92,6 @@ class EventNeedingClaimRequest extends Schema.Class<EventNeedingClaimRequest>(
   location: Schema.OptionFromNullOr(Schema.String),
   description: Schema.OptionFromNullOr(Schema.String),
   event_type: Schema.String,
-  discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   reminders_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
@@ -109,7 +120,6 @@ class EventNeedingReminder extends Schema.Class<EventNeedingReminder>('EventNeed
   title: Schema.String,
   start_at: Schemas.DateTimeFromDate,
   event_type: Schema.String,
-  discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   reminders_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
@@ -138,6 +148,10 @@ const make = Effect.gen(function* () {
              create_discord_channel_on_group, create_discord_channel_on_roster,
              discord_archive_category_id,
              discord_roster_category_id,
+             discord_personal_events_category_id,
+             discord_personal_events_group_id,
+             discord_personal_events_channel_format,
+             discord_events_channel_id,
              discord_channel_cleanup_on_group_delete,
              discord_channel_cleanup_on_roster_deactivate,
              discord_role_format,
@@ -176,6 +190,10 @@ const make = Effect.gen(function* () {
                                  create_discord_channel_on_group, create_discord_channel_on_roster,
                                  discord_archive_category_id,
                                  discord_roster_category_id,
+                                 discord_personal_events_category_id,
+                                 discord_personal_events_group_id,
+                                 discord_personal_events_channel_format,
+                                 discord_events_channel_id,
                                  discord_channel_cleanup_on_group_delete,
                                  discord_channel_cleanup_on_roster_deactivate,
                                  discord_role_format,
@@ -195,6 +213,10 @@ const make = Effect.gen(function* () {
               ${input.create_discord_channel_on_group}, ${input.create_discord_channel_on_roster},
               ${input.discord_archive_category_id},
               ${input.discord_roster_category_id},
+              ${input.discord_personal_events_category_id},
+              ${input.discord_personal_events_group_id},
+              ${input.discord_personal_events_channel_format},
+              ${input.discord_events_channel_id},
               ${input.discord_channel_cleanup_on_group_delete},
               ${input.discord_channel_cleanup_on_roster_deactivate},
               ${input.discord_role_format},
@@ -221,6 +243,10 @@ const make = Effect.gen(function* () {
         create_discord_channel_on_roster = ${input.create_discord_channel_on_roster},
         discord_archive_category_id = ${input.discord_archive_category_id},
         discord_roster_category_id = ${input.discord_roster_category_id},
+        discord_personal_events_category_id = ${input.discord_personal_events_category_id},
+        discord_personal_events_group_id = ${input.discord_personal_events_group_id},
+        discord_personal_events_channel_format = ${input.discord_personal_events_channel_format},
+        discord_events_channel_id = ${input.discord_events_channel_id},
         discord_channel_cleanup_on_group_delete = ${input.discord_channel_cleanup_on_group_delete},
         discord_channel_cleanup_on_roster_deactivate = ${input.discord_channel_cleanup_on_roster_deactivate},
         discord_role_format = ${input.discord_role_format},
@@ -241,6 +267,10 @@ const make = Effect.gen(function* () {
                 create_discord_channel_on_group, create_discord_channel_on_roster,
                 discord_archive_category_id,
                 discord_roster_category_id,
+                discord_personal_events_category_id,
+                discord_personal_events_group_id,
+                discord_personal_events_channel_format,
+                discord_events_channel_id,
                 discord_channel_cleanup_on_group_delete,
                 discord_channel_cleanup_on_roster_deactivate,
                 discord_role_format,
@@ -267,7 +297,7 @@ const make = Effect.gen(function* () {
       Result: EventNeedingReminder,
       execute: () => sql`
         SELECT e.id AS event_id, e.team_id, e.title, e.start_at, e.event_type,
-               e.discord_target_channel_id, e.owner_group_id, e.member_group_id,
+               e.owner_group_id, e.member_group_id,
                ts.reminders_channel_id, ts.timezone,
                e.claimed_by, e.claim_discord_channel_id, e.claim_discord_message_id
         FROM events e
@@ -292,7 +322,7 @@ const make = Effect.gen(function* () {
       execute: () => sql`
         SELECT e.id AS event_id, e.team_id, e.title, e.start_at,
                e.end_at, e.location, e.description, e.event_type,
-               e.discord_target_channel_id, e.owner_group_id, e.member_group_id,
+               e.owner_group_id, e.member_group_id,
                ts.reminders_channel_id, ts.timezone
         FROM events e
         JOIN team_settings ts ON ts.team_id = e.team_id
@@ -354,6 +384,10 @@ const make = Effect.gen(function* () {
     createDiscordChannelOnRoster = true,
     discordArchiveCategoryId = Option.none(),
     discordRosterCategoryId = Option.none(),
+    discordPersonalEventsCategoryId = Option.none(),
+    discordPersonalEventsGroupId = Option.none(),
+    discordPersonalEventsChannelFormat = DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT,
+    discordEventsChannelId = Option.none(),
     discordChannelCleanupOnGroupDelete = 'delete' as ChannelSyncEvent.ChannelCleanupMode,
     discordChannelCleanupOnRosterDeactivate = 'delete' as ChannelSyncEvent.ChannelCleanupMode,
     discordRoleFormat = DEFAULT_ROLE_FORMAT,
@@ -381,6 +415,10 @@ const make = Effect.gen(function* () {
     createDiscordChannelOnRoster?: boolean;
     discordArchiveCategoryId?: Option.Option<Discord.Snowflake>;
     discordRosterCategoryId?: Option.Option<Discord.Snowflake>;
+    discordPersonalEventsCategoryId?: Option.Option<Discord.Snowflake>;
+    discordPersonalEventsGroupId?: Option.Option<GroupModel.GroupId>;
+    discordPersonalEventsChannelFormat?: string;
+    discordEventsChannelId?: Option.Option<Discord.Snowflake>;
     discordChannelCleanupOnGroupDelete?: ChannelSyncEvent.ChannelCleanupMode;
     discordChannelCleanupOnRosterDeactivate?: ChannelSyncEvent.ChannelCleanupMode;
     discordRoleFormat?: string;
@@ -409,6 +447,10 @@ const make = Effect.gen(function* () {
       create_discord_channel_on_roster: createDiscordChannelOnRoster,
       discord_archive_category_id: discordArchiveCategoryId,
       discord_roster_category_id: discordRosterCategoryId,
+      discord_personal_events_category_id: discordPersonalEventsCategoryId,
+      discord_personal_events_group_id: discordPersonalEventsGroupId,
+      discord_personal_events_channel_format: discordPersonalEventsChannelFormat,
+      discord_events_channel_id: discordEventsChannelId,
       discord_channel_cleanup_on_group_delete: discordChannelCleanupOnGroupDelete,
       discord_channel_cleanup_on_roster_deactivate: discordChannelCleanupOnRosterDeactivate,
       discord_role_format: discordRoleFormat,

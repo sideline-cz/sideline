@@ -8,7 +8,7 @@ import type {
   Roster as RosterDomain,
   TrainingTypeApi,
 } from '@sideline/domain';
-import { Discord, Event, EventSeries, GroupModel, Team, TrainingType } from '@sideline/domain';
+import { Event, EventSeries, GroupModel, Team, TrainingType } from '@sideline/domain';
 import { Link, useNavigate, useRouter } from '@tanstack/react-router';
 import { type DateTime, Effect, Option, Schema } from 'effect';
 import React from 'react';
@@ -50,7 +50,6 @@ import {
   formatUtcTime,
   localToUtc,
 } from '~/lib/datetime.js';
-import { DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import { eventStatusClasses, eventStatusLabels, eventTypeLabels } from '~/lib/event-labels';
 import { toGroupOptions } from '~/lib/group-options';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
@@ -84,7 +83,6 @@ const EventEditSchema = Schema.Struct({
   endDate: Schema.String,
   endTime: Schema.String,
   location: Schema.String,
-  discordChannelId: Schema.String,
   ownerGroupId: Schema.String,
   memberGroupId: Schema.String,
 });
@@ -114,7 +112,6 @@ interface EventDetailPageProps {
   eventId: string;
   eventDetail: EventApi.EventDetail;
   trainingTypes: ReadonlyArray<TrainingTypeApi.TrainingTypeInfo>;
-  discordChannels: ReadonlyArray<GroupApi.DiscordChannelInfo>;
   rsvpDetail: EventRsvpApi.EventRsvpDetail;
   nonResponders: ReadonlyArray<EventRsvpApi.NonResponderEntry>;
   groups: ReadonlyArray<GroupApi.GroupInfo>;
@@ -168,7 +165,6 @@ export function EventDetailPage({
   eventId,
   eventDetail,
   trainingTypes,
-  discordChannels,
   rsvpDetail,
   nonResponders,
   groups,
@@ -213,7 +209,6 @@ export function EventDetailPage({
           }),
       location: Option.getOrElse(eventDetail.location, () => ''),
       locationUrl: Option.getOrElse(eventDetail.locationUrl, () => ''),
-      discordChannelId: Option.getOrElse(eventDetail.discordChannelId, () => NONE_VALUE),
       ownerGroupId: Option.getOrElse(eventDetail.ownerGroupId, () => NONE_VALUE),
       memberGroupId: Option.getOrElse(eventDetail.memberGroupId, () => NONE_VALUE),
     },
@@ -263,11 +258,6 @@ export function EventDetailPage({
             location: Option.some(values.location ? Option.some(values.location) : Option.none()),
             locationUrl: Option.some(
               values.locationUrl ? Option.some(values.locationUrl) : Option.none(),
-            ),
-            discordChannelId: Option.some(
-              values.discordChannelId && values.discordChannelId !== NONE_VALUE
-                ? Option.some(Discord.Snowflake.makeUnsafe(values.discordChannelId))
-                : Option.none(),
             ),
             ownerGroupId: Option.some(
               values.ownerGroupId && values.ownerGroupId !== NONE_VALUE
@@ -322,11 +312,6 @@ export function EventDetailPage({
               values.locationUrl ? Option.some(values.locationUrl) : Option.none(),
             ),
             endDate: Option.none(),
-            discordChannelId: Option.some(
-              values.discordChannelId && values.discordChannelId !== NONE_VALUE
-                ? Option.some(Discord.Snowflake.makeUnsafe(values.discordChannelId))
-                : Option.none(),
-            ),
             ownerGroupId: Option.some(
               values.ownerGroupId && values.ownerGroupId !== NONE_VALUE
                 ? Option.some(Schema.decodeSync(GroupModel.GroupId)(values.ownerGroupId))
@@ -694,30 +679,6 @@ export function EventDetailPage({
                             />
                           )}
                         <p className='text-xs text-muted-foreground'>{tr('event_imageUrlHelp')}</p>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    {...form.register('discordChannelId')}
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>{tr('event_discordChannel')}</FormLabel>
-                        <FormControl>
-                          <SearchableSelect
-                            value={field.value}
-                            onValueChange={field.onChange}
-                            placeholder={tr('event_useDefault')}
-                            options={[
-                              { value: NONE_VALUE, label: tr('event_useDefault') },
-                              ...discordChannels
-                                .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
-                                .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
-                            ]}
-                            pinnedValues={[NONE_VALUE]}
-                          />
-                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}

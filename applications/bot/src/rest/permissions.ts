@@ -26,6 +26,19 @@ export const MANAGE: Permission = {
   deny: Discord.Permissions.SendMessages,
 };
 
+/**
+ * Personal event channel: member can read but cannot write, react, or create threads.
+ * Used for the per-member private event feed.
+ */
+export const PERSONAL_VIEW: Permission = {
+  allow: Discord.Permissions.ViewChannel | Discord.Permissions.ReadMessageHistory,
+  deny:
+    Discord.Permissions.SendMessages |
+    Discord.Permissions.AddReactions |
+    Discord.Permissions.CreatePublicThreads |
+    Discord.Permissions.CreatePrivateThreads,
+};
+
 // --- Managed channel access tiers ---
 
 export const CHANNEL_ACCESS_VIEW: Permission = {

@@ -174,7 +174,6 @@ describe('CreateEventRequest — locationUrl cross-field validation', () => {
     startAt: '2099-12-31T18:00:00.000Z',
     endAt: null,
     location: 'Main Field',
-    discordChannelId: null,
     ownerGroupId: null,
     memberGroupId: null,
   };

@@ -50,6 +50,9 @@ import { PaymentReminderSyncEventsRepository } from '~/repositories/PaymentRemin
 import { PaymentRemindersSentRepository } from '~/repositories/PaymentRemindersSentRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
+import { PersonalEventChannelsRepository } from '~/repositories/PersonalEventChannelsRepository.js';
+import { PersonalEventMessagesRepository } from '~/repositories/PersonalEventMessagesRepository.js';
+import { PersonalEventOverflowCategoriesRepository } from '~/repositories/PersonalEventOverflowCategoriesRepository.js';
 import { PlayerRatingsRepository } from '~/repositories/PlayerRatingsRepository.js';
 import { PollsRepository } from '~/repositories/PollsRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
@@ -168,6 +171,9 @@ const Repositories = Layer.mergeAll(
   EmailMessagesRepository.Default,
   EmailAttachmentsRepository.Default,
   EmailPostSyncEventsRepository.Default,
+  PersonalEventChannelsRepository.Default,
+  PersonalEventMessagesRepository.Default,
+  PersonalEventOverflowCategoriesRepository.Default,
 );
 
 const AppLayer = Layer.mergeAll(

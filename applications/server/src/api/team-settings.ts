@@ -7,7 +7,11 @@ import { requireMembership, requirePermission } from '~/api/permissions.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
-import { DEFAULT_CHANNEL_FORMAT, DEFAULT_ROLE_FORMAT } from '~/utils/applyDiscordFormat.js';
+import {
+  DEFAULT_CHANNEL_FORMAT,
+  DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT,
+  DEFAULT_ROLE_FORMAT,
+} from '~/utils/applyDiscordFormat.js';
 
 const forbidden = new EventApi.Forbidden();
 
@@ -55,6 +59,10 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     discordRoleFormat: DEFAULT_ROLE_FORMAT,
                     discordChannelFormat: DEFAULT_CHANNEL_FORMAT,
                     maxMissedRsvps: 4,
+                    discordPersonalEventsCategoryId: Option.none(),
+                    discordPersonalEventsGroupId: Option.none(),
+                    discordPersonalEventsChannelFormat: DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT,
+                    discordEventsChannelId: Option.none(),
                   }),
                 onSome: (s) =>
                   new TeamSettingsApi.TeamSettingsInfo({
@@ -84,6 +92,10 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     discordRoleFormat: s.discord_role_format,
                     discordChannelFormat: s.discord_channel_format,
                     maxMissedRsvps: s.max_missed_rsvps,
+                    discordPersonalEventsCategoryId: s.discord_personal_events_category_id,
+                    discordPersonalEventsGroupId: s.discord_personal_events_group_id,
+                    discordPersonalEventsChannelFormat: s.discord_personal_events_channel_format,
+                    discordEventsChannelId: s.discord_events_channel_id,
                   }),
               }),
             ),
@@ -167,6 +179,17 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                       ? { discordChannelFormat: payload.discordChannelFormat.value }
                       : {}),
                     maxMissedRsvps: Option.getOrElse(payload.maxMissedRsvps, () => 4),
+                    discordPersonalEventsCategoryId: Option.flatten(
+                      payload.discordPersonalEventsCategoryId,
+                    ),
+                    discordPersonalEventsGroupId: Option.flatten(
+                      payload.discordPersonalEventsGroupId,
+                    ),
+                    discordPersonalEventsChannelFormat: Option.getOrElse(
+                      payload.discordPersonalEventsChannelFormat,
+                      () => DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT,
+                    ),
+                    discordEventsChannelId: Option.flatten(payload.discordEventsChannelId),
                   }),
                 onSome: (s) =>
                   settings.upsert({
@@ -264,6 +287,28 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                       payload.maxMissedRsvps,
                       () => s.max_missed_rsvps,
                     ),
+                    discordPersonalEventsCategoryId: Option.match(
+                      payload.discordPersonalEventsCategoryId,
+                      {
+                        onNone: () => s.discord_personal_events_category_id,
+                        onSome: (v) => v,
+                      },
+                    ),
+                    discordPersonalEventsGroupId: Option.match(
+                      payload.discordPersonalEventsGroupId,
+                      {
+                        onNone: () => s.discord_personal_events_group_id,
+                        onSome: (v) => v,
+                      },
+                    ),
+                    discordPersonalEventsChannelFormat: Option.getOrElse(
+                      payload.discordPersonalEventsChannelFormat,
+                      () => s.discord_personal_events_channel_format,
+                    ),
+                    discordEventsChannelId: Option.match(payload.discordEventsChannelId, {
+                      onNone: () => s.discord_events_channel_id,
+                      onSome: (v) => v,
+                    }),
                   }),
               }),
             ),
@@ -303,6 +348,10 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                   discordRoleFormat: result.discord_role_format,
                   discordChannelFormat: result.discord_channel_format,
                   maxMissedRsvps: result.max_missed_rsvps,
+                  discordPersonalEventsCategoryId: result.discord_personal_events_category_id,
+                  discordPersonalEventsGroupId: result.discord_personal_events_group_id,
+                  discordPersonalEventsChannelFormat: result.discord_personal_events_channel_format,
+                  discordEventsChannelId: result.discord_events_channel_id,
                 }),
             ),
             Effect.catchTag(

@@ -59,7 +59,6 @@ function EventsRoute() {
         })
       }
       trainingTypes={data.trainingTypes.trainingTypes}
-      discordChannels={data.discordChannels}
       groups={data.groups}
     />
   );

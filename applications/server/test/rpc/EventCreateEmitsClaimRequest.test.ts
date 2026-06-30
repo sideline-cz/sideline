@@ -213,6 +213,7 @@ const makeMockEventsRepository = (
       markedClaimRequestSent.push(eventId);
       return Effect.void;
     },
+    markEventPersonalMessagesDirty: () => Effect.void,
   } as any);
 
 const makeMockSyncEventsRepository = () =>

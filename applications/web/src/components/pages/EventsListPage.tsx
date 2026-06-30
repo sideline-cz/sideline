@@ -1,6 +1,6 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import type { EventApi, GroupApi, TrainingTypeApi } from '@sideline/domain';
-import { Discord, Event, EventSeries, GroupModel, Team, TrainingType } from '@sideline/domain';
+import { Event, EventSeries, GroupModel, Team, TrainingType } from '@sideline/domain';
 import { Link, useRouter, useRouterState } from '@tanstack/react-router';
 import { DateTime, Effect, Option, Schema } from 'effect';
 import { CalendarDays, List, Loader2, ShieldCheck } from 'lucide-react';
@@ -32,7 +32,6 @@ import { Switch } from '~/components/ui/switch';
 import { Textarea } from '~/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/components/ui/tooltip';
 import { dateOnlyToUtc, formatEventDateRange, formatUtcTime, localToUtc } from '~/lib/datetime.js';
-import { DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import {
   DAY_ORDER,
   dayFullLabels,
@@ -74,7 +73,6 @@ const CreateEventSchema = Schema.Struct({
   endDate: Schema.String,
   endTime: Schema.String,
   location: Schema.String,
-  discordChannelId: Schema.String,
   ownerGroupId: Schema.String,
   memberGroupId: Schema.String,
 });
@@ -101,7 +99,6 @@ const CreateSeriesSchema = Schema.Struct({
   startTime: Schema.NonEmptyString.annotate({ message: tr('validation_required') }),
   endTime: Schema.String,
   location: Schema.String,
-  discordChannelId: Schema.String,
   ownerGroupId: Schema.String,
   memberGroupId: Schema.String,
 });
@@ -116,7 +113,6 @@ interface EventsListPageProps {
   showAllGroups: boolean;
   onShowAllGroupsChange: (value: boolean) => void;
   trainingTypes: ReadonlyArray<TrainingTypeApi.TrainingTypeInfo>;
-  discordChannels: ReadonlyArray<GroupApi.DiscordChannelInfo>;
   groups: ReadonlyArray<GroupApi.GroupInfo>;
 }
 
@@ -128,7 +124,6 @@ export function EventsListPage({
   showAllGroups,
   onShowAllGroupsChange,
   trainingTypes,
-  discordChannels,
   groups,
 }: EventsListPageProps) {
   const run = useRun();
@@ -158,7 +153,6 @@ export function EventsListPage({
       endDate: '',
       endTime: '',
       location: '',
-      discordChannelId: NONE_VALUE,
       ownerGroupId: NONE_VALUE,
       memberGroupId: NONE_VALUE,
     },
@@ -182,7 +176,6 @@ export function EventsListPage({
       startTime: '',
       endTime: '',
       location: '',
-      discordChannelId: NONE_VALUE,
       ownerGroupId: NONE_VALUE,
       memberGroupId: NONE_VALUE,
     },
@@ -242,10 +235,6 @@ export function EventsListPage({
             endAt: endAt ? Option.some(endAt) : Option.none(),
             allDay: values.allDay,
             location: values.location ? Option.some(values.location) : Option.none(),
-            discordChannelId:
-              values.discordChannelId && values.discordChannelId !== NONE_VALUE
-                ? Option.some(Discord.Snowflake.makeUnsafe(values.discordChannelId))
-                : Option.none(),
             ownerGroupId:
               values.ownerGroupId && values.ownerGroupId !== NONE_VALUE
                 ? Option.some(Schema.decodeSync(GroupModel.GroupId)(values.ownerGroupId))
@@ -288,10 +277,6 @@ export function EventsListPage({
               : Option.none(),
             location: values.location ? Option.some(values.location) : Option.none(),
             locationUrl: values.locationUrl ? Option.some(values.locationUrl) : Option.none(),
-            discordChannelId:
-              values.discordChannelId && values.discordChannelId !== NONE_VALUE
-                ? Option.some(Discord.Snowflake.makeUnsafe(values.discordChannelId))
-                : Option.none(),
             ownerGroupId:
               values.ownerGroupId && values.ownerGroupId !== NONE_VALUE
                 ? Option.some(Schema.decodeSync(GroupModel.GroupId)(values.ownerGroupId))
@@ -596,32 +581,6 @@ export function EventsListPage({
                           </FormItem>
                         )}
                       />
-                      <FormField
-                        {...form.register('discordChannelId')}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{tr('event_discordChannel')}</FormLabel>
-                            <FormControl>
-                              <SearchableSelect
-                                value={field.value}
-                                onValueChange={field.onChange}
-                                placeholder={tr('event_useDefault')}
-                                options={[
-                                  { value: NONE_VALUE, label: tr('event_useDefault') },
-                                  ...discordChannels
-                                    .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
-                                    .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
-                                ]}
-                                pinnedValues={[NONE_VALUE]}
-                              />
-                            </FormControl>
-                            <p className='text-xs text-muted-foreground'>
-                              {tr('event_discordChannelHelp')}
-                            </p>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
                       <div className='flex flex-col gap-4 sm:flex-row'>
                         <FormField
                           {...form.register('ownerGroupId')}
@@ -896,32 +855,6 @@ export function EventsListPage({
                                 rows={3}
                               />
                             </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        {...seriesForm.register('discordChannelId')}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>{tr('event_discordChannel')}</FormLabel>
-                            <FormControl>
-                              <SearchableSelect
-                                value={field.value}
-                                onValueChange={field.onChange}
-                                placeholder={tr('event_useDefault')}
-                                options={[
-                                  { value: NONE_VALUE, label: tr('event_useDefault') },
-                                  ...discordChannels
-                                    .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
-                                    .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
-                                ]}
-                                pinnedValues={[NONE_VALUE]}
-                              />
-                            </FormControl>
-                            <p className='text-xs text-muted-foreground'>
-                              {tr('event_discordChannelHelp')}
-                            </p>
                             <FormMessage />
                           </FormItem>
                         )}

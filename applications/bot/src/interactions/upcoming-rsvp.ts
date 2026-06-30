@@ -1,4 +1,10 @@
-import { Discord as DiscordSchemas, Event, EventRsvp, Team } from '@sideline/domain';
+import {
+  Discord as DiscordSchemas,
+  Event,
+  type EventRpcModels,
+  EventRsvp,
+  Team,
+} from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
@@ -7,7 +13,8 @@ import * as Discord from 'dfx/types';
 import { Effect, Metric, Option, Schema } from 'effect';
 import { type Locale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
-import { buildUpcomingEventEmbed } from '~/rest/events/buildUpcomingEventEmbed.js';
+import { YES_EMBED_LIMIT } from '~/rest/events/buildEventEmbed.js';
+import { buildPersonalMessage } from '~/rest/events/buildPersonalEventMessage.js';
 import { interactionUserId } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 import { postRsvpDiscordUpdates } from './rsvp.js';
@@ -26,6 +33,47 @@ const localizeRsvpResponse = (response: EventRsvp.RsvpResponse, locale: Locale):
     case 'maybe':
       return m.rsvp_maybe({}, { locale });
   }
+};
+
+/**
+ * Re-render a member's personal event message after they interact with it.
+ * Fetches the yes-attendees so the "Going" list matches the global channel, and
+ * uses the edit payload so the unanswered-event mention is cleared (content: '')
+ * once the member has responded (this path always runs post-response).
+ */
+const renderUpcomingPagePayload = (params: {
+  eventId: Event.EventId;
+  events: ReadonlyArray<EventRpcModels.UpcomingEventForUserEntry>;
+  discordUserId: DiscordSchemas.Snowflake;
+  locale: Locale;
+}) => {
+  const entry = params.events.find((e) => e.event_id === params.eventId);
+  if (entry === undefined) {
+    return Effect.succeed({
+      content: m.bot_rsvp_event_not_found({}, { locale: params.locale }) as string,
+      embeds: [] as ReadonlyArray<Discord.RichEmbed>,
+      components: [] as ReadonlyArray<Discord.ActionRowComponentForMessageRequest>,
+      allowed_mentions: { parse: [] as [] },
+    });
+  }
+  return SyncRpc.asEffect().pipe(
+    Effect.flatMap((rpc) =>
+      rpc['Event/GetYesAttendeesForEmbed']({
+        event_id: params.eventId,
+        limit: YES_EMBED_LIMIT,
+        member_group_id: Option.none(),
+      }),
+    ),
+    Effect.map(
+      (yesAttendees) =>
+        buildPersonalMessage({
+          entry,
+          yesAttendees,
+          discordId: params.discordUserId,
+          locale: params.locale,
+        }).editPayload,
+    ),
+  );
 };
 
 const modalValueOption = (
@@ -122,17 +170,14 @@ export const UpcomingRsvpButton = Ix.messageComponent(
             offset: 0,
             limit: 10,
           }).pipe(
-            Effect.map((result) => {
-              const entry = result.events.find((e) => e.event_id === eventId);
-              if (!entry) {
-                return {
-                  content: m.bot_rsvp_event_not_found({}, { locale }),
-                  components: [] as ReadonlyArray<Discord.ActionRowComponentForMessageRequest>,
-                };
-              }
-              const page = buildUpcomingEventEmbed({ entry, locale });
-              return { embeds: page.embeds, components: page.components };
-            }),
+            Effect.flatMap((result) =>
+              renderUpcomingPagePayload({
+                eventId,
+                events: result.events,
+                discordUserId,
+                locale,
+              }),
+            ),
           ),
         ),
         Effect.flatMap((payload) =>
@@ -311,17 +356,14 @@ export const UpcomingClearMessageButton = Ix.messageComponent(
             offset: 0,
             limit: 10,
           }).pipe(
-            Effect.map((result) => {
-              const entry = result.events.find((e) => e.event_id === eventId);
-              if (!entry) {
-                return {
-                  content: m.bot_rsvp_event_not_found({}, { locale }),
-                  components: [] as ReadonlyArray<Discord.ActionRowComponentForMessageRequest>,
-                };
-              }
-              const page = buildUpcomingEventEmbed({ entry, locale });
-              return { embeds: page.embeds, components: page.components };
-            }),
+            Effect.flatMap((result) =>
+              renderUpcomingPagePayload({
+                eventId,
+                events: result.events,
+                discordUserId,
+                locale,
+              }),
+            ),
           ),
         ),
         Effect.flatMap((payload) =>
@@ -453,17 +495,14 @@ export const UpcomingRsvpModal = Ix.modalSubmit(
             offset: 0,
             limit: 10,
           }).pipe(
-            Effect.map((result) => {
-              const entry = result.events.find((e) => e.event_id === eventId);
-              if (!entry) {
-                return {
-                  content: m.bot_rsvp_event_not_found({}, { locale }),
-                  components: [] as ReadonlyArray<Discord.ActionRowComponentForMessageRequest>,
-                };
-              }
-              const page = buildUpcomingEventEmbed({ entry, locale });
-              return { embeds: page.embeds, components: page.components };
-            }),
+            Effect.flatMap((result) =>
+              renderUpcomingPagePayload({
+                eventId,
+                events: result.events,
+                discordUserId,
+                locale,
+              }),
+            ),
           ),
         ),
         Effect.flatMap((payload) =>

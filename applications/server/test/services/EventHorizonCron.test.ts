@@ -442,7 +442,7 @@ describe('eventHorizonCronEffect', () => {
       event_horizon_days: 7,
     });
 
-    // Override TeamSettings to return a training channel ID — resolveChannel will pick it up
+    // Override TeamSettings to return a global events channel ID — resolveChannel will pick it up
     const TeamSettingsWithChannelLayer = Layer.succeed(TeamSettingsRepository, {
       findByTeamId: () =>
         Effect.succeed(
@@ -451,7 +451,7 @@ describe('eventHorizonCronEffect', () => {
             event_horizon_days: 30,
             min_players_threshold: 0,
             rsvp_reminder_hours: 0,
-            discord_channel_training: Option.some(DISCORD_CHANNEL_ID),
+            discord_channel_training: Option.none(),
             discord_channel_match: Option.none(),
             discord_channel_tournament: Option.none(),
             discord_channel_meeting: Option.none(),
@@ -461,6 +461,8 @@ describe('eventHorizonCronEffect', () => {
             create_discord_channel_on_group: false,
             create_discord_channel_on_roster: false,
             discord_archive_category_id: Option.none(),
+            discord_personal_events_category_id: Option.none(),
+            discord_events_channel_id: Option.some(DISCORD_CHANNEL_ID),
             discord_channel_cleanup_on_group_delete: 'delete',
             discord_channel_cleanup_on_roster_deactivate: 'delete',
             discord_role_format: '{name}',
@@ -544,9 +546,9 @@ describe('eventHorizonCronEffect', () => {
     );
   });
 
-  it.effect('resolves channel from owner group when no other channel configured', () => {
-    // No per-event channel, no training type channel, no team settings channel,
-    // but the owner group has a Discord channel mapping.
+  it.effect('resolves Option.none for channel when discord_events_channel_id is unset', () => {
+    // No discord_events_channel_id configured in team settings.
+    // resolveChannel now only reads discord_events_channel_id, so the result is Option.none().
     const series = makeActiveSeries({
       last_generated_date: Option.none(),
       start_date: DateTime.subtract(DateTime.nowUnsafe(), { days: 1 }),
@@ -556,58 +558,26 @@ describe('eventHorizonCronEffect', () => {
       discord_target_channel_id: Option.none(),
     });
 
-    // Arrange: the group->channel mapping returns GROUP_DISCORD_CHANNEL_ID
+    // Even with a group->channel mapping, resolveChannel ignores it
     groupChannelMapping = Option.some(GROUP_DISCORD_CHANNEL_ID);
-
-    // Arrange: the event returned by findEventByIdWithDetails has owner_group_id set
-    const findEventWithOwnerGroup = (eventId: Event.EventId) =>
-      Effect.succeed(
-        Option.some({
-          id: eventId,
-          team_id: TEAM_ID,
-          training_type_id: Option.none(),
-          event_type: 'training',
-          title: 'Weekly Training',
-          description: Option.none(),
-          start_at: DateTime.makeUnsafe('2026-04-14T10:00:00Z'),
-          end_at: Option.none(),
-          location: Option.none(),
-          status: 'active',
-          created_by: CREATED_BY,
-          training_type_name: Option.none(),
-          created_by_name: Option.none(),
-          series_id: Option.none(),
-          series_modified: false,
-          discord_target_channel_id: Option.none(),
-          owner_group_id: Option.some(GROUP_ID),
-          owner_group_name: Option.none(),
-          member_group_id: Option.none(),
-          member_group_name: Option.none(),
-          reminder_sent_at: Option.none(),
-        }),
-      );
 
     return eventHorizonCronEffect.pipe(
       Effect.tap(() =>
         Effect.sync(() => {
           expect(emittedCreated.length).toBeGreaterThan(0);
-          // All emitted events should use the owner group's channel
+          // discord_events_channel_id is None, so all events have no resolved channel
           for (const emitted of emittedCreated) {
-            expect(Option.isSome(emitted.discordTargetChannelId)).toBe(true);
-            if (Option.isSome(emitted.discordTargetChannelId)) {
-              expect(emitted.discordTargetChannelId.value).toBe(GROUP_DISCORD_CHANNEL_ID);
-            }
+            expect(Option.isNone(emitted.discordTargetChannelId)).toBe(true);
           }
         }),
       ),
-      Effect.provide(makeTestLayer([series], undefined, findEventWithOwnerGroup)),
+      Effect.provide(makeTestLayer([series])),
       Effect.asVoid,
     );
   });
 
-  it.effect('team settings channel wins over owner group channel', () => {
-    // Both team settings channel AND owner group channel are configured.
-    // Team settings (fallback #3) should take priority over owner group (fallback #4).
+  it.effect('discord_events_channel_id in team settings is used as resolved channel', () => {
+    // discord_events_channel_id in team settings is the single source of truth for resolveChannel.
     const series = makeActiveSeries({
       last_generated_date: Option.none(),
       start_date: DateTime.subtract(DateTime.nowUnsafe(), { days: 1 }),
@@ -617,10 +587,10 @@ describe('eventHorizonCronEffect', () => {
       discord_target_channel_id: Option.none(),
     });
 
-    // Arrange: owner group mapping is set
+    // Arrange: owner group mapping is also set (but should be ignored by resolveChannel)
     groupChannelMapping = Option.some(GROUP_DISCORD_CHANNEL_ID);
 
-    // Arrange: team settings also has a channel configured
+    // Arrange: team settings has discord_events_channel_id configured
     const TeamSettingsWithChannelLayer = Layer.succeed(TeamSettingsRepository, {
       findByTeamId: () =>
         Effect.succeed(
@@ -629,7 +599,7 @@ describe('eventHorizonCronEffect', () => {
             event_horizon_days: 30,
             min_players_threshold: 0,
             rsvp_reminder_hours: 0,
-            discord_channel_training: Option.some(DISCORD_CHANNEL_ID),
+            discord_channel_training: Option.none(),
             discord_channel_match: Option.none(),
             discord_channel_tournament: Option.none(),
             discord_channel_meeting: Option.none(),
@@ -639,6 +609,8 @@ describe('eventHorizonCronEffect', () => {
             create_discord_channel_on_group: false,
             create_discord_channel_on_roster: false,
             discord_archive_category_id: Option.none(),
+            discord_personal_events_category_id: Option.none(),
+            discord_events_channel_id: Option.some(DISCORD_CHANNEL_ID),
             discord_channel_cleanup_on_group_delete: 'delete',
             discord_channel_cleanup_on_roster_deactivate: 'delete',
             discord_role_format: '{name}',
@@ -651,39 +623,11 @@ describe('eventHorizonCronEffect', () => {
       findEventsNeedingReminder: () => Effect.die(new Error('Not implemented')),
     } as any);
 
-    // Arrange: the event returned by findEventByIdWithDetails has owner_group_id set
-    const findEventWithOwnerGroup = (eventId: Event.EventId) =>
-      Effect.succeed(
-        Option.some({
-          id: eventId,
-          team_id: TEAM_ID,
-          training_type_id: Option.none(),
-          event_type: 'training',
-          title: 'Weekly Training',
-          description: Option.none(),
-          start_at: DateTime.makeUnsafe('2026-04-14T10:00:00Z'),
-          end_at: Option.none(),
-          location: Option.none(),
-          status: 'active',
-          created_by: CREATED_BY,
-          training_type_name: Option.none(),
-          created_by_name: Option.none(),
-          series_id: Option.none(),
-          series_modified: false,
-          discord_target_channel_id: Option.none(),
-          owner_group_id: Option.some(GROUP_ID),
-          owner_group_name: Option.none(),
-          member_group_id: Option.none(),
-          member_group_name: Option.none(),
-          reminder_sent_at: Option.none(),
-        }),
-      );
-
     return eventHorizonCronEffect.pipe(
       Effect.tap(() =>
         Effect.sync(() => {
           expect(emittedCreated.length).toBeGreaterThan(0);
-          // Team settings channel (DISCORD_CHANNEL_ID) should win over group channel
+          // discord_events_channel_id (DISCORD_CHANNEL_ID) should be used
           for (const emitted of emittedCreated) {
             expect(Option.isSome(emitted.discordTargetChannelId)).toBe(true);
             if (Option.isSome(emitted.discordTargetChannelId)) {
@@ -695,7 +639,7 @@ describe('eventHorizonCronEffect', () => {
       Effect.provide(
         Layer.mergeAll(
           makeMockEventSeriesRepository([series]),
-          makeMockEventsRepositoryLayer(findEventWithOwnerGroup),
+          MockEventsRepositoryLayer,
           MockTrainingTypesRepositoryLayer,
           TeamSettingsWithChannelLayer,
           MockDiscordChannelMappingRepositoryLayer,

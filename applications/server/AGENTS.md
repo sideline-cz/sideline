@@ -463,6 +463,94 @@ Two `event_sync_events` payload fields carry **different semantics depending on 
 
 For `event_started`, `EventStartCron` additionally passes `event.claimed_by` (the assigned coach's `TeamMemberId`) to `emitEventStarted` ONLY for trainings; the JOIN in `findUnprocessedEvents` resolves it to `claimed_by_discord_id`, and the bot prefers a `<@coach>` user mention over the role mention. See the bot AGENTS.md "Training claim threads" note for the consumer rules.
 
+### Two-surface event model: global shared channel + per-member personal channels
+
+Events render onto **two Discord surfaces** with two different server-side mechanisms. Keep them straight — they do not share a resolution path.
+
+| Surface | Channel | Server mechanism | Renderer (bot) |
+|---------|---------|------------------|----------------|
+| **Global shared events channel** | ONE channel per team: `team_settings.discord_events_channel_id` | `resolveChannel(teamId)` + the `event_sync_events` outbox (`event_created`/`event_updated`/`event_cancelled`/`event_started`/…) | `buildEventEmbed` (one aggregate message per event, RSVP buttons shared) |
+| **Private per-member personal channels** | one hidden channel per team member inside `team_settings.discord_personal_events_category_id` (auto-overflow categories past 50) | the `events.personal_messages_dirty_at` reconcile marker, polled by the bot (no outbox) | `buildUpcomingEventEmbed` (per-member RSVP state) |
+
+#### Event Discord channel resolution (`src/services/EventChannelResolver.ts`)
+
+`resolveChannel(teamId)` was **simplified to a single team-level global channel**. It now reads ONLY `team_settings.discord_events_channel_id` and returns `Option<Discord.Snowflake>` (requires only `TeamSettingsRepository`). The old signature `resolveChannel(teamId, eventId)` and its 4-tier waterfall (per-event override → training-type default → team-settings per-event-type channel → owner-group fallback) are **GONE**, along with the `discord_target_channel_id` columns on `events` and `event_series` (dropped by migration `1790300009_drop_discord_target_channel_id.ts`).
+
+- **Never reintroduce a per-event channel override or an `eventId` argument to `resolveChannel`.** A team has exactly one events channel.
+- `resolveReminderChannel` and `resolveOwnerGroupChannel` (same file) are **retained unchanged** — they still serve RSVP reminders, training claims, and roster/owner-group posts. Do not fold them into `resolveChannel`.
+- All event-creating call sites now call `resolveChannel(teamId)` with no event id: `src/api/event.ts` (create/update/cancel), `src/services/EventHorizonCron.ts` (series generation).
+
+#### `events.personal_messages_dirty_at` reconcile marker
+
+The per-member personal-channel surface has NO outbox. The trigger is a single nullable timestamp column on `events`: `personal_messages_dirty_at` (added by migration `1790300006_add_personal_messages_dirty_at.ts`). The bot polls it; the server only sets and clears it.
+
+- **Set it on EVERY write path that alters a member's view — no exceptions.** `EventsRepository.markEventPersonalMessagesDirty(eventId)` runs `UPDATE events SET personal_messages_dirty_at = date_trunc('milliseconds', now()) WHERE id = $1`. It is always best-effort (`markPersonalMessagesDirtyBestEffort` in `src/api/event.ts` wraps it in `Effect.catchCause(... logWarning)`; series/RPC call sites use `.pipe(Effect.ignore)`) so a marker failure never rolls back the primary write. The complete set of call sites that MUST mark dirty:
+  - **Single event** create / update / cancel — `src/api/event.ts` (`markPersonalMessagesDirtyBestEffort`).
+  - **RSVP** submit — RSVP changes the per-member embed, so the answered/unanswered event's row is re-marked.
+  - **Event series** create / update / cancel — `src/api/event-series.ts` re-marks EACH generated/affected event id inside the `{ concurrency: 1 }` loop (a series op fans out to N events; mark every one, not just the series row — there is no series-level marker).
+  - **RPC-driven event writes** — `src/rpc/event/index.ts` (e.g. the bot-triggered event edits) mark the touched event id.
+
+  When you add a NEW server write path that can change what a member sees in their personal channel, add a `markEventPersonalMessagesDirty` call there too — a missed call leaves the personal channel stale until some unrelated edit re-marks the event. `date_trunc('milliseconds', ...)` is REQUIRED so the timestamp round-trips losslessly through the bot's `DateTimeFromIsoString` wire codec and matches the clear guard exactly.
+- **Read for reconcile.** `PersonalEvents/GetEventsNeedingReconcile({ limit })` selects events with `personal_messages_dirty_at IS NOT NULL` (JOIN `teams` for `guild_id`, `ORDER BY personal_messages_dirty_at ASC`), returning `{ event_id, team_id, guild_id, dirty_at }`.
+- **Clear with an observed-timestamp guard (lost-update prevention).** `PersonalEvents/ClearPersonalMessagesDirty({ event_id, dirty_at })` → `clearEventPersonalMessagesDirty` runs `UPDATE events SET personal_messages_dirty_at = NULL WHERE id = $1 AND personal_messages_dirty_at = $2`. The `dirty_at` is the value the bot observed at the START of its reconcile tick. If an RSVP/edit re-marked the event mid-reconcile, the marker now holds a newer timestamp, the `WHERE` matches nothing, and the event stays dirty for the next tick. **Never clear the marker unconditionally** — that would drop the interleaved update. The bot side of this contract is `applications/bot/AGENTS.md` → "Personal Events Sync".
+
+#### Personal event tables and reserve-first provisioning
+
+Three new tables back the personal-channel surface (migrations `1790300004`/`1790300005`/`1790300008`):
+
+| Table | Purpose | Idempotency / shape |
+|-------|---------|---------------------|
+| `personal_event_channels` | one row per `(team_id, team_member_id)` — the member's private channel | **Reserve-first**: `Guild/ReservePersonalChannel` does `INSERT ... ON CONFLICT (team_id, team_member_id) DO NOTHING` with `discord_channel_id` left NULL, returning `{ reserved }`. The bot creates the Discord channel only when `reserved=true`, then `Guild/SavePersonalChannelId` fills in the id. Partial unique index on `discord_channel_id WHERE NOT NULL`. |
+| `personal_event_messages` | fan-out: one message per `(event_id, team_member_id)` | `UpsertPersonalEventMessage` upserts `(personal_channel_id, discord_message_id, payload_hash)` `ON CONFLICT (event_id, team_member_id)`. The `payload_hash` is the no-op-edit suppressor (hash-diff). |
+| `personal_event_overflow_categories` | extra categories once the base category hits Discord's 50-channel cap | `AllocatePersonalOverflowCategory` reserves the next `(team_id, sequence)` `ON CONFLICT DO NOTHING`; `GetPersonalChannelTargetCategory` returns the base category or the last overflow category. |
+
+- **The reserve row is the idempotency token.** Provisioning is bot-driven and may run across replicas/ticks; the `ON CONFLICT DO NOTHING` reserve is what guarantees exactly one channel per member. Never create a personal channel without first reserving.
+- **`payload_hash` suppresses no-op Discord edits across BOTH surfaces** — personal messages compare against the stored `personal_event_messages.payload_hash`; the global message compares against the live message content. Same hash → no `updateMessage`.
+- The personal-events RPCs live in two groups: provisioning/category/channel reads on `Guild/*Personal*` (`packages/domain/src/rpc/guild/GuildRpcGroup.ts`, handlers in `src/rpc/guild/index.ts`) and message/dirty reads on `PersonalEvents/*` (`packages/domain/src/rpc/personalEvents/PersonalEventsRpcGroup.ts`, handlers in `src/rpc/personalEvents/index.ts` — wired into `SyncRpcsLive` per the three-edit RPC rule).
+
+##### Group restriction (`team_settings.discord_personal_events_group_id`)
+
+`team_settings.discord_personal_events_group_id` (nullable UUID FK to `groups`, `ON DELETE SET NULL`; migration `1790300010`) optionally restricts personal channels to members of one group AND its descendant subgroups. `NULL` = every active member gets a channel (default).
+
+- **Both eligibility queries use the SAME `WITH RECURSIVE descendant_groups` CTE** (`PersonalEventChannelsRepository`): `_getMembersNeeding` adds an `EXISTS (... descendant_groups ... group_members)` predicate (skipped when `group_id::uuid IS NULL`), and `_getMembersToDeprovision` uses the `NOT EXISTS` negation to find channel-holders who fell outside the group. The CTE walks `groups.parent_id`, scoped to the same `team_id`. This mirrors the established descendant-CTE pattern (see "Group-role backfill" rule above); reuse it for any future group-scoped membership filter — never flatten the hierarchy in application code.
+- **`Guild/GetGuildsNeedingPersonalProvisioning` surfaces a guild needing provision, de-provision, OR rename.** Its `_getGuildsNeedingProvisioning` query's WHERE has three OR'd arms: (a) an eligible member still missing a channel, (b) a channel-holder no longer in the configured group, OR (c) a channel whose `applied_channel_format` drifted from the team's current format (see "Personal-channel format-change drift"). A guild appears in the result if any arm matches, so Pass 1's provision + de-provision + rename all have work.
+- **`Guild/GetPersonalChannelsToDeprovision` returns `[]` when no group is configured.** The handler short-circuits on `Option.none()` for `discord_personal_events_group_id` — an unrestricted team never de-provisions. Only `getMembersToDeprovision` runs the `NOT EXISTS` query, and only when a group id is present.
+- **De-provision clears messages BEFORE the channel row.** `deletePersonalChannel` runs `_deleteMemberMessages` (DELETE `personal_event_messages` for the member) THEN `_deleteChannel`, returning the freed `discord_channel_id` so the caller knows what to delete on Discord. The bot deletes the Discord channel first and calls `Guild/DeletePersonalChannel` only after the channel is gone (see `applications/bot/AGENTS.md` → "Pass 1b — De-provision").
+
+##### Channel-name format (`team_settings.discord_personal_events_channel_format`)
+
+`discord_personal_events_channel_format` (`TEXT NOT NULL DEFAULT 'events-{discord_id}'`; migration `1790300010`) is the per-team template for personal channel names. Placeholders: `{name}` (member display name, slugified bot-side) and `{discord_id}`. The server does NOT apply this template — it returns the raw `channel_format` plus the resolved `name` (display name via `COALESCE(discord_display_name, discord_nickname, name, discord_id)`) on the `Guild/GetGuildsNeedingPersonalProvisioning` result; the bot applies it via `formatPersonalChannelName`. The default constant `DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT = 'events-{discord_id}'` (`src/utils/applyDiscordFormat.ts`) is used when team settings are absent.
+
+###### Personal-channel format-change drift
+
+`personal_event_channels.applied_channel_format` (`TEXT`, nullable; migration `1790300011`) records the format last applied to a member's channel name, so a later team-settings change can be detected and existing channels renamed.
+
+- **Drift = `applied_channel_format IS DISTINCT FROM ts.discord_personal_events_channel_format`** (a plain string compare — `IS DISTINCT FROM` so a NULL `applied_channel_format` always counts as drifted). This predicate appears in TWO `PersonalEventChannelsRepository` queries: as the third OR'd arm `(c)` of `_getGuildsNeedingProvisioning` (so a guild with only format-drift surfaces for Pass 1), and as the WHERE of `_getChannelsToRename` (`Guild/GetPersonalChannelsToRename`), which returns `{ team_id, team_member_id, discord_id, discord_channel_id, name, channel_format }` per drifted member. Both compare strings only — never re-render the template server-side to detect drift.
+- **`Guild/SavePersonalChannelId` now carries `channel_format`** and writes it to `applied_channel_format` alongside the channel id — provisioning records the format it just used, so a freshly-created channel is never immediately flagged as drifted. `Guild/SavePersonalChannelFormat` (`savePersonalChannelFormat`) updates `applied_channel_format` ALONE; the bot calls it after a successful rename (Pass 1c) to stop flagging the channel.
+- The bot side of rename-on-drift is `applications/bot/AGENTS.md` → "Pass 1c — Rename"; the bot is the single source of name formatting (`formatPersonalChannelName`), so the server only stores/compares the raw format string.
+
+###### Backfill-on-provision (`Guild/MarkTeamPersonalEventsDirty`)
+
+When a member's channel is freshly provisioned, the bot calls `Guild/MarkTeamPersonalEventsDirty({ team_id })` → `EventsRepository.markTeamUpcomingEventsPersonalMessagesDirty(teamId)` so the reconcile loop (Pass 2) populates the new channel with the member's existing events — reusing reconcile rather than duplicating the personal-message render path. The query marks `personal_messages_dirty_at` ONLY for events that are `status='active'`, `start_at >= now()`, AND `personal_messages_dirty_at IS NULL` — events already dirty are left untouched so an in-flight reconcile is not disturbed.
+
+> **`GuildsRpcLive` now depends on `EventsRepository`** (for `Guild/MarkTeamPersonalEventsDirty`). Any test layer building `GuildsRpcLive` MUST provide `EventsRepository` (`EventsRepository.Default`, or a `Layer.succeed(EventsRepository, …)` proxy mock) — see `test/rpc/OnboardingSync.test.ts` and `test/rpc/RegisterMember.test.ts`.
+
+###### Channel classification for `/event refresh` (`Guild/IdentifyEventsChannel`)
+
+The bot's `/event refresh` subcommand (`applications/bot/AGENTS.md` → "Slash Commands") classifies the channel it was run in via `Guild/IdentifyEventsChannel({ guild_id, channel_id, discord_user_id })` (handler in `src/rpc/guild/index.ts`). It returns `{ kind: 'global' | 'personal' | 'none', team_id: Option<TeamId>, team_member_id: Option<String>, owner_discord_id: Option<Snowflake>, is_admin: boolean }`:
+
+- **`global`** — the channel equals the team's `team_settings.discord_events_channel_id`. The bot re-renders + reorders the shared channel (admins only).
+- **`personal`** — the channel is ANY team member's personal channel, resolved by CHANNEL ID alone via `findPersonalChannelOwner(teamId, channelId)`. `team_member_id` AND `owner_discord_id` are both `Some` (the channel's owner, NOT necessarily the caller). The server does NOT decide own-vs-other here — it only reports the owner; the bot compares `owner_discord_id` to the caller and gates accordingly (own channel → anyone; another member's → admins only). See `applications/bot/AGENTS.md` → "Slash Commands" rule 2.
+- **`none`** — no linked team, or the channel is neither surface. The bot replies "nothing to refresh".
+- **`is_admin`** — whether the caller holds Sideline's `team:manage` permission on the linked team. Computed by resolving the caller's membership via `members.findMembershipByDiscordAndTeam(discord_user_id, team.id)` then `membership.permissions.includes('team:manage')`; `false` when the guild is unlinked or the caller has no membership. `/event refresh` is a subcommand and so CANNOT use Discord `default_member_permissions` — the bot gates admin-only refresh entirely on this runtime flag.
+
+Rules:
+
+1. **`findPersonalChannelOwner(teamId, channelId)`** (`PersonalEventChannelsRepository`) returns `Option<{ team_member_id, discord_id }>` by joining `personal_event_channels → team_members → users` on `discord_channel_id = channel_id`. It is keyed on the CHANNEL only — it does NOT filter by the caller's discord id. Resolving the owner (not the caller) is deliberate: it lets an admin refresh another member's channel acting with the owner's identity. The own-vs-other authorization decision lives in the bot, never here — the server's only authorization output is the `is_admin` flag plus the reported `owner_discord_id`.
+2. **The handler adds NO new repository dependency for classification** — it composes the existing `teams` / `teamSettings` / `personalChannels` deps already on `GuildsRpcLive`. The `is_admin` computation reuses the existing `members` dependency (`findMembershipByDiscordAndTeam`); do not inject a new repo for this read.
+
+> **NOTE — do not confuse two `discord_target_channel_id` meanings.** `event_sync_events.discord_target_channel_id` is RETAINED and still overloaded (it carries the resolved target for roster/claim/teams payloads). The now-DROPPED columns are `events.discord_target_channel_id` and `event_series.discord_target_channel_id` (migration `1790300009`). When you read or write `discord_target_channel_id`, confirm it is the outbox column — there is no longer a per-event/per-series channel column to fall back to.
+
 ### Overloaded payload fields on event sync events (roster approval flow)
 
 Three `event_sync_events` event types are emitted by the **Event↔Roster Attendance** feature. They reuse the generic outbox columns with specific semantics:
@@ -531,6 +619,7 @@ The **server** applies Discord name formatting before emitting sync events. The 
 |----------|-------|----------|
 | `DEFAULT_ROLE_FORMAT` | `{emoji} {name}` | `src/utils/applyDiscordFormat.ts` |
 | `DEFAULT_CHANNEL_FORMAT` | `{emoji}│{name}` | `src/utils/applyDiscordFormat.ts` |
+| `DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT` | `events-{discord_id}` | `src/utils/applyDiscordFormat.ts` — personal-channel name template default; placeholders `{name}` / `{discord_id}` (applied bot-side by `formatPersonalChannelName`, NOT `applyDiscordFormat`) |
 
 Format templates use `{emoji}` and `{name}` placeholders. The `applyDiscordFormat(template, name, emoji)` function handles missing emoji by stripping the placeholder and cleaning up leftover separators.
 
@@ -1028,7 +1117,7 @@ Reference: `applications/server/src/utils/onboardingToken.ts` (`generateOnboardi
 
 This footgun bit `TeamsRepository.insert` once already: `welcome_channel_id` was added to `Team.Team.insert` and the API handler, but the column list still read `(name, guild_id, description, sport, logo_url, created_by)` — every team created post-migration had `welcome_channel_id = NULL` despite the caller passing a value. Fix: extend both the column list and `VALUES` tuple in the same edit.
 
-Current state of `TeamsRepository.insertQuery` column list: all 16 non-generated columns are now persisted at INSERT time — `name`, `guild_id`, `description`, `sport`, `logo_url`, `created_by`, `welcome_channel_id`, `system_log_channel_id`, `welcome_message_template`, `rules_channel_id`, `overview_channel_id`, `achievement_channel_id`, `onboarding_rules_role_id`, `onboarding_rules_prompt_id`, `onboarding_locale`, `onboarding_sync_status`. (`created_at`/`updated_at` keep DB defaults; `id` is generated; `onboarding_synced_at`/`onboarding_sync_error` default to NULL.) The 16-column round-trip is verified by an integration test in `TeamsRepository.test.ts`.
+Current state of `TeamsRepository.insertQuery` column list: all 15 non-generated columns are now persisted at INSERT time — `name`, `guild_id`, `description`, `sport`, `logo_url`, `created_by`, `welcome_channel_id`, `system_log_channel_id`, `welcome_message_template`, `rules_channel_id`, `achievement_channel_id`, `onboarding_rules_role_id`, `onboarding_rules_prompt_id`, `onboarding_locale`, `onboarding_sync_status`. (`created_at`/`updated_at` keep DB defaults; `id` is generated; `onboarding_synced_at`/`onboarding_sync_error` default to NULL.) `teams.overview_channel_id` was DROPPED (migration `1790300002_drop_overview_channel.ts`) — the team's events channel now lives on `team_settings.discord_events_channel_id`; do not reference `teams.overview_channel_id` or the removed `Guild/SetOverviewChannel` RPC. The round-trip is verified by an integration test in `TeamsRepository.test.ts`.
 
 Rules when adding a new column to a `Model.Class` that is INSERTed via hand-written SQL:
 

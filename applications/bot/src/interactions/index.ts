@@ -25,7 +25,6 @@ import {
 import { EventCreateModal } from './event-create.js';
 import { EventCreateAutocomplete } from './event-create-autocomplete.js';
 import { MakanickoLogAutocomplete } from './makanicko-log-autocomplete.js';
-import { OverviewShowButton } from './overview-channel.js';
 import {
   PollAddButtonReg,
   PollAddModalReg,
@@ -56,7 +55,6 @@ export const interactionBuilder = Ix.builder
   .add(UpcomingAddMessageButton)
   .add(UpcomingClearMessageButton)
   .add(UpcomingRsvpModal)
-  .add(OverviewShowButton)
   .add(EventCreateAutocomplete)
   .add(MakanickoLogAutocomplete)
   .add(TrainingResultAutocomplete)

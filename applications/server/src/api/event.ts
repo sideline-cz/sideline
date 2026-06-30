@@ -1,6 +1,6 @@
-import { Auth, EventApi } from '@sideline/domain';
+import { Auth, type Event, EventApi } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
-import { Array, Effect, Option } from 'effect';
+import { Array, Effect, Option, type ServiceMap } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { hasPermission, requireMembership, requirePermission } from '~/api/permissions.js';
@@ -12,6 +12,18 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { resolveChannel } from '~/services/EventChannelResolver.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
+
+const markPersonalMessagesDirtyBestEffort = (
+  events: ServiceMap.Service.Shape<typeof EventsRepository>,
+  eventId: Event.EventId,
+) =>
+  events
+    .markEventPersonalMessagesDirty(eventId)
+    .pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning('Failed to mark personal messages dirty', cause),
+      ),
+    );
 
 const forbidden = new EventApi.Forbidden();
 const notFound = new EventApi.EventNotFound();
@@ -134,13 +146,12 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                 location: payload.location,
                 locationUrl: payload.locationUrl,
                 createdBy: membership.id,
-                discordTargetChannelId: payload.discordChannelId,
                 ownerGroupId: resolvedGroups.ownerGroupId,
                 memberGroupId: resolvedGroups.memberGroupId,
                 allDay: payload.allDay,
               }),
             ),
-            Effect.bind('resolvedChannel', ({ event }) => resolveChannel(teamId, event.id)),
+            Effect.bind('resolvedChannel', () => resolveChannel(teamId)),
             Effect.tap(({ event, resolvedChannel }) =>
               syncEvents.emitEventCreated(
                 teamId,
@@ -173,6 +184,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                 locationUrl: event.location_url,
               }),
             ),
+            Effect.tap(({ event }) => markPersonalMessagesDirtyBestEffort(events, event.id)),
             Effect.map(
               ({ event }) =>
                 new EventApi.EventInfo({
@@ -261,7 +273,6 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   canCancel: canCancel && event.status === 'active',
                   seriesId: event.series_id,
                   seriesModified: event.series_modified,
-                  discordChannelId: event.discord_target_channel_id,
                   ownerGroupId: event.owner_group_id,
                   ownerGroupName: event.owner_group_name,
                   memberGroupId: event.member_group_id,
@@ -364,10 +375,6 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                 }),
                 location: mergedLocation,
                 locationUrl: mergedLocationUrl,
-                discordTargetChannelId: Option.match(payload.discordChannelId, {
-                  onNone: () => existing.discord_target_channel_id,
-                  onSome: (v) => v,
-                }),
                 ownerGroupId: Option.match(payload.ownerGroupId, {
                   onNone: () => existing.owner_group_id,
                   onSome: (v) => v,
@@ -394,26 +401,27 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                 ),
               ),
             ),
-            Effect.bind('resolvedChannelForUpdate', ({ detail }) =>
-              resolveChannel(teamId, detail.id),
-            ),
+            Effect.bind('resolvedChannelForUpdate', () => resolveChannel(teamId)),
             Effect.tap(({ detail, resolvedChannelForUpdate }) =>
-              syncEvents.emitEventUpdated(
-                teamId,
-                detail.id,
-                detail.title,
-                detail.description,
-                detail.start_at,
-                detail.end_at,
-                detail.location,
-                detail.event_type,
-                resolvedChannelForUpdate,
-                Option.none(),
-                Option.none(),
-                detail.image_url,
-                detail.location_url,
-                detail.all_day,
-              ),
+              Effect.all([
+                syncEvents.emitEventUpdated(
+                  teamId,
+                  detail.id,
+                  detail.title,
+                  detail.description,
+                  detail.start_at,
+                  detail.end_at,
+                  detail.location,
+                  detail.event_type,
+                  resolvedChannelForUpdate,
+                  Option.none(),
+                  Option.none(),
+                  detail.image_url,
+                  detail.location_url,
+                  detail.all_day,
+                ),
+                markPersonalMessagesDirtyBestEffort(events, detail.id),
+              ]),
             ),
             Effect.map(
               ({ detail, membership }) =>
@@ -437,7 +445,6 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                     hasPermission(membership, 'event:cancel') && detail.status === 'active',
                   seriesId: detail.series_id,
                   seriesModified: detail.series_modified,
-                  discordChannelId: detail.discord_target_channel_id,
                   ownerGroupId: detail.owner_group_id,
                   ownerGroupName: detail.owner_group_name,
                   memberGroupId: detail.member_group_id,
@@ -496,20 +503,23 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
             ),
             Effect.tap(() => events.cancelEvent(eventId)),
             Effect.tap(({ existing }) =>
-              syncEvents.emitEventCancelled(
-                teamId,
-                existing.id,
-                existing.title,
-                existing.description,
-                existing.start_at,
-                existing.end_at,
-                existing.location,
-                existing.event_type,
-                Option.none(),
-                Option.none(),
-                Option.none(),
-                existing.location_url,
-              ),
+              Effect.all([
+                syncEvents.emitEventCancelled(
+                  teamId,
+                  existing.id,
+                  existing.title,
+                  existing.description,
+                  existing.start_at,
+                  existing.end_at,
+                  existing.location,
+                  existing.event_type,
+                  Option.none(),
+                  Option.none(),
+                  Option.none(),
+                  existing.location_url,
+                ),
+                markPersonalMessagesDirtyBestEffort(events, existing.id),
+              ]),
             ),
             Effect.asVoid,
           ),

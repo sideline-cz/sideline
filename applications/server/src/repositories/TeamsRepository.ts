@@ -29,7 +29,6 @@ class PendingOnboardingSyncRow extends Schema.Class<PendingOnboardingSyncRow>(
   rules_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   welcome_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   training_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
-  overview_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   onboarding_rules_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
   onboarding_rules_prompt_id: Schema.OptionFromNullOr(Discord.Snowflake),
   is_community_enabled: Schema.Boolean,
@@ -51,14 +50,14 @@ const make = Effect.gen(function* () {
       INSERT INTO teams (
         name, guild_id, description, sport, logo_url, created_by,
         welcome_channel_id, system_log_channel_id, welcome_message_template,
-        rules_channel_id, overview_channel_id, achievement_channel_id,
+        rules_channel_id, achievement_channel_id,
         onboarding_rules_role_id, onboarding_rules_prompt_id,
         onboarding_locale, onboarding_sync_status
       )
       VALUES (
         ${input.name}, ${input.guild_id}, ${input.description}, ${input.sport}, ${input.logo_url}, ${input.created_by},
         ${input.welcome_channel_id}, ${input.system_log_channel_id}, ${input.welcome_message_template},
-        ${input.rules_channel_id}, ${input.overview_channel_id}, ${input.achievement_channel_id},
+        ${input.rules_channel_id}, ${input.achievement_channel_id},
         ${input.onboarding_rules_role_id}, ${input.onboarding_rules_prompt_id},
         ${input.onboarding_locale}, ${input.onboarding_sync_status}
       )
@@ -151,7 +150,7 @@ const make = Effect.gen(function* () {
           FOR UPDATE SKIP LOCKED
         )
         RETURNING id, guild_id, name, onboarding_locale,
-                  rules_channel_id, welcome_channel_id, overview_channel_id,
+                  rules_channel_id, welcome_channel_id,
                   onboarding_rules_role_id, onboarding_rules_prompt_id
       )
       SELECT
@@ -161,7 +160,6 @@ const make = Effect.gen(function* () {
         c.onboarding_locale,
         c.rules_channel_id,
         c.welcome_channel_id,
-        c.overview_channel_id,
         c.onboarding_rules_role_id,
         c.onboarding_rules_prompt_id,
         ts.discord_channel_training AS training_channel_id,
@@ -260,19 +258,6 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
-  // Sets teams.overview_channel_id for the team matching guild_id. Returns the number
-  // of rows whose value actually changed so the caller can re-trigger onboarding sync
-  // only when the channel moved.
-  const setOverviewChannelByGuildId = (guildId: Discord.Snowflake, channelId: Discord.Snowflake) =>
-    sql<{ id: Team.TeamId }>`
-      UPDATE teams
-      SET overview_channel_id = ${channelId},
-          updated_at = now()
-      WHERE guild_id = ${guildId}
-        AND (overview_channel_id IS DISTINCT FROM ${channelId})
-      RETURNING id
-    `.pipe(catchSqlErrors);
-
   return {
     findById,
     insert,
@@ -287,7 +272,6 @@ const make = Effect.gen(function* () {
     markOnboardingSyncSkippedIfSyncing,
     flipPendingOnboardingSyncForGuild,
     getOnboardingRulesRoleIdByGuildId,
-    setOverviewChannelByGuildId,
   };
 });
 

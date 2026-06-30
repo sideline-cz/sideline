@@ -24,7 +24,6 @@ const makeInsert = (overrides?: {
   system_log_channel_id: Option.none(),
   welcome_message_template: Option.none(),
   rules_channel_id: Option.none(),
-  overview_channel_id: Option.none(),
   achievement_channel_id: Option.none(),
   onboarding_rules_role_id: Option.none(),
   onboarding_rules_prompt_id: Option.none(),
@@ -302,7 +301,6 @@ describe('TeamsRepository', () => {
                 system_log_channel_id: Option.some('400000000000000003' as Discord.Snowflake),
                 welcome_message_template: Option.some('Welcome {{name}}!'),
                 rules_channel_id: Option.some('400000000000000004' as Discord.Snowflake),
-                overview_channel_id: Option.some('400000000000000005' as Discord.Snowflake),
                 achievement_channel_id: Option.some('400000000000000006' as Discord.Snowflake),
                 onboarding_rules_role_id: Option.some('400000000000000007' as Discord.Snowflake),
                 onboarding_rules_prompt_id: Option.some('400000000000000008' as Discord.Snowflake),
@@ -337,7 +335,6 @@ describe('TeamsRepository', () => {
             expect(Option.getOrThrow(team.system_log_channel_id)).toBe('400000000000000003');
             expect(Option.getOrThrow(team.welcome_message_template)).toBe('Welcome {{name}}!');
             expect(Option.getOrThrow(team.rules_channel_id)).toBe('400000000000000004');
-            expect(Option.getOrThrow(team.overview_channel_id)).toBe('400000000000000005');
             expect(Option.getOrThrow(team.onboarding_rules_role_id)).toBe('400000000000000007');
             expect(Option.getOrThrow(team.onboarding_rules_prompt_id)).toBe('400000000000000008');
           }),
@@ -377,7 +374,6 @@ describe('TeamsRepository', () => {
           expect(Option.isNone(team.system_log_channel_id)).toBe(true);
           expect(Option.isNone(team.welcome_message_template)).toBe(true);
           expect(Option.isNone(team.rules_channel_id)).toBe(true);
-          expect(Option.isNone(team.overview_channel_id)).toBe(true);
           expect(Option.isNone(team.achievement_channel_id)).toBe(true);
           expect(Option.isNone(team.onboarding_rules_role_id)).toBe(true);
           expect(Option.isNone(team.onboarding_rules_prompt_id)).toBe(true);
@@ -435,7 +431,6 @@ describe('TeamsRepository', () => {
               system_log_channel_id: Option.none(),
               welcome_message_template: Option.none(),
               rules_channel_id: Option.none(),
-              overview_channel_id: Option.none(),
               achievement_channel_id: Option.none(),
               onboarding_rules_role_id: Option.none(),
               onboarding_rules_prompt_id: Option.none(),

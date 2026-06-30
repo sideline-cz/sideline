@@ -1,9 +1,11 @@
-import type { EventRpcModels } from '@sideline/domain';
+import { Event, type EventRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import type { DiscordRestService } from 'dfx/DiscordREST';
 import * as DiscordTypes from 'dfx/types';
-import { Duration, Effect } from 'effect';
+import { Duration, Effect, Option } from 'effect';
 import type { Locale } from '~/locale.js';
+import { SyncRpc } from '~/services/SyncRpc.js';
+import { YES_EMBED_LIMIT } from './buildEventEmbed.js';
 import { buildUpcomingEventEmbed } from './buildUpcomingEventEmbed.js';
 
 const STALE_DELAY = Duration.minutes(10);
@@ -25,18 +27,28 @@ export const sendUpcomingEventFollowups = (params: {
 
   const sendMessages = Effect.forEach(
     events,
-    (entry) => {
-      const { embeds, components } = buildUpcomingEventEmbed({ entry, locale });
-      return rest
-        .executeWebhook(applicationId, interactionToken, {
-          payload: {
-            embeds,
-            components,
-            flags: DiscordTypes.MessageFlags.Ephemeral,
-          },
-        })
-        .pipe(Effect.map((response) => response.id));
-    },
+    (entry) =>
+      SyncRpc.asEffect().pipe(
+        Effect.flatMap((rpc) =>
+          rpc['Event/GetYesAttendeesForEmbed']({
+            event_id: Event.EventId.makeUnsafe(entry.event_id),
+            limit: YES_EMBED_LIMIT,
+            member_group_id: Option.none(),
+          }),
+        ),
+        Effect.flatMap((yesAttendees) => {
+          const { embeds, components } = buildUpcomingEventEmbed({ entry, yesAttendees, locale });
+          return rest
+            .executeWebhook(applicationId, interactionToken, {
+              payload: {
+                embeds,
+                components,
+                flags: DiscordTypes.MessageFlags.Ephemeral,
+              },
+            })
+            .pipe(Effect.map((response) => response.id));
+        }),
+      ),
     { concurrency: 1 },
   );
 

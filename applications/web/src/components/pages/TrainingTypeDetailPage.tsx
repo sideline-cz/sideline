@@ -207,7 +207,6 @@ export function TrainingTypeDetailPage({
               : Option.none(),
             location: values.location ? Option.some(values.location) : Option.none(),
             locationUrl: values.locationUrl ? Option.some(values.locationUrl) : Option.none(),
-            discordChannelId: Option.none(),
             ownerGroupId: Option.none(),
             memberGroupId: Option.none(),
           },
@@ -295,7 +294,6 @@ export function TrainingTypeDetailPage({
             endDate: Option.some(
               values.endDate ? Option.some(dateOnlyToUtc(values.endDate)) : Option.none(),
             ),
-            discordChannelId: Option.none(),
             ownerGroupId: Option.none(),
             memberGroupId: Option.none(),
           },

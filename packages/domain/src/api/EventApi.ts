@@ -3,7 +3,6 @@ import { Schema, SchemaGetter } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
 import { fieldState } from '~/api/RequestFilters.js';
-import { Snowflake } from '~/models/Discord.js';
 import { EventId, EventStatus, EventType } from '~/models/Event.js';
 import { EventSeriesId } from '~/models/EventSeries.js';
 import { GroupId } from '~/models/GroupModel.js';
@@ -142,7 +141,6 @@ export class EventDetail extends Schema.Class<EventDetail>('EventDetail')({
   canCancel: Schema.Boolean,
   seriesId: Schema.OptionFromNullOr(EventSeriesId),
   seriesModified: Schema.Boolean,
-  discordChannelId: Schema.OptionFromNullOr(Snowflake),
   ownerGroupId: Schema.OptionFromNullOr(GroupId),
   ownerGroupName: Schema.OptionFromNullOr(Schema.String),
   memberGroupId: Schema.OptionFromNullOr(GroupId),
@@ -166,7 +164,6 @@ const CreateEventRequestStruct = Schema.Struct({
   allDay: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
   location: Schema.OptionFromNullOr(Schema.String),
   locationUrl: Schema.OptionFromOptionalNullOr(EventLocationUrl),
-  discordChannelId: Schema.OptionFromNullOr(Snowflake),
   ownerGroupId: Schema.OptionFromNullOr(GroupId),
   memberGroupId: Schema.OptionFromNullOr(GroupId),
 });
@@ -192,7 +189,6 @@ const UpdateEventRequestStruct = Schema.Struct({
   allDay: Schema.OptionFromOptional(Schema.Boolean),
   location: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schema.String)),
   locationUrl: Schema.OptionFromOptional(Schema.OptionFromNullOr(EventLocationUrl)),
-  discordChannelId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),
   ownerGroupId: Schema.OptionFromOptional(Schema.OptionFromNullOr(GroupId)),
   memberGroupId: Schema.OptionFromOptional(Schema.OptionFromNullOr(GroupId)),
 });

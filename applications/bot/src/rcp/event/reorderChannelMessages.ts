@@ -23,7 +23,7 @@ export const MAX_CHANNEL_EVENTS = 10;
 const decodeSnowflake = Schema.decodeEffect(DiscordSchema.Snowflake);
 
 /** Compare two snowflakes numerically via BigInt. Returns -1, 0, or 1. */
-const compareSnowflakes = (a: Discord.Snowflake, b: Discord.Snowflake): number => {
+export const compareSnowflakes = (a: Discord.Snowflake, b: Discord.Snowflake): number => {
   const ai = BigInt(a);
   const bi = BigInt(b);
   return ai < bi ? -1 : ai > bi ? 1 : 0;
@@ -218,7 +218,9 @@ type ReorderItem =
  * 2. Its snowflake is strictly greater than the previous kept item's snowflake.
  * 3. Its snowflake is strictly less than the minimum snowflake in the remaining suffix.
  */
-const longestKeepablePrefix = (items: ReadonlyArray<ReorderItem>): number => {
+export const longestKeepablePrefix = (
+  items: ReadonlyArray<{ readonly snowflake: Option.Option<Discord.Snowflake> }>,
+): number => {
   const n = items.length;
   // Build minSuffix[i] = minimum snowflake in items[i..n-1] (only counting Some snowflakes)
   const minSuffix: Array<Option.Option<Discord.Snowflake>> = new Array(n + 1);

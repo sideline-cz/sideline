@@ -279,7 +279,7 @@ const createEvent = (
             ),
           ),
     ),
-    Effect.bind('resolvedChannel', ({ teamId, event }) => resolveChannel(teamId, event.id)),
+    Effect.bind('resolvedChannel', ({ teamId }) => resolveChannel(teamId)),
     Effect.tap(({ teamId, event, resolvedChannel }) =>
       syncEvents.emitEventCreated(
         teamId,
@@ -306,6 +306,15 @@ const createEvent = (
         location: event.location,
         locationUrl: event.location_url,
       }),
+    ),
+    Effect.tap(({ event }) =>
+      events
+        .markEventPersonalMessagesDirty(event.id)
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning('Failed to mark personal messages dirty after create', cause),
+          ),
+        ),
     ),
     Effect.map(
       ({ event }) =>
@@ -483,6 +492,16 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
               .pipe(
                 Effect.catchCause((cause) =>
                   Effect.logWarning('Failed to reset missed RSVPs, continuing', cause),
+                ),
+              ),
+          ),
+          // Mark personal messages dirty for all surfaces to reconcile after RSVP
+          Effect.tap(() =>
+            svc.events
+              .markEventPersonalMessagesDirty(event_id)
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning('Failed to mark personal messages dirty after RSVP', cause),
                 ),
               ),
           ),

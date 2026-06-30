@@ -3,17 +3,22 @@ import type { Auth, Discord, GroupModel, Team } from '@sideline/domain';
 import { GuildRpcGroup } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { RpcTest } from 'effect/unstable/rpc';
+import { SqlClient } from 'effect/unstable/sql';
 import { afterEach, beforeEach, describe, expect } from 'vitest';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
+import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
+import { PersonalEventChannelsRepository } from '~/repositories/PersonalEventChannelsRepository.js';
+import { PersonalEventOverflowCategoriesRepository } from '~/repositories/PersonalEventOverflowCategoriesRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { GuildsRpcLive } from '~/rpc/guild/index.js';
@@ -296,6 +301,56 @@ const MockDiscordChannelMappingRepository = Layer.succeed(DiscordChannelMappingR
   findAllByTeamId: () => Effect.succeed([]),
 } as any);
 
+const MockTeamSettingsRepository = Layer.succeed(TeamSettingsRepository, {
+  findByTeamId: () => Effect.succeed(Option.none()),
+} as any);
+
+const MockPersonalEventChannelsRepository = Layer.succeed(PersonalEventChannelsRepository, {
+  findByMemberAndEvent: () => Effect.succeed(Option.none()),
+  findByEvent: () => Effect.succeed([]),
+  reserve: () => Effect.succeed(Option.none()),
+  save: () => Effect.void,
+  delete: () => Effect.void,
+  findPersonalChannelTargetCategory: () => Effect.succeed(Option.none()),
+} as any);
+
+const MockPersonalEventOverflowCategoriesRepository = Layer.succeed(
+  PersonalEventOverflowCategoriesRepository,
+  {
+    findByGuild: () => Effect.succeed([]),
+    allocate: () => Effect.succeed(Option.none()),
+    save: () => Effect.void,
+  } as any,
+);
+
+const MockSqlClientLayer = Layer.succeed(
+  SqlClient.SqlClient,
+  Object.assign(
+    function mockSql(_strings: TemplateStringsArray, ..._args: unknown[]) {
+      return Effect.succeed([]);
+    },
+    {
+      safe: undefined as any,
+      withoutTransforms: function (this: any) {
+        return this;
+      },
+      reserve: Effect.die(new Error('reserve not implemented')),
+      withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | any, R> =>
+        effect,
+      reactive: () => Effect.succeed([] as never[]),
+      reactiveMailbox: () => Effect.die(new Error('reactiveMailbox not implemented')),
+      unsafe: (_sql: string, _params?: ReadonlyArray<unknown>) => Effect.succeed([] as never[]),
+      literal: (_sql: string) => ({ _tag: 'Fragment' as const, segments: [] }),
+      in: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      insert: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      update: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      updateValues: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      and: (..._args: unknown[]) => Effect.succeed([] as never[]),
+      or: (..._args: unknown[]) => Effect.succeed([] as never[]),
+    },
+  ) as unknown as SqlClient.SqlClient,
+);
+
 const TestLayer = GuildsRpcLive.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -309,6 +364,11 @@ const TestLayer = GuildsRpcLive.pipe(
       MockDiscordChannelsRepository,
       MockDiscordRoleMappingRepository,
       MockDiscordChannelMappingRepository,
+      MockTeamSettingsRepository,
+      MockPersonalEventChannelsRepository,
+      MockPersonalEventOverflowCategoriesRepository,
+      MockSqlClientLayer,
+      Layer.succeed(EventsRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       Layer.succeed(DiscordRolesRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       Layer.succeed(PendingGuildJoinsRepository, {
         _tag: 'api/PendingGuildJoinsRepository',

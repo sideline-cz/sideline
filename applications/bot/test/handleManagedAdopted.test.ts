@@ -12,7 +12,7 @@
  */
 
 import type { Discord, Team, TeamChannel } from '@sideline/domain';
-import { DiscordREST } from 'dfx/DiscordREST';
+import { DiscordREST } from 'dfx';
 import * as DiscordTypes from 'dfx/types';
 import { Effect, Layer } from 'effect';
 import { describe, expect, it } from 'vitest';
@@ -128,7 +128,7 @@ describe('handleManagedAdopted', () => {
     // Deny must include ViewChannel bit
     const denyValue = BigInt(overwrite.deny);
     expect((denyValue & VIEW_CHANNEL_BIT) === VIEW_CHANNEL_BIT).toBe(true);
-  });
+  }, 30000); // Allow time for dynamic import cold start
 
   it('does NOT call setChannelPermissionOverwrite (uses full-replace updateChannel instead)', async () => {
     const { handleManagedAdopted } = await import('~/rcp/channel/handleManagedAdopted.js');
@@ -152,7 +152,7 @@ describe('handleManagedAdopted', () => {
     expect(restCalls.deleteChannelPermissionOverwrite).toHaveLength(0);
     // Must NOT call deleteChannel
     expect(restCalls.deleteChannel).toHaveLength(0);
-  });
+  }, 30000); // Allow time for dynamic import cold start
 
   it('updateChannel fails (retryable 500) → retried at least once, does NOT call deleteChannel', async () => {
     const { handleManagedAdopted } = await import('~/rcp/channel/handleManagedAdopted.js');

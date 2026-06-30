@@ -31,7 +31,6 @@ class EventWithDetails extends Schema.Class<EventWithDetails>('EventWithDetails'
   created_by_name: Schema.OptionFromNullOr(Schema.String),
   series_id: Schema.OptionFromNullOr(EventSeries.EventSeriesId),
   series_modified: Schema.Boolean,
-  discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   owner_group_name: Schema.OptionFromNullOr(Schema.String),
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
@@ -42,6 +41,7 @@ class EventWithDetails extends Schema.Class<EventWithDetails>('EventWithDetails'
   claim_discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   claim_discord_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
   all_day: Schema.Boolean,
+  personal_messages_dirty_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
 }) {}
 
 class EventRow extends Schema.Class<EventRow>('EventRow')({
@@ -60,7 +60,6 @@ class EventRow extends Schema.Class<EventRow>('EventRow')({
   created_by: TeamMember.TeamMemberId,
   series_id: Schema.OptionFromNullOr(EventSeries.EventSeriesId),
   series_modified: Schema.Boolean,
-  discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   all_day: Schema.Boolean,
@@ -79,11 +78,11 @@ const EventInsertInput = Schema.Struct({
   location_url: Schema.OptionFromNullOr(Schema.String),
   created_by: Schema.String,
   series_id: Schema.OptionFromNullOr(Schema.String),
-  discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   owner_group_id: Schema.OptionFromNullOr(Schema.String),
   member_group_id: Schema.OptionFromNullOr(Schema.String),
   all_day: Schema.Boolean,
 });
+// Note: discord_target_channel_id was removed (migration 1790300009)
 
 const EventUpdateInput = Schema.Struct({
   id: Event.EventId,
@@ -96,7 +95,6 @@ const EventUpdateInput = Schema.Struct({
   end_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   location: Schema.OptionFromNullOr(Schema.String),
   location_url: Schema.OptionFromNullOr(Schema.String),
-  discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   owner_group_id: Schema.OptionFromNullOr(Schema.String),
   member_group_id: Schema.OptionFromNullOr(Schema.String),
   all_day: Schema.Boolean,
@@ -119,7 +117,6 @@ const make = Effect.gen(function* () {
                    tt.name AS training_type_name,
                    u.name AS created_by_name,
                    e.series_id, e.series_modified,
-                   e.discord_target_channel_id,
                    e.owner_group_id, og.name AS owner_group_name,
                    e.member_group_id, mg.name AS member_group_name,
                    e.reminder_sent_at,
@@ -127,7 +124,8 @@ const make = Effect.gen(function* () {
                    cu.name AS claimer_name,
                    e.claim_discord_channel_id,
                    e.claim_discord_message_id,
-                   e.all_day
+                   e.all_day,
+                   e.personal_messages_dirty_at
             FROM events e
             LEFT JOIN training_types tt ON tt.id = e.training_type_id
             LEFT JOIN team_members tm ON tm.id = e.created_by
@@ -151,7 +149,6 @@ const make = Effect.gen(function* () {
                    tt.name AS training_type_name,
                    u.name AS created_by_name,
                    e.series_id, e.series_modified,
-                   e.discord_target_channel_id,
                    e.owner_group_id, og.name AS owner_group_name,
                    e.member_group_id, mg.name AS member_group_name,
                    e.reminder_sent_at,
@@ -159,7 +156,8 @@ const make = Effect.gen(function* () {
                    cu.name AS claimer_name,
                    e.claim_discord_channel_id,
                    e.claim_discord_message_id,
-                   e.all_day
+                   e.all_day,
+                   e.personal_messages_dirty_at
             FROM events e
             LEFT JOIN training_types tt ON tt.id = e.training_type_id
             LEFT JOIN team_members tm ON tm.id = e.created_by
@@ -178,15 +176,15 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
             INSERT INTO events (team_id, training_type_id, event_type, title, description,
                                 image_url, start_at, end_at, location, location_url, created_by, series_id,
-                                discord_target_channel_id, owner_group_id, member_group_id, all_day)
+                                owner_group_id, member_group_id, all_day)
             VALUES (${input.team_id}, ${input.training_type_id}, ${input.event_type},
                     ${input.title}, ${input.description}, ${input.image_url}, ${input.start_at},
                     ${input.end_at}, ${input.location}, ${input.location_url}, ${input.created_by},
-                    ${input.series_id}, ${input.discord_target_channel_id},
+                    ${input.series_id},
                     ${input.owner_group_id}, ${input.member_group_id}, ${input.all_day})
             RETURNING id, team_id, training_type_id, event_type, title, description,
                       image_url, start_at, end_at, location, location_url, status,
-                      created_by, series_id, series_modified, discord_target_channel_id,
+                      created_by, series_id, series_modified,
                       owner_group_id, member_group_id, all_day
           `,
   });
@@ -205,7 +203,6 @@ const make = Effect.gen(function* () {
               end_at = ${input.end_at},
               location = ${input.location},
               location_url = ${input.location_url},
-              discord_target_channel_id = ${input.discord_target_channel_id},
               owner_group_id = ${input.owner_group_id},
               member_group_id = ${input.member_group_id},
               all_day = ${input.all_day},
@@ -213,7 +210,7 @@ const make = Effect.gen(function* () {
             WHERE id = ${input.id}
             RETURNING id, team_id, training_type_id, event_type, title, description,
                       image_url, start_at, end_at, location, location_url, status,
-                      created_by, series_id, series_modified, discord_target_channel_id,
+                      created_by, series_id, series_modified,
                       owner_group_id, member_group_id, all_day
           `,
   });
@@ -245,7 +242,6 @@ const make = Effect.gen(function* () {
       location_url: Schema.OptionFromNullOr(Schema.String),
       event_type: Schema.String,
       member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
-      discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
       owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
       reminders_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
       all_day: Schema.Boolean,
@@ -253,7 +249,7 @@ const make = Effect.gen(function* () {
     }),
     execute: () => sql`
       SELECT e.id, e.team_id, e.title, e.description, e.image_url, e.start_at, e.end_at, e.location, e.location_url, e.event_type,
-             e.member_group_id, e.discord_target_channel_id, e.owner_group_id,
+             e.member_group_id, e.owner_group_id,
              ts.reminders_channel_id, e.all_day, e.claimed_by
       FROM events e
       LEFT JOIN team_settings ts ON ts.team_id = e.team_id
@@ -670,7 +666,6 @@ const make = Effect.gen(function* () {
     locationUrl = Option.none(),
     createdBy,
     seriesId = Option.none(),
-    discordTargetChannelId = Option.none(),
     ownerGroupId = Option.none(),
     memberGroupId = Option.none(),
     allDay = false,
@@ -687,7 +682,6 @@ const make = Effect.gen(function* () {
     locationUrl?: Option.Option<string>;
     createdBy: TeamMember.TeamMemberId;
     seriesId?: Option.Option<string>;
-    discordTargetChannelId?: Option.Option<Discord.Snowflake>;
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
     allDay?: boolean;
@@ -705,7 +699,6 @@ const make = Effect.gen(function* () {
       location_url: locationUrl,
       created_by: createdBy,
       series_id: seriesId,
-      discord_target_channel_id: discordTargetChannelId,
       owner_group_id: ownerGroupId,
       member_group_id: memberGroupId,
       all_day: allDay,
@@ -722,7 +715,6 @@ const make = Effect.gen(function* () {
     endAt,
     location,
     locationUrl = Option.none(),
-    discordTargetChannelId = Option.none(),
     ownerGroupId = Option.none(),
     memberGroupId = Option.none(),
     allDay = false,
@@ -737,7 +729,6 @@ const make = Effect.gen(function* () {
     endAt: Option.Option<DateTime.Utc>;
     location: Option.Option<string>;
     locationUrl?: Option.Option<string>;
-    discordTargetChannelId?: Option.Option<Discord.Snowflake>;
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
     allDay?: boolean;
@@ -753,7 +744,6 @@ const make = Effect.gen(function* () {
       end_at: endAt,
       location,
       location_url: locationUrl,
-      discord_target_channel_id: discordTargetChannelId,
       owner_group_id: ownerGroupId,
       member_group_id: memberGroupId,
       all_day: allDay,
@@ -851,6 +841,43 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  const markPersonalMessagesDirty = SqlSchema.void({
+    Request: Event.EventId,
+    execute: (id) =>
+      sql`UPDATE events SET personal_messages_dirty_at = date_trunc('milliseconds', now()) WHERE id = ${id}`,
+  });
+
+  const clearPersonalMessagesDirty = SqlSchema.void({
+    Request: Schema.Struct({ id: Event.EventId, dirty_at: Schema.Date }),
+    execute: (input) =>
+      sql`UPDATE events SET personal_messages_dirty_at = NULL WHERE id = ${input.id} AND personal_messages_dirty_at = ${input.dirty_at}`,
+  });
+
+  // Mark every active, upcoming event for a team dirty so the personal-events
+  // reconcile loop (re)builds personal messages — e.g. to populate a member's
+  // freshly-provisioned channel with their existing events. Only touches events
+  // that are not already dirty, so in-flight reconciles are left undisturbed.
+  const markTeamUpcomingPersonalMessagesDirty = SqlSchema.void({
+    Request: Team.TeamId,
+    execute: (teamId) =>
+      sql`UPDATE events SET personal_messages_dirty_at = date_trunc('milliseconds', now())
+          WHERE team_id = ${teamId}
+            AND status = 'active'
+            AND start_at >= now()
+            AND personal_messages_dirty_at IS NULL`,
+  });
+
+  const markSeriesFuturePersonalMessagesDirtySchema = SqlSchema.void({
+    Request: Schema.Struct({
+      series_id: Schema.String,
+      from_date: Schema.Date,
+    }),
+    execute: (input) =>
+      sql`UPDATE events SET personal_messages_dirty_at = date_trunc('milliseconds', now())
+          WHERE series_id = ${input.series_id}
+            AND (start_at AT TIME ZONE 'UTC')::date >= ${input.from_date}::date`,
+  });
+
   const updateFutureUnmodifiedInSeries = (
     seriesId: EventSeries.EventSeriesId,
     fromDate: Date,
@@ -874,6 +901,27 @@ const make = Effect.gen(function* () {
       end_time: fields.endTime,
       location: fields.location,
       location_url: fields.locationUrl,
+    }).pipe(catchSqlErrors);
+
+  const markEventPersonalMessagesDirty = (eventId: Event.EventId) =>
+    markPersonalMessagesDirty(eventId).pipe(catchSqlErrors);
+
+  const markTeamUpcomingEventsPersonalMessagesDirty = (teamId: Team.TeamId) =>
+    markTeamUpcomingPersonalMessagesDirty(teamId).pipe(catchSqlErrors);
+
+  const markSeriesFuturePersonalMessagesDirty = (
+    seriesId: EventSeries.EventSeriesId,
+    fromDate: Date,
+  ) =>
+    markSeriesFuturePersonalMessagesDirtySchema({
+      series_id: seriesId,
+      from_date: fromDate,
+    }).pipe(catchSqlErrors);
+
+  const clearEventPersonalMessagesDirty = (eventId: Event.EventId, observedDirtyAt: DateTime.Utc) =>
+    clearPersonalMessagesDirty({
+      id: eventId,
+      dirty_at: new Date(observedDirtyAt.epochMilliseconds),
     }).pipe(catchSqlErrors);
 
   return {
@@ -907,6 +955,10 @@ const make = Effect.gen(function* () {
     saveClaimDiscordMessage,
     saveClaimThread,
     findClaimInfo,
+    markEventPersonalMessagesDirty,
+    markTeamUpcomingEventsPersonalMessagesDirty,
+    markSeriesFuturePersonalMessagesDirty,
+    clearEventPersonalMessagesDirty,
   };
 });
 

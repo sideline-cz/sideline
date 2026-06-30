@@ -3,7 +3,7 @@ import * as Ix from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
 import { createHandler } from './create.js';
 import { listHandler } from './list.js';
-import { overviewHandler } from './overview.js';
+import { refreshHandler } from './refresh.js';
 
 export const EventCommand = Ix.global(
   {
@@ -52,10 +52,13 @@ export const EventCommand = Ix.global(
       },
       {
         type: DiscordTypes.ApplicationCommandOptionType.SUB_COMMAND,
-        name: 'overview',
-        name_localizations: { cs: 'prehled' },
-        description: m.bot_event_overview_description({}, { locale: 'en' }),
-        description_localizations: { cs: m.bot_event_overview_description({}, { locale: 'cs' }) },
+        name: 'refresh',
+        name_localizations: { cs: 'obnovit' },
+        // Visible to everyone; access is gated at runtime (own personal channel = anyone,
+        // others' personal channels + the global channel = team:manage admins). Subcommands
+        // can't carry default_member_permissions, so the gate lives in refreshHandler.
+        description: m.bot_refresh_events_description({}, { locale: 'en' }),
+        description_localizations: { cs: m.bot_refresh_events_description({}, { locale: 'cs' }) },
       },
     ],
   } as const,
@@ -63,6 +66,6 @@ export const EventCommand = Ix.global(
     ix.subCommands({
       create: createHandler,
       list: listHandler,
-      overview: overviewHandler,
+      refresh: refreshHandler,
     }),
 );

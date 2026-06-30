@@ -12,6 +12,7 @@ import {
   GuildJoinSyncService,
   InviteGeneratorService,
   OnboardingSyncService,
+  PersonalEventsSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
   TeamChallengeSyncService,
@@ -33,6 +34,7 @@ const SyncLive = Layer.mergeAll(
   GuildJoinSyncService.Default,
   InviteGeneratorService.Default,
   OnboardingSyncService.Default,
+  PersonalEventsSyncService.Default,
   TeamChallengeSyncService.Default,
   WeeklySummarySyncService.Default,
 ).pipe(

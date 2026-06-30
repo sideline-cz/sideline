@@ -1,8 +1,9 @@
 import type { EventRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import * as Discord from 'dfx/types';
-import { DateTime, Option } from 'effect';
+import { Array, DateTime, Option, pipe } from 'effect';
 import type { Locale } from '~/locale.js';
+import { formatName } from '../utils.js';
 import { locationDisplay } from './locationDisplay.js';
 
 const EVENT_TYPE_COLORS: Record<string, number> = {
@@ -57,12 +58,13 @@ const buildYourRsvpValue = (
 
 export const buildUpcomingEventEmbed = (params: {
   entry: EventRpcModels.UpcomingEventForUserEntry;
+  yesAttendees: ReadonlyArray<EventRpcModels.RsvpAttendeeEntry>;
   locale: Locale;
 }): {
   embeds: ReadonlyArray<Discord.RichEmbed>;
   components: ReadonlyArray<Discord.ActionRowComponentForMessageRequest>;
 } => {
-  const { entry, locale } = params;
+  const { entry, yesAttendees, locale } = params;
 
   const descParts: string[] = [];
   if (Option.isSome(entry.description)) {
@@ -106,6 +108,19 @@ export const buildUpcomingEventEmbed = (params: {
       { locale },
     ),
   });
+
+  if (yesAttendees.length > 0) {
+    const names = pipe(yesAttendees, Array.map(formatName), Array.join(', '));
+    const extra =
+      entry.yes_count > yesAttendees.length
+        ? ` +${entry.yes_count - yesAttendees.length} more`
+        : '';
+    fields.push({
+      name: m.bot_embed_going({}, { locale }),
+      value: names + extra,
+      inline: false,
+    });
+  }
 
   fields.push({
     name: m.bot_embed_your_rsvp({}, { locale }),
@@ -163,6 +178,12 @@ export const buildUpcomingEventEmbed = (params: {
         style: maybeStyle,
         label: m.bot_btn_maybe({}, { locale }),
         custom_id: `upcoming-rsvp:${entry.event_id}:${entry.team_id}:maybe`,
+      },
+      {
+        type: 2,
+        style: Discord.ButtonStyleTypes.SECONDARY,
+        label: m.bot_btn_attendees({}, { locale }),
+        custom_id: `attendees:${entry.team_id}:${entry.event_id}:0`,
       },
     ],
   };

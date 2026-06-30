@@ -2,6 +2,7 @@ import { Schema } from 'effect';
 import { Model } from 'effect/unstable/schema';
 import { ChannelCleanupMode } from '~/models/ChannelSyncEvent.js';
 import { Snowflake } from '~/models/Discord.js';
+import { GroupId } from '~/models/GroupModel.js';
 import { TeamId } from '~/models/Team.js';
 
 export class TeamSettings extends Model.Class<TeamSettings>('TeamSettings')({
@@ -18,6 +19,10 @@ export class TeamSettings extends Model.Class<TeamSettings>('TeamSettings')({
   create_discord_channel_on_roster: Schema.Boolean,
   discord_archive_category_id: Schema.OptionFromNullOr(Snowflake),
   discord_roster_category_id: Schema.OptionFromNullOr(Snowflake),
+  discord_personal_events_category_id: Schema.OptionFromNullOr(Snowflake),
+  discord_personal_events_group_id: Schema.OptionFromNullOr(GroupId),
+  discord_personal_events_channel_format: Schema.String,
+  discord_events_channel_id: Schema.OptionFromNullOr(Snowflake),
   discord_channel_cleanup_on_group_delete: ChannelCleanupMode,
   discord_channel_cleanup_on_roster_deactivate: ChannelCleanupMode,
   discord_role_format: Schema.String,

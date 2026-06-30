@@ -1,4 +1,4 @@
-import { Discord, EventSeries, GroupModel, Team, TeamMember, TrainingType } from '@sideline/domain';
+import { EventSeries, GroupModel, Team, TeamMember, TrainingType } from '@sideline/domain';
 import { Schemas } from '@sideline/effect-lib';
 import { type DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -19,7 +19,6 @@ class EventSeriesRow extends Schema.Class<EventSeriesRow>('EventSeriesRow')({
   start_date: Schemas.DateTimeFromDate,
   end_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   status: EventSeries.EventSeriesStatus,
-  discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
 }) {}
@@ -42,7 +41,6 @@ class EventSeriesWithDetails extends Schema.Class<EventSeriesWithDetails>('Event
     status: EventSeries.EventSeriesStatus,
     training_type_name: Schema.OptionFromNullOr(Schema.String),
     last_generated_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
-    discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
     owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
     owner_group_name: Schema.OptionFromNullOr(Schema.String),
     member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
@@ -67,7 +65,6 @@ class EventSeriesForGeneration extends Schema.Class<EventSeriesForGeneration>(
   start_date: Schemas.DateTimeFromDate,
   end_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   last_generated_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
-  discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   created_by: TeamMember.TeamMemberId,
@@ -88,7 +85,6 @@ const EventSeriesInsertInput = Schema.Struct({
   start_date: Schemas.DateTimeFromDate,
   end_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   created_by: Schema.String,
-  discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   owner_group_id: Schema.OptionFromNullOr(Schema.String),
   member_group_id: Schema.OptionFromNullOr(Schema.String),
 });
@@ -104,7 +100,6 @@ const EventSeriesUpdateInput = Schema.Struct({
   location: Schema.OptionFromNullOr(Schema.String),
   location_url: Schema.OptionFromNullOr(Schema.String),
   end_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
-  discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   owner_group_id: Schema.OptionFromNullOr(Schema.String),
   member_group_id: Schema.OptionFromNullOr(Schema.String),
 });
@@ -119,16 +114,16 @@ const make = Effect.gen(function* () {
             INSERT INTO event_series (team_id, training_type_id, title, description,
                                       start_time, end_time, location, location_url, frequency,
                                       days_of_week, start_date, end_date, created_by,
-                                      discord_target_channel_id, owner_group_id, member_group_id)
+                                      owner_group_id, member_group_id)
             VALUES (${input.team_id}, ${input.training_type_id}, ${input.title},
                     ${input.description}, ${input.start_time}, ${input.end_time},
                     ${input.location}, ${input.location_url}, ${input.frequency}, ${input.days_of_week},
                     ${input.start_date}, ${input.end_date}, ${input.created_by},
-                    ${input.discord_target_channel_id}, ${input.owner_group_id}, ${input.member_group_id})
+                    ${input.owner_group_id}, ${input.member_group_id})
             RETURNING id, team_id, training_type_id, title, description,
                       start_time, end_time, location, location_url, frequency,
                       days_of_week, start_date, end_date, status,
-                      discord_target_channel_id, owner_group_id, member_group_id
+                      owner_group_id, member_group_id
           `,
   });
 
@@ -140,7 +135,6 @@ const make = Effect.gen(function* () {
                    es.start_time, es.end_time, es.location, es.location_url, es.frequency,
                    es.days_of_week, es.start_date, es.end_date, es.status,
                    tt.name AS training_type_name, es.last_generated_date,
-                   es.discord_target_channel_id,
                    es.owner_group_id, og.name AS owner_group_name,
                    es.member_group_id, mg.name AS member_group_name
             FROM event_series es
@@ -160,7 +154,6 @@ const make = Effect.gen(function* () {
                    es.start_time, es.end_time, es.location, es.location_url, es.frequency,
                    es.days_of_week, es.start_date, es.end_date, es.status,
                    tt.name AS training_type_name, es.last_generated_date,
-                   es.discord_target_channel_id,
                    es.owner_group_id, og.name AS owner_group_name,
                    es.member_group_id, mg.name AS member_group_name
             FROM event_series es
@@ -178,7 +171,7 @@ const make = Effect.gen(function* () {
             SELECT es.id, es.team_id, es.training_type_id, es.title, es.description,
                    es.start_time, es.end_time, es.location, es.location_url, es.frequency,
                    es.days_of_week, es.start_date, es.end_date,
-                   es.last_generated_date, es.discord_target_channel_id,
+                   es.last_generated_date,
                    es.owner_group_id, es.member_group_id,
                    es.created_by,
                    COALESCE(ts.event_horizon_days, 30) AS event_horizon_days
@@ -212,7 +205,6 @@ const make = Effect.gen(function* () {
               location = ${input.location},
               location_url = ${input.location_url},
               end_date = ${input.end_date},
-              discord_target_channel_id = ${input.discord_target_channel_id},
               owner_group_id = ${input.owner_group_id},
               member_group_id = ${input.member_group_id},
               updated_at = now()
@@ -220,7 +212,7 @@ const make = Effect.gen(function* () {
             RETURNING id, team_id, training_type_id, title, description,
                       start_time, end_time, location, location_url, frequency,
                       days_of_week, start_date, end_date, status,
-                      discord_target_channel_id, owner_group_id, member_group_id
+                      owner_group_id, member_group_id
           `,
   });
 
@@ -244,7 +236,6 @@ const make = Effect.gen(function* () {
     startDate,
     endDate,
     createdBy,
-    discordTargetChannelId = Option.none(),
     ownerGroupId = Option.none(),
     memberGroupId = Option.none(),
   }: {
@@ -261,7 +252,6 @@ const make = Effect.gen(function* () {
     startDate: DateTime.Utc;
     endDate: Option.Option<DateTime.Utc>;
     createdBy: string;
-    discordTargetChannelId?: Option.Option<Discord.Snowflake>;
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
   }) =>
@@ -279,7 +269,6 @@ const make = Effect.gen(function* () {
       start_date: startDate,
       end_date: endDate,
       created_by: createdBy,
-      discord_target_channel_id: discordTargetChannelId,
       owner_group_id: ownerGroupId,
       member_group_id: memberGroupId,
     }).pipe(catchSqlErrors);
@@ -300,7 +289,6 @@ const make = Effect.gen(function* () {
     location,
     locationUrl = Option.none(),
     endDate,
-    discordTargetChannelId = Option.none(),
     ownerGroupId = Option.none(),
     memberGroupId = Option.none(),
   }: {
@@ -314,7 +302,6 @@ const make = Effect.gen(function* () {
     location: Option.Option<string>;
     locationUrl?: Option.Option<string>;
     endDate: Option.Option<DateTime.Utc>;
-    discordTargetChannelId?: Option.Option<Discord.Snowflake>;
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
   }) =>
@@ -329,7 +316,6 @@ const make = Effect.gen(function* () {
       location,
       location_url: locationUrl,
       end_date: endDate,
-      discord_target_channel_id: discordTargetChannelId,
       owner_group_id: ownerGroupId,
       member_group_id: memberGroupId,
     }).pipe(catchSqlErrors);

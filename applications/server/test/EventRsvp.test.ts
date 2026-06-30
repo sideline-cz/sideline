@@ -469,6 +469,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   cancelFutureInSeries: () => Effect.void,
   updateFutureUnmodified: () => Effect.void,
   updateFutureUnmodifiedInSeries: () => Effect.void,
+  markEventPersonalMessagesDirty: () => Effect.void,
 } as any);
 
 const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
@@ -1414,6 +1415,7 @@ const MockRpcEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   getDiscordMessageId: () => Effect.succeed(Option.none()),
   findNonResponders: () => Effect.succeed([]),
   findByGuildId: () => Effect.succeed(Option.none()),
+  markEventPersonalMessagesDirty: () => Effect.void,
 } as any);
 
 const MockRpcEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {

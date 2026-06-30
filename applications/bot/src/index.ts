@@ -13,6 +13,7 @@ export {
   GuildJoinSyncService,
   InviteGeneratorService,
   OnboardingSyncService,
+  PersonalEventsSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
   TeamChallengeSyncService,

@@ -174,6 +174,7 @@ const MockRpcEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   getDiscordMessageId: () => Effect.succeed(Option.none()),
   findNonResponders: () => Effect.succeed([]),
   findByGuildId: () => Effect.succeed(Option.none()),
+  markEventPersonalMessagesDirty: () => Effect.void,
 } as any);
 
 const MockRpcEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {

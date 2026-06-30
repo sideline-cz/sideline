@@ -372,6 +372,10 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
             create_discord_channel_on_roster: true,
             discord_archive_category_id: Option.none(),
             discord_roster_category_id: Option.none(),
+            discord_personal_events_category_id: Option.none(),
+            discord_personal_events_group_id: Option.none(),
+            discord_personal_events_channel_format: 'events-{discord_id}',
+            discord_events_channel_id: Option.none(),
             discord_channel_cleanup_on_group_delete: 'delete',
             discord_channel_cleanup_on_roster_deactivate: 'delete',
             discord_role_format: '{role}',
@@ -417,6 +421,11 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       create_discord_channel_on_roster: input.createDiscordChannelOnRoster ?? true,
       discord_archive_category_id: input.discordArchiveCategoryId ?? Option.none(),
       discord_roster_category_id: input.discordRosterCategoryId ?? Option.none(),
+      discord_personal_events_category_id: input.discordPersonalEventsCategoryId ?? Option.none(),
+      discord_personal_events_group_id: input.discordPersonalEventsGroupId ?? Option.none(),
+      discord_personal_events_channel_format:
+        input.discordPersonalEventsChannelFormat ?? 'events-{discord_id}',
+      discord_events_channel_id: input.discordEventsChannelId ?? Option.none(),
       discord_channel_cleanup_on_group_delete: input.discordChannelCleanupOnGroupDelete ?? 'delete',
       discord_channel_cleanup_on_roster_deactivate:
         input.discordChannelCleanupOnRosterDeactivate ?? 'delete',

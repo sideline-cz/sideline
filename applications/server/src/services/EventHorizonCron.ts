@@ -55,13 +55,12 @@ export const eventHorizonCronEffect = Effect.Do.pipe(
                 locationUrl: s.location_url,
                 createdBy: s.created_by,
                 seriesId: Option.some(s.id),
-                discordTargetChannelId: s.discord_target_channel_id,
                 ownerGroupId: s.owner_group_id,
                 memberGroupId: s.member_group_id,
               })
               .pipe(
                 Effect.tap((event) =>
-                  resolveChannel(s.team_id, event.id).pipe(
+                  resolveChannel(s.team_id).pipe(
                     Effect.flatMap((resolved) =>
                       syncEvents.emitEventCreated(
                         s.team_id,

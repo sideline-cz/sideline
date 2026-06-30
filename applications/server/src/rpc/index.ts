@@ -9,6 +9,7 @@ import { EventsRpcLive } from './event/index.js';
 import { FinanceRpcLive } from './finance/index.js';
 import { GuildsRpcLive } from './guild/index.js';
 import { InvitesRpcLive } from './invite/index.js';
+import { PersonalEventsRpcLive } from './personalEvents/index.js';
 import { PollsRpcLive } from './poll/index.js';
 import { RolesRpcLive } from './role/index.js';
 import { RoleProvisionRpcLive } from './roleProvision/index.js';
@@ -33,4 +34,5 @@ export const SyncRpcsLive = Layer.mergeAll(
   EmailRpcLive,
   SummarizeRpcLive,
   PollsRpcLive,
+  PersonalEventsRpcLive,
 );

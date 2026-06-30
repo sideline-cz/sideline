@@ -30,8 +30,20 @@ const makeEntry = (
     ...overrides,
   });
 
+const makeAttendee = (name: string): EventRpcModels.RsvpAttendeeEntry =>
+  new EventRpcModels.RsvpAttendeeEntry({
+    discord_id: Option.none(),
+    name: Option.some(name),
+    nickname: Option.none(),
+    username: Option.none(),
+    display_name: Option.none(),
+    response: 'yes',
+    message: Option.none(),
+  });
+
 const baseParams = {
   locale: 'en' as const,
+  yesAttendees: [] as ReadonlyArray<EventRpcModels.RsvpAttendeeEntry>,
 };
 
 describe('buildUpcomingEventEmbed', () => {
@@ -126,6 +138,35 @@ describe('buildUpcomingEventEmbed', () => {
       // The "your rsvp" field should exist
       expect(fields.length).toBeGreaterThanOrEqual(3);
     });
+
+    it('lists yes-attendee names in a going field when present', () => {
+      const entry = makeEntry({ yes_count: 2 });
+      const { embeds } = buildUpcomingEventEmbed({
+        ...baseParams,
+        entry,
+        yesAttendees: [makeAttendee('Alice'), makeAttendee('Bob')],
+      });
+      const allText = (embeds[0].fields ?? []).map((f) => f.value).join(' ');
+      expect(allText).toContain('Alice');
+      expect(allText).toContain('Bob');
+    });
+
+    it('shows "+N more" when yes_count exceeds listed attendees', () => {
+      const entry = makeEntry({ yes_count: 5 });
+      const { embeds } = buildUpcomingEventEmbed({
+        ...baseParams,
+        entry,
+        yesAttendees: [makeAttendee('Alice'), makeAttendee('Bob')],
+      });
+      const allText = (embeds[0].fields ?? []).map((f) => f.value).join(' ');
+      expect(allText).toContain('+3 more');
+    });
+
+    it('omits the going field when there are no yes attendees', () => {
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry: makeEntry() });
+      const goingField = (embeds[0].fields ?? []).find((f) => f.name.includes('Going'));
+      expect(goingField).toBeUndefined();
+    });
   });
 
   describe('when field with end_at', () => {
@@ -151,9 +192,18 @@ describe('buildUpcomingEventEmbed', () => {
       expect(components).toHaveLength(1);
     });
 
-    it('rsvp row has three buttons', () => {
+    it('rsvp row has four buttons (yes/no/maybe + attendees)', () => {
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry: makeEntry() });
-      expect(components[0].components).toHaveLength(3);
+      expect(components[0].components).toHaveLength(4);
+    });
+
+    it('includes an attendees button targeting this event', () => {
+      const entry = makeEntry({ event_id: 'ev-42', team_id: 'tm-7' });
+      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const attendeesBtn = (components[0].components as ReadonlyArray<{ custom_id: string }>).find(
+        (b) => b.custom_id.startsWith('attendees:'),
+      );
+      expect(attendeesBtn?.custom_id).toBe('attendees:tm-7:ev-42:0');
     });
 
     it('rsvp buttons are always enabled', () => {

@@ -258,9 +258,10 @@ test.describe('Onboarding Settings Card', () => {
     // Toast notification — use project's toast locator (Sonner or shadcn toast)
     await expect(
       page
-        .getByRole('alert')
-        .or(page.locator('[data-sonner-toast]'))
-        .or(page.locator('[role="status"]').filter({ hasText: /saved|syncing/i })),
+        .locator('[data-sonner-toast]')
+        .or(page.getByRole('alert').filter({ hasText: /saved|syncing/i }))
+        .or(page.locator('[role="status"]').filter({ hasText: /saved|syncing/i }))
+        .first(),
     ).toBeVisible({ timeout: 10000 });
   });
 

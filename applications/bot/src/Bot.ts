@@ -18,6 +18,7 @@ import {
   GuildJoinSyncService,
   InviteGeneratorService,
   OnboardingSyncService,
+  PersonalEventsSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
   TeamChallengeSyncService,
@@ -130,6 +131,7 @@ export const program = Effect.Do.pipe(
   Effect.bind('finance', () => FinanceSyncService.asEffect()),
   Effect.bind('emailSync', () => EmailSyncService.asEffect()),
   Effect.bind('channelBackfill', () => ChannelBackfillService.asEffect()),
+  Effect.bind('personalEvents', () => PersonalEventsSyncService.asEffect()),
   Effect.tap(() => Effect.logInfo('Bot connected to Discord')),
   Effect.andThen(
     ({
@@ -147,6 +149,7 @@ export const program = Effect.Do.pipe(
       finance,
       emailSync,
       channelBackfill,
+      personalEvents,
     }) =>
       Effect.all(
         [
@@ -165,6 +168,7 @@ export const program = Effect.Do.pipe(
           pollLoop(finance.processTick),
           pollLoop(emailSync.processTick),
           slowPollLoop(channelBackfill.processTick),
+          pollLoop(personalEvents.processTick),
           recoverDeletedMessages,
         ],
         {
@@ -192,4 +196,5 @@ export const program = Effect.Do.pipe(
   | RoleProvisionSyncService
   | TeamChallengeSyncService
   | WeeklySummarySyncService
+  | PersonalEventsSyncService
 >;

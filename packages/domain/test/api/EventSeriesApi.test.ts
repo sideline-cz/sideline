@@ -39,7 +39,6 @@ const baseCreateSeriesPayload: Schema.Schema.Type<typeof EventSeriesApi.CreateEv
     endTime: Option.none(),
     location: Option.none(),
     locationUrl: Option.none(),
-    discordChannelId: Option.none(),
     ownerGroupId: Option.none(),
     memberGroupId: Option.none(),
   };
@@ -124,7 +123,6 @@ const emptySeriesPatch: Schema.Schema.Type<typeof EventSeriesApi.UpdateEventSeri
   location: Option.none(),
   locationUrl: Option.none(),
   endDate: Option.none(),
-  discordChannelId: Option.none(),
   ownerGroupId: Option.none(),
   memberGroupId: Option.none(),
 };
@@ -151,7 +149,6 @@ describe('UpdateEventSeriesRequest — encoding direction (regression for runtim
       location: Option.some(Option.none()),
       locationUrl: Option.some(Option.none()),
       endDate: Option.some(Option.none()),
-      discordChannelId: Option.some(Option.none()),
       ownerGroupId: Option.some(Option.none()),
       memberGroupId: Option.some(Option.none()),
     };

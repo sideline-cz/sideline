@@ -4,7 +4,6 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/ht
 import { AuthMiddleware } from '~/api/Auth.js';
 import { EventLocationUrl, Forbidden } from '~/api/EventApi.js';
 import { fieldState } from '~/api/RequestFilters.js';
-import { Snowflake } from '~/models/Discord.js';
 import {
   DaysOfWeek,
   EventSeriesId,
@@ -30,7 +29,6 @@ export class EventSeriesInfo extends Schema.Class<EventSeriesInfo>('EventSeriesI
   endTime: Schema.OptionFromNullOr(Schema.String),
   location: Schema.OptionFromNullOr(Schema.String),
   locationUrl: Schema.OptionFromNullOr(Schema.String),
-  discordChannelId: Schema.OptionFromNullOr(Snowflake),
   ownerGroupId: Schema.OptionFromNullOr(GroupId),
   ownerGroupName: Schema.OptionFromNullOr(Schema.String),
   memberGroupId: Schema.OptionFromNullOr(GroupId),
@@ -53,7 +51,6 @@ export class EventSeriesDetail extends Schema.Class<EventSeriesDetail>('EventSer
   endTime: Schema.OptionFromNullOr(Schema.String),
   location: Schema.OptionFromNullOr(Schema.String),
   locationUrl: Schema.OptionFromNullOr(Schema.String),
-  discordChannelId: Schema.OptionFromNullOr(Snowflake),
   ownerGroupId: Schema.OptionFromNullOr(GroupId),
   ownerGroupName: Schema.OptionFromNullOr(Schema.String),
   memberGroupId: Schema.OptionFromNullOr(GroupId),
@@ -74,7 +71,6 @@ const CreateEventSeriesRequestStruct = Schema.Struct({
   endTime: Schema.OptionFromNullOr(Schema.String),
   location: Schema.OptionFromNullOr(Schema.String),
   locationUrl: Schema.OptionFromOptionalNullOr(EventLocationUrl),
-  discordChannelId: Schema.OptionFromNullOr(Snowflake),
   ownerGroupId: Schema.OptionFromNullOr(GroupId),
   memberGroupId: Schema.OptionFromNullOr(GroupId),
 });
@@ -99,7 +95,6 @@ const UpdateEventSeriesRequestStruct = Schema.Struct({
   location: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schema.String)),
   locationUrl: Schema.OptionFromOptional(Schema.OptionFromNullOr(EventLocationUrl)),
   endDate: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString)),
-  discordChannelId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),
   ownerGroupId: Schema.OptionFromOptional(Schema.OptionFromNullOr(GroupId)),
   memberGroupId: Schema.OptionFromOptional(Schema.OptionFromNullOr(GroupId)),
 });

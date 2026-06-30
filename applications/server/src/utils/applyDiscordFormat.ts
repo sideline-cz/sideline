@@ -2,6 +2,7 @@ import { Option } from 'effect';
 
 export const DEFAULT_ROLE_FORMAT = '{emoji} {name}';
 export const DEFAULT_CHANNEL_FORMAT = '{emoji}\u2502{name}';
+export const DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT = 'events-{discord_id}';
 
 /** Apply a Discord name format template. When emoji is None, {emoji} is removed and separators are cleaned up. */
 export const applyDiscordFormat = (

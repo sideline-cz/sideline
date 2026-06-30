@@ -6,6 +6,7 @@ import { FinanceSyncService } from './finance/index.js';
 import { GuildJoinSyncService } from './guildJoin/index.js';
 import { InviteGeneratorService } from './inviteGenerator/index.js';
 import { OnboardingSyncService } from './onboarding/index.js';
+import { PersonalEventsSyncService } from './personalEvents/index.js';
 import { RoleSyncService } from './role/index.js';
 import { RoleProvisionSyncService } from './roleProvision/index.js';
 import { TeamChallengeSyncService } from './teamChallenge/index.js';
@@ -21,6 +22,7 @@ export {
   GuildJoinSyncService,
   InviteGeneratorService,
   OnboardingSyncService,
+  PersonalEventsSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
   TeamChallengeSyncService,

@@ -22,7 +22,6 @@ export class Team extends Model.Class<Team>('Team')({
   system_log_channel_id: Schema.OptionFromNullOr(Snowflake),
   welcome_message_template: Schema.OptionFromNullOr(Schema.String),
   rules_channel_id: Schema.OptionFromNullOr(Snowflake),
-  overview_channel_id: Schema.OptionFromNullOr(Snowflake),
   achievement_channel_id: Schema.OptionFromNullOr(Snowflake),
   onboarding_rules_role_id: Schema.OptionFromNullOr(Snowflake),
   onboarding_rules_prompt_id: Schema.OptionFromNullOr(Snowflake),

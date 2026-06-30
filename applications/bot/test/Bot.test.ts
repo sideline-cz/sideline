@@ -13,6 +13,7 @@ import {
   GuildJoinSyncService,
   InviteGeneratorService,
   OnboardingSyncService,
+  PersonalEventsSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
   TeamChallengeSyncService,
@@ -114,6 +115,10 @@ const MockChannelBackfillServiceLayer = Layer.succeed(ChannelBackfillService, {
   processTick: Effect.void,
 } as never);
 
+const MockPersonalEventsSyncServiceLayer = Layer.succeed(PersonalEventsSyncService, {
+  processTick: Effect.void,
+} as never);
+
 const MockOnboardingRoleCacheLayer = Layer.succeed(OnboardingRoleCache, {
   get: () => Effect.succeed(Option.none()),
   set: () => Effect.void,
@@ -156,6 +161,7 @@ describe('Bot', () => {
       MockFinanceSyncServiceLayer,
       MockEmailSyncServiceLayer,
       MockChannelBackfillServiceLayer,
+      MockPersonalEventsSyncServiceLayer,
       MockOnboardingRoleCacheLayer,
       MockSyncRpcLayer,
       MockInviteCacheLayer,
