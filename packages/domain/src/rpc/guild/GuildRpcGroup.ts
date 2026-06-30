@@ -288,8 +288,9 @@ export const GuildRpcGroup = RpcGroup.make(
   Rpc.make('MarkTeamPersonalEventsDirty', {
     payload: { team_id: TeamId },
   }),
-  // Classifies a channel for the /refresh-events command: the team's global events
-  // channel, the calling member's own personal events channel, or neither.
+  // Classifies a channel for the `/event refresh` command: the team's global events
+  // channel, the calling member's own personal events channel, or neither — and
+  // whether the caller is a team admin (holds the `team:manage` permission).
   Rpc.make('IdentifyEventsChannel', {
     payload: {
       guild_id: Discord.Snowflake,
@@ -300,6 +301,7 @@ export const GuildRpcGroup = RpcGroup.make(
       kind: Schema.Literals(['global', 'personal', 'none']),
       team_id: Schema.OptionFromNullOr(TeamId),
       team_member_id: Schema.OptionFromNullOr(Schema.String),
+      is_admin: Schema.Boolean,
     }),
   }),
   Rpc.make('GetPersonalChannel', {

@@ -1,7 +1,9 @@
+import * as m from '@sideline/i18n/messages';
 import * as Ix from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
 import { createHandler } from './create.js';
 import { listHandler } from './list.js';
+import { refreshHandler } from './refresh.js';
 
 export const EventCommand = Ix.global(
   {
@@ -48,11 +50,21 @@ export const EventCommand = Ix.global(
         description: 'List upcoming events',
         description_localizations: { cs: 'Zobrazit nadcházející události' },
       },
+      {
+        type: DiscordTypes.ApplicationCommandOptionType.SUB_COMMAND,
+        name: 'refresh',
+        name_localizations: { cs: 'obnovit' },
+        // Admins only — enforced at runtime via Sideline's team:manage permission
+        // (subcommands can't carry default_member_permissions).
+        description: m.bot_refresh_events_description({}, { locale: 'en' }),
+        description_localizations: { cs: m.bot_refresh_events_description({}, { locale: 'cs' }) },
+      },
     ],
   } as const,
   (ix) =>
     ix.subCommands({
       create: createHandler,
       list: listHandler,
+      refresh: refreshHandler,
     }),
 );

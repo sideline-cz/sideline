@@ -20,5 +20,5 @@ Rework the Discord events overview into private per-member event channels plus a
 - New optional team setting for the generated personal channel name format (`{name}` / `{discord_id}` placeholders; defaults to `events-{discord_id}`). A static name (no placeholder) is allowed.
 - A freshly-provisioned personal channel is immediately populated with the member's existing upcoming events.
 - Changing the channel-name format renames all existing personal channels to match.
-- New admin (ManageEvents) `/refresh-events` slash command: run it inside the global events channel or your own personal events channel to re-render and reorder its messages.
+- New admin `/event refresh` subcommand (gated on Sideline's `team:manage` permission): run it inside the global events channel or your own personal events channel to re-render and reorder its messages.
 - Removes the old `/event overview` command, the overview-channel team setting, and the SetOverviewChannel RPC. The coaching-status announcement is retained.

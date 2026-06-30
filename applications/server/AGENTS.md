@@ -529,18 +529,19 @@ When a member's channel is freshly provisioned, the bot calls `Guild/MarkTeamPer
 
 > **`GuildsRpcLive` now depends on `EventsRepository`** (for `Guild/MarkTeamPersonalEventsDirty`). Any test layer building `GuildsRpcLive` MUST provide `EventsRepository` (`EventsRepository.Default`, or a `Layer.succeed(EventsRepository, …)` proxy mock) — see `test/rpc/OnboardingSync.test.ts` and `test/rpc/RegisterMember.test.ts`.
 
-###### Channel classification for `/refresh-events` (`Guild/IdentifyEventsChannel`)
+###### Channel classification for `/event refresh` (`Guild/IdentifyEventsChannel`)
 
-The bot's `/refresh-events` admin command (`applications/bot/AGENTS.md` → "Slash Commands") classifies the channel it was run in via `Guild/IdentifyEventsChannel({ guild_id, channel_id, discord_user_id })` (handler in `src/rpc/guild/index.ts`). It returns `{ kind: 'global' | 'personal' | 'none', team_id: Option<TeamId>, team_member_id: Option<String> }`:
+The bot's `/event refresh` admin subcommand (`applications/bot/AGENTS.md` → "Slash Commands") classifies the channel it was run in via `Guild/IdentifyEventsChannel({ guild_id, channel_id, discord_user_id })` (handler in `src/rpc/guild/index.ts`). It returns `{ kind: 'global' | 'personal' | 'none', team_id: Option<TeamId>, team_member_id: Option<String>, is_admin: boolean }`:
 
 - **`global`** — the channel equals the team's `team_settings.discord_events_channel_id`. The bot re-renders + reorders the shared channel.
 - **`personal`** — the channel is the CALLER'S OWN personal channel (matched by `findOwnedPersonalChannel`). `team_member_id` is `Some`. The bot marks the team's events dirty + reorders that channel.
 - **`none`** — no linked team, or the channel is neither surface (or is another member's personal channel). The bot replies "nothing to refresh".
+- **`is_admin`** — whether the caller holds Sideline's `team:manage` permission on the linked team. Computed by resolving the caller's membership via `members.findMembershipByDiscordAndTeam(discord_user_id, team.id)` then `membership.permissions.includes('team:manage')`; `false` when the guild is unlinked or the caller has no membership. `/event refresh` is a subcommand and so CANNOT use Discord `default_member_permissions` — the bot gates admin-only refresh entirely on this runtime flag, replying "forbidden" when `is_admin` is `false` (see `applications/bot/AGENTS.md` → "Slash Commands" rule 2).
 
 Rules:
 
 1. **`findOwnedPersonalChannel(teamId, channelId, discordUserId)`** (`PersonalEventChannelsRepository`) returns `Option<TeamMemberId>` by joining `personal_event_channels → team_members → users` on `discord_channel_id = channel_id AND users.discord_id = discord_user_id`. This is what scopes the `personal` branch to the caller's OWN channel — an admin running it in another member's personal channel gets `none`, never a refresh of someone else's channel.
-2. **The handler adds NO new dependency** — it composes the existing `teams` / `teamSettings` / `personalChannels` deps already on `GuildsRpcLive`. Do not inject a new repo for this read.
+2. **The handler adds NO new repository dependency for classification** — it composes the existing `teams` / `teamSettings` / `personalChannels` deps already on `GuildsRpcLive`. The `is_admin` computation reuses the existing `members` dependency (`findMembershipByDiscordAndTeam`); do not inject a new repo for this read.
 
 > **NOTE — do not confuse two `discord_target_channel_id` meanings.** `event_sync_events.discord_target_channel_id` is RETAINED and still overloaded (it carries the resolved target for roster/claim/teams payloads). The now-DROPPED columns are `events.discord_target_channel_id` and `event_series.discord_target_channel_id` (migration `1790300009`). When you read or write `discord_target_channel_id`, confirm it is the outbox column — there is no longer a per-event/per-series channel column to fall back to.
 

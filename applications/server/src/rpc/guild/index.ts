@@ -31,6 +31,7 @@ type IdentifyEventsChannelResult = {
   readonly kind: 'global' | 'personal' | 'none';
   readonly team_id: Option.Option<Team.TeamId>;
   readonly team_member_id: Option.Option<string>;
+  readonly is_admin: boolean;
 };
 /** Widens the `kind` literal so all branches share one return type. */
 const identifyResult = (r: IdentifyEventsChannelResult): IdentifyEventsChannelResult => r;
@@ -705,45 +706,61 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     kind: 'none',
                     team_id: Option.none(),
                     team_member_id: Option.none(),
+                    is_admin: false,
                   }),
                 ),
               onSome: (team) =>
-                deps.teamSettings.findByTeamId(team.id).pipe(
-                  Effect.flatMap((settingsOpt) => {
-                    const globalChannel = Option.flatMap(
-                      settingsOpt,
-                      (s) => s.discord_events_channel_id,
-                    );
-                    if (Option.isSome(globalChannel) && globalChannel.value === channel_id) {
-                      return Effect.succeed(
-                        identifyResult({
-                          kind: 'global',
-                          team_id: Option.some(team.id),
-                          team_member_id: Option.none(),
-                        }),
-                      );
-                    }
-                    return deps.personalChannels
-                      .findOwnedPersonalChannel(team.id, channel_id, discord_user_id)
-                      .pipe(
-                        Effect.map(
-                          Option.match({
-                            onNone: () =>
-                              identifyResult({
-                                kind: 'none',
-                                team_id: Option.some(team.id),
-                                team_member_id: Option.none(),
+                // Resolve the caller's team membership to gate on the `team:manage`
+                // permission (Sideline's admin gate — Discord perms aren't used here).
+                deps.members.findMembershipByDiscordAndTeam(discord_user_id, team.id).pipe(
+                  Effect.map(
+                    Option.match({
+                      onNone: () => false,
+                      onSome: (membership) => membership.permissions.includes('team:manage'),
+                    }),
+                  ),
+                  Effect.flatMap((isAdmin) =>
+                    deps.teamSettings.findByTeamId(team.id).pipe(
+                      Effect.flatMap((settingsOpt) => {
+                        const globalChannel = Option.flatMap(
+                          settingsOpt,
+                          (s) => s.discord_events_channel_id,
+                        );
+                        if (Option.isSome(globalChannel) && globalChannel.value === channel_id) {
+                          return Effect.succeed(
+                            identifyResult({
+                              kind: 'global',
+                              team_id: Option.some(team.id),
+                              team_member_id: Option.none(),
+                              is_admin: isAdmin,
+                            }),
+                          );
+                        }
+                        return deps.personalChannels
+                          .findOwnedPersonalChannel(team.id, channel_id, discord_user_id)
+                          .pipe(
+                            Effect.map(
+                              Option.match({
+                                onNone: () =>
+                                  identifyResult({
+                                    kind: 'none',
+                                    team_id: Option.some(team.id),
+                                    team_member_id: Option.none(),
+                                    is_admin: isAdmin,
+                                  }),
+                                onSome: (teamMemberId) =>
+                                  identifyResult({
+                                    kind: 'personal',
+                                    team_id: Option.some(team.id),
+                                    team_member_id: Option.some(String(teamMemberId)),
+                                    is_admin: isAdmin,
+                                  }),
                               }),
-                            onSome: (teamMemberId) =>
-                              identifyResult({
-                                kind: 'personal',
-                                team_id: Option.some(team.id),
-                                team_member_id: Option.some(String(teamMemberId)),
-                              }),
-                          }),
-                        ),
-                      );
-                  }),
+                            ),
+                          );
+                      }),
+                    ),
+                  ),
                 ),
             }),
           ),

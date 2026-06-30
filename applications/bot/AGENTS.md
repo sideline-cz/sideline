@@ -12,7 +12,7 @@ src/
 ├── env.ts           — Environment config (token, intents, health port)
 ├── run.ts           — Runtime entrypoint (config, logging, NodeRuntime)
 ├── schemas.ts       — Dfx decode schemas (DfxTextChannel, DfxSyncableChannel, DfxGuildMember, DfxUser incl. global_name)
-├── commands/        — Slash command registry (event/create, event/list, refresh-events, training/*, carpool/*, makanicko/*, finance/*, poll, info, summon, summarize)
+├── commands/        — Slash command registry (event/create, event/list, event/refresh, training/*, carpool/*, makanicko/*, finance/*, poll, info, summon, summarize)
 ├── interactions/    — Component interaction registry (buttons/selects/modals)
 ├── events/          — Gateway event handler registry (guild, member, invite, channel lifecycle)
 ├── services/        — Sync services (RoleSyncService, ChannelSyncService) and welcome helpers (InviteCache, inviteDiff, welcomeRenderer)
@@ -718,9 +718,11 @@ Prefer `guild_locale` (server-configured language) over `locale` (individual use
 
 Each top-level slash command lives in its own folder under `src/commands/`: `index.ts` builds the `Ix.global(definition, handler)` and is registered in `src/commands/index.ts` via `commandBuilder.add(...)`; `handler.ts` holds the handler effect. Localize `description`/`description_localizations` with `m.bot_<command>_description({}, { locale })` and add `name_localizations` for the Czech command name.
 
-### Admin-Gating via `default_member_permissions` (no runtime permission check)
+### Admin-Gating: `default_member_permissions` (top-level) vs. runtime Sideline permission (subcommand)
 
-Captain/admin-only commands are gated **natively by Discord**, not by a runtime check in the handler. Set both fields on the command definition:
+There are TWO admin-gating mechanisms. Pick by whether the command is top-level or a subcommand.
+
+**A. Top-level commands — gate natively via Discord `default_member_permissions`** (no runtime check in the handler). Set both fields on the command definition:
 
 ```ts
 // Hides the command from members lacking ManageEvents in Discord's UI.
@@ -728,14 +730,16 @@ default_member_permissions: Number(DiscordTypes.Permissions.ManageEvents),
 dm_permission: false,
 ```
 
+**B. Subcommands — gate at RUNTIME via Sideline's own permission system.** A subcommand CANNOT carry `default_member_permissions` (the field is honored only on the top-level command), so the handler must check Sideline's `team:manage` permission itself and reply "forbidden" when the caller lacks it. `/event refresh` (`src/commands/event/refresh.ts`) is the reference: the desire was to keep it under the member-visible `/event` command (NOT a separate top-level `/refresh-events`) AND not to use Discord permissions at all, so it resolves the caller's `team:manage` status server-side and gates on it.
+
 Rules:
 
-1. **Use `default_member_permissions: Number(DiscordTypes.Permissions.ManageEvents)` + `dm_permission: false`** for every captain/admin command. Reference commands sharing this exact convention: `/training`, `/carpool`, `/summon`, `/poll`, `/refresh-events`. Do NOT re-check the permission in the handler — Discord enforces it before dispatch.
-2. **Subcommands cannot carry their own `default_member_permissions`** — the field is honored only on the top-level command. When an admin action must be permission-gated, declare it as a **top-level command** (`/refresh-events`), NOT a subcommand of an existing member-visible command (e.g. not `/event refresh`).
+1. **Top-level captain/admin commands use `default_member_permissions: Number(DiscordTypes.Permissions.ManageEvents)` + `dm_permission: false`.** Reference commands sharing this exact convention: `/training`, `/carpool`, `/summon`, `/poll`. Do NOT re-check the permission in the handler — Discord enforces it before dispatch.
+2. **Subcommands cannot carry their own `default_member_permissions`** — the field is honored only on the top-level command. An admin-gated subcommand (e.g. `/event refresh`) MUST gate at runtime on Sideline's `team:manage` permission instead. The server resolves the caller's admin status (`findMembershipByDiscordAndTeam` + `permissions.includes('team:manage')`) and surfaces it as `is_admin: boolean` on `Guild/IdentifyEventsChannel`'s result; the handler replies with the localized "forbidden" message (`m.bot_refresh_events_forbidden`) when `!is_admin` and only proceeds otherwise. Do NOT add `default_member_permissions` to a subcommand — it is silently ignored.
 
 ### 3-Second Ack: Fork Heavy Work With `Effect.forkDetach`
 
-Discord requires an interaction ack within 3s. When a command handler's work (RPC round-trips + Discord REST renders) may exceed that, ack immediately and fork the heavy work with `Effect.forkDetach`, returning an ephemeral acknowledgement synchronously. Reference: `src/commands/refreshEvents/handler.ts` classifies the channel via `Guild/IdentifyEventsChannel`, then `Effect.forkDetach`s the reorder/dirty-mark work and returns an ephemeral reply. For handlers that DEFER (rather than reply immediately), the deferred-response resolution rules in "Paginated Embed Pattern" rule 6 apply.
+Discord requires an interaction ack within 3s. When a command handler's work (RPC round-trips + Discord REST renders) may exceed that, ack immediately and fork the heavy work with `Effect.forkDetach`, returning an ephemeral acknowledgement synchronously. Reference: `src/commands/event/refresh.ts` classifies the channel via `Guild/IdentifyEventsChannel` (and checks its `is_admin` flag first), then `Effect.forkDetach`s the reorder/dirty-mark work and returns an ephemeral reply. For handlers that DEFER (rather than reply immediately), the deferred-response resolution rules in "Paginated Embed Pattern" rule 6 apply.
 
 ### Locale Split: Channel Content vs. Ephemeral Reply (`guildLocale` / `userLocale`)
 
@@ -744,7 +748,7 @@ Discord requires an interaction ack within 3s. When a command handler's work (RP
 1. **`guildLocale(interaction)`** (`guild_locale`, server-configured language) — for content written into a channel everyone sees (the reordered/refreshed event messages). Mirrors the existing "prefer `guild_locale` for server-wide consistency" rule under "Discord Built-in Localization".
 2. **`userLocale(interaction)`** (caller's `locale`, falling back to `guildLocale`) — for the ephemeral reply only the caller sees.
 
-Reference: `src/commands/refreshEvents/handler.ts` renders channel content in `guildLocale(interaction)` and the ephemeral reply in `userLocale(interaction)`.
+Reference: `src/commands/event/refresh.ts` renders channel content in `guildLocale(interaction)` and the ephemeral reply in `userLocale(interaction)`.
 
 ## Autocomplete Handlers (`src/interactions/*-autocomplete.ts`)
 

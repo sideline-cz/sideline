@@ -18,15 +18,16 @@ const ephemeral = (content: string) =>
   });
 
 /**
- * `/refresh-events` — admin (ManageEvents) command. Run inside an events channel
- * to re-sync it. Classifies the current channel via `Guild/IdentifyEventsChannel`:
- * the global events channel → `reorderChannelMessages` (re-renders in place +
- * reorders); the caller's own personal channel → mark the team's events dirty
- * (content re-render via the reconcile loop) + `reorderPersonalChannel`. The
- * heavy work is forked so the interaction gets its 3s ack; channel content
- * renders in the guild locale, the ephemeral reply in the caller's locale.
+ * `/event refresh` — re-sync the events channel it's run in. Gated on Sideline's
+ * own `team:manage` admin permission (NOT Discord permissions): the subcommand is
+ * visible to everyone under `/event`, so it checks `is_admin` at runtime and
+ * replies "forbidden" otherwise. `Guild/IdentifyEventsChannel` classifies the
+ * current channel (and returns the caller's admin status); the heavy refresh is
+ * forked so the interaction is acked within 3s. Global → reorderChannelMessages
+ * (re-render in place + reorder); the caller's own personal channel →
+ * MarkTeamPersonalEventsDirty (content re-render via reconcile) + reorderPersonalChannel.
  */
-export const refreshEventsHandler = Interaction.asEffect().pipe(
+export const refreshHandler = Interaction.asEffect().pipe(
   Effect.tap(() =>
     Metric.update(
       Metric.withAttributes(discordInteractionsTotal, { interaction_type: 'command' }),
@@ -55,6 +56,9 @@ export const refreshEventsHandler = Interaction.asEffect().pipe(
           discord_user_id: userId,
         }).pipe(
           Effect.flatMap((identified) => {
+            if (!identified.is_admin) {
+              return Effect.succeed(ephemeral(m.bot_refresh_events_forbidden({}, { locale })));
+            }
             if (identified.kind === 'global') {
               return Effect.forkDetach(
                 reorderChannelMessages(snowflakeChannelId, channelLocale),
@@ -69,7 +73,7 @@ export const refreshEventsHandler = Interaction.asEffect().pipe(
               const teamMemberId = identified.team_member_id.value;
               const work = rpc['Guild/MarkTeamPersonalEventsDirty']({ team_id: teamId }).pipe(
                 Effect.catchTag('RpcClientError', (e) =>
-                  Effect.logWarning('refresh-events: failed to mark events dirty', e),
+                  Effect.logWarning('event refresh: failed to mark events dirty', e),
                 ),
                 Effect.andThen(
                   reorderPersonalChannel({
@@ -87,7 +91,7 @@ export const refreshEventsHandler = Interaction.asEffect().pipe(
             return Effect.succeed(ephemeral(m.bot_refresh_events_none({}, { locale })));
           }),
           Effect.catchTag('RpcClientError', (e) =>
-            Effect.logWarning('refresh-events: IdentifyEventsChannel failed', e).pipe(
+            Effect.logWarning('event refresh: IdentifyEventsChannel failed', e).pipe(
               Effect.as(ephemeral(m.bot_refresh_events_none({}, { locale }))),
             ),
           ),
@@ -95,5 +99,5 @@ export const refreshEventsHandler = Interaction.asEffect().pipe(
       ),
     );
   }),
-  Effect.withSpan('command/refresh-events'),
+  Effect.withSpan('command/event.refresh'),
 );
