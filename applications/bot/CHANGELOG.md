@@ -1,5 +1,40 @@
 # @sideline/bot
 
+## 0.28.0
+
+### Minor Changes
+
+- [#458](https://github.com/maxa-ondrej/sideline/pull/458) [`b970c70`](https://github.com/maxa-ondrej/sideline/commit/b970c70d9fd4e21db28a8d53436c2cfb259a6e8c) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - feat: re-post events when a team's events channel changes
+
+  Changing a team's `discord_events_channel_id` now migrates existing upcoming
+  events to the new channel instead of leaving them stranded in the old one.
+  The settings update emits an `event_channel_moved` sync event; the bot
+  atomically repoints the team's active, future events to the new channel
+  (nulling their message id as the commit point), deletes the old announcements,
+  re-posts every now-unposted upcoming event (driven off durable state so a
+  crashed run recovers on retry), and reorders both channels — the old one's
+  divider is cleaned up, the new one is capped/ordered by `reorderChannelMessages`.
+  Also picks up upcoming events that were created while no events channel was
+  configured (posting was skipped at creation) and posts them into the new
+  channel.
+
+### Patch Changes
+
+- [#456](https://github.com/maxa-ondrej/sideline/pull/456) [`8e564ed`](https://github.com/maxa-ondrej/sideline/commit/8e564eda0a82cae7641bc63ab2964a3681a7ce9d) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - fix: personal-events channel provisioning never spilled into an overflow category
+
+  The category-full detection in `handleProvision` checked for Discord error
+  code `30013`, which is not the code Discord returns when a category hits its
+  50-channel limit. The real response is `50035` (Invalid Form Body) with a
+  nested `parent_id` error `CHANNEL_PARENT_MAX_CHANNELS`. Because the check never
+  matched, the overflow-category creation branch was unreachable: members past
+  the 50th in a category failed to provision on every poll tick and never got a
+  personal channel. Detection now keys on `50035` plus the nested
+  `CHANNEL_PARENT_MAX_CHANNELS` sub-code, so an overflow category is created and
+  the channel is retried as intended.
+
+- Updated dependencies [[`b970c70`](https://github.com/maxa-ondrej/sideline/commit/b970c70d9fd4e21db28a8d53436c2cfb259a6e8c)]:
+  - @sideline/domain@0.35.0
+
 ## 0.27.0
 
 ### Minor Changes
