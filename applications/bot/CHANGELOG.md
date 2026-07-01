@@ -1,5 +1,27 @@
 # @sideline/bot
 
+## 0.27.0
+
+### Minor Changes
+
+- [#454](https://github.com/maxa-ondrej/sideline/pull/454) [`d5812ff`](https://github.com/maxa-ondrej/sideline/commit/d5812ff3a9b88433aec2f9d59a392969cca1a95a) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add a Discord `/sudo` command that lets team admins temporarily elevate to Discord Administrator.
+  - `/sudo` is a toggle: an admin running it grants themselves a shared `Sideline Sudo` role (carrying the Discord Administrator permission) and posts an audit entry with a "Leave sudo" button to the team's system channel; running it again while elevated revokes the role.
+  - Any admin can press "Leave sudo" to end another admin's session; the audit message is edited to a resolved state showing who was in sudo, who ended it, and — from start to end — how long the session lasted. Non-admins clicking it get an ephemeral denial and the shared message is left untouched.
+  - Both exit paths (the "Leave sudo" button and re-running `/sudo`) now close the same audit message and record the duration. A new `sudo_sessions` table persists the active session (audit message location + start time) so either path can find and resolve the message; entries are cleaned up on team deletion.
+  - Access is enforced server-side via a new `Guild/CheckTeamAdmin` RPC (resolves the caller's team membership and `team:manage` permission), not via Discord `default_member_permissions` — so the command stays visible to team admins regardless of their Discord-native permissions.
+  - The interaction is deferred and the elevation work is forked so Discord's 3-second acknowledgement window is respected; role-assign/revoke permission errors (bot role hierarchy) are surfaced clearly on both exit paths, and a missing system channel still grants sudo with an ephemeral notice (re-run `/sudo` to step down).
+  - No auto-expiry in this version: sudo persists until the invoker toggles it off or an admin presses "Leave sudo".
+
+### Patch Changes
+
+- [#453](https://github.com/maxa-ondrej/sideline/pull/453) [`8e6d58f`](https://github.com/maxa-ondrej/sideline/commit/8e6d58f0978051cd2410783e8112e54bcc70cb74) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Move the "Attendees" button to the second action row of the upcoming-event RSVP message
+
+  The Attendees button now shares the second row with the RSVP message buttons (Add/Edit/Clear message) instead of sitting alongside Yes/No/Maybe. The second row always renders the Attendees button — including for members who haven't responded yet — with the message buttons appended when the member has an RSVP.
+
+- Updated dependencies [[`d5812ff`](https://github.com/maxa-ondrej/sideline/commit/d5812ff3a9b88433aec2f9d59a392969cca1a95a), [`61cc064`](https://github.com/maxa-ondrej/sideline/commit/61cc06420c759ef9312abfb0778a9460ebeb6467)]:
+  - @sideline/domain@0.34.0
+  - @sideline/i18n@0.18.0
+
 ## 0.26.0
 
 ### Minor Changes
