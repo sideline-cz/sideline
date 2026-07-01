@@ -2185,5 +2185,6 @@
   "bot_sudo_err_grant_failed": "⚠️ I couldn't grant the sudo role. Check that the bot's role is above the sudo role and has **Manage Roles**.",
   "bot_sudo_err_revoke_failed": "⚠️ I couldn't remove the sudo role. Check the bot's role position and **Manage Roles** permission, then try again.",
   "bot_sudo_err_no_system_channel": "Sudo is on, but no system channel is set, so no audit entry was posted. Run /sudo again to step down.",
+  "bot_sudo_err_audit_failed": "🛡️ Sudo is on, but I couldn't post the audit entry to the system channel. Run /sudo again to step down.",
   "bot_sudo_err_generic": "Something went wrong. Please try again."
 }

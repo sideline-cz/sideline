@@ -30,8 +30,11 @@ export const isDiscordPermissionError = (error: unknown): boolean => {
   return discordCode === 50013;
 };
 
-/** 404 (Unknown Role/Member) means the role assignment is already gone — treat as
- * success rather than an error. */
+/** 404 (Unknown Member/User/Role) means the role assignment is already gone — treat as
+ * success rather than an error. Covers HTTP 404 and Discord JSON error codes
+ * Unknown Member (10007), Unknown Role (10011), Unknown User (10013) — the last three
+ * can arrive without an HTTP status when surfaced via `err.data.code` alone (e.g. when
+ * removing a role from a member who has already left the guild). */
 export const isDiscordNotFoundError = (error: unknown): boolean => {
   if (!isRecord(error)) return false;
   const response = recordProp(error, 'response');
@@ -39,5 +42,5 @@ export const isDiscordNotFoundError = (error: unknown): boolean => {
   const httpStatus = numberProp(response, 'status') ?? numberProp(error, 'status');
   if (httpStatus === 404) return true;
   const discordCode = numberProp(data, 'code') ?? numberProp(error, 'code');
-  return discordCode === 10011 || discordCode === 10013;
+  return discordCode === 10007 || discordCode === 10011 || discordCode === 10013;
 };

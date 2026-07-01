@@ -2185,5 +2185,6 @@
   "bot_sudo_err_grant_failed": "⚠️ Nepodařilo se přidělit sudo roli. Zkontroluj, že role bota je nad sudo rolí a má právo **Spravovat role**.",
   "bot_sudo_err_revoke_failed": "⚠️ Nepodařilo se odebrat sudo roli. Zkontroluj pozici role bota a právo **Spravovat role** a zkus to znovu.",
   "bot_sudo_err_no_system_channel": "Sudo je zapnuté, ale není nastaven systémový kanál, takže nebyl vytvořen záznam. Pro ukončení spusť /sudo znovu.",
+  "bot_sudo_err_audit_failed": "🛡️ Sudo je zapnuté, ale nepodařilo se přidat záznam do systémového kanálu. Pro ukončení spusť /sudo znovu.",
   "bot_sudo_err_generic": "Něco se pokazilo. Zkus to prosím znovu."
 }

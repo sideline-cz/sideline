@@ -487,6 +487,50 @@ describe('sudoHandler', () => {
     expect(webhookPayload).toContain(m.bot_sudo_err_grant_failed({}, { locale: 'en' }));
   });
 
+  it('grant succeeds but audit-post fails (403 on createMessage) → role WAS granted, ephemeral audit-failed (not grant-failed, not generic)', async () => {
+    const rest = makeRestStub({
+      createMessage: vi.fn(() =>
+        Effect.fail({
+          _tag: 'ErrorResponse' as const,
+          response: { status: 403 },
+          data: { code: 50013, message: 'Missing Permissions' },
+          message: 'Missing Permissions',
+        }),
+      ),
+    });
+    const rpc = makeSyncRpcStub({ 'Guild/CheckTeamAdmin': adminResult(true) });
+
+    await runHandler(makeInteraction({ invokerRoles: [] }), rest.layer, rpc.layer);
+
+    expect(rest.addGuildMemberRole).toHaveBeenCalledTimes(1);
+    expect(rpc.beginSudoSession).not.toHaveBeenCalled();
+
+    expect(rest.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const webhookPayload = JSON.stringify(rest.updateOriginalWebhookMessage.mock.calls[0]);
+    expect(webhookPayload).toContain(m.bot_sudo_err_audit_failed({}, { locale: 'en' }));
+    expect(webhookPayload).not.toContain(m.bot_sudo_err_grant_failed({}, { locale: 'en' }));
+    expect(webhookPayload).not.toContain(m.bot_sudo_err_generic({}, { locale: 'en' }));
+  });
+
+  it('grant succeeds, audit message posted, but BeginSudoSession RPC fails → role WAS granted, ephemeral audit-failed', async () => {
+    const rest = makeRestStub();
+    const rpc = makeSyncRpcStub({
+      'Guild/CheckTeamAdmin': adminResult(true),
+      'Guild/BeginSudoSession': vi.fn(() => Effect.fail({ _tag: 'RpcClientError' as const })),
+    });
+
+    await runHandler(makeInteraction({ invokerRoles: [] }), rest.layer, rpc.layer);
+
+    expect(rest.addGuildMemberRole).toHaveBeenCalledTimes(1);
+    expect(rest.createMessage).toHaveBeenCalledTimes(1);
+
+    expect(rest.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const webhookPayload = JSON.stringify(rest.updateOriginalWebhookMessage.mock.calls[0]);
+    expect(webhookPayload).toContain(m.bot_sudo_err_audit_failed({}, { locale: 'en' }));
+    expect(webhookPayload).not.toContain(m.bot_sudo_err_grant_failed({}, { locale: 'en' }));
+    expect(webhookPayload).not.toContain(m.bot_sudo_err_generic({}, { locale: 'en' }));
+  });
+
   it('RPC transport failure (CheckTeamAdmin fails) → ephemeral generic error, no role/message side effects', async () => {
     const rest = makeRestStub();
     const rpc = makeSyncRpcStub({

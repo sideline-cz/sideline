@@ -82,10 +82,10 @@ const buildSudoAuditMessage = (
   ],
 });
 
-/** Whether the invoker already holds the sudo role. Logs a warning (rather than
- * silently defaulting to "not elevated") when `interaction.member` is absent, since
- * that would otherwise cause a mis-toggle (granting when the user may already be
- * elevated) with no diagnostic trail. */
+/** Pure predicate: whether the invoker already holds the sudo role. Returns `false`
+ * (not elevated) when `interaction.member` is absent — the caller separately logs a
+ * warning in that case (rather than silently defaulting), since a mis-toggle (granting
+ * when the user may already be elevated) would otherwise have no diagnostic trail. */
 const isElevated = (
   interaction: DiscordTypes.APIInteraction,
   sudoRoleId: DiscordSchemas.Snowflake,
@@ -94,10 +94,11 @@ const isElevated = (
   return Array.isArray(roles) && roles.includes(sudoRoleId);
 };
 
-/** Grant the sudo role and — if a system channel is configured — post an audit entry
- * with a "Leave sudo" button, then persist the session so it can later be closed by
- * `EndSudoSession` (either the button or a toggle-off `/sudo` re-run). */
-const enterSudoMode = (
+/** Post the audit entry (if a system channel is configured) and persist the session
+ * so it can later be closed by `EndSudoSession` (either the button or a toggle-off
+ * `/sudo` re-run). Runs only after the role grant has already succeeded — any failure
+ * here must NOT be reported as a grant failure, since the user is already elevated. */
+const postAuditAndReply = (
   rest: DiscordRestService,
   rpc: SyncRpcClient,
   interaction: DiscordTypes.APIInteraction,
@@ -105,11 +106,8 @@ const enterSudoMode = (
   embedLocale: 'en' | 'cs',
   guildId: DiscordSchemas.Snowflake,
   userId: DiscordSchemas.Snowflake,
-  sudoRoleId: DiscordSchemas.Snowflake,
 ) =>
-  rest.addGuildMemberRole(guildId, userId, sudoRoleId).pipe(
-    Effect.flatMap(() => Effect.logWarning(`Sudo mode granted to ${userId} in guild ${guildId}`)),
-    Effect.flatMap(() => rest.getGuild(guildId)),
+  rest.getGuild(guildId).pipe(
     Effect.flatMap(decodeGuild),
     Effect.flatMap((guild) =>
       Option.match(guild.system_channel_id, {
@@ -152,6 +150,85 @@ const enterSudoMode = (
         },
       }),
     ),
+  );
+
+/** Grant the sudo role, then post the audit entry. The grant and audit phases have
+ * distinct error handling: a grant failure means the role was NOT granted (safe to
+ * report as such), while an audit-phase failure happens AFTER the role was already
+ * granted, so it must tell the user sudo is on rather than claiming the grant failed. */
+const enterSudoMode = (
+  rest: DiscordRestService,
+  rpc: SyncRpcClient,
+  interaction: DiscordTypes.APIInteraction,
+  locale: 'en' | 'cs',
+  embedLocale: 'en' | 'cs',
+  guildId: DiscordSchemas.Snowflake,
+  userId: DiscordSchemas.Snowflake,
+  sudoRoleId: DiscordSchemas.Snowflake,
+) =>
+  rest.addGuildMemberRole(guildId, userId, sudoRoleId).pipe(
+    Effect.flatMap(() => Effect.logWarning(`Sudo mode granted to ${userId} in guild ${guildId}`)),
+    Effect.flatMap(() =>
+      postAuditAndReply(rest, rpc, interaction, locale, embedLocale, guildId, userId).pipe(
+        Effect.catchTags({
+          ErrorResponse: (error) =>
+            Effect.logError('sudo: audit-phase Discord REST call failed', error).pipe(
+              Effect.flatMap(() =>
+                replyWebhook(
+                  rest,
+                  interaction,
+                  { content: m.bot_sudo_err_audit_failed({}, { locale }) },
+                  'Failed to update sudo audit-failed response',
+                ),
+              ),
+            ),
+          SchemaError: (error) =>
+            Effect.logError('sudo: failed to decode getGuild response', error).pipe(
+              Effect.flatMap(() =>
+                replyWebhook(
+                  rest,
+                  interaction,
+                  { content: m.bot_sudo_err_audit_failed({}, { locale }) },
+                  'Failed to update sudo audit-failed response',
+                ),
+              ),
+            ),
+          RpcClientError: (error) =>
+            Effect.logError('sudo: BeginSudoSession RPC failed', error).pipe(
+              Effect.flatMap(() =>
+                replyWebhook(
+                  rest,
+                  interaction,
+                  { content: m.bot_sudo_err_audit_failed({}, { locale }) },
+                  'Failed to update sudo audit-failed response',
+                ),
+              ),
+            ),
+          HttpClientError: (error) =>
+            Effect.logError('sudo: audit-phase Discord REST call failed', error).pipe(
+              Effect.flatMap(() =>
+                replyWebhook(
+                  rest,
+                  interaction,
+                  { content: m.bot_sudo_err_audit_failed({}, { locale }) },
+                  'Failed to update sudo audit-failed response',
+                ),
+              ),
+            ),
+          RatelimitedResponse: (error) =>
+            Effect.logError('sudo: audit-phase Discord REST call failed', error).pipe(
+              Effect.flatMap(() =>
+                replyWebhook(
+                  rest,
+                  interaction,
+                  { content: m.bot_sudo_err_audit_failed({}, { locale }) },
+                  'Failed to update sudo audit-failed response',
+                ),
+              ),
+            ),
+        }),
+      ),
+    ),
     Effect.catchTag('ErrorResponse', (error) =>
       isDiscordPermissionError(error)
         ? replyWebhook(
@@ -161,18 +238,6 @@ const enterSudoMode = (
             'Failed to update sudo grant-failed response',
           )
         : Effect.fail(error),
-    ),
-    Effect.catchTag('SchemaError', (error) =>
-      Effect.logError('sudo: failed to decode getGuild response', error).pipe(
-        Effect.flatMap(() =>
-          replyWebhook(
-            rest,
-            interaction,
-            { content: m.bot_sudo_err_generic({}, { locale }) },
-            'Failed to update sudo generic-error response (decode failure)',
-          ),
-        ),
-      ),
     ),
   );
 
