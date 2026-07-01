@@ -547,7 +547,7 @@ erDiagram
 
 ### Discord Integration
 
-This domain bridges the application to a Discord bot. `bot_guilds` tracks which Discord servers the bot has joined. `discord_channels` caches the channel list for each guild. `discord_role_mappings` and `discord_channel_mappings` link application roles and groups to their Discord counterparts. In `discord_channel_mappings`, the `discord_channel_id` column is nullable — a group always receives a Discord role, but a Discord channel is only created when explicitly requested (via the `create_discord_channel_on_group` team setting or a manual "Create channel" action). The `claim_thread_id` column stores the persistent Discord thread ID used for training coach-claim embeds: all claim messages for the same owner group are posted into one long-lived thread rather than one thread per training. `team_channels` stores admin-managed Discord text channels (the `managed` entity type); each row represents a channel whose lifecycle Sideline fully controls. A fourth entity type `'discord'` is used in `channel_sync_events` for archive operations on Discord-native channels (channels not created by Sideline); these events carry no `team_channel_id`. `team_channel_access` records per-group access grants (`VIEW`, `EDIT`, or `ADMIN`) for managed channels; these grants are translated into Discord permission overwrites by the bot. The three sync-event tables (`role_sync_events`, `channel_sync_events`, `event_sync_events`) are outbox tables consumed by the bot worker to propagate state changes to Discord. `channel_event_dividers` tracks the single divider message posted in each event channel to visually separate past events from upcoming ones. `personal_event_channels` tracks the private per-member Discord text channel created under the team's personal-events category; `applied_channel_format` records the channel-name format template that was last applied (used to detect drift when the team changes its format setting).
+This domain bridges the application to a Discord bot. `bot_guilds` tracks which Discord servers the bot has joined. `discord_channels` caches the channel list for each guild. `discord_role_mappings` and `discord_channel_mappings` link application roles and groups to their Discord counterparts. In `discord_channel_mappings`, the `discord_channel_id` column is nullable — a group always receives a Discord role, but a Discord channel is only created when explicitly requested (via the `create_discord_channel_on_group` team setting or a manual "Create channel" action). The `claim_thread_id` column stores the persistent Discord thread ID used for training coach-claim embeds: all claim messages for the same owner group are posted into one long-lived thread rather than one thread per training. `team_channels` stores admin-managed Discord text channels (the `managed` entity type); each row represents a channel whose lifecycle Sideline fully controls. A fourth entity type `'discord'` is used in `channel_sync_events` for archive operations on Discord-native channels (channels not created by Sideline); these events carry no `team_channel_id`. `team_channel_access` records per-group access grants (`VIEW`, `EDIT`, or `ADMIN`) for managed channels; these grants are translated into Discord permission overwrites by the bot. The three sync-event tables (`role_sync_events`, `channel_sync_events`, `event_sync_events`) are outbox tables consumed by the bot worker to propagate state changes to Discord. `channel_event_dividers` tracks the single divider message posted in each event channel to visually separate past events from upcoming ones. `personal_event_channels` tracks the private per-member Discord text channel created under the team's personal-events category; `applied_channel_format` records the channel-name format template that was last applied (used to detect drift when the team changes its format setting). `sudo_sessions` tracks a team admin's active `/sudo` session — one row per (team, Discord user), recording where the audit message was posted and when the session started — so either exit path (the "Leave sudo" button or re-running `/sudo`) can close that message and report the elapsed duration.
 
 ```mermaid
 erDiagram
@@ -683,12 +683,22 @@ erDiagram
         TIMESTAMPTZ updated_at
     }
 
+    sudo_sessions {
+        UUID id PK
+        UUID team_id FK
+        TEXT discord_user_id
+        TEXT system_channel_id
+        TEXT audit_message_id
+        TIMESTAMPTZ started_at
+    }
+
     bot_guilds ||--o{ discord_channels : "hosts"
     teams ||--o{ discord_role_mappings : "maps"
     teams ||--o{ discord_channel_mappings : "maps"
     teams ||--o{ team_channels : "manages"
     teams ||--o{ personal_event_channels : "provisions"
     team_members ||--o{ personal_event_channels : "owns"
+    teams ||--o{ sudo_sessions : "tracks"
     team_channels ||--o{ team_channel_access : "grants"
     groups ||--o{ team_channel_access : "granted via"
     teams ||--o{ role_sync_events : "logs"
@@ -1387,6 +1397,7 @@ erDiagram
 | `custom_achievements` | Team-defined achievements with configurable names, descriptions, rule kinds, thresholds, and optional Discord role grants. |
 | `discord_role_provision_events` | Outbox records for the bot's Role Provision worker to auto-create Discord roles for achievement mappings. |
 | `weekly_summary_sync_events` | Outbox records for the bot's Weekly Summary worker to post the weekly activity digest embed to a configured Discord channel. |
+| `sudo_sessions` | Tracks a team admin's active `/sudo` session — one row per (team, Discord user) — so the audit message can later be closed and the elapsed duration reported. |
 | `rosters` | Named match-day squad lists managed per team. |
 | `roster_members` | Many-to-many junction placing team members on a roster. |
 | `event_rosters` | Links one event to one roster for attendance tracking; at most one roster per event. Stores the `auto_approve` flag and the Discord approval thread ID. |

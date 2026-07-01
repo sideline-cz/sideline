@@ -1072,6 +1072,25 @@ Tracks additional Discord category channels created when the primary personal-ev
 
 ---
 
+#### `sudo_sessions`
+
+Tracks a team admin's active `/sudo` session, one row per (team, Discord user), so the shared audit message can later be closed and the elapsed duration reported.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `discord_user_id` | TEXT | NOT NULL | — |
+| `system_channel_id` | TEXT | NOT NULL | — |
+| `audit_message_id` | TEXT | NOT NULL | — |
+| `started_at` | TIMESTAMPTZ | NOT NULL | — |
+
+**Unique**: `(team_id, discord_user_id)`
+
+**Notes**: Added in migration `1790300012_create_sudo_sessions`. Inserted by `Guild/BeginSudoSession` when a team admin enters sudo mode (recording where the audit message was posted and when the session started), and deleted by `Guild/EndSudoSession` when the session ends — via either the "Leave sudo" button or the admin re-running `/sudo` to toggle off. `EndSudoSession` returns the deleted row so the bot can compute the from/to/duration shown on the closed audit message.
+
+---
+
 ### 8. Activity Tracking
 
 #### `activity_types`
@@ -1957,6 +1976,7 @@ All 109 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1790300005 | `add_team_members_missed_rsvps` | Adds `missed_rsvps INT NOT NULL DEFAULT 0` to `team_members`. |
 | 1790300009 | `personal_events_rework` | Removes `discord_target_channel_id` from `events` and `event_series`; removes `overview_channel_id` from `teams`; adds `personal_messages_dirty_at TIMESTAMPTZ` to `events`; adds `discord_personal_events_category_id TEXT` and `discord_events_channel_id TEXT` to `team_settings`; creates `personal_event_channels` (PK id, team_id FK CASCADE, team_member_id FK CASCADE, discord_channel_id TEXT nullable, created_at, updated_at; UNIQUE (team_id, team_member_id)); creates `personal_event_messages` (PK id, event_id FK CASCADE, team_member_id FK CASCADE, personal_channel_id TEXT, discord_message_id TEXT, payload_hash TEXT, created_at, updated_at; UNIQUE (event_id, team_member_id)); creates `personal_event_overflow_categories` (PK id, team_id FK CASCADE, sequence INT, discord_category_id TEXT nullable, created_at; UNIQUE (team_id, sequence)). |
 | 1790300011 | `add_personal_channel_applied_format` | Adds `applied_channel_format TEXT` (nullable) to `personal_event_channels`. Stores the channel-name format template that was applied when the channel was last created or renamed; NULL on rows predating this migration, which causes the provisioning worker to treat those channels as drifted and rename them to the current format on the next tick. |
+| 1790300012 | `create_sudo_sessions` | Creates `sudo_sessions` (PK id, team_id FK CASCADE, discord_user_id TEXT, system_channel_id TEXT, audit_message_id TEXT, started_at TIMESTAMPTZ; UNIQUE (team_id, discord_user_id)). Tracks a team admin's active `/sudo` session so the audit message can be closed and its duration reported when the session ends. |
 
 ### After Migrations (seed data)
 
@@ -1990,7 +2010,7 @@ The server inserts rows when the relevant domain action occurs. The bot polls `W
 
 ### Cascading Deletes
 
-Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events, fees, expenses, email_forwarding_config, email_messages, email_post_sync_events, player_ratings, player_rating_history, training_games, team_generation_config, personal_event_channels, personal_event_overflow_categories). Deletion of a `training_games` row cascades to its `training_game_participants` rows. Deletion of an `email_messages` row cascades to its `email_attachments` and `email_post_sync_events` rows. Fee deletion cascades to fee_assignments. Fee assignment deletion cascades to `payment_reminder_sync_events` and `payment_reminders_sent`. Expense deletion does not cascade to `expense_history` (no FK constraint on `expense_history.expense_id`). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, achievement_sync_events, and training_game_participants. Member deletion is blocked (`ON DELETE RESTRICT`) when any fee_assignment or payment row references the member. User deletion is blocked (`ON DELETE RESTRICT`) when any expense or expense_history row references the user. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
+Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events, fees, expenses, email_forwarding_config, email_messages, email_post_sync_events, player_ratings, player_rating_history, training_games, team_generation_config, personal_event_channels, personal_event_overflow_categories, sudo_sessions). Deletion of a `training_games` row cascades to its `training_game_participants` rows. Deletion of an `email_messages` row cascades to its `email_attachments` and `email_post_sync_events` rows. Fee deletion cascades to fee_assignments. Fee assignment deletion cascades to `payment_reminder_sync_events` and `payment_reminders_sent`. Expense deletion does not cascade to `expense_history` (no FK constraint on `expense_history.expense_id`). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, achievement_sync_events, and training_game_participants. Member deletion is blocked (`ON DELETE RESTRICT`) when any fee_assignment or payment row references the member. User deletion is blocked (`ON DELETE RESTRICT`) when any expense or expense_history row references the user. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
 
 Role deletion uses `ON DELETE RESTRICT` on `member_roles` to prevent accidentally orphaning members. FK references from `role_sync_events.role_id` and `channel_sync_events.group_id` are stored as plain UUID (no FK constraint) so audit rows are retained after the referenced entity is deleted.
 

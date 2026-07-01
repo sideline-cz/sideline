@@ -16,6 +16,7 @@ import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRep
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { PersonalEventChannelsRepository } from '~/repositories/PersonalEventChannelsRepository.js';
 import { PersonalEventOverflowCategoriesRepository } from '~/repositories/PersonalEventOverflowCategoriesRepository.js';
+import { SudoSessionsRepository } from '~/repositories/SudoSessionsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
@@ -370,6 +371,7 @@ const TestLayer = GuildsRpcLive.pipe(
       MockSqlClientLayer,
       Layer.succeed(EventsRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       Layer.succeed(DiscordRolesRepository, new Proxy({} as any, { get: () => () => Effect.void })),
+      Layer.succeed(SudoSessionsRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       Layer.succeed(PendingGuildJoinsRepository, {
         _tag: 'api/PendingGuildJoinsRepository',
         enqueue: () => Effect.void,

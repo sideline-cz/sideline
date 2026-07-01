@@ -30,7 +30,7 @@ The bot is built with **dfx**, an Effect-native Discord framework. It connects t
 
 ## Slash Commands
 
-Nine top-level commands are registered globally: `/carpool`, `/event`, `/finance`, `/info`, `/makanicko`, `/poll`, `/summarize`, `/summon`, and `/training`. `/event`, `/finance`, `/makanicko`, and `/training` each have sub-commands. `/event` has three sub-commands: `create`, `list`, and `refresh`.
+Ten top-level commands are registered globally: `/carpool`, `/event`, `/finance`, `/info`, `/makanicko`, `/poll`, `/sudo`, `/summarize`, `/summon`, and `/training`. `/event`, `/finance`, `/makanicko`, and `/training` each have sub-commands. `/event` has three sub-commands: `create`, `list`, and `refresh`.
 
 ### /carpool
 
@@ -594,6 +594,52 @@ Maximum duration: 10 years (3 650 days). Out-of-range or zero-value inputs retur
 
 ---
 
+### /sudo
+
+**Description:** Toggle temporary Discord Administrator elevation for the invoking team admin.
+
+**Options:** None.
+
+**Permission required:** `team:manage` (checked server-side via the `Guild/CheckTeamAdmin` RPC). Unlike most other commands, `/sudo` carries **no** `default_member_permissions` gate, so it stays visible in the Discord UI to team admins even if they lack Discord-native permissions — the check happens entirely at runtime.
+
+**Constraints:**
+- `dm_permission: false` — the command cannot be used in DMs.
+- No `default_member_permissions` gate (see above).
+
+**Flow:**
+
+1. Team admin invokes `/sudo`. The handler (`applications/bot/src/commands/sudo/handler.ts`) returns a deferred ephemeral acknowledgement and forks a background fiber (the admin check + role + audit-post chain can exceed Discord's 3-second ACK window).
+2. The fiber calls `Guild/CheckTeamAdmin` RPC with `guild_id` and `discord_user_id`. If `is_admin` is `false`, replies ephemerally that only team admins can use sudo mode.
+3. Otherwise calls `ensureSudoRole` (`applications/bot/src/rest/roles/ensureSudoRole.ts`), which looks up (or creates, with the Discord Administrator permission) a guild role named `Sideline Sudo` and returns its ID. If more than one role happens to share that name (a create race), it deterministically picks the lowest-snowflake (oldest) one and logs a warning.
+4. Checks whether the invoker already holds the sudo role (via `interaction.member.roles`):
+   - **Not elevated** → grants the role (`addGuildMemberRole`), then fetches the guild to find its configured system channel:
+     - If a system channel is configured, posts a permanent audit embed there ("🛡️ Sudo mode active", who, when) with a **Leave sudo** button (`sudo-leave:{userId}`), then calls `Guild/BeginSudoSession` to persist the session (audit message location + start time, in the `sudo_sessions` table) before replying ephemerally that sudo mode is on.
+     - If no system channel is configured, still grants the role but replies ephemerally that no audit entry was posted (re-run `/sudo` to step down); no session is persisted in this case (no audit message to track).
+   - **Already elevated** → revokes the role (`deleteGuildMemberRole`), calls `Guild/EndSudoSession` to fetch and delete the persisted session, and — if a session was found — edits the original audit message in place to its "ended" state (recording from/to timestamps and elapsed duration), then replies ephemerally that sudo mode has ended. Unlike before, toggling off via `/sudo` now closes the audit message the same way the "Leave sudo" button does (see below); a transient `EndSudoSession` RPC failure is logged and swallowed so the reply still succeeds even if the session row is left orphaned.
+5. Role-grant/revoke permission failures (bot role below the sudo role, or missing Manage Roles) are detected via `isDiscordPermissionError` and surfaced as a clear ephemeral warning rather than a generic error.
+
+**No auto-expiry:** sudo mode persists until the invoker runs `/sudo` again or an admin presses **Leave sudo** — there is no scheduled revocation.
+
+**Session persistence:** each active session is tracked in the `sudo_sessions` table (one row per team + Discord user, via `Guild/BeginSudoSession` / `Guild/EndSudoSession`), recording where the audit message was posted and when the session started. This lets either exit path — the button or a `/sudo` re-run — locate and close the correct audit message and report how long the session lasted, regardless of which admin ends it.
+
+**Errors:**
+
+| Condition | User-visible message |
+|-----------|----------------------|
+| No `guild_id` or user ID unavailable (e.g. DM edge case) | This command can only be used on a Discord server. |
+| `Guild/CheckTeamAdmin` returns `is_admin: false` | Only team admins can use sudo mode. |
+| `Guild/CheckTeamAdmin` RPC fails (`RpcClientError`) | Generic error message |
+| Role grant/revoke fails with a Discord permission error | Role-hierarchy-specific warning (check bot role position and Manage Roles) |
+| No system channel configured (still grants the role) | Sudo is on, but no audit entry was posted; re-run to step down |
+
+**Source files:**
+- `applications/bot/src/commands/sudo/index.ts` (command registration)
+- `applications/bot/src/commands/sudo/handler.ts`
+- `applications/bot/src/rest/roles/ensureSudoRole.ts`
+- `applications/bot/src/rest/discordErrors.ts`
+
+---
+
 ## Button and Modal Interactions
 
 All interaction handlers are registered in `applications/bot/src/interactions/index.ts`. Each handler pattern-matches on the `custom_id` prefix.
@@ -1138,6 +1184,26 @@ Appears on every poll embed (both open and closed). Sends an ephemeral "Who vote
 **Source files:**
 - `applications/bot/src/interactions/poll.ts` (`PollVotersButton`, `PollVotersButtonReg`)
 - `applications/bot/src/rest/poll/buildPollVotersView.ts`
+
+---
+
+### Leave Sudo Button — `sudo-leave:{subjectUserId}`
+
+Appears on the permanent audit embed posted to the system channel when a team admin enters `/sudo` mode. Lets **any** team admin (not just the original invoker) revoke another admin's active sudo session.
+
+**Custom ID pattern:** `sudo-leave:{subjectUserId}`
+
+**Behavior:**
+
+1. Parses `subjectUserId` from the custom ID.
+2. Returns a deferred ephemeral acknowledgement and forks a background fiber.
+3. The fiber calls `Guild/CheckTeamAdmin` RPC for the *clicking* user. If they are not an admin, replies ephemerally that only team admins can use sudo mode — **the shared audit message is left untouched** (not edited).
+4. Otherwise calls `ensureSudoRole` to resolve the `Sideline Sudo` role ID, then `deleteGuildMemberRole` to revoke it from the subject user.
+5. On success, calls `Guild/EndSudoSession` to fetch and delete the subject's persisted session (`sudo_sessions` row), then edits the shared audit message in place to a resolved "✅ Sudo mode ended" state (green, no components, records who ended it, the from/to timestamps, and the elapsed duration) and replies ephemerally that sudo mode ended. If no session row is found (e.g. a pre-existing audit message that predates session tracking), the "from" time falls back to the audit message's own Discord snowflake-embedded creation time, so from/to/duration are always shown.
+6. If the role/member was already gone (Discord 404 — e.g. the subject already left sudo themselves), treats it as success: still ends the session, marks the message ended (with from/to/duration), and replies "Sudo mode was already ended."
+7. Any other Discord permission error (bot role hierarchy, missing Manage Roles) leaves the audit message **active** (components/embed unchanged) and the session untouched, and replies with a revoke-failed warning.
+
+**Source file:** `applications/bot/src/interactions/sudo.ts` (`SudoLeaveButton`, `SudoLeaveButtonReg`)
 
 ---
 

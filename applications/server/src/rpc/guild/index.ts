@@ -8,7 +8,7 @@ import {
 } from '@sideline/domain';
 import { LogicError, Schemas } from '@sideline/effect-lib';
 import { applyTemplate, sanitizeHexColor, sanitizeRendered } from '@sideline/template-renderer';
-import { Array, Effect, Option, pipe, Schema } from 'effect';
+import { Array, type DateTime, Effect, Option, pipe, Schema } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
@@ -21,6 +21,7 @@ import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRep
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { PersonalEventChannelsRepository } from '~/repositories/PersonalEventChannelsRepository.js';
 import { PersonalEventOverflowCategoriesRepository } from '~/repositories/PersonalEventOverflowCategoriesRepository.js';
+import { SudoSessionsRepository } from '~/repositories/SudoSessionsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
@@ -78,6 +79,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
   Effect.bind('personalChannels', () => PersonalEventChannelsRepository.asEffect()),
   Effect.bind('overflowCategories', () => PersonalEventOverflowCategoriesRepository.asEffect()),
   Effect.bind('events', () => EventsRepository.asEffect()),
+  Effect.bind('sudoSessions', () => SudoSessionsRepository.asEffect()),
   Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
   Effect.map((deps) => {
     const setupNewMember = (
@@ -767,6 +769,91 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     ),
                   ),
                 ),
+            }),
+          ),
+        ),
+
+      'Guild/CheckTeamAdmin': ({
+        guild_id,
+        discord_user_id,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly discord_user_id: Discord.Snowflake;
+      }) =>
+        deps.teams.findByGuildId(guild_id).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.succeed({ team_id: Option.none<Team.TeamId>(), is_admin: false }),
+              onSome: (team) =>
+                deps.members.findMembershipByDiscordAndTeam(discord_user_id, team.id).pipe(
+                  Effect.map(
+                    Option.match({
+                      onNone: () => ({ team_id: Option.some(team.id), is_admin: false }),
+                      onSome: (membership) => ({
+                        team_id: Option.some(team.id),
+                        is_admin: membership.permissions.includes('team:manage'),
+                      }),
+                    }),
+                  ),
+                ),
+            }),
+          ),
+        ),
+
+      'Guild/BeginSudoSession': ({
+        guild_id,
+        discord_user_id,
+        system_channel_id,
+        audit_message_id,
+        started_at,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly discord_user_id: Discord.Snowflake;
+        readonly system_channel_id: Discord.Snowflake;
+        readonly audit_message_id: Discord.Snowflake;
+        readonly started_at: DateTime.Utc;
+      }) =>
+        deps.teams.findByGuildId(guild_id).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => Effect.succeed({}),
+              onSome: (team) =>
+                deps.sudoSessions
+                  .upsert({
+                    team_id: team.id,
+                    discord_user_id,
+                    system_channel_id,
+                    audit_message_id,
+                    started_at,
+                  })
+                  .pipe(Effect.as({})),
+            }),
+          ),
+        ),
+
+      'Guild/EndSudoSession': ({
+        guild_id,
+        discord_user_id,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly discord_user_id: Discord.Snowflake;
+      }) =>
+        deps.teams.findByGuildId(guild_id).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.succeed({
+                  session: Option.none<{
+                    readonly started_at: DateTime.Utc;
+                    readonly system_channel_id: Discord.Snowflake;
+                    readonly audit_message_id: Discord.Snowflake;
+                  }>(),
+                }),
+              onSome: (team) =>
+                deps.sudoSessions
+                  .fetchAndDelete({ team_id: team.id, discord_user_id })
+                  .pipe(Effect.map((session) => ({ session }))),
             }),
           ),
         ),
