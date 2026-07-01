@@ -9,9 +9,14 @@ import { tr } from '~/lib/translations.js';
 interface MemberSummaryHeaderProps {
   player: Roster.RosterPlayer;
   canManageRoles: boolean;
+  isInactive?: boolean;
 }
 
-export function MemberSummaryHeader({ player, canManageRoles }: MemberSummaryHeaderProps) {
+export function MemberSummaryHeader({
+  player,
+  canManageRoles,
+  isInactive = false,
+}: MemberSummaryHeaderProps) {
   const { formatMonthYear } = useFormatDate();
   const displayName = player.displayName;
   const initials = displayName.slice(0, 2).toUpperCase();
@@ -36,6 +41,7 @@ export function MemberSummaryHeader({ player, canManageRoles }: MemberSummaryHea
           {Option.isSome(player.jerseyNumber) ? (
             <span className='text-muted-foreground'>#{player.jerseyNumber.value}</span>
           ) : null}
+          {isInactive ? <Badge variant='outline'>{tr('members_inactiveBadge')}</Badge> : null}
         </div>
         <div className='flex items-center gap-1.5 text-sm text-muted-foreground'>
           <Calendar className='size-4' aria-hidden='true' />
@@ -50,7 +56,6 @@ export function MemberSummaryHeader({ player, canManageRoles }: MemberSummaryHea
         {canManageRoles ? (
           <div className='flex flex-col gap-1 text-sm text-muted-foreground'>
             <p className='font-medium text-foreground'>{tr('members_permissionsTitle')}</p>
-            <p>{player.discordId}</p>
             <div className='flex flex-wrap gap-1'>
               {player.permissions.map((permission) => (
                 <Badge key={permission} variant='secondary'>

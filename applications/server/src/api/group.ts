@@ -4,7 +4,7 @@ import { Array, Effect, Match, Option, pipe, Result } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { SqlClient } from 'effect/unstable/sql';
 import { Api } from '~/api/api.js';
-import { requireMembership, requirePermission } from '~/api/permissions.js';
+import { requireMembership, requirePermission, requireReadAccess } from '~/api/permissions.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
@@ -68,6 +68,50 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                 const provisioningSet = new Set(provisioningIds);
                 return Array.map(
                   list,
+                  (g) =>
+                    new GroupApi.GroupInfo({
+                      groupId: g.id,
+                      teamId: g.team_id,
+                      parentId: g.parent_id,
+                      name: g.name,
+                      emoji: g.emoji,
+                      color: g.color,
+                      memberCount: g.member_count,
+                      discordChannelProvisioning: provisioningSet.has(g.id),
+                    }),
+                );
+              }),
+            ),
+          )
+          .handle('listMemberGroups', ({ params: { teamId, memberId } }) =>
+            Effect.Do.pipe(
+              Effect.bind('membership', () => requireReadAccess(members, teamId, forbidden)),
+              Effect.tap(({ membership }) =>
+                requirePermission(membership, 'member:view', forbidden),
+              ),
+              Effect.bind('_check', () =>
+                members.findRosterMemberByIds(teamId, memberId, { includeInactive: true }).pipe(
+                  Effect.flatMap(
+                    Option.match({
+                      onNone: () => Effect.fail(new GroupApi.MemberNotFound()),
+                      onSome: Effect.succeed,
+                    }),
+                  ),
+                ),
+              ),
+              Effect.bind('memberGroupIds', () => groups.findGroupIdsByMember(memberId)),
+              Effect.bind('list', () => groups.findGroupsByTeamId(teamId)),
+              Effect.let('memberGroups', ({ list, memberGroupIds }) => {
+                const memberGroupIdSet = new Set(memberGroupIds);
+                return list.filter((g) => memberGroupIdSet.has(g.id));
+              }),
+              Effect.bind('provisioningIds', ({ memberGroups }) =>
+                channelSync.hasUnprocessedForGroups(memberGroups.map((g) => g.id)),
+              ),
+              Effect.map(({ memberGroups, provisioningIds }) => {
+                const provisioningSet = new Set(provisioningIds);
+                return Array.map(
+                  memberGroups,
                   (g) =>
                     new GroupApi.GroupInfo({
                       groupId: g.id,

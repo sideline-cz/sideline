@@ -614,3 +614,86 @@ describe('GroupsRepository — findDescendantMembersWithDiscordIdByGroupId', () 
     ),
   );
 });
+
+// ---------------------------------------------------------------------------
+// findGroupIdsByMember — used by deactivateMember/reactivateMember Discord
+// cleanup and by listMemberGroups to scope the group list to a single member.
+// ---------------------------------------------------------------------------
+
+describe('GroupsRepository.findGroupIdsByMember', () => {
+  it.effect('returns only the group ids the member belongs to', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('910000000000000001', 'multi-group-member')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('910606060606060601' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.bind('groupA', ({ team }) => createGroup(team.id, 'Group A')),
+      Effect.bind('groupB', ({ team }) => createGroup(team.id, 'Group B')),
+      // Member is only added to groupA.
+      Effect.tap(({ groupA, member }) => addGroupMember(groupA.id, member.id)),
+      Effect.bind('groupIds', ({ member }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findGroupIdsByMember(member.id)),
+        ),
+      ),
+      Effect.tap(({ groupIds, groupA, groupB }) =>
+        Effect.sync(() => {
+          expect(groupIds).toHaveLength(1);
+          expect(groupIds).toContain(groupA.id);
+          expect(groupIds).not.toContain(groupB.id);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('returns an empty array for a member on no groups', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('910000000000000002', 'groupless-member')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('910606060606060602' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.bind('groupIds', ({ member }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findGroupIdsByMember(member.id)),
+        ),
+      ),
+      Effect.tap(({ groupIds }) =>
+        Effect.sync(() => {
+          expect(groupIds).toHaveLength(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('reflects removal — group id disappears after removeMemberById', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('910000000000000003', 'removed-group-member')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('910606060606060603' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.bind('group', ({ team }) => createGroup(team.id, 'Removable Group')),
+      Effect.tap(({ group, member }) => addGroupMember(group.id, member.id)),
+      Effect.tap(({ group, member }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.removeMemberById(group.id, member.id)),
+        ),
+      ),
+      Effect.bind('groupIds', ({ member }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findGroupIdsByMember(member.id)),
+        ),
+      ),
+      Effect.tap(({ groupIds }) =>
+        Effect.sync(() => {
+          expect(groupIds).toHaveLength(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});

@@ -224,3 +224,94 @@ describe('RostersRepository.findMemberEntriesById', () => {
     ),
   );
 });
+
+// ---------------------------------------------------------------------------
+// findRosterIdsByMember — used by reactivateMember/deactivateMember Discord
+// cleanup and by listMemberRosters to scope the roster list to a single member.
+// ---------------------------------------------------------------------------
+
+describe('RostersRepository.findRosterIdsByMember', () => {
+  it.effect('returns only the roster ids the member belongs to', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('900000000000000001', 'multi-roster-member')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('900606060606060601' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.bind('rosterA', ({ team }) => createRoster(team.id)),
+      Effect.bind('rosterB', ({ team }) => createRoster(team.id)),
+      // Member is only added to rosterA.
+      Effect.tap(({ rosterA, member }) =>
+        RostersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.addMemberById(rosterA.id, member.id)),
+        ),
+      ),
+      Effect.bind('rosterIds', ({ member }) =>
+        RostersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findRosterIdsByMember(member.id)),
+        ),
+      ),
+      Effect.tap(({ rosterIds, rosterA, rosterB }) =>
+        Effect.sync(() => {
+          expect(rosterIds).toHaveLength(1);
+          expect(rosterIds).toContain(rosterA.id);
+          expect(rosterIds).not.toContain(rosterB.id);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('returns an empty array for a member on no rosters', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('900000000000000002', 'rosterless-member')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('900606060606060602' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.bind('rosterIds', ({ member }) =>
+        RostersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findRosterIdsByMember(member.id)),
+        ),
+      ),
+      Effect.tap(({ rosterIds }) =>
+        Effect.sync(() => {
+          expect(rosterIds).toHaveLength(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('reflects removal — roster id disappears after removeMemberById', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('900000000000000003', 'removed-roster-member')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('900606060606060603' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.bind('roster', ({ team }) => createRoster(team.id)),
+      Effect.tap(({ roster, member }) =>
+        RostersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.addMemberById(roster.id, member.id)),
+        ),
+      ),
+      Effect.tap(({ roster, member }) =>
+        RostersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.removeMemberById(roster.id, member.id)),
+        ),
+      ),
+      Effect.bind('rosterIds', ({ member }) =>
+        RostersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findRosterIdsByMember(member.id)),
+        ),
+      ),
+      Effect.tap(({ rosterIds }) =>
+        Effect.sync(() => {
+          expect(rosterIds).toHaveLength(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});

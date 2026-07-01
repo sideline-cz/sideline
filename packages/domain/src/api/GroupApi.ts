@@ -132,6 +132,16 @@ export class GroupApiGroup extends HttpApiGroup.make('group')
     }).middleware(AuthMiddleware),
   )
   .add(
+    HttpApiEndpoint.get('listMemberGroups', '/teams/:teamId/members/:memberId/groups', {
+      success: Schema.Array(GroupInfo),
+      error: [
+        Forbidden.pipe(HttpApiSchema.status(403)),
+        MemberNotFound.pipe(HttpApiSchema.status(404)),
+      ],
+      params: { teamId: TeamId, memberId: TeamMemberId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
     HttpApiEndpoint.post('createGroup', '/teams/:teamId/groups', {
       success: GroupInfo.pipe(HttpApiSchema.status(201)),
       error: [

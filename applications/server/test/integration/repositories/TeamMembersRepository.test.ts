@@ -115,7 +115,7 @@ describe('TeamMembersRepository — findMembershipByIds', () => {
       const team = yield* createTeam('800200000000000000' as Discord.Snowflake, userId);
       const member = yield* addActiveMember(team.id, userId);
       // Deactivate the membership
-      yield* deactivateMember(team.id, (member as any).id);
+      yield* deactivateMember(team.id, member.id);
       const result = yield* TeamMembersRepository.asEffect().pipe(
         Effect.andThen((repo) => repo.findMembershipByIds(team.id, userId)),
       );
@@ -132,7 +132,7 @@ describe('TeamMembersRepository — findMembershipByIds', () => {
         const team = yield* createTeam('800300000000000000' as Discord.Snowflake, userId);
         const member = yield* addActiveMember(team.id, userId);
         // Deactivate the membership
-        yield* deactivateMember(team.id, (member as any).id);
+        yield* deactivateMember(team.id, member.id);
         const result = yield* TeamMembersRepository.asEffect().pipe(
           Effect.andThen((repo) =>
             repo.findMembershipByIds(team.id, userId, { includeInactive: true }),
@@ -152,7 +152,7 @@ describe('TeamMembersRepository — findMembershipByIds', () => {
         const userId = yield* createUser('800000000000000004', 'mbr-inactive-3');
         const team = yield* createTeam('800400000000000000' as Discord.Snowflake, userId);
         const member = yield* addActiveMember(team.id, userId);
-        yield* deactivateMember(team.id, (member as any).id);
+        yield* deactivateMember(team.id, member.id);
         const result = yield* TeamMembersRepository.asEffect().pipe(
           Effect.andThen((repo) =>
             repo.findMembershipByIds(team.id, userId, { includeInactive: false }),
@@ -176,7 +176,7 @@ describe('TeamMembersRepository — findByUser', () => {
       yield* addActiveMember(team1.id, userId);
       const member2 = yield* addActiveMember(team2.id, userId);
       // Deactivate membership in team2
-      yield* deactivateMember(team2.id, (member2 as any).id);
+      yield* deactivateMember(team2.id, member2.id);
       const results = yield* TeamMembersRepository.asEffect().pipe(
         Effect.andThen((repo) => repo.findByUser(userId)),
       );
@@ -194,11 +194,99 @@ describe('TeamMembersRepository — findByUser', () => {
       const userId = yield* createUser('800000000000000011', 'mbr-all-inactive');
       const team = yield* createTeam('800600000000000000' as Discord.Snowflake, userId);
       const member = yield* addActiveMember(team.id, userId);
-      yield* deactivateMember(team.id, (member as any).id);
+      yield* deactivateMember(team.id, member.id);
       const results = yield* TeamMembersRepository.asEffect().pipe(
         Effect.andThen((repo) => repo.findByUser(userId)),
       );
       expect(results).toHaveLength(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// findRosterMemberByIds — includeInactive option
+//
+// Regression coverage for the member-detail-page follow-up: getMember/
+// reactivateMember/listMemberRosters/listMemberGroups all need to look up a
+// DEACTIVATED member by id without the default active-only filter hiding it.
+// ---------------------------------------------------------------------------
+
+describe('TeamMembersRepository — findRosterMemberByIds', () => {
+  it.effect('without includeInactive returns None for a deactivated member', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('800000000000000020', 'roster-inactive-1');
+      const team = yield* createTeam('800700000000000000' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      yield* deactivateMember(team.id, member.id);
+      const result = yield* TeamMembersRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findRosterMemberByIds(team.id, member.id)),
+      );
+      expect(Option.isNone(result)).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'with { includeInactive: true } returns Some with active===false for a deactivated member',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('800000000000000021', 'roster-inactive-2');
+        const team = yield* createTeam('800800000000000000' as Discord.Snowflake, userId);
+        const member = yield* addActiveMember(team.id, userId);
+        yield* deactivateMember(team.id, member.id);
+        const result = yield* TeamMembersRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.findRosterMemberByIds(team.id, member.id, { includeInactive: true }),
+          ),
+        );
+        expect(Option.isSome(result)).toBe(true);
+        const entry = Option.getOrThrow(result);
+        expect(entry.active).toBe(false);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('returns Some with active===true for an active member (default)', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('800000000000000022', 'roster-active-1');
+      const team = yield* createTeam('800900000000000000' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      const result = yield* TeamMembersRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findRosterMemberByIds(team.id, member.id)),
+      );
+      expect(Option.isSome(result)).toBe(true);
+      const entry = Option.getOrThrow(result);
+      expect(entry.active).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// reactivateMember — flips active back to true
+// ---------------------------------------------------------------------------
+
+describe('TeamMembersRepository — reactivateMember', () => {
+  it.effect('flips a deactivated member back to active', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('800000000000000030', 'reactivate-1');
+      const team = yield* createTeam('801000000000000000' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      yield* deactivateMember(team.id, member.id);
+
+      const deactivated = yield* TeamMembersRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.findRosterMemberByIds(team.id, member.id, { includeInactive: true }),
+        ),
+      );
+      expect(Option.getOrThrow(deactivated).active).toBe(false);
+
+      yield* TeamMembersRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.reactivateMember(member.id)),
+      );
+
+      const reactivated = yield* TeamMembersRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findRosterMemberByIds(team.id, member.id)),
+      );
+      expect(Option.isSome(reactivated)).toBe(true);
+      expect(Option.getOrThrow(reactivated).active).toBe(true);
     }).pipe(Effect.provide(TestLayer)),
   );
 });

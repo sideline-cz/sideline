@@ -1,4 +1,13 @@
-import { Auth, type Discord, DisplayName, Roster, type RosterModel } from '@sideline/domain';
+import {
+  Auth,
+  type Discord,
+  DisplayName,
+  type GroupModel,
+  Roster,
+  type RosterModel,
+  type Team,
+  type TeamMember,
+} from '@sideline/domain';
 import { LogicError, Options } from '@sideline/effect-lib';
 import { Array, DateTime, Effect, Match, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
@@ -12,6 +21,7 @@ import {
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
+import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import type { RosterEntry } from '~/repositories/TeamMembersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -50,6 +60,7 @@ const toRosterPlayer = (entry: RosterEntry) =>
       () => entry.username,
     ),
     joinedAt: entry.joined_at,
+    active: entry.active,
   });
 
 type ChannelLike = { readonly channel_id: Discord.Snowflake; readonly name: string };
@@ -112,11 +123,143 @@ const toRosterInfo = (
     discordChannelProvisioning,
   });
 
+// Reconciles the member's Discord roster/group role & channel access with their active state.
+// Called on deactivate ('member_removed' — revoke access) and reactivate ('member_added' —
+// restore access). Mirrors the emit pattern used by addRosterMember/removeRosterMember and
+// addGroupMember/removeGroupMember, including ancestor groups for the group side.
+const emitDiscordCleanupForMember = (
+  deps: {
+    rosters: {
+      findRosterIdsByMember: (
+        memberId: TeamMember.TeamMemberId,
+      ) => Effect.Effect<readonly RosterModel.RosterId[], never>;
+      findRosterById: (
+        rosterId: RosterModel.RosterId,
+      ) => Effect.Effect<Option.Option<RosterModel.Roster>, never>;
+    };
+    groups: {
+      findGroupIdsByMember: (
+        memberId: TeamMember.TeamMemberId,
+      ) => Effect.Effect<readonly GroupModel.GroupId[], never>;
+      findGroupById: (
+        groupId: GroupModel.GroupId,
+      ) => Effect.Effect<Option.Option<{ readonly name: string }>, never>;
+      getAncestors: (
+        groupId: GroupModel.GroupId,
+      ) => Effect.Effect<
+        readonly { readonly id: GroupModel.GroupId; readonly name: string }[],
+        never
+      >;
+    };
+    channelSync: {
+      emitRosterMemberAdded: (
+        teamId: Team.TeamId,
+        rosterId: RosterModel.RosterId,
+        rosterName: string,
+        memberId: TeamMember.TeamMemberId,
+        discordUserId: Option.Option<Discord.Snowflake>,
+      ) => Effect.Effect<void, never>;
+      emitRosterMemberRemoved: (
+        teamId: Team.TeamId,
+        rosterId: RosterModel.RosterId,
+        rosterName: string,
+        memberId: TeamMember.TeamMemberId,
+        discordUserId: Option.Option<Discord.Snowflake>,
+      ) => Effect.Effect<void, never>;
+      emitMemberAdded: (
+        teamId: Team.TeamId,
+        groupId: GroupModel.GroupId,
+        groupName: string,
+        memberId: TeamMember.TeamMemberId,
+        discordUserId: Discord.Snowflake,
+      ) => Effect.Effect<void, never>;
+      emitMemberRemoved: (
+        teamId: Team.TeamId,
+        groupId: GroupModel.GroupId,
+        groupName: string,
+        memberId: TeamMember.TeamMemberId,
+        discordUserId: Discord.Snowflake,
+      ) => Effect.Effect<void, never>;
+    };
+  },
+  teamId: Team.TeamId,
+  memberId: TeamMember.TeamMemberId,
+  discordUserId: Discord.Snowflake,
+  eventKind: 'member_added' | 'member_removed',
+) => {
+  const { rosters, groups, channelSync } = deps;
+  const emitRoster =
+    eventKind === 'member_added'
+      ? channelSync.emitRosterMemberAdded
+      : channelSync.emitRosterMemberRemoved;
+  const emitGroup =
+    eventKind === 'member_added' ? channelSync.emitMemberAdded : channelSync.emitMemberRemoved;
+
+  return Effect.Do.pipe(
+    Effect.bind('rosterIds', () => rosters.findRosterIdsByMember(memberId)),
+    Effect.bind('groupIds', () => groups.findGroupIdsByMember(memberId)),
+    Effect.tap(({ rosterIds }) =>
+      Effect.forEach(
+        rosterIds,
+        (rosterId) =>
+          rosters.findRosterById(rosterId).pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () => Effect.void,
+                onSome: (roster) =>
+                  emitRoster(teamId, rosterId, roster.name, memberId, Option.some(discordUserId)),
+              }),
+            ),
+          ),
+        { concurrency: 'unbounded' },
+      ),
+    ),
+    Effect.tap(({ groupIds }) =>
+      Effect.forEach(
+        groupIds,
+        (groupId) =>
+          groups.findGroupById(groupId).pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () => Effect.void,
+                onSome: (group) =>
+                  Effect.all(
+                    [
+                      emitGroup(teamId, groupId, group.name, memberId, discordUserId),
+                      groups
+                        .getAncestors(groupId)
+                        .pipe(
+                          Effect.flatMap((ancestors) =>
+                            Effect.forEach(ancestors, (ancestor) =>
+                              emitGroup(
+                                teamId,
+                                ancestor.id,
+                                ancestor.name,
+                                memberId,
+                                discordUserId,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                    { concurrency: 'unbounded' },
+                  ),
+              }),
+            ),
+          ),
+        { concurrency: 'unbounded' },
+      ),
+    ),
+    Effect.asVoid,
+  );
+};
+
 export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
   Effect.Do.pipe(
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('users', () => UsersRepository.asEffect()),
     Effect.bind('rosters', () => RostersRepository.asEffect()),
+    Effect.bind('groups', () => GroupsRepository.asEffect()),
     Effect.bind('teams', () => TeamsRepository.asEffect()),
     Effect.bind('discordChannels', () => DiscordChannelsRepository.asEffect()),
     Effect.bind('channelSync', () => ChannelSyncEventsRepository.asEffect()),
@@ -127,6 +270,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
         members,
         users,
         rosters,
+        groups,
         teams,
         discordChannels,
         channelSync,
@@ -155,7 +299,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                 requirePermission(membership, 'member:view', new Roster.Forbidden()),
               ),
               Effect.bind('entry', () =>
-                members.findRosterMemberByIds(teamId, memberId).pipe(
+                members.findRosterMemberByIds(teamId, memberId, { includeInactive: true }).pipe(
                   Effect.flatMap(
                     Option.match({
                       onNone: () => Effect.fail(new Roster.PlayerNotFound()),
@@ -221,6 +365,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                       () => entry.username,
                     ),
                     joinedAt: entry.joined_at,
+                    active: entry.active,
                   }),
               ),
               Effect.catchTag(
@@ -240,7 +385,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
               Effect.tap(({ membership }) =>
                 requirePermission(membership, 'member:remove', new Roster.Forbidden()),
               ),
-              Effect.bind('_check', () =>
+              Effect.bind('member', () =>
                 members.findRosterMemberByIds(teamId, memberId).pipe(
                   Effect.flatMap(
                     Option.match({
@@ -250,12 +395,112 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                   ),
                 ),
               ),
+              Effect.tap(({ currentUser, member }) =>
+                member.user_id === currentUser.id
+                  ? Effect.fail(new Roster.Forbidden())
+                  : Effect.void,
+              ),
               Effect.tap(() => members.deactivateMemberByIds(teamId, memberId)),
+              Effect.tap(({ member }) =>
+                emitDiscordCleanupForMember(
+                  { rosters, groups, channelSync },
+                  teamId,
+                  memberId,
+                  member.discord_id,
+                  'member_removed',
+                ),
+              ),
               Effect.asVoid,
               Effect.catchTag(
                 'NoSuchElementError',
                 LogicError.withMessage(() => 'Failed deactivating roster member — no row returned'),
               ),
+            ),
+          )
+          .handle('reactivateMember', ({ params: { teamId, memberId } }) =>
+            Effect.Do.pipe(
+              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+              Effect.bind('membership', ({ currentUser }) =>
+                requireMembership(members, teamId, currentUser.id, new Roster.Forbidden()),
+              ),
+              Effect.tap(({ membership }) =>
+                requirePermission(membership, 'member:remove', new Roster.Forbidden()),
+              ),
+              // The target member is inactive — `findRosterMemberByIds` (active-filtered) would
+              // self-404 here, so look the member up with `includeInactive: true` instead, and
+              // confirm team ownership ourselves since `reactivateMemberQuery` is team-blind
+              // (`WHERE id = $member_id`, no team scope).
+              Effect.bind('member', () =>
+                members.findRosterMemberByIds(teamId, memberId, { includeInactive: true }).pipe(
+                  Effect.flatMap(
+                    Option.match({
+                      onNone: () => Effect.fail(new Roster.PlayerNotFound()),
+                      onSome: Effect.succeed,
+                    }),
+                  ),
+                ),
+              ),
+              Effect.tap(() => members.reactivateMember(memberId)),
+              Effect.tap(({ member }) =>
+                emitDiscordCleanupForMember(
+                  { rosters, groups, channelSync },
+                  teamId,
+                  memberId,
+                  member.discord_id,
+                  'member_added',
+                ),
+              ),
+              Effect.asVoid,
+              Effect.catchTag(
+                'NoSuchElementError',
+                LogicError.withMessage(() => 'Failed reactivating roster member — no row returned'),
+              ),
+            ),
+          )
+          .handle('listMemberRosters', ({ params: { teamId, memberId } }) =>
+            Effect.Do.pipe(
+              Effect.bind('membership', () =>
+                requireReadAccess(members, teamId, new Roster.Forbidden()),
+              ),
+              Effect.tap(({ membership }) =>
+                requirePermission(membership, 'member:view', new Roster.Forbidden()),
+              ),
+              Effect.bind('_check', () =>
+                members.findRosterMemberByIds(teamId, memberId, { includeInactive: true }).pipe(
+                  Effect.flatMap(
+                    Option.match({
+                      onNone: () => Effect.fail(new Roster.PlayerNotFound()),
+                      onSome: Effect.succeed,
+                    }),
+                  ),
+                ),
+              ),
+              Effect.bind('memberRosterIds', () => rosters.findRosterIdsByMember(memberId)),
+              Effect.bind('rosterList', ({ memberRosterIds }) =>
+                rosters.findByTeamId(teamId).pipe(
+                  Effect.map((all) => {
+                    const memberRosterIdSet = new Set(memberRosterIds);
+                    return all.filter((r) => memberRosterIdSet.has(r.id));
+                  }),
+                ),
+              ),
+              Effect.bind('team', () =>
+                teams
+                  .findById(teamId)
+                  .pipe(Effect.flatMap(Options.toEffect(() => new Roster.Forbidden()))),
+              ),
+              Effect.bind('allChannels', ({ team }) =>
+                discordChannels.findByGuildId(team.guild_id),
+              ),
+              Effect.bind('provisioningIds', ({ rosterList }) =>
+                channelSync.hasUnprocessedForRosters(rosterList.map((r) => r.id)),
+              ),
+              Effect.map(({ rosterList, allChannels, provisioningIds }) => {
+                const provisioningSet = new Set(provisioningIds);
+                return Array.map(rosterList, (r) =>
+                  toRosterInfo(r, r.member_count, allChannels, provisioningSet.has(r.id)),
+                );
+              }),
             ),
           )
           .handle('listRosters', ({ params: { teamId } }) =>

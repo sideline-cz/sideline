@@ -468,6 +468,7 @@ const makeRosterEntry = (memberId: TeamMember.TeamMemberId): RosterEntry =>
     discord_nickname: Option.none(),
     discord_display_name: Option.none(),
     joined_at: '2024-01-01T00:00:00.000Z',
+    active: true,
   });
 
 const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {

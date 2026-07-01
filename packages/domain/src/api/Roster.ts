@@ -33,6 +33,7 @@ export class RosterPlayer extends Schema.Class<RosterPlayer>('RosterPlayer')({
   /** Resolved display name (profile name → Discord nickname → Discord display name → username). */
   displayName: Schema.String,
   joinedAt: Schema.String,
+  active: Schema.Boolean,
 }) {}
 
 export const UpdatePlayerRequest = Schema.Struct({
@@ -147,6 +148,26 @@ export class RosterApiGroup extends HttpApiGroup.make('roster')
   .add(
     HttpApiEndpoint.delete('deactivateMember', '/teams/:teamId/members/:memberId', {
       success: Schema.Void.pipe(HttpApiSchema.status(204)),
+      error: [
+        Forbidden.pipe(HttpApiSchema.status(403)),
+        PlayerNotFound.pipe(HttpApiSchema.status(404)),
+      ],
+      params: { teamId: TeamId, memberId: TeamMemberId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post('reactivateMember', '/teams/:teamId/members/:memberId/reactivate', {
+      success: Schema.Void.pipe(HttpApiSchema.status(204)),
+      error: [
+        Forbidden.pipe(HttpApiSchema.status(403)),
+        PlayerNotFound.pipe(HttpApiSchema.status(404)),
+      ],
+      params: { teamId: TeamId, memberId: TeamMemberId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.get('listMemberRosters', '/teams/:teamId/members/:memberId/rosters', {
+      success: Schema.Array(RosterInfo),
       error: [
         Forbidden.pipe(HttpApiSchema.status(403)),
         PlayerNotFound.pipe(HttpApiSchema.status(404)),

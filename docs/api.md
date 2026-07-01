@@ -625,6 +625,7 @@ Lists all active members of a team with their profile and role information.
 | `avatar` | `string \| null` | Yes | Discord avatar hash |
 | `displayName` | `string` | No | Server-resolved display name. Precedence: profile name → Discord nickname → Discord display name → Discord username. Always non-empty. |
 | `joinedAt` | `string` | No | ISO 8601 UTC timestamp of when the member joined the team (`team_members.joined_at`) |
+| `active` | `boolean` | No | Whether the member is active (`false` for deactivated members) |
 
 **Errors:**
 
@@ -636,7 +637,7 @@ Lists all active members of a team with their profile and role information.
 
 #### `GET /teams/:teamId/members/:memberId`
 
-Returns a single member's details.
+Returns a single member's details. Returns both active and inactive (deactivated) members.
 
 **Auth:** Bearer token (AuthMiddleware)
 **Required Permission:** `roster:view` or `member:view`
@@ -695,7 +696,7 @@ Updates a member's profile fields. All fields are optional.
 
 #### `DELETE /teams/:teamId/members/:memberId`
 
-Deactivates a team member (removes them from active roster).
+Deactivates a team member (removes them from active roster). Also revokes the member's Discord roster/group role and channel access for every roster and group they belong to.
 
 **Auth:** Bearer token (AuthMiddleware)
 **Required Permission:** `member:remove`
@@ -715,6 +716,56 @@ Deactivates a team member (removes them from active roster).
 |---|---|---|
 | `Forbidden` | 403 | Missing `member:remove` permission |
 | `PlayerNotFound` | 404 | Member does not exist |
+
+---
+
+#### `POST /teams/:teamId/members/:memberId/reactivate`
+
+Reactivates a previously deactivated team member. Also restores the member's Discord roster/group role and channel access for every roster and group they belong to.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `member:remove`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `memberId` | `TeamMemberId` (string) | Member ID |
+
+**Response:** `204 No Content`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `Forbidden` | 403 | Missing `member:remove` permission |
+| `PlayerNotFound` | 404 | Member does not exist (active or inactive) in this team |
+
+---
+
+#### `GET /teams/:teamId/members/:memberId/rosters`
+
+Lists the rosters that a member belongs to.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `member:view`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `memberId` | `TeamMemberId` (string) | Member ID |
+
+**Response:** `200 OK` — `RosterInfo[]` (see `GET /teams/:teamId/rosters` for field descriptions)
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `Forbidden` | 403 | Missing `member:view` permission |
+| `PlayerNotFound` | 404 | Member does not exist (active or inactive) in this team |
 
 ---
 
@@ -1037,7 +1088,7 @@ Manages roles and their permission assignments. Roles control what members can d
 | `roster:manage` | Create, edit, and delete rosters; add/remove roster members |
 | `member:view` | View member profiles |
 | `member:edit` | Edit member profiles |
-| `member:remove` | Deactivate members |
+| `member:remove` | Deactivate and reactivate members |
 | `role:view` | View roles and their permissions |
 | `role:manage` | Create, edit, and delete custom roles; assign/unassign roles |
 | `activity-type:create` | Create team-specific activity types |
@@ -1321,6 +1372,31 @@ Lists all groups for a team.
 | Tag | Status | When |
 |---|---|---|
 | `GroupForbidden` | 403 | Not a member of this team |
+
+---
+
+#### `GET /teams/:teamId/members/:memberId/groups`
+
+Lists the groups that a member belongs to.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `member:view`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+| `memberId` | `TeamMemberId` (string) | Member ID |
+
+**Response:** `200 OK` — `GroupInfo[]` (see `GET /teams/:teamId/groups` for field descriptions)
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `GroupForbidden` | 403 | Missing `member:view` permission |
+| `GroupMemberNotFound` | 404 | Member does not exist (active or inactive) in this team |
 
 ---
 

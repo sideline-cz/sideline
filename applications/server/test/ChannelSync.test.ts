@@ -143,6 +143,7 @@ usersMap.set(TEST_ADMIN_ID, testAdmin);
 
 const sessionsStore = new Map<string, Auth.UserId>();
 sessionsStore.set('admin-token', TEST_ADMIN_ID);
+sessionsStore.set('user-token', TEST_USER_ID);
 
 const membersStore = new Map<string, MembershipWithRole>();
 membersStore.set(TEST_MEMBER_ID, {
@@ -326,6 +327,12 @@ const MockGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
   getAncestorIds: () => Effect.succeed([]),
   getAncestors: () => Effect.succeed([]),
   getDescendantMemberIds: () => Effect.succeed([]),
+  findGroupIdsByMember: (memberId: TeamMember.TeamMemberId) =>
+    Effect.succeed(
+      Array.from(groupMembersStore.entries())
+        .filter(([, members]) => members.has(memberId))
+        .map(([groupId]) => groupId as GroupModel.GroupId),
+    ),
 } as any);
 
 const MockDiscordOAuthLayer = Layer.succeed(DiscordOAuth, {
@@ -392,9 +399,14 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   findByTeam: () => Effect.succeed([]),
   findByUser: () => Effect.succeed([]),
   findRosterByTeam: () => Effect.succeed([]),
-  findRosterMemberByIds: (teamId: Team.TeamId, memberId: TeamMember.TeamMemberId) => {
+  findRosterMemberByIds: (
+    teamId: Team.TeamId,
+    memberId: TeamMember.TeamMemberId,
+    options?: { includeInactive?: boolean },
+  ) => {
     const member = membersStore.get(memberId);
-    if (!member || member.team_id !== teamId || !member.active) {
+    const includeInactive = options?.includeInactive === true;
+    if (!member || member.team_id !== teamId || (!member.active && !includeInactive)) {
       return Effect.succeed(Option.none());
     }
     const user = usersMap.get(member.user_id);
@@ -416,6 +428,7 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
           discord_nickname: Option.none(),
           discord_display_name: Option.none(),
           joined_at: '2024-01-01T00:00:00.000Z',
+          active: member.active,
         }),
       ),
     );
@@ -1210,6 +1223,108 @@ describe('Channel Sync Events', () => {
         groupName: 'ForRemoval',
         teamMemberId: TEST_MEMBER_ID,
         discordUserId: '12345',
+      });
+    });
+  });
+
+  describe('GET /teams/:teamId/members/:memberId/groups', () => {
+    it('returns 401 without auth token', async () => {
+      const response = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/groups`),
+      );
+      expect(response.status).toBe(401);
+    });
+
+    it('returns 404 for unknown member', async () => {
+      const unknownMemberId = '00000000-0000-0000-0000-000000000099';
+      const response = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${unknownMemberId}/groups`, {
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(response.status).toBe(404);
+    });
+
+    it('returns only the groups the member belongs to, gated on member:view', async () => {
+      const createResponseA = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/groups`, {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ name: 'MemberGroupA', parentId: null, emoji: null, color: null }),
+        }),
+      );
+      const groupA = await createResponseA.json();
+
+      const createResponseB = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/groups`, {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ name: 'MemberGroupB', parentId: null, emoji: null, color: null }),
+        }),
+      );
+      const groupB = await createResponseB.json();
+
+      // Only add the member to group A.
+      await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/groups/${groupA.groupId}/members`, {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ memberId: TEST_MEMBER_ID }),
+        }),
+      );
+
+      // TEST_MEMBER_ID (user-token) only has 'member:view' — that alone must be sufficient.
+      const response = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/groups`, {
+          headers: { Authorization: 'Bearer user-token' },
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(Array.isArray(body)).toBe(true);
+      const groupIds = body.map((g: { groupId: string }) => g.groupId);
+      expect(groupIds).toContain(groupA.groupId);
+      expect(groupIds).not.toContain(groupB.groupId);
+
+      groupsStore.delete(groupA.groupId);
+      groupsStore.delete(groupB.groupId);
+      groupMembersStore.delete(groupA.groupId);
+      groupMembersStore.delete(groupB.groupId);
+    });
+
+    it('returns 403 when the caller lacks member:view', async () => {
+      // Temporarily strip TEST_MEMBER_ID's permissions.
+      membersStore.set(TEST_MEMBER_ID, {
+        id: TEST_MEMBER_ID,
+        team_id: TEST_TEAM_ID,
+        user_id: TEST_USER_ID,
+        active: true,
+        role_names: [],
+        permissions: [],
+      });
+      const response = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/groups`, {
+          headers: { Authorization: 'Bearer user-token' },
+        }),
+      );
+      expect(response.status).toBe(403);
+      // Restore.
+      membersStore.set(TEST_MEMBER_ID, {
+        id: TEST_MEMBER_ID,
+        team_id: TEST_TEAM_ID,
+        user_id: TEST_USER_ID,
+        active: true,
+        role_names: ['Player'],
+        permissions: ['roster:view', 'member:view'],
       });
     });
   });

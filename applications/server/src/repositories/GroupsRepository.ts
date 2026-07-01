@@ -78,6 +78,10 @@ class GroupMemberWithDiscordRow extends Schema.Class<GroupMemberWithDiscordRow>(
   discord_user_id: Schema.NullOr(Discord.Snowflake),
 }) {}
 
+class GroupIdRow extends Schema.Class<GroupIdRow>('GroupIdRow')({
+  group_id: GroupModel.GroupId,
+}) {}
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -362,6 +366,20 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  const findGroupIdsByMemberQuery = SqlSchema.findAll({
+    Request: TeamMember.TeamMemberId,
+    Result: GroupIdRow,
+    execute: (memberId) => sql`
+      SELECT group_id FROM group_members WHERE team_member_id = ${memberId}
+    `,
+  });
+
+  const findGroupIdsByMember = (memberId: TeamMember.TeamMemberId) =>
+    findGroupIdsByMemberQuery(memberId).pipe(
+      Effect.map((rows) => rows.map((r) => r.group_id)),
+      catchSqlErrors,
+    );
+
   return {
     findGroupsByTeamId,
     findGroupById,
@@ -380,6 +398,7 @@ const make = Effect.gen(function* () {
     getDescendantMemberIds,
     findMembersWithDiscordIdByGroupId,
     findDescendantMembersWithDiscordIdByGroupId,
+    findGroupIdsByMember,
   };
 });
 

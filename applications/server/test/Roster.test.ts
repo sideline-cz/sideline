@@ -1,4 +1,12 @@
-import type { Auth, Discord, Role, RosterModel, Team, TeamMember } from '@sideline/domain';
+import type {
+  Auth,
+  Discord,
+  GroupModel,
+  Role,
+  RosterModel,
+  Team,
+  TeamMember,
+} from '@sideline/domain';
 import { OAuth2Tokens } from 'arctic';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { HttpClient, HttpClientResponse, HttpRouter, HttpServer } from 'effect/unstable/http';
@@ -60,6 +68,8 @@ const TEST_TEAM_ID = '00000000-0000-0000-0000-000000000010' as Team.TeamId;
 const TEST_MEMBER_ID = '00000000-0000-0000-0000-000000000020' as TeamMember.TeamMemberId;
 const TEST_ADMIN_MEMBER_ID = '00000000-0000-0000-0000-000000000021' as TeamMember.TeamMemberId;
 const TEST_ROSTER_ID = '00000000-0000-0000-0000-000000000030' as RosterModel.RosterId;
+const TEST_GROUP_ID = '00000000-0000-0000-0000-000000000050' as GroupModel.GroupId;
+const TEST_GROUP_ANCESTOR_ID = '00000000-0000-0000-0000-000000000051' as GroupModel.GroupId;
 const TEST_PLAYER_ROLE_ID = '00000000-0000-0000-0000-000000000041' as Role.RoleId;
 const ADMIN_PERMISSIONS: readonly Role.Permission[] = [
   'team:manage',
@@ -160,6 +170,7 @@ const buildRosterEntry = (
   userId: Auth.UserId,
   roleNames: readonly string[],
   permissions: readonly Role.Permission[],
+  active = true,
 ): RosterEntry => {
   const user = usersMap.get(userId);
   if (!user) throw new Error(`User ${userId} not found in usersMap`);
@@ -178,6 +189,7 @@ const buildRosterEntry = (
     discord_nickname: Option.none(),
     discord_display_name: Option.none(),
     joined_at: '2024-01-01T00:00:00.000Z',
+    active,
   });
 };
 
@@ -211,6 +223,40 @@ rostersStore.set(TEST_ROSTER_ID, {
 });
 
 const rosterMembersStore = new Map<string, RosterMemberRecord>();
+
+// In-memory group store used to exercise the group/ancestor Discord-cleanup branch of
+// deactivateMember/reactivateMember without needing a real GroupsRepository.
+type GroupRecord = { id: GroupModel.GroupId; name: string };
+
+const groupsStore = new Map<GroupModel.GroupId, GroupRecord>([
+  [TEST_GROUP_ID, { id: TEST_GROUP_ID, name: 'Test Group' }],
+  [TEST_GROUP_ANCESTOR_ID, { id: TEST_GROUP_ANCESTOR_ID, name: 'Test Group Ancestor' }],
+]);
+const groupAncestorsStore = new Map<GroupModel.GroupId, readonly GroupModel.GroupId[]>([
+  [TEST_GROUP_ID, [TEST_GROUP_ANCESTOR_ID]],
+]);
+const groupMembersStore = new Set<string>();
+
+// Tracks Discord cleanup emissions from deactivateMember/reactivateMember so tests can assert
+// that the member-removed/member-added cleanup fired (or didn't) without needing a real Discord bot.
+const channelSyncCalls: {
+  emitMemberAdded: Array<{ groupId: unknown; memberId: unknown }>;
+  emitMemberRemoved: Array<{ groupId: unknown; memberId: unknown }>;
+  emitRosterMemberAdded: Array<{ rosterId: unknown; memberId: unknown }>;
+  emitRosterMemberRemoved: Array<{ rosterId: unknown; memberId: unknown }>;
+} = {
+  emitMemberAdded: [],
+  emitMemberRemoved: [],
+  emitRosterMemberAdded: [],
+  emitRosterMemberRemoved: [],
+};
+
+const resetChannelSyncCalls = () => {
+  channelSyncCalls.emitMemberAdded = [];
+  channelSyncCalls.emitMemberRemoved = [];
+  channelSyncCalls.emitRosterMemberAdded = [];
+  channelSyncCalls.emitRosterMemberRemoved = [];
+};
 
 const MockDiscordOAuthLayer = Layer.succeed(DiscordOAuth, {
   _tag: 'api/DiscordOAuth',
@@ -338,14 +384,25 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
         .filter((m) => m.team_id === teamId && m.active)
         .map((m) => buildRosterEntry(m.id, m.user_id, m.role_names, m.permissions)),
     ),
-  findRosterMemberByIds: (teamId: Team.TeamId, memberId: TeamMember.TeamMemberId) => {
+  findRosterMemberByIds: (
+    teamId: Team.TeamId,
+    memberId: TeamMember.TeamMemberId,
+    options?: { includeInactive?: boolean },
+  ) => {
     const member = membersStore.get(memberId);
-    if (!member || member.team_id !== teamId || !member.active) {
+    const includeInactive = options?.includeInactive === true;
+    if (!member || member.team_id !== teamId || (!member.active && !includeInactive)) {
       return Effect.succeed(Option.none());
     }
     return Effect.succeed(
       Option.some(
-        buildRosterEntry(member.id, member.user_id, member.role_names, member.permissions),
+        buildRosterEntry(
+          member.id,
+          member.user_id,
+          member.role_names,
+          member.permissions,
+          member.active,
+        ),
       ),
     );
   },
@@ -353,6 +410,20 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
     const member = membersStore.get(memberId);
     if (!member || member.team_id !== teamId) return Effect.die(new Error('Member not found'));
     const updated = { ...member, active: false };
+    membersStore.set(memberId, updated);
+    return Effect.succeed({
+      id: updated.id,
+      team_id: updated.team_id,
+      user_id: updated.user_id,
+      active: updated.active,
+      jersey_number: Option.none(),
+      joined_at: DateTime.nowUnsafe(),
+    });
+  },
+  reactivateMember: (memberId: TeamMember.TeamMemberId) => {
+    const member = membersStore.get(memberId);
+    if (!member) return Effect.die(new Error('Member not found'));
+    const updated = { ...member, active: true };
     membersStore.set(memberId, updated);
     return Effect.succeed({
       id: updated.id,
@@ -462,6 +533,12 @@ const MockRostersRepositoryLayer = Layer.succeed(RostersRepository, {
     rosterMembersStore.delete(key);
     return Effect.void;
   },
+  findRosterIdsByMember: (memberId: TeamMember.TeamMemberId) =>
+    Effect.succeed(
+      Array.from(rosterMembersStore.values())
+        .filter((rm) => rm.team_member_id === memberId)
+        .map((rm) => rm.roster_id),
+    ),
 } as any);
 
 const MockTeamInvitesRepositoryLayer = Layer.succeed(TeamInvitesRepository, {
@@ -509,7 +586,8 @@ const MockRolesRepositoryLayer = Layer.succeed(RolesRepository, {
 const MockGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
   _tag: 'api/GroupsRepository',
   findGroupsByTeamId: () => Effect.succeed([]),
-  findGroupById: () => Effect.succeed(Option.none()),
+  findGroupById: (groupId: GroupModel.GroupId) =>
+    Effect.succeed(Option.fromNullishOr(groupsStore.get(groupId))),
   insertGroup: () => Effect.die(new Error('Not implemented')),
   updateGroupById: () => Effect.die(new Error('Not implemented')),
   archiveGroupById: () => Effect.void,
@@ -521,6 +599,19 @@ const MockGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
   getMemberCount: () => Effect.succeed(0),
   getChildren: () => Effect.succeed([]),
   getAncestorIds: () => Effect.succeed([]),
+  getAncestors: (groupId: GroupModel.GroupId) =>
+    Effect.succeed(
+      (groupAncestorsStore.get(groupId) ?? []).flatMap((id) => {
+        const group = groupsStore.get(id);
+        return group ? [group] : [];
+      }),
+    ),
+  findGroupIdsByMember: (memberId: TeamMember.TeamMemberId) =>
+    Effect.succeed(
+      Array.from(groupMembersStore)
+        .filter((key) => key.endsWith(`:${memberId}`))
+        .map((key) => key.split(':')[0] as GroupModel.GroupId),
+    ),
   getDescendantMemberIds: () => Effect.succeed([]),
 } as any);
 
@@ -599,10 +690,37 @@ const MockRoleSyncEventsRepositoryLayer = Layer.succeed(RoleSyncEventsRepository
 const MockChannelSyncEventsRepositoryLayer = Layer.succeed(ChannelSyncEventsRepository, {
   emitChannelCreated: () => Effect.void,
   emitChannelDeleted: () => Effect.void,
-  emitMemberAdded: () => Effect.void,
-  emitMemberRemoved: () => Effect.void,
-  emitRosterMemberAdded: () => Effect.void,
-  emitRosterMemberRemoved: () => Effect.void,
+  emitMemberAdded: (_teamId: unknown, groupId: unknown, _groupName: unknown, memberId: unknown) => {
+    channelSyncCalls.emitMemberAdded.push({ groupId, memberId });
+    return Effect.void;
+  },
+  emitMemberRemoved: (
+    _teamId: unknown,
+    groupId: unknown,
+    _groupName: unknown,
+    memberId: unknown,
+  ) => {
+    channelSyncCalls.emitMemberRemoved.push({ groupId, memberId });
+    return Effect.void;
+  },
+  emitRosterMemberAdded: (
+    _teamId: unknown,
+    rosterId: unknown,
+    _rosterName: unknown,
+    memberId: unknown,
+  ) => {
+    channelSyncCalls.emitRosterMemberAdded.push({ rosterId, memberId });
+    return Effect.void;
+  },
+  emitRosterMemberRemoved: (
+    _teamId: unknown,
+    rosterId: unknown,
+    _rosterName: unknown,
+    memberId: unknown,
+  ) => {
+    channelSyncCalls.emitRosterMemberRemoved.push({ rosterId, memberId });
+    return Effect.void;
+  },
   emitRosterChannelCreated: () => Effect.void,
   emitRosterChannelDeleted: () => Effect.void,
   findUnprocessed: () => Effect.succeed([]),
@@ -1021,6 +1139,243 @@ describe('Members API', () => {
         }),
       );
       expect(response.status).toBe(204);
+    });
+
+    it('flips the member to inactive and emits Discord member-removed cleanup', async () => {
+      // Re-activate the member first
+      membersStore.set(TEST_MEMBER_ID, {
+        id: TEST_MEMBER_ID,
+        team_id: TEST_TEAM_ID,
+        user_id: TEST_USER_ID,
+        active: true,
+        role_names: ['Player'],
+        permissions: PLAYER_PERMISSIONS,
+      });
+      // Seed the member's roster membership explicitly so the cleanup assertion below is
+      // unconditional (no silent skip if the roster-membership tests haven't run yet).
+      rosterMembersStore.set(`${TEST_ROSTER_ID}:${TEST_MEMBER_ID}`, {
+        roster_id: TEST_ROSTER_ID,
+        team_member_id: TEST_MEMBER_ID,
+      });
+      resetChannelSyncCalls();
+      const response = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}`, {
+          method: 'DELETE',
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(response.status).toBe(204);
+      expect(membersStore.get(TEST_MEMBER_ID)?.active).toBe(false);
+      // Regression guard: deactivateMember must reconcile Discord roster access — the member
+      // was seeded onto TEST_ROSTER_ID above, so the cleanup path must emit roster-member-removed.
+      expect(
+        channelSyncCalls.emitRosterMemberRemoved.some((c) => c.memberId === TEST_MEMBER_ID),
+      ).toBe(true);
+
+      rosterMembersStore.delete(`${TEST_ROSTER_ID}:${TEST_MEMBER_ID}`);
+    });
+
+    it('emits group member-removed cleanup for the member group AND its ancestor', async () => {
+      // Re-activate the member first
+      membersStore.set(TEST_MEMBER_ID, {
+        id: TEST_MEMBER_ID,
+        team_id: TEST_TEAM_ID,
+        user_id: TEST_USER_ID,
+        active: true,
+        role_names: ['Player'],
+        permissions: PLAYER_PERMISSIONS,
+      });
+      // Seed the member's group membership — TEST_GROUP_ID has TEST_GROUP_ANCESTOR_ID as an
+      // ancestor (see groupAncestorsStore), so deactivation must emit member-removed for both.
+      groupMembersStore.add(`${TEST_GROUP_ID}:${TEST_MEMBER_ID}`);
+      resetChannelSyncCalls();
+      const response = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}`, {
+          method: 'DELETE',
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(response.status).toBe(204);
+      expect(membersStore.get(TEST_MEMBER_ID)?.active).toBe(false);
+      expect(
+        channelSyncCalls.emitMemberRemoved.some(
+          (c) => c.groupId === TEST_GROUP_ID && c.memberId === TEST_MEMBER_ID,
+        ),
+      ).toBe(true);
+      expect(
+        channelSyncCalls.emitMemberRemoved.some(
+          (c) => c.groupId === TEST_GROUP_ANCESTOR_ID && c.memberId === TEST_MEMBER_ID,
+        ),
+      ).toBe(true);
+
+      groupMembersStore.delete(`${TEST_GROUP_ID}:${TEST_MEMBER_ID}`);
+    });
+
+    it('returns 403 for regular member without member:remove permission', async () => {
+      membersStore.set(TEST_MEMBER_ID, {
+        id: TEST_MEMBER_ID,
+        team_id: TEST_TEAM_ID,
+        user_id: TEST_USER_ID,
+        active: true,
+        role_names: ['Player'],
+        permissions: PLAYER_PERMISSIONS,
+      });
+      const response = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}`, {
+          method: 'DELETE',
+          headers: { Authorization: 'Bearer user-token' },
+        }),
+      );
+      expect(response.status).toBe(403);
+    });
+
+    it('returns 403 when a user with member:remove tries to deactivate their own membership', async () => {
+      membersStore.set(TEST_ADMIN_MEMBER_ID, {
+        id: TEST_ADMIN_MEMBER_ID,
+        team_id: TEST_TEAM_ID,
+        user_id: TEST_ADMIN_ID,
+        active: true,
+        role_names: ['Admin'],
+        permissions: ADMIN_PERMISSIONS,
+      });
+      const response = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_ADMIN_MEMBER_ID}`, {
+          method: 'DELETE',
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(response.status).toBe(403);
+      // Membership must remain untouched — the guard should fail before any mutation.
+      expect(membersStore.get(TEST_ADMIN_MEMBER_ID)?.active).toBe(true);
+    });
+  });
+
+  describe('GET /teams/:teamId/members/:memberId — deactivated member', () => {
+    it('returns 200 (not 404) for a deactivated member, with active:false', async () => {
+      membersStore.set(TEST_MEMBER_ID, {
+        id: TEST_MEMBER_ID,
+        team_id: TEST_TEAM_ID,
+        user_id: TEST_USER_ID,
+        active: false,
+        role_names: ['Player'],
+        permissions: PLAYER_PERMISSIONS,
+      });
+      const response = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}`, {
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.memberId).toBe(TEST_MEMBER_ID);
+      expect(body.active).toBe(false);
+      // Restore active state for subsequent tests
+      membersStore.set(TEST_MEMBER_ID, {
+        id: TEST_MEMBER_ID,
+        team_id: TEST_TEAM_ID,
+        user_id: TEST_USER_ID,
+        active: true,
+        role_names: ['Player'],
+        permissions: PLAYER_PERMISSIONS,
+      });
+    });
+  });
+
+  describe('POST /teams/:teamId/members/:memberId/reactivate', () => {
+    it('returns 401 without auth token', async () => {
+      const response = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/reactivate`, {
+          method: 'POST',
+        }),
+      );
+      expect(response.status).toBe(401);
+    });
+
+    it('returns 403 without member:remove permission', async () => {
+      membersStore.set(TEST_MEMBER_ID, {
+        id: TEST_MEMBER_ID,
+        team_id: TEST_TEAM_ID,
+        user_id: TEST_USER_ID,
+        active: false,
+        role_names: ['Player'],
+        permissions: PLAYER_PERMISSIONS,
+      });
+      const response = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/reactivate`, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer user-token' },
+        }),
+      );
+      expect(response.status).toBe(403);
+    });
+
+    it('returns 404 for a member not in this team / nonexistent', async () => {
+      const unknownMemberId = '00000000-0000-0000-0000-000000000099';
+      const response = await handler(
+        new Request(
+          `http://localhost/teams/${TEST_TEAM_ID}/members/${unknownMemberId}/reactivate`,
+          {
+            method: 'POST',
+            headers: { Authorization: 'Bearer admin-token' },
+          },
+        ),
+      );
+      expect(response.status).toBe(404);
+    });
+
+    it('returns 404 for a member that belongs to a different team', async () => {
+      const otherTeamMemberId = '00000000-0000-0000-0000-000000000077' as TeamMember.TeamMemberId;
+      const otherTeamId = '00000000-0000-0000-0000-000000000098' as Team.TeamId;
+      membersStore.set(otherTeamMemberId, {
+        id: otherTeamMemberId,
+        team_id: otherTeamId,
+        user_id: TEST_USER_ID,
+        active: false,
+        role_names: ['Player'],
+        permissions: PLAYER_PERMISSIONS,
+      });
+      const response = await handler(
+        new Request(
+          `http://localhost/teams/${TEST_TEAM_ID}/members/${otherTeamMemberId}/reactivate`,
+          {
+            method: 'POST',
+            headers: { Authorization: 'Bearer admin-token' },
+          },
+        ),
+      );
+      expect(response.status).toBe(404);
+      membersStore.delete(otherTeamMemberId);
+    });
+
+    it('flips an inactive member back to active without self-404ing, and emits Discord member-added cleanup', async () => {
+      // Deactivate the member first — reactivateMember must look this member up with
+      // includeInactive: true, since the active-filtered lookup would otherwise 404 here.
+      membersStore.set(TEST_MEMBER_ID, {
+        id: TEST_MEMBER_ID,
+        team_id: TEST_TEAM_ID,
+        user_id: TEST_USER_ID,
+        active: false,
+        role_names: ['Player'],
+        permissions: PLAYER_PERMISSIONS,
+      });
+      resetChannelSyncCalls();
+      const response = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/reactivate`, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(response.status).toBe(204);
+      expect(membersStore.get(TEST_MEMBER_ID)?.active).toBe(true);
+
+      const getResponse = await handler(
+        new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}`, {
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(getResponse.status).toBe(200);
+      const body = await getResponse.json();
+      expect(body.active).toBe(true);
     });
   });
 });
@@ -1465,6 +1820,106 @@ describe('Rosters API', () => {
         ),
       );
       expect(response.status).toBe(204);
+    });
+  });
+});
+
+describe('GET /teams/:teamId/members/:memberId/rosters', () => {
+  it('returns 401 without auth token', async () => {
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/rosters`),
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it('returns 403 for non-member', async () => {
+    const nonMemberTeamId = '00000000-0000-0000-0000-000000000099';
+    const response = await handler(
+      new Request(`http://localhost/teams/${nonMemberTeamId}/members/${TEST_MEMBER_ID}/rosters`, {
+        headers: { Authorization: 'Bearer user-token' },
+      }),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it('returns 404 for unknown member', async () => {
+    const unknownMemberId = '00000000-0000-0000-0000-000000000099';
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${unknownMemberId}/rosters`, {
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('returns only the rosters the member belongs to', async () => {
+    membersStore.set(TEST_MEMBER_ID, {
+      id: TEST_MEMBER_ID,
+      team_id: TEST_TEAM_ID,
+      user_id: TEST_USER_ID,
+      active: true,
+      role_names: ['Player'],
+      permissions: PLAYER_PERMISSIONS,
+    });
+    // Create a second roster the member is NOT on.
+    const otherRosterId = '00000000-0000-0000-0000-000000000031' as RosterModel.RosterId;
+    rostersStore.set(otherRosterId, {
+      id: otherRosterId,
+      team_id: TEST_TEAM_ID,
+      name: 'Other Roster',
+      active: true,
+      color: Option.none(),
+      emoji: Option.none(),
+      discord_channel_id: Option.none(),
+      created_at: DateTime.nowUnsafe(),
+    });
+    // Put the member only on TEST_ROSTER_ID.
+    rosterMembersStore.set(`${TEST_ROSTER_ID}:${TEST_MEMBER_ID}`, {
+      roster_id: TEST_ROSTER_ID,
+      team_member_id: TEST_MEMBER_ID,
+    });
+
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/rosters`, {
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(Array.isArray(body)).toBe(true);
+    const rosterIds = body.map((r: { rosterId: string }) => r.rosterId);
+    expect(rosterIds).toContain(TEST_ROSTER_ID);
+    expect(rosterIds).not.toContain(otherRosterId);
+
+    rostersStore.delete(otherRosterId);
+    rosterMembersStore.delete(`${TEST_ROSTER_ID}:${TEST_MEMBER_ID}`);
+  });
+
+  it('is gated on member:view — 403 without it even for a team member', async () => {
+    // Strip the requesting user's own membership permissions (findMembershipByIds matches
+    // by team_id + user_id, so mutating TEST_MEMBER_ID directly affects the "user-token" caller).
+    membersStore.set(TEST_MEMBER_ID, {
+      id: TEST_MEMBER_ID,
+      team_id: TEST_TEAM_ID,
+      user_id: TEST_USER_ID,
+      active: true,
+      role_names: [],
+      permissions: [],
+    });
+    const response = await handler(
+      new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/rosters`, {
+        headers: { Authorization: 'Bearer user-token' },
+      }),
+    );
+    expect(response.status).toBe(403);
+    // Restore the standard player membership used by other tests.
+    membersStore.set(TEST_MEMBER_ID, {
+      id: TEST_MEMBER_ID,
+      team_id: TEST_TEAM_ID,
+      user_id: TEST_USER_ID,
+      active: true,
+      role_names: ['Player'],
+      permissions: PLAYER_PERMISSIONS,
     });
   });
 });

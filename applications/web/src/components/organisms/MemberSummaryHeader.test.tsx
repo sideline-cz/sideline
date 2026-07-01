@@ -30,6 +30,7 @@ vi.mock('~/lib/translations.js', () => ({
     const map: Record<string, string> = {
       members_joinedLabel: 'Joined {date}',
       members_permissionsTitle: 'Permissions',
+      members_inactiveBadge: 'Inactive',
     };
     const template = map[key] ?? key;
     if (!params) return template;
@@ -215,5 +216,21 @@ describe('MemberSummaryHeader', () => {
 
     expect(screen.queryByText('member:view')).toBeNull();
     expect(screen.queryByText('member:edit')).toBeNull();
+  });
+
+  it('isInactive=true → renders an Inactive badge', () => {
+    const player = makePlayer();
+    render(
+      <MemberSummaryHeader player={player as never} canManageRoles={false} isInactive={true} />,
+    );
+
+    expect(screen.getByText('Inactive')).not.toBeNull();
+  });
+
+  it('isInactive=false (or omitted) → no Inactive badge rendered', () => {
+    const player = makePlayer();
+    render(<MemberSummaryHeader player={player as never} canManageRoles={false} />);
+
+    expect(screen.queryByText('Inactive')).toBeNull();
   });
 });

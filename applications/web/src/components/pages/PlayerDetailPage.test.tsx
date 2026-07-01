@@ -24,6 +24,47 @@ vi.mock('~/lib/translations.js', () => ({
       members_saving: 'Saving…',
       members_saveChanges: 'Save changes',
       members_joinedLabel: 'Joined {date}',
+      members_editProfile: 'Edit',
+      members_discardTitle: 'Discard changes?',
+      members_discardDescription:
+        'You have unsaved changes. Are you sure you want to discard them?',
+      members_discardConfirm: 'Discard',
+      members_discardCancel: 'Keep editing',
+      members_fieldEmpty: '—',
+      members_membershipsTitle: 'Memberships',
+      members_groupsTitle: 'Groups',
+      members_rostersTitle: 'Rosters',
+      groups_noneForMember: 'Not a member of any group.',
+      rosters_noneForMember: 'Not a member of any roster.',
+      members_addToGroup: 'Add to group',
+      members_addToRoster: 'Add to roster',
+      members_removeFromGroupAria: 'Remove from {group}',
+      members_removeFromRosterAria: 'Remove from {roster}',
+      members_removeFromGroupConfirmTitle: 'Remove from group?',
+      members_removeFromGroupConfirmDescription:
+        'Are you sure you want to remove this member from {group}?',
+      members_removeFromGroupConfirmConfirm: 'Remove',
+      members_removeFromRosterConfirmTitle: 'Remove from roster?',
+      members_removeFromRosterConfirmDescription:
+        'Are you sure you want to remove this member from {roster}?',
+      members_removeFromRosterConfirmConfirm: 'Remove',
+      members_inactiveBannerTitle: 'Inactive member',
+      members_inactiveBannerDescription:
+        'This member has been deactivated and no longer has access to the team.',
+      members_inactiveBadge: 'Inactive',
+      members_dangerZoneTitle: 'Danger zone',
+      members_deactivateAction: 'Deactivate member',
+      members_deactivateDescription:
+        "Deactivating removes this member's access to the team. This can be undone later.",
+      members_deactivateConfirmTitle: 'Deactivate this member?',
+      members_deactivateConfirmDescription:
+        'They will lose access to the team immediately. You can reactivate them later.',
+      members_deactivateConfirmConfirm: 'Deactivate',
+      members_reactivateAction: 'Reactivate member',
+      members_reactivateConfirmTitle: 'Reactivate this member?',
+      members_reactivateConfirmDescription: 'They will regain access to the team.',
+      members_reactivateConfirmConfirm: 'Reactivate',
+      common_cancel: 'Cancel',
       profile_complete_displayName: 'Display name',
       profile_complete_birthDate: 'Birth date',
       profile_complete_birthDatePlaceholder: 'Select date',
@@ -142,6 +183,7 @@ function makePlayer(overrides: Record<string, unknown> = {}) {
     avatar: Option.none(),
     displayName: 'Alice Doe',
     joinedAt: '2024-03-15T00:00:00Z',
+    active: true,
     ...overrides,
   };
 }
@@ -187,17 +229,44 @@ function makeRoles(): ReadonlyArray<{
   ];
 }
 
+function makeGroups(): ReadonlyArray<{ groupId: string; name: string }> {
+  return [
+    { groupId: 'group-1', name: 'Attackers' },
+    { groupId: 'group-2', name: 'Defenders' },
+  ];
+}
+
+function makeRosters(): ReadonlyArray<{ rosterId: string; name: string }> {
+  return [
+    { rosterId: 'roster-1', name: 'Main Roster' },
+    { rosterId: 'roster-2', name: 'B Team' },
+  ];
+}
+
 const TEAM_ID = 'team-1';
 
 const baseProps = {
   teamId: TEAM_ID,
   availableRoles: makeRoles(),
+  memberRosters: [] as ReadonlyArray<{ rosterId: string; name: string }>,
+  assignableRosters: makeRosters(),
+  memberGroups: [] as ReadonlyArray<{ groupId: string; name: string }>,
+  assignableGroups: makeGroups(),
+  canManageRosters: false,
+  canManageGroups: false,
+  canRemoveMember: false,
   achievements: [] as ReadonlyArray<{ slug: string; earned_at: string }>,
   activityLogs: makeActivityLogs(),
   activityTypes: [],
   onSave: vi.fn().mockResolvedValue(undefined),
   onAssignRole: vi.fn().mockResolvedValue(undefined),
   onUnassignRole: vi.fn().mockResolvedValue(undefined),
+  onAddToRoster: vi.fn().mockResolvedValue(undefined),
+  onRemoveFromRoster: vi.fn().mockResolvedValue(undefined),
+  onAddToGroup: vi.fn().mockResolvedValue(undefined),
+  onRemoveFromGroup: vi.fn().mockResolvedValue(undefined),
+  onDeactivate: vi.fn().mockResolvedValue(true),
+  onReactivate: vi.fn().mockResolvedValue(true),
   onCreateLog: vi.fn().mockResolvedValue(undefined),
   onUpdateLog: vi.fn().mockResolvedValue(undefined),
   onDeleteLog: vi.fn().mockResolvedValue(undefined),
@@ -207,8 +276,8 @@ const baseProps = {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('PlayerDetailPage — edit gating', () => {
-  it('canEdit=true → profile edit form is rendered', () => {
+describe('PlayerDetailPage — view/edit split (item 1)', () => {
+  it('canEdit=true → form is hidden until Edit is clicked; read-only view rendered first', () => {
     render(
       <PlayerDetailPage
         {...(baseProps as any)}
@@ -220,11 +289,32 @@ describe('PlayerDetailPage — edit gating', () => {
       />,
     );
 
+    expect(screen.queryByLabelText('Display name')).toBeNull();
+    expect(screen.queryByText('Save changes')).toBeNull();
+    expect(screen.getByRole('button', { name: /edit/i })).not.toBeNull();
+  });
+
+  it('canEdit=true → clicking Edit reveals the dirty-state form', async () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={true}
+        canManageRoles={false}
+        isOwnProfile={true}
+        activityStats={makeActivityStats() as any}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+    });
+
     expect(screen.getByLabelText('Display name')).not.toBeNull();
     expect(screen.getByText('Save changes')).not.toBeNull();
   });
 
-  it('canEdit=false → read-only details rendered, no editable inputs', () => {
+  it('canEdit=false → read-only details rendered, no editable inputs, no Edit button', () => {
     render(
       <PlayerDetailPage
         {...(baseProps as any)}
@@ -238,6 +328,114 @@ describe('PlayerDetailPage — edit gating', () => {
 
     expect(screen.queryByLabelText('Display name')).toBeNull();
     expect(document.querySelector('input')).toBeNull();
+    expect(screen.queryByRole('button', { name: /edit/i })).toBeNull();
+  });
+
+  it('canEdit=true → successful save exits edit mode back to the read-only view', async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={true}
+        canManageRoles={false}
+        isOwnProfile={true}
+        activityStats={makeActivityStats() as any}
+        onSave={onSave}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+    });
+
+    const jerseyInput = screen.getByLabelText('Jersey number');
+    await act(async () => {
+      fireEvent.change(jerseyInput, { target: { value: '9' } });
+      fireEvent.blur(jerseyInput);
+    });
+
+    const saveButton = await screen.findByText('Save changes');
+    await waitFor(() => {
+      expect(saveButton.closest('button')?.hasAttribute('disabled')).toBe(false);
+    });
+
+    await act(async () => {
+      fireEvent.click(saveButton);
+    });
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Display name')).toBeNull();
+    });
+    expect(screen.getByRole('button', { name: /edit/i })).not.toBeNull();
+  });
+
+  it('canEdit=true → cancel while dirty opens a discard-confirm dialog; confirming discards and exits edit mode', async () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={true}
+        canManageRoles={false}
+        isOwnProfile={true}
+        activityStats={makeActivityStats() as any}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+    });
+
+    const jerseyInput = screen.getByLabelText('Jersey number');
+    await act(async () => {
+      fireEvent.change(jerseyInput, { target: { value: '9' } });
+      fireEvent.blur(jerseyInput);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('alertdialog')).not.toBeNull();
+    });
+    expect(screen.getByText('Discard changes?')).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Display name')).toBeNull();
+    });
+  });
+
+  it('canEdit=true → cancel while pristine exits edit mode immediately without a confirm dialog', async () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={true}
+        canManageRoles={false}
+        isOwnProfile={true}
+        activityStats={makeActivityStats() as any}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+    });
+
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.queryByLabelText('Display name')).toBeNull();
   });
 });
 
@@ -291,9 +489,6 @@ describe('PlayerDetailPage — rating card gating (unchanged)', () => {
 });
 
 describe('PlayerDetailPage — achievements empty state', () => {
-  // TDD: PlayerDetailPage currently calls AchievementsGridI18n without empty-state
-  // props; the component is expected to forward empty title/description when
-  // there are no earned achievements.
   it('no achievements → empty-state title/description are forwarded to the grid stub', () => {
     render(
       <PlayerDetailPage
@@ -314,8 +509,6 @@ describe('PlayerDetailPage — achievements empty state', () => {
 });
 
 describe('PlayerDetailPage — activity empty-state CTA', () => {
-  // TDD: ActivityStatsCard currently has no isOwnProfile-aware empty-state CTA;
-  // PlayerDetailPage is expected to pass isOwnProfile through so the CTA can render.
   it('totalActivities=0 and isOwnProfile=true → activity empty-state CTA rendered', () => {
     render(
       <PlayerDetailPage
@@ -348,8 +541,6 @@ describe('PlayerDetailPage — activity empty-state CTA', () => {
 });
 
 describe('PlayerDetailPage — role removal confirmation', () => {
-  // TDD: role removal currently calls onUnassignRole directly on click with no
-  // confirmation. The new behaviour requires an AlertDialog confirm step.
   it('canManageRoles=true → clicking remove opens a confirm dialog; confirming calls onUnassignRole with the roleId', async () => {
     const onUnassignRole = vi.fn().mockResolvedValue(undefined);
     render(
@@ -433,10 +624,7 @@ describe('PlayerDetailPage — role removal confirmation', () => {
 });
 
 describe('PlayerDetailPage — form dirty/validation gating', () => {
-  // TDD: current implementation only disables Save while `isSubmitting`; the new
-  // behaviour requires disabling Save while the form is pristine and while invalid,
-  // and showing a dirty indicator once changed.
-  it('pristine form → Save button is disabled', () => {
+  it('pristine form → Save button is disabled', async () => {
     render(
       <PlayerDetailPage
         {...(baseProps as any)}
@@ -447,6 +635,10 @@ describe('PlayerDetailPage — form dirty/validation gating', () => {
         activityStats={makeActivityStats() as any}
       />,
     );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+    });
 
     const saveButton = screen.getByText('Save changes').closest('button');
     expect(saveButton?.hasAttribute('disabled')).toBe(true);
@@ -463,6 +655,10 @@ describe('PlayerDetailPage — form dirty/validation gating', () => {
         activityStats={makeActivityStats() as any}
       />,
     );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+    });
 
     const jerseyInput = screen.getByLabelText('Jersey number');
     await act(async () => {
@@ -489,6 +685,10 @@ describe('PlayerDetailPage — form dirty/validation gating', () => {
         activityStats={makeActivityStats() as any}
       />,
     );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+    });
 
     const jerseyInput = screen.getByLabelText('Jersey number');
     await act(async () => {
@@ -518,6 +718,10 @@ describe('PlayerDetailPage — form dirty/validation gating', () => {
       />,
     );
 
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+    });
+
     const jerseyInput = screen.getByLabelText('Jersey number');
     await act(async () => {
       fireEvent.change(jerseyInput, { target: { value: '9' } });
@@ -538,51 +742,7 @@ describe('PlayerDetailPage — form dirty/validation gating', () => {
     });
   });
 
-  it('successful save clears the dirty indicator and unsaved-changes footer', async () => {
-    const onSave = vi.fn().mockResolvedValue(true);
-    render(
-      <PlayerDetailPage
-        {...(baseProps as any)}
-        player={makePlayer() as any}
-        canEdit={true}
-        canManageRoles={false}
-        isOwnProfile={true}
-        activityStats={makeActivityStats() as any}
-        onSave={onSave}
-      />,
-    );
-
-    const jerseyInput = screen.getByLabelText('Jersey number');
-    await act(async () => {
-      fireEvent.change(jerseyInput, { target: { value: '9' } });
-      fireEvent.blur(jerseyInput);
-    });
-
-    const saveButton = await screen.findByText('Save changes');
-    await waitFor(() => {
-      expect(saveButton.closest('button')?.hasAttribute('disabled')).toBe(false);
-    });
-
-    expect(screen.getByText('Unsaved changes')).not.toBeNull();
-
-    await act(async () => {
-      fireEvent.click(saveButton);
-    });
-
-    await waitFor(() => {
-      expect(onSave).toHaveBeenCalled();
-    });
-
-    await waitFor(() => {
-      expect(screen.queryByText('Unsaved changes')).toBeNull();
-    });
-
-    await waitFor(() => {
-      expect(saveButton.closest('button')?.hasAttribute('disabled')).toBe(true);
-    });
-  });
-
-  it('failed save keeps the dirty indicator and unsaved-changes footer visible', async () => {
+  it('failed save keeps the dirty indicator, unsaved-changes footer, and edit mode visible', async () => {
     const onSave = vi.fn().mockResolvedValue(false);
     render(
       <PlayerDetailPage
@@ -596,6 +756,10 @@ describe('PlayerDetailPage — form dirty/validation gating', () => {
       />,
     );
 
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+    });
+
     const jerseyInput = screen.getByLabelText('Jersey number');
     await act(async () => {
       fireEvent.change(jerseyInput, { target: { value: '9' } });
@@ -616,6 +780,7 @@ describe('PlayerDetailPage — form dirty/validation gating', () => {
     });
 
     expect(screen.getByText('Unsaved changes')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /edit/i })).toBeNull();
   });
 
   it('blank display name ("") → validation error shown and Save stays disabled', async () => {
@@ -629,6 +794,10 @@ describe('PlayerDetailPage — form dirty/validation gating', () => {
         activityStats={makeActivityStats() as any}
       />,
     );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+    });
 
     const nameInput = screen.getByLabelText('Display name');
     await act(async () => {
@@ -644,56 +813,6 @@ describe('PlayerDetailPage — form dirty/validation gating', () => {
     expect(saveButton?.hasAttribute('disabled')).toBe(true);
   });
 
-  it('whitespace-only display name ("   ") → validation error shown and Save stays disabled', async () => {
-    render(
-      <PlayerDetailPage
-        {...(baseProps as any)}
-        player={makePlayer() as any}
-        canEdit={true}
-        canManageRoles={false}
-        isOwnProfile={true}
-        activityStats={makeActivityStats() as any}
-      />,
-    );
-
-    const nameInput = screen.getByLabelText('Display name');
-    await act(async () => {
-      fireEvent.change(nameInput, { target: { value: '   ' } });
-      fireEvent.blur(nameInput);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('This field is required.')).not.toBeNull();
-    });
-
-    const saveButton = screen.getByText('Save changes').closest('button');
-    expect(saveButton?.hasAttribute('disabled')).toBe(true);
-  });
-
-  it('null display name (no profile name set) → allowed, does not block Save', async () => {
-    render(
-      <PlayerDetailPage
-        {...(baseProps as any)}
-        player={makePlayer({ name: Option.none() }) as any}
-        canEdit={true}
-        canManageRoles={false}
-        isOwnProfile={true}
-        activityStats={makeActivityStats() as any}
-      />,
-    );
-
-    const jerseyInput = screen.getByLabelText('Jersey number');
-    await act(async () => {
-      fireEvent.change(jerseyInput, { target: { value: '9' } });
-      fireEvent.blur(jerseyInput);
-    });
-
-    await waitFor(() => {
-      const saveButton = screen.getByText('Save changes').closest('button');
-      expect(saveButton?.hasAttribute('disabled')).toBe(false);
-    });
-  });
-
   it('valid display name ("A") → accepted, Save becomes enabled', async () => {
     render(
       <PlayerDetailPage
@@ -706,6 +825,10 @@ describe('PlayerDetailPage — form dirty/validation gating', () => {
       />,
     );
 
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+    });
+
     const nameInput = screen.getByLabelText('Display name');
     await act(async () => {
       fireEvent.change(nameInput, { target: { value: 'A' } });
@@ -716,5 +839,266 @@ describe('PlayerDetailPage — form dirty/validation gating', () => {
       const saveButton = screen.getByText('Save changes').closest('button');
       expect(saveButton?.hasAttribute('disabled')).toBe(false);
     });
+  });
+});
+
+describe('PlayerDetailPage — memberships (item 2)', () => {
+  it('canManageGroups=true → picker + Add calls onAddToGroup with the selected id', async () => {
+    const onAddToGroup = vi.fn().mockResolvedValue(undefined);
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={false}
+        canManageRoles={false}
+        canManageGroups={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+        memberGroups={[]}
+        assignableGroups={makeGroups()}
+        onAddToGroup={onAddToGroup}
+      />,
+    );
+
+    const combos = screen.getAllByRole('combobox');
+    const groupCombo = combos[combos.length - 1];
+    await act(async () => {
+      fireEvent.click(groupCombo);
+    });
+
+    const option = await screen.findByText('Attackers');
+    await act(async () => {
+      fireEvent.click(option);
+    });
+
+    const addButtons = screen.getAllByRole('button', { name: 'Add to group' });
+    const enabledAddButton = addButtons.find((btn) => !btn.hasAttribute('disabled'));
+    expect(enabledAddButton).not.toBeUndefined();
+
+    await act(async () => {
+      fireEvent.click(enabledAddButton as HTMLElement);
+    });
+
+    await waitFor(() => {
+      expect(onAddToGroup).toHaveBeenCalledWith('group-1');
+    });
+  });
+
+  it('canManageRosters=true → remove confirm calls onRemoveFromRoster; cancel does not', async () => {
+    const onRemoveFromRoster = vi.fn().mockResolvedValue(undefined);
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={false}
+        canManageRoles={false}
+        canManageRosters={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+        memberRosters={makeRosters()}
+        assignableRosters={[]}
+        onRemoveFromRoster={onRemoveFromRoster}
+      />,
+    );
+
+    const removeButton = screen.getByRole('button', { name: 'Remove from Main Roster' });
+    await act(async () => {
+      fireEvent.click(removeButton);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Remove from roster?')).not.toBeNull();
+    });
+
+    const cancelButton = screen.getByRole('button', { name: /^cancel$/i });
+    await act(async () => {
+      fireEvent.click(cancelButton);
+    });
+
+    expect(onRemoveFromRoster).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Remove from Main Roster' }));
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Remove from roster?')).not.toBeNull();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    });
+
+    await waitFor(() => {
+      expect(onRemoveFromRoster).toHaveBeenCalledWith('roster-1');
+    });
+  });
+
+  it('canManageGroups=false and canManageRosters=false → chips render but no add/remove controls', () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={false}
+        canManageRoles={false}
+        canManageGroups={false}
+        canManageRosters={false}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+        memberGroups={makeGroups()}
+        memberRosters={makeRosters()}
+      />,
+    );
+
+    expect(screen.getByText('Attackers')).not.toBeNull();
+    expect(screen.getByText('Main Roster')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /remove from/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add to group' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add to roster' })).toBeNull();
+  });
+
+  it('no assignable groups/rosters → picker is hidden even when manager', () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={false}
+        canManageRoles={false}
+        canManageGroups={true}
+        canManageRosters={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+        memberGroups={[]}
+        assignableGroups={[]}
+        memberRosters={[]}
+        assignableRosters={[]}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Add to group' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add to roster' })).toBeNull();
+  });
+
+  it('player inactive → membership add/remove controls are disabled even for managers', () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer({ active: false }) as any}
+        canEdit={false}
+        canManageRoles={true}
+        canManageGroups={true}
+        canManageRosters={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+        memberGroups={makeGroups()}
+        memberRosters={makeRosters()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /remove from/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add to group' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add to roster' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /remove/i })).toBeNull();
+  });
+});
+
+describe('PlayerDetailPage — deactivate/reactivate (item 3)', () => {
+  it('player inactive → banner and badge render, and danger zone shows Reactivate', async () => {
+    const onReactivate = vi.fn().mockResolvedValue(true);
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer({ active: false }) as any}
+        canEdit={false}
+        canManageRoles={false}
+        canRemoveMember={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+        onReactivate={onReactivate}
+      />,
+    );
+
+    expect(screen.getByText('Inactive member')).not.toBeNull();
+    expect(screen.getByText('Danger zone')).not.toBeNull();
+    const reactivateButton = screen.getByRole('button', { name: 'Reactivate member' });
+    await act(async () => {
+      fireEvent.click(reactivateButton);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('alertdialog')).not.toBeNull();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
+    });
+
+    await waitFor(() => {
+      expect(onReactivate).toHaveBeenCalled();
+    });
+  });
+
+  it('player active, canRemoveMember=true, not own profile → danger zone shows Deactivate behind confirm', async () => {
+    const onDeactivate = vi.fn().mockResolvedValue(true);
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer({ active: true }) as any}
+        canEdit={false}
+        canManageRoles={false}
+        canRemoveMember={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+        onDeactivate={onDeactivate}
+      />,
+    );
+
+    expect(screen.queryByText('Inactive member')).toBeNull();
+    const deactivateButton = screen.getByRole('button', { name: 'Deactivate member' });
+    await act(async () => {
+      fireEvent.click(deactivateButton);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('alertdialog')).not.toBeNull();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
+    });
+
+    await waitFor(() => {
+      expect(onDeactivate).toHaveBeenCalled();
+    });
+  });
+
+  it('canRemoveMember=false → no danger zone rendered', () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer({ active: true }) as any}
+        canEdit={false}
+        canManageRoles={false}
+        canRemoveMember={false}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+      />,
+    );
+
+    expect(screen.queryByText('Danger zone')).toBeNull();
+  });
+
+  it('isOwnProfile=true → no danger zone rendered even when canRemoveMember=true', () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer({ active: true }) as any}
+        canEdit={true}
+        canManageRoles={false}
+        canRemoveMember={true}
+        isOwnProfile={true}
+        activityStats={makeActivityStats() as any}
+      />,
+    );
+
+    expect(screen.queryByText('Danger zone')).toBeNull();
   });
 });

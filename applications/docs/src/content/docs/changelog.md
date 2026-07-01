@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-07-01 — Manage group/roster memberships and deactivate members from the member page
+
+The member detail page (**Team → Members → a member**) now supports full member lifecycle management for captains and admins.
+
+- The profile card now has a clear **view/edit toggle** — click the edit icon to switch to the editable form, or **Cancel** to discard changes and return to the read-only view.
+- A new **Memberships** card lets you add or remove the member's **groups** and **rosters** directly from their profile, without navigating to each group or roster individually.
+- A **Danger zone** section (visible to admins with permission to remove members) lets you **deactivate** a member, and **reactivate** them later. Deactivating a member also removes their Discord roster/group role and channel access; reactivating restores it.
+- API integrators: `RosterPlayer` now includes an `active` field on `GET /teams/{teamId}/members`, `GET /teams/{teamId}/members/{memberId}`, and `PATCH /teams/{teamId}/members/{memberId}`. `GET /teams/{teamId}/members/{memberId}` now also returns deactivated members. New endpoints: `POST /teams/{teamId}/members/{memberId}/reactivate`, `GET /teams/{teamId}/members/{memberId}/rosters`, and `GET /teams/{teamId}/members/{memberId}/groups`.
+
 ## 2026-07-01 — Redesigned member detail page
 
 The member detail page (**Team → Members → a member**) has a new card-based layout that's easier to scan, especially on mobile.
