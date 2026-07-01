@@ -142,7 +142,7 @@ export const provisionPersonalChannels = (guildId: DiscordSchemas.Snowflake) =>
                               }),
                             ),
                             // Fetch the base category name so the overflow category
-                            // gets a consistent label (e.g. "personal-events (2)").
+                            // reuses the exact same name as the base category (no suffix).
                             Effect.let('baseCategoryName', () => 'personal-events' as string),
                             Effect.bind('resolvedBaseName', ({ rest, baseCategoryName }) =>
                               rest.getChannel(categoryId).pipe(
@@ -157,18 +157,15 @@ export const provisionPersonalChannels = (guildId: DiscordSchemas.Snowflake) =>
                                 ),
                               ),
                             ),
-                            Effect.bind(
-                              'overflowCategory',
-                              ({ rest, allocation, resolvedBaseName }) => {
-                                const overflowName = `${resolvedBaseName} (${allocation.sequence + 1})`;
-                                return rest
-                                  .createGuildChannel(guildId, {
-                                    name: overflowName,
-                                    type: Discord.ChannelTypes.GUILD_CATEGORY,
-                                  })
-                                  .pipe(Effect.retry(retryPolicy));
-                              },
-                            ),
+                            Effect.bind('overflowCategory', ({ rest, resolvedBaseName }) => {
+                              const overflowName = resolvedBaseName;
+                              return rest
+                                .createGuildChannel(guildId, {
+                                  name: overflowName,
+                                  type: Discord.ChannelTypes.GUILD_CATEGORY,
+                                })
+                                .pipe(Effect.retry(retryPolicy));
+                            }),
                             Effect.tap(({ allocation, overflowCategory }) =>
                               rpc['Guild/SavePersonalOverflowCategoryId']({
                                 team_id: member.team_id,
