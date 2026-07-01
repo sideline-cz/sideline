@@ -33,7 +33,7 @@ export class SilentClientError extends Data.TaggedError('SilentClientError')<{
   readonly message: string;
 }> {}
 
-type Client = Effect.Success<typeof client>;
+export type Client = Effect.Success<typeof client>;
 
 export class ApiClient extends ServiceMap.Service<ApiClient, Client>()('ApiClient') {}
 

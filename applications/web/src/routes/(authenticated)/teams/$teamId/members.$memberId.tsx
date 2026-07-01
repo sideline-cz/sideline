@@ -14,6 +14,7 @@ import { Effect, Option, Schema } from 'effect';
 import React from 'react';
 import type { PlayerEditValues } from '~/components/pages/PlayerDetailPage';
 import { PlayerDetailPage } from '~/components/pages/PlayerDetailPage';
+import type { Client } from '~/lib/runtime';
 import { ApiClient, ClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
@@ -30,7 +31,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$me
             const myPermissions =
               myTeams.find((t: Auth.UserTeam) => t.teamId === params.teamId)?.permissions ?? [];
             const canEdit = myPermissions.includes('member:edit');
-            const canManageRosters = myPermissions.includes('roster:view');
+            const canViewRosters = myPermissions.includes('roster:view');
             const canManageGroups = myPermissions.includes('group:manage');
             return Effect.all({
               player: api.roster.getMember({ params: { teamId, memberId } }),
@@ -50,7 +51,7 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$me
                     Effect.catch(() => Effect.succeed(undefined)),
                   )
                 : Effect.succeed(undefined),
-              rosterList: canManageRosters
+              rosterList: canViewRosters
                 ? api.roster.listRosters({ params: { teamId } })
                 : Effect.succeed(new Roster.RosterListResponse({ canManage: false, rosters: [] })),
               memberRosters: api.roster.listMemberRosters({ params: { teamId, memberId } }),
@@ -114,6 +115,29 @@ function MemberDetailRoute() {
   const canManageGroups = myPermissions.includes('group:manage');
   const canRemoveMember = myPermissions.includes('member:remove');
 
+  // Shared shape for the mutation handlers below: run an API call through the Effect
+  // runtime, map failures to a ClientError with the given message, show a success toast,
+  // and invalidate the route loader data on success. Returns whether the call succeeded.
+  const runMutation = React.useCallback(
+    async (options: {
+      readonly apiCall: (api: Client) => Effect.Effect<unknown, unknown>;
+      readonly errorMessage: string;
+      readonly successMessage: string;
+    }): Promise<boolean> => {
+      const result = await ApiClient.asEffect().pipe(
+        Effect.flatMap(options.apiCall),
+        Effect.mapError(() => ClientError.make(options.errorMessage)),
+        run({ success: options.successMessage }),
+      );
+      if (Option.isSome(result)) {
+        router.invalidate();
+        return true;
+      }
+      return false;
+    },
+    [run, router],
+  );
+
   const handleSave = React.useCallback(
     async (values: PlayerEditValues) => {
       const result = await ApiClient.asEffect().pipe(
@@ -142,64 +166,52 @@ function MemberDetailRoute() {
 
   const handleAssignRole = React.useCallback(
     async (roleId: string) => {
-      const result = await ApiClient.asEffect().pipe(
-        Effect.flatMap((api) =>
+      await runMutation({
+        apiCall: (api) =>
           api.role.assignRole({
             params: { teamId, memberId },
             payload: { roleId: Schema.decodeSync(Role.RoleId)(roleId) },
           }),
-        ),
-        Effect.mapError(() => ClientError.make(tr('roles_assignFailed'))),
-        run({ success: tr('role_roleAssigned') }),
-      );
-      if (Option.isSome(result)) {
-        router.invalidate();
-      }
+        errorMessage: tr('roles_assignFailed'),
+        successMessage: tr('role_roleAssigned'),
+      });
     },
-    [teamId, memberId, run, router],
+    [teamId, memberId, runMutation],
   );
 
   const handleUnassignRole = React.useCallback(
     async (roleId: string) => {
-      const result = await ApiClient.asEffect().pipe(
-        Effect.flatMap((api) =>
+      await runMutation({
+        apiCall: (api) =>
           api.role.unassignRole({
             params: { teamId, memberId, roleId: Schema.decodeSync(Role.RoleId)(roleId) },
           }),
-        ),
-        Effect.mapError(() => ClientError.make(tr('roles_unassignFailed'))),
-        run({ success: tr('role_roleUnassigned') }),
-      );
-      if (Option.isSome(result)) {
-        router.invalidate();
-      }
+        errorMessage: tr('roles_unassignFailed'),
+        successMessage: tr('role_roleUnassigned'),
+      });
     },
-    [teamId, memberId, run, router],
+    [teamId, memberId, runMutation],
   );
 
   const handleAddToRoster = React.useCallback(
     async (rosterIdRaw: string) => {
-      const result = await ApiClient.asEffect().pipe(
-        Effect.flatMap((api) =>
+      await runMutation({
+        apiCall: (api) =>
           api.roster.addRosterMember({
             params: { teamId, rosterId: Schema.decodeSync(RosterModel.RosterId)(rosterIdRaw) },
             payload: { memberId },
           }),
-        ),
-        Effect.mapError(() => ClientError.make(tr('roster_updateFailed'))),
-        run({ success: tr('roster_memberAdded') }),
-      );
-      if (Option.isSome(result)) {
-        router.invalidate();
-      }
+        errorMessage: tr('roster_updateFailed'),
+        successMessage: tr('roster_memberAdded'),
+      });
     },
-    [teamId, memberId, run, router],
+    [teamId, memberId, runMutation],
   );
 
   const handleRemoveFromRoster = React.useCallback(
     async (rosterIdRaw: string) => {
-      const result = await ApiClient.asEffect().pipe(
-        Effect.flatMap((api) =>
+      await runMutation({
+        apiCall: (api) =>
           api.roster.removeRosterMember({
             params: {
               teamId,
@@ -207,40 +219,32 @@ function MemberDetailRoute() {
               memberId,
             },
           }),
-        ),
-        Effect.mapError(() => ClientError.make(tr('roster_updateFailed'))),
-        run({ success: tr('roster_memberRemoved') }),
-      );
-      if (Option.isSome(result)) {
-        router.invalidate();
-      }
+        errorMessage: tr('roster_updateFailed'),
+        successMessage: tr('roster_memberRemoved'),
+      });
     },
-    [teamId, memberId, run, router],
+    [teamId, memberId, runMutation],
   );
 
   const handleAddToGroup = React.useCallback(
     async (groupIdRaw: string) => {
-      const result = await ApiClient.asEffect().pipe(
-        Effect.flatMap((api) =>
+      await runMutation({
+        apiCall: (api) =>
           api.group.addGroupMember({
             params: { teamId, groupId: Schema.decodeSync(GroupModel.GroupId)(groupIdRaw) },
             payload: { memberId },
           }),
-        ),
-        Effect.mapError(() => ClientError.make(tr('group_updateFailed'))),
-        run({ success: tr('group_memberAdded') }),
-      );
-      if (Option.isSome(result)) {
-        router.invalidate();
-      }
+        errorMessage: tr('group_updateFailed'),
+        successMessage: tr('group_memberAdded'),
+      });
     },
-    [teamId, memberId, run, router],
+    [teamId, memberId, runMutation],
   );
 
   const handleRemoveFromGroup = React.useCallback(
     async (groupIdRaw: string) => {
-      const result = await ApiClient.asEffect().pipe(
-        Effect.flatMap((api) =>
+      await runMutation({
+        apiCall: (api) =>
           api.group.removeGroupMember({
             params: {
               teamId,
@@ -248,42 +252,32 @@ function MemberDetailRoute() {
               memberId,
             },
           }),
-        ),
-        Effect.mapError(() => ClientError.make(tr('group_updateFailed'))),
-        run({ success: tr('group_memberRemoved') }),
-      );
-      if (Option.isSome(result)) {
-        router.invalidate();
-      }
+        errorMessage: tr('group_updateFailed'),
+        successMessage: tr('group_memberRemoved'),
+      });
     },
-    [teamId, memberId, run, router],
+    [teamId, memberId, runMutation],
   );
 
-  const handleDeactivate = React.useCallback(async () => {
-    const result = await ApiClient.asEffect().pipe(
-      Effect.flatMap((api) => api.roster.deactivateMember({ params: { teamId, memberId } })),
-      Effect.mapError(() => ClientError.make(tr('members_deactivateFailed'))),
-      run({ success: tr('members_deactivated') }),
-    );
-    if (Option.isSome(result)) {
-      router.invalidate();
-      return true;
-    }
-    return false;
-  }, [teamId, memberId, run, router]);
+  const handleDeactivate = React.useCallback(
+    () =>
+      runMutation({
+        apiCall: (api) => api.roster.deactivateMember({ params: { teamId, memberId } }),
+        errorMessage: tr('members_deactivateFailed'),
+        successMessage: tr('members_deactivated'),
+      }),
+    [teamId, memberId, runMutation],
+  );
 
-  const handleReactivate = React.useCallback(async () => {
-    const result = await ApiClient.asEffect().pipe(
-      Effect.flatMap((api) => api.roster.reactivateMember({ params: { teamId, memberId } })),
-      Effect.mapError(() => ClientError.make(tr('members_reactivateFailed'))),
-      run({ success: tr('members_reactivated') }),
-    );
-    if (Option.isSome(result)) {
-      router.invalidate();
-      return true;
-    }
-    return false;
-  }, [teamId, memberId, run, router]);
+  const handleReactivate = React.useCallback(
+    () =>
+      runMutation({
+        apiCall: (api) => api.roster.reactivateMember({ params: { teamId, memberId } }),
+        errorMessage: tr('members_reactivateFailed'),
+        successMessage: tr('members_reactivated'),
+      }),
+    [teamId, memberId, runMutation],
+  );
 
   const handleCreateLog = React.useCallback(
     async (input: {
