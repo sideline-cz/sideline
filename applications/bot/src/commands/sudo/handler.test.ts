@@ -4,7 +4,7 @@ import * as m from '@sideline/i18n/messages';
 import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
 import { Interaction } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
-import { Effect, Layer } from 'effect';
+import { DateTime, Effect, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { sudoHandler } from '~/commands/sudo/handler.js';
 import { SUDO_ROLE_NAME } from '~/rest/roles/ensureSudoRole.js';
@@ -18,6 +18,7 @@ const GUILD_ID = '900000000000000001';
 const INVOKER_ID = '900000000000000030';
 const SUDO_ROLE_ID = '900000000000000099';
 const SYSTEM_CHANNEL_ID = '900000000000000077';
+const AUDIT_MESSAGE_ID = '900000000000000088';
 
 // ---------------------------------------------------------------------------
 // Discord REST stub helpers
@@ -30,6 +31,7 @@ interface RestStubOptions {
   deleteGuildMemberRole?: ReturnType<typeof vi.fn>;
   getGuild?: ReturnType<typeof vi.fn>;
   createMessage?: ReturnType<typeof vi.fn>;
+  updateMessage?: ReturnType<typeof vi.fn>;
   updateOriginalWebhookMessage?: ReturnType<typeof vi.fn>;
 }
 
@@ -48,7 +50,9 @@ const makeRestStub = (options: RestStubOptions = {}) => {
     vi.fn(() =>
       Effect.succeed({ system_channel_id: SYSTEM_CHANNEL_ID, preferred_locale: 'en-US' }),
     );
-  const createMessage = options.createMessage ?? vi.fn(() => Effect.succeed(undefined));
+  const createMessage =
+    options.createMessage ?? vi.fn(() => Effect.succeed({ id: AUDIT_MESSAGE_ID }));
+  const updateMessage = options.updateMessage ?? vi.fn(() => Effect.succeed(undefined));
   const updateOriginalWebhookMessage =
     options.updateOriginalWebhookMessage ?? vi.fn(() => Effect.succeed(undefined));
 
@@ -60,6 +64,7 @@ const makeRestStub = (options: RestStubOptions = {}) => {
       if (prop === 'deleteGuildMemberRole') return deleteGuildMemberRole;
       if (prop === 'getGuild') return getGuild;
       if (prop === 'createMessage') return createMessage;
+      if (prop === 'updateMessage') return updateMessage;
       if (prop === 'updateOriginalWebhookMessage') return updateOriginalWebhookMessage;
       return () => Effect.succeed(undefined);
     },
@@ -74,6 +79,7 @@ const makeRestStub = (options: RestStubOptions = {}) => {
     deleteGuildMemberRole,
     getGuild,
     createMessage,
+    updateMessage,
     updateOriginalWebhookMessage,
   };
 };
@@ -84,12 +90,19 @@ const makeRestStub = (options: RestStubOptions = {}) => {
 
 interface SyncRpcOptions {
   'Guild/CheckTeamAdmin'?: ReturnType<typeof vi.fn>;
+  'Guild/BeginSudoSession'?: ReturnType<typeof vi.fn>;
+  'Guild/EndSudoSession'?: ReturnType<typeof vi.fn>;
 }
 
 const makeSyncRpcStub = (options: SyncRpcOptions = {}) => {
   const defaultCheckTeamAdmin = vi.fn(() =>
     Effect.succeed({ team_id: { _tag: 'Some', value: 'team-1' }, is_admin: true }),
   );
+  const defaultBeginSudoSession = vi.fn(() => Effect.succeed({}));
+  const defaultEndSudoSession = vi.fn(() => Effect.succeed({ session: { _tag: 'None' } }));
+
+  const beginSudoSession = options['Guild/BeginSudoSession'] ?? defaultBeginSudoSession;
+  const endSudoSession = options['Guild/EndSudoSession'] ?? defaultEndSudoSession;
 
   const rpc = new Proxy({} as any, {
     get: (_target, prop: string) => {
@@ -97,6 +110,8 @@ const makeSyncRpcStub = (options: SyncRpcOptions = {}) => {
       if (prop === 'Guild/CheckTeamAdmin') {
         return options['Guild/CheckTeamAdmin'] ?? defaultCheckTeamAdmin;
       }
+      if (prop === 'Guild/BeginSudoSession') return beginSudoSession;
+      if (prop === 'Guild/EndSudoSession') return endSudoSession;
       return () => Effect.succeed(undefined);
     },
   });
@@ -105,6 +120,8 @@ const makeSyncRpcStub = (options: SyncRpcOptions = {}) => {
   return {
     layer,
     checkTeamAdmin: options['Guild/CheckTeamAdmin'] ?? defaultCheckTeamAdmin,
+    beginSudoSession,
+    endSudoSession,
   };
 };
 
@@ -221,6 +238,20 @@ describe('sudoHandler', () => {
     const createPayload = JSON.stringify(createArgs);
     expect(createPayload).toContain(`sudo-leave:${INVOKER_ID}`);
 
+    // BeginSudoSession is called after createMessage resolves, with the created
+    // message's id and a started_at.
+    expect(rpc.beginSudoSession).toHaveBeenCalledTimes(1);
+    const beginArgs = rpc.beginSudoSession.mock.calls[0] as unknown[];
+    expect(beginArgs[0]).toEqual(
+      expect.objectContaining({
+        guild_id: GUILD_ID,
+        discord_user_id: INVOKER_ID,
+        system_channel_id: SYSTEM_CHANNEL_ID,
+        audit_message_id: AUDIT_MESSAGE_ID,
+      }),
+    );
+    expect((beginArgs[0] as { started_at?: unknown }).started_at).toBeDefined();
+
     expect(rest.updateOriginalWebhookMessage).toHaveBeenCalled();
     const webhookPayload = JSON.stringify(rest.updateOriginalWebhookMessage.mock.calls[0]);
     expect(webhookPayload).toContain(m.bot_sudo_entered({}, { locale: 'en' }));
@@ -243,7 +274,7 @@ describe('sudoHandler', () => {
     expect(rest.createMessage).toHaveBeenCalled();
   });
 
-  it('admin, already elevated → revokes role, ephemeral left, no audit message posted', async () => {
+  it('admin, already elevated → revokes role, ends the session, no audit message posted directly via createMessage', async () => {
     const rest = makeRestStub();
     const rpc = makeSyncRpcStub({ 'Guild/CheckTeamAdmin': adminResult(true) });
 
@@ -254,9 +285,153 @@ describe('sudoHandler', () => {
     expect(rest.addGuildMemberRole).not.toHaveBeenCalled();
     expect(rest.createMessage).not.toHaveBeenCalled();
 
+    expect(rpc.endSudoSession).toHaveBeenCalledTimes(1);
+    expect(rpc.endSudoSession).toHaveBeenCalledWith({
+      guild_id: GUILD_ID,
+      discord_user_id: INVOKER_ID,
+    });
+
     expect(rest.updateOriginalWebhookMessage).toHaveBeenCalled();
     const webhookPayload = JSON.stringify(rest.updateOriginalWebhookMessage.mock.calls[0]);
     expect(webhookPayload).toContain(m.bot_sudo_left({}, { locale: 'en' }));
+  });
+
+  it('toggle-off (re-run /sudo while elevated), EndSudoSession returns a session → closes the audit message with from/to/duration, ephemeral left', async () => {
+    const startedAt = DateTime.fromDateUnsafe(
+      new Date(Date.now() - 2 * 60 * 60 * 1000 - 15 * 60 * 1000),
+    );
+    const rest = makeRestStub();
+    const rpc = makeSyncRpcStub({
+      'Guild/CheckTeamAdmin': adminResult(true),
+      'Guild/EndSudoSession': vi.fn(() =>
+        Effect.succeed({
+          session: {
+            _tag: 'Some',
+            value: {
+              started_at: startedAt,
+              system_channel_id: SYSTEM_CHANNEL_ID,
+              audit_message_id: AUDIT_MESSAGE_ID,
+            },
+          },
+        }),
+      ),
+    });
+
+    await runHandler(makeInteraction({ invokerRoles: [SUDO_ROLE_ID] }), rest.layer, rpc.layer);
+
+    expect(rest.deleteGuildMemberRole).toHaveBeenCalledTimes(1);
+    expect(rest.updateMessage).toHaveBeenCalledWith(
+      SYSTEM_CHANNEL_ID,
+      AUDIT_MESSAGE_ID,
+      expect.objectContaining({ components: [] }),
+    );
+    const updatePayload = JSON.stringify(rest.updateMessage.mock.calls[0]);
+    expect(updatePayload).toContain('<t:');
+    expect(updatePayload).toContain('2h 15m');
+
+    expect(rest.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const webhookPayload = JSON.stringify(rest.updateOriginalWebhookMessage.mock.calls[0]);
+    expect(webhookPayload).toContain(m.bot_sudo_left({}, { locale: 'en' }));
+  });
+
+  it('toggle-off, EndSudoSession returns no session → no updateMessage call, still ephemeral left', async () => {
+    const rest = makeRestStub();
+    const rpc = makeSyncRpcStub({
+      'Guild/CheckTeamAdmin': adminResult(true),
+      'Guild/EndSudoSession': vi.fn(() => Effect.succeed({ session: { _tag: 'None' } })),
+    });
+
+    await runHandler(makeInteraction({ invokerRoles: [SUDO_ROLE_ID] }), rest.layer, rpc.layer);
+
+    expect(rest.deleteGuildMemberRole).toHaveBeenCalledTimes(1);
+    expect(rest.updateMessage).not.toHaveBeenCalled();
+
+    expect(rest.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const webhookPayload = JSON.stringify(rest.updateOriginalWebhookMessage.mock.calls[0]);
+    expect(webhookPayload).toContain(m.bot_sudo_left({}, { locale: 'en' }));
+  });
+
+  it('toggle-off, revoke fails 403 → ephemeral revoke-failed, EndSudoSession NOT called, message stays active (no updateMessage)', async () => {
+    const rest = makeRestStub({
+      deleteGuildMemberRole: vi.fn(() =>
+        Effect.fail({
+          _tag: 'ErrorResponse' as const,
+          response: { status: 403 },
+          data: { code: 50013, message: 'Missing Permissions' },
+          message: 'Missing Permissions',
+        }),
+      ),
+    });
+    const rpc = makeSyncRpcStub({ 'Guild/CheckTeamAdmin': adminResult(true) });
+
+    await runHandler(makeInteraction({ invokerRoles: [SUDO_ROLE_ID] }), rest.layer, rpc.layer);
+
+    expect(rpc.endSudoSession).not.toHaveBeenCalled();
+    expect(rest.updateMessage).not.toHaveBeenCalled();
+
+    expect(rest.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const webhookPayload = JSON.stringify(rest.updateOriginalWebhookMessage.mock.calls[0]);
+    expect(webhookPayload).toContain(m.bot_sudo_err_revoke_failed({}, { locale: 'en' }));
+  });
+
+  it('toggle-off, revoke fails 404 (already gone) → session ended, message updated to ended state, success reply', async () => {
+    const startedAt = DateTime.fromDateUnsafe(new Date(Date.now() - 45 * 60 * 1000));
+    const rest = makeRestStub({
+      deleteGuildMemberRole: vi.fn(() =>
+        Effect.fail({
+          _tag: 'ErrorResponse' as const,
+          response: { status: 404 },
+          data: { code: 10011, message: 'Unknown Role' },
+          message: 'Unknown Role',
+        }),
+      ),
+    });
+    const rpc = makeSyncRpcStub({
+      'Guild/CheckTeamAdmin': adminResult(true),
+      'Guild/EndSudoSession': vi.fn(() =>
+        Effect.succeed({
+          session: {
+            _tag: 'Some',
+            value: {
+              started_at: startedAt,
+              system_channel_id: SYSTEM_CHANNEL_ID,
+              audit_message_id: AUDIT_MESSAGE_ID,
+            },
+          },
+        }),
+      ),
+    });
+
+    await runHandler(makeInteraction({ invokerRoles: [SUDO_ROLE_ID] }), rest.layer, rpc.layer);
+
+    expect(rpc.endSudoSession).toHaveBeenCalledTimes(1);
+    expect(rest.updateMessage).toHaveBeenCalledWith(
+      SYSTEM_CHANNEL_ID,
+      AUDIT_MESSAGE_ID,
+      expect.objectContaining({ components: [] }),
+    );
+
+    expect(rest.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const webhookPayload = JSON.stringify(rest.updateOriginalWebhookMessage.mock.calls[0]);
+    expect(webhookPayload).toContain(m.bot_sudo_already_ended({}, { locale: 'en' }));
+  });
+
+  it('toggle-off, EndSudoSession RPC fails after successful revoke → still replies with success (no generic error)', async () => {
+    const rest = makeRestStub();
+    const rpc = makeSyncRpcStub({
+      'Guild/CheckTeamAdmin': adminResult(true),
+      'Guild/EndSudoSession': vi.fn(() => Effect.fail({ _tag: 'RpcClientError' as const })),
+    });
+
+    await runHandler(makeInteraction({ invokerRoles: [SUDO_ROLE_ID] }), rest.layer, rpc.layer);
+
+    expect(rest.deleteGuildMemberRole).toHaveBeenCalledTimes(1);
+    expect(rest.updateMessage).not.toHaveBeenCalled();
+
+    expect(rest.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const webhookPayload = JSON.stringify(rest.updateOriginalWebhookMessage.mock.calls[0]);
+    expect(webhookPayload).toContain(m.bot_sudo_left({}, { locale: 'en' }));
+    expect(webhookPayload).not.toContain(m.bot_sudo_err_generic({}, { locale: 'en' }));
   });
 
   it('non-admin → no role ops, no message, ephemeral not-admin', async () => {

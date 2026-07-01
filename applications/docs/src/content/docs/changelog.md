@@ -30,7 +30,8 @@ Team admins can now temporarily elevate to Discord Administrator without leaving
 
 - Run `/sudo` to toggle a shared **Sideline Sudo** Discord role (carrying the Administrator permission) on or off for yourself. Requires the `team:manage` permission — the command is visible to everyone, but only admins can actually use it.
 - Entering sudo mode posts an audit entry with a **Leave sudo** button to your team's system log channel, so it's always clear who is elevated and when they started.
-- Any admin can click **Leave sudo** to end someone else's session — the audit message updates in place to show it was resolved.
+- Any admin can click **Leave sudo** to end someone else's session — the audit message updates in place to show it was resolved. Re-running `/sudo` yourself closes it the same way.
+- The resolved audit entry shows when the session started, when it ended, and how long it lasted.
 - Sudo mode has no automatic expiry in this release; step down by re-running `/sudo` or clicking **Leave sudo**.
 
 ## 2026-06-30 — New Discord sub-command: `/event refresh`

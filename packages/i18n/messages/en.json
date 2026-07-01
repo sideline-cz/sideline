@@ -2178,7 +2178,7 @@
   "bot_sudo_log_footer": "Any admin can end this with Leave sudo.",
   "bot_sudo_btn_leave": "🔓 Leave sudo",
   "bot_sudo_log_title_ended": "✅ Sudo mode ended",
-  "bot_sudo_log_ended": "<@{userId}>'s sudo mode was ended by <@{actorId}> {timestamp}. Admin permissions have been removed.",
+  "bot_sudo_log_ended": "<@{userId}>'s sudo mode was ended by <@{actorId}>.\nFrom {from} to {to} ({duration}). Admin permissions have been removed.",
   "bot_sudo_already_ended": "Sudo mode was already ended.",
   "bot_sudo_err_not_admin": "Only team admins can use sudo mode.",
   "bot_sudo_err_no_guild": "This command can only be used on a Discord server.",

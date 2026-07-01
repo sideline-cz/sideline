@@ -613,12 +613,14 @@ Maximum duration: 10 years (3 650 days). Out-of-range or zero-value inputs retur
 3. Otherwise calls `ensureSudoRole` (`applications/bot/src/rest/roles/ensureSudoRole.ts`), which looks up (or creates, with the Discord Administrator permission) a guild role named `Sideline Sudo` and returns its ID. If more than one role happens to share that name (a create race), it deterministically picks the lowest-snowflake (oldest) one and logs a warning.
 4. Checks whether the invoker already holds the sudo role (via `interaction.member.roles`):
    - **Not elevated** → grants the role (`addGuildMemberRole`), then fetches the guild to find its configured system channel:
-     - If a system channel is configured, posts a permanent audit embed there ("🛡️ Sudo mode active", who, when) with a **Leave sudo** button (`sudo-leave:{userId}`), then replies ephemerally that sudo mode is on.
-     - If no system channel is configured, still grants the role but replies ephemerally that no audit entry was posted (re-run `/sudo` to step down).
-   - **Already elevated** → revokes the role (`deleteGuildMemberRole`) and replies ephemerally that sudo mode has ended. The original audit message (if any) is left untouched — the invoker toggling off does not edit it; only the "Leave sudo" button does that (see below).
+     - If a system channel is configured, posts a permanent audit embed there ("🛡️ Sudo mode active", who, when) with a **Leave sudo** button (`sudo-leave:{userId}`), then calls `Guild/BeginSudoSession` to persist the session (audit message location + start time, in the `sudo_sessions` table) before replying ephemerally that sudo mode is on.
+     - If no system channel is configured, still grants the role but replies ephemerally that no audit entry was posted (re-run `/sudo` to step down); no session is persisted in this case (no audit message to track).
+   - **Already elevated** → revokes the role (`deleteGuildMemberRole`), calls `Guild/EndSudoSession` to fetch and delete the persisted session, and — if a session was found — edits the original audit message in place to its "ended" state (recording from/to timestamps and elapsed duration), then replies ephemerally that sudo mode has ended. Unlike before, toggling off via `/sudo` now closes the audit message the same way the "Leave sudo" button does (see below); a transient `EndSudoSession` RPC failure is logged and swallowed so the reply still succeeds even if the session row is left orphaned.
 5. Role-grant/revoke permission failures (bot role below the sudo role, or missing Manage Roles) are detected via `isDiscordPermissionError` and surfaced as a clear ephemeral warning rather than a generic error.
 
 **No auto-expiry:** sudo mode persists until the invoker runs `/sudo` again or an admin presses **Leave sudo** — there is no scheduled revocation.
+
+**Session persistence:** each active session is tracked in the `sudo_sessions` table (one row per team + Discord user, via `Guild/BeginSudoSession` / `Guild/EndSudoSession`), recording where the audit message was posted and when the session started. This lets either exit path — the button or a `/sudo` re-run — locate and close the correct audit message and report how long the session lasted, regardless of which admin ends it.
 
 **Errors:**
 
@@ -1197,9 +1199,9 @@ Appears on the permanent audit embed posted to the system channel when a team ad
 2. Returns a deferred ephemeral acknowledgement and forks a background fiber.
 3. The fiber calls `Guild/CheckTeamAdmin` RPC for the *clicking* user. If they are not an admin, replies ephemerally that only team admins can use sudo mode — **the shared audit message is left untouched** (not edited).
 4. Otherwise calls `ensureSudoRole` to resolve the `Sideline Sudo` role ID, then `deleteGuildMemberRole` to revoke it from the subject user.
-5. On success, edits the shared audit message in place to a resolved "✅ Sudo mode ended" state (green, no components, records who ended it and when) and replies ephemerally that sudo mode ended.
-6. If the role/member was already gone (Discord 404 — e.g. the subject already left sudo themselves), treats it as success: still marks the message ended and replies "Sudo mode was already ended."
-7. Any other Discord permission error (bot role hierarchy, missing Manage Roles) leaves the audit message **active** (components/embed unchanged) and replies with a revoke-failed warning.
+5. On success, calls `Guild/EndSudoSession` to fetch and delete the subject's persisted session (`sudo_sessions` row), then edits the shared audit message in place to a resolved "✅ Sudo mode ended" state (green, no components, records who ended it, the from/to timestamps, and the elapsed duration) and replies ephemerally that sudo mode ended. If no session row is found (e.g. a pre-existing audit message that predates session tracking), the "from" time falls back to the audit message's own Discord snowflake-embedded creation time, so from/to/duration are always shown.
+6. If the role/member was already gone (Discord 404 — e.g. the subject already left sudo themselves), treats it as success: still ends the session, marks the message ended (with from/to/duration), and replies "Sudo mode was already ended."
+7. Any other Discord permission error (bot role hierarchy, missing Manage Roles) leaves the audit message **active** (components/embed unchanged) and the session untouched, and replies with a revoke-failed warning.
 
 **Source file:** `applications/bot/src/interactions/sudo.ts` (`SudoLeaveButton`, `SudoLeaveButtonReg`)
 

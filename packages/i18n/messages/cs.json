@@ -2178,7 +2178,7 @@
   "bot_sudo_log_footer": "Kterýkoli admin může ukončit tlačítkem Opustit sudo.",
   "bot_sudo_btn_leave": "🔓 Opustit sudo",
   "bot_sudo_log_title_ended": "✅ Sudo režim ukončen",
-  "bot_sudo_log_ended": "Sudo režim uživatele <@{userId}> ukončil(a) <@{actorId}> {timestamp}. Administrátorská práva byla odebrána.",
+  "bot_sudo_log_ended": "Sudo režim uživatele <@{userId}> ukončil(a) <@{actorId}>.\nOd {from} do {to} ({duration}). Administrátorská práva byla odebrána.",
   "bot_sudo_already_ended": "Sudo režim už byl ukončen.",
   "bot_sudo_err_not_admin": "Sudo režim mohou používat jen administrátoři týmu.",
   "bot_sudo_err_no_guild": "Tento příkaz lze použít jen na Discord serveru.",

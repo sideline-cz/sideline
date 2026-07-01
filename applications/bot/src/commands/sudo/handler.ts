@@ -4,11 +4,13 @@ import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
 import { Interaction } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
 import { DateTime, Effect, Metric, Option, Schema } from 'effect';
+import { formatSudoDuration } from '~/commands/sudo/duration.js';
 import { guildLocale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
-import { isDiscordPermissionError } from '~/rest/discordErrors.js';
+import { isDiscordNotFoundError, isDiscordPermissionError } from '~/rest/discordErrors.js';
 import { ensureSudoRole } from '~/rest/roles/ensureSudoRole.js';
 import { DfxGuild, interactionUserId } from '~/schemas.js';
+import type { SyncRpcClient } from '~/services/SyncRpc.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 const decodeSnowflake = Schema.decodeUnknownSync(DiscordSchemas.Snowflake);
@@ -93,9 +95,11 @@ const isElevated = (
 };
 
 /** Grant the sudo role and — if a system channel is configured — post an audit entry
- * with a "Leave sudo" button. */
+ * with a "Leave sudo" button, then persist the session so it can later be closed by
+ * `EndSudoSession` (either the button or a toggle-off `/sudo` re-run). */
 const enterSudoMode = (
   rest: DiscordRestService,
+  rpc: SyncRpcClient,
   interaction: DiscordTypes.APIInteraction,
   locale: 'en' | 'cs',
   embedLocale: 'en' | 'cs',
@@ -117,7 +121,8 @@ const enterSudoMode = (
             'Failed to update sudo no-system-channel response',
           ),
         onSome: (systemChannelId) => {
-          const timestamp = toDiscordTimestamp(DateTime.nowUnsafe());
+          const startedAt = DateTime.nowUnsafe();
+          const timestamp = toDiscordTimestamp(startedAt);
           const { embeds, components } = buildSudoAuditMessage(userId, timestamp, embedLocale);
           return rest
             .createMessage(systemChannelId, {
@@ -126,6 +131,15 @@ const enterSudoMode = (
               allowed_mentions: { parse: [] },
             })
             .pipe(
+              Effect.flatMap((message) =>
+                rpc['Guild/BeginSudoSession']({
+                  guild_id: guildId,
+                  discord_user_id: userId,
+                  system_channel_id: systemChannelId,
+                  audit_message_id: decodeSnowflake(message.id),
+                  started_at: startedAt,
+                }),
+              ),
               Effect.flatMap(() =>
                 replyWebhook(
                   rest,
@@ -162,26 +176,136 @@ const enterSudoMode = (
     ),
   );
 
+/** Close the shared audit message the same way the "Leave sudo" button does, swallowing
+ * REST failures (a failure to edit the message must not fail the toggle-off — the role
+ * has already been revoked). A 404 on the message (deleted) is treated as fine. */
+const closeAuditMessage = (
+  rest: DiscordRestService,
+  session: {
+    started_at: DateTime.Utc;
+    system_channel_id: DiscordSchemas.Snowflake;
+    audit_message_id: DiscordSchemas.Snowflake;
+  },
+  userId: DiscordSchemas.Snowflake,
+  embedLocale: 'en' | 'cs',
+) => {
+  const now = DateTime.nowUnsafe();
+  const elapsedMs =
+    Number(DateTime.toEpochMillis(now)) - Number(DateTime.toEpochMillis(session.started_at));
+  const description = m.bot_sudo_log_ended(
+    {
+      userId,
+      actorId: userId,
+      from: toDiscordTimestamp(session.started_at),
+      to: toDiscordTimestamp(now),
+      duration: formatSudoDuration(elapsedMs),
+    },
+    { locale: embedLocale },
+  );
+  return rest
+    .updateMessage(session.system_channel_id, session.audit_message_id, {
+      embeds: [
+        {
+          title: m.bot_sudo_log_title_ended({}, { locale: embedLocale }),
+          description,
+          color: 0x57f287,
+        },
+      ],
+      components: [],
+    })
+    .pipe(
+      Effect.asVoid,
+      Effect.catchTag('ErrorResponse', (error) =>
+        isDiscordNotFoundError(error)
+          ? Effect.void
+          : Effect.logError('sudo: failed to close audit message on toggle-off', error),
+      ),
+      Effect.catchTag(['HttpClientError', 'RatelimitedResponse'], (error) =>
+        Effect.logError('sudo: failed to close audit message on toggle-off', error),
+      ),
+    );
+};
+
+/** End the session (if any) + close the audit message (if a session exists), then
+ * reply with `replyMessage`. A transient `RpcClientError` from `EndSudoSession` is
+ * logged and swallowed rather than failing the interaction — the role has already
+ * been revoked, so the user still gets the success reply; the session row may be
+ * left orphaned (acceptable — the button still works as a fallback). */
+const endSessionAndReply = (
+  rest: DiscordRestService,
+  rpc: SyncRpcClient,
+  interaction: DiscordTypes.APIInteraction,
+  guildId: DiscordSchemas.Snowflake,
+  userId: DiscordSchemas.Snowflake,
+  embedLocale: 'en' | 'cs',
+  replyMessage: string,
+  replyContext: string,
+) =>
+  rpc['Guild/EndSudoSession']({ guild_id: guildId, discord_user_id: userId }).pipe(
+    Effect.flatMap(({ session }) =>
+      Option.match(session, {
+        onNone: () => Effect.void,
+        onSome: (s) => closeAuditMessage(rest, s, userId, embedLocale),
+      }),
+    ),
+    Effect.catchTag('RpcClientError', (e) =>
+      Effect.logError(
+        'sudo: EndSudoSession RPC failed after role was already revoked — session may be orphaned',
+        e,
+      ),
+    ),
+    Effect.flatMap(() => replyWebhook(rest, interaction, { content: replyMessage }, replyContext)),
+  );
+
 const leaveSudoMode = (
   rest: DiscordRestService,
+  rpc: SyncRpcClient,
   interaction: DiscordTypes.APIInteraction,
   locale: 'en' | 'cs',
+  embedLocale: 'en' | 'cs',
   guildId: DiscordSchemas.Snowflake,
   userId: DiscordSchemas.Snowflake,
   sudoRoleId: DiscordSchemas.Snowflake,
 ) =>
-  rest
-    .deleteGuildMemberRole(guildId, userId, sudoRoleId)
-    .pipe(
-      Effect.flatMap(() =>
-        replyWebhook(
-          rest,
-          interaction,
-          { content: m.bot_sudo_left({}, { locale }) },
-          'Failed to update sudo left response',
-        ),
+  rest.deleteGuildMemberRole(guildId, userId, sudoRoleId).pipe(
+    Effect.flatMap(() =>
+      endSessionAndReply(
+        rest,
+        rpc,
+        interaction,
+        guildId,
+        userId,
+        embedLocale,
+        m.bot_sudo_left({}, { locale }),
+        'Failed to update sudo left response',
       ),
-    );
+    ),
+    Effect.catchTag('ErrorResponse', (error) => {
+      // Already gone (role/member unknown) — treat as success, still end the session
+      // and close the audit message if one exists.
+      if (isDiscordNotFoundError(error)) {
+        return endSessionAndReply(
+          rest,
+          rpc,
+          interaction,
+          guildId,
+          userId,
+          embedLocale,
+          m.bot_sudo_already_ended({}, { locale }),
+          'Failed to update sudo already-ended response',
+        );
+      }
+      // Permission (or any other) error: the user is still elevated — leave the
+      // session + audit message ACTIVE (do not call EndSudoSession / close it) so an
+      // admin can retry or use the "Leave sudo" button.
+      return replyWebhook(
+        rest,
+        interaction,
+        { content: m.bot_sudo_err_revoke_failed({}, { locale }) },
+        'Failed to update sudo revoke-failed response',
+      );
+    }),
+  );
 
 /**
  * `/sudo` — lets a team admin temporarily elevate to Discord Administrator on the
@@ -230,9 +354,9 @@ export const sudoHandler = Interaction.asEffect().pipe(
             rpc['Guild/CheckTeamAdmin']({
               guild_id: snowflakeGuildId,
               discord_user_id: userId,
-            }),
+            }).pipe(Effect.map((admin) => ({ rpc, admin }))),
           ),
-          Effect.flatMap((admin) => {
+          Effect.flatMap(({ rpc, admin }) => {
             if (!admin.is_admin) {
               return replyWebhook(
                 rest,
@@ -252,9 +376,19 @@ export const sudoHandler = Interaction.asEffect().pipe(
               ),
               Effect.flatMap((sudoRoleId) =>
                 isElevated(interaction, sudoRoleId)
-                  ? leaveSudoMode(rest, interaction, locale, snowflakeGuildId, userId, sudoRoleId)
+                  ? leaveSudoMode(
+                      rest,
+                      rpc,
+                      interaction,
+                      locale,
+                      embedLocale,
+                      snowflakeGuildId,
+                      userId,
+                      sudoRoleId,
+                    )
                   : enterSudoMode(
                       rest,
+                      rpc,
                       interaction,
                       locale,
                       embedLocale,

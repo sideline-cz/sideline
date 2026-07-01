@@ -59,6 +59,7 @@ import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepositor
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
+import { SudoSessionsRepository } from '~/repositories/SudoSessionsRepository.js';
 import { TeamChallengeRepository } from '~/repositories/TeamChallengeRepository.js';
 import { TeamChannelAccessRepository } from '~/repositories/TeamChannelAccessRepository.js';
 import { TeamChannelsRepository } from '~/repositories/TeamChannelsRepository.js';
@@ -174,6 +175,7 @@ const Repositories = Layer.mergeAll(
   PersonalEventChannelsRepository.Default,
   PersonalEventMessagesRepository.Default,
   PersonalEventOverflowCategoriesRepository.Default,
+  SudoSessionsRepository.Default,
 );
 
 const AppLayer = Layer.mergeAll(

@@ -7,7 +7,7 @@ import * as m from '@sideline/i18n/messages';
 import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
 import { Interaction } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
-import { Effect, Layer } from 'effect';
+import { DateTime, Effect, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { SudoLeaveButton } from '~/interactions/sudo.js';
 import { SUDO_ROLE_NAME } from '~/rest/roles/ensureSudoRole.js';
@@ -79,6 +79,7 @@ const makeRestStub = (options: RestStubOptions = {}) => {
 
 interface SyncRpcStubOptions {
   'Guild/CheckTeamAdmin'?: ReturnType<typeof vi.fn>;
+  'Guild/EndSudoSession'?: ReturnType<typeof vi.fn>;
 }
 
 const adminResult = (isAdmin: boolean) =>
@@ -89,7 +90,21 @@ const adminResult = (isAdmin: boolean) =>
     }),
   );
 
+const endSessionResult = (
+  session:
+    | { started_at: DateTime.Utc; system_channel_id: string; audit_message_id: string }
+    | undefined,
+) =>
+  vi.fn(() =>
+    Effect.succeed({
+      session: session === undefined ? { _tag: 'None' } : { _tag: 'Some', value: session },
+    }),
+  );
+
 const makeSyncRpcStub = (options: SyncRpcStubOptions = {}) => {
+  const defaultEndSudoSession = endSessionResult(undefined);
+  const endSudoSession = options['Guild/EndSudoSession'] ?? defaultEndSudoSession;
+
   const rpcStub = new Proxy({} as any, {
     get: (_target, prop: string) => {
       if (options[prop as keyof SyncRpcStubOptions]) {
@@ -98,12 +113,15 @@ const makeSyncRpcStub = (options: SyncRpcStubOptions = {}) => {
       if (prop === 'Guild/CheckTeamAdmin') {
         return adminResult(true);
       }
+      if (prop === 'Guild/EndSudoSession') {
+        return endSudoSession;
+      }
       return vi.fn(() => Effect.succeed(undefined));
     },
   });
 
   const layer = Layer.succeed(SyncRpc, rpcStub);
-  return { layer, rpcStub };
+  return { layer, rpcStub, endSudoSession };
 };
 
 // ---------------------------------------------------------------------------
@@ -198,6 +216,12 @@ describe('SudoLeaveButton — sudo-leave:{subjectUserId}', () => {
     expect(restStub.deleteGuildMemberRole).toHaveBeenCalledTimes(1);
     expect(restStub.deleteGuildMemberRole).toHaveBeenCalledWith(GUILD_ID, SUBJECT_ID, SUDO_ROLE_ID);
 
+    expect(rpcStub.endSudoSession).toHaveBeenCalledTimes(1);
+    expect(rpcStub.endSudoSession).toHaveBeenCalledWith({
+      guild_id: GUILD_ID,
+      discord_user_id: SUBJECT_ID,
+    });
+
     expect(restStub.updateMessage).toHaveBeenCalledWith(
       CHANNEL_ID,
       MESSAGE_ID,
@@ -211,6 +235,51 @@ describe('SudoLeaveButton — sudo-leave:{subjectUserId}', () => {
     expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
     const ephemeralPayload = JSON.stringify(restStub.updateOriginalWebhookMessage.mock.calls[0]);
     expect(ephemeralPayload).toContain(m.bot_sudo_left({}, { locale: 'en' }));
+  });
+
+  it('admin clicks Leave, EndSudoSession returns a session → ended content includes from/to/duration from the persisted started_at', async () => {
+    const startedAt = DateTime.fromDateUnsafe(new Date(Date.now() - 45 * 60 * 1000));
+    const rpcStub = makeSyncRpcStub({
+      'Guild/CheckTeamAdmin': adminResult(true),
+      'Guild/EndSudoSession': endSessionResult({
+        started_at: startedAt,
+        system_channel_id: CHANNEL_ID,
+        audit_message_id: MESSAGE_ID,
+      }),
+    });
+    const restStub = makeRestStub();
+
+    const interaction = makeLeaveInteraction(SUBJECT_ID, CLICKER_ID);
+    await runHandler(SudoLeaveButton, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateMessage).toHaveBeenCalledWith(
+      CHANNEL_ID,
+      MESSAGE_ID,
+      expect.objectContaining({ components: [] }),
+    );
+    const updatePayload = JSON.stringify(restStub.updateMessage.mock.calls[0]);
+    // Two "<t:" tokens: from and to.
+    expect(updatePayload.match(/<t:/g)?.length).toBe(2);
+    expect(updatePayload).toContain('45m');
+  });
+
+  it('admin clicks Leave, EndSudoSession returns no session → falls back to the audit message snowflake for "from", still shows from/to', async () => {
+    const rpcStub = makeSyncRpcStub({
+      'Guild/CheckTeamAdmin': adminResult(true),
+      'Guild/EndSudoSession': endSessionResult(undefined),
+    });
+    const restStub = makeRestStub();
+
+    const interaction = makeLeaveInteraction(SUBJECT_ID, CLICKER_ID);
+    await runHandler(SudoLeaveButton, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateMessage).toHaveBeenCalledWith(
+      CHANNEL_ID,
+      MESSAGE_ID,
+      expect.objectContaining({ components: [] }),
+    );
+    const updatePayload = JSON.stringify(restStub.updateMessage.mock.calls[0]);
+    expect(updatePayload.match(/<t:/g)?.length).toBe(2);
   });
 
   it('non-admin clicks Leave → immediate ephemeral not-admin, no revoke, shared message untouched', async () => {
@@ -279,6 +348,10 @@ describe('SudoLeaveButton — sudo-leave:{subjectUserId}', () => {
       return Array.isArray(payload?.components) && payload.components.length === 0;
     });
     expect(emptiedComponentsCall).toBeUndefined();
+
+    // Regression guard: on a permission error the session must NOT be ended — the
+    // user is still elevated, so an admin must be able to retry via the button.
+    expect(rpcStub.endSudoSession).not.toHaveBeenCalled();
 
     expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
     const ephemeralPayload = JSON.stringify(restStub.updateOriginalWebhookMessage.mock.calls[0]);

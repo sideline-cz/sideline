@@ -5,12 +5,23 @@ import * as Ix from 'dfx/Interactions/index';
 import { Interaction } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
 import { DateTime, Effect, Metric, Option, Schema } from 'effect';
+import { formatSudoDuration } from '~/commands/sudo/duration.js';
 import { guildLocale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { isDiscordNotFoundError } from '~/rest/discordErrors.js';
 import { ensureSudoRole } from '~/rest/roles/ensureSudoRole.js';
 import { interactionUserId } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
+
+/** Discord epoch (2015-01-01T00:00:00.000Z), in Unix epoch millis — the offset baked
+ * into every Discord snowflake's timestamp bits. */
+const DISCORD_EPOCH_MS = 1420070400000;
+
+/** Derives the creation time of a Discord snowflake (message, user, etc.) from its
+ * embedded timestamp bits. Used as a fallback "from" time for audit messages that
+ * predate session tracking (no persisted `started_at`). */
+const snowflakeToDate = (snowflake: DiscordSchemas.Snowflake): DateTime.Utc =>
+  DateTime.fromDateUnsafe(new Date(Number(BigInt(snowflake) >> 22n) + DISCORD_EPOCH_MS));
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -68,15 +79,23 @@ const toDiscordTimestamp = (dt: DateTime.Utc): string =>
 const buildSudoEndedMessage = (
   subjectUserId: DiscordSchemas.Snowflake,
   actorId: DiscordSchemas.Snowflake,
+  startedAt: DateTime.Utc,
   embedLocale: 'en' | 'cs',
 ) => {
-  const timestamp = toDiscordTimestamp(DateTime.nowUnsafe());
+  const now = DateTime.nowUnsafe();
+  const elapsedMs = Number(DateTime.toEpochMillis(now)) - Number(DateTime.toEpochMillis(startedAt));
   return {
     embeds: [
       {
         title: m.bot_sudo_log_title_ended({}, { locale: embedLocale }),
         description: m.bot_sudo_log_ended(
-          { userId: subjectUserId, actorId, timestamp },
+          {
+            userId: subjectUserId,
+            actorId,
+            from: toDiscordTimestamp(startedAt),
+            to: toDiscordTimestamp(now),
+            duration: formatSudoDuration(elapsedMs),
+          },
           { locale: embedLocale },
         ),
         color: 0x57f287,
@@ -94,12 +113,18 @@ const markEndedOnSharedMessage = (
   interaction: DiscordTypes.APIInteraction,
   subjectUserId: DiscordSchemas.Snowflake,
   actorId: DiscordSchemas.Snowflake,
+  startedAt: DateTime.Utc,
   embedLocale: 'en' | 'cs',
 ) => {
   const channelId = interaction.message?.channel_id ?? interaction.channel_id;
   const messageId = interaction.message?.id;
   if (channelId === undefined || messageId === undefined) return Effect.void;
-  const { embeds, components } = buildSudoEndedMessage(subjectUserId, actorId, embedLocale);
+  const { embeds, components } = buildSudoEndedMessage(
+    subjectUserId,
+    actorId,
+    startedAt,
+    embedLocale,
+  );
   return rest
     .updateMessage(channelId, messageId, { embeds, components })
     .pipe(Effect.asVoid, logRestErrors('Failed to update sudo-ended message'));
@@ -179,40 +204,62 @@ export const SudoLeaveButton = Effect.Do.pipe(
           );
         }
 
-        return ensureSudoRole(snowflakeGuildId).pipe(
-          Effect.flatMap((sudoRoleId) =>
-            rest.deleteGuildMemberRole(snowflakeGuildId, subjectUserId, sudoRoleId),
-          ),
-          Effect.flatMap(() =>
-            markEndedOnSharedMessage(rest, interaction, subjectUserId, clickerId, embedLocale).pipe(
-              Effect.flatMap(() =>
-                replyWebhook(
-                  rest,
-                  interaction,
-                  { content: m.bot_sudo_left({}, { locale }) },
-                  'Failed to update sudo-leave response',
-                ),
-              ),
-            ),
-          ),
-          Effect.catchTag('ErrorResponse', (error) => {
-            // Already gone (role/member unknown) — treat as success, still mark ended.
-            if (isDiscordNotFoundError(error)) {
+        // startedAt fallback: no persisted session (e.g. a pre-existing audit message
+        // predating session tracking) → derive "from" from the audit message's own
+        // snowflake-embedded creation time, so from/to/duration are always shown.
+        const fallbackStartedAt = interaction.message?.id
+          ? snowflakeToDate(decodeSnowflake(interaction.message.id))
+          : DateTime.nowUnsafe();
+
+        const endSessionAndMarkEnded = (replyMessage: string, replyContext: string) =>
+          rpc['Guild/EndSudoSession']({
+            guild_id: snowflakeGuildId,
+            discord_user_id: subjectUserId,
+          }).pipe(
+            Effect.flatMap(({ session }) => {
+              const startedAt = Option.match(session, {
+                onNone: () => fallbackStartedAt,
+                onSome: (s) => s.started_at,
+              });
               return markEndedOnSharedMessage(
                 rest,
                 interaction,
                 subjectUserId,
                 clickerId,
+                startedAt,
                 embedLocale,
-              ).pipe(
-                Effect.flatMap(() =>
-                  replyWebhook(
-                    rest,
-                    interaction,
-                    { content: m.bot_sudo_already_ended({}, { locale }) },
-                    'Failed to update sudo-already-ended response',
-                  ),
-                ),
+              );
+            }),
+            // A transient RpcClientError here means the role was already revoked but
+            // the session may be left orphaned — log and swallow rather than failing
+            // the interaction, since the user should still get the success reply.
+            Effect.catchTag('RpcClientError', (e) =>
+              Effect.logError(
+                'sudo-leave: EndSudoSession RPC failed after role was already revoked — session may be orphaned',
+                e,
+              ),
+            ),
+            Effect.flatMap(() =>
+              replyWebhook(rest, interaction, { content: replyMessage }, replyContext),
+            ),
+          );
+
+        return ensureSudoRole(snowflakeGuildId).pipe(
+          Effect.flatMap((sudoRoleId) =>
+            rest.deleteGuildMemberRole(snowflakeGuildId, subjectUserId, sudoRoleId),
+          ),
+          Effect.flatMap(() =>
+            endSessionAndMarkEnded(
+              m.bot_sudo_left({}, { locale }),
+              'Failed to update sudo-leave response',
+            ),
+          ),
+          Effect.catchTag('ErrorResponse', (error) => {
+            // Already gone (role/member unknown) — treat as success, still mark ended.
+            if (isDiscordNotFoundError(error)) {
+              return endSessionAndMarkEnded(
+                m.bot_sudo_already_ended({}, { locale }),
+                'Failed to update sudo-already-ended response',
               );
             }
             // Permission (or any other) error: leave the message ACTIVE — do not

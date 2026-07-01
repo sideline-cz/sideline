@@ -7,6 +7,7 @@ export default defineProject({
     exclude: [
       'test/integration/**',
       'test/rpc/OnboardingSync.test.ts',
+      'test/rpc/SudoSession.test.ts',
       '**/node_modules/**',
       'build/**',
     ],

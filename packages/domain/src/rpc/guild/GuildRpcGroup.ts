@@ -317,6 +317,34 @@ export const GuildRpcGroup = RpcGroup.make(
       is_admin: Schema.Boolean,
     }),
   }),
+  // Begins (or restarts) a `/sudo` session for a caller in a guild: persists the
+  // audit-message location + start time so the session can later be closed by
+  // `EndSudoSession` (via the "leave sudo" button or by re-running `/sudo`).
+  Rpc.make('BeginSudoSession', {
+    payload: {
+      guild_id: Discord.Snowflake,
+      discord_user_id: Discord.Snowflake,
+      system_channel_id: Discord.Snowflake,
+      audit_message_id: Discord.Snowflake,
+      started_at: Schema.DateTimeUtc,
+    },
+    success: Schema.Struct({}),
+  }),
+  // Ends the caller's active `/sudo` session for a guild (if any), returning the
+  // audit-message location + start time so the bot can close that message and
+  // report the elapsed duration. Returns None if there was no active session.
+  Rpc.make('EndSudoSession', {
+    payload: { guild_id: Discord.Snowflake, discord_user_id: Discord.Snowflake },
+    success: Schema.Struct({
+      session: Schema.OptionFromNullOr(
+        Schema.Struct({
+          started_at: Schema.DateTimeUtc,
+          system_channel_id: Discord.Snowflake,
+          audit_message_id: Discord.Snowflake,
+        }),
+      ),
+    }),
+  }),
   Rpc.make('GetPersonalChannel', {
     payload: { team_id: TeamId, team_member_id: Schema.String },
     success: Schema.OptionFromNullOr(Discord.Snowflake),
