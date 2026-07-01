@@ -59,9 +59,13 @@ const isNotFutureDate = Schema.makeFilter<string>((value) => {
   return parsed.getTime() <= Date.now() ? true : tr('validation_birthDateFuture');
 });
 
+const isNonBlank = Schema.makeFilter<string>((value) =>
+  value.trim().length > 0 ? true : tr('validation_required'),
+);
+
 const PlayerEditSchema = Schema.Struct({
   name: Schema.NullOr(
-    Schema.String.pipe(Schema.check(Schema.isMaxLength(80))).annotate({
+    Schema.String.pipe(Schema.check(isNonBlank), Schema.check(Schema.isMaxLength(80))).annotate({
       message: tr('validation_displayNameTooLong'),
     }),
   ),

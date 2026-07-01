@@ -35,6 +35,8 @@ vi.mock('~/lib/translations.js', () => ({
       profile_complete_jerseyNumber: 'Jersey number',
       profile_complete_jerseyNumberPlaceholder: 'e.g. 7',
       validation_jerseyNumber: 'Jersey number must be between 0 and 99',
+      validation_required: 'This field is required.',
+      validation_displayNameTooLong: 'Display name is too long',
       roles_currentRoles: 'Current roles',
       roles_noRoles: 'No roles assigned',
       roles_addRole: 'Add role',
@@ -614,5 +616,105 @@ describe('PlayerDetailPage — form dirty/validation gating', () => {
     });
 
     expect(screen.getByText('Unsaved changes')).not.toBeNull();
+  });
+
+  it('blank display name ("") → validation error shown and Save stays disabled', async () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={true}
+        canManageRoles={false}
+        isOwnProfile={true}
+        activityStats={makeActivityStats() as any}
+      />,
+    );
+
+    const nameInput = screen.getByLabelText('Display name');
+    await act(async () => {
+      fireEvent.change(nameInput, { target: { value: '' } });
+      fireEvent.blur(nameInput);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('This field is required.')).not.toBeNull();
+    });
+
+    const saveButton = screen.getByText('Save changes').closest('button');
+    expect(saveButton?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('whitespace-only display name ("   ") → validation error shown and Save stays disabled', async () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={true}
+        canManageRoles={false}
+        isOwnProfile={true}
+        activityStats={makeActivityStats() as any}
+      />,
+    );
+
+    const nameInput = screen.getByLabelText('Display name');
+    await act(async () => {
+      fireEvent.change(nameInput, { target: { value: '   ' } });
+      fireEvent.blur(nameInput);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('This field is required.')).not.toBeNull();
+    });
+
+    const saveButton = screen.getByText('Save changes').closest('button');
+    expect(saveButton?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('null display name (no profile name set) → allowed, does not block Save', async () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer({ name: Option.none() }) as any}
+        canEdit={true}
+        canManageRoles={false}
+        isOwnProfile={true}
+        activityStats={makeActivityStats() as any}
+      />,
+    );
+
+    const jerseyInput = screen.getByLabelText('Jersey number');
+    await act(async () => {
+      fireEvent.change(jerseyInput, { target: { value: '9' } });
+      fireEvent.blur(jerseyInput);
+    });
+
+    await waitFor(() => {
+      const saveButton = screen.getByText('Save changes').closest('button');
+      expect(saveButton?.hasAttribute('disabled')).toBe(false);
+    });
+  });
+
+  it('valid display name ("A") → accepted, Save becomes enabled', async () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={true}
+        canManageRoles={false}
+        isOwnProfile={true}
+        activityStats={makeActivityStats() as any}
+      />,
+    );
+
+    const nameInput = screen.getByLabelText('Display name');
+    await act(async () => {
+      fireEvent.change(nameInput, { target: { value: 'A' } });
+      fireEvent.blur(nameInput);
+    });
+
+    await waitFor(() => {
+      const saveButton = screen.getByText('Save changes').closest('button');
+      expect(saveButton?.hasAttribute('disabled')).toBe(false);
+    });
   });
 });

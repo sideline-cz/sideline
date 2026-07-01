@@ -34,10 +34,16 @@ export function useFormatDate() {
       timeZone: 'UTC',
     });
 
+    const monthYearFormatter = new Intl.DateTimeFormat(locale, {
+      month: 'short',
+      year: 'numeric',
+    });
+
     const formatDate = (date: Date) => dateFormatter.format(date);
     const formatDayMonth = (date: Date) => dayMonthFormatter.format(date);
     const formatTime = (date: Date) => timeFormatter.format(date);
     const formatDateTime = (date: Date) => dateTimeFormatter.format(date);
+    const formatMonthYear = (date: Date) => monthYearFormatter.format(date);
 
     const formatRelative = (date: Date) => {
       const now = Date.now();
@@ -53,6 +59,13 @@ export function useFormatDate() {
       return relativeFormatter.format(diffDay, 'day');
     };
 
-    return { formatDate, formatDayMonth, formatTime, formatDateTime, formatRelative };
+    return {
+      formatDate,
+      formatDayMonth,
+      formatTime,
+      formatDateTime,
+      formatRelative,
+      formatMonthYear,
+    };
   }, [locale]);
 }

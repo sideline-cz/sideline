@@ -1,9 +1,9 @@
 import type { Roster } from '@sideline/domain';
-import { getLocale } from '@sideline/i18n/runtime';
 import { Option } from 'effect';
 import { Calendar } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Badge } from '~/components/ui/badge';
+import { useFormatDate } from '~/hooks/useFormatDate.js';
 import { tr } from '~/lib/translations.js';
 
 interface MemberSummaryHeaderProps {
@@ -11,16 +11,12 @@ interface MemberSummaryHeaderProps {
   canManageRoles: boolean;
 }
 
-function formatJoinedDate(joinedAt: string): string {
-  const locale = getLocale();
-  return new Date(joinedAt).toLocaleDateString(locale, { month: 'short', year: 'numeric' });
-}
-
 export function MemberSummaryHeader({ player, canManageRoles }: MemberSummaryHeaderProps) {
+  const { formatMonthYear } = useFormatDate();
   const displayName = player.displayName;
   const initials = displayName.slice(0, 2).toUpperCase();
   const [primaryRole, ...extraRoles] = player.roleNames;
-  const joinedDate = formatJoinedDate(player.joinedAt);
+  const joinedDate = formatMonthYear(new Date(player.joinedAt));
 
   return (
     <div className='flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6'>
