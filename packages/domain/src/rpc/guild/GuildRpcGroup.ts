@@ -307,6 +307,16 @@ export const GuildRpcGroup = RpcGroup.make(
       is_admin: Schema.Boolean,
     }),
   }),
+  // Resolves the caller's team membership and whether they hold the `team:manage`
+  // permission (team admin) for the given guild. Used by the `/sudo` command to
+  // authorize admin-only actions without requiring a specific channel context.
+  Rpc.make('CheckTeamAdmin', {
+    payload: { guild_id: Discord.Snowflake, discord_user_id: Discord.Snowflake },
+    success: Schema.Struct({
+      team_id: Schema.OptionFromNullOr(TeamId),
+      is_admin: Schema.Boolean,
+    }),
+  }),
   Rpc.make('GetPersonalChannel', {
     payload: { team_id: TeamId, team_member_id: Schema.String },
     success: Schema.OptionFromNullOr(Discord.Snowflake),

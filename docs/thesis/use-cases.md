@@ -15,7 +15,7 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 | **Captain** | A team member holding the built-in `Captain` role. Inherits all Player capabilities and additionally holds `roster:manage`, `member:edit`, `role:view`, `event:create`, `event:edit`, `event:cancel`, and `finance:view` permissions. |
 | **Admin** | A team member holding the built-in `Admin` role. Holds the full permission set including `team:manage`, `team:invite`, `member:remove`, `role:manage`, `training-type:create`, `training-type:delete`, `finance:view`, `finance:manage_fees`, and `finance:record_payments`, in addition to all Captain permissions. |
 | **Treasurer** | A team member holding the built-in `Treasurer` role. Holds `finance:view`, `finance:manage_fees`, and `finance:record_payments`. Used to delegate finance authority without elevating the member to Captain or Admin. |
-| **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/carpool`, `/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`, `/summarize`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination, carpool board buttons, email approval/reject buttons). Receives RPC calls from the server to synchronise Discord roles, channels, and email posts. |
+| **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/carpool`, `/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`, `/summarize`, `/sudo`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination, carpool board buttons, email approval/reject buttons, Leave sudo button). Receives RPC calls from the server to synchronise Discord roles, channels, and email posts. |
 | **Global Admin** | A user who is a global admin by either having the `users.is_global_admin` database flag set to `true` or having their Discord ID listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable (the two sources are ORed). The first user to register on a fresh database is automatically promoted via the DB flag. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. Can also mint, list, and revoke team onboarding tokens, enabling new teams to be set up by a designated captain without requiring a pre-existing Sideline account. Can manage the global-admin roster via `GET/POST/DELETE /auth/global-admins` — granting or revoking `users.is_global_admin` for other users, subject to self-revoke, last-admin, and env-managed safeguards. A global admin with no team memberships is redirected to `/admin/onboarding-tokens` instead of `/no-team`. Additionally, global admins have **read-only access to every team** regardless of membership: all read endpoints for members, rosters, roles, finance, activity stats, and team info use a `requireReadAccess` helper that synthesises a read-only membership (with `roster:view`, `member:view`, `role:view`, `finance:view` permissions) when the caller is a global admin but not a real team member. Write endpoints still require actual membership. |
 | **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes (and incrementing the `missed_rsvps` counter for non-responding built-in Players in the event's member group), sending RSVP reminder notifications before events (targeting only Players whose `missed_rsvps` count is below the team's `max_missed_rsvps` threshold), auto-logging attendance from RSVP data, evaluating age-threshold rules to move members between groups, and queuing payment reminder DMs for members with upcoming or overdue fee assignments. |
 
@@ -622,12 +622,14 @@ flowchart LR
         UC_MAK_STATS["\/makanicko stats\nDisplays personal activity stats and streak"]
         UC_MAK_LB["\/makanicko leaderboard\nDisplays top-10 leaderboard embed\nshows requesting user's own rank in footer"]
         UC_SUMMARIZE["\/summarize\nAI-generated summary of recent channel messages\nephemeral embed · no permission required\n(Summarize/SummarizeChannel RPC → LlmClient)"]
+        UC_SUDO["\/sudo\nToggles a shared 'Sideline Sudo' Discord Administrator role\nrequires team:manage (Guild/CheckTeamAdmin)\nposts audit entry with Leave sudo button to system channel"]
     end
 
     subgraph BUTTONS["Button Interactions on Embeds"]
         UC_BTN_RSVP["RSVP Button (Yes / No / Maybe)\nSaves RSVP immediately on click (no modal)\nEphemeral confirm with Add/Edit/Clear message buttons\nupdates embed counts in real time"]
         UC_BTN_PAGE["Upcoming Events Navigation Buttons\nNavigates upcoming events one event at a time"]
         UC_BTN_OVERVIEW_SHOW["Overview Show Button\nOpens ephemeral upcoming events embed for the clicking user\n(Event/GetUpcomingEventsForUser)"]
+        UC_BTN_SUDO_LEAVE["Leave Sudo Button\nAny team admin revokes another admin's active sudo session\nedits the shared audit message to a resolved state\n(Guild/CheckTeamAdmin)"]
     end
 
     subgraph SYNC["Background Sync (RPC)"]
@@ -646,9 +648,11 @@ flowchart LR
     DU --> UC_MAK_STATS
     DU --> UC_MAK_LB
     DU --> UC_SUMMARIZE
+    DU --> UC_SUDO
     DU --> UC_BTN_RSVP
     DU --> UC_BTN_PAGE
     DU --> UC_BTN_OVERVIEW_SHOW
+    DU --> UC_BTN_SUDO_LEAVE
 
     BOT --> UC_EVT_LIST
     BOT --> UC_EVT_OVERVIEW
@@ -658,9 +662,11 @@ flowchart LR
     BOT --> UC_MAK_STATS
     BOT --> UC_MAK_LB
     BOT --> UC_SUMMARIZE
+    BOT --> UC_SUDO
     BOT --> UC_BTN_RSVP
     BOT --> UC_BTN_PAGE
     BOT --> UC_BTN_OVERVIEW_SHOW
+    BOT --> UC_BTN_SUDO_LEAVE
     BOT --> UC_SYNC_ROLES
     BOT --> UC_SYNC_CHANNELS
     BOT --> UC_POST_EMBED

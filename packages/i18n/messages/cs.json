@@ -2169,5 +2169,21 @@
   "members_reactivateConfirmDescription": "Znovu získá přístup k týmu.",
   "members_reactivateConfirmConfirm": "Aktivovat",
   "members_reactivated": "Člen byl znovu aktivován.",
-  "members_reactivateFailed": "Znovu aktivovat člena se nezdařilo."
+  "members_reactivateFailed": "Znovu aktivovat člena se nezdařilo.",
+  "bot_sudo_cmd_desc": "Dočasně zapnout administrátorský (sudo) režim",
+  "bot_sudo_entered": "🛡️ Sudo režim je zapnutý. Máš teď administrátorská práva. Do systémového kanálu byl přidán záznam — až budeš hotový, použij tam **Opustit sudo** (nebo spusť /sudo znovu).",
+  "bot_sudo_left": "🔓 Sudo režim ukončen. Administrátorská práva odebrána.",
+  "bot_sudo_log_title": "🛡️ Sudo režim aktivní",
+  "bot_sudo_log_active": "<@{userId}> zapnul(a) sudo režim {timestamp}. Do ukončení má administrátorská práva.",
+  "bot_sudo_log_footer": "Kterýkoli admin může ukončit tlačítkem Opustit sudo.",
+  "bot_sudo_btn_leave": "🔓 Opustit sudo",
+  "bot_sudo_log_title_ended": "✅ Sudo režim ukončen",
+  "bot_sudo_log_ended": "Sudo režim uživatele <@{userId}> ukončil(a) <@{actorId}> {timestamp}. Administrátorská práva byla odebrána.",
+  "bot_sudo_already_ended": "Sudo režim už byl ukončen.",
+  "bot_sudo_err_not_admin": "Sudo režim mohou používat jen administrátoři týmu.",
+  "bot_sudo_err_no_guild": "Tento příkaz lze použít jen na Discord serveru.",
+  "bot_sudo_err_grant_failed": "⚠️ Nepodařilo se přidělit sudo roli. Zkontroluj, že role bota je nad sudo rolí a má právo **Spravovat role**.",
+  "bot_sudo_err_revoke_failed": "⚠️ Nepodařilo se odebrat sudo roli. Zkontroluj pozici role bota a právo **Spravovat role** a zkus to znovu.",
+  "bot_sudo_err_no_system_channel": "Sudo je zapnuté, ale není nastaven systémový kanál, takže nebyl vytvořen záznam. Pro ukončení spusť /sudo znovu.",
+  "bot_sudo_err_generic": "Něco se pokazilo. Zkus to prosím znovu."
 }

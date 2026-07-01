@@ -124,6 +124,19 @@ Rules:
 2. **The fallback path is terminal.** Wrap only the fallback's own REST call in `Effect.retry(retryPolicy)`; never put an outer `Effect.retry` around the whole `retry`+`catchIf` pipe — re-entry after a permanent error must not re-create the already-created resource.
 3. **Only apply the parameter-relaxed branch when the optional input is present.** When the optional input is absent, issue the plain `Effect.suspend(() => ...).pipe(Effect.retry(retryPolicy))` call with no `catchIf` fallback.
 
+### Classifying a One-Off Discord REST Error (`~/rest/discordErrors.ts`)
+
+`isPermanentError` (above) is for the **channel-sync** transient/permanent split. When a command or component handler instead needs to classify a SINGLE `ErrorResponse` (e.g. "was this a permission denial?" or "is the role/member already gone?"), use the shared predicates in `src/rest/discordErrors.ts` — do NOT re-inline the `err.response.status === 403 || err.data.code === 50013` check:
+
+| Predicate | True when | Typical use |
+|-----------|-----------|-------------|
+| `isDiscordPermissionError(error)` | HTTP `403` OR Discord code `50013` | The bot lacks permission — reply a localized "action failed" message instead of failing the fiber. |
+| `isDiscordNotFoundError(error)` | HTTP `404` OR Discord code `10011` / `10013` | The target role/member is already gone — treat as success (idempotent revoke). |
+
+Both accept `unknown` and read `error.response.status` / `error.data.code` defensively. Reference call sites: `src/commands/sudo/handler.ts` (`isDiscordPermissionError`) and `src/interactions/sudo.ts` (`isDiscordNotFoundError`).
+
+**Prefer this module over copying the classifier.** Pre-existing inline copies still live in `src/commands/summon/handler.ts`, `src/commands/summarize/handler.ts`, and `src/interactions/carpool.ts` — those predate the extraction. When you next touch any of them, migrate them to `~/rest/discordErrors.ts` rather than growing the duplication; never add a fourth inline copy.
+
 ## Gateway Event Handlers (`src/events/index.ts`)
 
 Gateway event handlers react to Discord gateway dispatch events (e.g. `GuildCreate`, `ChannelDelete`, `GuildMemberAdd`). All handlers are defined in `src/events/index.ts` and registered via `gateway.handleDispatch`.
@@ -718,9 +731,15 @@ Prefer `guild_locale` (server-configured language) over `locale` (individual use
 
 Each top-level slash command lives in its own folder under `src/commands/`: `index.ts` builds the `Ix.global(definition, handler)` and is registered in `src/commands/index.ts` via `commandBuilder.add(...)`; `handler.ts` holds the handler effect. Localize `description`/`description_localizations` with `m.bot_<command>_description({}, { locale })` and add `name_localizations` for the Czech command name.
 
-### Admin-Gating: `default_member_permissions` (top-level) vs. runtime Sideline permission (subcommand)
+### Admin-Gating: `default_member_permissions` (top-level) vs. runtime Sideline permission (subcommand or RPC-gated top-level)
 
-There are TWO admin-gating mechanisms. Pick by whether the command is top-level or a subcommand.
+There are THREE admin-gating mechanisms. Pick by the decision table below.
+
+| Command shape | Gating | Reference |
+|---------------|--------|-----------|
+| Top-level, gate on a Discord-native permission | Discord `default_member_permissions` (option A) | `/training`, `/carpool`, `/summon`, `/poll` |
+| Subcommand | Runtime Sideline permission in the handler (option B) | `/event refresh` |
+| Top-level, but must stay visible to Sideline admins who lack the Discord-native permission | Runtime `Guild/CheckTeamAdmin` RPC in the handler; NO `default_member_permissions` (option C) | `/sudo` |
 
 **A. Top-level commands — gate natively via Discord `default_member_permissions`** (no runtime check in the handler). Set both fields on the command definition:
 
@@ -732,6 +751,8 @@ dm_permission: false,
 
 **B. Subcommands — gate at RUNTIME via Sideline's own permission system.** A subcommand CANNOT carry `default_member_permissions` (the field is honored only on the top-level command), so the handler must check Sideline's `team:manage` permission itself and reply "forbidden" when the caller lacks it. `/event refresh` (`src/commands/event/refresh.ts`) is the reference: the desire was to keep it under the member-visible `/event` command (NOT a separate top-level `/refresh-events`) AND not to use Discord permissions at all, so it resolves the caller's `team:manage` status server-side and gates on it.
 
+**C. Top-level commands that must stay visible to Sideline admins — gate at RUNTIME via `Guild/CheckTeamAdmin`, and set NO `default_member_permissions`.** Use this ONLY when option A's Discord-native gate would wrongly HIDE the command from a legitimate Sideline admin (e.g. a captain who is not a Discord Administrator). `/sudo` (`src/commands/sudo/`) is the reference: it grants a Discord Administrator role, so gating it on `default_member_permissions: Administrator` would hide it from exactly the admins who need it. Instead its definition (`src/commands/sudo/index.ts`) carries only `dm_permission: false`, and the handler calls `rpc['Guild/CheckTeamAdmin']({ guild_id, discord_user_id })`, replying with the localized "not admin" message when `is_admin === false`. Because the RPC round-trip plus the role/audit work exceeds the 3s ack window, the handler DEFERS ephemerally and does the check-then-act in an `Effect.forkDetach`'d fork (see "3-Second Ack" below).
+
 Rules:
 
 1. **Top-level captain/admin commands use `default_member_permissions: Number(DiscordTypes.Permissions.ManageEvents)` + `dm_permission: false`.** Reference commands sharing this exact convention: `/training`, `/carpool`, `/summon`, `/poll`. Do NOT re-check the permission in the handler — Discord enforces it before dispatch.
@@ -742,6 +763,7 @@ Rules:
    - otherwise reply the localized "forbidden" (`m.bot_refresh_events_forbidden`) or "nothing to refresh" (`m.bot_refresh_events_none`).
 
    The own-vs-other decision lives in the BOT (compare `owner_discord_id` to the interaction user) — the server reports the owner and `is_admin` but never decides authorization (see `applications/server/AGENTS.md` → "Channel classification for `/event refresh`"). Do NOT collapse this back to a flat `!is_admin → forbidden` check (that would block a member from refreshing their own channel), and do NOT add `default_member_permissions` to a subcommand — it is silently ignored.
+3. **Option C is the ONLY case where a top-level command omits `default_member_permissions` deliberately.** Reach for it only when a Discord-native gate would hide the command from a valid Sideline admin. The authorization decision MUST live server-side in `Guild/CheckTeamAdmin` (returns `{ is_admin: boolean }`); the bot only branches on `is_admin` and never re-derives admin status from Discord role ids. Every `Guild/CheckTeamAdmin` deny path replies with a localized ephemeral message — never leave the deferred interaction unresolved. `/sudo` and its `sudo-leave:` button (`src/interactions/sudo.ts`) BOTH re-check `Guild/CheckTeamAdmin` before acting; a component interaction that mutates admin-only state MUST re-authorize the clicker, never trust that only admins can see the button.
 
 ### 3-Second Ack: Fork Heavy Work With `Effect.forkDetach`
 

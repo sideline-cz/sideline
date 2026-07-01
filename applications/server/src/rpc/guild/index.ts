@@ -771,6 +771,34 @@ export const GuildsRpcLive = Effect.Do.pipe(
           ),
         ),
 
+      'Guild/CheckTeamAdmin': ({
+        guild_id,
+        discord_user_id,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly discord_user_id: Discord.Snowflake;
+      }) =>
+        deps.teams.findByGuildId(guild_id).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.succeed({ team_id: Option.none<Team.TeamId>(), is_admin: false }),
+              onSome: (team) =>
+                deps.members.findMembershipByDiscordAndTeam(discord_user_id, team.id).pipe(
+                  Effect.map(
+                    Option.match({
+                      onNone: () => ({ team_id: Option.some(team.id), is_admin: false }),
+                      onSome: (membership) => ({
+                        team_id: Option.some(team.id),
+                        is_admin: membership.permissions.includes('team:manage'),
+                      }),
+                    }),
+                  ),
+                ),
+            }),
+          ),
+        ),
+
       'Guild/GetPersonalChannelsToRename': ({
         guild_id,
         limit,
