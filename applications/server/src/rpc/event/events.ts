@@ -270,6 +270,18 @@ export const constructEvent = Match.type<EventSyncEventRow>().pipe(
       }),
     ),
   ),
+  Match.when({ event_type: 'event_channel_moved' }, (r) =>
+    Effect.succeed(
+      new EventRpcEvents.EventChannelMovedEvent({
+        id: r.id,
+        team_id: r.team_id,
+        guild_id: r.guild_id,
+        event_id: r.event_id,
+        new_channel_id: r.discord_target_channel_id,
+        old_channel_id: r.discord_role_id,
+      }),
+    ),
+  ),
   Match.when({ event_type: 'teams_generated' }, (r) => {
     // A teams_generated row with a null or empty payload is malformed — fail so the
     // ProcessorService marks the event FAILED for retry instead of posting empty teams.

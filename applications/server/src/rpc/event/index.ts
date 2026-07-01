@@ -394,6 +394,15 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
 
       'Event/GetChannelsWithStoredMessages': () => svc.events.findAllChannelsWithStoredMessages(),
 
+      'Event/GetUnpostedUpcomingByChannel': ({
+        discord_channel_id,
+      }: {
+        readonly discord_channel_id: Discord.Snowflake;
+      }) =>
+        svc.events
+          .findUnpostedUpcomingByChannel(discord_channel_id)
+          .pipe(Effect.map(Array.map((row) => row.event_id))),
+
       'Event/SubmitRsvp': ({
         event_id,
         team_id,
@@ -609,6 +618,27 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                   status: row.status,
                   discord_message_id: row.discord_message_id,
                   all_day: row.all_day,
+                }),
+            ),
+          ),
+        ),
+
+      'Event/RepointChannelEvents': ({
+        team_id,
+        old_channel_id,
+        new_channel_id,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly old_channel_id: Option.Option<Discord.Snowflake>;
+        readonly new_channel_id: Option.Option<Discord.Snowflake>;
+      }) =>
+        svc.events.repointChannelEvents(team_id, old_channel_id, new_channel_id).pipe(
+          Effect.map(
+            Array.map(
+              (row) =>
+                new EventRpcModels.MovedEventRow({
+                  event_id: row.event_id,
+                  old_message_id: row.old_message_id,
                 }),
             ),
           ),

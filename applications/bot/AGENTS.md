@@ -49,7 +49,8 @@ src/
     ├── handleUnclaimedTrainingReminder.ts — unclaimed_training_reminder handler (posts reminder pointing to claim message)
     ├── handleEventRosterApprovalRequest.ts — event_roster_approval_request handler (resolves/creates owners thread, posts approval embed + Approve/Decline buttons, saves message id back via Event/SaveApprovalRequestMessageId)
     ├── handleEventRosterApprovalCancel.ts — event_roster_approval_cancel handler (deletes the approval thread message; swallows 10008)
-    └── handleEventRosterThreadDelete.ts — event_roster_thread_delete handler (deletes the entire owners approval thread; swallows 10003)
+    ├── handleEventRosterThreadDelete.ts — event_roster_thread_delete handler (deletes the entire owners approval thread; swallows 10003)
+    └── handleChannelMoved.ts             — event_channel_moved handler (repoints upcoming events old→new events channel; see "Events-Channel Move" below)
 └── rest/events/     — Embed builder functions
     ├── buildEventEmbed.ts              — Main event embed (RSVP counts, "Going" field)
     ├── buildAttendeesEmbed.ts          — Paginated attendee list embed
@@ -458,7 +459,7 @@ Syncs event lifecycle to Discord embed messages. When events are created/updated
 | Domain model | `packages/domain/src/rpc/event/EventRpcEvents.ts` |
 | Bot service | `src/rcp/event/ProcessorService.ts` |
 
-Event types: `event_created`, `event_updated`, `event_cancelled`, `event_started`, `rsvp_reminder`, `training_claim_request`, `training_claim_update`, `unclaimed_training_reminder`, `coaching_status`, `event_roster_approval_request`, `event_roster_approval_cancel`, `event_roster_thread_delete`, `teams_generated`
+Event types: `event_created`, `event_updated`, `event_cancelled`, `event_started`, `rsvp_reminder`, `training_claim_request`, `training_claim_update`, `unclaimed_training_reminder`, `coaching_status`, `event_roster_approval_request`, `event_roster_approval_cancel`, `event_roster_thread_delete`, `teams_generated`, `event_channel_moved`
 
 The `teams_generated` handler (`src/rcp/event/handleTeamsGenerated.ts`) posts the balanced-team breakdown embed (built by `src/rest/events/buildGeneratedTeamsEmbed.ts`) to `event.discord_target_channel_id`; it no-ops with a warning when that channel id is `None`. Its `teams` payload is decoded from the `event_sync_events.teams_payload` JSONB column (see "JSONB payload column on an outbox event type" in `applications/server/AGENTS.md`) — the bot does not recompute the assignment, it only renders the server-computed result.
 
@@ -480,6 +481,25 @@ Three event-sync handlers drive the Discord side of the Event↔Roster Attendanc
 2. If `owner_channel_id` is `None`, log a warning and skip — no thread can be created.
 3. On `createMessage` failure with code 10003 / HTTP 404 (thread deleted), call `Event/ClearEventRosterThread`, recreate via the same race-safe path, and retry the post once.
 4. The candidate's `discord_id` is resolved server-side and arrives on the event as `candidate_discord_id` — the handler never looks it up itself.
+
+#### Events-Channel Move
+
+`handleChannelMoved` (`src/rcp/event/handleChannelMoved.ts`) processes `event_channel_moved`, emitted once by the server when `updateTeamSettings` changes `team_settings.discord_events_channel_id` (old→new, either side `Option<Snowflake>`). It moves every ACTIVE upcoming event's shared-channel message from the old channel to the new one. The event carries `old_channel_id` and `new_channel_id` (both `Option<Snowflake>`); its `event_id` is a nil-UUID sentinel (there is no single event) and its overloaded columns are documented in `applications/server/AGENTS.md`.
+
+The handler is crash-idempotent by construction. Its ordered steps:
+
+1. Resolve the guild locale, falling back to `'en'` if `getGuild` fails.
+2. **Repoint = the commit point.** Call `Event/RepointChannelEvents` FIRST. That RPC atomically UPDATEs each upcoming event's `discord_channel_id` to the new channel AND clears `discord_message_id` to `NULL`, returning each event's PRE-update `old_message_id` (see `applications/server/AGENTS.md` → "Atomic UPDATE that returns each row's PRE-update column values"). After this commit, all subsequent posting is driven off durable DB state.
+3. If `old_channel_id` is `Some`, delete the returned `old_message_id`s from the old channel (`safeDeleteMessage`, `concurrency: 3`, swallows code 10008).
+4. If `new_channel_id` is `Some`, call `Event/GetUnpostedUpcomingByChannel({ discord_channel_id: newChannel })` (active + upcoming + `discord_message_id IS NULL` in that channel) and post each via `buildEventEmbed` + `createMessage`, saving the new id back with `Event/SaveDiscordMessageId` (`concurrency: 1`).
+5. `reorderChannelMessages(newChannel, locale)`, then `reorderChannelMessages(oldChannel, locale)` (each only if the corresponding id is `Some`).
+
+Rules that MUST be preserved:
+
+1. **Posting is driven off durable NULL-`discord_message_id` state, never off the repoint result.** Step 4 re-queries `Event/GetUnpostedUpcomingByChannel` rather than iterating the `moved` rows, so a crash between repoint and posting recovers on retry: already-posted events have a non-NULL id and are skipped, un-posted events are re-found. This is why step 2 must be the single commit point.
+2. **The handler posts ALL unposted events; the slot cap lives ONLY in `reorderChannelMessages`.** Do NOT apply `MAX_CHANNEL_EVENTS` in the posting loop — step 5's reorder trims the channel to the cap afterward. Posting all first then reordering keeps the newest-N selection in one place.
+3. **Each `Option` side is independent.** `old_channel_id = None` (channel first set) skips old-message deletion + old-channel reorder; `new_channel_id = None` (channel cleared) skips posting + new-channel reorder. Never assume both are `Some`.
+4. **An event that vanished/cancelled between repoint and post is skipped, not failed** — step 4 checks `Event/GetEventEmbedInfo`; a `None` logs and continues.
 
 ### Personal Events Sync (per-member private channels + global refresh)
 

@@ -232,6 +232,18 @@ export class TeamsGeneratedEvent extends Schema.TaggedClass<TeamsGeneratedEvent>
   },
 ) {}
 
+export class EventChannelMovedEvent extends Schema.TaggedClass<EventChannelMovedEvent>()(
+  'event_channel_moved',
+  {
+    id: Schema.String,
+    team_id: Team.TeamId,
+    guild_id: Discord.Snowflake,
+    event_id: Event.EventId,
+    old_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    new_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  },
+) {}
+
 export const UnprocessedEventSyncEvent = Schema.Union([
   EventCreatedEvent,
   EventUpdatedEvent,
@@ -246,6 +258,7 @@ export const UnprocessedEventSyncEvent = Schema.Union([
   EventRosterApprovalCancelEvent,
   EventRosterThreadDeleteEvent,
   TeamsGeneratedEvent,
+  EventChannelMovedEvent,
 ]);
 
 export type UnprocessedEventSyncEvent = Schema.Schema.Type<typeof UnprocessedEventSyncEvent>;

@@ -101,6 +101,34 @@ Rules:
 2. **The uncapped count is a separate aggregate column** (`option_counts.vote_count`); the consumer derives the hidden remainder as `vote_count - <rows returned for that group>`. Reference: `PollsRepository.findPollVoters` (60-voter cap per option) and the bot's `buildPollVotersView` "…and N more" math (see `applications/bot/AGENTS.md` → "Total embed-text budget").
 3. **`LEFT JOIN` the capped child CTE** so a group with zero children still returns one row (with `Option.none()` child columns) and the count column is preserved.
 
+### Atomic UPDATE that returns each row's PRE-update column values
+
+When an UPDATE must overwrite a column but the caller still needs the OLD per-row value (e.g. repointing events to a new Discord channel while returning each event's soon-to-be-orphaned `discord_message_id` so the bot can delete the old messages), capture the old values in a `moved` CTE `SELECT ... FOR UPDATE`, do the UPDATE in a second `upd` CTE keyed on `moved`, then `SELECT` by JOINing the two. A plain `UPDATE ... RETURNING` can only return post-update values, and re-reading after the UPDATE always sees the new value.
+
+```sql
+WITH moved AS (
+  SELECT id, discord_message_id AS old_message_id
+  FROM events
+  WHERE team_id = ${input.team_id}
+    AND status = 'active' AND start_at >= now()
+    AND discord_channel_id = ${input.old_channel_id}
+  FOR UPDATE
+), upd AS (
+  UPDATE events SET discord_channel_id = ${input.new_channel_id}, discord_message_id = NULL
+  WHERE id IN (SELECT id FROM moved)
+  RETURNING id
+)
+SELECT moved.id AS event_id, moved.old_message_id FROM moved JOIN upd ON upd.id = moved.id
+```
+
+Rules:
+
+1. **The `moved` CTE MUST use `FOR UPDATE`** to lock the matched rows for the duration of the statement — otherwise a concurrent writer can change a row between the `moved` snapshot and the `upd` write.
+2. **The final `SELECT` JOINs `moved` (old values) to `upd` (proof the row was updated)** — returning from `moved` alone would report rows even if the UPDATE skipped them.
+3. **This is the many-row analogue of the single-value `WITH prev AS (...) ... RETURNING (SELECT ... FROM prev)` pattern** used by `insert`/`insertRoleOnly` to detect the none→present role transition (see "Group-role backfill and grant reapply"). Use `prev`+`RETURNING` for one prior scalar; use `moved`+`upd`+`SELECT JOIN` when you need the old value of EACH updated row.
+
+Reference: `EventsRepository.repointChannelEvents` (`repointChannelEventsWithOld` / `repointChannelEventsWithNullOld`), integration coverage in `applications/server/test/integration/repositories/RepointChannelEvents.test.ts`.
+
 ### Repository Pattern
 
 Construct repositories by starting from `SqlClient.SqlClient.pipe(Effect.bindTo('sql'), ...)`. Use `Effect.bind` for effectful dependencies and `Effect.let` for pure method definitions. End with `Bind.remove` to strip internals.
@@ -231,18 +259,24 @@ When API handlers create/delete resources that need Discord sync:
 2. Call `repo.emitIfGuildLinked(teamId, eventType, ...)` — looks up `guild_id` from `teams` table; if linked, inserts event row; if not, no-op
 3. Wrap emission in `Effect.catchAllDefect(() => Effect.void)` so sync failures never break the primary operation. Use `Effect.catchAllDefect` (not `Effect.catchAll`) because repository methods convert SQL/parse errors to defects via `catchSqlErrors`. Always log before catching with `Effect.tapDefect`
 
-### Adding an `event_sync_events` Event Type — Four Synchronized Places
+### Adding an `event_sync_events` Event Type — Five Synchronized Places
 
-Each `event_sync_events.event_type` value is enumerated in **four** places that MUST stay consistent. Three live in this repo's server + domain; the fourth is the bot. Adding a value to fewer than all four either fails an insert at runtime (DB constraint), drops the event on decode, or fails to compile (bot `Match.exhaustive`).
+Each `event_sync_events.event_type` value is enumerated in **five** places that MUST stay consistent, and ALL five MUST land in one PR. Adding a value to fewer than all five either fails an insert at runtime (DB constraint), fails to compile (server or bot `Match.exhaustive`), or drops the event on decode.
 
 | # | Place | File | What to add |
 |---|-------|------|-------------|
 | 1 | DB CHECK constraint `event_sync_events_event_type_check` | migration (drop + re-add the constraint, see `packages/migrations/AGENTS.md` → "Updating CHECK Constraints") | the new literal in the `event_type IN (...)` list |
 | 2 | `EventSyncEventType` `Schema.Literals([...])` | `src/repositories/EventSyncEventsRepository.ts` | the new literal |
 | 3 | `UnprocessedEventSyncEvent` `Schema.Union([...])` | `packages/domain/src/rpc/event/EventRpcEvents.ts` | a new `Schema.TaggedClass` whose tag equals the literal, added to the union |
-| 4 | Bot dispatcher `Match.type<UnprocessedEventSyncEvent>().pipe(...)` | `applications/bot/src/rcp/event/ProcessorService.ts` | a `Match.tag('<literal>', handler)` arm before `Match.exhaustive` |
+| 4 | Server `constructEvent` matcher `Match.type<EventSyncEventRow>().pipe(...)` | `src/rpc/event/events.ts` | a `Match.when({ event_type: '<literal>' }, (r) => ...)` branch (before `Match.exhaustive`) that builds the place-3 `TaggedClass` from the row |
+| 5 | Bot dispatcher `Match.type<UnprocessedEventSyncEvent>().pipe(...)` | `applications/bot/src/rcp/event/ProcessorService.ts` | a `Match.tag('<literal>', handler)` arm before `Match.exhaustive` |
 
-Place 4 is the compile-time backstop: `Match.exhaustive` fails to type-check the moment place 3 gains a variant with no matching `Match.tag` arm (see `applications/bot/AGENTS.md` → "Tagged-Union Dispatch With `Match.exhaustive`"). Places 1 and 2 have no compile-time link to the others — verify them by hand. The same four-place rule applies to any other `*_sync_events` table that pairs a DB CHECK constraint, a repository `Schema.Literals`, a domain `Schema.Union`, and a bot `Match.exhaustive` dispatcher.
+Places 4 and 5 are BOTH compile-time backstops:
+
+- Place 4's `Match.exhaustive` is over `EventSyncEventRow.event_type`, which IS the `EventSyncEventType` literals union (place 2). So adding place 2's literal WITHOUT a place-4 branch breaks the **server** build. (This differs from `channel_sync_events`, whose `constructEvent.Match.exhaustive` is over the broader `EventRow.event_type` and is therefore NOT a backstop — see the note below.)
+- Place 5's `Match.exhaustive` fails to type-check the moment place 3 gains a variant with no matching `Match.tag` arm (see `applications/bot/AGENTS.md` → "Tagged-Union Dispatch With `Match.exhaustive`"), breaking the **bot** build.
+
+Places 1 and 3 have no compile-time link to the others — verify them by hand (place 1 fails at insert time; place 3 mismatch drops the event on decode). Reference: the `event_channel_moved` wiring across all five places. The same rule applies to any other `*_sync_events` table that pairs a DB CHECK constraint, a repository `Schema.Literals`, a domain `Schema.Union`, a server `constructEvent` matcher, and a bot `Match.exhaustive` dispatcher.
 
 `channel_sync_events` is the **five-place** variant of this rule because it decodes rows through a manual `constructEvent` matcher instead of decoding the literal directly into a tagged union. Adding a `channel_sync_events` event type (e.g. `roster_role_reconcile`) requires, in one PR: (1) the literal in `ChannelSyncEventType` `Schema.Literals` (`packages/domain/src/models/ChannelSyncEvent.ts`); (2) a CHECK-constraint migration on `channel_sync_events_event_type_check` (drop + re-add, see `packages/migrations/AGENTS.md`); (3) a new `Schema.TaggedClass` in `packages/domain/src/rpc/channel/ChannelRpcEvents.ts` added to `UnprocessedChannelEvent`; (4) a `Match.when({ event_type: '<literal>' }, ...FromSql)` branch in `constructEvent` (`src/rpc/channel/events.ts`) that builds that class from the `EventRow` — MISS THIS and the row fails decode at read time (no compile error, since `constructEvent`'s `Match.exhaustive` is over `EventRow.event_type`, not the RPC union); (5) a `Match.tag('<literal>', handler)` arm in the bot dispatcher (`applications/bot/src/rcp/channel/ProcessorService.ts`, added to whichever `actionMatcher`/`action` chain has room — see the bot AGENTS.md 20-arm split note). Reference: the `roster_role_reconcile` wiring across all five places.
 
@@ -568,6 +602,18 @@ Rules:
 3. **`emitEventRosterApprovalCancel` must also be emitted for ALL pending requests** when `unlinkEventRoster` is called — iterate `requests.findPendingByEvent(eventId)` and emit one cancel per request before calling `eventRosters.unlink`.
 4. **`emitEventRosterThreadDelete` must be emitted** in `unlinkEventRoster` before the `eventRosters.unlink` call (while the `owners_thread_id` is still resolvable from the DB row).
 5. **`was_member_before` is set once on first upsert and never updated.** Both the approved and pending upserts (`_upsertApproved`, `_upsertPendingInsert`) use `ON CONFLICT (event_id, team_member_id) DO UPDATE SET ...` but intentionally omit `was_member_before` from the update list. This protects members who were on the roster at request-time: even if they are later removed before the event, the flag stays `true` so an admin decline does not double-remove them. See `_upsertApproved` in `src/repositories/EventRosterRequestsRepository.ts` for the immutability comment.
+
+### Overloaded payload fields on event sync events (events-channel move)
+
+`event_channel_moved` is emitted by `updateTeamSettings` (`src/api/team-settings.ts`) whenever `team_settings.discord_events_channel_id` changes value (compared via `Option.getOrNull(prev) !== Option.getOrNull(next)`), including first-set (`None`→`Some`) and clear (`Some`→`None`). The emit is best-effort — wrapped in `Effect.catchCause(... logWarning)` so a failed enqueue never fails the settings update. `EventSyncEventsRepository.emitEventChannelMoved(teamId, oldChannelId, newChannelId)` short-circuits (emits nothing) when the team has no linked guild, and overloads the generic outbox columns:
+
+| Payload field | Carries | Notes |
+|---------------|---------|-------|
+| `discord_target_channel_id` | `new_channel_id` (`Option<Snowflake>`) | The new events channel; `None` when the channel was cleared. |
+| `discord_role_id` | `old_channel_id` (`Option<Snowflake>`) | The previous events channel; `None` when the channel was first set. |
+| `event_id` | nil-UUID sentinel `00000000-0000-0000-0000-000000000000` | There is no single event — the move affects ALL upcoming events. `constructEvent` maps these back to `EventChannelMovedEvent.{new_channel_id, old_channel_id}`. |
+
+The bot's `handleChannelMoved` then repoints every active upcoming event via `Event/RepointChannelEvents` and reposts unposted events via `Event/GetUnpostedUpcomingByChannel` — see `applications/bot/AGENTS.md` → "Events-Channel Move" for the crash-idempotency contract. `Event/RepointChannelEvents` uses the pre-update-capture CTE documented in "Atomic UPDATE that returns each row's PRE-update column values"; its `old_channel_id = None` case (channel first set) matches events with `discord_channel_id IS NULL` instead of a specific old channel.
 
 ### Roster request provenance invariant (do not break)
 

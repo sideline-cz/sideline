@@ -95,7 +95,7 @@ const loadEventPayload = (
   );
 
 /** Delete a Discord message, logging and swallowing any REST error. */
-const safeDeleteMessage = (
+export const safeDeleteMessage = (
   channelId: Discord.Snowflake,
   messageId: Discord.Snowflake,
   warnContext: string,

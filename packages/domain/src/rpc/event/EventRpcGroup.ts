@@ -31,6 +31,7 @@ import {
   GuildEventListEntry,
   GuildEventListResult,
   GuildNotFound,
+  MovedEventRow,
   NotOwnerGroupMember,
   RosterNotFoundForLink,
   RosterRequestNotFound,
@@ -66,6 +67,14 @@ export const EventRpcGroup = RpcGroup.make(
       discord_channel_id: Discord.Snowflake,
       discord_message_id: Discord.Snowflake,
     },
+  }),
+  Rpc.make('RepointChannelEvents', {
+    payload: {
+      team_id: Team.TeamId,
+      old_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+      new_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    },
+    success: Schema.Array(MovedEventRow),
   }),
   Rpc.make('GetDiscordMessageId', {
     payload: { event_id: Event.EventId },
@@ -232,6 +241,10 @@ export const EventRpcGroup = RpcGroup.make(
       owner_group_id: GroupModel.GroupId,
     },
     success: Schema.Void,
+  }),
+  Rpc.make('GetUnpostedUpcomingByChannel', {
+    payload: { discord_channel_id: Discord.Snowflake },
+    success: Schema.Array(Event.EventId),
   }),
   Rpc.make('GetChannelsWithStoredMessages', {
     success: Schema.Array(

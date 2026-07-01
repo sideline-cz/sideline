@@ -5,6 +5,11 @@ import { EventId } from '~/models/Event.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 import { TrainingTypeId } from '~/models/TrainingType.js';
 
+export class MovedEventRow extends Schema.Class<MovedEventRow>('MovedEventRow')({
+  event_id: EventId,
+  old_message_id: Schema.OptionFromNullOr(Snowflake),
+}) {}
+
 export class EventDiscordMessage extends Schema.Class<EventDiscordMessage>('EventDiscordMessage')({
   discord_channel_id: Snowflake,
   discord_message_id: Snowflake,

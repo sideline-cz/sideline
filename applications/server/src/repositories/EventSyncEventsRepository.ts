@@ -27,6 +27,7 @@ const EventSyncEventType = Schema.Literals([
   'event_roster_approval_cancel',
   'event_roster_thread_delete',
   'teams_generated',
+  'event_channel_moved',
 ]);
 type EventSyncEventType = typeof EventSyncEventType.Type;
 
@@ -131,7 +132,8 @@ const make = Effect.gen(function* () {
     Request: Schema.Number,
     Result: EventSyncEventRow,
     execute: (limit) => sql`
-      SELECT ese.id, ese.team_id, ese.guild_id, ese.event_type, ese.event_id,
+      SELECT ese.id, ese.team_id, ese.guild_id, ese.event_type,
+             COALESCE(ese.event_id, '00000000-0000-0000-0000-000000000000') AS event_id,
              ese.event_title, ese.event_description, ese.event_image_url,
              ese.event_start_at, ese.event_end_at, ese.event_location,
              ese.event_location_url, ese.event_event_type,
@@ -762,6 +764,59 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  /**
+   * Emit an `event_channel_moved` outbox event.
+   *
+   * Column overloads:
+   *   discord_target_channel_id → new_channel_id
+   *   discord_role_id           → old_channel_id
+   *   event_id                  → nil-UUID sentinel (no real event)
+   *
+   * Short-circuits (emits nothing) when the team has no linked guild.
+   */
+  // Team-scoped: no specific event, so event_id is left NULL (the column is
+  // nullable as of migration 1790300014). Overloads: discord_target_channel_id
+  // = new channel, discord_role_id = old channel.
+  const insertChannelMovedEvent = SqlSchema.void({
+    Request: Schema.Struct({
+      team_id: Team.TeamId,
+      guild_id: Discord.Snowflake,
+      new_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+      old_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    }),
+    execute: (input) => sql`
+      INSERT INTO event_sync_events (
+        team_id, guild_id, event_type, event_title, event_start_at,
+        event_event_type, discord_target_channel_id, discord_role_id, event_all_day
+      ) VALUES (
+        ${input.team_id}, ${input.guild_id}, ${'event_channel_moved'}, ${''},
+        ${'1970-01-01T00:00:00.000Z'}, ${'move'},
+        ${input.new_channel_id}, ${input.old_channel_id}, ${false}
+      )
+    `,
+  });
+
+  const emitEventChannelMoved = (
+    teamId: Team.TeamId,
+    oldChannelId: Option.Option<Discord.Snowflake>,
+    newChannelId: Option.Option<Discord.Snowflake>,
+  ) =>
+    lookupGuildId(teamId).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: ({ guild_id }) =>
+            insertChannelMovedEvent({
+              team_id: teamId,
+              guild_id,
+              new_channel_id: newChannelId,
+              old_channel_id: oldChannelId,
+            }),
+        }),
+      ),
+      catchSqlErrors,
+    );
+
   const findUnprocessed = (limit: number) => findUnprocessedEvents(limit).pipe(catchSqlErrors);
 
   const markProcessed = (id: string) => markEventProcessed({ id }).pipe(catchSqlErrors);
@@ -783,6 +838,7 @@ const make = Effect.gen(function* () {
     emitEventRosterApprovalRequest,
     emitEventRosterApprovalCancel,
     emitEventRosterThreadDelete,
+    emitEventChannelMoved,
     findUnprocessed,
     markProcessed,
     markFailed,

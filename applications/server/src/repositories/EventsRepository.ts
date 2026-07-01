@@ -924,6 +924,97 @@ const make = Effect.gen(function* () {
       dirty_at: new Date(observedDirtyAt.epochMilliseconds),
     }).pipe(catchSqlErrors);
 
+  const findUnpostedUpcomingByChannelSchema = SqlSchema.findAll({
+    Request: Discord.Snowflake,
+    Result: Schema.Struct({ event_id: Event.EventId }),
+    execute: (channelId) => sql`
+      SELECT id AS event_id
+      FROM events
+      WHERE discord_channel_id = ${channelId}
+        AND discord_message_id IS NULL
+        AND status = 'active'
+        AND start_at >= now()
+      ORDER BY start_at ASC
+    `,
+  });
+
+  const repointChannelEventsWithOld = SqlSchema.findAll({
+    Request: Schema.Struct({
+      team_id: Team.TeamId,
+      old_channel_id: Discord.Snowflake,
+      new_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    }),
+    Result: Schema.Struct({
+      event_id: Event.EventId,
+      old_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    }),
+    execute: (input) => sql`
+      WITH moved AS (
+        SELECT id, discord_message_id AS old_message_id
+        FROM events
+        WHERE team_id = ${input.team_id}
+          AND status = 'active'
+          AND start_at >= now()
+          AND discord_channel_id = ${input.old_channel_id}
+        FOR UPDATE
+      ), upd AS (
+        UPDATE events SET discord_channel_id = ${input.new_channel_id}, discord_message_id = NULL
+        WHERE id IN (SELECT id FROM moved)
+        RETURNING id
+      )
+      SELECT moved.id AS event_id, moved.old_message_id FROM moved JOIN upd ON upd.id = moved.id
+    `,
+  });
+
+  const repointChannelEventsWithNullOld = SqlSchema.findAll({
+    Request: Schema.Struct({
+      team_id: Team.TeamId,
+      new_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    }),
+    Result: Schema.Struct({
+      event_id: Event.EventId,
+      old_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    }),
+    execute: (input) => sql`
+      WITH moved AS (
+        SELECT id, discord_message_id AS old_message_id
+        FROM events
+        WHERE team_id = ${input.team_id}
+          AND status = 'active'
+          AND start_at >= now()
+          AND discord_channel_id IS NULL
+        FOR UPDATE
+      ), upd AS (
+        UPDATE events SET discord_channel_id = ${input.new_channel_id}, discord_message_id = NULL
+        WHERE id IN (SELECT id FROM moved)
+        RETURNING id
+      )
+      SELECT moved.id AS event_id, moved.old_message_id FROM moved JOIN upd ON upd.id = moved.id
+    `,
+  });
+
+  const findUnpostedUpcomingByChannel = (channelId: Discord.Snowflake) =>
+    findUnpostedUpcomingByChannelSchema(channelId).pipe(catchSqlErrors);
+
+  const repointChannelEvents = (
+    teamId: Team.TeamId,
+    oldChannelId: Option.Option<Discord.Snowflake>,
+    newChannelId: Option.Option<Discord.Snowflake>,
+  ) =>
+    Option.match(oldChannelId, {
+      onNone: () =>
+        repointChannelEventsWithNullOld({
+          team_id: teamId,
+          new_channel_id: newChannelId,
+        }).pipe(catchSqlErrors),
+      onSome: (old) =>
+        repointChannelEventsWithOld({
+          team_id: teamId,
+          old_channel_id: old,
+          new_channel_id: newChannelId,
+        }).pipe(catchSqlErrors),
+    });
+
   return {
     findUpcomingByGuildId,
     countUpcomingByGuildId,
@@ -959,6 +1050,8 @@ const make = Effect.gen(function* () {
     markTeamUpcomingEventsPersonalMessagesDirty,
     markSeriesFuturePersonalMessagesDirty,
     clearEventPersonalMessagesDirty,
+    repointChannelEvents,
+    findUnpostedUpcomingByChannel,
   };
 });
 

@@ -4,6 +4,7 @@ import { Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { requireMembership, requirePermission } from '~/api/permissions.js';
+import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
@@ -20,7 +21,8 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('settings', () => TeamSettingsRepository.asEffect()),
     Effect.bind('teams', () => TeamsRepository.asEffect()),
-    Effect.map(({ members, settings, teams }) =>
+    Effect.bind('syncEvents', () => EventSyncEventsRepository.asEffect()),
+    Effect.map(({ members, settings, teams, syncEvents }) =>
       handlers
         .handle('getTeamSettings', ({ params: { teamId } }) =>
           Effect.Do.pipe(
@@ -121,6 +123,22 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                   Option.match(existing, {
                     onNone: () => Option.none<string>(),
                     onSome: (s) => s.discord_channel_training,
+                  }),
+                onSome: (v) => v,
+              }),
+            ),
+            Effect.let('prevEventsChannel', ({ existing }) =>
+              Option.match(existing, {
+                onNone: () => Option.none(),
+                onSome: (s) => s.discord_events_channel_id,
+              }),
+            ),
+            Effect.let('nextEventsChannel', ({ existing }) =>
+              Option.match(payload.discordEventsChannelId, {
+                onNone: () =>
+                  Option.match(existing, {
+                    onNone: () => Option.none(),
+                    onSome: (s) => s.discord_events_channel_id,
                   }),
                 onSome: (v) => v,
               }),
@@ -315,6 +333,18 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
             Effect.tap(({ prevTrainingChannel, nextTrainingChannel }) => {
               if (Option.getOrNull(prevTrainingChannel) !== Option.getOrNull(nextTrainingChannel)) {
                 return teams.markOnboardingSyncPending(teamId);
+              }
+              return Effect.void;
+            }),
+            Effect.tap(({ prevEventsChannel, nextEventsChannel }) => {
+              if (Option.getOrNull(prevEventsChannel) !== Option.getOrNull(nextEventsChannel)) {
+                return syncEvents
+                  .emitEventChannelMoved(teamId, prevEventsChannel, nextEventsChannel)
+                  .pipe(
+                    Effect.catchCause((c) =>
+                      Effect.logWarning('failed to emit event_channel_moved', c),
+                    ),
+                  );
               }
               return Effect.void;
             }),

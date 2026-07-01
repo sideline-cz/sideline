@@ -7,6 +7,7 @@ import { POLL_BATCH_SIZE } from '~/rest/utils.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 import { ChannelReorderSemaphore } from './ChannelReorderSemaphore.js';
 import { handleCancelled } from './handleCancelled.js';
+import { handleChannelMoved } from './handleChannelMoved.js';
 import { handleCoachingStatus } from './handleCoachingStatus.js';
 import { handleCreated } from './handleCreated.js';
 import { handleEventRosterApprovalCancel } from './handleEventRosterApprovalCancel.js';
@@ -37,6 +38,7 @@ const action: (
     Match.tag('event_roster_approval_cancel', handleEventRosterApprovalCancel),
     Match.tag('event_roster_thread_delete', handleEventRosterThreadDelete),
     Match.tag('teams_generated', handleTeamsGenerated),
+    Match.tag('event_channel_moved', handleChannelMoved),
     Match.exhaustive,
   );
 

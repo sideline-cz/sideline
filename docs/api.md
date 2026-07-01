@@ -6715,6 +6715,8 @@ Manages event embeds, RSVPs, and event sync outbox processing.
 | `Event/ApproveRosterRequest` | `event_id`, `team_member_id`, `decided_by_discord_id` → `DecideRosterRequestResult` | Approves a pending roster request from Discord; errors: `RosterRequestNotFound`, `RosterRequestNotPending`, `NotOwnerGroupMember`, `EventRosterEventNotFound` |
 | `Event/DeclineRosterRequest` | `event_id`, `team_member_id`, `decided_by_discord_id` → `DecideRosterRequestResult` | Declines a pending roster request from Discord; errors: `RosterRequestNotFound`, `RosterRequestNotPending`, `NotOwnerGroupMember`, `EventRosterEventNotFound` |
 | `Event/GetLoggableTrainingEvents` | `guild_id` → `GuildEventListEntry[]` | Returns training events for the guild whose status is `active` or `started` and whose `start_at` is within the past 2 days. Used by the `/training result` autocomplete and command handler. Errors: `GuildNotFound` |
+| `Event/RepointChannelEvents` | `team_id`, `old_channel_id`, `new_channel_id` → `MovedEventRow[]` | Atomic CTE UPDATE that reassigns `discord_channel_id` and NULLs `discord_message_id` for all upcoming active events whose current channel matches `old_channel_id` (or `IS NULL` when `old_channel_id` is `None`). Returns one `MovedEventRow` per affected event with the event's previous `discord_message_id` so the caller can delete the old Discord message. Called by `handleChannelMoved`. |
+| `Event/GetUnpostedUpcomingByChannel` | `discord_channel_id` → `EventId[]` | Returns IDs of all active upcoming events that have `discord_channel_id = $channel` and `discord_message_id IS NULL`, ordered by `start_at` ascending. Used by `handleChannelMoved` to enumerate events that need to be posted to the new channel after a repoint. |
 
 #### Role
 

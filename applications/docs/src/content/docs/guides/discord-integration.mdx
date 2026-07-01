@@ -33,6 +33,10 @@ You link Discord channels to Sideline for specific purposes:
 
 Change channel links at any time from **Team settings → Discord integration**.
 
+<Aside type="note" title="Changing the events channel moves existing events">
+  When you save a new **Events channel**, the bot automatically moves all of your team's upcoming event posts to the new channel — it deletes the old messages and re-posts each event embed in the new channel, then reorders both channels. Past or cancelled events are not moved.
+</Aside>
+
 ### Managed channels
 
 In addition to the purpose-specific channels above, admins and captains can create fully **managed Discord channels** from **Team → Channels**. Sideline creates and owns these channels — you assign access per group, and the bot applies the corresponding Discord permission overwrites within seconds.

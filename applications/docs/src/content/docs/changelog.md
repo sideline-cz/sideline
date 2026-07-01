@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-07-01 — Changing the events channel now moves existing event posts automatically
+
+When a captain or admin changes the **Events channel** in **Team settings → Discord integration**, the bot now automatically migrates all upcoming event posts to the new channel.
+
+- The bot removes each event's message from the old channel and re-posts it in the new channel within seconds.
+- Both channels are reordered after the move, so upcoming events are still sorted with the soonest event nearest the input box.
+- Past and cancelled events are not affected — only upcoming active events are moved.
+- No manual `/event refresh` is needed after changing the channel.
+
 ## 2026-07-01 — Manage group/roster memberships and deactivate members from the member page
 
 The member detail page (**Team → Members → a member**) now supports full member lifecycle management for captains and admins.
