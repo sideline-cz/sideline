@@ -1,5 +1,30 @@
 # @sideline/server
 
+## 0.37.0
+
+### Minor Changes
+
+- [#459](https://github.com/maxa-ondrej/sideline/pull/459) [`53a8a87`](https://github.com/maxa-ondrej/sideline/commit/53a8a87c7eba97553f21cf554b7a43790ef840a6) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - feat: deactivate members when they leave Discord, with membership cascade
+
+  When a member leaves (or is kicked/banned from) the Discord guild, the bot now
+  deactivates their team membership and tears down their memberships: it removes
+  all their group and roster memberships, revokes their Discord roles / channel
+  access (via the existing channel-sync outbox), and de-provisions their personal
+  events channel. The `team_members` row and all history (RSVPs, attendance,
+  created events) are kept, so the member/history is recoverable on rejoin —
+  though prior group/roster memberships are not auto-restored (a captain re-adds
+  them; Discord-role-backed groups return automatically).
+
+  The cascade is centralized (`deactivateMemberAndCascade`) and shared by the new
+  `Guild/RemoveMember` leave path and the existing admin "deactivate member"
+  endpoint, runs in a single transaction with a per-team advisory lock, and skips
+  deactivation of the last remaining team manager to avoid orphaning a team.
+
+### Patch Changes
+
+- Updated dependencies [[`53a8a87`](https://github.com/maxa-ondrej/sideline/commit/53a8a87c7eba97553f21cf554b7a43790ef840a6)]:
+  - @sideline/domain@0.36.0
+
 ## 0.36.0
 
 ### Minor Changes
