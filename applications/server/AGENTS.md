@@ -182,7 +182,7 @@ RPC groups are served via NDJSON over HTTP. Each group has a domain definition a
 |-------|------------------|----------------|---------|
 | Role | `packages/domain/src/rpc/role/RoleRpcGroup.ts` | `src/rpc/role/index.ts` | Role sync events |
 | Channel | `packages/domain/src/rpc/channel/ChannelRpcGroup.ts` | `src/rpc/channel/index.ts` | Channel sync events |
-| Guild | `packages/domain/src/rpc/guild/GuildRpcGroup.ts` | `src/rpc/guild/index.ts` | Guild operations (sync/upsert/delete channels, register members, update channel names) |
+| Guild | `packages/domain/src/rpc/guild/GuildRpcGroup.ts` | `src/rpc/guild/index.ts` | Guild operations (sync/upsert/delete channels, register/remove members, update channel names) |
 | Event | `packages/domain/src/rpc/event/EventRpcGroup.ts` | `src/rpc/event/index.ts` | Event sync |
 | Activity | `packages/domain/src/rpc/activity/ActivityRpcGroup.ts` | `src/rpc/activity/index.ts` | Activity sync |
 | BotInfo | `packages/domain/src/rpc/botInfo/BotInfoRpcGroup.ts` | `src/rpc/botInfo/index.ts` | Bot version reporting (`ReportBotInfo` writes the bot's `APP_VERSION` into the in-memory `BotInfoStore` at startup; `GetServerVersion` returns the server's `APP_VERSION`). Backs the `/version` HTTP endpoint and the bot's `/info` slash command. |
@@ -216,6 +216,10 @@ The RPC payload includes `invite_code: Option<Snowflake-like string>` — this i
 5. If the parent invite has a `group_id`, add the new member to that group AND fetch the group's color via `groups.findGroupById` → `sanitizeHexColor` to populate `group_color_int`.
 
 The server is the only renderer of welcome templates. The bot receives a fully-substituted, sanitized string and embeds it as-is.
+
+### `Guild/RemoveMember`
+
+`Guild/RemoveMember` (`src/rpc/guild/index.ts`, payload `{ guild_id, discord_id }`) is the leave counterpart to `Guild/RegisterMember`, called by the bot's `guildMemberRemove` handler. It resolves team → user → membership (via `findMembershipByIds(..., { includeInactive: true })`), skips with a log line when any is missing or the membership is already inactive, and otherwise runs `deactivateMemberAndCascade` (see "Member Deactivation Cascade — One Chokepoint"). It logs the `deactivated` / `last_admin` / `already_inactive` outcome and returns void — a member who is the team's last active manager is intentionally NOT deactivated on leaving.
 
 ### Per-Acceptance Discord Invites
 
@@ -547,8 +551,8 @@ Three new tables back the personal-channel surface (migrations `1790300004`/`179
 `team_settings.discord_personal_events_group_id` (nullable UUID FK to `groups`, `ON DELETE SET NULL`; migration `1790300010`) optionally restricts personal channels to members of one group AND its descendant subgroups. `NULL` = every active member gets a channel (default).
 
 - **Both eligibility queries use the SAME `WITH RECURSIVE descendant_groups` CTE** (`PersonalEventChannelsRepository`): `_getMembersNeeding` adds an `EXISTS (... descendant_groups ... group_members)` predicate (skipped when `group_id::uuid IS NULL`), and `_getMembersToDeprovision` uses the `NOT EXISTS` negation to find channel-holders who fell outside the group. The CTE walks `groups.parent_id`, scoped to the same `team_id`. This mirrors the established descendant-CTE pattern (see "Group-role backfill" rule above); reuse it for any future group-scoped membership filter — never flatten the hierarchy in application code.
-- **`Guild/GetGuildsNeedingPersonalProvisioning` surfaces a guild needing provision, de-provision, OR rename.** Its `_getGuildsNeedingProvisioning` query's WHERE has three OR'd arms: (a) an eligible member still missing a channel, (b) a channel-holder no longer in the configured group, OR (c) a channel whose `applied_channel_format` drifted from the team's current format (see "Personal-channel format-change drift"). A guild appears in the result if any arm matches, so Pass 1's provision + de-provision + rename all have work.
-- **`Guild/GetPersonalChannelsToDeprovision` returns `[]` when no group is configured.** The handler short-circuits on `Option.none()` for `discord_personal_events_group_id` — an unrestricted team never de-provisions. Only `getMembersToDeprovision` runs the `NOT EXISTS` query, and only when a group id is present.
+- **`Guild/GetGuildsNeedingPersonalProvisioning` surfaces a guild needing provision, de-provision, OR rename.** Its `_getGuildsNeedingProvisioning` query is a `UNION` of four SELECT branches: (a) an eligible member still missing a channel, (b) a channel-holder no longer in the configured group, (c) a channel whose `applied_channel_format` drifted from the team's current format (see "Personal-channel format-change drift"), and (d) an **inactive** member still holding a personal channel (`tm.active = false AND pec.discord_channel_id IS NOT NULL`) — a deactivated member is unreachable via branch (a) yet must be de-provisioned regardless of any group config. A guild appears if any branch matches, so Pass 1's provision + de-provision + rename all have work.
+- **`Guild/GetPersonalChannelsToDeprovision` always merges group-based AND inactive-member de-provision.** The handler runs `getInactiveMembersToDeprovision(teamId, limit)` (channel-holders where `tm.active = false`) **unconditionally**, and additionally runs `getMembersToDeprovision(teamId, groupId, limit)` (the `NOT EXISTS` group query) ONLY when `discord_personal_events_group_id` is `Some`. It merges both result sets and de-duplicates by `team_member_id`. An unrestricted team (no group configured) still de-provisions inactive members — do NOT reintroduce a short-circuit-to-`[]` on `Option.none()` group id.
 - **De-provision clears messages BEFORE the channel row.** `deletePersonalChannel` runs `_deleteMemberMessages` (DELETE `personal_event_messages` for the member) THEN `_deleteChannel`, returning the freed `discord_channel_id` so the caller knows what to delete on Discord. The bot deletes the Discord channel first and calls `Guild/DeletePersonalChannel` only after the channel is gone (see `applications/bot/AGENTS.md` → "Pass 1b — De-provision").
 
 ##### Channel-name format (`team_settings.discord_personal_events_channel_format`)
@@ -1342,6 +1346,34 @@ Rules:
 6. **Fee/payment queries that JOIN `team_members` filter `AND tm.active = true` directly in SQL** (see `FeeAssignmentsRepository.findReminderCandidates` and `findUnpaidAssignmentsForUser`). A removed member's outstanding fees must not appear in payment reminders, my-payments lists, or unpaid-assignment scans. When adding a new repository query that JOINs `team_members` to surface user-facing data, add the same predicate.
 
 Reference: `applications/server/src/repositories/TeamMembersRepository.ts` (`findMembershipQuery`, `findByUserQuery`), `applications/server/src/api/auth.ts` (`autoJoinTeams`), `applications/server/src/api/invite.ts` (`joinViaInvite`), `applications/server/src/rpc/guild/index.ts` (`RegisterMember`).
+
+## Member Deactivation Cascade — One Chokepoint
+
+Every path that deactivates a team member MUST go through `deactivateMemberAndCascade` (`src/utils/deactivateMemberCascade.ts`). Currently exactly two call sites: the roster `deactivateMember` HTTP handler (`src/api/roster.ts`) and the `Guild/RemoveMember` RPC (`src/rpc/guild/index.ts`, invoked when the bot's `guildMemberRemove` fires). Do NOT re-implement the deactivation side effects inline anywhere — a second copy will drift from the invariants below.
+
+The helper runs the entire cascade inside one `deps.sql.withTransaction(...)` and returns a `DeactivateMemberCascadeResult` (`{ deactivated: true }` or `{ deactivated: false, reason: 'already_inactive' | 'last_admin' }`). Its ordered body:
+
+1. Acquire a per-team advisory lock (see below) — always first, inside the transaction.
+2. Re-read the member row; if missing or already inactive → `{ deactivated: false, reason: 'already_inactive' }` (idempotent no-op).
+3. Owner guard: if `memberHoldsManage` and `hasOtherActiveManager(teamId, memberId)` is `false`, log a warning and return `{ deactivated: false, reason: 'last_admin' }` — the last active `team:manage` holder is NEVER deactivated.
+4. Capture roster + group ids BEFORE deleting them (needed for the emit payloads).
+5. Emit `member_removed` channel-sync events for every roster and every group (including ancestor groups via `getAncestors`).
+6. Deactivate the `team_members` row.
+7. **Hard-delete** `group_members` and `roster_members` rows for the member (AFTER the emits).
+
+Rules:
+
+1. **Reactivation does NOT restore group/roster memberships.** Because step 7 hard-deletes them, `reactivateMember` restores only the member row plus event/attendance history — a captain must re-add the member to groups/rosters manually. This blank-slate behavior is intentional; see the NOTE in `src/api/roster.ts` `reactivateMember`.
+2. **Callers translate the `last_admin` result to their own error.** The roster HTTP handler maps `{ deactivated: false, reason: 'last_admin' }` to `Roster.Forbidden`; the RPC handler logs a warning and returns void. Never let the helper throw — it always succeeds with a result the caller inspects.
+3. **`deactivateMemberByIds` must be adapted to `Effect<void, never>`** at the call site: `.pipe(Effect.asVoid, Effect.catchTag('NoSuchElementError', () => LogicError.die(...)))`. A missing UPDATE row after the in-transaction re-read is an impossible state, so it dies rather than fails.
+
+### Per-Team Advisory Lock Guarding an Invariant Check
+
+The cascade guards the "team must keep ≥1 active manager" invariant with `SELECT pg_advisory_xact_lock(hashtext(${teamId}))` as the FIRST statement inside `sql.withTransaction(...)`. Without it, two managers leaving simultaneously could both pass `hasOtherActiveManager` (each still sees the other as active) and both deactivate, orphaning the team with zero managers. The lock serializes all cascades for the same team so the count check and the deactivation are effectively one atomic step. When you add any transaction whose correctness depends on a "count of rows satisfying X across the team" check that a concurrent transaction could invalidate, acquire the same per-team `pg_advisory_xact_lock(hashtext(teamId))` before the check.
+
+### "Does member hold permission X" Checks Must Mirror `findMembershipByIds`
+
+`TeamMember.permissions` is derived from TWO paths: (1) **direct** — `member_roles → role_permissions`; and (2) **group-inherited** — `group_members → (member's group AND all ancestor groups) → role_groups → role_permissions`. Any query that answers "does this member hold permission X?" MUST check BOTH paths, exactly as `findMembershipByIds` does. `TeamMembersRepository.hasOtherActiveManager` is the reference: its SQL has a direct `EXISTS` branch and a group-inherited `EXISTS` branch (with a recursive ancestor CTE) OR'd together. A narrower check (e.g. direct-only) would silently mis-guard — it would report "no other manager" for a team whose only other manager inherits `team:manage` through a group, and then wrongly deactivate the last real manager. When mirroring this for any other permission check, always replicate the full direct + group-inherited derivation.
 
 ## PATCH Payload Merge: `Option.getOrElse` Over `Option.match`
 

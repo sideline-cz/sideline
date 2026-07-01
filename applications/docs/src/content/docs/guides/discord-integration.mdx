@@ -98,6 +98,27 @@ Set a **system log channel** to receive a private embed for every join. The log 
 
 ---
 
+## Member leave (auto-deactivation)
+
+When a member **leaves, is kicked, or is banned** from your Discord server, Sideline automatically deactivates them:
+
+- Their `team_members` record is marked inactive.
+- They are removed from all **groups** and **rosters**.
+- All Discord **roles and channel access** granted via those groups and rosters are revoked within seconds (the same channel-sync worker that handles manual deactivation runs the cleanup).
+- If the member had a **personal events channel**, the channel is de-provisioned on the next personal-channel poll tick.
+
+**What is preserved:** the member's event attendance history, RSVP records, and activity logs are kept so captains can still review past participation.
+
+**Last-admin protection:** if the departing member is the only active team admin (holds `team:manage`), Sideline skips the automatic deactivation and logs a warning. Remove the admin from Discord manually with another admin present to avoid this edge case.
+
+**Rejoin is a blank slate:** if the member rejoins your Discord server and accepts a new invite, they are re-registered as a fresh member — their previous group and roster memberships are **not** restored automatically. A captain must re-add them to any groups or rosters as needed.
+
+<Aside type="note" title="Manual deactivation also available">
+  Admins can deactivate (and later reactivate) any member at any time from **Team → Members → member profile → Danger zone**. The same cascade and last-admin protection apply.
+</Aside>
+
+---
+
 ## Training claim board
 
 A configurable number of days before each training (default: 3 days), the bot posts a **claim-board message** into a dedicated **"Training claims" thread** in the owner group's Discord channel. All trainings for the same owner group share one persistent thread — the bot creates it the first time and reuses it from then on. Each individual embed shows the training's details and an orange **Claim** button.

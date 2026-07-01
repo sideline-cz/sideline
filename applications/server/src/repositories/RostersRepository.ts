@@ -164,6 +164,11 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  const removeAllForMemberQuery = SqlSchema.void({
+    Request: TeamMember.TeamMemberId,
+    execute: (memberId) => sql`DELETE FROM roster_members WHERE team_member_id = ${memberId}`,
+  });
+
   const findByTeamId = (teamId: Team.TeamId) => findByTeam(teamId).pipe(catchSqlErrors);
 
   const findRosterById = (rosterId: RosterModel.RosterId) =>
@@ -192,6 +197,9 @@ const make = Effect.gen(function* () {
     teamMemberId: TeamMember.TeamMemberId,
   ) => removeMember({ roster_id: rosterId, team_member_id: teamMemberId }).pipe(catchSqlErrors);
 
+  const removeAllForMember = (memberId: TeamMember.TeamMemberId) =>
+    removeAllForMemberQuery(memberId).pipe(catchSqlErrors);
+
   const findMemberEntriesById = (rosterId: RosterModel.RosterId) =>
     findMemberEntries({ roster_id: rosterId }).pipe(catchSqlErrors);
 
@@ -219,6 +227,7 @@ const make = Effect.gen(function* () {
     removeMemberById,
     findMemberEntriesById,
     findRosterIdsByMember,
+    removeAllForMember,
   };
 });
 

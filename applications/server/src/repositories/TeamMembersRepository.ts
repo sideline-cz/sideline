@@ -1,5 +1,5 @@
 import { Discord, Role, Team, TeamMember, User } from '@sideline/domain';
-import { Schemas, SqlErrors } from '@sideline/effect-lib';
+import { LogicError, Schemas, SqlErrors } from '@sideline/effect-lib';
 import { Effect, Layer, type Option, pipe, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
@@ -436,6 +436,64 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  const hasOtherActiveManagerQuery = SqlSchema.findOne({
+    Request: Schema.Struct({
+      team_id: Schema.String,
+      exclude_member_id: Schema.String,
+    }),
+    Result: Schema.Struct({ has_manager: Schema.Boolean }),
+    execute: (input) => sql`
+      SELECT EXISTS (
+        SELECT 1
+        FROM team_members tm
+        WHERE tm.team_id = ${input.team_id}
+          AND tm.active = true
+          AND tm.id != ${input.exclude_member_id}::uuid
+          AND (
+            -- direct member_roles path
+            EXISTS (
+              SELECT 1
+              FROM member_roles mr
+              JOIN role_permissions rp ON rp.role_id = mr.role_id
+              WHERE mr.team_member_id = tm.id
+                AND rp.permission = 'team:manage'
+            )
+            OR
+            -- group-inherited path (group_members → ancestor groups → role_groups → role_permissions)
+            EXISTS (
+              SELECT 1
+              FROM group_members gm
+              JOIN LATERAL (
+                WITH RECURSIVE ancestors AS (
+                  SELECT gm.group_id AS id
+                  UNION ALL
+                  SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
+                )
+                SELECT id FROM ancestors
+              ) anc ON true
+              JOIN role_groups rg ON rg.group_id = anc.id
+              JOIN role_permissions rp ON rp.role_id = rg.role_id
+              WHERE gm.team_member_id = tm.id
+                AND rp.permission = 'team:manage'
+            )
+          )
+      ) AS has_manager
+    `,
+  });
+
+  const hasOtherActiveManager = (teamId: Team.TeamId, excludeMemberId: TeamMember.TeamMemberId) =>
+    hasOtherActiveManagerQuery({
+      team_id: teamId,
+      exclude_member_id: excludeMemberId,
+    }).pipe(
+      catchSqlErrors,
+      // EXISTS always returns exactly one row; NoSuchElementError is impossible here.
+      Effect.catchTag('NoSuchElementError', () =>
+        LogicError.die('hasOtherActiveManager: EXISTS query returned no row — impossible'),
+      ),
+      Effect.map((r) => r.has_manager),
+    );
+
   const resetMissedRsvpsQuery = SqlSchema.void({
     Request: TeamMember.TeamMemberId,
     execute: (id) => sql`UPDATE team_members SET missed_rsvps = 0 WHERE id = ${id}`,
@@ -469,6 +527,7 @@ const make = Effect.gen(function* () {
     unassignRole,
     setJerseyNumber,
     resetMissedRsvps,
+    hasOtherActiveManager,
     // test helper
     hardDelete,
   };

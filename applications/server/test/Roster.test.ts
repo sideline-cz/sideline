@@ -10,6 +10,7 @@ import type {
 import { OAuth2Tokens } from 'arctic';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { HttpClient, HttpClientResponse, HttpRouter, HttpServer } from 'effect/unstable/http';
+import { SqlClient } from 'effect/unstable/sql';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ApiLive } from '~/api/index.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
@@ -438,6 +439,12 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   assignRole: () => Effect.void,
   unassignRole: () => Effect.void,
   setJerseyNumber: () => Effect.void,
+  findById: (id: TeamMember.TeamMemberId) => {
+    const member = membersStore.get(id);
+    return Effect.succeed(member ? Option.some({ active: member.active }) : Option.none());
+  },
+  hasOtherActiveManager: (_teamId: Team.TeamId, _excludeMemberId: TeamMember.TeamMemberId) =>
+    Effect.succeed(true),
 } as any);
 
 const MockRostersRepositoryLayer = Layer.succeed(RostersRepository, {
@@ -539,6 +546,7 @@ const MockRostersRepositoryLayer = Layer.succeed(RostersRepository, {
         .filter((rm) => rm.team_member_id === memberId)
         .map((rm) => rm.roster_id),
     ),
+  removeAllForMember: (_memberId: TeamMember.TeamMemberId) => Effect.void,
 } as any);
 
 const MockTeamInvitesRepositoryLayer = Layer.succeed(TeamInvitesRepository, {
@@ -613,6 +621,7 @@ const MockGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
         .map((key) => key.split(':')[0] as GroupModel.GroupId),
     ),
   getDescendantMemberIds: () => Effect.succeed([]),
+  removeAllForMember: (_memberId: TeamMember.TeamMemberId) => Effect.void,
 } as any);
 
 const MockTrainingTypesRepositoryLayer = Layer.succeed(TrainingTypesRepository, {
@@ -686,6 +695,13 @@ const MockRoleSyncEventsRepositoryLayer = Layer.succeed(RoleSyncEventsRepository
   markProcessed: () => Effect.void,
   markFailed: () => Effect.void,
 } as any);
+
+// Stub SqlClient: repositories are mocked, so the only real usages from
+// deactivateMemberAndCascade are `sql.withTransaction(body)` (run the body
+// directly) and the `sql`...`` advisory-lock tagged-template call (no-op query).
+const sqlStub: any = (..._args: unknown[]) => Effect.succeed([]);
+sqlStub.withTransaction = (effect: unknown) => effect;
+const MockSqlClientLayer = Layer.succeed(SqlClient.SqlClient, sqlStub as any);
 
 const MockChannelSyncEventsRepositoryLayer = Layer.succeed(ChannelSyncEventsRepository, {
   emitChannelCreated: () => Effect.void,
@@ -979,7 +995,8 @@ const TestLayer = ApiLive.pipe(
     Layer.provide(
       Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),
     ),
-  );
+  )
+  .pipe(Layer.provide(MockSqlClientLayer));
 
 let handler: (...args: any) => Promise<Response>;
 let dispose: () => Promise<void>;
@@ -2184,7 +2201,8 @@ const buildRcTestLayer = (
       Layer.provide(
         Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),
       ),
-    );
+    )
+    .pipe(Layer.provide(MockSqlClientLayer));
 
 const rcDisposeHandlers: (() => Promise<void>)[] = [];
 

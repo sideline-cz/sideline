@@ -11,6 +11,7 @@ import { applyTemplate, sanitizeHexColor, sanitizeRendered } from '@sideline/tem
 import { Array, type DateTime, Effect, Option, pipe, Schema } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
@@ -21,12 +22,14 @@ import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRep
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { PersonalEventChannelsRepository } from '~/repositories/PersonalEventChannelsRepository.js';
 import { PersonalEventOverflowCategoriesRepository } from '~/repositories/PersonalEventOverflowCategoriesRepository.js';
+import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SudoSessionsRepository } from '~/repositories/SudoSessionsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
+import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
 
 type IdentifyEventsChannelResult = {
   readonly kind: 'global' | 'personal' | 'none';
@@ -364,6 +367,110 @@ export const GuildsRpcLive = Effect.Do.pipe(
 
       'Guild/RegisterMember': registerMember,
 
+      'Guild/RemoveMember': ({
+        guild_id,
+        discord_id,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly discord_id: Discord.Snowflake;
+      }) =>
+        Effect.withSpan('Guild/RemoveMember', { attributes: { guild_id, discord_id } })(
+          Effect.Do.pipe(
+            Effect.bind('rosters', () => RostersRepository.asEffect()),
+            Effect.bind('channelSync', () => ChannelSyncEventsRepository.asEffect()),
+            Effect.flatMap(({ rosters, channelSync }) =>
+              deps.teams.findByGuildId(guild_id).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () =>
+                      Effect.logInfo(
+                        `Guild/RemoveMember: no team found for guild ${guild_id}, skipping`,
+                      ).pipe(Effect.asVoid),
+                    onSome: (team) =>
+                      Effect.Do.pipe(
+                        Effect.bind('user', () => deps.users.findByDiscordId(discord_id)),
+                        Effect.flatMap(({ user }) =>
+                          Option.match(user, {
+                            onNone: () =>
+                              Effect.logInfo(
+                                `Guild/RemoveMember: no user found for discord_id ${discord_id}, skipping`,
+                              ).pipe(Effect.asVoid),
+                            onSome: (resolvedUser) =>
+                              Effect.Do.pipe(
+                                Effect.bind('membership', () =>
+                                  deps.members.findMembershipByIds(team.id, resolvedUser.id, {
+                                    includeInactive: true,
+                                  }),
+                                ),
+                                Effect.flatMap(({ membership }) =>
+                                  Option.match(membership, {
+                                    onNone: () =>
+                                      Effect.logInfo(
+                                        `Guild/RemoveMember: no membership found for user ${resolvedUser.id} in team ${team.id}, skipping`,
+                                      ).pipe(Effect.asVoid),
+                                    onSome: (m) => {
+                                      if (!m.active) {
+                                        return Effect.logInfo(
+                                          `Guild/RemoveMember: membership for user ${resolvedUser.id} in team ${team.id} is already inactive, skipping`,
+                                        ).pipe(Effect.asVoid);
+                                      }
+                                      const memberHoldsManage =
+                                        m.permissions.includes('team:manage');
+                                      return deactivateMemberAndCascade(
+                                        {
+                                          sql: deps.sql,
+                                          members: {
+                                            ...deps.members,
+                                            deactivateMemberByIds: (tId, mId) =>
+                                              deps.members.deactivateMemberByIds(tId, mId).pipe(
+                                                Effect.asVoid,
+                                                Effect.catchTag('NoSuchElementError', () =>
+                                                  LogicError.die(
+                                                    'deactivateMemberByIds: UPDATE returned no row',
+                                                  ),
+                                                ),
+                                              ),
+                                          },
+                                          rosters,
+                                          groups: deps.groups,
+                                          channelSync,
+                                        },
+                                        team.id,
+                                        m.id,
+                                        memberHoldsManage,
+                                        discord_id,
+                                      ).pipe(
+                                        Effect.flatMap((result) => {
+                                          if (result.deactivated) {
+                                            return Effect.logInfo(
+                                              `Guild/RemoveMember: deactivated member ${m.id} for discord_id ${discord_id} in team ${team.id}`,
+                                            );
+                                          }
+                                          if (result.reason === 'last_admin') {
+                                            return Effect.logWarning(
+                                              `Guild/RemoveMember: skipped deactivation of member ${m.id} (last admin) for discord_id ${discord_id} in team ${team.id}`,
+                                            );
+                                          }
+                                          return Effect.logInfo(
+                                            `Guild/RemoveMember: member ${m.id} already inactive for discord_id ${discord_id} in team ${team.id}`,
+                                          );
+                                        }),
+                                        Effect.asVoid,
+                                      );
+                                    },
+                                  }),
+                                ),
+                              ),
+                          }),
+                        ),
+                      ),
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ),
+
       'Guild/ReconcileMembers': ({
         guild_id,
         members: membersList,
@@ -611,34 +718,53 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 ),
               onSome: (team) =>
                 deps.teamSettings.findByTeamId(team.id).pipe(
-                  Effect.flatMap((settingsOpt) =>
-                    Option.match(
-                      Option.flatMap(settingsOpt, (s) => s.discord_personal_events_group_id),
-                      {
-                        // No group restriction → nothing to de-provision.
-                        onNone: () =>
-                          Effect.succeed(
-                            [] as ReadonlyArray<{
-                              readonly team_id: Team.TeamId;
-                              readonly team_member_id: string;
-                              readonly discord_channel_id: Discord.Snowflake;
-                            }>,
-                          ),
-                        onSome: (groupId) =>
-                          deps.personalChannels
-                            .getMembersToDeprovision(team.id, groupId, limit)
-                            .pipe(
-                              Effect.map(
-                                Array.map((m) => ({
-                                  team_id: team.id,
-                                  team_member_id: m.team_member_id,
-                                  discord_channel_id: m.discord_channel_id,
-                                })),
-                              ),
-                            ),
-                      },
-                    ),
-                  ),
+                  Effect.flatMap((settingsOpt) => {
+                    const groupId = Option.flatMap(
+                      settingsOpt,
+                      (s) => s.discord_personal_events_group_id,
+                    );
+                    // Group-based de-provision: active members who left the configured group.
+                    const groupBased = Option.match(groupId, {
+                      onNone: () =>
+                        Effect.succeed<
+                          ReadonlyArray<{
+                            readonly team_member_id: TeamMember.TeamMemberId;
+                            readonly discord_channel_id: Discord.Snowflake;
+                          }>
+                        >([]),
+                      onSome: (gId) =>
+                        deps.personalChannels.getMembersToDeprovision(team.id, gId, limit),
+                    });
+                    // Inactive-member de-provision: always, regardless of group config.
+                    const inactiveBased = deps.personalChannels.getInactiveMembersToDeprovision(
+                      team.id,
+                      limit,
+                    );
+                    return Effect.all([groupBased, inactiveBased], {
+                      concurrency: 'unbounded',
+                    }).pipe(
+                      Effect.map(([groupRows, inactiveRows]) => {
+                        // Merge and deduplicate by team_member_id
+                        const seen = new Set<string>();
+                        const merged: Array<{
+                          readonly team_id: Team.TeamId;
+                          readonly team_member_id: string;
+                          readonly discord_channel_id: Discord.Snowflake;
+                        }> = [];
+                        for (const m of [...groupRows, ...inactiveRows]) {
+                          if (!seen.has(m.team_member_id)) {
+                            seen.add(m.team_member_id);
+                            merged.push({
+                              team_id: team.id,
+                              team_member_id: m.team_member_id,
+                              discord_channel_id: m.discord_channel_id,
+                            });
+                          }
+                        }
+                        return merged;
+                      }),
+                    );
+                  }),
                 ),
             }),
           ),

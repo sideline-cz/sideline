@@ -1320,9 +1320,30 @@ Fired when a new member joins a guild.
 
 ### GUILD_MEMBER_REMOVE
 
-Fired when a member leaves or is removed from a guild.
+Fired when a member leaves, is kicked, or is banned from a guild.
 
-**Actions:** Logs the event only. No server-side action is taken; the member record is retained.
+**Actions:**
+
+1. Decodes the payload (`user`, `guild_id`). If decoding fails, logs a warning and exits without taking further action.
+2. Records the `guild_member_remove` metric.
+3. If the departing user is a bot: logs "Skipping bot" and takes no further action.
+4. Otherwise calls `Guild/RemoveMember` RPC with `guild_id` and `discord_id` of the departing user. If the RPC fails with `RpcClientError`, the error is logged but does not crash the handler.
+
+**`Guild/RemoveMember` cascade (server-side):**
+
+- Looks up the team by `guild_id` and the user by `discord_id`. If either is not found, or if the member's `team_members` row does not exist or is already inactive, the call is a no-op.
+- **Last-admin guard:** if the member holds `team:manage` and is the last active manager of the team, deactivation is skipped to prevent orphaning the team. A warning is logged.
+- Otherwise, runs `deactivateMemberAndCascade` inside a single PostgreSQL transaction (serialised per-team via `pg_advisory_xact_lock`):
+  1. Captures the member's current roster and group IDs before deleting them.
+  2. Emits `member_removed` channel-sync events for every roster and group the member belongs to (including ancestor groups), causing the bot's channel-sync worker to revoke Discord roles and access.
+  3. Deactivates the `team_members` row (`active = false`).
+  4. Hard-deletes all `group_members` and roster membership rows.
+- Rejoin is a blank slate: reactivating the member later restores the `team_members` row and their event/attendance history, but does **not** restore prior group or roster memberships — a captain must re-add them manually.
+
+**Source files:**
+- `applications/bot/src/events/index.ts`
+- `applications/server/src/rpc/guild/index.ts` (`Guild/RemoveMember` handler)
+- `applications/server/src/utils/deactivateMemberCascade.ts`
 
 ---
 
@@ -1814,11 +1835,12 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Guild/DeleteChannel` | | Delete a single channel row from `discord_channels` when a Discord channel is deleted |
 | `Guild/ReconcileMembers` | | Bulk-sync up to 1000 guild members on startup |
 | `Guild/RegisterMember` | | Register a single new member; accepts `invite_code: Option<string>` (the Discord code matched by the invite diff) and returns `Option<WelcomeMeta>` (system log channel, optional welcome detail including rendered message, group colour, inviter Discord ID). The server resolves the invite code via `invite_acceptances.discord_code` (not `team_invites.discord_code`) to look up the team, group, and inviter. |
+| `Guild/RemoveMember` | `guild_id`, `discord_id` | Deactivate a member who left the guild. Resolves the team by `guild_id` and the user by `discord_id`. No-op when the member is not found or is already inactive. Protected: the last active `team:manage` holder is never deactivated. On success, runs `deactivateMemberAndCascade` in a transaction: emits `member_removed` channel-sync events for all rosters and groups (including ancestor groups), deactivates the `team_members` row, and hard-deletes all group and roster memberships. Called from the `GUILD_MEMBER_REMOVE` gateway handler; errors are caught and logged without crashing the handler. |
 | `Guild/GetGuildsNeedingPersonalProvisioning` | `limit` → `Snowflake[]` | Returns guild IDs where personal events are enabled and at least one active member is missing a personal channel |
 | `Guild/IdentifyEventsChannel` | `guild_id`, `channel_id`, `discord_user_id` → `{ kind, team_id, team_member_id, owner_discord_id, is_admin }` | Classifies a channel as `'global'` (the team's global events channel), `'personal'` (a member's personal events channel), or `'none'`. For `'personal'` channels, `owner_discord_id` is the Discord snowflake of the channel's owner — the bot compares this to the caller to tell an own-channel refresh apart from an admin refreshing someone else's. `is_admin` is `true` if the caller holds `team:manage`. |
 | `Guild/GetPersonalEventsCategory` | `guild_id` → `Snowflake \| null` | Returns the team's `discord_personal_events_category_id` setting |
 | `Guild/GetMembersNeedingPersonalChannel` | `guild_id`, `limit` → `{ team_id, team_member_id, discord_id, name, channel_format }[]` | Lists active members with no provisioned personal channel; applies the team's `discord_personal_events_group_id` restriction when set; `name` is the member's display name for the `{name}` channel-format placeholder; `channel_format` is the team's configured `discord_personal_events_channel_format` |
-| `Guild/GetPersonalChannelsToDeprovision` | `guild_id`, `limit` → `{ team_id, team_member_id, discord_channel_id }[]` | Lists members who have a personal channel but are outside the configured `discord_personal_events_group_id` group; empty when no group restriction is set |
+| `Guild/GetPersonalChannelsToDeprovision` | `guild_id`, `limit` → `{ team_id, team_member_id, discord_channel_id }[]` | Lists members who have a personal channel but are no longer eligible. Returns the union of two sets: (a) active members outside the configured `discord_personal_events_group_id` group (empty when no group restriction is set); and (b) inactive members who still hold a personal channel (e.g. after `Guild/RemoveMember` cascade deactivation). Duplicates are de-duplicated by `team_member_id`. |
 | `Guild/ReservePersonalChannel` | `team_id`, `team_member_id` → `{ reserved }` | Idempotent insert into `personal_event_channels` |
 | `Guild/SavePersonalChannelId` | `team_id`, `team_member_id`, `discord_channel_id`, `channel_format` | Writes the Discord channel ID and the applied channel-name format after the bot creates a channel |
 | `Guild/SavePersonalChannelFormat` | `team_id`, `team_member_id`, `channel_format` | Records the channel-name format last applied during a rename so drift detection works correctly on subsequent ticks |

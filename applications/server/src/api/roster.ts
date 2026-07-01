@@ -11,6 +11,7 @@ import {
 import { LogicError, Options } from '@sideline/effect-lib';
 import { Array, DateTime, Effect, Match, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
+import { SqlClient } from 'effect/unstable/sql';
 import { Api } from '~/api/api.js';
 import {
   hasPermission,
@@ -34,6 +35,7 @@ import {
   DEFAULT_ROLE_FORMAT,
 } from '~/utils/applyDiscordFormat.js';
 import { backfillRosterRoleMembers } from '~/utils/backfillRosterRoleMembers.js';
+import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
 import { hexColorToDiscordInt } from '~/utils/hexColorToDiscordInt.js';
 import { reconcileRosterRoleExtras } from '~/utils/reconcileRosterRoleExtras.js';
 
@@ -400,21 +402,37 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                   ? Effect.fail(new Roster.Forbidden())
                   : Effect.void,
               ),
-              Effect.tap(() => members.deactivateMemberByIds(teamId, memberId)),
-              Effect.tap(({ member }) =>
-                emitDiscordCleanupForMember(
-                  { rosters, groups, channelSync },
+              Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
+              Effect.bind('cascadeResult', ({ member, sql }) =>
+                deactivateMemberAndCascade(
+                  {
+                    sql,
+                    members: {
+                      ...members,
+                      deactivateMemberByIds: (tId, mId) =>
+                        members.deactivateMemberByIds(tId, mId).pipe(
+                          Effect.asVoid,
+                          Effect.catchTag('NoSuchElementError', () =>
+                            LogicError.die('deactivateMemberByIds: UPDATE returned no row'),
+                          ),
+                        ),
+                    },
+                    rosters,
+                    groups,
+                    channelSync,
+                  },
                   teamId,
                   memberId,
+                  member.permissions.includes('team:manage'),
                   member.discord_id,
-                  'member_removed',
                 ),
               ),
-              Effect.asVoid,
-              Effect.catchTag(
-                'NoSuchElementError',
-                LogicError.withMessage(() => 'Failed deactivating roster member — no row returned'),
+              Effect.tap(({ cascadeResult }) =>
+                cascadeResult.deactivated === false && cascadeResult.reason === 'last_admin'
+                  ? Effect.fail(new Roster.Forbidden())
+                  : Effect.void,
               ),
+              Effect.asVoid,
             ),
           )
           .handle('reactivateMember', ({ params: { teamId, memberId } }) =>
@@ -430,6 +448,11 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
               // self-404 here, so look the member up with `includeInactive: true` instead, and
               // confirm team ownership ourselves since `reactivateMemberQuery` is team-blind
               // (`WHERE id = $member_id`, no team scope).
+              //
+              // NOTE: after a cascade deactivation the member's group and roster memberships were
+              // hard-deleted (see deactivateMemberAndCascade). Reactivation restores the member
+              // row and their event/attendance history, but NOT prior group/roster memberships —
+              // a captain must re-add them manually. This blank-slate behavior is intentional.
               Effect.bind('member', () =>
                 members.findRosterMemberByIds(teamId, memberId, { includeInactive: true }).pipe(
                   Effect.flatMap(

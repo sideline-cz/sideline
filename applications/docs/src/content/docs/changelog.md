@@ -13,6 +13,16 @@ When a captain or admin changes the **Events channel** in **Team settings → Di
 - Both channels are reordered after the move, so upcoming events are still sorted with the soonest event nearest the input box.
 - Past and cancelled events are not affected — only upcoming active events are moved.
 - No manual `/event refresh` is needed after changing the channel.
+## 2026-07-01 — Automatic member deactivation when leaving Discord
+
+When a member **leaves, is kicked, or is banned** from your Discord server, Sideline now deactivates them automatically — no manual action from admins is required.
+
+- The member is removed from all groups and rosters.
+- Their Discord roles and channel access are revoked within seconds.
+- If they had a personal events channel, it is cleaned up on the next bot tick.
+- Their event attendance and RSVP history are preserved for captain review.
+- **Last-admin protection:** the last active team admin is never auto-deactivated to prevent the team from becoming unmanageable.
+- **Rejoin is a blank slate:** if the member rejoins and accepts a new invite, they are re-registered as a fresh member. A captain must re-add them to any groups or rosters manually.
 
 ## 2026-07-01 — Manage group/roster memberships and deactivate members from the member page
 

@@ -186,6 +186,11 @@ const make = Effect.gen(function* () {
           `,
   });
 
+  const removeAllForMemberQuery = SqlSchema.void({
+    Request: TeamMember.TeamMemberId,
+    execute: (memberId) => sql`DELETE FROM group_members WHERE team_member_id = ${memberId}`,
+  });
+
   const findRolesForGroup = SqlSchema.findAll({
     Request: GroupModel.GroupId,
     Result: GroupRoleRow,
@@ -319,6 +324,9 @@ const make = Effect.gen(function* () {
   const removeMemberById = (groupId: GroupModel.GroupId, teamMemberId: TeamMember.TeamMemberId) =>
     removeMember({ group_id: groupId, team_member_id: teamMemberId }).pipe(catchSqlErrors);
 
+  const removeAllForMember = (memberId: TeamMember.TeamMemberId) =>
+    removeAllForMemberQuery(memberId).pipe(catchSqlErrors);
+
   const getRolesForGroup = (groupId: GroupModel.GroupId) =>
     findRolesForGroup(groupId).pipe(catchSqlErrors);
 
@@ -399,6 +407,7 @@ const make = Effect.gen(function* () {
     findMembersWithDiscordIdByGroupId,
     findDescendantMembersWithDiscordIdByGroupId,
     findGroupIdsByMember,
+    removeAllForMember,
   };
 });
 

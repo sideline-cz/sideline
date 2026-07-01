@@ -197,6 +197,24 @@ const make = Effect.Do.pipe(
       `,
     });
 
+    const _getInactiveMembersToDeprovision = SqlSchema.findAll({
+      Request: Schema.Struct({
+        team_id: Schema.String,
+        limit: Schema.Number,
+      }),
+      Result: MemberToDeprovision,
+      execute: (input) => sql`
+        SELECT tm.id AS team_member_id, pec.discord_channel_id
+        FROM personal_event_channels pec
+        JOIN team_members tm ON tm.id = pec.team_member_id AND tm.team_id = pec.team_id
+        WHERE pec.team_id = ${input.team_id}
+          AND pec.discord_channel_id IS NOT NULL
+          AND tm.active = false
+        ORDER BY tm.id
+        LIMIT ${input.limit}
+      `,
+    });
+
     const _getChannelsToRename = SqlSchema.findAll({
       Request: Schema.Struct({ team_id: Schema.String, limit: Schema.Number }),
       Result: MemberToRename,
@@ -279,6 +297,18 @@ const make = Effect.Do.pipe(
               AND pec.applied_channel_format IS DISTINCT FROM ts.discord_personal_events_channel_format
             )
           )
+        UNION
+        -- (d) inactive members still holding a personal channel (unreachable via the active-member
+        --     branch above; requires a separate UNION so the bot poll picks them up for de-provision)
+        SELECT DISTINCT t.guild_id
+        FROM teams t
+        JOIN team_settings ts ON ts.team_id = t.id
+        JOIN team_members tm ON tm.team_id = t.id
+        JOIN personal_event_channels pec ON pec.team_member_id = tm.id AND pec.team_id = tm.team_id
+        WHERE ts.discord_personal_events_category_id IS NOT NULL
+          AND t.guild_id IS NOT NULL
+          AND tm.active = false
+          AND pec.discord_channel_id IS NOT NULL
         LIMIT ${input.limit}
       `,
     });
@@ -379,6 +409,9 @@ const make = Effect.Do.pipe(
     ) =>
       _getMembersToDeprovision({ team_id: teamId, group_id: groupId, limit }).pipe(catchSqlErrors);
 
+    const getInactiveMembersToDeprovision = (teamId: Team.TeamId, limit: number) =>
+      _getInactiveMembersToDeprovision({ team_id: teamId, limit }).pipe(catchSqlErrors);
+
     const getGuildsNeedingPersonalProvisioning = (limit: number) =>
       _getGuildsNeedingProvisioning({ limit }).pipe(
         Effect.map((rows) => rows.map((r) => r.guild_id)),
@@ -402,6 +435,7 @@ const make = Effect.Do.pipe(
       deletePersonalChannel,
       getMembersNeedingPersonalChannel,
       getMembersToDeprovision,
+      getInactiveMembersToDeprovision,
       getChannelsToRename,
       getGuildsNeedingPersonalProvisioning,
       listPersonalChannelsForEvent,

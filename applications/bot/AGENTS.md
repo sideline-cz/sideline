@@ -250,6 +250,20 @@ The bot attributes a joining member to a specific Sideline invite by diffing Dis
 3. **Never add denormalised welcome metadata to the bot.** Channel ids, group color, inviter discord id all come from `Guild/RegisterMember`'s response. The bot must not look these up itself.
 4. **`inviteDiff` and `welcomeRenderer` must remain Effect-free.** They live under `src/services/` for proximity to consumers but follow the pure-function rule of `@sideline/template-renderer`.
 
+### `guildMemberRemove` — Leave Counterpart of `RegisterMember`
+
+`src/events/index.ts → guildMemberRemove` is the leave counterpart to the `GuildMemberAdd` join flow. It calls the `Guild/RemoveMember` RPC (payload `{ guild_id, discord_id }`), which deactivates the member and cascades all side effects server-side (see `applications/server/AGENTS.md` → "Member Deactivation Cascade — One Chokepoint"). Pipeline, inside one `Effect.Do.pipe`:
+
+1. Decode the raw gateway payload INSIDE the Effect with `Schema.decodeEffect(Schema.Struct({ user: DfxUser, guild_id: Discord.Snowflake }))(member)`, mapping success to `Option.some` and `Effect.catchTag('SchemaError', ...)` to a `logWarning` + `Option.none()`. Never synchronously decode the payload in the dispatch callback body.
+2. `Effect.tap` → increment `discordEventsTotal` with `event_type: 'guild_member_remove'`.
+3. `Option.match` the decoded value: on `None` do nothing; on `Some`, log the leave, then skip bots (`user.bot`) or call `rpc['Guild/RemoveMember']({ guild_id, discord_id: user.id })`.
+4. `Effect.catchTag('RpcClientError', ...)` → log and swallow RPC failure.
+5. `Effect.withSpan('discord/guild_member_remove', ...)` then `Effect.asVoid`.
+
+### Decode Gateway Payloads Inside the Effect, Never in the Dispatch Callback
+
+When a gateway handler needs to schema-validate its raw payload AND perform Effect work, decode with `Schema.decodeEffect(...)` bound inside the `Effect.Do.pipe` and catch `SchemaError` with `Effect.catchTag('SchemaError', ...)` (mapping to a warning + `Option.none()`), NOT with a synchronous `Schema.decodeUnknownOption` call in the `handleDispatch` callback body. A synchronous decode that throws escapes the Effect error channel and is not traced/logged through the handler's span. The `Schema.decodeUnknownOption` + `Option.match` shape shown for the channel handlers above is acceptable ONLY when the decode has no failure to report (unsupported channel types are silently skipped by design); a payload whose decode failure must be logged as a warning uses the `decodeEffect` + `catchTag('SchemaError')` form (`guildMemberRemove` is the reference).
+
 ## Discord Sync Architecture
 
 The bot and server communicate via an **event-driven polling pattern** for syncing Discord resources.

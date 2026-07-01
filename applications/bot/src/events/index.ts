@@ -297,21 +297,51 @@ export const eventHandlers = Effect.Do.pipe(
       );
     }),
   ),
-  Effect.let('guildMemberRemove', ({ gateway }) =>
+  Effect.let('guildMemberRemove', ({ gateway, rpc }) =>
     gateway.handleDispatch(DiscordTypes.GatewayDispatchEvents.GuildMemberRemove, (member) =>
       Effect.Do.pipe(
+        Effect.bind('decoded', () =>
+          Schema.decodeEffect(Schema.Struct({ user: DfxUser, guild_id: Discord.Snowflake }))(
+            member,
+          ).pipe(
+            Effect.map(Option.some),
+            Effect.catchTag('SchemaError', (e) =>
+              Effect.logWarning(`guild_member_remove: failed to decode member payload`, e).pipe(
+                Effect.as(Option.none()),
+              ),
+            ),
+          ),
+        ),
         Effect.tap(() =>
           Metric.update(
             Metric.withAttributes(discordEventsTotal, { event_type: 'guild_member_remove' }),
             1,
           ),
         ),
-        Effect.tap(() =>
-          Effect.logInfo(`Member left: ${member.user.username} from guild ${member.guild_id}`),
+        Effect.tap(({ decoded }) =>
+          Option.match(decoded, {
+            onNone: () => Effect.void,
+            onSome: ({ user, guild_id }) =>
+              Effect.logInfo(`Member left: ${user.username} from guild ${guild_id}`).pipe(
+                Effect.andThen(
+                  user.bot
+                    ? Effect.logInfo('Skipping bot')
+                    : rpc['Guild/RemoveMember']({
+                        guild_id,
+                        discord_id: user.id,
+                      }).pipe(
+                        Effect.catchTag('RpcClientError', (error) =>
+                          Effect.logError(`Failed to remove member ${user.username}`, error),
+                        ),
+                      ),
+                ),
+              ),
+          }),
         ),
         Effect.withSpan('discord/guild_member_remove', {
           attributes: { 'guild.id': member.guild_id },
         }),
+        Effect.asVoid,
       ),
     ),
   ),

@@ -696,7 +696,11 @@ Updates a member's profile fields. All fields are optional.
 
 #### `DELETE /teams/:teamId/members/:memberId`
 
-Deactivates a team member (removes them from active roster). Also revokes the member's Discord roster/group role and channel access for every roster and group they belong to.
+Deactivates a team member (removes them from active roster). Uses `deactivateMemberAndCascade` in a single transaction: emits `member_removed` channel-sync events for every roster and group the member belongs to (including ancestor groups), deactivates the `team_members` row, and hard-deletes all group and roster memberships.
+
+**Last-admin guard:** if the member holds `team:manage` and is the last active manager of the team, deactivation is blocked and `403 Forbidden` is returned. This prevents the team from becoming unmanageable.
+
+**Rejoin behaviour:** reactivating the member later (via `POST /reactivate`) restores the member row and their event/attendance history, but does **not** restore prior group or roster memberships — a captain must re-add them manually.
 
 **Auth:** Bearer token (AuthMiddleware)
 **Required Permission:** `member:remove`
@@ -714,7 +718,7 @@ Deactivates a team member (removes them from active roster). Also revokes the me
 
 | Tag | Status | When |
 |---|---|---|
-| `Forbidden` | 403 | Missing `member:remove` permission |
+| `Forbidden` | 403 | Missing `member:remove` permission, or the member is the last active `team:manage` holder |
 | `PlayerNotFound` | 404 | Member does not exist |
 
 ---
@@ -6649,10 +6653,11 @@ Handles Discord guild lifecycle events.
 | `Guild/SyncGuildChannels` | `guild_id`, `channels[]` | Syncs the channel list for a guild |
 | `Guild/ReconcileMembers` | `guild_id`, `members[]` | Reconciles the server member list with the database |
 | `Guild/RegisterMember` | `guild_id`, `discord_id`, `username`, `avatar`, `roles[]` | Registers a new member who joined the server |
+| `Guild/RemoveMember` | `guild_id`, `discord_id` | Deactivates a member who left the Discord guild (triggered by `GUILD_MEMBER_REMOVE`). Resolves the team by `guild_id` and the user by `discord_id`. No-op when the member is not found or is already inactive. Protected: the last active `team:manage` holder is never deactivated (logs a warning and skips). On success, runs `deactivateMemberAndCascade` in a per-team advisory-locked transaction: emits `member_removed` channel-sync events for all rosters and groups (including ancestor groups), deactivates the `team_members` row, and hard-deletes all group and roster memberships. |
 | `Guild/GetGuildsNeedingPersonalProvisioning` | `limit` → `Snowflake[]` | Returns guild IDs where `discord_personal_events_category_id` is set in team settings and at least one active member has no personal channel row or no Discord channel ID yet |
 | `Guild/GetPersonalEventsCategory` | `guild_id` → `Snowflake \| null` | Returns the team's configured personal-events category channel ID, or null if the feature is not enabled |
 | `Guild/GetMembersNeedingPersonalChannel` | `guild_id`, `limit` → `{ team_id, team_member_id, discord_id, name, channel_format }[]` | Lists active team members who have no personal channel row or whose channel has not yet been provisioned; respects `discord_personal_events_group_id` restriction when set; `name` is the member's best-effort display name for the `{name}` channel-format placeholder; `channel_format` is the team's configured `discord_personal_events_channel_format` template |
-| `Guild/GetPersonalChannelsToDeprovision` | `guild_id`, `limit` → `{ team_id, team_member_id, discord_channel_id }[]` | Lists members who currently have a personal channel but are no longer eligible due to the configured `discord_personal_events_group_id` restriction; returns an empty array when no group restriction is set |
+| `Guild/GetPersonalChannelsToDeprovision` | `guild_id`, `limit` → `{ team_id, team_member_id, discord_channel_id }[]` | Lists members who currently have a personal channel but are no longer eligible. Returns the union of two sets: (a) active members outside the configured `discord_personal_events_group_id` group (empty when no group restriction is set); and (b) inactive members still holding a personal channel (e.g. after `Guild/RemoveMember` cascade deactivation). Results are de-duplicated by `team_member_id`. |
 | `Guild/ReservePersonalChannel` | `team_id`, `team_member_id` → `{ reserved: boolean }` | Inserts a `personal_event_channels` row with `ON CONFLICT DO NOTHING`; returns whether a new row was inserted |
 | `Guild/SavePersonalChannelId` | `team_id`, `team_member_id`, `discord_channel_id`, `channel_format` | Writes the Discord channel snowflake and the applied channel-name format template back to the `personal_event_channels` row after the channel is created |
 | `Guild/SavePersonalChannelFormat` | `team_id`, `team_member_id`, `channel_format` | Records the channel-name format template last applied to a member's channel after a rename, so format-change drift can be detected on subsequent ticks |

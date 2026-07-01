@@ -101,6 +101,12 @@ export const GuildRpcGroup = RpcGroup.make(
       }),
     ),
   }),
+  Rpc.make('RemoveMember', {
+    payload: {
+      guild_id: Discord.Snowflake,
+      discord_id: Discord.Snowflake,
+    },
+  }),
   Rpc.make('PendingGuildJoins', {
     success: Schema.Array(
       Schema.Struct({

@@ -638,6 +638,7 @@ flowchart LR
         UC_POST_EMBED["Post Event Embed\nPosts or updates an event embed message\nin the configured Discord channel\nwhen an event is created or updated\n(Event/GetUnprocessedEvents → Event/MarkEventProcessed)"]
         UC_CLAIM_THREAD["Post Training Claim Embed\nPosts claim embed into persistent owners-group thread\n(Event/GetOwnerClaimThread → Event/SaveOwnerClaimThread\n→ Event/SaveClaimDiscordMessageId)\nThread is reused across all trainings for the same owner group"]
         UC_START_ANNOUNCE["Post Training-Start Announcement\n@-mentions assigned coach (claimed_by_discord_id)\nor owners-group role + no-coach warning if unclaimed\n(Event/GetClaimInfo → rest.deleteMessage on claim embed)"]
+        UC_LEAVE_DEACTIVATE["Auto-Deactivate on Discord Leave\nGateway: GUILD_MEMBER_REMOVE\nSkips bots; skips already-inactive members\nLast-admin guard: skips if sole team:manage holder\n(Guild/RemoveMember → deactivateMemberAndCascade):\nEmits member_removed channel-sync events for all rosters+groups\nDeactivates team_members row; hard-deletes group+roster memberships\nPersonal channel de-provisioned on next bot poll tick"]
     end
 
     DU --> UC_EVT_LIST
@@ -672,6 +673,7 @@ flowchart LR
     BOT --> UC_POST_EMBED
     BOT --> UC_CLAIM_THREAD
     BOT --> UC_START_ANNOUNCE
+    BOT --> UC_LEAVE_DEACTIVATE
 
     SYS --> UC_SYNC_ROLES
     SYS --> UC_SYNC_CHANNELS
