@@ -1,6 +1,5 @@
 ---
 "@sideline/bot": patch
-"@sideline/docs": patch
 ---
 
 Move the "Attendees" button to the second action row of the upcoming-event RSVP message

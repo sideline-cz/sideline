@@ -187,20 +187,20 @@ describe('buildUpcomingEventEmbed', () => {
   });
 
   describe('RSVP buttons', () => {
-    it('returns one component row when user has no response', () => {
+    it('returns two component rows (rsvp + attendees) when user has no response', () => {
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry: makeEntry() });
-      expect(components).toHaveLength(1);
+      expect(components).toHaveLength(2);
     });
 
-    it('rsvp row has four buttons (yes/no/maybe + attendees)', () => {
+    it('rsvp row has three buttons (yes/no/maybe)', () => {
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry: makeEntry() });
-      expect(components[0].components).toHaveLength(4);
+      expect(components[0].components).toHaveLength(3);
     });
 
-    it('includes an attendees button targeting this event', () => {
+    it('includes an attendees button targeting this event on the second row', () => {
       const entry = makeEntry({ event_id: 'ev-42', team_id: 'tm-7' });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
-      const attendeesBtn = (components[0].components as ReadonlyArray<{ custom_id: string }>).find(
+      const attendeesBtn = (components[1].components as ReadonlyArray<{ custom_id: string }>).find(
         (b) => b.custom_id.startsWith('attendees:'),
       );
       expect(attendeesBtn?.custom_id).toBe('attendees:tm-7:ev-42:0');
@@ -274,53 +274,58 @@ describe('buildUpcomingEventEmbed', () => {
   });
 
   describe('message action row', () => {
-    it('does not include message row when my_response is none', () => {
+    it('second row holds only the attendees button when my_response is none', () => {
       const entry = makeEntry({ my_response: Option.none() });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
-      expect(components).toHaveLength(1);
+      expect(components).toHaveLength(2);
+      const secondRow = components[1].components as ReadonlyArray<{ custom_id: string }>;
+      expect(secondRow).toHaveLength(1);
+      expect(secondRow[0].custom_id.startsWith('attendees:')).toBe(true);
     });
 
-    it('includes message row when my_response is some', () => {
+    it('keeps two rows when my_response is some', () => {
       const entry = makeEntry({ my_response: Option.some('yes') });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
       expect(components).toHaveLength(2);
     });
 
-    it('shows add message button when user has no message', () => {
+    it('appends add message button after attendees when user has no message', () => {
       const entry = makeEntry({ my_response: Option.some('yes'), my_message: Option.none() });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
-      const messageRow = components[1].components as ReadonlyArray<{ custom_id: string }>;
-      expect(messageRow).toHaveLength(1);
-      expect(messageRow[0].custom_id).toBe('u-add-msg:team-1:event-1:yes');
+      const secondRow = components[1].components as ReadonlyArray<{ custom_id: string }>;
+      expect(secondRow).toHaveLength(2);
+      expect(secondRow[0].custom_id.startsWith('attendees:')).toBe(true);
+      expect(secondRow[1].custom_id).toBe('u-add-msg:team-1:event-1:yes');
     });
 
-    it('shows edit and clear buttons when user has a message', () => {
+    it('appends edit and clear buttons after attendees when user has a message', () => {
       const entry = makeEntry({
         my_response: Option.some('yes'),
         my_message: Option.some('Ready!'),
       });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
-      const messageRow = components[1].components as ReadonlyArray<{ custom_id: string }>;
-      expect(messageRow).toHaveLength(2);
-      expect(messageRow[0].custom_id).toBe('u-add-msg:team-1:event-1:yes');
-      expect(messageRow[1].custom_id).toBe('u-clear-msg:team-1:event-1:yes');
+      const secondRow = components[1].components as ReadonlyArray<{ custom_id: string }>;
+      expect(secondRow).toHaveLength(3);
+      expect(secondRow[0].custom_id.startsWith('attendees:')).toBe(true);
+      expect(secondRow[1].custom_id).toBe('u-add-msg:team-1:event-1:yes');
+      expect(secondRow[2].custom_id).toBe('u-clear-msg:team-1:event-1:yes');
     });
 
-    it('encodes team_id and event_id in custom_ids', () => {
+    it('encodes team_id and event_id in message-button custom_ids', () => {
       const entry = makeEntry({
         event_id: 'ev-99',
         team_id: 'tm-5',
         my_response: Option.some('maybe'),
       });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
-      const messageRow = components[1].components as ReadonlyArray<{ custom_id: string }>;
-      expect(messageRow[0].custom_id).toBe('u-add-msg:tm-5:ev-99:maybe');
+      const secondRow = components[1].components as ReadonlyArray<{ custom_id: string }>;
+      expect(secondRow[1].custom_id).toBe('u-add-msg:tm-5:ev-99:maybe');
     });
 
     it('add/edit button uses secondary style (2)', () => {
       const entry = makeEntry({ my_response: Option.some('yes'), my_message: Option.none() });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
-      const addBtn = components[1].components[0] as { style: number };
+      const addBtn = components[1].components[1] as { style: number };
       expect(addBtn.style).toBe(2);
     });
 
@@ -330,7 +335,7 @@ describe('buildUpcomingEventEmbed', () => {
         my_message: Option.some('Here!'),
       });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
-      const clearBtn = components[1].components[1] as { style: number };
+      const clearBtn = components[1].components[2] as { style: number };
       expect(clearBtn.style).toBe(4);
     });
   });
