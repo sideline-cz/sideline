@@ -8,10 +8,17 @@ import { POLL_BATCH_SIZE, retryPolicy } from '~/rest/utils.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 /**
- * Discord JSON error code: "Maximum number of channels in category reached".
- * Returned as HTTP 400 when a guild category hits the channel limit.
+ * Discord returns HTTP 400 code 50035 (Invalid Form Body) with a nested
+ * `parent_id` error `CHANNEL_PARENT_MAX_CHANNELS` when a guild category hits
+ * the 50-channel limit. The top-level 50035 code alone is not specific enough
+ * (it covers any form-body validation failure), so we also require the nested
+ * sub-code before treating it as "category full".
  */
-const MAX_CHANNELS_IN_CATEGORY = 30013;
+const INVALID_FORM_BODY = 50035;
+
+const isCategoryFullError = (data: { readonly code: number; readonly errors?: unknown }): boolean =>
+  data.code === INVALID_FORM_BODY &&
+  JSON.stringify(data.errors ?? {}).includes('CHANNEL_PARENT_MAX_CHANNELS');
 
 /**
  * Idempotent provisioner: for each guild, find members without a personal
@@ -21,7 +28,7 @@ const MAX_CHANNELS_IN_CATEGORY = 30013;
  *   1. GetPersonalChannelTargetCategory → resolves base or overflow category
  *   2. ReservePersonalChannel (INSERT ON CONFLICT DO NOTHING) → if reserved=true, proceed
  *   3. createPersonalEventChannel (Discord API call)
- *      - On HTTP 400 / code 30013 (category full):
+ *      - On HTTP 400 / code 50035 CHANNEL_PARENT_MAX_CHANNELS (category full):
  *        a. AllocatePersonalOverflowCategory → get sequence
  *        b. createGuildChannel(GUILD_CATEGORY) → new Discord category
  *        c. SavePersonalOverflowCategoryId
@@ -113,15 +120,16 @@ export const provisionPersonalChannels = (guildId: DiscordSchemas.Snowflake) =>
                           ),
                         );
 
-                      // Try with the resolved category; on HTTP 400 / code 30013
+                      // Try with the resolved category; on HTTP 400 / code 50035
                       // (max channels in category), allocate and CREATE an overflow
                       // Discord category, persist its ID, then retry once.
                       return createAndSave(categoryId).pipe(
                         Effect.catchTag('ErrorResponse', (e) => {
-                          // Only handle the category-full error code (30013).
-                          // Any other error (e.g. 403 Missing Access = 50013) must
-                          // propagate so callers can observe the real failure.
-                          if (e.data.code !== MAX_CHANNELS_IN_CATEGORY) {
+                          // Only handle the category-full condition (50035 with a
+                          // nested CHANNEL_PARENT_MAX_CHANNELS). Any other error
+                          // (e.g. 403 Missing Access = 50013) must propagate so
+                          // callers can observe the real failure.
+                          if (!isCategoryFullError(e.data)) {
                             return Effect.fail(e);
                           }
                           // Category is full — allocate an overflow row, create the
