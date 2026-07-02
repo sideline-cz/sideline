@@ -1,0 +1,5 @@
+---
+"@sideline/bot": patch
+---
+
+Model raw dfx Discord REST failures as semantic tagged Effect errors and eliminate ad-hoc casts. New `~/rest/discordErrors.ts` tagged errors (`DiscordPermissionError` / `DiscordNotFoundError` / `DiscordPermanentError` / `DiscordTransientError`) with a total `toDiscordError` mapper and `failAsDiscordError` combinator, so command/component handlers branch with `Effect.catchTag` instead of re-inlining `err.response.status === 403 || err.data.code === 50013` checks. `summon`, `summarize`, and `carpool` now use the tagged errors. Cast-free shape-probing primitives (`isRecord` / `asRecord` / `numberProp`) extracted to `~/rest/recordProbe.ts`, removing `value as Record<string, unknown>` / `record[key] as number` casts from `discordErrors.ts`, `Bot.ts`, and `rcp/channel/ProcessorService.ts`. The permanent/transient classifier (`isPermanentError`) now lives in `discordErrors.ts` (re-exported from `ProcessorService.ts`), sharing one source of truth with the mapper. No behavior change.

@@ -3,6 +3,7 @@ import { Bind } from '@sideline/effect-lib';
 import { DiscordREST } from 'dfx/DiscordREST';
 import { Array, Effect, Match, Metric } from 'effect';
 import { syncEventsFailedTotal, syncEventsProcessedTotal } from '~/metrics.js';
+import { isPermanentError } from '~/rest/discordErrors.js';
 import { POLL_BATCH_SIZE } from '~/rest/utils.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 import { handleGroupArchived, handleRosterArchived } from './handleArchived.js';
@@ -57,40 +58,10 @@ const action: (
   Match.exhaustive,
 );
 
-/**
- * Returns true for errors that are permanent (i.e. retrying will not help):
- * - Any non-429 4xx Discord HTTP error (permission denied, unknown resource, bad request, etc.)
- * - Discord JSON error codes 10xxx (Unknown resource) or 50013 (Missing Permissions)
- * - Any structural error (_tag: 'ParseError' / 'SchemaError')
- *
- * Note: dfx stores the HTTP status at `e.response.status` and the Discord error code at
- * `e.data.code` — NOT at top-level `e.status` / `e.code`.
- * 5xx errors arrive as `_tag: 'HttpClientError'` (dfx `unexpectedStatus`), NOT `ErrorResponse`,
- * and therefore fall through to `return false` (transient).
- */
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
-
-const numberProp = (
-  record: Record<string, unknown> | undefined,
-  key: string,
-): number | undefined => (typeof record?.[key] === 'number' ? (record[key] as number) : undefined);
-
-export const isPermanentError = (error: unknown): boolean => {
-  const e = asRecord(error);
-  if (e === undefined) return false;
-  // Schema/parse errors are permanent
-  if (e._tag === 'ParseError' || e._tag === 'SchemaError') return true;
-  if (e._tag !== 'ErrorResponse') return false;
-  // Any 4xx that is not 429 is a non-retryable client error.
-  // dfx stores the HTTP response at e.response (not top-level).
-  const status = numberProp(asRecord(e.response), 'status');
-  if (status !== undefined && status >= 400 && status < 500 && status !== 429) return true;
-  // Discord JSON error codes: 10xxx = Unknown resource, 50013 = Missing Permissions.
-  // dfx stores the parsed JSON body at e.data (not top-level).
-  const code = numberProp(asRecord(e.data), 'code');
-  return code !== undefined && (code === 50013 || (code >= 10000 && code < 11000));
-};
+// The permanent/transient classifier lives in `~/rest/discordErrors.ts` (shared with the
+// tagged-error mapper). Re-exported here so channel-sync retry predicates keep importing it
+// from their subsystem (`Effect.retry({ while: (e) => !isPermanentError(e) })`).
+export { isPermanentError };
 
 const processEvent = Effect.Do.pipe(
   Effect.bind('rpc', () => SyncRpc.asEffect()),
