@@ -1,5 +1,6 @@
 import { Discord as DiscordSchemas } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
 import { Interaction } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
@@ -68,17 +69,13 @@ const buildSudoAuditMessage = (
     },
   ],
   components: [
-    {
-      type: 1 as const,
-      components: [
-        {
-          type: 2 as const,
-          style: 4 as const, // Danger
-          label: m.bot_sudo_btn_leave({}, { locale: embedLocale }),
-          custom_id: `sudo-leave:${userId}`,
-        },
-      ],
-    },
+    UI.row([
+      UI.button({
+        style: 4, // style 4 = Danger
+        label: m.bot_sudo_btn_leave({}, { locale: embedLocale }),
+        custom_id: `sudo-leave:${userId}`,
+      }),
+    ]),
   ],
 });
 

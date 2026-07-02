@@ -1,5 +1,6 @@
 import type { Event, TeamMember } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import type * as Discord from 'dfx/types';
 import { DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
@@ -101,44 +102,38 @@ export const buildRosterApprovalMessage = (opts: {
   const components: Array<Discord.ActionRowComponentForMessageRequest> = [];
 
   if (status === 'pending') {
-    components.push({
-      type: 1,
-      components: [
-        {
-          type: 2,
-          style: 3, // SUCCESS / green
+    components.push(
+      UI.row([
+        UI.button({
+          style: 3, // style 3 = Success
           label: m.bot_roster_btn_approve({}, { locale }),
           custom_id: `rsv-approve:${eventId}:${memberId}`,
-        },
-        {
-          type: 2,
-          style: 4, // DANGER / red
+        }),
+        UI.button({
+          style: 4, // style 4 = Danger
           label: m.bot_roster_btn_decline({}, { locale }),
           custom_id: `rsv-decline:${eventId}:${memberId}`,
-        },
-      ],
-    });
+        }),
+      ]),
+    );
   } else {
     // Disabled row for decided/withdrawn states
-    components.push({
-      type: 1,
-      components: [
-        {
-          type: 2,
-          style: 3,
+    components.push(
+      UI.row([
+        UI.button({
+          style: 3, // style 3 = Success
           label: m.bot_roster_btn_approve({}, { locale }),
           custom_id: `rsv-approve:${eventId}:${memberId}`,
           disabled: true,
-        },
-        {
-          type: 2,
-          style: 4,
+        }),
+        UI.button({
+          style: 4, // style 4 = Danger
           label: m.bot_roster_btn_decline({}, { locale }),
           custom_id: `rsv-decline:${eventId}:${memberId}`,
           disabled: true,
-        },
-      ],
-    });
+        }),
+      ]),
+    );
   }
 
   return { embeds, components };

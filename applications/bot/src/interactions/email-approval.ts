@@ -5,6 +5,7 @@ import {
   Team,
 } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction, MessageComponentData } from 'dfx/Interactions/index';
@@ -20,25 +21,21 @@ const decodeSnowflakeOption = Schema.decodeUnknownOption(DiscordSchemas.Snowflak
 const decodeTeamIdOption = Schema.decodeUnknownOption(Team.TeamId);
 const decodeEmailMessageIdOption = Schema.decodeUnknownOption(EmailForwarding.EmailMessageId);
 
-const buildDisabledApprovalRow = (): Discord.ActionRowComponentForMessageRequest => ({
-  type: 1,
-  components: [
-    {
-      type: 2,
-      style: 3,
+const buildDisabledApprovalRow = (): Discord.ActionRowComponentForMessageRequest =>
+  UI.row([
+    UI.button({
+      style: 3, // style 3 = Success
       label: m.bot_email_btn_approve({}, { locale: 'en' }),
       custom_id: 'email-approve:disabled',
       disabled: true,
-    },
-    {
-      type: 2,
-      style: 4,
+    }),
+    UI.button({
+      style: 4, // style 4 = Danger
       label: m.bot_email_btn_reject({}, { locale: 'en' }),
       custom_id: 'email-reject:disabled',
       disabled: true,
-    },
-  ],
-});
+    }),
+  ]);
 
 const ephemeralResponse = (content: string) =>
   Ix.response({

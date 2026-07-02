@@ -1,5 +1,6 @@
 import type { EmailForwarding, EmailRpcEvents, Team } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import type * as Discord from 'dfx/types';
 import { DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
@@ -161,32 +162,29 @@ export const buildApprovalComponents = (
   locale: Locale,
 ): Array<Discord.ActionRowComponentForMessageRequest> => {
   const buttons: Array<Discord.ButtonComponentForMessageRequest> = [
-    {
-      type: 2,
-      style: 3,
+    UI.button({
+      style: 3, // style 3 = Success
       label: m.bot_email_btn_approve({}, { locale }),
       custom_id: `email-approve:${teamId}:${emailId}`,
-    },
-    {
-      type: 2,
-      style: 4,
+    }),
+    UI.button({
+      style: 4, // style 4 = Danger
       label: m.bot_email_btn_reject({}, { locale }),
       custom_id: `email-reject:${teamId}:${emailId}`,
-    },
+    }),
     ...Option.match(deepLink, {
       onNone: () => [] as Array<Discord.ButtonComponentForMessageRequest>,
       onSome: (url): Array<Discord.ButtonComponentForMessageRequest> => [
-        {
-          type: 2,
-          style: 5,
+        UI.button({
+          style: 5, // style 5 = Link
           label: m.bot_email_btn_edit_sideline({}, { locale }),
           url,
-        },
+        }),
       ],
     }),
   ];
 
-  return [{ type: 1, components: buttons }];
+  return [UI.row(buttons)];
 };
 
 // ---------------------------------------------------------------------------
@@ -248,23 +246,18 @@ export const buildTeamPostComponents = (
   emailId: EmailForwarding.EmailMessageId,
   locale: Locale,
 ): Array<Discord.ActionRowComponentForMessageRequest> => [
-  {
-    type: 1,
-    components: [
-      {
-        type: 2,
-        style: 2,
-        label: m.bot_email_btn_detailed({}, { locale }),
-        custom_id: `email-detail:${teamId}:${emailId}`,
-      },
-      {
-        type: 2,
-        style: 2,
-        label: m.bot_email_btn_original({}, { locale }),
-        custom_id: `email-original:${teamId}:${emailId}`,
-      },
-    ],
-  },
+  UI.row([
+    UI.button({
+      style: 2, // style 2 = Secondary
+      label: m.bot_email_btn_detailed({}, { locale }),
+      custom_id: `email-detail:${teamId}:${emailId}`,
+    }),
+    UI.button({
+      style: 2, // style 2 = Secondary
+      label: m.bot_email_btn_original({}, { locale }),
+      custom_id: `email-original:${teamId}:${emailId}`,
+    }),
+  ]),
 ];
 
 // ---------------------------------------------------------------------------
@@ -390,28 +383,25 @@ export const buildPageComponents = ({
   const prefix = kind === 'detailed' ? 'email-detail-page' : 'email-original-page';
 
   const buttons: Array<Discord.ButtonComponentForMessageRequest> = [
-    {
-      type: 2,
-      style: 2,
+    UI.button({
+      style: 2, // style 2 = Secondary
       label: '◀',
       custom_id: `${prefix}:${teamId}:${emailId}:${pageIndex - 1}`,
       disabled: pageIndex === 0,
-    },
-    {
-      type: 2,
-      style: 2,
+    }),
+    UI.button({
+      style: 2, // style 2 = Secondary
       label: m.bot_email_page_indicator({ current: pageIndex + 1, total: totalPages }, { locale }),
       custom_id: `${prefix}-disabled:${teamId}:${emailId}`,
       disabled: true,
-    },
-    {
-      type: 2,
-      style: 2,
+    }),
+    UI.button({
+      style: 2, // style 2 = Secondary
       label: '▶',
       custom_id: `${prefix}:${teamId}:${emailId}:${pageIndex + 1}`,
       disabled: pageIndex === totalPages - 1,
-    },
+    }),
   ];
 
-  return [{ type: 1, components: buttons }];
+  return [UI.row(buttons)];
 };
