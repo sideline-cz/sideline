@@ -26,7 +26,9 @@ const isCategoryFullError = (data: { readonly code: number; readonly errors?: un
  *
  * Algorithm per member:
  *   1. GetPersonalChannelTargetCategory → resolves base or overflow category
- *   2. ReservePersonalChannel (INSERT ON CONFLICT DO NOTHING) → if reserved=true, proceed
+ *   2. ReservePersonalChannel (lease-based INSERT ON CONFLICT DO UPDATE) → if reserved=true, proceed.
+ *      A fresh insert or a re-claimed stale NULL reservation (older than the lease) returns
+ *      reserved=true; a recent NULL reservation or an already-provisioned row returns reserved=false.
  *   3. createPersonalEventChannel (Discord API call)
  *      - On HTTP 400 / code 50035 CHANNEL_PARENT_MAX_CHANNELS (category full):
  *        a. AllocatePersonalOverflowCategory → get sequence

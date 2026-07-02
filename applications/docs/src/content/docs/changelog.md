@@ -5,6 +5,13 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-07-02 — Fixed a bug where some members never received their personal events channel
+
+Previously, if creating a member's private personal events channel failed on the first attempt (for example a transient Discord error), that member could be permanently skipped on every later provisioning check — they would never get a channel until an admin intervened.
+
+- The provisioning check now automatically retries a member whose channel creation didn't complete, instead of skipping them forever.
+- No action is needed from admins or affected members — this is fixed automatically on the next provisioning check (within about 15 minutes).
+
 ## 2026-07-02 — New `/complete` Discord command completes your profile
 
 You can now complete your profile straight from Discord with the new `/complete` slash command (Czech: `/dokoncit`) — an alternative to the one-time web onboarding form.

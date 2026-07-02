@@ -50,10 +50,18 @@ const make = Effect.Do.pipe(
         team_member_id: Schema.String,
       }),
       Result: Schema.Struct({ id: Schema.String }),
+      // Re-claimable lease: a fresh NULL reservation (mutual exclusion) or an already
+      // provisioned row (non-NULL discord_channel_id) is left untouched by the DO UPDATE
+      // guard clause, so the INSERT ... DO UPDATE ... WHERE returns no row for those cases.
+      // A NULL reservation left stale for more than 15 minutes (e.g. a crashed worker) can
+      // be re-claimed by bumping updated_at, which returns the row.
       execute: (input) => sql`
         INSERT INTO personal_event_channels (team_id, team_member_id)
         VALUES (${input.team_id}, ${input.team_member_id})
-        ON CONFLICT (team_id, team_member_id) DO NOTHING
+        ON CONFLICT (team_id, team_member_id) DO UPDATE
+          SET updated_at = now()
+          WHERE personal_event_channels.discord_channel_id IS NULL
+            AND personal_event_channels.updated_at < now() - interval '15 minutes'
         RETURNING id
       `,
     });

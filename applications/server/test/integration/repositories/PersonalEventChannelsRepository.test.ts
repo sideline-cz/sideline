@@ -1,13 +1,11 @@
-// NOTE: These tests are written in TDD mode BEFORE the implementation.
-// They require:
-//   - Migration 1790100002: CREATE TABLE personal_event_channels
-//   - A new PersonalEventChannelsRepository service with methods:
-//       reservePersonalChannel(teamId, teamMemberId) → INSERT ON CONFLICT DO NOTHING
-//       savePersonalChannelId(teamId, teamMemberId, discordChannelId) → UPDATE
-//       getMembersNeedingPersonalChannel(teamId, limit) → rows with discord_channel_id IS NULL
-//       getPersonalChannel(teamId, teamMemberId) → Option<{id, discord_channel_id}>
-//       deletePersonalChannel(teamId, teamMemberId) → Option<Snowflake> (returns channel id)
-// These tests WILL FAIL until the developer implements the repository and migration.
+// Integration tests for PersonalEventChannelsRepository (real Postgres).
+// Key methods under test:
+//   reservePersonalChannel(teamId, teamMemberId) → lease-based INSERT ON CONFLICT
+//     DO UPDATE: re-claims a NULL reservation only once its updated_at lease expires
+//   savePersonalChannelId(teamId, teamMemberId, discordChannelId) → UPDATE
+//   getMembersNeedingPersonalChannel(teamId, limit) → rows with discord_channel_id IS NULL
+//   getPersonalChannel(teamId, teamMemberId) → Option<{id, discord_channel_id}>
+//   deletePersonalChannel(teamId, teamMemberId) → Option<Snowflake> (returns channel id)
 
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, GroupModel, Team, TeamMember, User } from '@sideline/domain';
@@ -117,7 +115,7 @@ const seedTeamWithMember = (discordId: string, username: string, guildId: Discor
   );
 
 // ---------------------------------------------------------------------------
-// Tests: reserve-first idempotency (INSERT ON CONFLICT DO NOTHING)
+// Tests: reserve-first idempotency (lease-based INSERT ON CONFLICT DO UPDATE)
 // ---------------------------------------------------------------------------
 
 describe('PersonalEventChannelsRepository — reservePersonalChannel idempotency', () => {
@@ -205,6 +203,298 @@ describe('PersonalEventChannelsRepository — reservePersonalChannel idempotency
       ),
       Effect.provide(TestLayer),
     ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Tests: stale reservation re-claim (lease-based conditional re-claim)
+// ---------------------------------------------------------------------------
+//
+// Bug: a NULL discord_channel_id row (reserved but the channel was never
+// actually created, e.g. the process crashed mid-provisioning) permanently
+// blocks that member from ever being re-provisioned because the old
+// `ON CONFLICT DO NOTHING` reserve always reports "not reserved" for an
+// existing row. The fix re-claims a NULL row once its `updated_at` lease is
+// older than 15 minutes.
+
+const backdateReservation = (
+  teamId: Team.TeamId,
+  teamMemberId: TeamMember.TeamMemberId,
+  interval: string,
+) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen((sql) =>
+      sql.unsafe(`
+        UPDATE personal_event_channels
+        SET updated_at = now() - interval '${interval}'
+        WHERE team_id = '${teamId}' AND team_member_id = '${teamMemberId}'
+      `),
+    ),
+  );
+
+const countReservations = (teamId: Team.TeamId, teamMemberId: TeamMember.TeamMemberId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen((sql) =>
+      sql.unsafe<{ count: string }>(`
+        SELECT COUNT(*)::text AS count FROM personal_event_channels
+        WHERE team_id = '${teamId}' AND team_member_id = '${teamMemberId}'
+      `),
+    ),
+    Effect.map((rows) => parseInt(rows[0]?.count ?? '0', 10)),
+  );
+
+describe('PersonalEventChannelsRepository — stale reservation re-claim', () => {
+  it.effect(
+    'regression: a stale NULL reservation (older than the lease) is re-claimed, unblocking provisioning',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '420000000000000001',
+            'stale-reclaim-1',
+            '420020202020202020' as Discord.Snowflake,
+          ),
+        ),
+        // First reserve attempt succeeds but the channel is never created
+        // (discord_channel_id stays NULL) — simulating a crashed/failed attempt.
+        Effect.bind('firstReserve', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.reservePersonalChannel(seed.team.id, seed.member.id)),
+          ),
+        ),
+        Effect.tap(({ firstReserve }) =>
+          Effect.sync(() => {
+            expect(firstReserve).toBe(true);
+          }),
+        ),
+        // Simulate the lease going stale (older than 15 minutes).
+        Effect.tap(({ seed }) => backdateReservation(seed.team.id, seed.member.id, '1 hour')),
+        // A later provisioning pass should be able to re-claim the stale row.
+        Effect.bind('secondReserve', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.reservePersonalChannel(seed.team.id, seed.member.id)),
+          ),
+        ),
+        Effect.tap(({ secondReserve }) =>
+          Effect.sync(() => {
+            expect(secondReserve).toBe(true);
+          }),
+        ),
+        // No duplicate row was created — the same row was updated in place.
+        Effect.bind('count', ({ seed }) => countReservations(seed.team.id, seed.member.id)),
+        Effect.tap(({ count }) =>
+          Effect.sync(() => {
+            expect(count).toBe(1);
+          }),
+        ),
+        // End-to-end recovery: provisioning the channel now removes the member
+        // from the "needs a channel" queue.
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.savePersonalChannelId(
+                seed.team.id,
+                seed.member.id,
+                '420111111111111111' as Discord.Snowflake,
+                'events-{discord_id}',
+              ),
+            ),
+          ),
+        ),
+        Effect.bind('needing', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.getMembersNeedingPersonalChannel(seed.team.id, Option.none(), 100),
+            ),
+          ),
+        ),
+        Effect.tap(({ needing, seed }) =>
+          Effect.sync(() => {
+            const memberIds = needing.map((r) => r.team_member_id);
+            expect(memberIds).not.toContain(seed.member.id);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'mutual exclusion: a recent NULL reservation (within the lease) is NOT re-claimed',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '421000000000000001',
+            'mutual-exclusion-1',
+            '421020202020202020' as Discord.Snowflake,
+          ),
+        ),
+        Effect.bind('firstReserve', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.reservePersonalChannel(seed.team.id, seed.member.id)),
+          ),
+        ),
+        Effect.tap(({ firstReserve }) =>
+          Effect.sync(() => {
+            expect(firstReserve).toBe(true);
+          }),
+        ),
+        // No backdating — the row's lease is still fresh.
+        Effect.bind('secondReserve', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.reservePersonalChannel(seed.team.id, seed.member.id)),
+          ),
+        ),
+        Effect.tap(({ secondReserve }) =>
+          Effect.sync(() => {
+            expect(secondReserve).toBe(false);
+          }),
+        ),
+        Effect.bind('count', ({ seed }) => countReservations(seed.team.id, seed.member.id)),
+        Effect.tap(({ count }) =>
+          Effect.sync(() => {
+            expect(count).toBe(1);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'already-provisioned: a row with a non-NULL discord_channel_id is never re-claimed, even if stale',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '422000000000000001',
+            'already-provisioned-1',
+            '422020202020202020' as Discord.Snowflake,
+          ),
+        ),
+        Effect.bind('firstReserve', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.reservePersonalChannel(seed.team.id, seed.member.id)),
+          ),
+        ),
+        Effect.tap(({ firstReserve }) =>
+          Effect.sync(() => {
+            expect(firstReserve).toBe(true);
+          }),
+        ),
+        Effect.tap(({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.savePersonalChannelId(
+                seed.team.id,
+                seed.member.id,
+                '422111111111111111' as Discord.Snowflake,
+                'events-{discord_id}',
+              ),
+            ),
+          ),
+        ),
+        // Backdate the lease to prove the guard against re-claiming is the
+        // non-NULL discord_channel_id, not the 15-minute lease window.
+        Effect.tap(({ seed }) => backdateReservation(seed.team.id, seed.member.id, '1 hour')),
+        Effect.bind('secondReserve', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.reservePersonalChannel(seed.team.id, seed.member.id)),
+          ),
+        ),
+        Effect.tap(({ secondReserve }) =>
+          Effect.sync(() => {
+            expect(secondReserve).toBe(false);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect('fresh member: reserving a member with no prior row succeeds', () =>
+    Effect.Do.pipe(
+      Effect.bind('seed', () =>
+        seedTeamWithMember(
+          '423000000000000001',
+          'fresh-member-1',
+          '423020202020202020' as Discord.Snowflake,
+        ),
+      ),
+      Effect.bind('reserved', ({ seed }) =>
+        PersonalEventChannelsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.reservePersonalChannel(seed.team.id, seed.member.id)),
+        ),
+      ),
+      Effect.tap(({ reserved }) =>
+        Effect.sync(() => {
+          expect(reserved).toBe(true);
+        }),
+      ),
+      Effect.bind('count', ({ seed }) => countReservations(seed.team.id, seed.member.id)),
+      Effect.tap(({ count }) =>
+        Effect.sync(() => {
+          expect(count).toBe(1);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    // Two reserves against the same stale row yield exactly one winner and no
+    // duplicate. Mutual exclusion is guaranteed by the single atomic
+    // INSERT ... ON CONFLICT DO UPDATE statement (autocommit per statement), so
+    // the outcome is interleaving-independent — this asserts that property holds
+    // rather than exercising a genuine cross-transaction race.
+    'two reserves against the same stale row yield exactly one winner (no duplicate)',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () =>
+          seedTeamWithMember(
+            '424000000000000001',
+            'concurrent-reclaim-1',
+            '424020202020202020' as Discord.Snowflake,
+          ),
+        ),
+        Effect.bind('firstReserve', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.reservePersonalChannel(seed.team.id, seed.member.id)),
+          ),
+        ),
+        Effect.tap(({ firstReserve }) =>
+          Effect.sync(() => {
+            expect(firstReserve).toBe(true);
+          }),
+        ),
+        Effect.tap(({ seed }) => backdateReservation(seed.team.id, seed.member.id, '1 hour')),
+        Effect.bind('results', ({ seed }) =>
+          PersonalEventChannelsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              Effect.all(
+                [
+                  repo.reservePersonalChannel(seed.team.id, seed.member.id),
+                  repo.reservePersonalChannel(seed.team.id, seed.member.id),
+                ],
+                { concurrency: 'unbounded' },
+              ),
+            ),
+          ),
+        ),
+        Effect.tap(({ results }) =>
+          Effect.sync(() => {
+            const winners = results.filter((r) => r === true);
+            const losers = results.filter((r) => r === false);
+            expect(winners).toHaveLength(1);
+            expect(losers).toHaveLength(1);
+          }),
+        ),
+        Effect.bind('count', ({ seed }) => countReservations(seed.team.id, seed.member.id)),
+        Effect.tap(({ count }) =>
+          Effect.sync(() => {
+            expect(count).toBe(1);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
   );
 });
 
