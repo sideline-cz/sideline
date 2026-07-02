@@ -758,6 +758,177 @@ describe('ExpensesRepository — balanceSummaryByTeam', () => {
       Effect.provide(TestLayer),
     ),
   );
+
+  it.effect(
+    'balanceSummaryByTeam returns a negative netMinor when expenses exceed income (allows negative via Schema.decodeSync(NetAmountMinor))',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userId', () => createUser('930000000000000021', 'exp-owner-neg')),
+        Effect.bind('team', ({ userId }) =>
+          createTeam('933000000000000000' as Discord.Snowflake, userId),
+        ),
+        // Large expense: 10_000 minor units CZK
+        Effect.tap(({ team, userId }) =>
+          ExpensesRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.insert({
+                team_id: team.id,
+                amount_minor: 10000,
+                currency: 'CZK',
+                spent_at: DateTime.fromDateUnsafe(new Date('2025-05-01T12:00:00Z')),
+                category: 'equipment',
+                description: 'Big purchase',
+                created_by_user_id: userId,
+                updated_by_user_id: userId,
+              }),
+            ),
+          ),
+        ),
+        // Small income: fee 3000 + payment 3000 CZK
+        Effect.bind('fee', ({ team }) =>
+          FeesRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.insert({
+                team_id: team.id,
+                name: 'Small Fee',
+                description: Option.none(),
+                amount_minor: 3000,
+                currency: 'CZK',
+                due_at: Option.none(),
+              }),
+            ),
+          ),
+        ),
+        Effect.bind('member', ({ team, userId }) =>
+          TeamMembersRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.addMember({
+                team_id: team.id,
+                user_id: userId,
+                active: true,
+                joined_at: undefined,
+              }),
+            ),
+          ),
+        ),
+        Effect.bind('assignments', ({ fee, member }) =>
+          FeeAssignmentsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.bulkInsert({
+                feeId: fee.id,
+                memberIds: [(member as any).id],
+                amountMinorOverride: Option.none(),
+                dueAtOverride: Option.none(),
+              }),
+            ),
+          ),
+        ),
+        Effect.tap(({ assignments, member, userId }) =>
+          PaymentsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.insert({
+                feeAssignmentId: assignments[0]?.id,
+                teamMemberId: (member as any).id,
+                amountMinor: 3000,
+                method: 'cash',
+                paidAt: DateTime.fromDateUnsafe(new Date('2025-05-02T12:00:00Z')),
+                note: Option.none(),
+                recordedByUserId: userId,
+              }),
+            ),
+          ),
+        ),
+        Effect.bind('summary', ({ team }) =>
+          ExpensesRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.balanceSummaryByTeam(team.id)),
+          ),
+        ),
+        Effect.tap(({ summary }) =>
+          Effect.sync(() => {
+            const czkEntry = summary.find((s) => s.currency === 'CZK');
+            expect(czkEntry).toBeDefined();
+            if (czkEntry !== undefined) {
+              expect(czkEntry.incomeMinor).toBe(3000);
+              expect(czkEntry.expensesMinor).toBe(10000);
+              expect(czkEntry.netMinor).toBe(-7000);
+              expect(czkEntry.netMinor).toBeLessThan(0);
+            }
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'balanceSummaryByTeam decodes BIGINT-as-string SUM columns into correct numeric branded AmountMinor values',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userId', () => createUser('930000000000000022', 'exp-owner-bigint')),
+        Effect.bind('team', ({ userId }) =>
+          createTeam('933100000000000000' as Discord.Snowflake, userId),
+        ),
+        // Two expenses whose sum (1_000_000_000 minor units) must decode as an exact
+        // JS number, proving Expense.AmountMinor's NumberFromString branch correctly
+        // parses the BIGINT-as-string value node-pg returns for the SUM(...) column.
+        Effect.tap(({ team, userId }) =>
+          ExpensesRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.insert({
+                team_id: team.id,
+                amount_minor: 123456789,
+                currency: 'CZK',
+                spent_at: DateTime.fromDateUnsafe(new Date('2025-05-10T12:00:00Z')),
+                category: 'other',
+                description: 'Large expense one',
+                created_by_user_id: userId,
+                updated_by_user_id: userId,
+              }),
+            ),
+          ),
+        ),
+        Effect.tap(({ team, userId }) =>
+          ExpensesRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.insert({
+                team_id: team.id,
+                amount_minor: 876543211,
+                currency: 'CZK',
+                spent_at: DateTime.fromDateUnsafe(new Date('2025-05-11T12:00:00Z')),
+                category: 'other',
+                description: 'Large expense two',
+                created_by_user_id: userId,
+                updated_by_user_id: userId,
+              }),
+            ),
+          ),
+        ),
+        Effect.bind('summary', ({ team }) =>
+          ExpensesRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.balanceSummaryByTeam(team.id)),
+          ),
+        ),
+        Effect.tap(({ summary }) =>
+          Effect.sync(() => {
+            const czkEntry = summary.find((s) => s.currency === 'CZK');
+            expect(czkEntry).toBeDefined();
+            if (czkEntry !== undefined) {
+              expect(typeof czkEntry.expensesMinor).toBe('number');
+              expect(czkEntry.expensesMinor).toBe(1_000_000_000);
+              expect(czkEntry.incomeMinor).toBe(0);
+              expect(czkEntry.netMinor).toBe(-1_000_000_000);
+              // The per-category breakdown goes through the same AmountMinor decode.
+              const otherCategory = czkEntry.byCategory.find((c) => c.category === 'other');
+              expect(otherCategory).toBeDefined();
+              if (otherCategory !== undefined) {
+                expect(typeof otherCategory.amountMinor).toBe('number');
+                expect(otherCategory.amountMinor).toBe(1_000_000_000);
+              }
+            }
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
 });
 
 // ---------------------------------------------------------------------------

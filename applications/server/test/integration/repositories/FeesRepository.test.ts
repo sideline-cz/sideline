@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Team, User } from '@sideline/domain';
-import { Effect, Layer, Option } from 'effect';
+import { DateTime, Effect, Layer, Option } from 'effect';
 import { beforeEach } from 'vitest';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -229,6 +229,179 @@ describe('FeesRepository — update', () => {
       ),
       Effect.provide(TestLayer),
     ),
+  );
+});
+
+describe('FeesRepository — update due_at nested-Option semantics (nestedOptionToNullable)', () => {
+  it.effect('insert with due_at = Some(dateTime) persists a non-null due_at', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('900000000000000009', 'fees-owner-due-1')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('900900000000000000' as Discord.Snowflake, ownerId),
+      ),
+      Effect.bind('fee', ({ team }) =>
+        FeesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.insert({
+              team_id: team.id,
+              name: 'Due-dated Fee',
+              description: Option.none(),
+              amount_minor: 5000,
+              currency: 'CZK',
+              due_at: Option.some(DateTime.fromDateUnsafe(new Date('2025-08-01T00:00:00Z'))),
+            }),
+          ),
+        ),
+      ),
+      Effect.tap(({ fee }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(fee.due_at)).toBe(true);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    'update with due_at = Option.some(Option.some(dateTime)) sets due_at to that value',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('900000000000000010', 'fees-owner-due-2')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('901000000000000000' as Discord.Snowflake, ownerId),
+        ),
+        Effect.bind('fee', ({ team }) => insertFee(team.id)),
+        Effect.tap(({ fee }) =>
+          Effect.sync(() => {
+            // Sanity: freshly-inserted fee (insertFee passes due_at: Option.none()) has no due_at
+            expect(Option.isNone(fee.due_at)).toBe(true);
+          }),
+        ),
+        Effect.bind('updated', ({ fee }) =>
+          FeesRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.update(fee.id, {
+                name: Option.none(),
+                description: Option.none(),
+                amount_minor: Option.none(),
+                currency: Option.none(),
+                due_at: Option.some(
+                  Option.some(DateTime.fromDateUnsafe(new Date('2025-09-15T00:00:00Z'))),
+                ),
+                target_scope: Option.none(),
+              }),
+            ),
+          ),
+        ),
+        Effect.tap(({ updated }) =>
+          Effect.sync(() => {
+            expect(Option.isSome(updated.due_at)).toBe(true);
+            const dueAt = Option.getOrThrow(updated.due_at);
+            expect(DateTime.formatIso(dueAt)).toContain('2025-09-15');
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'update with due_at = Option.some(Option.none()) clears a previously-set due_at to null',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('900000000000000011', 'fees-owner-due-3')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('901100000000000000' as Discord.Snowflake, ownerId),
+        ),
+        Effect.bind('fee', ({ team }) =>
+          FeesRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.insert({
+                team_id: team.id,
+                name: 'Due-dated Fee To Clear',
+                description: Option.none(),
+                amount_minor: 5000,
+                currency: 'CZK',
+                due_at: Option.some(DateTime.fromDateUnsafe(new Date('2025-08-01T00:00:00Z'))),
+              }),
+            ),
+          ),
+        ),
+        Effect.tap(({ fee }) =>
+          Effect.sync(() => {
+            expect(Option.isSome(fee.due_at)).toBe(true);
+          }),
+        ),
+        Effect.bind('updated', ({ fee }) =>
+          FeesRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.update(fee.id, {
+                name: Option.none(),
+                description: Option.none(),
+                amount_minor: Option.none(),
+                currency: Option.none(),
+                due_at: Option.some(Option.none()),
+                target_scope: Option.none(),
+              }),
+            ),
+          ),
+        ),
+        Effect.tap(({ updated }) =>
+          Effect.sync(() => {
+            expect(Option.isNone(updated.due_at)).toBe(true);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'update with due_at = Option.none() (field absent) leaves an existing due_at unchanged',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('900000000000000012', 'fees-owner-due-4')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('901200000000000000' as Discord.Snowflake, ownerId),
+        ),
+        Effect.bind('fee', ({ team }) =>
+          FeesRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.insert({
+                team_id: team.id,
+                name: 'Due-dated Fee To Keep',
+                description: Option.none(),
+                amount_minor: 5000,
+                currency: 'CZK',
+                due_at: Option.some(DateTime.fromDateUnsafe(new Date('2025-08-01T00:00:00Z'))),
+              }),
+            ),
+          ),
+        ),
+        Effect.bind('updated', ({ fee }) =>
+          FeesRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.update(fee.id, {
+                // Absent field — outer Option.none() — must NOT touch due_at
+                name: Option.some('Renamed, due_at untouched'),
+                description: Option.none(),
+                amount_minor: Option.none(),
+                currency: Option.none(),
+                due_at: Option.none(),
+                target_scope: Option.none(),
+              }),
+            ),
+          ),
+        ),
+        Effect.tap(({ updated, fee }) =>
+          Effect.sync(() => {
+            expect(updated.name).toBe('Renamed, due_at untouched');
+            expect(Option.isSome(updated.due_at)).toBe(true);
+            const originalDueAt = Option.getOrThrow(fee.due_at);
+            const updatedDueAt = Option.getOrThrow(updated.due_at);
+            expect(DateTime.formatIso(updatedDueAt)).toBe(DateTime.formatIso(originalDueAt));
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
   );
 });
 

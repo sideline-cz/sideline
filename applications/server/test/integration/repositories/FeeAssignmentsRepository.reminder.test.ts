@@ -130,7 +130,7 @@ const createAssignment = (feeId: Fee.FeeId, memberId: string, dueAt: Date, amoun
         amountMinorOverride: amountMinor
           ? Option.some(amountMinor as Fee.AmountMinor)
           : Option.none(),
-        dueAtOverride: Option.some(dueAt),
+        dueAtOverride: Option.some(DateTime.fromDateUnsafe(dueAt)),
       }),
     ),
     Effect.map((rows) => rows[0]!),

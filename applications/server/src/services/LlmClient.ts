@@ -401,13 +401,12 @@ export const makeReal = (
 
       return requestContent(requestBody).pipe(
         // Attempt to parse as JSON { short, detailed }; fall back on any parse failure
-        Effect.map((text): SummarizeEmailResult => {
-          try {
-            return Schema.decodeUnknownSync(TwoPartSchema)(JSON.parse(text) as unknown);
-          } catch {
-            return deriveFallback(text);
-          }
-        }),
+        Effect.flatMap((text) =>
+          Effect.try({
+            try: () => Schema.decodeUnknownSync(TwoPartSchema)(JSON.parse(text)),
+            catch: (e) => e,
+          }).pipe(Effect.orElseSucceed(() => deriveFallback(text))),
+        ),
       );
     },
 
@@ -489,17 +488,21 @@ export const makeReal = (
       };
 
       return requestContent(requestBody).pipe(
-        Effect.map((text): EstimateRatingResult => {
-          try {
-            const parsedJson = Schema.decodeUnknownSync(EstimateRatingLlmSchema)(
-              JSON.parse(text) as unknown,
-            );
-            const suggestedRating = clampRating(parsedJson.rating, minRating, maxRating);
-            return { suggestedRating, rationale: parsedJson.rationale, generated: true };
-          } catch {
-            return deriveEstimateFallback(input);
-          }
-        }),
+        Effect.flatMap((text) =>
+          Effect.try({
+            try: () => Schema.decodeUnknownSync(EstimateRatingLlmSchema)(JSON.parse(text)),
+            catch: (e) => e,
+          }).pipe(
+            Effect.map(
+              (parsedJson): EstimateRatingResult => ({
+                suggestedRating: clampRating(parsedJson.rating, minRating, maxRating),
+                rationale: parsedJson.rationale,
+                generated: true,
+              }),
+            ),
+            Effect.orElseSucceed(() => deriveEstimateFallback(input)),
+          ),
+        ),
         Effect.tapError((e) =>
           Effect.logWarning(
             'estimateRatingFromDescription failed, using deterministic fallback',
@@ -593,18 +596,25 @@ export const makeReal = (
                 cause: e,
               }),
         ),
-        Effect.map((text): SummarizeChannelResult => {
-          try {
-            const parsed = Schema.decodeUnknownSync(ChannelSummaryLlmSchema)(
-              JSON.parse(text) as unknown,
-            );
-            return { summary: parsed.summary, generated: true, summarizedCount };
-          } catch {
-            // Use sentMessages so the prose count matches what was actually sent
-            const sentInput: SummarizeChannelInput = { ...input, messages: sentMessages };
-            return deriveChannelSummaryFallback(sentInput);
-          }
-        }),
+        Effect.flatMap((text) =>
+          Effect.try({
+            try: () => Schema.decodeUnknownSync(ChannelSummaryLlmSchema)(JSON.parse(text)),
+            catch: (e) => e,
+          }).pipe(
+            Effect.map(
+              (parsed): SummarizeChannelResult => ({
+                summary: parsed.summary,
+                generated: true,
+                summarizedCount,
+              }),
+            ),
+            Effect.orElseSucceed(() => {
+              // Use sentMessages so the prose count matches what was actually sent
+              const sentInput: SummarizeChannelInput = { ...input, messages: sentMessages };
+              return deriveChannelSummaryFallback(sentInput);
+            }),
+          ),
+        ),
         Effect.tapError((e) =>
           Effect.logWarning('summarizeChannel failed, using deterministic fallback', e),
         ),

@@ -1,4 +1,4 @@
-import { Discord, Team, TeamChallenge, TeamChallengeRpcGroup } from '@sideline/domain';
+import { Discord, Team, TeamChallenge, TeamChallengeRpcGroup, TeamMember } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import { DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -21,14 +21,14 @@ class ChallengeRow extends Schema.Class<ChallengeRow>('TcChallengeRow')({
   kind: TeamChallenge.TeamChallengeKind,
   title: TeamChallenge.TeamChallengeTitle,
   description: Schema.OptionFromNullOr(TeamChallenge.TeamChallengeDescription),
-  created_by: Schema.String,
+  created_by: TeamMember.TeamMemberId,
   created_at: Schema.Date,
   updated_at: Schema.Date,
 }) {}
 
 class CompletionRow extends Schema.Class<CompletionRow>('TcCompletionRow')({
   challenge_id: TeamChallenge.TeamChallengeId,
-  member_id: Schema.String,
+  member_id: TeamMember.TeamMemberId,
 }) {}
 
 class DateRangeRow extends Schema.Class<DateRangeRow>('TcDateRangeRow')({
@@ -68,7 +68,7 @@ const toTeamChallenge = (row: ChallengeRow): TeamChallenge.TeamChallenge =>
     kind: row.kind,
     title: row.title,
     description: row.description,
-    created_by: row.created_by as TeamChallenge.TeamChallenge['created_by'],
+    created_by: row.created_by,
     created_at: DateTime.makeUnsafe(row.created_at.getTime()),
     updated_at: DateTime.makeUnsafe(row.updated_at.getTime()),
   });
@@ -278,7 +278,7 @@ const make = Effect.gen(function* () {
         return listCompletionsForChallengesQuery(ids).pipe(
           catchSqlErrors,
           Effect.map((completions) => {
-            const byChallenge = new Map<TeamChallenge.TeamChallengeId, string[]>();
+            const byChallenge = new Map<TeamChallenge.TeamChallengeId, TeamMember.TeamMemberId[]>();
             for (const c of completions) {
               const existing = byChallenge.get(c.challenge_id) ?? [];
               existing.push(c.member_id);
@@ -292,8 +292,7 @@ const make = Effect.gen(function* () {
               const isActive = todayStr >= startStr && todayStr <= endStr;
               return new TeamChallenge.TeamChallengeView({
                 challenge: toTeamChallenge(row),
-                completedMemberIds: (byChallenge.get(row.id) ??
-                  []) as TeamChallenge.TeamChallenge['created_by'][],
+                completedMemberIds: byChallenge.get(row.id) ?? [],
                 isActive,
               });
             });

@@ -8,9 +8,10 @@ import {
   User,
 } from '@sideline/domain';
 import { LogicError, Schemas } from '@sideline/effect-lib';
-import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
+import { type DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
+import { nestedOptionToNullable } from '~/repositories/patchHelpers.js';
 
 // ---------------------------------------------------------------------------
 // Row schemas
@@ -173,10 +174,10 @@ const make = Effect.gen(function* () {
     feeId: Fee.FeeId;
     memberIds: ReadonlyArray<TeamMember.TeamMemberId>;
     amountMinorOverride: Option.Option<Fee.AmountMinor>;
-    dueAtOverride: Option.Option<unknown>;
+    dueAtOverride: Option.Option<DateTime.Utc>;
   }) => {
     if (input.memberIds.length === 0) {
-      return Effect.succeed([] as AssignmentViewRow[]);
+      return Effect.succeed<ReadonlyArray<AssignmentViewRow>>([]);
     }
 
     // amountOverride / dueAtOverride are SINGLE values applied to ALL members
@@ -184,12 +185,8 @@ const make = Effect.gen(function* () {
     // Bind each member id individually via sql.join (the codebase's existing
     // pattern, used in the SELECT below) to sidestep Postgres array-binding
     // quirks where pg may serialize a JS array as a record/composite.
-    const amountOverrideValue = Option.isSome(input.amountMinorOverride)
-      ? (input.amountMinorOverride.value as number)
-      : null;
-    const dueAtOverrideValue = Option.isSome(input.dueAtOverride)
-      ? (input.dueAtOverride.value as Date)
-      : null;
+    const amountOverrideValue = Option.getOrNull(input.amountMinorOverride);
+    const dueAtOverrideValue = Option.getOrNull(input.dueAtOverride);
     const memberIdFragments = input.memberIds.map((id) => sql`${id}`);
     return sql
       .withTransaction(
@@ -242,7 +239,7 @@ const make = Effect.gen(function* () {
     id: FeeAssignment.FeeAssignmentId | undefined,
     patch: {
       amountMinor: Option.Option<Fee.AmountMinor>;
-      dueAt: Option.Option<Option.Option<unknown>>;
+      dueAt: Option.Option<Option.Option<DateTime.Utc>>;
       waived: Option.Option<boolean>;
       waivedReason: Option.Option<Option.Option<string>>;
     },
@@ -257,22 +254,12 @@ const make = Effect.gen(function* () {
         const waivedFlag = Option.getOrElse(patch.waived, () => false);
         const isSettingWaived = Option.isSome(patch.waived) && waivedFlag;
         const isUnsettingWaived = Option.isSome(patch.waived) && !waivedFlag;
-        const waivedReasonValue = Option.isSome(patch.waivedReason)
-          ? Option.getOrNull(Option.getOrElse(patch.waivedReason, () => Option.none<string>()))
-          : undefined;
+        const waivedReasonValue = nestedOptionToNullable(patch.waivedReason);
 
         return sql`
           UPDATE fee_assignments SET
             amount_minor = CASE WHEN ${Option.isSome(patch.amountMinor)} THEN ${Option.getOrNull(patch.amountMinor)} ELSE amount_minor END,
-            due_at = CASE WHEN ${Option.isSome(patch.dueAt)} THEN ${
-              Option.isNone(patch.dueAt)
-                ? null
-                : Option.getOrNull(
-                    Option.getOrElse(patch.dueAt, () =>
-                      Option.none<Date>(),
-                    ) as Option.Option<Date | null>,
-                  )
-            } ELSE due_at END,
+            due_at = CASE WHEN ${Option.isSome(patch.dueAt)} THEN ${nestedOptionToNullable(patch.dueAt)} ELSE due_at END,
             stored_status = CASE
               WHEN ${isSettingWaived} THEN 'waived'
               WHEN ${isUnsettingWaived} THEN 'active'

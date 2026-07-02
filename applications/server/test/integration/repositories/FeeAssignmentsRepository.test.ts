@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Fee, Team, User } from '@sideline/domain';
-import { Effect, Layer, Option } from 'effect';
+import { DateTime, Effect, Layer, Option } from 'effect';
 import { beforeEach } from 'vitest';
 import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
@@ -516,7 +516,9 @@ describe('FeeAssignmentsRepository — findUnpaidAssignmentsForUser (Handle remo
               feeId: fee.id,
               memberIds: [(member as any).id],
               amountMinorOverride: Option.none(),
-              dueAtOverride: Option.some(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+              dueAtOverride: Option.some(
+                DateTime.fromDateUnsafe(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+              ),
             }),
           ),
         );
@@ -549,7 +551,9 @@ describe('FeeAssignmentsRepository — findUnpaidAssignmentsForUser (Handle remo
             feeId: fee.id,
             memberIds: [(member as any).id],
             amountMinorOverride: Option.none(),
-            dueAtOverride: Option.some(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+            dueAtOverride: Option.some(
+              DateTime.fromDateUnsafe(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+            ),
           }),
         ),
       );

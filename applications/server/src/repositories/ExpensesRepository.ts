@@ -1,4 +1,4 @@
-import { Auth, Expense, type ExpenseApi, Team } from '@sideline/domain';
+import { Auth, Expense, ExpenseApi, Team } from '@sideline/domain';
 import { Schemas } from '@sideline/effect-lib';
 import { type DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -42,19 +42,26 @@ export class ExpenseWithNamesRow extends Schema.Class<ExpenseWithNamesRow>('Expe
 // Balance-summary row (decoded once in the repo so callers receive typed values)
 // ---------------------------------------------------------------------------
 
-// Postgres returns BIGINT columns as strings via node-pg; decode as string here
-// and `Number()`-convert below. Sums of int64 minor units never approach
-// Number.MAX_SAFE_INTEGER for plausible team budgets.
+// Postgres returns BIGINT columns as strings via node-pg; `Expense.AmountMinor`
+// decodes both a number and a numeric string (via its `NumberFromString` branch),
+// so it validates and converts the raw BIGINT-as-string output in one step.
+// Sums of int64 minor units never approach Number.MAX_SAFE_INTEGER for plausible
+// team budgets.
+// `income_minor`/`expenses_minor` are SUMs of `payments.amount_minor` and
+// `expenses.amount_minor`, both of which are non-negative by DB CHECK constraint;
+// voided payments are excluded via `voided_at IS NULL`. So the sums can never be
+// negative, and decoding them as (non-negative) `AmountMinor` is safe. A future
+// signed-amount feature (e.g. refunds) would need a signed schema here instead.
 const BalanceSummaryRawRow = Schema.Struct({
   currency: Expense.CurrencyCode,
-  income_minor: Schema.String,
-  expenses_minor: Schema.String,
+  income_minor: Expense.AmountMinor,
+  expenses_minor: Expense.AmountMinor,
 });
 
 const CategoryBreakdownRawRow = Schema.Struct({
   currency: Expense.CurrencyCode,
   category: Expense.ExpenseCategory,
-  amount_minor: Schema.String,
+  amount_minor: Expense.AmountMinor,
 });
 
 export interface BalanceSummaryRow {
@@ -220,8 +227,8 @@ const make = Effect.gen(function* () {
   }) =>
     insertQuery({
       team_id: input.team_id,
-      amount_minor: input.amount_minor as Expense.AmountMinor,
-      currency: input.currency as Expense.CurrencyCode,
+      amount_minor: Schema.decodeSync(Expense.AmountMinor)(input.amount_minor),
+      currency: Schema.decodeSync(Expense.CurrencyCode)(input.currency),
       spent_at: input.spent_at,
       category: input.category,
       description: input.description,
@@ -337,19 +344,18 @@ const make = Effect.gen(function* () {
       ),
       Effect.map(({ totals, categories }): ReadonlyArray<BalanceSummaryRow> => {
         return totals.map((row) => {
-          const incomeMinor = Number(row.income_minor);
-          const expensesMinor = Number(row.expenses_minor);
+          const { income_minor: incomeMinor, expenses_minor: expensesMinor } = row;
           const byCategory = categories
             .filter((c) => c.currency === row.currency)
             .map((c) => ({
               category: c.category,
-              amountMinor: Number(c.amount_minor) as Expense.AmountMinor,
+              amountMinor: c.amount_minor,
             }));
           return {
             currency: row.currency,
-            incomeMinor: incomeMinor as Expense.AmountMinor,
-            expensesMinor: expensesMinor as Expense.AmountMinor,
-            netMinor: (incomeMinor - expensesMinor) as ExpenseApi.NetAmountMinor,
+            incomeMinor,
+            expensesMinor,
+            netMinor: Schema.decodeSync(ExpenseApi.NetAmountMinor)(incomeMinor - expensesMinor),
             byCategory,
           };
         });

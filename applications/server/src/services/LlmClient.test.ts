@@ -50,7 +50,7 @@
 
 import { it as itEffect } from '@effect/vitest';
 import { Effect, Layer, Redacted } from 'effect';
-import { HttpClient, HttpClientResponse } from 'effect/unstable/http';
+import { FetchHttpClient, HttpClient, HttpClientResponse } from 'effect/unstable/http';
 import { afterEach, describe, expect } from 'vitest';
 import { LlmClient, makeReal } from '~/services/LlmClient.js';
 
@@ -126,6 +126,34 @@ const makeLlmClientRealWithHttp = (httpLayer: Layer.Layer<HttpClient.HttpClient>
       ),
     ),
   ).pipe(Layer.provide(httpLayer));
+
+// ---------------------------------------------------------------------------
+// Mock global-fetch factory
+// ---------------------------------------------------------------------------
+
+/**
+ * `summarizeEmail` / `estimateRatingFromDescription` go through `requestContent`,
+ * which internally calls `Effect.provide(FetchHttpClient.layer)` — an
+ * outer-provided `HttpClient.HttpClient` mock (as used for `summarizeChannel`
+ * above) cannot intercept these calls because the requirement is already
+ * satisfied before it ever reaches the outer layer graph.
+ *
+ * `FetchHttpClient.layer`'s `HttpClient` implementation reads the underlying
+ * `fetch` function from the `FetchHttpClient.Fetch` ServiceMap Reference at
+ * CALL time (`fiber.getRef(Fetch)`), not at layer-construction time. Since
+ * `Effect.provide(FetchHttpClient.layer)` never touches that Reference, an
+ * outer `Effect.provideService(FetchHttpClient.Fetch, mockFetch)` still wins —
+ * this lets us intercept the "hard-coded" real-provider HTTP call without a
+ * network listener.
+ */
+const makeMockFetch = (responseBody: unknown, status = 200): typeof fetch =>
+  (() =>
+    Promise.resolve(
+      new Response(JSON.stringify(responseBody), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )) as typeof fetch;
 
 // ---------------------------------------------------------------------------
 // Summarize channel input helpers
@@ -449,6 +477,207 @@ describe('LlmClient.summarizeChannel — real provider with mock HTTP', () => {
               // summarizedCount should reflect actual number sent (< 50 if truncated)
               expect(result.summarizedCount).toBeGreaterThanOrEqual(1);
               expect(result.summarizedCount).toBeLessThanOrEqual(50);
+            }
+          }),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  itEffect.effect(
+    'real provider fallback on malformed JSON content (Effect.try/orElseSucceed path, distinct from the LlmError "no choices" path): non-JSON content → deriveChannelSummaryFallback used',
+    () => {
+      // A well-formed OpenAI response whose message content is present but is NOT
+      // valid JSON — this exercises the `Effect.try({ try: () => JSON.parse(...) })
+      // .pipe(Effect.orElseSucceed(...))` branch, not the `LlmError` catchTag branch.
+      const openAiResponse = {
+        choices: [{ message: { content: 'this is plain prose, not JSON at all' } }],
+      };
+      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer(openAiResponse));
+
+      return LlmClient.asEffect().pipe(
+        Effect.flatMap((llm) =>
+          llm.summarizeChannel({
+            messages: makeMessages(4),
+            channelName: 'general',
+            locale: 'en',
+          }),
+        ),
+        Effect.provide(llmLayer),
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result._tag).toBe('Success');
+            if (result._tag === 'Success') {
+              expect(result.success.generated).toBe(false);
+              expect(result.success.summarizedCount).toBe(4);
+              expect(result.success.summary.length).toBeGreaterThan(0);
+            }
+          }),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Tests — summarizeEmail real provider (mocked global fetch)
+// ---------------------------------------------------------------------------
+
+describe('LlmClient.summarizeEmail — real provider (mocked global fetch)', () => {
+  itEffect.effect(
+    'real provider success: HTTP returns valid JSON of the right shape → parsed short/detailed returned',
+    () => {
+      const openAiResponse = {
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                short: 'Short summary.',
+                detailed: 'Detailed summary.',
+              }),
+            },
+          },
+        ],
+      };
+      // The mock HttpClient layer is unused for summarizeEmail (it goes through the
+      // hard-coded FetchHttpClient.layer inside requestContent) but is still required
+      // to construct the real provider via makeLlmClientRealWithHttp.
+      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer({}));
+
+      return LlmClient.asEffect().pipe(
+        Effect.flatMap((llm) =>
+          llm.summarizeEmail({
+            subject: 'Team practice cancelled',
+            from: 'coach@example.com',
+            body: 'Unfortunately practice is cancelled due to rain.',
+          }),
+        ),
+        Effect.provideService(FetchHttpClient.Fetch, makeMockFetch(openAiResponse)),
+        Effect.provide(llmLayer),
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result.short).toBe('Short summary.');
+            expect(result.detailed).toBe('Detailed summary.');
+          }),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  itEffect.effect(
+    'real provider fallback: HTTP returns non-JSON content → deriveFallback used, no throw (Effect.try/orElseSucceed path)',
+    () => {
+      const openAiResponse = {
+        choices: [{ message: { content: 'This is not JSON at all, just prose.' } }],
+      };
+      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer({}));
+
+      return LlmClient.asEffect().pipe(
+        Effect.flatMap((llm) =>
+          llm.summarizeEmail({
+            subject: 'Fallback test',
+            from: 'x@y.com',
+            body: 'Body content here',
+          }),
+        ),
+        Effect.provideService(FetchHttpClient.Fetch, makeMockFetch(openAiResponse)),
+        Effect.provide(llmLayer),
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            // No new error channel surfaces — the malformed response still succeeds.
+            expect(result._tag).toBe('Success');
+            if (result._tag === 'Success') {
+              // deriveFallback(text): detailed === the raw (non-JSON) text
+              expect(result.success.detailed).toBe('This is not JSON at all, just prose.');
+              expect(typeof result.success.short).toBe('string');
+              expect(result.success.short.length).toBeGreaterThan(0);
+            }
+          }),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Tests — estimateRatingFromDescription real provider (mocked global fetch)
+// ---------------------------------------------------------------------------
+
+describe('LlmClient.estimateRatingFromDescription — real provider (mocked global fetch)', () => {
+  itEffect.effect(
+    'real provider success: HTTP returns valid JSON of the right shape → parsed rating/rationale returned, generated: true',
+    () => {
+      const openAiResponse = {
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({ rating: 1450, rationale: 'Solid intermediate player.' }),
+            },
+          },
+        ],
+      };
+      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer({}));
+
+      return LlmClient.asEffect().pipe(
+        Effect.flatMap((llm) =>
+          llm.estimateRatingFromDescription({
+            description: 'I play a few times a week at a decent level.',
+            defaultRating: 1200,
+            minRating: 800,
+            maxRating: 1800,
+            locale: 'en',
+          }),
+        ),
+        Effect.provideService(FetchHttpClient.Fetch, makeMockFetch(openAiResponse)),
+        Effect.provide(llmLayer),
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result.suggestedRating).toBe(1450);
+            expect(result.rationale).toBe('Solid intermediate player.');
+            expect(result.generated).toBe(true);
+          }),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  itEffect.effect(
+    'real provider fallback: HTTP returns non-JSON/wrong-shape content → deriveEstimateFallback used (default rating clamped, generated: false)',
+    () => {
+      // "wrong shape": rating is missing entirely, so it fails EstimateRatingLlmSchema decode.
+      const openAiResponse = {
+        choices: [{ message: { content: JSON.stringify({ notARating: true }) } }],
+      };
+      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer({}));
+
+      return LlmClient.asEffect().pipe(
+        Effect.flatMap((llm) =>
+          llm.estimateRatingFromDescription({
+            description: 'Beginner player.',
+            defaultRating: 1200,
+            minRating: 800,
+            maxRating: 1800,
+            locale: 'en',
+          }),
+        ),
+        Effect.provideService(FetchHttpClient.Fetch, makeMockFetch(openAiResponse)),
+        Effect.provide(llmLayer),
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            // No new error channel surfaces — the malformed response still succeeds.
+            expect(result._tag).toBe('Success');
+            if (result._tag === 'Success') {
+              expect(result.success.suggestedRating).toBe(1200);
+              expect(result.success.generated).toBe(false);
+              expect(result.success.rationale.length).toBeGreaterThan(0);
             }
           }),
         ),

@@ -131,7 +131,7 @@ const make = Effect.gen(function* () {
   // ---------------------------------------------------------------------------
 
   const insert = (input: {
-    feeAssignmentId: FeeAssignment.FeeAssignmentId | undefined;
+    feeAssignmentId: FeeAssignment.FeeAssignmentId;
     teamMemberId: TeamMember.TeamMemberId;
     amountMinor: number;
     method: Payment.PaymentMethod;
@@ -140,9 +140,9 @@ const make = Effect.gen(function* () {
     recordedByUserId: Auth.UserId;
   }) =>
     insertQuery({
-      fee_assignment_id: input.feeAssignmentId as FeeAssignment.FeeAssignmentId,
+      fee_assignment_id: input.feeAssignmentId,
       team_member_id: input.teamMemberId,
-      amount_minor: input.amountMinor as Fee.AmountMinor,
+      amount_minor: Schema.decodeSync(Fee.AmountMinor)(input.amountMinor),
       method: input.method,
       paid_at: input.paidAt,
       note: input.note,
@@ -176,15 +176,15 @@ const make = Effect.gen(function* () {
     filters: {
       memberId?: Option.Option<TeamMember.TeamMemberId>;
       feeId?: Option.Option<Fee.FeeId>;
-      from?: Option.Option<unknown>;
-      to?: Option.Option<unknown>;
+      from?: Option.Option<DateTime.Utc>;
+      to?: Option.Option<DateTime.Utc>;
       includeVoided?: boolean;
     },
   ) => {
     const memberId = filters.memberId ?? Option.none<TeamMember.TeamMemberId>();
     const feeId = filters.feeId ?? Option.none<Fee.FeeId>();
-    const from = filters.from ?? Option.none<Date>();
-    const to = filters.to ?? Option.none<Date>();
+    const from = filters.from ?? Option.none<DateTime.Utc>();
+    const to = filters.to ?? Option.none<DateTime.Utc>();
     const noMemberId = Option.isNone(memberId);
     const memberIdVal = Option.getOrNull(memberId);
     const noFeeId = Option.isNone(feeId);

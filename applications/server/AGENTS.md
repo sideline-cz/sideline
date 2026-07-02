@@ -172,6 +172,41 @@ const repo = Model.makeRepository(User, {
 });
 ```
 
+### Branding raw boundary values (`Schema.decodeSync`, never `as`)
+
+A repository or RPC-handler method that accepts a raw primitive (`string`, `number`) which must become a branded domain type MUST convert it with `Schema.decodeSync(<Brand>)(value)` — never an `as <Brand>` cast. The cast asserts the brand without validating (an out-of-range or malformed value stays wrong at runtime); `decodeSync` validates and throws, which is acceptable at these trusted internal boundaries (the value already passed wire-schema decode upstream).
+
+```typescript
+// WRONG — cast asserts the brand without validating.
+amount_minor: input.amount_minor as Fee.AmountMinor,
+
+// RIGHT — decode through the branded schema.
+amount_minor: Schema.decodeSync(Fee.AmountMinor)(input.amount_minor),
+```
+
+When the same conversion recurs across many handlers in one file (e.g. an RPC group whose wire payloads type `team_member_id` as `string`), hoist the decoder to a module-level constant and reuse it:
+
+```typescript
+const toTeamMemberId = Schema.decodeSync(TeamMember.TeamMemberId);
+// ... deps.messages.getPersonalEventMessage(event_id, toTeamMemberId(team_member_id))
+```
+
+Prefer eliminating the conversion entirely: give the row/read `Schema.Class` its branded column type directly (e.g. `created_by: TeamMember.TeamMemberId` instead of `Schema.String`) so the decoded row is already branded and no downstream cast or `decodeSync` is needed. A raw BIGINT-as-string column decoded through a numeric branded schema whose codec has a `NumberFromString` branch (e.g. `Expense.AmountMinor`) both validates and converts in one step — do not `Number()`-then-cast. Reference: `ExpensesRepository`, `FeesRepository`, `TeamChallengeRepository`, `src/rpc/guild/index.ts`, `src/rpc/personalEvents/index.ts`.
+
+### Partial-update patches: `Option<Option<A>>` fields and `nestedOptionToNullable`
+
+A PATCH request field that is itself nullable decodes to `Option<Option<A>>` (see root AGENTS.md → `Schema.OptionFromOptional`): the OUTER `Option` means "was this field present in the patch", the INNER `Option` means "the new value, or explicit `null`". A hand-written `UPDATE ... SET col = CASE WHEN <present> THEN <bind> ELSE col END` MUST bind that field with `nestedOptionToNullable` from `src/repositories/patchHelpers.ts` — never re-inline the `Option.isNone(o) ? null : Option.getOrNull(o.value)` collapse at the call site.
+
+```typescript
+import { nestedOptionToNullable } from '~/repositories/patchHelpers.js';
+
+// patch.due_at: Option.Option<Option.Option<DateTime.Utc>>
+sql`UPDATE fees SET
+  due_at = CASE WHEN ${Option.isSome(patch.due_at)} THEN ${nestedOptionToNullable(patch.due_at)} ELSE due_at END`
+```
+
+`nestedOptionToNullable` returns `null` for the outer-`None` (absent) case too, so the `CASE WHEN ${Option.isSome(...)}` guard is what actually protects the column from being overwritten when the field is absent — the bound value is only consulted inside the `THEN` branch. Reference: `FeesRepository.update`, `FeeAssignmentsRepository.update`; all four `Option<Option<A>>` cases are covered by `test/integration/repositories/FeesRepository.test.ts`.
+
 ## RPC Transport
 
 RPC groups are served via NDJSON over HTTP. Each group has a domain definition and a server handler:

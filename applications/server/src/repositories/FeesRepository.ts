@@ -1,8 +1,9 @@
 import { Fee, Team, TeamMember } from '@sideline/domain';
 import { Schemas } from '@sideline/effect-lib';
-import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
+import { type DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
+import { nestedOptionToNullable } from '~/repositories/patchHelpers.js';
 
 // ---------------------------------------------------------------------------
 // Row schemas
@@ -181,17 +182,17 @@ const make = Effect.gen(function* () {
     description: Option.Option<string>;
     amount_minor: number;
     currency: string;
-    due_at: Option.Option<unknown>;
+    due_at: Option.Option<DateTime.Utc>;
     target_scope?: Fee.FeeTargetScope;
   }) =>
     insertQuery({
       team_id: input.team_id,
       name: input.name,
       description: input.description,
-      amount_minor: input.amount_minor as Fee.AmountMinor,
-      currency: input.currency as Fee.CurrencyCode,
-      due_at: input.due_at as Option.Option<never>,
-      target_scope: (input.target_scope ?? 'all_members') as Fee.FeeTargetScope,
+      amount_minor: Schema.decodeSync(Fee.AmountMinor)(input.amount_minor),
+      currency: Schema.decodeSync(Fee.CurrencyCode)(input.currency),
+      due_at: input.due_at,
+      target_scope: input.target_scope ?? 'all_members',
     }).pipe(catchSqlErrors);
 
   const findById = (id: Fee.FeeId) => findByIdQuery(id).pipe(catchSqlErrors);
@@ -212,7 +213,7 @@ const make = Effect.gen(function* () {
       description: Option.Option<Option.Option<string>>;
       amount_minor: Option.Option<Fee.AmountMinor>;
       currency: Option.Option<Fee.CurrencyCode>;
-      due_at: Option.Option<Option.Option<unknown>>;
+      due_at: Option.Option<Option.Option<DateTime.Utc>>;
       target_scope: Option.Option<Fee.FeeTargetScope>;
     },
   ) =>
@@ -222,10 +223,10 @@ const make = Effect.gen(function* () {
       execute: () => sql`
         UPDATE fees SET
           name = CASE WHEN ${Option.isSome(patch.name)} THEN ${Option.getOrNull(patch.name)} ELSE name END,
-          description = CASE WHEN ${Option.isSome(patch.description)} THEN ${Option.isNone(patch.description) ? null : Option.getOrNull(Option.getOrElse(patch.description, () => Option.none<string>()))} ELSE description END,
+          description = CASE WHEN ${Option.isSome(patch.description)} THEN ${nestedOptionToNullable(patch.description)} ELSE description END,
           amount_minor = CASE WHEN ${Option.isSome(patch.amount_minor)} THEN ${Option.getOrNull(patch.amount_minor)} ELSE amount_minor END,
           currency = CASE WHEN ${Option.isSome(patch.currency)} THEN ${Option.getOrNull(patch.currency)} ELSE currency END,
-          due_at = CASE WHEN ${Option.isSome(patch.due_at)} THEN ${Option.isNone(patch.due_at) ? null : Option.getOrNull(Option.getOrElse(patch.due_at, () => Option.none<Date>()) as Option.Option<Date | null>)} ELSE due_at END,
+          due_at = CASE WHEN ${Option.isSome(patch.due_at)} THEN ${nestedOptionToNullable(patch.due_at)} ELSE due_at END,
           target_scope = CASE WHEN ${Option.isSome(patch.target_scope)} THEN ${Option.getOrNull(patch.target_scope)} ELSE target_scope END,
           updated_at = now()
         WHERE id = ${id}
@@ -244,7 +245,7 @@ const make = Effect.gen(function* () {
     insertAssignmentQuery({
       fee_id: feeId,
       team_member_id: teamMemberId,
-      amount_minor: amountMinor as Fee.AmountMinor,
+      amount_minor: Schema.decodeSync(Fee.AmountMinor)(amountMinor),
     }).pipe(catchSqlErrors);
 
   const delete_ = (id: Fee.FeeId) => deleteQuery(id).pipe(catchSqlErrors);

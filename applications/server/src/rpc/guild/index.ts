@@ -35,6 +35,8 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
 import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
 
+const toTeamMemberId = Schema.decodeSync(TeamMember.TeamMemberId);
+
 type IdentifyEventsChannelResult = {
   readonly kind: 'global' | 'personal' | 'none';
   readonly team_id: Option.Option<Team.TeamId>;
@@ -663,15 +665,15 @@ export const GuildsRpcLive = Effect.Do.pipe(
           Effect.flatMap(
             Option.match({
               onNone: () =>
-                Effect.succeed(
-                  [] as ReadonlyArray<{
+                Effect.succeed<
+                  ReadonlyArray<{
                     readonly team_id: Team.TeamId;
                     readonly team_member_id: string;
                     readonly discord_id: Discord.Snowflake;
                     readonly name: string;
                     readonly channel_format: string;
-                  }>,
-                ),
+                  }>
+                >([]),
               onSome: (team) =>
                 deps.teamSettings.findByTeamId(team.id).pipe(
                   Effect.flatMap((settingsOpt) => {
@@ -713,13 +715,13 @@ export const GuildsRpcLive = Effect.Do.pipe(
           Effect.flatMap(
             Option.match({
               onNone: () =>
-                Effect.succeed(
-                  [] as ReadonlyArray<{
+                Effect.succeed<
+                  ReadonlyArray<{
                     readonly team_id: Team.TeamId;
                     readonly team_member_id: string;
                     readonly discord_channel_id: Discord.Snowflake;
-                  }>,
-                ),
+                  }>
+                >([]),
               onSome: (team) =>
                 deps.teamSettings.findByTeamId(team.id).pipe(
                   Effect.flatMap((settingsOpt) => {
@@ -782,7 +784,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
         readonly team_member_id: string;
       }) =>
         deps.personalChannels
-          .reservePersonalChannel(team_id, team_member_id as TeamMember.TeamMemberId)
+          .reservePersonalChannel(team_id, toTeamMemberId(team_member_id))
           .pipe(Effect.map((reserved) => ({ reserved }))),
 
       'Guild/SavePersonalChannelId': ({
@@ -798,7 +800,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
       }) =>
         deps.personalChannels.savePersonalChannelId(
           team_id,
-          team_member_id as TeamMember.TeamMemberId,
+          toTeamMemberId(team_member_id),
           discord_channel_id,
           channel_format,
         ),
@@ -814,7 +816,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
       }) =>
         deps.personalChannels.savePersonalChannelFormat(
           team_id,
-          team_member_id as TeamMember.TeamMemberId,
+          toTeamMemberId(team_member_id),
           channel_format,
         ),
 
@@ -1101,16 +1103,16 @@ export const GuildsRpcLive = Effect.Do.pipe(
           Effect.flatMap(
             Option.match({
               onNone: () =>
-                Effect.succeed(
-                  [] as ReadonlyArray<{
+                Effect.succeed<
+                  ReadonlyArray<{
                     readonly team_id: Team.TeamId;
                     readonly team_member_id: string;
                     readonly discord_id: Discord.Snowflake;
                     readonly discord_channel_id: Discord.Snowflake;
                     readonly name: string;
                     readonly channel_format: string;
-                  }>,
-                ),
+                  }>
+                >([]),
               onSome: (team) =>
                 deps.personalChannels.getChannelsToRename(team.id, limit).pipe(
                   Effect.map(
@@ -1136,7 +1138,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
         readonly team_member_id: string;
       }) =>
         deps.personalChannels
-          .getPersonalChannel(team_id, team_member_id as TeamMember.TeamMemberId)
+          .getPersonalChannel(team_id, toTeamMemberId(team_member_id))
           .pipe(Effect.map(Option.flatMap((row) => row.discord_channel_id))),
 
       'Guild/DeletePersonalChannel': ({
@@ -1145,11 +1147,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
       }: {
         readonly team_id: Team.TeamId;
         readonly team_member_id: string;
-      }) =>
-        deps.personalChannels.deletePersonalChannel(
-          team_id,
-          team_member_id as TeamMember.TeamMemberId,
-        ),
+      }) => deps.personalChannels.deletePersonalChannel(team_id, toTeamMemberId(team_member_id)),
 
       'Guild/ListPersonalChannelsForEvent': ({ event_id }: { readonly event_id: string }) =>
         deps.personalChannels.listPersonalChannelsForEvent(event_id),
