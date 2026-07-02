@@ -15,7 +15,7 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 | **Captain** | A team member holding the built-in `Captain` role. Inherits all Player capabilities and additionally holds `roster:manage`, `member:edit`, `role:view`, `event:create`, `event:edit`, `event:cancel`, and `finance:view` permissions. |
 | **Admin** | A team member holding the built-in `Admin` role. Holds the full permission set including `team:manage`, `team:invite`, `member:remove`, `role:manage`, `training-type:create`, `training-type:delete`, `finance:view`, `finance:manage_fees`, and `finance:record_payments`, in addition to all Captain permissions. |
 | **Treasurer** | A team member holding the built-in `Treasurer` role. Holds `finance:view`, `finance:manage_fees`, and `finance:record_payments`. Used to delegate finance authority without elevating the member to Captain or Admin. |
-| **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/carpool`, `/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`, `/summarize`, `/sudo`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination, carpool board buttons, email approval/reject buttons, Leave sudo button). Receives RPC calls from the server to synchronise Discord roles, channels, and email posts. |
+| **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/carpool`, `/complete`, `/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`, `/summarize`, `/sudo`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination, carpool board buttons, email approval/reject buttons, Leave sudo button). Receives RPC calls from the server to synchronise Discord roles, channels, and email posts. |
 | **Global Admin** | A user who is a global admin by either having the `users.is_global_admin` database flag set to `true` or having their Discord ID listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable (the two sources are ORed). The first user to register on a fresh database is automatically promoted via the DB flag. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. Can also mint, list, and revoke team onboarding tokens, enabling new teams to be set up by a designated captain without requiring a pre-existing Sideline account. Can manage the global-admin roster via `GET/POST/DELETE /auth/global-admins` — granting or revoking `users.is_global_admin` for other users, subject to self-revoke, last-admin, and env-managed safeguards. A global admin with no team memberships is redirected to `/admin/onboarding-tokens` instead of `/no-team`. Additionally, global admins have **read-only access to every team** regardless of membership: all read endpoints for members, rosters, roles, finance, activity stats, and team info use a `requireReadAccess` helper that synthesises a read-only membership (with `roster:view`, `member:view`, `role:view`, `finance:view` permissions) when the caller is a global admin but not a real team member. Write endpoints still require actual membership. |
 | **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes (and incrementing the `missed_rsvps` counter for non-responding built-in Players in the event's member group), sending RSVP reminder notifications before events (targeting only Players whose `missed_rsvps` count is below the team's `max_missed_rsvps` threshold), auto-logging attendance from RSVP data, evaluating age-threshold rules to move members between groups, and queuing payment reminder DMs for members with upcoming or overdue fee assignments. |
 
@@ -623,6 +623,7 @@ flowchart LR
         UC_MAK_LB["\/makanicko leaderboard\nDisplays top-10 leaderboard embed\nshows requesting user's own rank in footer"]
         UC_SUMMARIZE["\/summarize\nAI-generated summary of recent channel messages\nephemeral embed · no permission required\n(Summarize/SummarizeChannel RPC → LlmClient)"]
         UC_SUDO["\/sudo\nToggles a shared 'Sideline Sudo' Discord Administrator role\nrequires team:manage (Guild/CheckTeamAdmin)\nposts audit entry with Leave sudo button to system channel"]
+        UC_COMPLETE["\/complete\nSaves birth date, gender, and optional jersey number via a modal\nephemeral · does not set name or is_profile_complete\n(Guild/CompleteMemberProfile)"]
     end
 
     subgraph BUTTONS["Button Interactions on Embeds"]
@@ -650,6 +651,7 @@ flowchart LR
     DU --> UC_MAK_LB
     DU --> UC_SUMMARIZE
     DU --> UC_SUDO
+    DU --> UC_COMPLETE
     DU --> UC_BTN_RSVP
     DU --> UC_BTN_PAGE
     DU --> UC_BTN_OVERVIEW_SHOW
@@ -664,6 +666,7 @@ flowchart LR
     BOT --> UC_MAK_LB
     BOT --> UC_SUMMARIZE
     BOT --> UC_SUDO
+    BOT --> UC_COMPLETE
     BOT --> UC_BTN_RSVP
     BOT --> UC_BTN_PAGE
     BOT --> UC_BTN_OVERVIEW_SHOW
@@ -1158,3 +1161,15 @@ The following structured descriptions cover the most significant use cases in th
 | **Alternate Flow B** | If the RSVP pool has changed between generation and posting (a player withdrew their RSVP), the server returns `409 TeamGenerationRosterChanged`; the actor should regenerate before posting. |
 | **Alternate Flow C** | Via Discord: the actor invokes `/training generate event:<autocomplete>` and receives an ephemeral deep-link to the Team Generator section of the event detail page. All data entry and posting occur in the web app after following the link. |
 | **Notes** | The generation algorithm (`TeamGenerator`) uses a weighted penalty function: `score = weightElo × ratingSpreadPenalty + weightSize × sizePenalty + weightGender × genderPenalty`. The server re-loads trusted data on post-to-Discord to prevent embed injection or rating spoofing from the client. Per-team weights (`weightElo`, `weightSize`, `weightGender`, `defaultTeamCount`, `maxIterations`) are stored in `team_generation_config` and are configurable via `GET /PATCH /teams/:teamId/generation-config`. |
+
+---
+
+### UC-34: Complete Member Profile via Discord
+
+| Field | Detail |
+|---|---|
+| **Actor** | Any Discord user who is a Sideline team member |
+| **Precondition** | The user is in a Discord guild linked to a Sideline team and is an active member of that team. |
+| **Main Flow** | 1. The user invokes `/complete gender:<male\|female\|other>`. 2. The bot opens a modal asking for **Date of birth** (required, `YYYY-MM-DD`) and **Jersey number** (optional, 0–99). 3. The user submits the modal. The bot sends a deferred ephemeral response, then re-validates the gender (from the modal's custom ID), birth date (`Auth.BirthDateString` — same rule as the web onboarding form), and jersey number (`TeamMember.JerseyNumber`) client-side before calling `Guild/CompleteMemberProfile` with the guild ID, Discord user ID, and the three values. 4. The server resolves the guild to a team and the caller to a membership, re-validates the same fields server-side, and — inside a single transaction — updates `users.birth_date`/`users.gender` and, if a jersey number was supplied, the caller's `team_members.jersey_number`. 5. The bot edits the deferred message with a confirmation echoing the saved values. |
+| **Postcondition** | The member's birth date and gender (and optionally jersey number) are saved. `name` and `is_profile_complete` on `users` are left untouched — this command is a Discord-native convenience path, not a replacement for the web onboarding gate (UC-01 postcondition). |
+| **Alternate Flow** | If the guild is not linked to a team or the caller is not a member (`CompleteProfileGuildNotFound` / `CompleteProfileNotMember`), the bot replies that the user is not a member of this team. If either the bot-side or server-side re-validation rejects the input (`CompleteProfileInvalidInput`), or the RPC call fails outright, the bot replies with a generic "something went wrong" message; all replies are ephemeral. |

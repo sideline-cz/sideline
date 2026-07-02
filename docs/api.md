@@ -201,7 +201,7 @@ Completes a user's profile for the first time. Required after first login before
 | Field | Type | Required | Constraints | Description |
 |---|---|---|---|---|
 | `name` | `string` | Yes | Non-empty | Display name |
-| `birthDate` | `string` | Yes | Valid date after 1900-01-01; user must be at least 6 years old | Birth date (ISO 8601 date string) |
+| `birthDate` | `string` | Yes | Strict `YYYY-MM-DD` format; must be a real calendar date after 1900-01-01; user must be at least 6 years old | Birth date (ISO 8601 date string) |
 | `gender` | `"male" \| "female" \| "other"` | Yes | One of the enum values | Gender |
 
 **Response:** `200 OK` — `CurrentUser` (see `GET /auth/me` for field descriptions)
@@ -247,7 +247,7 @@ Updates the authenticated user's profile fields. All fields are optional; only p
 | Field | Type | Required | Constraints | Description |
 |---|---|---|---|---|
 | `name` | `string \| null` | No | — | Display name (null clears the field) |
-| `birthDate` | `string \| null` | No | Valid date after 1900-01-01; user must be at least 6 years old | Birth date (null clears the field) |
+| `birthDate` | `string \| null` | No | Strict `YYYY-MM-DD` format; must be a real calendar date after 1900-01-01; user must be at least 6 years old | Birth date (null clears the field) |
 | `gender` | `"male" \| "female" \| "other" \| null` | No | — | Gender (null clears the field) |
 
 **Response:** `200 OK` — `CurrentUser` (see `GET /auth/me` for field descriptions)

@@ -266,6 +266,7 @@ export * as FinanceRpcEvents from './rpc/finance/FinanceRpcEvents.js';
 export * as FinanceRpcGroup from './rpc/finance/FinanceRpcGroup.js';
 export * as FinanceRpcModels from './rpc/finance/FinanceRpcModels.js';
 export * as GuildRpcGroup from './rpc/guild/GuildRpcGroup.js';
+export * as GuildRpcModels from './rpc/guild/GuildRpcModels.js';
 export * as InviteRpcGroup from './rpc/invite/InviteRpcGroup.js';
 export * as PersonalEventsRpcGroup from './rpc/personalEvents/PersonalEventsRpcGroup.js';
 export * as PollRpcGroup from './rpc/poll/PollRpcGroup.js';

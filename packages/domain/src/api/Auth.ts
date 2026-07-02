@@ -16,6 +16,24 @@ export { UserId } from '~/models/User.js';
 export const MIN_AGE = 6;
 export const DEFAULT_BIRTH_YEAR_OFFSET = 18;
 
+export const BirthDateString = Schema.String.pipe(
+  Schema.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/)),
+  Schema.check(
+    Schema.makeFilter<string>((s) => {
+      const d = new Date(s);
+      if (Number.isNaN(d.getTime())) return 'Invalid date';
+      // Reject dates that roll over (e.g. "2005-02-30" -> "2005-03-02"),
+      // ensuring the stored/echoed value always matches what was submitted.
+      if (d.toISOString().slice(0, 10) !== s) return 'Invalid date';
+      if (d < new Date('1900-01-01')) return 'Date must be after 1900-01-01';
+      const minDate = new Date();
+      minDate.setFullYear(minDate.getFullYear() - MIN_AGE);
+      if (d > minDate) return `Must be at least ${MIN_AGE} years old`;
+      return true;
+    }),
+  ),
+);
+
 export class UserTeam extends Schema.Class<UserTeam>('UserTeam')({
   teamId: TeamId,
   teamName: Schema.String,
@@ -63,40 +81,14 @@ export class DiscordGuild extends Schema.Class<DiscordGuild>('DiscordGuild')({
 
 export const CompleteProfileRequest = Schema.Struct({
   name: Schema.String,
-  birthDate: Schema.String.pipe(
-    Schema.check(
-      Schema.makeFilter<string>((s) => {
-        const d = new Date(s);
-        if (Number.isNaN(d.getTime())) return 'Invalid date';
-        if (d < new Date('1900-01-01')) return 'Date must be after 1900-01-01';
-        const minDate = new Date();
-        minDate.setFullYear(minDate.getFullYear() - MIN_AGE);
-        if (d > minDate) return `Must be at least ${MIN_AGE} years old`;
-        return true;
-      }),
-    ),
-  ),
+  birthDate: BirthDateString,
   gender: Gender,
 });
 export type CompleteProfileRequest = Schema.Schema.Type<typeof CompleteProfileRequest>;
 
 export const UpdateProfileRequest = Schema.Struct({
   name: Schema.OptionFromNullOr(Schema.String),
-  birthDate: Schema.OptionFromNullOr(
-    Schema.String.pipe(
-      Schema.check(
-        Schema.makeFilter<string>((s) => {
-          const d = new Date(s);
-          if (Number.isNaN(d.getTime())) return 'Invalid date';
-          if (d < new Date('1900-01-01')) return 'Date must be after 1900-01-01';
-          const minDate = new Date();
-          minDate.setFullYear(minDate.getFullYear() - MIN_AGE);
-          if (d > minDate) return `Must be at least ${MIN_AGE} years old`;
-          return true;
-        }),
-      ),
-    ),
-  ),
+  birthDate: Schema.OptionFromNullOr(BirthDateString),
   gender: Schema.OptionFromNullOr(Gender),
 });
 export type UpdateProfileRequest = Schema.Schema.Type<typeof UpdateProfileRequest>;

@@ -2186,5 +2186,19 @@
   "bot_sudo_err_revoke_failed": "⚠️ I couldn't remove the sudo role. Check the bot's role position and **Manage Roles** permission, then try again.",
   "bot_sudo_err_no_system_channel": "Sudo is on, but no system channel is set, so no audit entry was posted. Run /sudo again to step down.",
   "bot_sudo_err_audit_failed": "🛡️ Sudo is on, but I couldn't post the audit entry to the system channel. Run /sudo again to step down.",
-  "bot_sudo_err_generic": "Something went wrong. Please try again."
+  "bot_sudo_err_generic": "Something went wrong. Please try again.",
+  "bot_complete_cmd_desc": "Save your date of birth, gender and jersey number to complete your profile.",
+  "bot_complete_gender_option_desc": "Your gender",
+  "bot_complete_modal_title": "Complete Your Profile",
+  "bot_complete_birth_date_label": "Date of birth (YYYY-MM-DD)",
+  "bot_complete_birth_date_placeholder": "2005-08-24",
+  "bot_complete_jersey_label": "Jersey number (optional)",
+  "bot_complete_jersey_placeholder": "e.g. 7",
+  "bot_complete_success": "Thanks! Saved — birth date {birthDate}, gender {gender}. Run /complete anytime to update.",
+  "bot_complete_success_with_jersey": "Thanks! Saved — birth date {birthDate}, gender {gender}, jersey number {jersey}. Run /complete anytime to update.",
+  "bot_complete_invalid_date": "Invalid date of birth. Use YYYY-MM-DD (e.g. 2005-08-24) — a real past date.",
+  "bot_complete_invalid_jersey": "Jersey number must be a whole number between 0 and 99.",
+  "bot_complete_not_member": "You are not a member of this team.",
+  "bot_complete_no_guild": "This command can only be used in a Discord server.",
+  "bot_complete_error": "Something went wrong while saving your details. Please try again."
 }

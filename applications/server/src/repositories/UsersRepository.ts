@@ -26,6 +26,12 @@ const AdminUpdateProfileInput = Schema.Struct({
   gender: Schema.OptionFromNullOr(User.Gender),
 });
 
+const SetBirthDateAndGenderInput = Schema.Struct({
+  id: User.UserId,
+  birth_date: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
+  gender: Schema.OptionFromNullOr(User.Gender),
+});
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -87,6 +93,25 @@ const make = Effect.gen(function* () {
 
   const completeProfile = (input: Schema.Schema.Type<typeof CompleteProfileInput>) =>
     completeProfileQuery(input).pipe(catchSqlErrors);
+
+  // Unlike `completeProfile`, this does NOT touch `name` and does NOT set
+  // `is_profile_complete` — used by the /complete slash command which only
+  // captures birth date, gender, and (separately) jersey number.
+  const setBirthDateAndGenderQuery = SqlSchema.findOne({
+    Request: SetBirthDateAndGenderInput,
+    Result: User.User,
+    execute: (input) => sql`
+      UPDATE users SET
+        birth_date = ${input.birth_date},
+        gender = ${input.gender},
+        updated_at = now()
+      WHERE id = ${input.id}
+      RETURNING *
+    `,
+  });
+
+  const setBirthDateAndGender = (input: Schema.Schema.Type<typeof SetBirthDateAndGenderInput>) =>
+    setBirthDateAndGenderQuery(input).pipe(catchSqlErrors);
 
   const updateLocaleQuery = SqlSchema.findOne({
     Request: Schema.Struct({ id: User.UserId, locale: User.Locale }),
@@ -172,6 +197,7 @@ const make = Effect.gen(function* () {
     findById,
     upsertFromDiscord,
     completeProfile,
+    setBirthDateAndGender,
     updateLocale,
     updateAdminProfile,
     listGlobalAdmins,

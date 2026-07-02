@@ -3,11 +3,17 @@ import { Rpc, RpcGroup } from 'effect/unstable/rpc';
 import * as Discord from '~/models/Discord.js';
 import { OnboardingLocale, OnboardingSyncErrorCode } from '~/models/Onboarding.js';
 import { TeamId } from '~/models/Team.js';
+import * as User from '~/models/User.js';
 import {
   GuildNotFound,
   RsvpMemberNotFound,
   UpcomingEventsForUserResult,
 } from '../event/EventRpcModels.js';
+import {
+  CompleteProfileGuildNotFound,
+  CompleteProfileInvalidInput,
+  CompleteProfileNotMember,
+} from './GuildRpcModels.js';
 
 export const GuildRpcGroup = RpcGroup.make(
   Rpc.make('RegisterGuild', {
@@ -404,5 +410,28 @@ export const GuildRpcGroup = RpcGroup.make(
     },
     success: UpcomingEventsForUserResult,
     error: Schema.Union([GuildNotFound, RsvpMemberNotFound]),
+  }),
+  // Persists profile data captured by the bot's `/complete` command: birth date + gender
+  // on the user, jersey number on the caller's membership in the guild's team. The payload
+  // is intentionally permissive (plain strings/numbers) so the bot can always encode it
+  // without risking a raw SchemaError — validation happens server-side.
+  Rpc.make('CompleteMemberProfile', {
+    payload: {
+      guild_id: Discord.Snowflake,
+      discord_user_id: Discord.Snowflake,
+      birth_date: Schema.String,
+      gender: User.Gender,
+      jersey_number: Schema.OptionFromNullOr(Schema.Number),
+    },
+    success: Schema.Struct({
+      birth_date: Schema.String,
+      gender: User.Gender,
+      jersey_number: Schema.OptionFromNullOr(Schema.Number),
+    }),
+    error: Schema.Union([
+      CompleteProfileGuildNotFound,
+      CompleteProfileNotMember,
+      CompleteProfileInvalidInput,
+    ]),
   }),
 ).prefix('Guild/');

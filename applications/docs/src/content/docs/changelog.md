@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-07-02 — New `/complete` Discord command for date of birth, gender, and jersey number
+
+You can now save your date of birth, gender, and jersey number straight from Discord with the new `/complete` slash command (Czech: `/dokoncit`).
+
+- Pick your gender when running the command, then fill in the pop-up form for date of birth and (optionally) jersey number.
+- The reply is always ephemeral — visible only to you.
+- Run it again any time to update these details.
+- This is a shortcut for filling in extra profile details — it does not replace the one-time profile setup you complete on the web the first time you sign in.
+
 ## 2026-07-01 — Changing the events channel now moves existing event posts automatically
 
 When a captain or admin changes the **Events channel** in **Team settings → Discord integration**, the bot now automatically migrates all upcoming event posts to the new channel.
