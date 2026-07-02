@@ -1,5 +1,17 @@
 # @sideline/server
 
+## 0.38.0
+
+### Minor Changes
+
+- [#463](https://github.com/maxa-ondrej/sideline/pull/463) [`d9c0bf8`](https://github.com/maxa-ondrej/sideline/commit/d9c0bf89d61a51d4886fd071293316d138cfd9c0) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add a `/complete` Discord slash command that lets a team member complete their profile without leaving Discord: it captures name, date of birth, gender, and jersey number. Gender is a native command choice; name, date of birth, and jersey number are collected via a modal. Name, birth date, and gender persist on the user and mark the profile complete (`is_profile_complete = true`, the same as web onboarding); jersey number persists on the team membership. Adds a `Guild/CompleteMemberProfile` RPC with defensive server-side validation and transactional writes, and tightens the shared birth-date schema to strict `YYYY-MM-DD` (rejecting rolled-over dates like `2005-02-30`).
+
+### Patch Changes
+
+- Updated dependencies [[`d9c0bf8`](https://github.com/maxa-ondrej/sideline/commit/d9c0bf89d61a51d4886fd071293316d138cfd9c0)]:
+  - @sideline/domain@0.37.0
+  - @sideline/i18n@0.18.1
+
 ## 0.37.0
 
 ### Minor Changes
