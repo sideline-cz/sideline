@@ -149,16 +149,14 @@ export const CarpoolAddButton = Effect.Do.pipe(
     if (messageId === undefined || channelId === undefined || !carpoolId) {
       // Deferred ephemeral as fallback
       return {
-        type: DiscordTypes.InteractionCallbackTypes
-          .DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE as typeof DiscordTypes.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+        type: DiscordTypes.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
         data: { flags: DiscordTypes.MessageFlags.Ephemeral },
       };
     }
 
     // Respond with a MODAL to collect capacity
     return {
-      type: DiscordTypes.InteractionCallbackTypes
-        .MODAL as typeof DiscordTypes.InteractionCallbackTypes.MODAL,
+      type: DiscordTypes.InteractionCallbackTypes.MODAL,
       data: {
         custom_id: `carpool-add-modal:${channelId}:${messageId}:${carpoolId}`,
         title: m.bot_carpool_btn_add({}, { locale }),
@@ -909,8 +907,7 @@ const _CarpoolAssignButtonEffect = Effect.Do.pipe(
     const locale = userLocale(interaction);
 
     return {
-      type: DiscordTypes.InteractionCallbackTypes
-        .CHANNEL_MESSAGE_WITH_SOURCE as typeof DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+      type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
       data: {
         flags: DiscordTypes.MessageFlags.Ephemeral,
         content: m.bot_carpool_assign_placeholder({}, { locale }),

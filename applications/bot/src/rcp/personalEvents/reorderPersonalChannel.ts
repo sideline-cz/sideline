@@ -1,4 +1,4 @@
-import type { Discord as DiscordSchemas, Event, EventRpcModels } from '@sideline/domain';
+import { Discord as DiscordSchemas, type Event, type EventRpcModels } from '@sideline/domain';
 import { DiscordREST } from 'dfx/DiscordREST';
 import { Array as Arr, DateTime, Effect, Option, Order } from 'effect';
 import type { Locale } from '~/locale.js';
@@ -110,7 +110,7 @@ const reorderWithMessages = (
                     Effect.catch(() => Effect.void),
                     Effect.andThen(rest.createMessage(channelId, render.createPayload)),
                     Effect.flatMap((created) => {
-                      const id = created.id as DiscordSchemas.Snowflake;
+                      const id = DiscordSchemas.Snowflake.makeUnsafe(created.id);
                       if (!render.needsMentionEdit) {
                         return persist(id, render.hash);
                       }

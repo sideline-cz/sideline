@@ -135,18 +135,16 @@ export const handleStarted = (event: EventRpcEvents.EventStartedEvent) =>
             ? rest.getGuild(event.guild_id).pipe(
                 Effect.flatMap(parseGuild),
                 Effect.map(
-                  (g) => Option.some(g) as Option.Option<Schema.Schema.Type<typeof DfxGuild>>,
+                  (g): Option.Option<Schema.Schema.Type<typeof DfxGuild>> => Option.some(g),
                 ),
                 Effect.catch((e) =>
                   Effect.logWarning(
                     `handleStarted: failed to fetch guild for "Starting now" post, skipping`,
                     e,
-                  ).pipe(
-                    Effect.as(Option.none() as Option.Option<Schema.Schema.Type<typeof DfxGuild>>),
-                  ),
+                  ).pipe(Effect.as(Option.none<Schema.Schema.Type<typeof DfxGuild>>())),
                 ),
               )
-            : Effect.succeed(Option.none() as Option.Option<Schema.Schema.Type<typeof DfxGuild>>),
+            : Effect.succeed(Option.none<Schema.Schema.Type<typeof DfxGuild>>()),
         ),
         Effect.flatMap(({ guildOpt }) => {
           const channelId = Option.getOrUndefined(

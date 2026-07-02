@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import type { Discord as DiscordSchemas, Event, EventRpcModels, Team } from '@sideline/domain';
+import {
+  Discord as DiscordSchemas,
+  type Event,
+  type EventRpcModels,
+  type Team,
+} from '@sideline/domain';
 import { DiscordREST } from 'dfx/DiscordREST';
 import { Array as Arr, Effect, Option, Schedule, Schema } from 'effect';
 import { guildLocale, type Locale } from '~/locale.js';
@@ -168,7 +173,7 @@ const reconcileMemberMessage = (params: {
         );
       return rest.createMessage(member.personal_channel_id, render.createPayload).pipe(
         Effect.flatMap((msg) => {
-          const discordMessageId = msg.id as DiscordSchemas.Snowflake;
+          const discordMessageId = DiscordSchemas.Snowflake.makeUnsafe(msg.id);
           const logCreated = Effect.logInfo(
             `Created personal event message ${discordMessageId} for member ${member.team_member_id} event ${event.event_id}`,
           );

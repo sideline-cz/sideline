@@ -1,4 +1,4 @@
-import type { Discord as DiscordSchemas } from '@sideline/domain';
+import { Discord as DiscordSchemas } from '@sideline/domain';
 import { DiscordREST } from 'dfx/DiscordREST';
 import * as Discord from 'dfx/types';
 import { Array as Arr, Effect, Option } from 'effect';
@@ -172,12 +172,15 @@ export const provisionPersonalChannels = (guildId: DiscordSchemas.Snowflake) =>
                               rpc['Guild/SavePersonalOverflowCategoryId']({
                                 team_id: member.team_id,
                                 sequence: allocation.sequence,
-                                discord_category_id:
-                                  overflowCategory.id as DiscordSchemas.Snowflake,
+                                discord_category_id: DiscordSchemas.Snowflake.makeUnsafe(
+                                  overflowCategory.id,
+                                ),
                               }),
                             ),
                             Effect.flatMap(({ overflowCategory }) =>
-                              createAndSave(overflowCategory.id as DiscordSchemas.Snowflake),
+                              createAndSave(
+                                DiscordSchemas.Snowflake.makeUnsafe(overflowCategory.id),
+                              ),
                             ),
                           );
                         }),
