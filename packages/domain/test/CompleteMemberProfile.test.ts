@@ -146,6 +146,7 @@ describe('Guild/CompleteMemberProfile RPC payload — permissive boundary', () =
       Schema.decodeUnknownEffect(getCompleteMemberProfileRpc().payloadSchema)({
         guild_id: '999999999999999999',
         discord_user_id: '111111111111111111',
+        name: 'Jane Doe',
         birth_date: 'this-is-not-a-date',
         gender: 'male',
         jersey_number: null,
@@ -164,6 +165,7 @@ describe('Guild/CompleteMemberProfile RPC payload — permissive boundary', () =
     Schema.decodeUnknownEffect(getCompleteMemberProfileRpc().payloadSchema)({
       guild_id: '999999999999999999',
       discord_user_id: '111111111111111111',
+      name: 'Jane Doe',
       birth_date: '1990-05-01',
       gender: 'female',
       jersey_number: null,
@@ -181,6 +183,7 @@ describe('Guild/CompleteMemberProfile RPC payload — permissive boundary', () =
     Schema.decodeUnknownEffect(getCompleteMemberProfileRpc().payloadSchema)({
       guild_id: '999999999999999999',
       discord_user_id: '111111111111111111',
+      name: 'Jane Doe',
       birth_date: '1990-05-01',
       gender: 'other',
       jersey_number: 10,
@@ -199,6 +202,7 @@ describe('Guild/CompleteMemberProfile RPC payload — permissive boundary', () =
       decodeSync(getCompleteMemberProfileRpc().payloadSchema)({
         guild_id: '999999999999999999',
         discord_user_id: '111111111111111111',
+        name: 'Jane Doe',
         birth_date: 'this-is-not-a-date',
         gender: 'not-a-real-gender',
         jersey_number: null,

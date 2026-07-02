@@ -40,6 +40,20 @@ export const completeHandler = Interaction.asEffect().pipe(
             components: [
               {
                 type: 4,
+                custom_id: 'profile_name',
+                label: m.bot_complete_name_label({}, { locale }),
+                style: 1,
+                required: true,
+                placeholder: m.bot_complete_name_placeholder({}, { locale }),
+                max_length: 100,
+              },
+            ],
+          },
+          {
+            type: 1,
+            components: [
+              {
+                type: 4,
                 custom_id: 'profile_birth_date',
                 label: m.bot_complete_birth_date_label({}, { locale }),
                 style: 1,

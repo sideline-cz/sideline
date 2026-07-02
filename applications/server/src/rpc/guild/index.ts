@@ -932,22 +932,25 @@ export const GuildsRpcLive = Effect.Do.pipe(
         ),
 
       // Server-side is the source of truth for validation — the bot's slash-command
-      // payload uses permissive `String`/`Number` fields, so birth_date and
-      // jersey_number are re-decoded here with the same schemas the bot's own
-      // modal validation uses (`Auth.BirthDateString`, `TeamMember.JerseyNumber`)
-      // before anything is persisted. Both writes (user birth date/gender, and the
-      // optional jersey number) happen inside a single transaction — `/complete`
-      // deliberately never sets `name` or `is_profile_complete` (that remains the
-      // web `completeProfile` flow's job).
+      // payload uses permissive `String`/`Number` fields, so name, birth_date, and
+      // jersey_number are re-validated/re-decoded here with the same schemas the
+      // bot's own modal validation uses (`Auth.BirthDateString`,
+      // `TeamMember.JerseyNumber`) before anything is persisted. `/complete` marks
+      // the user's profile globally complete: name, birth date, gender, and
+      // `is_profile_complete = true` are written via `deps.users.completeProfile`,
+      // and the optional jersey number is written alongside it, all inside a
+      // single transaction.
       'Guild/CompleteMemberProfile': ({
         guild_id,
         discord_user_id,
+        name,
         birth_date,
         gender,
         jersey_number,
       }: {
         readonly guild_id: Discord.Snowflake;
         readonly discord_user_id: Discord.Snowflake;
+        readonly name: string;
         readonly birth_date: string;
         readonly gender: User.Gender;
         readonly jersey_number: Option.Option<number>;
@@ -973,6 +976,12 @@ export const GuildsRpcLive = Effect.Do.pipe(
               ),
             ),
           ),
+          Effect.bind('validatedName', () => {
+            const trimmed = name.trim();
+            return trimmed.length > 0
+              ? Effect.succeed(trimmed)
+              : Effect.fail(new GuildRpcModels.CompleteProfileInvalidInput());
+          }),
           Effect.bind('validatedBirthDate', () =>
             Schema.decodeUnknownEffect(Auth.BirthDateString)(birth_date).pipe(
               Effect.mapError(() => new GuildRpcModels.CompleteProfileInvalidInput()),
@@ -988,20 +997,21 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 ),
             }),
           ),
-          Effect.tap(({ membership, validatedBirthDate, validatedJerseyNumber }) =>
+          Effect.tap(({ membership, validatedName, validatedBirthDate, validatedJerseyNumber }) =>
             deps.sql
               .withTransaction(
                 Effect.Do.pipe(
                   Effect.tap(() =>
                     deps.users
-                      .setBirthDateAndGender({
+                      .completeProfile({
                         id: membership.user_id,
+                        name: Option.some(validatedName),
                         birth_date: Option.some(DateTime.makeUnsafe(validatedBirthDate)),
                         gender: Option.some(gender),
                       })
                       .pipe(
                         Effect.catchTag('NoSuchElementError', () =>
-                          LogicError.die('setBirthDateAndGender: UPDATE returned no row'),
+                          LogicError.die('completeProfile: UPDATE returned no row'),
                         ),
                       ),
                   ),
@@ -1015,7 +1025,8 @@ export const GuildsRpcLive = Effect.Do.pipe(
               )
               .pipe(catchSqlErrors),
           ),
-          Effect.map(({ validatedBirthDate }) => ({
+          Effect.map(({ validatedName, validatedBirthDate }) => ({
+            name: validatedName,
             birth_date: validatedBirthDate,
             gender,
             jersey_number,

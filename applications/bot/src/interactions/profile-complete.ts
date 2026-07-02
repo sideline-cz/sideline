@@ -50,6 +50,15 @@ export const parseJerseyNumber = (
     },
   });
 
+/** Required — `None` (blank) is rejected. Trimming and blank-detection already
+ * happen in `modalValueOption`, so this is a thin wrapper that turns the
+ * `Option` into the same `Result` shape as the other field parsers. */
+export const parseName = (raw: Option.Option<string>): Result.Result<string, 'invalid'> =>
+  Option.match(raw, {
+    onNone: () => Result.fail('invalid' as const),
+    onSome: (value) => Result.succeed(value),
+  });
+
 /** `profile-complete:{gender}` → `{gender}` (`undefined` for a malformed custom_id
  * with no `:` segment). This helper itself never throws — the resulting value
  * still needs to be decoded against `User.Gender` (with a non-throwing decode)
@@ -133,6 +142,19 @@ export const ProfileCompleteModal = Ix.modalSubmit(
       }
       const gender = Result.getOrThrow(genderResult);
 
+      const nameResult = parseName(modalValueOption(data, 'profile_name'));
+      if (Result.isFailure(nameResult)) {
+        return Effect.succeed(
+          Ix.response({
+            type: Discord.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              content: m.bot_complete_invalid_name({}, { locale }),
+              flags: Discord.MessageFlags.Ephemeral,
+            },
+          }),
+        );
+      }
+
       const birthDateResult = parseBirthDate(modalValueOption(data, 'profile_birth_date'));
       if (Result.isFailure(birthDateResult)) {
         return Effect.succeed(
@@ -159,12 +181,14 @@ export const ProfileCompleteModal = Ix.modalSubmit(
         );
       }
 
+      const name = Result.getOrThrow(nameResult);
       const birthDate = Result.getOrThrow(birthDateResult);
       const jerseyNumber = Result.getOrThrow(jerseyNumberResult);
 
       const work = rpc['Guild/CompleteMemberProfile']({
         guild_id: decodeSnowflake(guildId),
         discord_user_id: decodeSnowflake(discordUserId.value),
+        name,
         birth_date: birthDate,
         gender,
         jersey_number: jerseyNumber,
@@ -173,12 +197,17 @@ export const ProfileCompleteModal = Ix.modalSubmit(
           Option.match(result.jersey_number, {
             onNone: () =>
               m.bot_complete_success(
-                { birthDate: result.birth_date, gender: genderLabel(result.gender, locale) },
+                {
+                  name: result.name,
+                  birthDate: result.birth_date,
+                  gender: genderLabel(result.gender, locale),
+                },
                 { locale },
               ),
             onSome: (jersey) =>
               m.bot_complete_success_with_jersey(
                 {
+                  name: result.name,
                   birthDate: result.birth_date,
                   gender: genderLabel(result.gender, locale),
                   jersey: String(jersey),

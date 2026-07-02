@@ -642,7 +642,7 @@ Maximum duration: 10 years (3 650 days). Out-of-range or zero-value inputs retur
 
 ### /complete
 
-**Description:** Save the invoking member's date of birth, gender, and (optionally) jersey number without leaving Discord.
+**Description:** Complete the invoking member's global profile (name, date of birth, gender) and optionally set a jersey number, without leaving Discord.
 
 **Czech command name:** `dokoncit`
 
@@ -659,23 +659,24 @@ Maximum duration: 10 years (3 650 days). Out-of-range or zero-value inputs retur
 
 1. User invokes `/complete gender:<choice>`.
 2. The command handler (`applications/bot/src/commands/complete/handler.ts`) opens a Discord modal with `custom_id` `profile-complete:{gender}` (the chosen gender is round-tripped through the custom ID rather than persisted at this step).
-3. The modal contains two text input fields:
+3. The modal contains three text input fields:
 
    | Field `custom_id` | Label | Required | Max length | Style |
    |-------------------|-------|----------|------------|-------|
+   | `profile_name` | Name | Yes | 100 | Single-line |
    | `profile_birth_date` | Date of birth (YYYY-MM-DD) | Yes | 10 | Single-line (placeholder: `2005-08-24`) |
    | `profile_jersey_number` | Jersey number (optional) | No | 2 | Single-line (placeholder: `e.g. 7`) |
 
 4. User submits the modal. The modal submit handler (`ProfileCompleteModal` in `applications/bot/src/interactions/profile-complete.ts`) sends an immediate deferred ephemeral response, then forks a background fiber.
-5. The bot re-decodes the gender from the custom ID (`User.Gender`), the birth date with the shared `Auth.BirthDateString` schema (strict `YYYY-MM-DD`, real calendar date, after 1900-01-01, at least `Auth.MIN_AGE` years old), and — if provided — the jersey number with `TeamMember.JerseyNumber` (integer 0–99). A blank jersey number field means "leave unchanged". Any parse failure updates the deferred message with a localized error and never reaches the RPC.
-6. On success the fiber calls `Guild/CompleteMemberProfile` RPC with `guild_id`, `discord_user_id`, `birth_date`, `gender`, and `jersey_number`.
-7. The ephemeral message is updated with a localized confirmation echoing the saved birth date, gender, and jersey number (if set).
+5. The bot re-decodes the gender from the custom ID (`User.Gender`), the name (non-blank, trimmed), the birth date with the shared `Auth.BirthDateString` schema (strict `YYYY-MM-DD`, real calendar date, after 1900-01-01, at least `Auth.MIN_AGE` years old), and — if provided — the jersey number with `TeamMember.JerseyNumber` (integer 0–99). A blank jersey number field means "leave unchanged". Any parse failure updates the deferred message with a localized error and never reaches the RPC.
+6. On success the fiber calls `Guild/CompleteMemberProfile` RPC with `guild_id`, `discord_user_id`, `name`, `birth_date`, `gender`, and `jersey_number`.
+7. The ephemeral message is updated with a localized confirmation echoing the saved name, birth date, gender, and jersey number (if set).
 
 **Behavior notes:**
 - All responses are **ephemeral** — visible only to the invoking user.
-- Unlike the web onboarding flow (`POST /auth/profile`), `/complete` never sets `name` and never sets `is_profile_complete` — the web onboarding gate is unaffected, so running `/complete` does not let a member skip it. It is purely a convenience path to fill in or update birth date, gender, and jersey number from Discord, including for members who already completed onboarding.
+- `/complete` is now a Discord-native alternative to the web onboarding flow (`POST /auth/profile`): it writes `name`, `birth_date`, and `gender` via `UsersRepository.completeProfile` and sets `is_profile_complete = true`, exactly like completing the web onboarding form. It can also be re-run afterwards to update birth date, gender, name, or jersey number.
 - Server-side validation (via the same `Auth.BirthDateString` and `TeamMember.JerseyNumber` schemas) is authoritative; the RPC payload itself is intentionally permissive (`string`/`number`) so the bot never risks a raw schema-decode defect when calling it.
-- The user's birth date and gender are written to `users`; the jersey number (when provided) is written to the caller's `team_members` row for the guild's team. Both writes happen in a single database transaction.
+- The user's name, birth date, and gender are written to `users` (and `is_profile_complete` is set to `true`) via `completeProfile`; the jersey number (when provided) is written to the caller's `team_members` row for the guild's team via `setJerseyNumber`. Both writes happen in a single database transaction.
 
 **Errors from `Guild/CompleteMemberProfile`:**
 
@@ -1906,7 +1907,7 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Guild/SavePersonalOverflowCategoryId` | `team_id`, `sequence`, `discord_category_id` | Persists the Discord overflow category snowflake |
 | `Guild/ListPersonalOverflowCategories` | `team_id` → `{ sequence, discord_category_id }[]` | Lists provisioned overflow categories in order |
 | `Guild/GetAllUpcomingEventsForUser` | `guild_id`, `discord_user_id` → `UpcomingEventsForUserResult` | Returns all upcoming active events with the user's RSVP; used by the personal-channel reconcile worker |
-| `Guild/CompleteMemberProfile` | `guild_id`, `discord_user_id`, `birth_date`, `gender`, `jersey_number: Option<number>` → `{ birth_date, gender, jersey_number }` | Called by the `/complete` slash command. Re-validates `birth_date` and `jersey_number` server-side with `Auth.BirthDateString` / `TeamMember.JerseyNumber`, then in one transaction updates `users.birth_date`/`users.gender` and (if `jersey_number` is set) the caller's `team_members.jersey_number`. Deliberately never touches `name` or `is_profile_complete`. Errors: `CompleteProfileGuildNotFound`, `CompleteProfileNotMember`, `CompleteProfileInvalidInput`. |
+| `Guild/CompleteMemberProfile` | `guild_id`, `discord_user_id`, `name`, `birth_date`, `gender`, `jersey_number: Option<number>` → `{ name, birth_date, gender, jersey_number }` | Called by the `/complete` slash command. Re-validates `name`, `birth_date`, and `jersey_number` server-side with `Auth.BirthDateString` / `TeamMember.JerseyNumber`, then in one transaction completes the user's global profile via `UsersRepository.completeProfile` (`users.name`/`birth_date`/`gender`, `is_profile_complete = true`) and (if `jersey_number` is set) the caller's `team_members.jersey_number`. Errors: `CompleteProfileGuildNotFound`, `CompleteProfileNotMember`, `CompleteProfileInvalidInput`. |
 
 ### Role group (`Role/`)
 

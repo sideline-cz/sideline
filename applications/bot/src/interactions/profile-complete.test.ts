@@ -26,6 +26,7 @@ import {
   decodeGenderFromCustomId,
   parseBirthDate,
   parseJerseyNumber,
+  parseName,
 } from '~/interactions/profile-complete.js';
 
 vi.mock('~/env.js', () => ({
@@ -132,6 +133,24 @@ describe('parseBirthDate', () => {
     const year = nowUtc.getUTCFullYear() - (Auth.MIN_AGE - UNDER_AGE_MARGIN_YEARS);
     const result = parseBirthDate(Option.some(`${year}-${todayMonth}-${todayDay}`));
     expect(Result.isFailure(result)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseName
+// ---------------------------------------------------------------------------
+
+describe('parseName', () => {
+  it('Some("Jane Doe") → Success("Jane Doe")', () => {
+    const result = parseName(Option.some('Jane Doe'));
+    expect(Result.isSuccess(result)).toBe(true);
+    expect(Result.getOrThrow(result)).toBe('Jane Doe');
+  });
+
+  it('None → Failure("invalid") — name is required, blank is not allowed', () => {
+    const result = parseName(Option.none());
+    expect(Result.isFailure(result)).toBe(true);
+    expect(Option.getOrNull(Result.getFailure(result))).toBe('invalid');
   });
 });
 

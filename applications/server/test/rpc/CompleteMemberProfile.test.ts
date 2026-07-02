@@ -1,9 +1,7 @@
-// TDD mode — written BEFORE the server implementation exists.
-// Guild/CompleteMemberProfile has no handler yet in ~/rpc/guild/index.ts and
-// UsersRepository.setBirthDateAndGender does not exist yet, so every test in this
-// file is expected to fail (RpcServer "no handler for tag" defect, or a TypeScript
-// `any`-cast escape hatch masking the missing method at compile time but blowing up
-// at runtime) until the developer implements both.
+// Guild/CompleteMemberProfile marks the user's profile globally complete: it
+// persists name, birth date, gender, and `is_profile_complete = true` via
+// `UsersRepository.completeProfile`, plus (optionally) the jersey number on the
+// caller's membership in the guild's team — all inside a single transaction.
 //
 // Template: applications/server/test/rpc/RegisterMember.test.ts — same file
 // (~/rpc/guild/index.ts → GuildsRpcLive), same "build the whole Layer, call through
@@ -53,8 +51,7 @@ const NON_MEMBER_DISCORD_USER_ID = '200000000000000099' as Discord.Snowflake;
 // In-memory capture stores (reset between tests)
 // ---------------------------------------------------------------------------
 
-let birthDateGenderCalls: Array<Record<string, unknown>>;
-let completeProfileCallCount: number;
+let completeProfileCalls: Array<Record<string, unknown>>;
 let jerseyNumberCalls: Array<{ memberId: string; jerseyNumber: Option.Option<number> }>;
 let jerseyNumberShouldFail: boolean;
 let transactionInvocations: number;
@@ -64,8 +61,7 @@ let transactionInvocations: number;
 let eventLog: Array<string>;
 
 const resetStores = () => {
-  birthDateGenderCalls = [];
-  completeProfileCallCount = 0;
+  completeProfileCalls = [];
   jerseyNumberCalls = [];
   jerseyNumberShouldFail = false;
   transactionInvocations = 0;
@@ -77,16 +73,6 @@ afterEach(resetStores);
 
 // ---------------------------------------------------------------------------
 // Assertion helpers
-//
-// UsersRepository.setBirthDateAndGender doesn't exist yet, so its exact
-// captured shape for birth_date/gender isn't fixed by this test spec — the
-// developer may follow the existing api/auth.ts `completeProfile` convention
-// (Option<DateTime.Utc>, see `birth_date: Option.some(DateTime.makeUnsafe(...))`
-// there) or pass the validated primitives through some other way. These
-// helpers normalize either representation down to a comparable primitive so
-// the success-path test can assert the actual persisted VALUE — not just that
-// *some* write happened — without hard-coupling to one specific repository
-// method signature that doesn't exist yet.
 // ---------------------------------------------------------------------------
 
 const normalizeCapturedBirthDate = (value: unknown): string | undefined => {
@@ -99,6 +85,11 @@ const normalizeCapturedBirthDate = (value: unknown): string | undefined => {
 };
 
 const normalizeCapturedGender = (value: unknown): string | undefined => {
+  const unwrapped = Option.isOption(value) ? Option.getOrUndefined(value) : value;
+  return typeof unwrapped === 'string' ? unwrapped : undefined;
+};
+
+const normalizeCapturedName = (value: unknown): string | undefined => {
   const unwrapped = Option.isOption(value) ? Option.getOrUndefined(value) : value;
   return typeof unwrapped === 'string' ? unwrapped : undefined;
 };
@@ -150,22 +141,13 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
 } as any);
 
 const MockUsersRepositoryLayer = Layer.succeed(UsersRepository, {
-  // New method the server task must add — must capture exactly {id, birth_date,
-  // gender} and must NOT touch `name` or `is_profile_complete` (per the story:
-  // /complete never marks the profile complete and never sets `name`).
-  setBirthDateAndGender: (input: Record<string, unknown>) => {
-    eventLog.push('setBirthDateAndGender');
-    birthDateGenderCalls.push(input);
+  // Guild/CompleteMemberProfile now marks the profile globally complete via
+  // `completeProfile` (name + birth_date + gender + is_profile_complete = true) —
+  // it must capture exactly {id, name, birth_date, gender}.
+  completeProfile: (input: Record<string, unknown>) => {
+    eventLog.push('completeProfile');
+    completeProfileCalls.push(input);
     return Effect.void;
-  },
-  // /complete must never call the full-profile completion path (that sets
-  // is_profile_complete=true and requires `name`) — dying loudly here turns any
-  // accidental call into an immediate, obvious test failure.
-  completeProfile: () => {
-    completeProfileCallCount++;
-    return Effect.die(
-      new Error('completeProfile must NOT be called by Guild/CompleteMemberProfile'),
-    );
   },
   findById: () => Effect.succeed(Option.none()),
   findByDiscordId: () => Effect.succeed(Option.none()),
@@ -249,6 +231,7 @@ const TestLayer = GuildsRpcLive.pipe(
 // ---------------------------------------------------------------------------
 
 type CompleteMemberProfileResult = {
+  readonly name: string;
   readonly birth_date: string;
   readonly gender: string;
   readonly jersey_number: Option.Option<number>;
@@ -257,6 +240,7 @@ type CompleteMemberProfileResult = {
 const callCompleteMemberProfile = (payload: {
   guild_id?: Discord.Snowflake;
   discord_user_id: Discord.Snowflake;
+  name: string;
   birth_date: string;
   gender: string;
   jersey_number: Option.Option<number>;
@@ -268,6 +252,7 @@ const callCompleteMemberProfile = (payload: {
           rpc['Guild/CompleteMemberProfile']({
             guild_id: payload.guild_id ?? GUILD_ID,
             discord_user_id: payload.discord_user_id,
+            name: payload.name,
             birth_date: payload.birth_date,
             gender: payload.gender,
             jersey_number: payload.jersey_number,
@@ -282,26 +267,29 @@ const callCompleteMemberProfile = (payload: {
 
 describe('Guild/CompleteMemberProfile — success path', () => {
   itEffect.effect(
-    'valid guild + active membership + jersey Some(10) → writes the SENT birth date/gender and jersey, echoes payload',
+    'valid guild + active membership + jersey Some(10) → writes name/birth date/gender and jersey, echoes payload',
     () =>
       callCompleteMemberProfile({
         discord_user_id: ACTIVE_DISCORD_USER_ID,
+        name: 'Jane Doe',
         birth_date: '1990-05-01',
         gender: 'male',
         jersey_number: Option.some(10),
       }).pipe(
         Effect.tap((result) =>
           Effect.sync(() => {
+            expect(result.name).toBe('Jane Doe');
             expect(result.birth_date).toBe('1990-05-01');
             expect(result.gender).toBe('male');
             expect(Option.getOrNull(result.jersey_number)).toBe(10);
 
-            expect(birthDateGenderCalls).toHaveLength(1);
-            const captured = birthDateGenderCalls[0];
+            expect(completeProfileCalls).toHaveLength(1);
+            const captured = completeProfileCalls[0];
             expect(captured.id).toBe(ACTIVE_USER_ID);
             // Asserts the actual persisted VALUES (not just that a write
             // happened) — catches a swapped-argument or wrong-value bug that
             // `captured.id === ACTIVE_USER_ID` alone would miss.
+            expect(normalizeCapturedName(captured.name)).toBe('Jane Doe');
             expect(normalizeCapturedBirthDate(captured.birth_date)).toBe('1990-05-01');
             expect(normalizeCapturedGender(captured.gender)).toBe('male');
 
@@ -314,23 +302,24 @@ describe('Guild/CompleteMemberProfile — success path', () => {
   );
 });
 
-describe('Guild/CompleteMemberProfile — never marks the profile complete', () => {
+describe('Guild/CompleteMemberProfile — marks the profile complete', () => {
   itEffect.effect(
-    'captured birth-date/gender write has NEITHER `is_profile_complete` NOR `name`, and completeProfile is never invoked',
+    'completeProfile is invoked exactly once with name/birth_date/gender, marking the profile globally complete',
     () =>
       callCompleteMemberProfile({
         discord_user_id: ACTIVE_DISCORD_USER_ID,
+        name: 'Jane Doe',
         birth_date: '1990-05-01',
         gender: 'female',
         jersey_number: Option.some(7),
       }).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
-            expect(birthDateGenderCalls).toHaveLength(1);
-            const captured = birthDateGenderCalls[0];
-            expect(Object.hasOwn(captured, 'is_profile_complete')).toBe(false);
-            expect(Object.hasOwn(captured, 'name')).toBe(false);
-            expect(completeProfileCallCount).toBe(0);
+            expect(completeProfileCalls).toHaveLength(1);
+            const captured = completeProfileCalls[0];
+            expect(Option.getOrNull(captured.name as Option.Option<string>)).toBe('Jane Doe');
+            expect(Option.isSome(captured.birth_date as Option.Option<unknown>)).toBe(true);
+            expect(Option.getOrNull(captured.gender as Option.Option<string>)).toBe('female');
           }),
         ),
       ),
@@ -341,6 +330,7 @@ describe('Guild/CompleteMemberProfile — blank jersey means "leave unchanged"',
   itEffect.effect('jersey_number: None → setJerseyNumber is NOT called, echoed back as None', () =>
     callCompleteMemberProfile({
       discord_user_id: ACTIVE_DISCORD_USER_ID,
+      name: 'Jane Doe',
       birth_date: '1990-05-01',
       gender: 'other',
       jersey_number: Option.none(),
@@ -349,8 +339,8 @@ describe('Guild/CompleteMemberProfile — blank jersey means "leave unchanged"',
         Effect.sync(() => {
           expect(Option.isNone(result.jersey_number)).toBe(true);
           expect(jerseyNumberCalls).toHaveLength(0);
-          // The birth date + gender write still happens regardless of jersey.
-          expect(birthDateGenderCalls).toHaveLength(1);
+          // The name/birth date/gender write still happens regardless of jersey.
+          expect(completeProfileCalls).toHaveLength(1);
         }),
       ),
     ),
@@ -364,6 +354,7 @@ describe('Guild/CompleteMemberProfile — guild not found', () => {
       callCompleteMemberProfile({
         guild_id: UNKNOWN_GUILD_ID,
         discord_user_id: ACTIVE_DISCORD_USER_ID,
+        name: 'Jane Doe',
         birth_date: '1990-05-01',
         gender: 'male',
         jersey_number: Option.none(),
@@ -375,7 +366,7 @@ describe('Guild/CompleteMemberProfile — guild not found', () => {
             if (result._tag === 'Failure') {
               expect(result.failure._tag).toBe('CompleteProfileGuildNotFound');
             }
-            expect(birthDateGenderCalls).toHaveLength(0);
+            expect(completeProfileCalls).toHaveLength(0);
             expect(jerseyNumberCalls).toHaveLength(0);
           }),
         ),
@@ -390,6 +381,7 @@ describe('Guild/CompleteMemberProfile — caller is not a member of the guild-li
     () =>
       callCompleteMemberProfile({
         discord_user_id: NON_MEMBER_DISCORD_USER_ID,
+        name: 'Jane Doe',
         birth_date: '1990-05-01',
         gender: 'male',
         jersey_number: Option.none(),
@@ -401,7 +393,7 @@ describe('Guild/CompleteMemberProfile — caller is not a member of the guild-li
             if (result._tag === 'Failure') {
               expect(result.failure._tag).toBe('CompleteProfileNotMember');
             }
-            expect(birthDateGenderCalls).toHaveLength(0);
+            expect(completeProfileCalls).toHaveLength(0);
             expect(jerseyNumberCalls).toHaveLength(0);
           }),
         ),
@@ -412,10 +404,36 @@ describe('Guild/CompleteMemberProfile — caller is not a member of the guild-li
 
 describe('Guild/CompleteMemberProfile — defensive server-side revalidation', () => {
   itEffect.effect(
+    'blank name (bot-side validation bypassed) → Failure(CompleteProfileInvalidInput), no writes',
+    () =>
+      callCompleteMemberProfile({
+        discord_user_id: ACTIVE_DISCORD_USER_ID,
+        name: '   ',
+        birth_date: '1990-05-01',
+        gender: 'male',
+        jersey_number: Option.none(),
+      }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result._tag).toBe('Failure');
+            if (result._tag === 'Failure') {
+              expect(result.failure._tag).toBe('CompleteProfileInvalidInput');
+            }
+            expect(completeProfileCalls).toHaveLength(0);
+            expect(jerseyNumberCalls).toHaveLength(0);
+          }),
+        ),
+        Effect.asVoid,
+      ),
+  );
+
+  itEffect.effect(
     'malformed birth_date (bot-side validation bypassed) → Failure(CompleteProfileInvalidInput), no writes',
     () =>
       callCompleteMemberProfile({
         discord_user_id: ACTIVE_DISCORD_USER_ID,
+        name: 'Jane Doe',
         birth_date: 'not-a-date',
         gender: 'male',
         jersey_number: Option.none(),
@@ -427,7 +445,7 @@ describe('Guild/CompleteMemberProfile — defensive server-side revalidation', (
             if (result._tag === 'Failure') {
               expect(result.failure._tag).toBe('CompleteProfileInvalidInput');
             }
-            expect(birthDateGenderCalls).toHaveLength(0);
+            expect(completeProfileCalls).toHaveLength(0);
             expect(jerseyNumberCalls).toHaveLength(0);
           }),
         ),
@@ -440,6 +458,7 @@ describe('Guild/CompleteMemberProfile — defensive server-side revalidation', (
     () =>
       callCompleteMemberProfile({
         discord_user_id: ACTIVE_DISCORD_USER_ID,
+        name: 'Jane Doe',
         birth_date: '1990-05-01',
         gender: 'male',
         jersey_number: Option.some(100),
@@ -451,7 +470,7 @@ describe('Guild/CompleteMemberProfile — defensive server-side revalidation', (
             if (result._tag === 'Failure') {
               expect(result.failure._tag).toBe('CompleteProfileInvalidInput');
             }
-            expect(birthDateGenderCalls).toHaveLength(0);
+            expect(completeProfileCalls).toHaveLength(0);
             expect(jerseyNumberCalls).toHaveLength(0);
           }),
         ),
@@ -462,10 +481,11 @@ describe('Guild/CompleteMemberProfile — defensive server-side revalidation', (
 
 describe('Guild/CompleteMemberProfile — transactional writes', () => {
   itEffect.effect(
-    'wraps the birth-date/gender write AND the jersey write inside a single sql.withTransaction call',
+    'wraps the completeProfile write AND the jersey write inside a single sql.withTransaction call',
     () =>
       callCompleteMemberProfile({
         discord_user_id: ACTIVE_DISCORD_USER_ID,
+        name: 'Jane Doe',
         birth_date: '1990-05-01',
         gender: 'male',
         jersey_number: Option.some(5),
@@ -478,15 +498,15 @@ describe('Guild/CompleteMemberProfile — transactional writes', () => {
 
             const startIndex = eventLog.indexOf('tx-start');
             const endIndex = eventLog.indexOf('tx-end');
-            const birthDateWriteIndex = eventLog.indexOf('setBirthDateAndGender');
+            const completeProfileWriteIndex = eventLog.indexOf('completeProfile');
             const jerseyWriteIndex = eventLog.indexOf('setJerseyNumber');
 
             expect(startIndex).toBeGreaterThanOrEqual(0);
             expect(endIndex).toBeGreaterThan(startIndex);
             // Both writes must fall strictly between THIS transaction's start
             // and end — proving they share one transaction, not two.
-            expect(birthDateWriteIndex).toBeGreaterThan(startIndex);
-            expect(birthDateWriteIndex).toBeLessThan(endIndex);
+            expect(completeProfileWriteIndex).toBeGreaterThan(startIndex);
+            expect(completeProfileWriteIndex).toBeLessThan(endIndex);
             expect(jerseyWriteIndex).toBeGreaterThan(startIndex);
             expect(jerseyWriteIndex).toBeLessThan(endIndex);
           }),
@@ -500,6 +520,7 @@ describe('Guild/CompleteMemberProfile — transactional writes', () => {
       jerseyNumberShouldFail = true;
       return callCompleteMemberProfile({
         discord_user_id: ACTIVE_DISCORD_USER_ID,
+        name: 'Jane Doe',
         birth_date: '1990-05-01',
         gender: 'male',
         jersey_number: Option.some(5),

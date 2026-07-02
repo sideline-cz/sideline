@@ -411,19 +411,21 @@ export const GuildRpcGroup = RpcGroup.make(
     success: UpcomingEventsForUserResult,
     error: Schema.Union([GuildNotFound, RsvpMemberNotFound]),
   }),
-  // Persists profile data captured by the bot's `/complete` command: birth date + gender
-  // on the user, jersey number on the caller's membership in the guild's team. The payload
-  // is intentionally permissive (plain strings/numbers) so the bot can always encode it
-  // without risking a raw SchemaError — validation happens server-side.
+  // Persists profile data captured by the bot's `/complete` command: name + birth date +
+  // gender on the user, jersey number on the caller's membership in the guild's team. The
+  // payload is intentionally permissive (plain strings/numbers) so the bot can always encode
+  // it without risking a raw SchemaError — validation happens server-side.
   Rpc.make('CompleteMemberProfile', {
     payload: {
       guild_id: Discord.Snowflake,
       discord_user_id: Discord.Snowflake,
+      name: Schema.String,
       birth_date: Schema.String,
       gender: User.Gender,
       jersey_number: Schema.OptionFromNullOr(Schema.Number),
     },
     success: Schema.Struct({
+      name: Schema.String,
       birth_date: Schema.String,
       gender: User.Gender,
       jersey_number: Schema.OptionFromNullOr(Schema.Number),
