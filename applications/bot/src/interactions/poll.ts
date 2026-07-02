@@ -458,7 +458,7 @@ export const PollAddButton = Effect.Do.pipe(
             UI.textInput({
               custom_id: 'poll-option-label',
               label: m.bot_poll_add_modal_label({}, { locale }),
-              style: 1,
+              style: 1, // style 1 = Short
               required: true,
               max_length: 80,
             }),

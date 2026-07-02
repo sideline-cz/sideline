@@ -88,13 +88,13 @@ export const buildEventListEmbed = (opts: {
     components.push(
       UI.row([
         UI.button({
-          style: 2,
+          style: 2, // style 2 = Secondary
           label: m.bot_btn_prev({}, { locale }),
           custom_id: `event-list-page:${opts.guildId}:${opts.offset - PAGE_SIZE}`,
           disabled: opts.offset === 0,
         }),
         UI.button({
-          style: 2,
+          style: 2, // style 2 = Secondary
           label: m.bot_btn_next({}, { locale }),
           custom_id: `event-list-page:${opts.guildId}:${opts.offset + PAGE_SIZE}`,
           disabled: opts.offset + PAGE_SIZE >= opts.total,

@@ -71,7 +71,7 @@ const buildSudoAuditMessage = (
   components: [
     UI.row([
       UI.button({
-        style: 4, // Danger
+        style: 4, // style 4 = Danger
         label: m.bot_sudo_btn_leave({}, { locale: embedLocale }),
         custom_id: `sudo-leave:${userId}`,
       }),

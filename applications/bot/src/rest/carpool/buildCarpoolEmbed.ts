@@ -110,13 +110,13 @@ export const buildCarpoolEmbed = (
   // But we cap at MAX_CARS_DISPLAYED (10) reserve buttons anyway
   const addRow: Discord.ActionRowComponentForMessageRequest = UI.row([
     UI.button({
-      style: 1, // Primary
+      style: 1, // style 1 = Primary
       label: m.bot_carpool_btn_add({}, { locale }),
       // Encode carpool_id so the modal submit handler can call AddCar.
       custom_id: `carpool-add:${view.carpool_id}`,
     }),
     UI.button({
-      style: 4, // Danger
+      style: 4, // style 4 = Danger
       label: m.bot_carpool_btn_leave_mine({}, { locale }),
       // A member is in at most one car per carpool, so a single shared
       // "leave my car" button resolves the car server-side by carpool_id.

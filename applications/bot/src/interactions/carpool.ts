@@ -185,7 +185,7 @@ export const CarpoolAddButton = Effect.Do.pipe(
             UI.textInput({
               custom_id: 'carpool_capacity',
               label: m.bot_carpool_capacity_placeholder({}, { locale }),
-              style: 1,
+              style: 1, // style 1 = Short
               required: true,
               min_length: 1,
               max_length: 1,
@@ -370,17 +370,17 @@ export const CarpoolAddModal = Ix.modalSubmit(
                   components: [
                     UI.row([
                       UI.button({
-                        style: 1,
+                        style: 1, // style 1 = Primary
                         label: m.bot_carpool_btn_assign({}, { locale }),
                         custom_id: `carpool-assign:${carId}`,
                       }),
                       UI.button({
-                        style: 2,
+                        style: 2, // style 2 = Secondary
                         label: m.bot_carpool_btn_leave({}, { locale }),
                         custom_id: `carpool-leave:${carId}`,
                       }),
                       UI.button({
-                        style: 4,
+                        style: 4, // style 4 = Danger
                         label: m.bot_carpool_btn_remove({}, { locale }),
                         custom_id: `carpool-remove:${carId}`,
                       }),
@@ -544,7 +544,7 @@ export const CarpoolReserveButton = Effect.Do.pipe(
                 components: [
                   UI.row([
                     UI.button({
-                      style: 4,
+                      style: 4, // style 4 = Danger
                       label: m.bot_carpool_btn_leave({}, { locale }),
                       custom_id: `carpool-leave:${carId}`,
                     }),

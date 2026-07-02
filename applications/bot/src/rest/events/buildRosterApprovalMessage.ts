@@ -105,12 +105,12 @@ export const buildRosterApprovalMessage = (opts: {
     components.push(
       UI.row([
         UI.button({
-          style: 3, // SUCCESS / green
+          style: 3, // style 3 = Success
           label: m.bot_roster_btn_approve({}, { locale }),
           custom_id: `rsv-approve:${eventId}:${memberId}`,
         }),
         UI.button({
-          style: 4, // DANGER / red
+          style: 4, // style 4 = Danger
           label: m.bot_roster_btn_decline({}, { locale }),
           custom_id: `rsv-decline:${eventId}:${memberId}`,
         }),
@@ -121,13 +121,13 @@ export const buildRosterApprovalMessage = (opts: {
     components.push(
       UI.row([
         UI.button({
-          style: 3,
+          style: 3, // style 3 = Success
           label: m.bot_roster_btn_approve({}, { locale }),
           custom_id: `rsv-approve:${eventId}:${memberId}`,
           disabled: true,
         }),
         UI.button({
-          style: 4,
+          style: 4, // style 4 = Danger
           label: m.bot_roster_btn_decline({}, { locale }),
           custom_id: `rsv-decline:${eventId}:${memberId}`,
           disabled: true,

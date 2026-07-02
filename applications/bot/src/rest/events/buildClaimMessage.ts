@@ -116,7 +116,7 @@ export const buildClaimMessage = (opts: {
       // Release button — Secondary (style 2)
       rowButtons.push(
         UI.button({
-          style: 2,
+          style: 2, // style 2 = Secondary
           label: m.bot_unclaim_button({}, { locale }),
           custom_id: `unclaim:${opts.teamId}:${opts.eventId}`,
         }),
@@ -125,7 +125,7 @@ export const buildClaimMessage = (opts: {
       // Claim button — Primary (style 1)
       rowButtons.push(
         UI.button({
-          style: 1,
+          style: 1, // style 1 = Primary
           label: m.bot_claim_button({}, { locale }),
           custom_id: `claim:${opts.teamId}:${opts.eventId}`,
         }),
