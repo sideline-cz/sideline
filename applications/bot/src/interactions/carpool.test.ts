@@ -9,6 +9,7 @@ import { Effect, Layer, Option, Schema } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CarpoolAddButton,
+  CarpoolAssignButton,
   CarpoolLeaveButton,
   CarpoolRemoveButton,
   CarpoolReserveButton,
@@ -529,6 +530,47 @@ describe('carpool-add interaction', () => {
     await expect(
       runHandler(CarpoolAddButton, restStub.layer, rpcStub.layer, interaction),
     ).resolves.not.toThrow();
+  });
+});
+
+// Regression guard: locks the USER_SELECT component JSON shape produced by
+// CarpoolAssignButton (a single action row wrapping one type-5 select). Guards
+// against drift in the dfx UI.* builder output for this component.
+describe('carpool-assign interaction — USER_SELECT component shape', () => {
+  it('renders a single action row with one USER_SELECT (type 5) component with the exact custom_id and placeholder', async () => {
+    const interaction = makeComponentInteraction(`carpool-assign:${CAR_ID}`);
+    // CarpoolAssignButton is exported as the Ix.messageComponent(...) registration
+    // wrapper (unlike its sibling buttons, which export the raw Effect); the
+    // handler Effect lives on its `.handle` property.
+    const response = await Effect.runPromise(
+      CarpoolAssignButton.handle.pipe(
+        Effect.provide(Layer.succeed(Interaction, interaction)),
+      ) as Effect.Effect<unknown, never, never>,
+    );
+
+    const data = (
+      response as {
+        type: number;
+        data: {
+          components: ReadonlyArray<{
+            type: number;
+            components: ReadonlyArray<{ type: number; custom_id: string; placeholder: string }>;
+          }>;
+        };
+      }
+    ).data;
+
+    expect(data.components).toHaveLength(1);
+    const row = data.components[0];
+    expect(row?.type).toBe(1);
+    expect(row?.components).toHaveLength(1);
+
+    const select = row?.components[0];
+    expect(select).toEqual({
+      type: 5,
+      custom_id: `carpool-assign-pick:${CAR_ID}`,
+      placeholder: 'Who do you want to put in the car?',
+    });
   });
 });
 

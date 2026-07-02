@@ -1,5 +1,6 @@
 import type { EventRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import type * as Discord from 'dfx/types';
 import { Array, DateTime, Option, pipe } from 'effect';
 import type { Locale } from '~/locale.js';
@@ -137,38 +138,36 @@ export const buildEventEmbed = (opts: {
 
   if (opts.counts.canRsvp) {
     rowButtons.push(
-      {
-        type: 2,
+      UI.button({
         style: 3,
         label: m.bot_btn_yes({}, { locale }),
         custom_id: `rsvp:${opts.teamId}:${opts.eventId}:yes`,
-      },
-      {
-        type: 2,
+      }),
+      UI.button({
         style: 4,
         label: m.bot_btn_no({}, { locale }),
         custom_id: `rsvp:${opts.teamId}:${opts.eventId}:no`,
-      },
-      {
-        type: 2,
+      }),
+      UI.button({
         style: 2,
         label: m.bot_btn_maybe({}, { locale }),
         custom_id: `rsvp:${opts.teamId}:${opts.eventId}:maybe`,
-      },
+      }),
     );
   }
 
   if (!opts.isStarted) {
-    rowButtons.push({
-      type: 2,
-      style: 2,
-      label: m.bot_btn_attendees({}, { locale }),
-      custom_id: `attendees:${opts.teamId}:${opts.eventId}:0`,
-    });
+    rowButtons.push(
+      UI.button({
+        style: 2,
+        label: m.bot_btn_attendees({}, { locale }),
+        custom_id: `attendees:${opts.teamId}:${opts.eventId}:0`,
+      }),
+    );
   }
 
   if (rowButtons.length > 0) {
-    components.push({ type: 1, components: rowButtons });
+    components.push(UI.row(rowButtons));
   }
 
   return { embeds, components };

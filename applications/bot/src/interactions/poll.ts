@@ -1,5 +1,6 @@
 import { Discord as DiscordSchemas, Poll, type PollRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction } from 'dfx/Interactions/index';
@@ -453,19 +454,15 @@ export const PollAddButton = Effect.Do.pipe(
         custom_id: `poll-add-modal:${channelId}:${messageId}:${pollId}`,
         title: m.bot_poll_add_modal_title({}, { locale }),
         components: [
-          {
-            type: 1 as const,
-            components: [
-              {
-                type: 4 as const,
-                custom_id: 'poll-option-label',
-                label: m.bot_poll_add_modal_label({}, { locale }),
-                style: 1 as const,
-                required: true,
-                max_length: 80,
-              },
-            ],
-          },
+          UI.row([
+            UI.textInput({
+              custom_id: 'poll-option-label',
+              label: m.bot_poll_add_modal_label({}, { locale }),
+              style: 1,
+              required: true,
+              max_length: 80,
+            }),
+          ]),
         ],
       },
     };

@@ -1,5 +1,6 @@
 import { Carpool, type CarpoolRpcModels, Discord as DiscordSchemas } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction, ModalSubmitData } from 'dfx/Interactions/index';
@@ -180,21 +181,17 @@ export const CarpoolAddButton = Effect.Do.pipe(
         custom_id: `carpool-add-modal:${channelId}:${messageId}:${carpoolId}`,
         title: m.bot_carpool_btn_add({}, { locale }),
         components: [
-          {
-            type: 1 as const,
-            components: [
-              {
-                type: 4 as const,
-                custom_id: 'carpool_capacity',
-                label: m.bot_carpool_capacity_placeholder({}, { locale }),
-                style: 1 as const,
-                required: true,
-                min_length: 1,
-                max_length: 1,
-                placeholder: '2',
-              },
-            ],
-          },
+          UI.row([
+            UI.textInput({
+              custom_id: 'carpool_capacity',
+              label: m.bot_carpool_capacity_placeholder({}, { locale }),
+              style: 1,
+              required: true,
+              min_length: 1,
+              max_length: 1,
+              placeholder: '2',
+            }),
+          ]),
         ],
       },
     };
@@ -371,29 +368,23 @@ export const CarpoolAddModal = Ix.modalSubmit(
                     },
                   ],
                   components: [
-                    {
-                      type: 1 as const,
-                      components: [
-                        {
-                          type: 2 as const,
-                          style: 1 as const,
-                          label: m.bot_carpool_btn_assign({}, { locale }),
-                          custom_id: `carpool-assign:${carId}`,
-                        },
-                        {
-                          type: 2 as const,
-                          style: 2 as const,
-                          label: m.bot_carpool_btn_leave({}, { locale }),
-                          custom_id: `carpool-leave:${carId}`,
-                        },
-                        {
-                          type: 2 as const,
-                          style: 4 as const,
-                          label: m.bot_carpool_btn_remove({}, { locale }),
-                          custom_id: `carpool-remove:${carId}`,
-                        },
-                      ],
-                    },
+                    UI.row([
+                      UI.button({
+                        style: 1,
+                        label: m.bot_carpool_btn_assign({}, { locale }),
+                        custom_id: `carpool-assign:${carId}`,
+                      }),
+                      UI.button({
+                        style: 2,
+                        label: m.bot_carpool_btn_leave({}, { locale }),
+                        custom_id: `carpool-leave:${carId}`,
+                      }),
+                      UI.button({
+                        style: 4,
+                        label: m.bot_carpool_btn_remove({}, { locale }),
+                        custom_id: `carpool-remove:${carId}`,
+                      }),
+                    ]),
                   ],
                 })
                 .pipe(
@@ -551,17 +542,13 @@ export const CarpoolReserveButton = Effect.Do.pipe(
               {
                 content: successContent + threadWarning,
                 components: [
-                  {
-                    type: 1 as const,
-                    components: [
-                      {
-                        type: 2 as const,
-                        style: 4 as const,
-                        label: m.bot_carpool_btn_leave({}, { locale }),
-                        custom_id: `carpool-leave:${carId}`,
-                      },
-                    ],
-                  },
+                  UI.row([
+                    UI.button({
+                      style: 4,
+                      label: m.bot_carpool_btn_leave({}, { locale }),
+                      custom_id: `carpool-leave:${carId}`,
+                    }),
+                  ]),
                 ],
               },
               'Failed to update reserve response',
@@ -946,16 +933,12 @@ const _CarpoolAssignButtonEffect = Effect.Do.pipe(
         flags: DiscordTypes.MessageFlags.Ephemeral,
         content: m.bot_carpool_assign_placeholder({}, { locale }),
         components: [
-          {
-            type: 1 as const,
-            components: [
-              {
-                type: 5 as const,
-                custom_id: `carpool-assign-pick:${carId}`,
-                placeholder: m.bot_carpool_assign_placeholder({}, { locale }),
-              },
-            ],
-          },
+          UI.row([
+            UI.userSelect({
+              custom_id: `carpool-assign-pick:${carId}`,
+              placeholder: m.bot_carpool_assign_placeholder({}, { locale }),
+            }),
+          ]),
         ],
       },
     };

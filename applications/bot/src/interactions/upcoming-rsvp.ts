@@ -6,6 +6,7 @@ import {
   Team,
 } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import { DiscordREST } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction, MessageComponentData, ModalSubmitData } from 'dfx/Interactions/index';
@@ -258,19 +259,15 @@ export const UpcomingAddMessageButton = Ix.messageComponent(
             { locale },
           ),
           components: [
-            {
-              type: 1,
-              components: [
-                {
-                  type: 4,
-                  custom_id: 'rsvp_message',
-                  label: m.bot_rsvp_modal_label({}, { locale }),
-                  style: 2,
-                  required: false,
-                  max_length: 200,
-                },
-              ],
-            },
+            UI.row([
+              UI.textInput({
+                custom_id: 'rsvp_message',
+                label: m.bot_rsvp_modal_label({}, { locale }),
+                style: 2,
+                required: false,
+                max_length: 200,
+              }),
+            ]),
           ],
         },
       });

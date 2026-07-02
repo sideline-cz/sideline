@@ -6,6 +6,7 @@ import {
   Team,
 } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction, MessageComponentData, ModalSubmitData } from 'dfx/Interactions/index';
@@ -40,32 +41,29 @@ const buildMessageActionRow = (
   response: EventRsvp.RsvpResponse,
   locale: Locale,
   hasMessage: boolean,
-): Discord.ActionRowComponentForMessageRequest => ({
-  type: 1,
-  components: hasMessage
-    ? [
-        {
-          type: 2,
-          style: 2,
-          label: m.bot_rsvp_edit_message({}, { locale }),
-          custom_id: `rsvp-add-msg:${teamId}:${eventId}:${response}`,
-        },
-        {
-          type: 2,
-          style: 4,
-          label: m.bot_rsvp_clear_message({}, { locale }),
-          custom_id: `rsvp-clear-msg:${teamId}:${eventId}:${response}`,
-        },
-      ]
-    : [
-        {
-          type: 2,
-          style: 2,
-          label: m.bot_rsvp_add_message({}, { locale }),
-          custom_id: `rsvp-add-msg:${teamId}:${eventId}:${response}`,
-        },
-      ],
-});
+): Discord.ActionRowComponentForMessageRequest =>
+  UI.row(
+    hasMessage
+      ? [
+          UI.button({
+            style: 2,
+            label: m.bot_rsvp_edit_message({}, { locale }),
+            custom_id: `rsvp-add-msg:${teamId}:${eventId}:${response}`,
+          }),
+          UI.button({
+            style: 4,
+            label: m.bot_rsvp_clear_message({}, { locale }),
+            custom_id: `rsvp-clear-msg:${teamId}:${eventId}:${response}`,
+          }),
+        ]
+      : [
+          UI.button({
+            style: 2,
+            label: m.bot_rsvp_add_message({}, { locale }),
+            custom_id: `rsvp-add-msg:${teamId}:${eventId}:${response}`,
+          }),
+        ],
+  );
 
 const modalValueOption = (
   submission: Discord.APIModalSubmission,
@@ -345,19 +343,15 @@ export const RsvpAddMessageButton = Ix.messageComponent(
             { locale },
           ),
           components: [
-            {
-              type: 1,
-              components: [
-                {
-                  type: 4,
-                  custom_id: 'rsvp_message',
-                  label: m.bot_rsvp_modal_label({}, { locale }),
-                  style: 2,
-                  required: false,
-                  max_length: 200,
-                },
-              ],
-            },
+            UI.row([
+              UI.textInput({
+                custom_id: 'rsvp_message',
+                label: m.bot_rsvp_modal_label({}, { locale }),
+                style: 2,
+                required: false,
+                max_length: 200,
+              }),
+            ]),
           ],
         },
       });

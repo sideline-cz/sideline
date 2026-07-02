@@ -1,5 +1,6 @@
 import type { CarpoolRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import type * as Discord from 'dfx/types';
 import type { Locale } from '~/locale.js';
 import { formatName } from '~/rest/utils.js';
@@ -107,28 +108,23 @@ export const buildCarpoolEmbed = (
   // Following rows: carpool-reserve:<car_id> buttons, up to 4 per row
   // Discord allows 5 rows max, row 1 is the add button → 4 rows × 4 buttons = 16 reserve buttons
   // But we cap at MAX_CARS_DISPLAYED (10) reserve buttons anyway
-  const addRow: Discord.ActionRowComponentForMessageRequest = {
-    type: 1,
-    components: [
-      {
-        type: 2,
-        style: 1, // Primary
-        label: m.bot_carpool_btn_add({}, { locale }),
-        // Encode carpool_id so the modal submit handler can call AddCar.
-        custom_id: `carpool-add:${view.carpool_id}`,
-      },
-      {
-        type: 2,
-        style: 4, // Danger
-        label: m.bot_carpool_btn_leave_mine({}, { locale }),
-        // A member is in at most one car per carpool, so a single shared
-        // "leave my car" button resolves the car server-side by carpool_id.
-        custom_id: `carpool-leave-mine:${view.carpool_id}`,
-        // No cars → nothing to leave.
-        disabled: displayedCars.length === 0,
-      },
-    ],
-  };
+  const addRow: Discord.ActionRowComponentForMessageRequest = UI.row([
+    UI.button({
+      style: 1, // Primary
+      label: m.bot_carpool_btn_add({}, { locale }),
+      // Encode carpool_id so the modal submit handler can call AddCar.
+      custom_id: `carpool-add:${view.carpool_id}`,
+    }),
+    UI.button({
+      style: 4, // Danger
+      label: m.bot_carpool_btn_leave_mine({}, { locale }),
+      // A member is in at most one car per carpool, so a single shared
+      // "leave my car" button resolves the car server-side by carpool_id.
+      custom_id: `carpool-leave-mine:${view.carpool_id}`,
+      // No cars → nothing to leave.
+      disabled: displayedCars.length === 0,
+    }),
+  ]);
 
   const components: Discord.ActionRowComponentForMessageRequest[] = [addRow];
 
@@ -136,20 +132,18 @@ export const buildCarpoolEmbed = (
   const BUTTONS_PER_ROW = 4;
   for (let i = 0; i < displayedCars.length; i += BUTTONS_PER_ROW) {
     const batch = displayedCars.slice(i, i + BUTTONS_PER_ROW);
-    const buttonRow: Discord.ActionRowComponentForMessageRequest = {
-      type: 1,
-      components: batch.map((car, batchIdx) => {
+    const buttonRow: Discord.ActionRowComponentForMessageRequest = UI.row(
+      batch.map((car, batchIdx) => {
         const carIndex = i + batchIdx + 1;
         const isFull = 1 + car.passengers.length >= car.capacity;
-        return {
-          type: 2,
+        return UI.button({
           style: isFull ? 2 : 3, // Secondary when full, Success (green) when available
           label: m.bot_carpool_btn_reserve({ n: carIndex }, { locale }),
           custom_id: `carpool-reserve:${car.car_id}`,
           disabled: isFull,
-        };
+        });
       }),
-    };
+    );
     components.push(buttonRow);
     // Discord allows max 5 rows, and row 1 is addRow → stop at 4 reserve rows
     if (components.length >= 5) break;

@@ -70,6 +70,32 @@ Follows the **AppLive + run.ts** pattern.
 | `src/rest/<feature>/` | Discord-REST-calling helpers and embed builders (`build<Name>Embed.ts`, send/edit helpers). | Embed builders MUST live here, NEVER under `src/rcp/`. The processor in `src/rcp/<feature>/` imports the embed builder from `src/rest/<feature>/`, never the reverse. |
 | `test/rcp/<feature>/` | Tests for the matching processor. | Mirrors `src/rcp/<feature>/` 1:1. |
 
+## Building Message Components
+
+Always build Discord message components (action rows, buttons, selects, text inputs) with the dfx `UI.*` builders imported from `dfx` (`import { UI } from 'dfx'`). Never hand-write component JSON with numeric `type` fields (`type: 1` row, `type: 2` button, `type: 4` text input, `type: 5` user select). The builders set `type` for you.
+
+```ts
+import { UI } from 'dfx';
+
+components: [
+  UI.row([
+    UI.button({ style: 4, label, custom_id }),   // style 4 = Danger
+  ]),
+  UI.row([
+    UI.textInput({ style: 1, custom_id, label, required: true }), // style 1 = Short
+  ]),
+  UI.row([
+    UI.userSelect({ custom_id, placeholder }),
+  ]),
+]
+```
+
+Rules:
+
+1. **Always pass `style` explicitly to `UI.button` and `UI.textInput`.** Both builders default `style` to `1` when omitted (`UI.button` → `ButtonStyleTypes.PRIMARY`, `UI.textInput` → `TextInputStyleTypes.SHORT`); an omitted `style` silently drifts to `1` with no type error. Keep the `// style N = <name>` comment next to each numeric value, matching the existing call sites.
+2. **`UI.userSelect`, `UI.select`, `UI.roleSelect`, `UI.channelSelect`, and `UI.mentionableSelect` have no `style` field** — do not add one.
+3. Keep every existing field (`custom_id`, `label`, `placeholder`, `required`, `min_length`, `max_length`, `disabled`) as-is when migrating hand-written JSON; only the wrapper and `type` field change.
+
 ## Discord REST Retry Pattern
 
 Every bot handler that calls `rest.<method>(...)` and wraps it in `Effect.retry(retryPolicy)` MUST defer the REST call with `Effect.suspend`. In Effect v4 beta, `rest.createMessage(channelId, body)` evaluates eagerly and returns a fixed `Effect` value — `Effect.retry` re-runs that same frozen description instead of re-invoking the function. The result is that the API call fires exactly once even though the retry policy schedules N attempts.

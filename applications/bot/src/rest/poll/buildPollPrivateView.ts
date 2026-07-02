@@ -1,5 +1,6 @@
 import type { PollRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import type * as Discord from 'dfx/types';
 import type { Locale } from '~/locale.js';
 import { regionalIndicator, truncateButtonLabel } from './buildPollEmbed.js';
@@ -31,19 +32,17 @@ export const buildPollPrivateView = (
 
   for (let i = 0; i < visibleOptions.length; i += BUTTONS_PER_ROW) {
     const batch = visibleOptions.slice(i, i + BUTTONS_PER_ROW);
-    const buttonRow: Discord.ActionRowComponentForMessageRequest = {
-      type: 1,
-      components: batch.map((opt) => {
+    const buttonRow: Discord.ActionRowComponentForMessageRequest = UI.row(
+      batch.map((opt) => {
         const isSelected = view.my_option_ids.includes(opt.option_id);
-        return {
-          type: 2,
+        return UI.button({
           style: isSelected ? 1 : 2, // Primary=1 (selected), Secondary=2 (unselected)
           label: `${regionalIndicator(opt.position)} ${truncateButtonLabel(opt.label)}`,
           custom_id: `poll-vote:${view.poll_id}:${opt.option_id}`,
           disabled: isClosed,
-        };
+        });
       }),
-    };
+    );
     components.push(buttonRow);
   }
 

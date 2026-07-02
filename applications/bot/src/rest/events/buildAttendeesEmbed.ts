@@ -1,5 +1,6 @@
 import type { EventRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import type * as Discord from 'dfx/types';
 import { Option } from 'effect';
 import type { Locale } from '~/locale.js';
@@ -82,25 +83,22 @@ export const buildAttendeesEmbed = (opts: {
   const components: Array<Discord.ActionRowComponentForMessageRequest> = [];
 
   if (opts.total > opts.limit) {
-    components.push({
-      type: 1,
-      components: [
-        {
-          type: 2,
+    components.push(
+      UI.row([
+        UI.button({
           style: 2,
           label: m.bot_btn_prev({}, { locale }),
           custom_id: `attendees-page:${opts.teamId}:${opts.eventId}:${opts.offset - opts.limit}`,
           disabled: opts.offset === 0,
-        },
-        {
-          type: 2,
+        }),
+        UI.button({
           style: 2,
           label: m.bot_btn_next({}, { locale }),
           custom_id: `attendees-page:${opts.teamId}:${opts.eventId}:${opts.offset + opts.limit}`,
           disabled: opts.offset + opts.limit >= opts.total,
-        },
-      ],
-    });
+        }),
+      ]),
+    );
   }
 
   return { embeds, components };

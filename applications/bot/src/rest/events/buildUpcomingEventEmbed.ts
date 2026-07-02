@@ -1,5 +1,6 @@
 import type { EventRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
 import { Array, DateTime, Option, pipe } from 'effect';
 import type { Locale } from '~/locale.js';
@@ -158,72 +159,59 @@ export const buildUpcomingEventEmbed = (params: {
       : Discord.ButtonStyleTypes.SECONDARY;
 
   // custom_id: upcoming-rsvp:<event_id>:<team_id>:<response>
-  const rsvpRow: Discord.ActionRowComponentForMessageRequest = {
-    type: 1,
-    components: [
-      {
-        type: 2,
-        style: yesStyle,
-        label: m.bot_btn_yes({}, { locale }),
-        custom_id: `upcoming-rsvp:${entry.event_id}:${entry.team_id}:yes`,
-      },
-      {
-        type: 2,
-        style: noStyle,
-        label: m.bot_btn_no({}, { locale }),
-        custom_id: `upcoming-rsvp:${entry.event_id}:${entry.team_id}:no`,
-      },
-      {
-        type: 2,
-        style: maybeStyle,
-        label: m.bot_btn_maybe({}, { locale }),
-        custom_id: `upcoming-rsvp:${entry.event_id}:${entry.team_id}:maybe`,
-      },
-    ],
-  };
+  const rsvpRow: Discord.ActionRowComponentForMessageRequest = UI.row([
+    UI.button({
+      style: yesStyle,
+      label: m.bot_btn_yes({}, { locale }),
+      custom_id: `upcoming-rsvp:${entry.event_id}:${entry.team_id}:yes`,
+    }),
+    UI.button({
+      style: noStyle,
+      label: m.bot_btn_no({}, { locale }),
+      custom_id: `upcoming-rsvp:${entry.event_id}:${entry.team_id}:no`,
+    }),
+    UI.button({
+      style: maybeStyle,
+      label: m.bot_btn_maybe({}, { locale }),
+      custom_id: `upcoming-rsvp:${entry.event_id}:${entry.team_id}:maybe`,
+    }),
+  ]);
 
   // Row 2: Attendees button, plus (when user has responded) add/edit/clear message buttons
   const messageButtons: ReadonlyArray<Discord.ButtonComponentForMessageRequest> = myResponse.pipe(
     Option.map((response) =>
       Option.isSome(entry.my_message)
         ? [
-            {
-              type: 2 as const,
+            UI.button({
               style: Discord.ButtonStyleTypes.SECONDARY,
               label: m.bot_rsvp_edit_message({}, { locale }),
               custom_id: `u-add-msg:${entry.team_id}:${entry.event_id}:${response}`,
-            },
-            {
-              type: 2 as const,
+            }),
+            UI.button({
               style: Discord.ButtonStyleTypes.DANGER,
               label: m.bot_rsvp_clear_message({}, { locale }),
               custom_id: `u-clear-msg:${entry.team_id}:${entry.event_id}:${response}`,
-            },
+            }),
           ]
         : [
-            {
-              type: 2 as const,
+            UI.button({
               style: Discord.ButtonStyleTypes.SECONDARY,
               label: m.bot_rsvp_add_message({}, { locale }),
               custom_id: `u-add-msg:${entry.team_id}:${entry.event_id}:${response}`,
-            },
+            }),
           ],
     ),
     Option.getOrElse(() => []),
   );
 
-  const messageRow: Discord.ActionRowComponentForMessageRequest = {
-    type: 1,
-    components: [
-      {
-        type: 2,
-        style: Discord.ButtonStyleTypes.SECONDARY,
-        label: m.bot_btn_attendees({}, { locale }),
-        custom_id: `attendees:${entry.team_id}:${entry.event_id}:0`,
-      },
-      ...messageButtons,
-    ],
-  };
+  const messageRow: Discord.ActionRowComponentForMessageRequest = UI.row([
+    UI.button({
+      style: Discord.ButtonStyleTypes.SECONDARY,
+      label: m.bot_btn_attendees({}, { locale }),
+      custom_id: `attendees:${entry.team_id}:${entry.event_id}:0`,
+    }),
+    ...messageButtons,
+  ]);
 
   const components: ReadonlyArray<Discord.ActionRowComponentForMessageRequest> = [
     rsvpRow,

@@ -1,4 +1,5 @@
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import type * as Discord from 'dfx/types';
 import { DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
@@ -113,23 +114,25 @@ export const buildClaimMessage = (opts: {
     const rowButtons: Array<Discord.ButtonComponentForMessageRequest> = [];
     if (isClaimed) {
       // Release button — Secondary (style 2)
-      rowButtons.push({
-        type: 2,
-        style: 2,
-        label: m.bot_unclaim_button({}, { locale }),
-        custom_id: `unclaim:${opts.teamId}:${opts.eventId}`,
-      });
+      rowButtons.push(
+        UI.button({
+          style: 2,
+          label: m.bot_unclaim_button({}, { locale }),
+          custom_id: `unclaim:${opts.teamId}:${opts.eventId}`,
+        }),
+      );
     } else {
       // Claim button — Primary (style 1)
-      rowButtons.push({
-        type: 2,
-        style: 1,
-        label: m.bot_claim_button({}, { locale }),
-        custom_id: `claim:${opts.teamId}:${opts.eventId}`,
-      });
+      rowButtons.push(
+        UI.button({
+          style: 1,
+          label: m.bot_claim_button({}, { locale }),
+          custom_id: `claim:${opts.teamId}:${opts.eventId}`,
+        }),
+      );
     }
     if (rowButtons.length > 0) {
-      components.push({ type: 1, components: rowButtons });
+      components.push(UI.row(rowButtons));
     }
   }
 

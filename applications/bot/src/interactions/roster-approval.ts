@@ -1,5 +1,6 @@
 import { Discord as DiscordSchemas, Event, TeamMember } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
+import { UI } from 'dfx';
 import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction, MessageComponentData } from 'dfx/Interactions/index';
@@ -27,25 +28,21 @@ const editFollowUp = (
 const buildDisabledRosterRow = (
   eventId: Event.EventId,
   memberId: TeamMember.TeamMemberId,
-): Discord.ActionRowComponentForMessageRequest => ({
-  type: 1,
-  components: [
-    {
-      type: 2,
+): Discord.ActionRowComponentForMessageRequest =>
+  UI.row([
+    UI.button({
       style: 3,
       label: m.bot_roster_btn_approve({}, { locale: 'en' }),
       custom_id: `rsv-approve:${eventId}:${memberId}`,
       disabled: true,
-    },
-    {
-      type: 2,
+    }),
+    UI.button({
       style: 4,
       label: m.bot_roster_btn_decline({}, { locale: 'en' }),
       custom_id: `rsv-decline:${eventId}:${memberId}`,
       disabled: true,
-    },
-  ],
-});
+    }),
+  ]);
 
 const makeApproveAndFollowUp = (
   rpc: typeof SyncRpc.Service,
