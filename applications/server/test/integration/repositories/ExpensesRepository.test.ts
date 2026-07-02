@@ -607,7 +607,7 @@ describe('ExpensesRepository — balanceSummaryByTeam', () => {
           Effect.andThen((repo) =>
             repo.bulkInsert({
               feeId: fee.id,
-              memberIds: [(member as any).id],
+              memberIds: [member.id],
               amountMinorOverride: Option.none(),
               dueAtOverride: Option.none(),
             }),
@@ -619,7 +619,7 @@ describe('ExpensesRepository — balanceSummaryByTeam', () => {
           Effect.andThen((repo) =>
             repo.insert({
               feeAssignmentId: assignments[0]?.id,
-              teamMemberId: (member as any).id,
+              teamMemberId: member.id,
               amountMinor: 5000,
               method: 'cash',
               paidAt: DateTime.fromDateUnsafe(new Date('2025-04-05T12:00:00Z')),
@@ -816,7 +816,7 @@ describe('ExpensesRepository — balanceSummaryByTeam', () => {
             Effect.andThen((repo) =>
               repo.bulkInsert({
                 feeId: fee.id,
-                memberIds: [(member as any).id],
+                memberIds: [member.id],
                 amountMinorOverride: Option.none(),
                 dueAtOverride: Option.none(),
               }),
@@ -828,7 +828,7 @@ describe('ExpensesRepository — balanceSummaryByTeam', () => {
             Effect.andThen((repo) =>
               repo.insert({
                 feeAssignmentId: assignments[0]?.id,
-                teamMemberId: (member as any).id,
+                teamMemberId: member.id,
                 amountMinor: 3000,
                 method: 'cash',
                 paidAt: DateTime.fromDateUnsafe(new Date('2025-05-02T12:00:00Z')),

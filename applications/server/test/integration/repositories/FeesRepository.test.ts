@@ -5,8 +5,9 @@
 //   - applications/server/src/repositories/FeesRepository.ts
 
 import { describe, expect, it } from '@effect/vitest';
-import type { Discord, Team, User } from '@sideline/domain';
-import { DateTime, Effect, Layer, Option } from 'effect';
+import type { Team, User } from '@sideline/domain';
+import { Discord } from '@sideline/domain';
+import { DateTime, Effect, Layer, Option, Schema } from 'effect';
 import { beforeEach } from 'vitest';
 import { FeesRepository } from '~/repositories/FeesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -26,6 +27,8 @@ beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runProm
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const toSnowflake = Schema.decodeSync(Discord.Snowflake);
 
 const createUser = (discordId: string, username: string) =>
   UsersRepository.asEffect().pipe(
@@ -236,9 +239,7 @@ describe('FeesRepository — update due_at nested-Option semantics (nestedOption
   it.effect('insert with due_at = Some(dateTime) persists a non-null due_at', () =>
     Effect.Do.pipe(
       Effect.bind('ownerId', () => createUser('900000000000000009', 'fees-owner-due-1')),
-      Effect.bind('team', ({ ownerId }) =>
-        createTeam('900900000000000000' as Discord.Snowflake, ownerId),
-      ),
+      Effect.bind('team', ({ ownerId }) => createTeam(toSnowflake('900900000000000000'), ownerId)),
       Effect.bind('fee', ({ team }) =>
         FeesRepository.asEffect().pipe(
           Effect.andThen((repo) =>
@@ -268,7 +269,7 @@ describe('FeesRepository — update due_at nested-Option semantics (nestedOption
       Effect.Do.pipe(
         Effect.bind('ownerId', () => createUser('900000000000000010', 'fees-owner-due-2')),
         Effect.bind('team', ({ ownerId }) =>
-          createTeam('901000000000000000' as Discord.Snowflake, ownerId),
+          createTeam(toSnowflake('901000000000000000'), ownerId),
         ),
         Effect.bind('fee', ({ team }) => insertFee(team.id)),
         Effect.tap(({ fee }) =>
@@ -310,7 +311,7 @@ describe('FeesRepository — update due_at nested-Option semantics (nestedOption
       Effect.Do.pipe(
         Effect.bind('ownerId', () => createUser('900000000000000011', 'fees-owner-due-3')),
         Effect.bind('team', ({ ownerId }) =>
-          createTeam('901100000000000000' as Discord.Snowflake, ownerId),
+          createTeam(toSnowflake('901100000000000000'), ownerId),
         ),
         Effect.bind('fee', ({ team }) =>
           FeesRepository.asEffect().pipe(
@@ -360,7 +361,7 @@ describe('FeesRepository — update due_at nested-Option semantics (nestedOption
       Effect.Do.pipe(
         Effect.bind('ownerId', () => createUser('900000000000000012', 'fees-owner-due-4')),
         Effect.bind('team', ({ ownerId }) =>
-          createTeam('901200000000000000' as Discord.Snowflake, ownerId),
+          createTeam(toSnowflake('901200000000000000'), ownerId),
         ),
         Effect.bind('fee', ({ team }) =>
           FeesRepository.asEffect().pipe(

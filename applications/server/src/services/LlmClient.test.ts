@@ -52,7 +52,7 @@ import { it as itEffect } from '@effect/vitest';
 import { Effect, Layer, Redacted } from 'effect';
 import { FetchHttpClient, HttpClient, HttpClientResponse } from 'effect/unstable/http';
 import { afterEach, describe, expect } from 'vitest';
-import { LlmClient, makeReal } from '~/services/LlmClient.js';
+import { LlmClient, LlmError, makeReal } from '~/services/LlmClient.js';
 
 // ---------------------------------------------------------------------------
 // Captured HTTP request storage (reset per test)
@@ -146,14 +146,15 @@ const makeLlmClientRealWithHttp = (httpLayer: Layer.Layer<HttpClient.HttpClient>
  * this lets us intercept the "hard-coded" real-provider HTTP call without a
  * network listener.
  */
-const makeMockFetch = (responseBody: unknown, status = 200): typeof fetch =>
-  (() =>
+const makeMockFetch =
+  (responseBody: unknown, status = 200): typeof fetch =>
+  () =>
     Promise.resolve(
       new Response(JSON.stringify(responseBody), {
         status,
         headers: { 'Content-Type': 'application/json' },
       }),
-    )) as typeof fetch;
+    );
 
 // ---------------------------------------------------------------------------
 // Summarize channel input helpers
@@ -597,6 +598,36 @@ describe('LlmClient.summarizeEmail — real provider (mocked global fetch)', () 
               expect(typeof result.success.short).toBe('string');
               expect(result.success.short.length).toBeGreaterThan(0);
             }
+          }),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  // summarizeEmail intentionally propagates LlmError (unlike estimate/summarizeChannel)
+  // so EmailSummarizer can retry and cap to 'failed'.
+  itEffect.effect(
+    'real provider error path: HTTP request fails → LlmError propagates (not swallowed into a fallback)',
+    () => {
+      // No choices in the response triggers requestContent's LlmError('LLM returned no choices').
+      const openAiResponse = { choices: [] };
+      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer({}));
+
+      return LlmClient.asEffect().pipe(
+        Effect.flatMap((llm) =>
+          llm.summarizeEmail({
+            subject: 'Propagation test',
+            from: 'x@y.com',
+            body: 'Body content here',
+          }),
+        ),
+        Effect.provideService(FetchHttpClient.Fetch, makeMockFetch(openAiResponse)),
+        Effect.provide(llmLayer),
+        Effect.flip,
+        Effect.tap((error) =>
+          Effect.sync(() => {
+            expect(error).toBeInstanceOf(LlmError);
           }),
         ),
         Effect.asVoid,
