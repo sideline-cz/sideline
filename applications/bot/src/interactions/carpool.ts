@@ -9,12 +9,11 @@ import { Array as Arr, Effect, Metric, Option, Schema } from 'effect';
 import { guildLocale, type Locale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { buildCarpoolEmbed } from '~/rest/carpool/buildCarpoolEmbed.js';
+import { DISCORD_REST_ERROR_TAGS, failAsDiscordError } from '~/rest/discordErrors.js';
+import { isRecord } from '~/rest/recordProbe.js';
 import { formatName, formatNamePlain } from '~/rest/utils.js';
 import { interactionUserId } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
 
 const stringProp = (value: unknown, key: string): string | undefined => {
   if (!isRecord(value)) return undefined;
@@ -38,20 +37,6 @@ const getComponentData = (
 
 const decodeSnowflake = Schema.decodeUnknownSync(DiscordSchemas.Snowflake);
 const decodeCarId = Schema.decodeUnknownSync(Carpool.CarpoolCarId);
-
-const numberProp = (value: unknown, key: string): number | undefined => {
-  if (!isRecord(value)) return undefined;
-  const v = value[key];
-  return typeof v === 'number' ? v : undefined;
-};
-
-const isDiscordPermissionError = (error: unknown): boolean => {
-  if (!isRecord(error)) return false;
-  const httpStatus = numberProp(error.response, 'status') ?? numberProp(error, 'status');
-  if (httpStatus === 403) return true;
-  const discordCode = numberProp(error.data, 'code') ?? numberProp(error, 'code');
-  return discordCode === 50013;
-};
 
 /** 1-based index of the car within the view (0 when not found). */
 const carIndexInView = (view: CarpoolRpcModels.CarpoolView, carId: Carpool.CarpoolCarId): number =>
@@ -126,19 +111,16 @@ const rebuildBoard = (
 const tryAddThreadMember = (rest: DiscordRestService, threadId: string, userId: string) =>
   rest.addThreadMember(decodeSnowflake(threadId), decodeSnowflake(userId)).pipe(
     Effect.as(true),
-    Effect.catchTag('ErrorResponse', (error) =>
-      (isDiscordPermissionError(error)
-        ? Effect.logWarning('Cannot add user to thread (permissions)', error)
-        : Effect.logWarning('Failed to add user to thread', error)
-      ).pipe(Effect.as(false)),
-    ),
-    Effect.catchTag('HttpClientError', (error) =>
-      Effect.logWarning('Failed to add user to thread (http)', error).pipe(Effect.as(false)),
-    ),
-    Effect.catchTag('RatelimitedResponse', (error) =>
-      Effect.logWarning('Failed to add user to thread (rate limited)', error).pipe(
+    Effect.catchTag(DISCORD_REST_ERROR_TAGS, failAsDiscordError),
+    Effect.catchTag('DiscordPermissionError', (error) =>
+      Effect.logWarning('Cannot add user to thread (permissions)', error.cause).pipe(
         Effect.as(false),
       ),
+    ),
+    Effect.catchTag(
+      ['DiscordNotFoundError', 'DiscordPermanentError', 'DiscordTransientError'],
+      (error) =>
+        Effect.logWarning('Failed to add user to thread', error.cause).pipe(Effect.as(false)),
     ),
   );
 

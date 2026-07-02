@@ -6,6 +6,7 @@ import { eventHandlers } from '~/events/index.js';
 import { interactionBuilder } from '~/interactions/index.js';
 import { syncEventsFailedTotal } from '~/metrics.js';
 import { recoverDeletedMessages } from '~/rcp/event/recoverDeletedMessages.js';
+import { asRecord } from '~/rest/recordProbe.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 import { APP_VERSION } from '~/version.js';
 import {
@@ -48,9 +49,6 @@ const ixProgram = Effect.succeed(commandBuilder).pipe(
  * - Objects with a `.response.status` that is a 5xx HTTP status code
  * - Plain strings containing 'is not valid JSON'
  */
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
-
 const isTransientUpstreamValue = (value: unknown): boolean => {
   if (value instanceof SyntaxError) return true;
   if (typeof value === 'string') return value.includes('is not valid JSON');

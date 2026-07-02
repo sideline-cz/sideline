@@ -8,6 +8,7 @@ import * as DiscordTypes from 'dfx/types';
 import { Array, DateTime, Effect, Metric, Option, pipe } from 'effect';
 import { userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
+import { toDiscordError } from '~/rest/discordErrors.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 import { buildSummaryEmbed } from './buildSummaryEmbed.js';
 
@@ -159,30 +160,6 @@ const readOption = (
         : Option.none(),
     ),
   );
-
-const numberProp = (record: Record<string, unknown>, key: string): number | undefined => {
-  const value = record[key];
-  return typeof value === 'number' ? value : undefined;
-};
-
-const recordProp = (record: Record<string, unknown>, key: string): Record<string, unknown> => {
-  const value = record[key];
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
-};
-
-/** Detect Discord permission errors (403 / code 50013). Mirrors the shape used
- * by `/summon`: HTTP status on `err.response.status`, Discord error code on
- * `err.data.code`, with top-level fallbacks for wrapped/test fixtures. */
-const isDiscordPermissionError = (error: unknown): boolean => {
-  if (error === null || typeof error !== 'object') return false;
-  const record = error as Record<string, unknown>;
-  const response = recordProp(record, 'response');
-  const data = recordProp(record, 'data');
-  const httpStatus = numberProp(response, 'status') ?? numberProp(record, 'status');
-  if (httpStatus === 403) return true;
-  const discordCode = numberProp(data, 'code') ?? numberProp(record, 'code');
-  return discordCode === 50013;
-};
 
 // ---------------------------------------------------------------------------
 // Handler
@@ -492,8 +469,14 @@ export const summarizeHandler = Interaction.asEffect().pipe(
               ),
             );
           }),
-          Effect.catchIf(isDiscordPermissionError, (error) =>
-            Effect.logWarning('Discord permission error during summarize', error).pipe(
+          // `work`'s error channel is `unknown` (fetchPages is typed `Effect<_, unknown>`),
+          // so `catchTag` on the dfx transport tags is unavailable here — use the total
+          // `mapError(toDiscordError)` instead. In practice every reachable failure is a
+          // Discord REST error from `listMessages`; anything unrecognized maps to
+          // `DiscordTransientError` and falls through to the generic `catchCause` below.
+          Effect.mapError(toDiscordError),
+          Effect.catchTag('DiscordPermissionError', (error) =>
+            Effect.logWarning('Discord permission error during summarize', error.cause).pipe(
               Effect.flatMap(() => postContent(m.bot_summarize_forbidden({}, { locale }))),
             ),
           ),

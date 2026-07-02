@@ -147,22 +147,29 @@ Effect.suspend(() => rest.createGuildChannel(guildId, withParentParams)).pipe(
 
 Rules:
 
-1. **Use the shared `isPermanentError`** (`src/rcp/channel/ProcessorService.ts`) as both the retry `while` predicate (negated) and the `catchIf` predicate — never re-classify errors inline here. This keeps the transient/permanent decision in exactly one place (see "Channel Sync Event Failure Classification" below).
+1. **Use the shared `isPermanentError`** — imported from `~/rcp/channel/ProcessorService.js` (the classifier itself lives in `~/rest/discordErrors.ts` and is re-exported there) — as both the retry `while` predicate (negated) and the `catchIf` predicate; never re-classify errors inline here. This keeps the transient/permanent decision in exactly one place (see "Channel Sync Event Failure Classification" below). A retry `while`/`catchIf` predicate stays a boolean — do NOT reach for the tagged errors below here.
 2. **The fallback path is terminal.** Wrap only the fallback's own REST call in `Effect.retry(retryPolicy)`; never put an outer `Effect.retry` around the whole `retry`+`catchIf` pipe — re-entry after a permanent error must not re-create the already-created resource.
 3. **Only apply the parameter-relaxed branch when the optional input is present.** When the optional input is absent, issue the plain `Effect.suspend(() => ...).pipe(Effect.retry(retryPolicy))` call with no `catchIf` fallback.
 
 ### Classifying a One-Off Discord REST Error (`~/rest/discordErrors.ts`)
 
-`isPermanentError` (above) is for the **channel-sync** transient/permanent split. When a command or component handler instead needs to classify a SINGLE `ErrorResponse` (e.g. "was this a permission denial?" or "is the role/member already gone?"), use the shared predicates in `src/rest/discordErrors.ts` — do NOT re-inline the `err.response.status === 403 || err.data.code === 50013` check:
+When a command or component handler needs to react to a Discord REST failure (e.g. "was this a permission denial?" or "is the role/member already gone?"), **map the raw dfx transport error to a semantic tagged error and branch with `Effect.catchTag`** — do NOT re-inline the `err.response.status === 403 || err.data.code === 50013` check. dfx surfaces every REST failure as one of the transport tags in `DISCORD_REST_ERROR_TAGS` (`ErrorResponse` / `HttpClientError` / `RatelimitedResponse`); `~/rest/discordErrors.ts` classifies those into:
 
-| Predicate | True when | Typical use |
-|-----------|-----------|-------------|
-| `isDiscordPermissionError(error)` | HTTP `403` OR Discord code `50013` | The bot lacks permission — reply a localized "action failed" message instead of failing the fiber. |
-| `isDiscordNotFoundError(error)` | HTTP `404` OR Discord code `10011` / `10013` | The target role/member is already gone — treat as success (idempotent revoke). |
+| Tagged error | Mapped from | Typical use |
+|--------------|-------------|-------------|
+| `DiscordPermissionError` | HTTP `403` OR Discord code `50013` | The bot lacks permission — reply a localized "action failed" message instead of failing the fiber. |
+| `DiscordNotFoundError` | HTTP `404` OR Discord codes `10007` / `10011` / `10013` | The target role/member is already gone — treat as success (idempotent revoke). |
+| `DiscordPermanentError` | other non-429 4xx, `ParseError` / `SchemaError` | Non-retryable failure that is neither of the above. |
+| `DiscordTransientError` | 5xx, rate limits, unrecognized values | Retryable upstream blip. |
 
-Both accept `unknown` and read `error.response.status` / `error.data.code` defensively. Reference call sites: `src/commands/sudo/handler.ts` (`isDiscordPermissionError`) and `src/interactions/sudo.ts` (`isDiscordNotFoundError`).
+Two idioms, by the error channel:
 
-**Prefer this module over copying the classifier.** Pre-existing inline copies still live in `src/commands/summon/handler.ts`, `src/commands/summarize/handler.ts`, and `src/interactions/carpool.ts` — those predate the extraction. When you next touch any of them, migrate them to `~/rest/discordErrors.ts` rather than growing the duplication; never add a fourth inline copy.
+- **Leaf REST call (dfx tags in the channel):** `restCall.pipe(Effect.catchTag(DISCORD_REST_ERROR_TAGS, failAsDiscordError), Effect.catchTag('DiscordPermissionError', …))`. `failAsDiscordError` re-fails the caught transport error as a `DiscordError`, leaving non-REST errors (RPC, parse …) untouched. Reference: `src/commands/summon/handler.ts`, `src/interactions/carpool.ts`.
+- **`unknown` / mixed channel:** `Effect.mapError(toDiscordError)` (total — maps any value; unrecognized → `DiscordTransientError`) then `catchTag`. Reference: `src/commands/summarize/handler.ts` (its `fetchPages` is typed `Effect<_, unknown>`, so `catchTag` on transport tags is not available).
+
+The underlying boolean predicates (`isDiscordPermissionError`, `isDiscordNotFoundError`, `isPermanentError`) remain exported for the cases where a tagged failure does NOT fit: retry `while` / `catchIf` predicates (channel-sync, above) and handlers whose layered error propagation would ripple (`src/commands/sudo/handler.ts`, `src/interactions/sudo.ts`). All shape probing (`isRecord` / `asRecord` / `numberProp`) lives in `~/rest/recordProbe.ts` — never hand-roll a `value as Record<string, unknown>` cast to read an error's fields.
+
+**Never re-inline the classifier or re-declare the probing primitives.** There are no remaining inline copies; keep it that way.
 
 #### Form-body errors (`50035`) require matching the nested sub-code, never the top-level code alone
 

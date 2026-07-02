@@ -8,6 +8,7 @@ import { Array, Effect, Metric, Option, pipe } from 'effect';
 import type { Locale } from '~/locale.js';
 import { userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
+import { DISCORD_REST_ERROR_TAGS, failAsDiscordError } from '~/rest/discordErrors.js';
 
 const THREAD_CHANNEL_TYPES = new Set<number>([
   DiscordTypes.ChannelTypes.PUBLIC_THREAD,
@@ -41,33 +42,6 @@ const ephemeral = (content: string) =>
       flags: DiscordTypes.MessageFlags.Ephemeral,
     },
   });
-
-const numberProp = (record: Record<string, unknown>, key: string): number | undefined => {
-  const value = record[key];
-  return typeof value === 'number' ? value : undefined;
-};
-
-const recordProp = (record: Record<string, unknown>, key: string): Record<string, unknown> => {
-  const value = record[key];
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
-};
-
-/** Discord's REST error has the HTTP status on `err.response.status` and the
- * Discord JSON error code on `err.data.code` (see dfx Generated.ts). We check
- * the top-level fields too in case a wrapped/test fixture exposes them
- * directly. Only 403 / code 50013 count as "bot lacks permission" — 404
- * (Unknown Resource) means the thread/user was deleted and should fall
- * through to the generic error. */
-const isDiscordPermissionError = (error: unknown): boolean => {
-  if (error === null || typeof error !== 'object') return false;
-  const record = error as Record<string, unknown>;
-  const response = recordProp(record, 'response');
-  const data = recordProp(record, 'data');
-  const httpStatus = numberProp(response, 'status') ?? numberProp(record, 'status');
-  if (httpStatus === 403) return true;
-  const discordCode = numberProp(data, 'code') ?? numberProp(record, 'code');
-  return discordCode === 50013;
-};
 
 const readOption = (
   options: ReadonlyArray<{ name: string }>,
@@ -117,14 +91,15 @@ const addMembersToThread = (
     (userId) =>
       rest.addThreadMember(channelId, userId).pipe(
         Effect.map(() => ({ userId, status: 'ok' as const })),
-        Effect.catchTag('ErrorResponse', (error) =>
-          Effect.succeed({
-            userId,
-            status: isDiscordPermissionError(error) ? ('permission' as const) : ('error' as const),
-          }),
+        Effect.catchTag(DISCORD_REST_ERROR_TAGS, failAsDiscordError),
+        Effect.catchTag('DiscordPermissionError', () =>
+          Effect.succeed({ userId, status: 'permission' as const }),
         ),
-        Effect.catchTag(['HttpClientError', 'RatelimitedResponse'], (error) =>
-          Effect.logWarning('Failed to add thread member', error).pipe(
+        Effect.catchTag(['DiscordNotFoundError', 'DiscordPermanentError'], () =>
+          Effect.succeed({ userId, status: 'error' as const }),
+        ),
+        Effect.catchTag('DiscordTransientError', (error) =>
+          Effect.logWarning('Failed to add thread member', error.cause).pipe(
             Effect.as({ userId, status: 'error' as const }),
           ),
         ),
