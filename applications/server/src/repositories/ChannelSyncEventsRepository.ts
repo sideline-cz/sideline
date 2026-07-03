@@ -661,7 +661,7 @@ const make = Effect.gen(function* () {
     markEventPermanentlyFailed({ id, error }).pipe(catchSqlErrors);
 
   const hasUnprocessedForGroups = (groupIds: ReadonlyArray<GroupModel.GroupId>) => {
-    if (groupIds.length === 0) return Effect.succeed([] as GroupModel.GroupId[]);
+    if (groupIds.length === 0) return Effect.succeed<GroupModel.GroupId[]>([]);
     return findUnprocessedForGroups([...groupIds]).pipe(
       Effect.map((rows) => rows.map((r) => r.group_id)),
       catchSqlErrors,
@@ -669,7 +669,7 @@ const make = Effect.gen(function* () {
   };
 
   const hasUnprocessedForRosters = (rosterIds: ReadonlyArray<RosterModel.RosterId>) => {
-    if (rosterIds.length === 0) return Effect.succeed([] as RosterModel.RosterId[]);
+    if (rosterIds.length === 0) return Effect.succeed<RosterModel.RosterId[]>([]);
     return findUnprocessedForRosters([...rosterIds]).pipe(
       Effect.map((rows) => rows.map((r) => r.roster_id)),
       catchSqlErrors,
