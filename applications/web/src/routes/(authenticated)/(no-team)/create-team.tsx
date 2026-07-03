@@ -1,4 +1,4 @@
-import type { Auth } from '@sideline/domain';
+import { type Auth, Discord } from '@sideline/domain';
 import { createFileRoute, redirect, useNavigate, useRouter } from '@tanstack/react-router';
 import { Effect, Option } from 'effect';
 import React from 'react';
@@ -46,7 +46,7 @@ function CreateTeamRoute() {
       const result = await ApiClient.asEffect().pipe(
         Effect.flatMap((api) =>
           api.auth.createTeam({
-            payload: { name, guildId: guildId as Auth.CreateTeamRequest['guildId'] },
+            payload: { name, guildId: Discord.Snowflake.makeUnsafe(guildId) },
           }),
         ),
         Effect.mapError(() => ClientError.make(tr('dashboard_createFailed'))),

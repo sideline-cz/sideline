@@ -110,7 +110,7 @@ function MemberDetailRoute() {
   const myPermissions =
     myTeams.find((t: Auth.UserTeam) => t.teamId === teamIdRaw)?.permissions ?? [];
   const canEdit = myPermissions.includes('member:edit');
-  const canManageRoles = myPermissions.includes('role:manage' as Role.Permission);
+  const canManageRoles = myPermissions.includes('role:manage');
   const canManageRosters = myPermissions.includes('roster:manage');
   const canManageGroups = myPermissions.includes('group:manage');
   const canRemoveMember = myPermissions.includes('member:remove');
