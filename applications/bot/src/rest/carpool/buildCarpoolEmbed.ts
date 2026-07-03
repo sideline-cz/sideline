@@ -1,7 +1,7 @@
 import type { CarpoolRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
-import type * as Discord from 'dfx/types';
+import * as Discord from 'dfx/types';
 import type { Locale } from '~/locale.js';
 import { formatName } from '~/rest/utils.js';
 
@@ -110,13 +110,13 @@ export const buildCarpoolEmbed = (
   // But we cap at MAX_CARS_DISPLAYED (10) reserve buttons anyway
   const addRow: Discord.ActionRowComponentForMessageRequest = UI.row([
     UI.button({
-      style: 1, // style 1 = Primary
+      style: Discord.ButtonStyleTypes.PRIMARY,
       label: m.bot_carpool_btn_add({}, { locale }),
       // Encode carpool_id so the modal submit handler can call AddCar.
       custom_id: `carpool-add:${view.carpool_id}`,
     }),
     UI.button({
-      style: 4, // style 4 = Danger
+      style: Discord.ButtonStyleTypes.DANGER,
       label: m.bot_carpool_btn_leave_mine({}, { locale }),
       // A member is in at most one car per carpool, so a single shared
       // "leave my car" button resolves the car server-side by carpool_id.
@@ -137,7 +137,7 @@ export const buildCarpoolEmbed = (
         const carIndex = i + batchIdx + 1;
         const isFull = 1 + car.passengers.length >= car.capacity;
         return UI.button({
-          style: isFull ? 2 : 3, // Secondary when full, Success (green) when available
+          style: isFull ? Discord.ButtonStyleTypes.SECONDARY : Discord.ButtonStyleTypes.SUCCESS,
           label: m.bot_carpool_btn_reserve({ n: carIndex }, { locale }),
           custom_id: `carpool-reserve:${car.car_id}`,
           disabled: isFull,
