@@ -1,7 +1,7 @@
 import type { EventRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
-import type * as Discord from 'dfx/types';
+import * as Discord from 'dfx/types';
 import { Array, DateTime, Option, pipe } from 'effect';
 import type { Locale } from '~/locale.js';
 import { formatName } from '../utils.js';
@@ -139,17 +139,17 @@ export const buildEventEmbed = (opts: {
   if (opts.counts.canRsvp) {
     rowButtons.push(
       UI.button({
-        style: 3, // style 3 = Success
+        style: Discord.ButtonStyleTypes.SUCCESS,
         label: m.bot_btn_yes({}, { locale }),
         custom_id: `rsvp:${opts.teamId}:${opts.eventId}:yes`,
       }),
       UI.button({
-        style: 4, // style 4 = Danger
+        style: Discord.ButtonStyleTypes.DANGER,
         label: m.bot_btn_no({}, { locale }),
         custom_id: `rsvp:${opts.teamId}:${opts.eventId}:no`,
       }),
       UI.button({
-        style: 2, // style 2 = Secondary
+        style: Discord.ButtonStyleTypes.SECONDARY,
         label: m.bot_btn_maybe({}, { locale }),
         custom_id: `rsvp:${opts.teamId}:${opts.eventId}:maybe`,
       }),
@@ -159,7 +159,7 @@ export const buildEventEmbed = (opts: {
   if (!opts.isStarted) {
     rowButtons.push(
       UI.button({
-        style: 2, // style 2 = Secondary
+        style: Discord.ButtonStyleTypes.SECONDARY,
         label: m.bot_btn_attendees({}, { locale }),
         custom_id: `attendees:${opts.teamId}:${opts.eventId}:0`,
       }),
