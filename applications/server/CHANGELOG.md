@@ -1,5 +1,13 @@
 # @sideline/server
 
+## 0.38.1
+
+### Patch Changes
+
+- [#465](https://github.com/maxa-ondrej/sideline/pull/465) [`d2fa636`](https://github.com/maxa-ondrej/sideline/commit/d2fa636529fceb35f2d50c6701f6fade580273e9) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix personal channel provisioning permanently skipping members after a failed first attempt. The reservation query used `INSERT ... ON CONFLICT DO NOTHING`, so a stale NULL reservation left behind by a failed attempt made every subsequent reserve return `reserved=false`, permanently skipping the member. Reservation is now a lease-based conditional re-claim that re-claims a stale NULL reservation older than 15 minutes while preserving cross-replica mutual exclusion for in-flight reservations and never touching already-provisioned rows.
+
+- [#467](https://github.com/maxa-ondrej/sideline/pull/467) [`d628f65`](https://github.com/maxa-ondrej/sideline/commit/d628f65b6422409e47f86d2e93e7f2592e0f1057) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Code-quality refactor of the finance repositories, RPC handlers, and LlmClient (no behavior change): eliminate `as` type casts by fixing the underlying types (internal `Schema.decodeSync` at boundaries, honest `Option<DateTime.Utc>` input types, branded read-side row schemas, typed empty-array `Effect.succeed`), DRY the `Option<Option<A>>`→nullable partial-update collapse into a shared `nestedOptionToNullable` helper, and replace `LlmClient`'s try/catch decode-with-fallback blocks with `Effect.try` + `Effect.orElseSucceed`. One intentional hardening: the balance-summary money columns are now schema-validated, so a malformed database sum fails loudly instead of being silently coerced.
+
 ## 0.38.0
 
 ### Minor Changes

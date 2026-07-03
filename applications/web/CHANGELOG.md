@@ -1,5 +1,15 @@
 # @sideline/web
 
+## 0.27.4
+
+### Patch Changes
+
+- [#478](https://github.com/maxa-ondrej/sideline/pull/478) [`e6a7866`](https://github.com/maxa-ondrej/sideline/commit/e6a786653eb3b3b42bc9407b673a44ba1c90d00f) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Replace `Effect.succeed(value as T)` widening casts with explicit type arguments (`Effect.succeed<T>(value)`) in the onboarding-token, my-payments, roster-detail, and onboarding-page loaders. Behavior-preserving — same value, annotation instead of assertion.
+
+- [#477](https://github.com/maxa-ondrej/sideline/pull/477) [`e72e01d`](https://github.com/maxa-ondrej/sideline/commit/e72e01d079570bdb18c82698d55837bcc540c0c3) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Eliminate two unnecessary `as` casts in the web app: drop the redundant `'role:manage' as Role.Permission` cast (the literal is already a valid `Permission`), and replace the create-team `guildId as Snowflake` cast with `Discord.Snowflake.makeUnsafe`. Behavior-preserving.
+
+- [#479](https://github.com/maxa-ondrej/sideline/pull/479) [`26d0869`](https://github.com/maxa-ondrej/sideline/commit/26d086944a57da2100df3a3b78967cb2a8e27b86) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Replace object-literal-nested type-widening `as` casts in three loaders (workout, member-detail, event-detail) with explicit branch-type annotations. The casts did catch-branch/success-branch unification; the annotations reproduce the exact same loader success types without the assertions (a redundant `r.logs` no-op cast is also dropped). Pure type-erasure — identical emitted JS, behavior-preserving.
+
 ## 0.27.3
 
 ### Patch Changes
