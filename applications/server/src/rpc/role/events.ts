@@ -1,9 +1,10 @@
 import { RoleRpcEvents, type RoleSyncEvent } from '@sideline/domain';
-import { Data, Effect, Match, type Option } from 'effect';
+import { Data, Effect, Match } from 'effect';
 import {
   type EventRow,
   RoleSyncEventsRepository,
 } from '~/repositories/RoleSyncEventsRepository.js';
+import { makeNullableEventProperty } from '~/utils/nullableEventProperty.js';
 
 export class EventPropertyMissing extends Data.TaggedError('EventPropertyMissing')<{
   event_type: string;
@@ -23,25 +24,9 @@ export class EventPropertyMissing extends Data.TaggedError('EventPropertyMissing
   static handle = (e: EventPropertyMissing) => e.log().pipe(Effect.tap(() => e.markFailed()));
 }
 
-const nullable = <
-  K extends keyof E & string,
-  E extends {
-    readonly event_type: string;
-    readonly id: RoleSyncEvent.RoleSyncEventId;
-  } & {
-    [key in K]: E[K] extends Option.Option<infer T> ? Option.Option<T> : never;
-  },
->(
-  event: E,
-  key: K,
-) =>
-  Effect.fromOption(event[key] as Option.Option<unknown>).pipe(
-    Effect.catchTag('NoSuchElementError', () =>
-      Effect.fail(
-        new EventPropertyMissing({ event_type: event.event_type, id: event.id, property: key }),
-      ),
-    ),
-  ) as Effect.Effect<E[K] extends Option.Option<infer T> ? T : never, EventPropertyMissing>;
+const nullable = makeNullableEventProperty<RoleSyncEvent.RoleSyncEventId, EventPropertyMissing>(
+  (args) => new EventPropertyMissing(args),
+);
 
 export const constructEvent = Match.type<EventRow>().pipe(
   Match.when({ event_type: 'role_created' }, (r) =>
