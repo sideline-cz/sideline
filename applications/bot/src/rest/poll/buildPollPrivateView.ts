@@ -1,7 +1,7 @@
 import type { PollRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
-import type * as Discord from 'dfx/types';
+import * as Discord from 'dfx/types';
 import type { Locale } from '~/locale.js';
 import { regionalIndicator, truncateButtonLabel } from './buildPollEmbed.js';
 
@@ -36,7 +36,7 @@ export const buildPollPrivateView = (
       batch.map((opt) => {
         const isSelected = view.my_option_ids.includes(opt.option_id);
         return UI.button({
-          style: isSelected ? 1 : 2, // Primary=1 (selected), Secondary=2 (unselected)
+          style: isSelected ? Discord.ButtonStyleTypes.PRIMARY : Discord.ButtonStyleTypes.SECONDARY,
           label: `${regionalIndicator(opt.position)} ${truncateButtonLabel(opt.label)}`,
           custom_id: `poll-vote:${view.poll_id}:${opt.option_id}`,
           disabled: isClosed,

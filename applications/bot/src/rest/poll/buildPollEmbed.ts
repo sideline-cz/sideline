@@ -1,7 +1,7 @@
 import type { PollRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
-import type * as Discord from 'dfx/types';
+import * as Discord from 'dfx/types';
 import { DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
 
@@ -126,7 +126,7 @@ export const buildPollEmbed = (
 
   // The "Who voted?" button is shown on both open and closed boards.
   const votersButton: Discord.ButtonComponentForMessageRequest = UI.button({
-    style: 2, // Secondary
+    style: Discord.ButtonStyleTypes.SECONDARY,
     label: m.bot_poll_voters_button({}, { locale }),
     custom_id: `poll-voters:${view.poll_id}`,
   });
@@ -142,17 +142,17 @@ export const buildPollEmbed = (
   // Open board: one action row with Vote + Add option + Close poll + Who voted? buttons
   const actionRow: Discord.ActionRowComponentForMessageRequest = UI.row([
     UI.button({
-      style: 1, // Primary
+      style: Discord.ButtonStyleTypes.PRIMARY,
       label: m.bot_poll_vote_button({}, { locale }),
       custom_id: `poll-open:${view.poll_id}`,
     }),
     UI.button({
-      style: 2, // Secondary
+      style: Discord.ButtonStyleTypes.SECONDARY,
       label: m.bot_poll_add_option_button({}, { locale }),
       custom_id: `poll-add:${view.poll_id}`,
     }),
     UI.button({
-      style: 4, // Danger
+      style: Discord.ButtonStyleTypes.DANGER,
       label: m.bot_poll_close_button({}, { locale }),
       custom_id: `poll-close:${view.poll_id}`,
     }),

@@ -1,7 +1,7 @@
 import type { EmailForwarding, EmailRpcEvents, Team } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
-import type * as Discord from 'dfx/types';
+import * as Discord from 'dfx/types';
 import { DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
 
@@ -163,12 +163,12 @@ export const buildApprovalComponents = (
 ): Array<Discord.ActionRowComponentForMessageRequest> => {
   const buttons: Array<Discord.ButtonComponentForMessageRequest> = [
     UI.button({
-      style: 3, // style 3 = Success
+      style: Discord.ButtonStyleTypes.SUCCESS,
       label: m.bot_email_btn_approve({}, { locale }),
       custom_id: `email-approve:${teamId}:${emailId}`,
     }),
     UI.button({
-      style: 4, // style 4 = Danger
+      style: Discord.ButtonStyleTypes.DANGER,
       label: m.bot_email_btn_reject({}, { locale }),
       custom_id: `email-reject:${teamId}:${emailId}`,
     }),
@@ -176,7 +176,7 @@ export const buildApprovalComponents = (
       onNone: () => [] as Array<Discord.ButtonComponentForMessageRequest>,
       onSome: (url): Array<Discord.ButtonComponentForMessageRequest> => [
         UI.button({
-          style: 5, // style 5 = Link
+          style: Discord.ButtonStyleTypes.LINK,
           label: m.bot_email_btn_edit_sideline({}, { locale }),
           url,
         }),
@@ -248,12 +248,12 @@ export const buildTeamPostComponents = (
 ): Array<Discord.ActionRowComponentForMessageRequest> => [
   UI.row([
     UI.button({
-      style: 2, // style 2 = Secondary
+      style: Discord.ButtonStyleTypes.SECONDARY,
       label: m.bot_email_btn_detailed({}, { locale }),
       custom_id: `email-detail:${teamId}:${emailId}`,
     }),
     UI.button({
-      style: 2, // style 2 = Secondary
+      style: Discord.ButtonStyleTypes.SECONDARY,
       label: m.bot_email_btn_original({}, { locale }),
       custom_id: `email-original:${teamId}:${emailId}`,
     }),
@@ -384,19 +384,19 @@ export const buildPageComponents = ({
 
   const buttons: Array<Discord.ButtonComponentForMessageRequest> = [
     UI.button({
-      style: 2, // style 2 = Secondary
+      style: Discord.ButtonStyleTypes.SECONDARY,
       label: '◀',
       custom_id: `${prefix}:${teamId}:${emailId}:${pageIndex - 1}`,
       disabled: pageIndex === 0,
     }),
     UI.button({
-      style: 2, // style 2 = Secondary
+      style: Discord.ButtonStyleTypes.SECONDARY,
       label: m.bot_email_page_indicator({ current: pageIndex + 1, total: totalPages }, { locale }),
       custom_id: `${prefix}-disabled:${teamId}:${emailId}`,
       disabled: true,
     }),
     UI.button({
-      style: 2, // style 2 = Secondary
+      style: Discord.ButtonStyleTypes.SECONDARY,
       label: '▶',
       custom_id: `${prefix}:${teamId}:${emailId}:${pageIndex + 1}`,
       disabled: pageIndex === totalPages - 1,
