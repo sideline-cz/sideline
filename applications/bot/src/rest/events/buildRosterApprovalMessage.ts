@@ -1,7 +1,7 @@
 import type { Event, TeamMember } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
-import type * as Discord from 'dfx/types';
+import * as Discord from 'dfx/types';
 import { DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
 import { formatNameWithMention } from '../utils.js';
@@ -105,12 +105,12 @@ export const buildRosterApprovalMessage = (opts: {
     components.push(
       UI.row([
         UI.button({
-          style: 3, // style 3 = Success
+          style: Discord.ButtonStyleTypes.SUCCESS,
           label: m.bot_roster_btn_approve({}, { locale }),
           custom_id: `rsv-approve:${eventId}:${memberId}`,
         }),
         UI.button({
-          style: 4, // style 4 = Danger
+          style: Discord.ButtonStyleTypes.DANGER,
           label: m.bot_roster_btn_decline({}, { locale }),
           custom_id: `rsv-decline:${eventId}:${memberId}`,
         }),
@@ -121,13 +121,13 @@ export const buildRosterApprovalMessage = (opts: {
     components.push(
       UI.row([
         UI.button({
-          style: 3, // style 3 = Success
+          style: Discord.ButtonStyleTypes.SUCCESS,
           label: m.bot_roster_btn_approve({}, { locale }),
           custom_id: `rsv-approve:${eventId}:${memberId}`,
           disabled: true,
         }),
         UI.button({
-          style: 4, // style 4 = Danger
+          style: Discord.ButtonStyleTypes.DANGER,
           label: m.bot_roster_btn_decline({}, { locale }),
           custom_id: `rsv-decline:${eventId}:${memberId}`,
           disabled: true,

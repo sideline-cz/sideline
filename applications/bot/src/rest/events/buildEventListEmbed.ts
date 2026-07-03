@@ -1,7 +1,7 @@
 import type { EventRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
-import type * as Discord from 'dfx/types';
+import * as Discord from 'dfx/types';
 import { DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
 import { locationDisplay } from './locationDisplay.js';
@@ -88,13 +88,13 @@ export const buildEventListEmbed = (opts: {
     components.push(
       UI.row([
         UI.button({
-          style: 2, // style 2 = Secondary
+          style: Discord.ButtonStyleTypes.SECONDARY,
           label: m.bot_btn_prev({}, { locale }),
           custom_id: `event-list-page:${opts.guildId}:${opts.offset - PAGE_SIZE}`,
           disabled: opts.offset === 0,
         }),
         UI.button({
-          style: 2, // style 2 = Secondary
+          style: Discord.ButtonStyleTypes.SECONDARY,
           label: m.bot_btn_next({}, { locale }),
           custom_id: `event-list-page:${opts.guildId}:${opts.offset + PAGE_SIZE}`,
           disabled: opts.offset + PAGE_SIZE >= opts.total,

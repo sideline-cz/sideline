@@ -1,7 +1,7 @@
 import type { EventRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
-import type * as Discord from 'dfx/types';
+import * as Discord from 'dfx/types';
 import { Option } from 'effect';
 import type { Locale } from '~/locale.js';
 import { formatNameWithMention } from '../utils.js';
@@ -86,13 +86,13 @@ export const buildAttendeesEmbed = (opts: {
     components.push(
       UI.row([
         UI.button({
-          style: 2, // style 2 = Secondary
+          style: Discord.ButtonStyleTypes.SECONDARY,
           label: m.bot_btn_prev({}, { locale }),
           custom_id: `attendees-page:${opts.teamId}:${opts.eventId}:${opts.offset - opts.limit}`,
           disabled: opts.offset === 0,
         }),
         UI.button({
-          style: 2, // style 2 = Secondary
+          style: Discord.ButtonStyleTypes.SECONDARY,
           label: m.bot_btn_next({}, { locale }),
           custom_id: `attendees-page:${opts.teamId}:${opts.eventId}:${opts.offset + opts.limit}`,
           disabled: opts.offset + opts.limit >= opts.total,

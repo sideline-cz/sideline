@@ -1,6 +1,6 @@
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
-import type * as Discord from 'dfx/types';
+import * as Discord from 'dfx/types';
 import { DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
 import { formatNameWithMention } from '../utils.js';
@@ -116,7 +116,7 @@ export const buildClaimMessage = (opts: {
       // Release button — Secondary (style 2)
       rowButtons.push(
         UI.button({
-          style: 2, // style 2 = Secondary
+          style: Discord.ButtonStyleTypes.SECONDARY,
           label: m.bot_unclaim_button({}, { locale }),
           custom_id: `unclaim:${opts.teamId}:${opts.eventId}`,
         }),
@@ -125,7 +125,7 @@ export const buildClaimMessage = (opts: {
       // Claim button — Primary (style 1)
       rowButtons.push(
         UI.button({
-          style: 1, // style 1 = Primary
+          style: Discord.ButtonStyleTypes.PRIMARY,
           label: m.bot_claim_button({}, { locale }),
           custom_id: `claim:${opts.teamId}:${opts.eventId}`,
         }),
