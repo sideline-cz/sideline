@@ -64,8 +64,8 @@ const make = Effect.gen(function* () {
     findByMemberQuery(teamMemberId).pipe(
       catchSqlErrors,
       Effect.map(
-        (rows) =>
-          new Set(rows.map((r) => r.achievement_slug)) as ReadonlySet<Achievement.AchievementSlug>,
+        (rows): ReadonlySet<Achievement.AchievementSlug> =>
+          new Set(rows.map((r) => r.achievement_slug)),
       ),
     );
 

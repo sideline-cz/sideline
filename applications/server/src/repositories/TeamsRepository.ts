@@ -87,7 +87,7 @@ const make = Effect.gen(function* () {
 
   const findByGuildIds = (guildIds: ReadonlyArray<typeof Discord.Snowflake.Type>) => {
     if (guildIds.length === 0) {
-      return Effect.succeed([] as Team.Team[]);
+      return Effect.succeed<Team.Team[]>([]);
     }
     return sql`SELECT * FROM teams WHERE guild_id IN ${sql.in([...guildIds])}`.pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Team.Team))),

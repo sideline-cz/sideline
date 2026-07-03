@@ -332,7 +332,7 @@ export const ActivityRpcLive = Effect.Do.pipe(
                     id: t.id,
                     name: t.name,
                     slug: t.slug,
-                    emoji: Option.map(t.emoji, (e) => e as string),
+                    emoji: t.emoji,
                     isGlobal: Option.isNone(t.team_id),
                   }),
               ),
