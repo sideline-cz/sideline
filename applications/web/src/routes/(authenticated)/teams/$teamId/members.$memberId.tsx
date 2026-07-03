@@ -39,9 +39,15 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$me
               roles: api.role.listRoles({ params: { teamId } }),
               activityStats: api.activityStats.getMemberStats({ params: { teamId, memberId } }),
               activityLogs: api.activityLog.listLogs({ params: { teamId, memberId } }).pipe(
-                Effect.map((r) => ({ isOwnProfile: true as boolean, logs: r.logs })),
+                Effect.map((r): { isOwnProfile: boolean; logs: typeof r.logs } => ({
+                  isOwnProfile: true,
+                  logs: r.logs,
+                })),
                 Effect.catch(() =>
-                  Effect.succeed({ isOwnProfile: false as boolean, logs: [] as const }),
+                  Effect.succeed<{ isOwnProfile: boolean; logs: readonly [] }>({
+                    isOwnProfile: false,
+                    logs: [],
+                  }),
                 ),
               ),
               activityTypes: api.activityType.listActivityTypes({ params: { teamId } }),

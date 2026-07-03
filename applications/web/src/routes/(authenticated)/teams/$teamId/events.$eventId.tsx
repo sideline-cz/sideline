@@ -31,9 +31,9 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/events/$eve
           rosters: api.roster.listRosters({ params: { teamId } }).pipe(
             Effect.tapError((e) => Effect.logWarning('Failed to load rosters for event', e)),
             Effect.catch(() =>
-              Effect.succeed({
+              Effect.succeed<{ canManage: false; rosters: ReadonlyArray<Roster.RosterInfo> }>({
                 canManage: false,
-                rosters: [] as ReadonlyArray<Roster.RosterInfo>,
+                rosters: [],
               }),
             ),
           ),
@@ -44,7 +44,9 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/events/$eve
           trainingGames: api.playerRating.getTrainingGames({ params: { teamId, eventId } }).pipe(
             Effect.tapError((e) => Effect.logWarning('Failed to load training games for event', e)),
             Effect.catch(() =>
-              Effect.succeed({ games: [] as ReadonlyArray<PlayerRatingApi.LoggedGameEntry> }),
+              Effect.succeed<{ games: ReadonlyArray<PlayerRatingApi.LoggedGameEntry> }>({
+                games: [],
+              }),
             ),
           ),
           teamRatings: api.playerRating.getTeamRatings({ params: { teamId } }).pipe(

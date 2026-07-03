@@ -24,33 +24,42 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/workout')({
           activityTypes: api.activityType.listActivityTypes({ params: { teamId } }),
         }).pipe(
           Effect.flatMap(({ leaderboard, members, activityTypes }) => {
+            type WorkoutData = {
+              leaderboard: typeof leaderboard;
+              activityTypes: typeof activityTypes;
+              activityStats: ActivityStatsApi.ActivityStatsResponse | null;
+              activityLogs: ReadonlyArray<ActivityLogApi.ActivityLogEntry>;
+              memberId: TeamMember.TeamMemberId | null;
+            };
             const currentMember = members.find((member) => member.userId === userId);
             if (!currentMember) {
-              return Effect.succeed({
+              return Effect.succeed<WorkoutData>({
                 leaderboard,
                 activityTypes,
-                activityStats: null as ActivityStatsApi.ActivityStatsResponse | null,
-                activityLogs: [] as ReadonlyArray<ActivityLogApi.ActivityLogEntry>,
-                memberId: null as TeamMember.TeamMemberId | null,
+                activityStats: null,
+                activityLogs: [],
+                memberId: null,
               });
             }
             const memberId = currentMember.memberId;
             return Effect.all({
               activityStats: api.activityStats.getMemberStats({ params: { teamId, memberId } }),
               activityLogs: api.activityLog.listLogs({ params: { teamId, memberId } }).pipe(
-                Effect.map((r) => r.logs as ReadonlyArray<ActivityLogApi.ActivityLogEntry>),
+                Effect.map((r) => r.logs),
                 Effect.catch(() =>
-                  Effect.succeed([] as ReadonlyArray<ActivityLogApi.ActivityLogEntry>),
+                  Effect.succeed<ReadonlyArray<ActivityLogApi.ActivityLogEntry>>([]),
                 ),
               ),
             }).pipe(
-              Effect.map(({ activityStats, activityLogs }) => ({
-                leaderboard,
-                activityTypes,
-                activityStats: activityStats as ActivityStatsApi.ActivityStatsResponse | null,
-                activityLogs,
-                memberId: memberId as TeamMember.TeamMemberId | null,
-              })),
+              Effect.map(
+                ({ activityStats, activityLogs }): WorkoutData => ({
+                  leaderboard,
+                  activityTypes,
+                  activityStats,
+                  activityLogs,
+                  memberId,
+                }),
+              ),
             );
           }),
         ),
