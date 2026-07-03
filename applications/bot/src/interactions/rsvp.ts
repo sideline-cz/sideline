@@ -46,19 +46,19 @@ const buildMessageActionRow = (
     hasMessage
       ? [
           UI.button({
-            style: 2, // style 2 = Secondary
+            style: Discord.ButtonStyleTypes.SECONDARY,
             label: m.bot_rsvp_edit_message({}, { locale }),
             custom_id: `rsvp-add-msg:${teamId}:${eventId}:${response}`,
           }),
           UI.button({
-            style: 4, // style 4 = Danger
+            style: Discord.ButtonStyleTypes.DANGER,
             label: m.bot_rsvp_clear_message({}, { locale }),
             custom_id: `rsvp-clear-msg:${teamId}:${eventId}:${response}`,
           }),
         ]
       : [
           UI.button({
-            style: 2, // style 2 = Secondary
+            style: Discord.ButtonStyleTypes.SECONDARY,
             label: m.bot_rsvp_add_message({}, { locale }),
             custom_id: `rsvp-add-msg:${teamId}:${eventId}:${response}`,
           }),
@@ -347,7 +347,7 @@ export const RsvpAddMessageButton = Ix.messageComponent(
               UI.textInput({
                 custom_id: 'rsvp_message',
                 label: m.bot_rsvp_modal_label({}, { locale }),
-                style: 2, // style 2 = Paragraph
+                style: Discord.TextInputStyleTypes.PARAGRAPH,
                 required: false,
                 max_length: 200,
               }),

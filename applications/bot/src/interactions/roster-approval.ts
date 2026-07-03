@@ -31,13 +31,13 @@ const buildDisabledRosterRow = (
 ): Discord.ActionRowComponentForMessageRequest =>
   UI.row([
     UI.button({
-      style: 3, // style 3 = Success
+      style: Discord.ButtonStyleTypes.SUCCESS,
       label: m.bot_roster_btn_approve({}, { locale: 'en' }),
       custom_id: `rsv-approve:${eventId}:${memberId}`,
       disabled: true,
     }),
     UI.button({
-      style: 4, // style 4 = Danger
+      style: Discord.ButtonStyleTypes.DANGER,
       label: m.bot_roster_btn_decline({}, { locale: 'en' }),
       custom_id: `rsv-decline:${eventId}:${memberId}`,
       disabled: true,

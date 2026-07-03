@@ -263,7 +263,7 @@ export const UpcomingAddMessageButton = Ix.messageComponent(
               UI.textInput({
                 custom_id: 'rsvp_message',
                 label: m.bot_rsvp_modal_label({}, { locale }),
-                style: 2, // style 2 = Paragraph
+                style: Discord.TextInputStyleTypes.PARAGRAPH,
                 required: false,
                 max_length: 200,
               }),

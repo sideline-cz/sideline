@@ -24,13 +24,13 @@ const decodeEmailMessageIdOption = Schema.decodeUnknownOption(EmailForwarding.Em
 const buildDisabledApprovalRow = (): Discord.ActionRowComponentForMessageRequest =>
   UI.row([
     UI.button({
-      style: 3, // style 3 = Success
+      style: Discord.ButtonStyleTypes.SUCCESS,
       label: m.bot_email_btn_approve({}, { locale: 'en' }),
       custom_id: 'email-approve:disabled',
       disabled: true,
     }),
     UI.button({
-      style: 4, // style 4 = Danger
+      style: Discord.ButtonStyleTypes.DANGER,
       label: m.bot_email_btn_reject({}, { locale: 'en' }),
       custom_id: 'email-reject:disabled',
       disabled: true,
