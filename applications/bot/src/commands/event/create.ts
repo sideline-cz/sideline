@@ -49,7 +49,7 @@ export const createHandler = Interaction.asEffect().pipe(
             UI.textInput({
               custom_id: 'event_title',
               label: m.bot_event_title_label({}, { locale }),
-              style: 1, // style 1 = Short
+              style: DiscordTypes.TextInputStyleTypes.SHORT,
               required: true,
               max_length: 100,
             }),
@@ -58,7 +58,7 @@ export const createHandler = Interaction.asEffect().pipe(
             UI.textInput({
               custom_id: 'event_start',
               label: m.bot_event_start_label({}, { locale }),
-              style: 1, // style 1 = Short
+              style: DiscordTypes.TextInputStyleTypes.SHORT,
               required: true,
               placeholder: m.bot_event_start_placeholder({}, { locale }),
               max_length: 16,
@@ -68,7 +68,7 @@ export const createHandler = Interaction.asEffect().pipe(
             UI.textInput({
               custom_id: 'event_end',
               label: m.bot_event_end_label({}, { locale }),
-              style: 1, // style 1 = Short
+              style: DiscordTypes.TextInputStyleTypes.SHORT,
               required: false,
               placeholder: m.bot_event_end_placeholder({}, { locale }),
               max_length: 16,
@@ -78,7 +78,7 @@ export const createHandler = Interaction.asEffect().pipe(
             UI.textInput({
               custom_id: 'event_location',
               label: m.bot_event_location_label({}, { locale }),
-              style: 1, // style 1 = Short
+              style: DiscordTypes.TextInputStyleTypes.SHORT,
               required: false,
               placeholder: m.bot_event_location_placeholder({}, { locale }),
               max_length: 200,
@@ -88,7 +88,7 @@ export const createHandler = Interaction.asEffect().pipe(
             UI.textInput({
               custom_id: 'event_description',
               label: m.bot_event_description_label({}, { locale }),
-              style: 2, // style 2 = Paragraph
+              style: DiscordTypes.TextInputStyleTypes.PARAGRAPH,
               required: false,
               max_length: 1000,
             }),
