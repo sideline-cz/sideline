@@ -1,5 +1,13 @@
 # @sideline/server
 
+## 0.38.2
+
+### Patch Changes
+
+- [#482](https://github.com/maxa-ondrej/sideline/pull/482) [`e8b9a7d`](https://github.com/maxa-ondrej/sideline/commit/e8b9a7df773797fc671e59a2fdee604b7707738d) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - DRY up the duplicated `nullable` event-property accessor in the role and channel RPC event constructors into a shared `makeNullableEventProperty` factory, consolidating the two generic mapped-type casts into a single location.
+
+- [#480](https://github.com/maxa-ondrej/sideline/pull/480) [`886f03d`](https://github.com/maxa-ondrej/sideline/commit/886f03df4875567004486d9d0d5b41be695a7c2d) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Eliminate redundant type casts in server repositories and activity RPC (empty-array `Effect.succeed<T>([])`, no-op `emoji` cast, redundant `ReadonlySet` cast).
+
 ## 0.38.1
 
 ### Patch Changes
