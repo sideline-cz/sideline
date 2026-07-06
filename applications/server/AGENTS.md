@@ -129,6 +129,27 @@ Rules:
 
 Reference: `EventsRepository.repointChannelEvents` (`repointChannelEventsWithOld` / `repointChannelEventsWithNullOld`), integration coverage in `applications/server/test/integration/repositories/RepointChannelEvents.test.ts`.
 
+### Renumbering a contiguous-position column after deleting rows (single-statement `ROW_NUMBER()` CTE)
+
+When a table has a `position` column constrained `UNIQUE(<parent_id>, position)` and holds a contiguous `0..n-1` sequence per parent (e.g. `poll_options.position`), deleting a middle row leaves a gap. Close the gap by recomputing every remaining row's position with a SINGLE `ROW_NUMBER()`-CTE UPDATE — never renumber row-by-row in application code, and never issue N separate UPDATE statements.
+
+```sql
+WITH renum AS (
+  SELECT id, (ROW_NUMBER() OVER (ORDER BY position) - 1) AS new_pos
+  FROM poll_options WHERE poll_id = ${input.pollId}
+)
+UPDATE poll_options po SET position = renum.new_pos
+FROM renum WHERE po.id = renum.id AND po.position <> renum.new_pos
+```
+
+Rules:
+
+1. **The whole renumber MUST be one UPDATE statement.** Postgres checks a non-deferrable `UNIQUE` constraint at STATEMENT-end for the full set of rows touched by that statement, not after each row — so a shift-down (e.g. `[0,2,3]` → `[0,1,2]`) never collides mid-statement even though an intermediate per-row assignment would transiently duplicate a position. Splitting the renumber into per-row UPDATEs (or two statements) reintroduces the collision and fails with a unique-violation.
+2. **Keep the `AND po.position <> renum.new_pos` guard.** It only skips no-op writes (rows already at their correct position); it is an optimization, not a correctness requirement — the statement-end check makes even the unguarded form safe.
+3. **Run the DELETE and the renumber in the same `sql.withTransaction(...)`** so a reader never observes a gapped or duplicated position sequence between the two statements. Rows referenced by a `FK ... ON DELETE CASCADE` child (e.g. `poll_votes.option_id`) are cleaned up by the DELETE automatically — do not delete children manually.
+
+Reference: `PollsRepository.removeOptions`, integration coverage in `applications/server/test/integration/repositories/PollsRepository.test.ts`.
+
 ### Repository Pattern
 
 Construct repositories by starting from `SqlClient.SqlClient.pipe(Effect.bindTo('sql'), ...)`. Use `Effect.bind` for effectful dependencies and `Effect.let` for pure method definitions. End with `Bind.remove` to strip internals.

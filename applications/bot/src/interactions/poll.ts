@@ -8,7 +8,11 @@ import * as DiscordTypes from 'dfx/types';
 import { Effect, Metric, Option, Schema } from 'effect';
 import { guildLocale, type Locale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
-import { buildPollEmbed } from '~/rest/poll/buildPollEmbed.js';
+import {
+  buildPollEmbed,
+  regionalIndicator,
+  truncateButtonLabel,
+} from '~/rest/poll/buildPollEmbed.js';
 import { buildPollPrivateView } from '~/rest/poll/buildPollPrivateView.js';
 import { buildPollVotersView } from '~/rest/poll/buildPollVotersView.js';
 import { interactionUserId } from '~/schemas.js';
@@ -962,4 +966,343 @@ export const PollVotersButton = Effect.Do.pipe(
 export const PollVotersButtonReg = Ix.messageComponent(
   Ix.idStartsWith('poll-voters:'),
   PollVotersButton,
+);
+
+// ---------------------------------------------------------------------------
+// poll-remove:{pollId} button — opens ephemeral string-select to pick options to remove
+// ---------------------------------------------------------------------------
+
+/** Read string-select values from raw interaction data — defensive, like readModalFieldValue. */
+const getSelectValues = (interaction: DiscordTypes.APIInteraction): ReadonlyArray<string> => {
+  const data: unknown = interaction.data;
+  if (!isRecord(data)) return [];
+  const vals: unknown = data.values;
+  return Array.isArray(vals) ? vals.filter((v): v is string => typeof v === 'string') : [];
+};
+
+export const PollRemoveButton = Effect.Do.pipe(
+  Effect.tap(() =>
+    Metric.update(
+      Metric.withAttributes(discordInteractionsTotal, { interaction_type: 'button' }),
+      1,
+    ),
+  ),
+  Effect.bind('interaction', () => Interaction.asEffect()),
+  Effect.bind('rpc', () => SyncRpc.asEffect()),
+  Effect.flatMap(({ interaction, rpc }) => {
+    const locale = userLocale(interaction);
+    const guildId = interaction.guild_id;
+    const discordUserIdOption = interactionUserId(interaction);
+    const customId = getCustomId(interaction);
+
+    // custom_id: poll-remove:{pollId}
+    const colonIdx = customId.indexOf(':');
+    const pollIdRaw = customId.slice(colonIdx + 1);
+
+    // Guard: DM-context interactions have no guild_id — return immediate ephemeral error.
+    if (guildId === undefined) {
+      return Effect.succeed({
+        type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          flags: DiscordTypes.MessageFlags.Ephemeral,
+          content: m.bot_poll_err_no_guild({}, { locale }),
+        },
+      });
+    }
+
+    if (Option.isNone(discordUserIdOption)) {
+      return Effect.succeed({
+        type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          flags: DiscordTypes.MessageFlags.Ephemeral,
+          content: m.bot_poll_err_not_member({}, { locale }),
+        },
+      });
+    }
+
+    const discordUserId = discordUserIdOption.value;
+    const pollId = decodePollId(pollIdRaw);
+
+    return rpc['Poll/GetPollView']({
+      guild_id: decodeSnowflake(guildId),
+      discord_user_id: discordUserId,
+      poll_id: pollId,
+    }).pipe(
+      Effect.flatMap((viewOption) =>
+        Option.match(viewOption, {
+          onNone: () =>
+            Effect.succeed({
+              type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+              data: {
+                flags: DiscordTypes.MessageFlags.Ephemeral,
+                content: m.bot_poll_err_not_found({}, { locale }),
+              },
+            }),
+          onSome: (view) => {
+            // Guard: poll must have more than 2 options to allow removal
+            if (view.options.length <= 2) {
+              return Effect.succeed({
+                type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+                data: {
+                  flags: DiscordTypes.MessageFlags.Ephemeral,
+                  content: m.bot_poll_err_min_options({}, { locale }),
+                },
+              });
+            }
+
+            const maxValues = view.options.length - 2;
+            const selectOptions = view.options.map((opt) => ({
+              label: `${regionalIndicator(opt.position)} ${truncateButtonLabel(opt.label)}`,
+              value: opt.option_id,
+            }));
+
+            const theSelect = UI.select({
+              custom_id: `poll-remove-select:${pollId}`,
+              placeholder: m.bot_poll_remove_select_placeholder({}, { locale }),
+              min_values: 1,
+              max_values: maxValues,
+              options: selectOptions,
+            });
+
+            return Effect.succeed({
+              type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+              data: {
+                flags: DiscordTypes.MessageFlags.Ephemeral,
+                content: m.bot_poll_remove_prompt({}, { locale }),
+                components: [UI.row([theSelect])],
+              },
+            });
+          },
+        }),
+      ),
+      Effect.catchTag('PollGuildNotFound', () =>
+        Effect.succeed({
+          type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            flags: DiscordTypes.MessageFlags.Ephemeral,
+            content: m.bot_poll_err_no_guild({}, { locale }),
+          },
+        }),
+      ),
+      Effect.catchTag('PollNotMember', () =>
+        Effect.succeed({
+          type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            flags: DiscordTypes.MessageFlags.Ephemeral,
+            content: m.bot_poll_err_not_member({}, { locale }),
+          },
+        }),
+      ),
+      Effect.catchTag('RpcClientError', (e) =>
+        Effect.logError('Poll remove-button RPC failed', e).pipe(
+          Effect.map(() => ({
+            type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              flags: DiscordTypes.MessageFlags.Ephemeral,
+              content: m.bot_poll_err_generic({}, { locale }),
+            },
+          })),
+        ),
+      ),
+    );
+  }),
+  Effect.withSpan('interaction/poll-remove-button'),
+);
+
+export const PollRemoveButtonReg = Ix.messageComponent(
+  Ix.idStartsWith('poll-remove:'),
+  PollRemoveButton,
+);
+
+// ---------------------------------------------------------------------------
+// poll-remove-select:{pollId} string-select submit
+// ---------------------------------------------------------------------------
+
+export const PollRemoveSelectSubmit = Effect.Do.pipe(
+  Effect.tap(() =>
+    Metric.update(
+      Metric.withAttributes(discordInteractionsTotal, { interaction_type: 'select' }),
+      1,
+    ),
+  ),
+  Effect.bind('interaction', () => Interaction.asEffect()),
+  Effect.bind('rpc', () => SyncRpc.asEffect()),
+  Effect.bind('rest', () => DiscordREST.asEffect()),
+  Effect.flatMap(({ interaction, rpc, rest }) => {
+    const locale = userLocale(interaction);
+    const embedLocale = guildLocale(interaction);
+    const guildId = interaction.guild_id;
+    const discordUserIdOption = interactionUserId(interaction);
+    const customId = getCustomId(interaction);
+
+    // custom_id: poll-remove-select:{pollId}
+    const colonIdx = customId.indexOf(':');
+    const pollIdRaw = customId.slice(colonIdx + 1);
+
+    // Read selected option ids from data.values
+    const selectedValues = getSelectValues(interaction);
+
+    // Guard: DM-context interactions have no guild_id
+    if (guildId === undefined) {
+      return Effect.as(
+        Effect.forkDetach(
+          replyWebhook(
+            rest,
+            interaction,
+            { content: m.bot_poll_err_no_guild({}, { locale }) },
+            'Failed to update poll-remove-select no-guild response',
+          ),
+        ),
+        ephemeralDeferred,
+      );
+    }
+
+    if (Option.isNone(discordUserIdOption)) {
+      return Effect.as(
+        Effect.forkDetach(
+          replyWebhook(
+            rest,
+            interaction,
+            { content: m.bot_poll_err_not_member({}, { locale }) },
+            'Failed to update poll-remove-select no-user response',
+          ),
+        ),
+        ephemeralDeferred,
+      );
+    }
+
+    const discordUserId = discordUserIdOption.value;
+    const pollId = decodePollId(pollIdRaw);
+    const optionIds = selectedValues.map((v) => decodePollOptionId(v));
+
+    const removeAndFollowUp = rpc['Poll/RemoveOptions']({
+      guild_id: decodeSnowflake(guildId),
+      discord_user_id: discordUserId,
+      poll_id: pollId,
+      option_ids: optionIds,
+    }).pipe(
+      Effect.flatMap((view) =>
+        rebuildBoard(rest, view, embedLocale).pipe(
+          Effect.flatMap(() =>
+            replyWebhook(
+              rest,
+              interaction,
+              { content: m.bot_poll_option_removed({}, { locale }) },
+              'Failed to update poll-remove-select success response',
+            ),
+          ),
+        ),
+      ),
+      Effect.catchTag('PollForbidden', () =>
+        replyWebhook(
+          rest,
+          interaction,
+          { content: m.bot_poll_err_not_captain({}, { locale }) },
+          'Failed to update poll-remove-select forbidden response',
+        ),
+      ),
+      Effect.catchTag('PollTooFewOptions', () =>
+        replyWebhook(
+          rest,
+          interaction,
+          { content: m.bot_poll_err_min_options({}, { locale }) },
+          'Failed to update poll-remove-select too-few-options response',
+        ),
+      ),
+      Effect.catchTag('PollOptionNotFound', () =>
+        replyWebhook(
+          rest,
+          interaction,
+          { content: m.bot_poll_err_option_not_found({}, { locale }) },
+          'Failed to update poll-remove-select option-not-found response',
+        ),
+      ),
+      Effect.catchTag('PollClosed', () =>
+        // Poll was closed before removal — fetch current view and rebuild the closed board
+        // using the stored board channel/message ids from the view (never from interaction.message,
+        // which for a select submit is the ephemeral picker, not the shared board).
+        rpc['Poll/GetPollView']({
+          guild_id: decodeSnowflake(guildId),
+          discord_user_id: discordUserId,
+          poll_id: pollId,
+        }).pipe(
+          Effect.flatMap((viewOption) =>
+            Option.match(viewOption, {
+              onNone: () => Effect.void,
+              onSome: (view) => rebuildBoard(rest, view, embedLocale),
+            }),
+          ),
+          Effect.catchTag('PollGuildNotFound', () => Effect.void),
+          Effect.catchTag('PollNotMember', () => Effect.void),
+          Effect.flatMap(() =>
+            replyWebhook(
+              rest,
+              interaction,
+              { content: m.bot_poll_closed_notice({}, { locale }) },
+              'Failed to update poll-remove-select closed notice',
+            ),
+          ),
+        ),
+      ),
+      Effect.catchTag('PollNotFound', () =>
+        replyWebhook(
+          rest,
+          interaction,
+          { content: m.bot_poll_err_not_found({}, { locale }) },
+          'Failed to update poll-remove-select not-found response',
+        ),
+      ),
+      Effect.catchTag('PollNotMember', () =>
+        replyWebhook(
+          rest,
+          interaction,
+          { content: m.bot_poll_err_not_member({}, { locale }) },
+          'Failed to update poll-remove-select not-member response',
+        ),
+      ),
+      Effect.catchTag('PollGuildNotFound', () =>
+        replyWebhook(
+          rest,
+          interaction,
+          { content: m.bot_poll_err_no_guild({}, { locale }) },
+          'Failed to update poll-remove-select guild-not-found response',
+        ),
+      ),
+      // RPC transport failure: resolve the deferred reply with a generic error.
+      Effect.catchTag('RpcClientError', (e) =>
+        Effect.logError('Poll remove-options RPC failed', e).pipe(
+          Effect.flatMap(() =>
+            replyWebhook(
+              rest,
+              interaction,
+              { content: m.bot_poll_err_generic({}, { locale }) },
+              'Failed to update poll-remove-select RPC-error response',
+            ),
+          ),
+        ),
+      ),
+      // Defensive: a defect in rebuildBoard/buildPollEmbed would otherwise die in the forked
+      // fiber, leaving the ephemeral deferred blank. Resolve it with a generic error.
+      Effect.catchDefect((defect) =>
+        Effect.logError('Poll remove-options defect', defect).pipe(
+          Effect.flatMap(() =>
+            replyWebhook(
+              rest,
+              interaction,
+              { content: m.bot_poll_err_generic({}, { locale }) },
+              'Failed to update poll-remove-select defect response',
+            ),
+          ),
+        ),
+      ),
+    );
+
+    return Effect.as(Effect.forkDetach(removeAndFollowUp), ephemeralDeferred);
+  }),
+  Effect.withSpan('interaction/poll-remove-select'),
+);
+
+export const PollRemoveSelectSubmitReg = Ix.messageComponent(
+  Ix.idStartsWith('poll-remove-select:'),
+  PollRemoveSelectSubmit,
 );

@@ -529,3 +529,52 @@ describe('buildPollEmbed — option field display', () => {
     expect(fieldNames.some((n) => n.includes('Sushi'))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests — remove option button (poll-remove:{pollId}) on open board
+// ---------------------------------------------------------------------------
+
+describe('buildPollEmbed — open board includes poll-remove button', () => {
+  it('open poll → includes a button with custom_id poll-remove:{pollId}', () => {
+    const options = [makeOptionView('opt-a', 'Pizza', 0), makeOptionView('opt-b', 'Sushi', 1)];
+    const view = makePollView(options, [], 'open');
+
+    const { components } = buildPollEmbed(view, locale);
+
+    const allCustomIds = components
+      .flatMap((row) => (row as any).components ?? [])
+      .map((c: any) => c.custom_id as string);
+
+    const removeBtn = allCustomIds.find((id) => id === `poll-remove:${POLL_ID}`);
+    expect(removeBtn).toBeDefined();
+  });
+
+  it('open poll action row has ≤ 5 components (Discord limit)', () => {
+    const options = [makeOptionView('opt-a', 'Pizza', 0), makeOptionView('opt-b', 'Sushi', 1)];
+    const view = makePollView(options, [], 'open');
+
+    const { components } = buildPollEmbed(view, locale);
+
+    // Each action row must have at most 5 components
+    for (const row of components) {
+      const rowComponents = (row as any).components ?? [];
+      expect(rowComponents.length).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it('closed poll → does NOT include poll-remove button', () => {
+    const options = [
+      makeOptionView('opt-a', 'Pizza', 0, 3),
+      makeOptionView('opt-b', 'Sushi', 1, 1),
+    ];
+    const view = makePollView(options, [], 'closed');
+
+    const { components } = buildPollEmbed(view, locale);
+
+    const allCustomIds = components
+      .flatMap((row) => (row as any).components ?? [])
+      .map((c: any) => c.custom_id as string);
+
+    expect(allCustomIds.every((id) => !id?.startsWith('poll-remove:'))).toBe(true);
+  });
+});

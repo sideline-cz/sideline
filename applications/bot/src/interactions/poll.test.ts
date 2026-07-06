@@ -17,6 +17,8 @@ import {
   PollAddModalSubmit,
   PollCloseButton,
   PollOpenButton,
+  PollRemoveButton,
+  PollRemoveSelectSubmit,
   PollVoteButton,
   PollVotersButton,
 } from '~/interactions/poll.js';
@@ -184,6 +186,7 @@ interface SyncRpcStubOptions {
   'Poll/ClosePoll'?: ReturnType<typeof vi.fn>;
   'Poll/GetPollView'?: ReturnType<typeof vi.fn>;
   'Poll/GetPollVoters'?: ReturnType<typeof vi.fn>;
+  'Poll/RemoveOptions'?: ReturnType<typeof vi.fn>;
 }
 
 const makeSyncRpcStub = (options: SyncRpcStubOptions = {}) => {
@@ -206,6 +209,9 @@ const makeSyncRpcStub = (options: SyncRpcStubOptions = {}) => {
       }
       if (prop === 'Poll/GetPollVoters') {
         return vi.fn(() => Effect.succeed(Option.some(makePollVotersView())));
+      }
+      if (prop === 'Poll/RemoveOptions') {
+        return vi.fn(() => Effect.succeed(makePollView()));
       }
       return vi.fn(() => Effect.succeed(undefined));
     },
@@ -1362,5 +1368,498 @@ describe('PollVotersButton — poll-voters:{pollId}', () => {
 
     // The voters view is ephemeral-only — must NEVER touch the shared board message
     expect(restStub.updateMessage).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Helper: string-select interaction (component_type 3) with data.values
+// ---------------------------------------------------------------------------
+
+const makeSelectInteraction = (
+  customId: string,
+  selectedValues: string[],
+  userId: string = USER_DISCORD_ID,
+  channelId: string = CHANNEL_ID,
+  messageId: string = MESSAGE_ID,
+  memberRoles: string[] = [ROLE_ID_1, ROLE_ID_2],
+): DiscordTypes.APIInteraction =>
+  ({
+    id: '1234567894' as DiscordTypes.Snowflake,
+    application_id: APP_ID,
+    token: INTERACTION_TOKEN,
+    version: 1,
+    type: DiscordTypes.InteractionTypes.MESSAGE_COMPONENT,
+    guild_id: GUILD_ID,
+    channel_id: channelId as DiscordTypes.Snowflake,
+    channel: {
+      id: channelId as DiscordTypes.Snowflake,
+      type: DiscordTypes.ChannelTypes.GUILD_TEXT,
+    } as unknown as DiscordTypes.APIInteraction['channel'],
+    member: {
+      user: {
+        id: userId as DiscordTypes.Snowflake,
+        username: 'testuser',
+        discriminator: '0001',
+        global_name: null,
+        avatar: null,
+      },
+      roles: memberRoles,
+      joined_at: '2024-01-01T00:00:00Z',
+      deaf: false,
+      mute: false,
+      permissions: '8',
+    },
+    locale: 'en-US',
+    data: {
+      component_type: 3, // STRING_SELECT
+      custom_id: customId,
+      values: selectedValues,
+    },
+    message: {
+      id: messageId as DiscordTypes.Snowflake,
+      channel_id: channelId as DiscordTypes.Snowflake,
+    },
+  }) as unknown as DiscordTypes.APIInteraction;
+
+// Helper: poll view with 3 options (enough to select from for remove)
+const makePollViewWith3Options = (status: Poll.PollStatus = 'open'): PollRpcModels.PollView => {
+  const OPTION_ID_C = 'opt-interact-c' as Poll.PollOptionId;
+  return new PollRpcModels.PollView({
+    poll_id: POLL_ID,
+    discord_channel_id: CHANNEL_ID as Discord.Snowflake,
+    discord_message_id: Option.some(MESSAGE_ID as Discord.Snowflake),
+    question: 'Test poll with 3 options?',
+    status,
+    multiple: false,
+    allowed_role_id: Option.none(),
+    deadline: Option.none(),
+    total_votes: 0,
+    options: [
+      new PollRpcModels.PollOptionView({
+        option_id: OPTION_ID_A,
+        label: 'Option A',
+        position: 0,
+        vote_count: 0,
+      }),
+      new PollRpcModels.PollOptionView({
+        option_id: OPTION_ID_B,
+        label: 'Option B',
+        position: 1,
+        vote_count: 0,
+      }),
+      new PollRpcModels.PollOptionView({
+        option_id: OPTION_ID_C,
+        label: 'Option C',
+        position: 2,
+        vote_count: 0,
+      }),
+    ],
+    my_option_ids: [],
+  });
+};
+
+// ---------------------------------------------------------------------------
+// Tests — PollRemoveButton (TDD mode — handler does not exist yet)
+// custom_id: poll-remove:{pollId}
+// Opens an ephemeral string select with max_values = options.length - 2,
+// so at least 2 options always remain.
+// ---------------------------------------------------------------------------
+
+describe('PollRemoveButton — poll-remove:{pollId}', () => {
+  it('opens ephemeral with a string-select whose custom_id starts with poll-remove-select:', async () => {
+    const rpcStub = makeSyncRpcStub({
+      'Poll/GetPollView': vi.fn(() => Effect.succeed(Option.some(makePollViewWith3Options()))),
+    });
+    const restStub = makeRestStub();
+
+    const interaction = makeComponentInteraction(`poll-remove:${POLL_ID}`);
+    const response = await runHandler(PollRemoveButton, restStub.layer, rpcStub.layer, interaction);
+
+    const responseJson = JSON.stringify(response);
+    expect(responseJson).toContain('poll-remove-select:');
+  });
+
+  it('string-select has max_values === 1 for 3-option poll (3-2=1) and min_values===1', async () => {
+    // 3 options → max_values = 1 (3 - 2 = 1); min_values must also be 1
+    const rpcStub = makeSyncRpcStub({
+      'Poll/GetPollView': vi.fn(() => Effect.succeed(Option.some(makePollViewWith3Options()))),
+    });
+    const restStub = makeRestStub();
+
+    const interaction = makeComponentInteraction(`poll-remove:${POLL_ID}`);
+    const response = await runHandler(PollRemoveButton, restStub.layer, rpcStub.layer, interaction);
+
+    // Parse the response and find the string-select component — no brittle substring scan.
+    const responseData = (response as any)?.data ?? response;
+    const allComponents = JSON.parse(JSON.stringify(responseData)) as Record<string, unknown>;
+    const allComponentsStr = JSON.stringify(allComponents);
+    // Navigate to the select component (type 3 = STRING_SELECT) and check numeric fields
+    const parsed = JSON.parse(allComponentsStr) as {
+      components?: Array<{
+        components?: Array<{ type?: number; max_values?: number; min_values?: number }>;
+      }>;
+    };
+    const rows = parsed?.components ?? [];
+    const selects = rows.flatMap((r) => r?.components ?? []).filter((c) => c?.type === 3);
+    expect(selects).toHaveLength(1);
+    expect(selects[0]?.max_values).toBe(1);
+    expect(selects[0]?.min_values).toBe(1);
+  });
+
+  it('string-select has max_values === 3 for 5-option poll (5-2=3)', async () => {
+    // 5-option poll → max_values = 5 - 2 = 3
+    const OPTION_ID_D = 'opt-interact-d' as Poll.PollOptionId;
+    const OPTION_ID_E = 'opt-interact-e' as Poll.PollOptionId;
+    const fiveOptionView = new PollRpcModels.PollView({
+      poll_id: POLL_ID,
+      discord_channel_id: CHANNEL_ID as Discord.Snowflake,
+      discord_message_id: Option.some(MESSAGE_ID as Discord.Snowflake),
+      question: '5-option poll?',
+      status: 'open',
+      multiple: false,
+      allowed_role_id: Option.none(),
+      deadline: Option.none(),
+      total_votes: 0,
+      options: [
+        makePollOptionView(OPTION_ID_A, 'A', 0),
+        makePollOptionView(OPTION_ID_B, 'B', 1),
+        makePollOptionView('opt-interact-c' as Poll.PollOptionId, 'C', 2),
+        makePollOptionView(OPTION_ID_D, 'D', 3),
+        makePollOptionView(OPTION_ID_E, 'E', 4),
+      ],
+      my_option_ids: [],
+    });
+    const rpcStub = makeSyncRpcStub({
+      'Poll/GetPollView': vi.fn(() => Effect.succeed(Option.some(fiveOptionView))),
+    });
+    const restStub = makeRestStub();
+
+    const interaction = makeComponentInteraction(`poll-remove:${POLL_ID}`);
+    const response = await runHandler(PollRemoveButton, restStub.layer, rpcStub.layer, interaction);
+
+    const allComponentsStr = JSON.stringify(response);
+    const parsed = JSON.parse(allComponentsStr) as {
+      data?: {
+        components?: Array<{
+          components?: Array<{ type?: number; max_values?: number }>;
+        }>;
+      };
+    };
+    const rows = parsed?.data?.components ?? [];
+    const selects = rows.flatMap((r) => r?.components ?? []).filter((c) => c?.type === 3);
+    expect(selects).toHaveLength(1);
+    expect(selects[0]?.max_values).toBe(3);
+  });
+
+  it('select options map each poll option to a select choice', async () => {
+    const rpcStub = makeSyncRpcStub({
+      'Poll/GetPollView': vi.fn(() => Effect.succeed(Option.some(makePollViewWith3Options()))),
+    });
+    const restStub = makeRestStub();
+
+    const interaction = makeComponentInteraction(`poll-remove:${POLL_ID}`);
+    const response = await runHandler(PollRemoveButton, restStub.layer, rpcStub.layer, interaction);
+
+    const responseJson = JSON.stringify(response);
+    // All 3 options must appear as select choices (their labels)
+    expect(responseJson).toContain('Option A');
+    expect(responseJson).toContain('Option B');
+    expect(responseJson).toContain('Option C');
+  });
+
+  it('poll with only 2 options → replies with min-options error; no select opened', async () => {
+    // A 2-option poll: removing any one would leave only 1 — not allowed.
+    // The handler must respond with an immediate ephemeral error (not a deferred spinner).
+    const rpcStub = makeSyncRpcStub({
+      'Poll/GetPollView': vi.fn(() => Effect.succeed(Option.some(makePollView('open')))),
+    });
+    const restStub = makeRestStub();
+
+    const interaction = makeComponentInteraction(`poll-remove:${POLL_ID}`);
+    const response = await runHandler(PollRemoveButton, restStub.layer, rpcStub.layer, interaction);
+
+    const responseJson = JSON.stringify(response);
+    // Must NOT include a string-select (no removal possible from 2-option poll)
+    expect(responseJson).not.toContain('poll-remove-select:');
+    // The response must be a non-empty immediate ephemeral reply — a no-op handler
+    // (returning undefined / empty) would not pass this assertion.
+    expect(responseJson.length).toBeGreaterThan(10);
+    // It must carry the Ephemeral flag (64) in its data.flags to confirm it's ephemeral
+    const parsed = JSON.parse(responseJson) as { data?: { flags?: number; content?: string } };
+    const flags = parsed?.data?.flags ?? 0;
+    expect(flags & 64).toBe(64); // MessageFlags.Ephemeral = 64
+    // Confirm no deferred webhook was called (error is immediate, not deferred+resolved)
+    expect(restStub.updateOriginalWebhookMessage).not.toHaveBeenCalled();
+  });
+
+  it('DM guard (no guild_id) → error reply, RPC not called', async () => {
+    const getPollViewFn = vi.fn(() => Effect.succeed(Option.some(makePollViewWith3Options())));
+    const rpcStub = makeSyncRpcStub({ 'Poll/GetPollView': getPollViewFn });
+    const restStub = makeRestStub();
+
+    const noGuildInteraction: DiscordTypes.APIInteraction = {
+      id: '1234567895' as DiscordTypes.Snowflake,
+      application_id: APP_ID,
+      token: INTERACTION_TOKEN,
+      version: 1,
+      type: DiscordTypes.InteractionTypes.MESSAGE_COMPONENT,
+      // guild_id absent
+      channel_id: CHANNEL_ID,
+      channel: {
+        id: CHANNEL_ID,
+        type: DiscordTypes.ChannelTypes.GUILD_TEXT,
+      } as unknown as DiscordTypes.APIInteraction['channel'],
+      member: {
+        user: {
+          id: USER_DISCORD_ID,
+          username: 'testuser',
+          discriminator: '0001',
+          global_name: null,
+          avatar: null,
+        },
+        roles: [],
+        joined_at: '2024-01-01T00:00:00Z',
+        deaf: false,
+        mute: false,
+        permissions: '8',
+      },
+      locale: 'en-US',
+      data: {
+        component_type: 2,
+        custom_id: `poll-remove:${POLL_ID}`,
+      },
+      message: {
+        id: MESSAGE_ID,
+        channel_id: CHANNEL_ID,
+      },
+    } as unknown as DiscordTypes.APIInteraction;
+
+    await runHandler(PollRemoveButton, restStub.layer, rpcStub.layer, noGuildInteraction);
+
+    // RPC must NOT be called in a DM context
+    expect(getPollViewFn).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — PollRemoveSelectSubmit (TDD mode — handler does not exist yet)
+// custom_id: poll-remove-select:{pollId}
+// Receives data.values with selected option_ids, calls Poll/RemoveOptions,
+// rebuilds board + sends confirmation webhook.
+// ---------------------------------------------------------------------------
+
+describe('PollRemoveSelectSubmit — poll-remove-select:{pollId}', () => {
+  it('single selected value → calls Poll/RemoveOptions with option_ids:[that]', async () => {
+    const removeOptionsFn = vi.fn(() => Effect.succeed(makePollViewWith3Options()));
+    const rpcStub = makeSyncRpcStub({ 'Poll/RemoveOptions': removeOptionsFn });
+    const restStub = makeRestStub();
+
+    const interaction = makeSelectInteraction(`poll-remove-select:${POLL_ID}`, [OPTION_ID_A]);
+    await runHandler(PollRemoveSelectSubmit, restStub.layer, rpcStub.layer, interaction);
+
+    expect(removeOptionsFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        poll_id: POLL_ID,
+        option_ids: [OPTION_ID_A],
+      }),
+    );
+  });
+
+  it('multi-select (two values) → both ids passed to Poll/RemoveOptions', async () => {
+    const removeOptionsFn = vi.fn(() => Effect.succeed(makePollViewWith3Options()));
+    const rpcStub = makeSyncRpcStub({ 'Poll/RemoveOptions': removeOptionsFn });
+    const restStub = makeRestStub();
+
+    const interaction = makeSelectInteraction(`poll-remove-select:${POLL_ID}`, [
+      OPTION_ID_A,
+      OPTION_ID_B,
+    ]);
+    await runHandler(PollRemoveSelectSubmit, restStub.layer, rpcStub.layer, interaction);
+
+    expect(removeOptionsFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        poll_id: POLL_ID,
+        option_ids: expect.arrayContaining([OPTION_ID_A, OPTION_ID_B]),
+      }),
+    );
+  });
+
+  it('happy path → board rebuilt (updateMessage called)', async () => {
+    const removeOptionsFn = vi.fn(() => Effect.succeed(makePollViewWith3Options()));
+    const rpcStub = makeSyncRpcStub({ 'Poll/RemoveOptions': removeOptionsFn });
+    const restStub = makeRestStub();
+
+    const interaction = makeSelectInteraction(`poll-remove-select:${POLL_ID}`, [OPTION_ID_A]);
+    await runHandler(PollRemoveSelectSubmit, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateMessage).toHaveBeenCalledWith(
+      CHANNEL_ID,
+      MESSAGE_ID,
+      expect.objectContaining({ allowed_mentions: { parse: [] } }),
+    );
+  });
+
+  it('happy path → confirmation sent via updateOriginalWebhookMessage', async () => {
+    const removeOptionsFn = vi.fn(() => Effect.succeed(makePollViewWith3Options()));
+    const rpcStub = makeSyncRpcStub({ 'Poll/RemoveOptions': removeOptionsFn });
+    const restStub = makeRestStub();
+
+    const interaction = makeSelectInteraction(`poll-remove-select:${POLL_ID}`, [OPTION_ID_A]);
+    await runHandler(PollRemoveSelectSubmit, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+  });
+
+  it('PollForbidden → confirmation uses bot_poll_err_not_captain message; board NOT rebuilt', async () => {
+    const rpcStub = makeSyncRpcStub({
+      'Poll/RemoveOptions': vi.fn(() => Effect.fail(new PollRpcModels.PollForbidden())),
+    });
+    const restStub = makeRestStub();
+
+    const interaction = makeSelectInteraction(`poll-remove-select:${POLL_ID}`, [OPTION_ID_A]);
+    await runHandler(PollRemoveSelectSubmit, restStub.layer, rpcStub.layer, interaction);
+
+    // Board must NOT be rebuilt on forbidden
+    expect(restStub.updateMessage).not.toHaveBeenCalled();
+    // Ephemeral error must be sent with the not-captain message
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const payload = JSON.stringify(restStub.updateOriginalWebhookMessage.mock.calls[0]);
+    // en: "Only captains and admins can do that."
+    expect(payload).toContain('Only captains and admins can do that.');
+  });
+
+  it('PollTooFewOptions → bot_poll_err_min_options message; board NOT rebuilt', async () => {
+    // bot_poll_err_min_options key does not exist yet (TDD) — assert it is distinct
+    // from the generic error and is non-empty so a catch-all mapping cannot pass this test.
+    const rpcStub = makeSyncRpcStub({
+      'Poll/RemoveOptions': vi.fn(() => Effect.fail(new PollRpcModels.PollTooFewOptions())),
+    });
+    const restStub = makeRestStub();
+
+    const interaction = makeSelectInteraction(`poll-remove-select:${POLL_ID}`, [OPTION_ID_A]);
+    await runHandler(PollRemoveSelectSubmit, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateMessage).not.toHaveBeenCalled();
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const payload = JSON.stringify(restStub.updateOriginalWebhookMessage.mock.calls[0]);
+    // Must NOT map to the generic error — must be a distinct min-options message.
+    // The exact English string is determined by the implementation (bot_poll_err_min_options).
+    expect(payload).not.toContain('Something went wrong. Please try again.');
+    // Must be non-trivially non-empty (a no-op handler would not produce content)
+    expect(payload.length).toBeGreaterThan(50);
+  });
+
+  it('PollOptionNotFound → bot_poll_err_option_not_found message; board NOT rebuilt', async () => {
+    const rpcStub = makeSyncRpcStub({
+      'Poll/RemoveOptions': vi.fn(() => Effect.fail(new PollRpcModels.PollOptionNotFound())),
+    });
+    const restStub = makeRestStub();
+
+    const interaction = makeSelectInteraction(`poll-remove-select:${POLL_ID}`, [OPTION_ID_A]);
+    await runHandler(PollRemoveSelectSubmit, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateMessage).not.toHaveBeenCalled();
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const payload = JSON.stringify(restStub.updateOriginalWebhookMessage.mock.calls[0]);
+    // en: "That option no longer exists." (bot_poll_err_option_not_found)
+    expect(payload).toContain('That option no longer exists.');
+  });
+
+  it('PollClosed → fetch view, rebuild board to CLOSED state (no poll-remove/poll-vote), send closed notice', async () => {
+    const closedView = makePollView('closed');
+    const getPollViewFn = vi.fn(() => Effect.succeed(Option.some(closedView)));
+    const rpcStub = makeSyncRpcStub({
+      'Poll/RemoveOptions': vi.fn(() => Effect.fail(new PollRpcModels.PollClosed())),
+      'Poll/GetPollView': getPollViewFn,
+    });
+    const restStub = makeRestStub();
+
+    const interaction = makeSelectInteraction(`poll-remove-select:${POLL_ID}`, [OPTION_ID_A]);
+    await runHandler(PollRemoveSelectSubmit, restStub.layer, rpcStub.layer, interaction);
+
+    // GetPollView must be called to fetch the current closed state
+    expect(getPollViewFn).toHaveBeenCalled();
+
+    // Board must be rebuilt — prove it used the CLOSED state by checking no open-only buttons
+    expect(restStub.updateMessage).toHaveBeenCalledWith(
+      CHANNEL_ID,
+      MESSAGE_ID,
+      expect.objectContaining({ allowed_mentions: { parse: [] } }),
+    );
+    const boardPayload = JSON.stringify(restStub.updateMessage.mock.calls[0]);
+    // Closed board must NOT contain the remove or vote custom_ids
+    expect(boardPayload).not.toContain('poll-remove:');
+    expect(boardPayload).not.toContain('poll-vote:');
+
+    // Confirmation notice must also be sent
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const confirmPayload = JSON.stringify(restStub.updateOriginalWebhookMessage.mock.calls[0]);
+    // en: "This poll has already been closed." (bot_poll_closed_notice)
+    expect(confirmPayload).toContain('This poll has already been closed.');
+  });
+
+  it('DM guard (no guild_id) → error reply, Poll/RemoveOptions not called', async () => {
+    const removeOptionsFn = vi.fn(() => Effect.succeed(makePollViewWith3Options()));
+    const rpcStub = makeSyncRpcStub({ 'Poll/RemoveOptions': removeOptionsFn });
+    const restStub = makeRestStub();
+
+    const noGuildInteraction: DiscordTypes.APIInteraction = {
+      id: '1234567896' as DiscordTypes.Snowflake,
+      application_id: APP_ID,
+      token: INTERACTION_TOKEN,
+      version: 1,
+      type: DiscordTypes.InteractionTypes.MESSAGE_COMPONENT,
+      // guild_id absent
+      channel_id: CHANNEL_ID,
+      channel: {
+        id: CHANNEL_ID,
+        type: DiscordTypes.ChannelTypes.GUILD_TEXT,
+      } as unknown as DiscordTypes.APIInteraction['channel'],
+      member: {
+        user: {
+          id: USER_DISCORD_ID,
+          username: 'testuser',
+          discriminator: '0001',
+          global_name: null,
+          avatar: null,
+        },
+        roles: [],
+        joined_at: '2024-01-01T00:00:00Z',
+        deaf: false,
+        mute: false,
+        permissions: '8',
+      },
+      locale: 'en-US',
+      data: {
+        component_type: 3,
+        custom_id: `poll-remove-select:${POLL_ID}`,
+        values: [OPTION_ID_A],
+      },
+      message: {
+        id: MESSAGE_ID,
+        channel_id: CHANNEL_ID,
+      },
+    } as unknown as DiscordTypes.APIInteraction;
+
+    await runHandler(PollRemoveSelectSubmit, restStub.layer, rpcStub.layer, noGuildInteraction);
+
+    expect(removeOptionsFn).not.toHaveBeenCalled();
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+  });
+
+  it('RpcClientError transport failure → bot_poll_err_generic message; board NOT rebuilt', async () => {
+    const rpcStub = makeSyncRpcStub({
+      'Poll/RemoveOptions': vi.fn(() => Effect.fail({ _tag: 'RpcClientError' } as never)),
+    });
+    const restStub = makeRestStub();
+
+    const interaction = makeSelectInteraction(`poll-remove-select:${POLL_ID}`, [OPTION_ID_A]);
+    await runHandler(PollRemoveSelectSubmit, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateMessage).not.toHaveBeenCalled();
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const payload = JSON.stringify(restStub.updateOriginalWebhookMessage.mock.calls[0]);
+    // en: "Something went wrong. Please try again." (bot_poll_err_generic)
+    expect(payload).toContain('Something went wrong. Please try again.');
   });
 });

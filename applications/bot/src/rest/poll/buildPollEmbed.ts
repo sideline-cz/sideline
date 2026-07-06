@@ -139,7 +139,8 @@ export const buildPollEmbed = (
     };
   }
 
-  // Open board: one action row with Vote + Add option + Close poll + Who voted? buttons
+  // Open board: one action row with Vote + Add option + Close poll + Who voted? + Remove option buttons.
+  // This row is now 5/5 components (Discord max). A future button would require a second row.
   const actionRow: Discord.ActionRowComponentForMessageRequest = UI.row([
     UI.button({
       style: Discord.ButtonStyleTypes.PRIMARY,
@@ -157,6 +158,11 @@ export const buildPollEmbed = (
       custom_id: `poll-close:${view.poll_id}`,
     }),
     votersButton,
+    UI.button({
+      style: Discord.ButtonStyleTypes.SECONDARY,
+      label: m.bot_poll_remove_option_button({}, { locale }),
+      custom_id: `poll-remove:${view.poll_id}`,
+    }),
   ]);
 
   return { embeds, components: [actionRow] };

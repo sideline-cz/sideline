@@ -30,6 +30,8 @@ import {
   PollAddModalReg,
   PollCloseButtonReg,
   PollOpenButtonReg,
+  PollRemoveButtonReg,
+  PollRemoveSelectSubmitReg,
   PollVoteButtonReg,
   PollVotersButtonReg,
 } from './poll.js';
@@ -85,5 +87,7 @@ export const interactionBuilder = Ix.builder
   .add(PollAddModalReg)
   .add(PollCloseButtonReg)
   .add(PollVotersButtonReg)
+  .add(PollRemoveButtonReg)
+  .add(PollRemoveSelectSubmitReg)
   .add(SudoLeaveButtonReg)
   .add(ProfileCompleteModal);
