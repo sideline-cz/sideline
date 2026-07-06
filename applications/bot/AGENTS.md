@@ -95,6 +95,7 @@ Rules:
 1. **Always pass `style` explicitly to `UI.button` and `UI.textInput`.** Both builders default `style` to `1` when omitted (`UI.button` → `ButtonStyleTypes.PRIMARY`, `UI.textInput` → `TextInputStyleTypes.SHORT`); an omitted `style` silently drifts to `1` with no type error. Keep the `// style N = <name>` comment next to each numeric value, matching the existing call sites.
 2. **`UI.userSelect`, `UI.select`, `UI.roleSelect`, `UI.channelSelect`, and `UI.mentionableSelect` have no `style` field** — do not add one.
 3. Keep every existing field (`custom_id`, `label`, `placeholder`, `required`, `min_length`, `max_length`, `disabled`) as-is when migrating hand-written JSON; only the wrapper and `type` field change.
+4. **Read a submitted string-select's chosen values with the defensive `getSelectValues(interaction)` helper**, which reads `interaction.data.values` through `isRecord` shape probing and filters to strings — the same defensive shape as `readModalFieldValue`. Never cast `interaction.data` to read `.values` directly. Reference: `getSelectValues` in `src/interactions/poll.ts` (`PollRemoveSelectSubmit`). Set `min_values`/`max_values` on the `UI.select` to bound the selection server-side of the picker, but still validate the decoded id count in the handler.
 
 ## Discord REST Retry Pattern
 
@@ -656,6 +657,8 @@ The `training_claim_request` handler posts the claim embed into a single **persi
 #### Rebuild a board message from the stored id, never from `interaction.message`
 
 When a component/button/modal interaction must edit a persistent "board" message (a server-backed embed that several users mutate — e.g. the carpool board, an RSVP roster, any embed rebuilt after a state change), rebuild it at the channel/message id **carried on the server view** (saved at creation time via a `Save…DiscordMessageId`-style RPC), NOT from `interaction.message` / `interaction.channel_id`. The same interaction can fire from inside a private thread or an ephemeral reply, where `interaction.message` is a different message entirely — editing it would corrupt the wrong message or no-op silently. Reference: `applications/bot/src/interactions/carpool.ts` — the `rebuildBoard` helper reads `view.discord_channel_id` + `view.discord_message_id` (an `Option`; log a warning and skip when `None`) and calls `rest.updateMessage`, swallowing REST failures. The view's ids originate from the create handler calling the persist RPC (`Carpool/SaveCarThreadId` saves a per-car thread id the same way).
+
+**String-select submits are the sharpest case of this rule.** When a board button opens an EPHEMERAL string-select (`UI.select`) and the user submits it, the submit interaction's `interaction.message` is the ephemeral picker message — NOT the shared board that the picker was opened from. Rebuilding from `interaction.message` here would edit the throwaway picker and leave the board stale. Always rebuild from the view's stored `discord_channel_id` + `discord_message_id`. Reference: `PollRemoveSelectSubmit` in `src/interactions/poll.ts` (its `PollClosed` branch re-fetches `Poll/GetPollView` and calls `rebuildBoard` off the stored ids, never `interaction.message`).
 
 #### Per-user actions on a shared board message: one button keyed by entity id, resolved server-side
 

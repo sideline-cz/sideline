@@ -6,6 +6,7 @@ import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Poll, Team, TeamMember, User } from '@sideline/domain';
 import { PollRpcModels } from '@sideline/domain';
 import { Effect, Layer, Option } from 'effect';
+import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { PollsRepository } from '~/repositories/PollsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -1342,5 +1343,383 @@ describe('PollsRepository — findPollVoters', () => {
         expect(optB?.vote_count).toBe(1);
         expect(optB?.voters).toHaveLength(1);
       }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Tests — removeOptions
+// ---------------------------------------------------------------------------
+
+const removeOptions = (
+  pollId: Poll.PollId,
+  optionIds: ReadonlyArray<Poll.PollOptionId>,
+  teamId: Team.TeamId,
+) =>
+  PollsRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.removeOptions({ pollId, optionIds, teamId })),
+  );
+
+describe('PollsRepository — removeOptions', () => {
+  it.effect('remove one option from 3-option poll → 2 remain, positions renumbered 0,1', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('700000000000000001', 'rm-1');
+      const team = yield* createTeam('710000000000000001' as Discord.Snowflake, userId);
+      const member = yield* addTeamMember(team.id, userId);
+      const poll = yield* createPoll(
+        team.id,
+        team.guild_id,
+        '710000000000000010' as Discord.Snowflake,
+        member.id,
+        ['Option A', 'Option B', 'Option C'],
+        false,
+      );
+
+      const optionA = poll.options[0].option_id;
+
+      const view = yield* removeOptions(poll.poll_id, [optionA], team.id);
+
+      expect(view.options).toHaveLength(2);
+      // Remaining options must have contiguous positions 0,1
+      const positions = view.options.map((o) => o.position).sort((a, b) => a - b);
+      expect(positions).toEqual([0, 1]);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'CRITICAL: remove MIDDLE-position option (pos 1) from 3-option poll → exact ordered label/position pairs; no UNIQUE constraint violation',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('700000000000000002', 'rm-middle');
+        const team = yield* createTeam('711000000000000001' as Discord.Snowflake, userId);
+        const member = yield* addTeamMember(team.id, userId);
+        const poll = yield* createPoll(
+          team.id,
+          team.guild_id,
+          '711000000000000010' as Discord.Snowflake,
+          member.id,
+          ['Option A', 'Option B', 'Option C'],
+          false,
+        );
+
+        // Option B is at position 1 (middle)
+        const optionB = poll.options[1].option_id;
+
+        // This must NOT throw a unique constraint violation on (poll_id, position)
+        const view = yield* removeOptions(poll.poll_id, [optionB], team.id);
+
+        expect(view.options).toHaveLength(2);
+        // Assert EXACT ordered (label, position) pairs — do NOT sort before asserting.
+        // A reversed A→1/C→0 mapping would pass a sorted check but fail this one.
+        expect(view.options.map((o) => ({ label: o.label, position: o.position }))).toEqual([
+          { label: 'Option A', position: 0 },
+          { label: 'Option C', position: 1 },
+        ]);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'CRITICAL: remove position-1 from 4-option poll → survivors (orig 0,2,3) become positions 0,1,2 in order A,C,D',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('700000000000000012b', 'rm-middle-4opt');
+        const team = yield* createTeam('711500000000000001' as Discord.Snowflake, userId);
+        const member = yield* addTeamMember(team.id, userId);
+        const poll = yield* createPoll(
+          team.id,
+          team.guild_id,
+          '711500000000000010' as Discord.Snowflake,
+          member.id,
+          ['Option A', 'Option B', 'Option C', 'Option D'],
+          false,
+        );
+
+        // Remove B (position 1) — survivors A(0), C(2), D(3) must become 0,1,2
+        const optionB = poll.options[1].option_id;
+        const view = yield* removeOptions(poll.poll_id, [optionB], team.id);
+
+        expect(view.options).toHaveLength(3);
+        expect(view.options.map((o) => ({ label: o.label, position: o.position }))).toEqual([
+          { label: 'Option A', position: 0 },
+          { label: 'Option C', position: 1 },
+          { label: 'Option D', position: 2 },
+        ]);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'remove position-0 option → survivors (orig 1,2) become positions 0,1 in order B,C',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('700000000000000012c', 'rm-first-opt');
+        const team = yield* createTeam('711600000000000001' as Discord.Snowflake, userId);
+        const member = yield* addTeamMember(team.id, userId);
+        const poll = yield* createPoll(
+          team.id,
+          team.guild_id,
+          '711600000000000010' as Discord.Snowflake,
+          member.id,
+          ['Option A', 'Option B', 'Option C'],
+          false,
+        );
+
+        // Remove A (position 0) — survivors B(1), C(2) must become 0,1
+        const optionA = poll.options[0].option_id;
+        const view = yield* removeOptions(poll.poll_id, [optionA], team.id);
+
+        expect(view.options).toHaveLength(2);
+        expect(view.options.map((o) => ({ label: o.label, position: o.position }))).toEqual([
+          { label: 'Option B', position: 0 },
+          { label: 'Option C', position: 1 },
+        ]);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'votes on removed option cascade-deleted at DB level; view aggregates also correct',
+    () =>
+      Effect.gen(function* () {
+        const userId1 = yield* createUser('700000000000000003', 'rm-cascade-1');
+        const userId2 = yield* createUser('700000000000000004', 'rm-cascade-2');
+        const team = yield* createTeam('712000000000000001' as Discord.Snowflake, userId1);
+        const member1 = yield* addTeamMember(team.id, userId1);
+        const member2 = yield* addTeamMember(team.id, userId2);
+        const poll = yield* createPoll(
+          team.id,
+          team.guild_id,
+          '712000000000000010' as Discord.Snowflake,
+          member1.id,
+          ['Option A', 'Option B', 'Option C'],
+          false,
+        );
+
+        const optionA = poll.options[0].option_id;
+        const optionB = poll.options[1].option_id;
+
+        // member1 votes for A, member2 votes for B
+        yield* castVote(poll.poll_id, optionA, member1.id, team.id);
+        yield* castVote(poll.poll_id, optionB, member2.id, team.id);
+
+        // Remove option B (which has 1 vote — that vote must cascade delete)
+        const view = yield* removeOptions(poll.poll_id, [optionB], team.id);
+
+        // 1. Verify view aggregates
+        expect(view.options).toHaveLength(2);
+        // total_votes must now reflect only the remaining votes (1, for option A)
+        expect(view.total_votes).toBe(1);
+        const optAView = view.options.find((o) => o.label === 'Option A');
+        expect(optAView?.vote_count).toBe(1);
+
+        // 2. Verify at the DB level that poll_votes rows for optionB are truly gone —
+        //    not just hidden by the aggregate query. Orphaned rows would pass a view check
+        //    but indicate a missing ON DELETE CASCADE.
+        const sql = yield* SqlClient.SqlClient.asEffect();
+        const voteRows = yield* sql.unsafe<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM poll_votes WHERE option_id = '${optionB}'`,
+        );
+        expect(parseInt(voteRows[0]?.count ?? '0', 10)).toBe(0);
+
+        // 3. Verify total poll_votes row count dropped from 2 to 1
+        const totalRows = yield* sql.unsafe<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM poll_votes WHERE poll_id = '${poll.poll_id}'`,
+        );
+        expect(parseInt(totalRows[0]?.count ?? '0', 10)).toBe(1);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'removal that would leave < 2 options → PollTooFewOptions; DB unchanged (exact positions + labels preserved)',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('700000000000000005', 'rm-toofew');
+        const team = yield* createTeam('713000000000000001' as Discord.Snowflake, userId);
+        const member = yield* addTeamMember(team.id, userId);
+        const poll = yield* createPoll(
+          team.id,
+          team.guild_id,
+          '713000000000000010' as Discord.Snowflake,
+          member.id,
+          ['Option A', 'Option B'],
+          false,
+        );
+
+        const optionA = poll.options[0].option_id;
+
+        // Removing 1 from 2 would leave 1 option — must fail
+        const result = yield* removeOptions(poll.poll_id, [optionA], team.id).pipe(Effect.result);
+
+        expect(result._tag).toBe('Failure');
+        if (result._tag === 'Failure') {
+          expect(result.failure._tag).toBe('PollTooFewOptions');
+        }
+
+        // DB must be fully unchanged — 2 options at original positions with original labels
+        const view = yield* findPollView(poll.poll_id, Option.none());
+        expect(Option.isSome(view)).toBe(true);
+        const pollView = Option.getOrThrow(view);
+        expect(pollView.options).toHaveLength(2);
+        // Exact ordered (label, position) pairs must be unchanged
+        expect(pollView.options.map((o) => ({ label: o.label, position: o.position }))).toEqual([
+          { label: 'Option A', position: 0 },
+          { label: 'Option B', position: 1 },
+        ]);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('option_id not belonging to the poll → PollOptionNotFound', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('700000000000000006', 'rm-notfound');
+      const team = yield* createTeam('714000000000000001' as Discord.Snowflake, userId);
+      const member = yield* addTeamMember(team.id, userId);
+
+      const poll1 = yield* createPoll(
+        team.id,
+        team.guild_id,
+        '714000000000000010' as Discord.Snowflake,
+        member.id,
+        ['Option A', 'Option B', 'Option C'],
+        false,
+      );
+      const poll2 = yield* createPoll(
+        team.id,
+        team.guild_id,
+        '714000000000000011' as Discord.Snowflake,
+        member.id,
+        ['X', 'Y', 'Z'],
+        false,
+      );
+
+      // Try to remove an option from poll2 that belongs to poll1
+      const optionFromPoll1 = poll1.options[0].option_id;
+      const result = yield* removeOptions(poll2.poll_id, [optionFromPoll1], team.id).pipe(
+        Effect.result,
+      );
+
+      expect(result._tag).toBe('Failure');
+      if (result._tag === 'Failure') {
+        expect(result.failure._tag).toBe('PollOptionNotFound');
+      }
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('removal on a closed poll → PollClosed; DB unchanged', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('700000000000000007', 'rm-closed');
+      const team = yield* createTeam('715000000000000001' as Discord.Snowflake, userId);
+      const member = yield* addTeamMember(team.id, userId);
+      const poll = yield* createPoll(
+        team.id,
+        team.guild_id,
+        '715000000000000010' as Discord.Snowflake,
+        member.id,
+        ['Option A', 'Option B', 'Option C'],
+        false,
+      );
+
+      yield* closePoll(poll.poll_id, team.id);
+
+      const optionA = poll.options[0].option_id;
+      const result = yield* removeOptions(poll.poll_id, [optionA], team.id).pipe(Effect.result);
+
+      expect(result._tag).toBe('Failure');
+      if (result._tag === 'Failure') {
+        expect(result.failure._tag).toBe('PollClosed');
+      }
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('removal on a poll past its deadline → lazy-closes → PollClosed', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('700000000000000008', 'rm-expired');
+      const team = yield* createTeam('716000000000000001' as Discord.Snowflake, userId);
+      const member = yield* addTeamMember(team.id, userId);
+
+      // Create with a valid future deadline (past deadlines are rejected by createPoll)
+      const poll = yield* createPoll(
+        team.id,
+        team.guild_id,
+        '716000000000000010' as Discord.Snowflake,
+        member.id,
+        ['Option A', 'Option B', 'Option C'],
+        false,
+      );
+
+      // Backdate the deadline to the past via raw SQL so the poll appears expired.
+      // This is the only way to reach the lazy-close path: createPoll rejects past
+      // deadlines, so we must time-travel the DB row directly.
+      const sql = yield* SqlClient.SqlClient.asEffect();
+      yield* sql.unsafe(
+        `UPDATE polls SET deadline = '2020-01-01 00:00:00+00' WHERE id = '${poll.poll_id}'`,
+      );
+
+      // Now removeOptions must detect the past deadline, lazy-close the poll, and return PollClosed
+      const optionA = poll.options[0].option_id;
+      const result = yield* removeOptions(poll.poll_id, [optionA], team.id).pipe(Effect.result);
+
+      expect(result._tag).toBe('Failure');
+      if (result._tag === 'Failure') {
+        expect(result.failure._tag).toBe('PollClosed');
+      }
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('cross-team IDOR guard: option from poll of another team → PollNotFound', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('700000000000000009', 'rm-idor');
+      const team1 = yield* createTeam('717000000000000001' as Discord.Snowflake, userId);
+      const member1 = yield* addTeamMember(team1.id, userId);
+
+      const userId2 = yield* createUser('700000000000000010', 'rm-idor-2');
+      const team2 = yield* createTeam('718000000000000001' as Discord.Snowflake, userId2);
+
+      const poll = yield* createPoll(
+        team1.id,
+        team1.guild_id,
+        '717000000000000010' as Discord.Snowflake,
+        member1.id,
+        ['Option A', 'Option B', 'Option C'],
+        false,
+      );
+
+      const optionA = poll.options[0].option_id;
+      // Try to remove from poll belonging to team1 but using team2's ID
+      const result = yield* removeOptions(poll.poll_id, [optionA], team2.id).pipe(Effect.result);
+
+      expect(result._tag).toBe('Failure');
+      if (result._tag === 'Failure') {
+        expect(result.failure._tag).toBe('PollNotFound');
+      }
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('multi-remove: remove 2 of 4 options → 2 remain, positions renumbered 0,1', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('700000000000000011', 'rm-multi');
+      const team = yield* createTeam('719000000000000001' as Discord.Snowflake, userId);
+      const member = yield* addTeamMember(team.id, userId);
+      const poll = yield* createPoll(
+        team.id,
+        team.guild_id,
+        '719000000000000010' as Discord.Snowflake,
+        member.id,
+        ['Option A', 'Option B', 'Option C', 'Option D'],
+        false,
+      );
+
+      const optionA = poll.options[0].option_id;
+      const optionC = poll.options[2].option_id;
+
+      // Remove A (pos 0) and C (pos 2) — leaves B and D which must be renumbered 0,1
+      const view = yield* removeOptions(poll.poll_id, [optionA, optionC], team.id);
+
+      expect(view.options).toHaveLength(2);
+      const positions = view.options.map((o) => o.position).sort((a, b) => a - b);
+      expect(positions).toEqual([0, 1]);
+
+      const labels = view.options.map((o) => o.label);
+      expect(labels).toContain('Option B');
+      expect(labels).toContain('Option D');
+      expect(labels).not.toContain('Option A');
+      expect(labels).not.toContain('Option C');
+    }).pipe(Effect.provide(TestLayer)),
   );
 });

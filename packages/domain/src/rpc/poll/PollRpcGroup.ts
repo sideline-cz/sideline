@@ -92,6 +92,24 @@ export const PollRpcGroup = RpcGroup.make(
       PollAddOptionForbidden,
     ]),
   }),
+  Rpc.make('RemoveOptions', {
+    payload: {
+      guild_id: Discord.Snowflake,
+      discord_user_id: Discord.Snowflake,
+      poll_id: PollId,
+      option_ids: Schema.Array(PollOptionId),
+    },
+    success: PollView,
+    error: Schema.Union([
+      PollGuildNotFound,
+      PollNotMember,
+      PollForbidden,
+      PollNotFound,
+      PollClosed,
+      PollOptionNotFound,
+      PollTooFewOptions,
+    ]),
+  }),
   Rpc.make('ClosePoll', {
     payload: {
       guild_id: Discord.Snowflake,

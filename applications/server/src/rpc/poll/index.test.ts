@@ -100,10 +100,17 @@ type ClosePollCall = {
   teamId: Team.TeamId;
 };
 
+type RemoveOptionsCall = {
+  pollId: Poll.PollId;
+  optionIds: ReadonlyArray<Poll.PollOptionId>;
+  teamId: Team.TeamId;
+};
+
 let createPollCalls: Array<unknown>;
 let castVoteCalls: Array<CastVoteCall>;
 let addOptionCalls: Array<AddOptionCall>;
 let closePollCalls: Array<ClosePollCall>;
+let removeOptionsCalls: Array<RemoveOptionsCall>;
 let pollsStore: Map<Poll.PollId, PollRpcModels.PollView>;
 let castVoteActionOverride: PollRpcModels.CastVoteResult['action'] | null;
 
@@ -112,6 +119,7 @@ const resetStores = () => {
   castVoteCalls = [];
   addOptionCalls = [];
   closePollCalls = [];
+  removeOptionsCalls = [];
   pollsStore = new Map();
   castVoteActionOverride = null;
 
@@ -231,6 +239,20 @@ const MockPollsRepository = Layer.succeed(PollsRepository, {
     pollsStore.set(input.pollId, view);
     return Effect.succeed(view);
   },
+  removeOptions: (input: RemoveOptionsCall) => {
+    removeOptionsCalls.push(input);
+    // Return a view that excludes the removed option_ids, mirroring closePoll stub pattern.
+    // This makes the success path consistent: pollsStore reflects the post-remove state.
+    const existing = pollsStore.get(input.pollId) ?? makePollView();
+    const filtered = new PollRpcModels.PollView({
+      ...existing,
+      options: existing.options.filter(
+        (o) => !(input.optionIds as ReadonlyArray<string>).includes(o.option_id),
+      ),
+    });
+    pollsStore.set(input.pollId, filtered);
+    return Effect.succeed(filtered);
+  },
 } as any);
 
 const TestLayer = PollsRpcLive.pipe(
@@ -267,6 +289,7 @@ afterEach(() => {
   castVoteCalls = [];
   addOptionCalls = [];
   closePollCalls = [];
+  removeOptionsCalls = [];
   createPollCalls = [];
 });
 
@@ -1418,6 +1441,273 @@ describe('Poll/GetPollVoters RPC', () => {
       Effect.tap((result) =>
         Effect.sync(() => {
           expect(Option.isNone(result)).toBe(true);
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Poll/RemoveOptions — permission gate + repo error propagation
+// ---------------------------------------------------------------------------
+
+describe('Poll/RemoveOptions RPC — permission gate and error propagation', () => {
+  itEffect.effect('unknown guild_id → PollGuildNotFound', () =>
+    callRpc('Poll/RemoveOptions', {
+      guild_id: UNKNOWN_GUILD_ID,
+      discord_user_id: MANAGER_DISCORD_ID,
+      poll_id: POLL_ID,
+      option_ids: [OPTION_ID_A],
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('PollGuildNotFound');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect('non-member discord_user_id → PollNotMember', () =>
+    callRpc('Poll/RemoveOptions', {
+      guild_id: GUILD_ID,
+      discord_user_id: NON_MEMBER_DISCORD_ID,
+      poll_id: POLL_ID,
+      option_ids: [OPTION_ID_A],
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('PollNotMember');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect('member without poll:manage → PollForbidden; repo NOT called', () =>
+    callRpc('Poll/RemoveOptions', {
+      guild_id: GUILD_ID,
+      discord_user_id: MEMBER_DISCORD_ID,
+      poll_id: POLL_ID,
+      option_ids: [OPTION_ID_A],
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('PollForbidden');
+          }
+          // Repository must NOT have been called
+          expect(removeOptionsCalls).toHaveLength(0);
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect(
+    'manager with poll:manage removes option → success; repo called with correct args',
+    () =>
+      callRpc('Poll/RemoveOptions', {
+        guild_id: GUILD_ID,
+        discord_user_id: MANAGER_DISCORD_ID,
+        poll_id: POLL_ID,
+        option_ids: [OPTION_ID_A],
+      }).pipe(
+        Effect.tap((view) =>
+          Effect.sync(() => {
+            expect(view).toBeInstanceOf(PollRpcModels.PollView);
+            expect(removeOptionsCalls).toHaveLength(1);
+            const call = removeOptionsCalls[0];
+            expect(call?.pollId).toBe(POLL_ID);
+            expect(call?.teamId).toBe(TEAM_ID);
+            expect(call?.optionIds).toContain(OPTION_ID_A);
+          }),
+        ),
+        Effect.asVoid,
+      ),
+  );
+
+  itEffect.effect('repo raises PollTooFewOptions → propagates to caller', () => {
+    // The `RemoveOptionsCall` annotation on `_input` documents the camelCase arg shape
+    // (optionIds) the handler is expected to pass. Note the layer object is cast `as any`
+    // below, so this is self-documentation, not a compile-time check of the call site;
+    // the arg mapping is asserted at runtime in the success test above (`call.optionIds`).
+    const MockPollsRepoTooFew = Layer.succeed(PollsRepository, {
+      createPoll: () => Effect.die(new Error('Not used')),
+      saveMessageId: () => Effect.void,
+      findPollView: () => Effect.succeed(Option.none()),
+      castVote: () => Effect.die(new Error('Not used')),
+      addOption: () => Effect.die(new Error('Not used')),
+      closePoll: () => Effect.die(new Error('Not used')),
+      removeOptions: (_input: RemoveOptionsCall) =>
+        Effect.fail(new PollRpcModels.PollTooFewOptions()),
+    } as any);
+
+    const layerTooFew = PollsRpcLive.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          MockTeamsRepository,
+          MockTeamMembersRepository,
+          MockTeamSettingsRepository,
+          MockPollsRepoTooFew,
+        ),
+      ),
+    );
+
+    return callRpc('Poll/RemoveOptions', {
+      guild_id: GUILD_ID,
+      discord_user_id: MANAGER_DISCORD_ID,
+      poll_id: POLL_ID,
+      option_ids: [OPTION_ID_A],
+    }).pipe(
+      Effect.provide(layerTooFew),
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('PollTooFewOptions');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+
+  itEffect.effect('repo raises PollOptionNotFound → propagates to caller', () => {
+    const MockPollsRepoOptionNotFound = Layer.succeed(PollsRepository, {
+      createPoll: () => Effect.die(new Error('Not used')),
+      saveMessageId: () => Effect.void,
+      findPollView: () => Effect.succeed(Option.none()),
+      castVote: () => Effect.die(new Error('Not used')),
+      addOption: () => Effect.die(new Error('Not used')),
+      closePoll: () => Effect.die(new Error('Not used')),
+      removeOptions: (_input: RemoveOptionsCall) =>
+        Effect.fail(new PollRpcModels.PollOptionNotFound()),
+    } as any);
+
+    const layerOptionNotFound = PollsRpcLive.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          MockTeamsRepository,
+          MockTeamMembersRepository,
+          MockTeamSettingsRepository,
+          MockPollsRepoOptionNotFound,
+        ),
+      ),
+    );
+
+    return callRpc('Poll/RemoveOptions', {
+      guild_id: GUILD_ID,
+      discord_user_id: MANAGER_DISCORD_ID,
+      poll_id: POLL_ID,
+      option_ids: ['00000000-0000-0000-0000-deadbeef0000' as Poll.PollOptionId],
+    }).pipe(
+      Effect.provide(layerOptionNotFound),
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('PollOptionNotFound');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+
+  itEffect.effect('repo raises PollClosed → propagates to caller', () => {
+    const MockPollsRepoClosed = Layer.succeed(PollsRepository, {
+      createPoll: () => Effect.die(new Error('Not used')),
+      saveMessageId: () => Effect.void,
+      findPollView: () => Effect.succeed(Option.none()),
+      castVote: () => Effect.die(new Error('Not used')),
+      addOption: () => Effect.die(new Error('Not used')),
+      closePoll: () => Effect.die(new Error('Not used')),
+      removeOptions: (_input: RemoveOptionsCall) => Effect.fail(new PollRpcModels.PollClosed()),
+    } as any);
+
+    const layerClosed = PollsRpcLive.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          MockTeamsRepository,
+          MockTeamMembersRepository,
+          MockTeamSettingsRepository,
+          MockPollsRepoClosed,
+        ),
+      ),
+    );
+
+    return callRpc('Poll/RemoveOptions', {
+      guild_id: GUILD_ID,
+      discord_user_id: MANAGER_DISCORD_ID,
+      poll_id: POLL_ID,
+      option_ids: [OPTION_ID_A],
+    }).pipe(
+      Effect.provide(layerClosed),
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('PollClosed');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+
+  itEffect.effect('repo raises PollNotFound (wrong team / IDOR) → propagates to caller', () => {
+    // PollNotFound is in the RemoveOptions error union — verify the handler propagates it
+    // (e.g. when the repo scopes by team_id and the poll belongs to a different team).
+    const MockPollsRepoNotFound = Layer.succeed(PollsRepository, {
+      createPoll: () => Effect.die(new Error('Not used')),
+      saveMessageId: () => Effect.void,
+      findPollView: () => Effect.succeed(Option.none()),
+      castVote: () => Effect.die(new Error('Not used')),
+      addOption: () => Effect.die(new Error('Not used')),
+      closePoll: () => Effect.die(new Error('Not used')),
+      removeOptions: (_input: RemoveOptionsCall) => Effect.fail(new PollRpcModels.PollNotFound()),
+    } as any);
+
+    const layerNotFound = PollsRpcLive.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          MockTeamsRepository,
+          MockTeamMembersRepository,
+          MockTeamSettingsRepository,
+          MockPollsRepoNotFound,
+        ),
+      ),
+    );
+
+    return callRpc('Poll/RemoveOptions', {
+      guild_id: GUILD_ID,
+      discord_user_id: MANAGER_DISCORD_ID,
+      poll_id: POLL_ID,
+      option_ids: [OPTION_ID_A],
+    }).pipe(
+      Effect.provide(layerNotFound),
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('PollNotFound');
+          }
         }),
       ),
       Effect.asVoid,

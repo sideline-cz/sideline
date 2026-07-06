@@ -62,6 +62,27 @@ Who can add options depends on the `allowed_role` setting:
 
 Duplicate labels (case-insensitive) and labels longer than 80 characters are rejected. The poll can hold at most 10 options in total.
 
+## Removing options
+
+Members with the `poll:manage` permission (Admin and Captain by default) can remove options from an open poll by clicking **➖ Remove option** on the embed.
+
+<Steps>
+
+1. Click **➖ Remove option** on the open poll embed.
+2. An ephemeral (private) drop-down appears listing the current options, each labeled with its regional-indicator letter (🇦, 🇧, 🇨…) and text.
+3. Select one or more options you want to remove. You can select at most *total options minus 2* at once — the poll must always keep at least 2 options.
+4. Submit. The selected options are removed and the poll embed updates for everyone.
+
+</Steps>
+
+<Aside type="caution" title="Votes are lost on removal">
+  All votes cast for a removed option are permanently deleted. The remaining options are renumbered so their 🇦🇧🇨 letters stay consecutive — for example, if you remove option 🇧, the former 🇨 becomes the new 🇧.
+</Aside>
+
+<Aside type="note" title="Minimum 2 options">
+  If a poll already has exactly 2 options, the **➖ Remove option** button returns an error. Close the poll instead.
+</Aside>
+
 ## Seeing who voted
 
 Any team member can see who voted for each option by clicking **👥 Who voted?** on the poll embed. The button is available on both open and closed polls.
@@ -99,9 +120,11 @@ Members with the `poll:manage` permission (Admin and Captain by default) can clo
 | "Each option must be at most 80 characters" error | At least one option is too long. |
 | "Invalid deadline format" error | The deadline must be in `YYYY-MM-DD HH:mm` format. |
 | "The deadline must be in the future" error | The deadline you entered has already passed. |
-| "Only captains and admins can do that" error | You tried to close the poll or add an option without the required permission. |
+| "Only captains and admins can do that" error | You tried to close the poll, add an option, or remove an option without the required permission. |
 | "This poll has already been closed" notice | The poll's deadline passed or it was manually closed. |
 | Cannot add an option | The poll has reached the 10-option limit, or you do not have the required role/permission. |
+| **➖ Remove option** returns "minimum 2 options" | The poll already has exactly 2 options and cannot be reduced further. Close it instead. |
+| **➖ Remove option** is missing | The poll is closed, or you do not have the `poll:manage` permission. |
 
 ## See also
 

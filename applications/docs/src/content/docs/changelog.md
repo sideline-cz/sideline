@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-07-06 — Admins can now remove options from a poll
+
+Captains and admins (anyone with the `poll:manage` permission) can now remove one or more options from an open poll directly in Discord.
+
+- Click **➖ Remove option** on the poll embed.
+- An ephemeral drop-down lists the current options. Select the ones to remove (at most total minus 2, so at least 2 always remain).
+- Votes cast for removed options are permanently deleted. Remaining options are renumbered so their 🇦🇧🇨 letters stay consecutive.
+
 ## 2026-07-02 — Fixed a bug where some members never received their personal events channel
 
 Previously, if creating a member's private personal events channel failed on the first attempt (for example a transient Discord error), that member could be permanently skipped on every later provisioning check — they would never get a channel until an admin intervened.

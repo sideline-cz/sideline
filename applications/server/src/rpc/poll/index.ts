@@ -274,6 +274,33 @@ const rpcHandlers = Effect.Do.pipe(
         ),
   ),
   Effect.let(
+    'Poll/RemoveOptions',
+    ({ polls }) =>
+      ({
+        guild_id,
+        discord_user_id,
+        poll_id,
+        option_ids,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly discord_user_id: Discord.Snowflake;
+        readonly poll_id: Poll.PollId;
+        readonly option_ids: ReadonlyArray<Poll.PollOptionId>;
+      }) =>
+        Effect.Do.pipe(
+          Effect.bind('team', () => resolveTeamByGuild(guild_id)),
+          Effect.bind('membership', ({ team }) => resolveMember(discord_user_id, team.id)),
+          Effect.tap(({ membership }) =>
+            membership.permissions.includes('poll:manage')
+              ? Effect.void
+              : Effect.fail(new PollRpcModels.PollForbidden()),
+          ),
+          Effect.flatMap(({ team }) =>
+            polls.removeOptions({ pollId: poll_id, optionIds: option_ids, teamId: team.id }),
+          ),
+        ),
+  ),
+  Effect.let(
     'Poll/ClosePoll',
     ({ polls }) =>
       ({

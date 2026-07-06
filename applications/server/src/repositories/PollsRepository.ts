@@ -611,6 +611,19 @@ const make = Effect.gen(function* () {
       sql`SELECT COUNT(*)::int AS count FROM poll_options WHERE poll_id = ${pollId}`,
   });
 
+  // Counts how many of the given option ids actually belong to the poll, in a single
+  // round trip. Callers compare the result against the number of requested ids to detect
+  // any that don't belong. Assumes a non-empty id list (sql.in cannot render `IN ()`).
+  const countBelongingOptionsQuery = SqlSchema.findOne({
+    Request: Schema.Struct({
+      poll_id: Poll.PollId,
+      option_ids: Schema.Array(Poll.PollOptionId),
+    }),
+    Result: OptionCountRow,
+    execute: (input) =>
+      sql`SELECT COUNT(*)::int AS count FROM poll_options WHERE poll_id = ${input.poll_id} AND id IN ${sql.in(input.option_ids)}`,
+  });
+
   const findExistingOptionQuery = SqlSchema.findOneOption({
     Request: Schema.Struct({ poll_id: Poll.PollId, label: Schema.String }),
     Result: ExistingOptionRow,
@@ -727,6 +740,118 @@ const make = Effect.gen(function* () {
         ),
       )
       .pipe(catchSqlErrors);
+
+  // ---- removeOptions ----
+
+  const removeOptions = (input: {
+    readonly pollId: Poll.PollId;
+    readonly optionIds: ReadonlyArray<Poll.PollOptionId>;
+    readonly teamId: Team.TeamId;
+  }) => {
+    // Dedupe incoming option ids before entering the transaction.
+    // An empty array would produce `id IN ()` — invalid SQL → SqlError defect.
+    // Duplicates skew the `optionCount - n < 2` guard (over-counting removals).
+    const uniqueOptionIds = [...new Set(input.optionIds)];
+    if (uniqueOptionIds.length === 0) {
+      return Effect.fail(new PollRpcModels.PollOptionNotFound());
+    }
+    return sql
+      .withTransaction(
+        Effect.Do.pipe(
+          // Lock the poll row FOR UPDATE scoped by team_id.
+          // If no row matches, the poll either doesn't exist or belongs to another team → PollNotFound (IDOR guard).
+          Effect.bind('poll', () =>
+            lockPollQuery({ poll_id: input.pollId, team_id: input.teamId }).pipe(
+              catchSqlErrors,
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.fail(new PollRpcModels.PollNotFound()),
+                  onSome: Effect.succeed,
+                }),
+              ),
+            ),
+          ),
+          // Lazy-close check — identical to addOption.
+          Effect.tap(({ poll }) => {
+            const isExpired =
+              poll.status === 'closed' ||
+              (Option.isSome(poll.deadline) && poll.deadline.value.epochMilliseconds < Date.now());
+            if (!isExpired) return Effect.void;
+            return closePollStatusQuery(input.pollId).pipe(
+              catchSqlErrors,
+              Effect.flatMap(() => Effect.fail(new PollRpcModels.PollClosed())),
+            );
+          }),
+          // Verify every requested option_id belongs to this poll — one query for the
+          // whole set. If fewer belong than were requested, at least one is foreign/gone.
+          Effect.tap(() =>
+            countBelongingOptionsQuery({
+              poll_id: input.pollId,
+              option_ids: uniqueOptionIds,
+            }).pipe(
+              catchSqlErrors,
+              Effect.catchTag('NoSuchElementError', () =>
+                LogicError.die('Belonging-option count returned no row'),
+              ),
+              Effect.flatMap((r) =>
+                r.count === uniqueOptionIds.length
+                  ? Effect.void
+                  : Effect.fail(new PollRpcModels.PollOptionNotFound()),
+              ),
+            ),
+          ),
+          // Count current options; ensure removal leaves >= 2.
+          Effect.bind('optionCount', () =>
+            countOptionsQuery(input.pollId).pipe(
+              catchSqlErrors,
+              Effect.catchTag('NoSuchElementError', () =>
+                LogicError.die('Option count returned no row'),
+              ),
+              Effect.map((r) => r.count),
+            ),
+          ),
+          Effect.tap(({ optionCount }) =>
+            optionCount - uniqueOptionIds.length < 2
+              ? Effect.fail(new PollRpcModels.PollTooFewOptions())
+              : Effect.void,
+          ),
+          // Delete the requested options. poll_votes cascade via ON DELETE CASCADE on the FK.
+          Effect.tap(() =>
+            sql`DELETE FROM poll_options WHERE poll_id = ${input.pollId} AND id IN ${sql.in(uniqueOptionIds)}`.pipe(
+              catchSqlErrors,
+            ),
+          ),
+          // Renumber remaining options to contiguous 0..n-1 preserving relative order by position.
+          // Postgres evaluates a non-deferrable UNIQUE constraint at statement-end for the set of
+          // rows touched by a single UPDATE, so the shift-down never collides mid-statement.
+          // The WHERE po.position <> renum.new_pos guard only skips no-op writes (rows whose
+          // position is already correct after removal).
+          Effect.tap(() =>
+            sql`
+              WITH renum AS (
+                SELECT id, (ROW_NUMBER() OVER (ORDER BY position) - 1) AS new_pos
+                FROM poll_options WHERE poll_id = ${input.pollId}
+              )
+              UPDATE poll_options po SET position = renum.new_pos
+              FROM renum WHERE po.id = renum.id AND po.position <> renum.new_pos
+            `.pipe(catchSqlErrors),
+          ),
+          Effect.flatMap(() =>
+            findPollViewRowsQuery({
+              poll_id: input.pollId,
+              viewer_id: Option.none(),
+              team_id: Option.none(),
+            }).pipe(
+              catchSqlErrors,
+              Effect.flatMap((rows) =>
+                buildPollViewOrDie(rows, 'Poll not found after removeOptions'),
+              ),
+            ),
+          ),
+        ),
+      )
+      .pipe(catchSqlErrors);
+  };
 
   // ---- closePoll ----
 
@@ -927,6 +1052,7 @@ const make = Effect.gen(function* () {
     findPollView,
     castVote,
     addOption,
+    removeOptions,
     closePoll,
     findPollVoters,
   };

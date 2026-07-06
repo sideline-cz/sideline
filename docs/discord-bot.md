@@ -92,7 +92,7 @@ Eleven top-level commands are registered globally: `/carpool`, `/complete`, `/ev
 1. Captain invokes `/poll` (or `/anketa`) in the channel where the poll should live.
 2. The handler returns a deferred ephemeral acknowledgement and forks a background fiber.
 3. The fiber calls `Poll/CreatePoll` RPC with `guild_id`, `discord_user_id`, `discord_channel_id`, `question`, `options_raw`, `multiple`, `allowed_role_id`, and `deadline_raw`.
-4. On success the bot posts a public `buildPollEmbed` message with option vote buttons, an **Add option** button, a **Close poll** button, and a **👥 Who voted?** button. The message ID is saved via `Poll/SavePollMessageId`.
+4. On success the bot posts a public `buildPollEmbed` message with option vote buttons, an **Add option** button, a **Close poll** button, a **👥 Who voted?** button, and a **➖ Remove option** button. The message ID is saved via `Poll/SavePollMessageId`. The action row is now at the Discord maximum of 5 components; a future button would require a second row.
 5. The ephemeral reply is updated with a localised "poll created" confirmation.
 
 **Errors from `Poll/CreatePoll`:**
@@ -1205,6 +1205,70 @@ Declines a roster attendance request from the per-event approval thread.
 
 ---
 
+### Poll "Remove option" Button — `poll-remove:{pollId}`
+
+Opens an ephemeral string-select menu listing the poll's current options so a captain or admin can pick one or more to remove.
+
+**Custom ID pattern:** `poll-remove:{pollId}`
+
+**Visibility:** members with `poll:manage` only (captains and admins by default; the same permission required to create/close polls).
+
+**Behavior:**
+
+1. Parses `pollId` from the custom ID.
+2. Calls `Poll/GetPollView` RPC with `guild_id`, `discord_user_id`, and `poll_id` to fetch the current option list.
+3. If the poll has 2 or fewer options (can't remove without violating the minimum), immediately returns an ephemeral "cannot remove — minimum 2 options" error.
+4. Otherwise returns an ephemeral `CHANNEL_MESSAGE_WITH_SOURCE` (not deferred) containing a string-select component (`custom_id: poll-remove-select:{pollId}`):
+   - Each option in the select is labeled `{regionalIndicator} {optionLabel}` (matching the embed letters 🇦🇧🇨…) with the `option_id` as its value.
+   - `min_values: 1`, `max_values: optionCount - 2` (prevents selecting so many options that fewer than 2 would remain).
+
+**Errors:**
+
+| Condition | User-visible message |
+|-----------|----------------------|
+| No `guild_id` (DM edge case) | Team not found for this Discord server |
+| User ID unavailable | Not a member of this team |
+| `PollGuildNotFound` | Team not found for this Discord server |
+| `PollNotMember` | Not a member of this team |
+| Poll has ≤ 2 options | Cannot remove — poll must keep at least 2 options |
+| `RpcClientError` | Generic error (interaction always resolved) |
+
+**Source file:** `applications/bot/src/interactions/poll.ts` (`PollRemoveButton`, `PollRemoveButtonReg`)
+
+---
+
+### Poll "Remove option" Select — `poll-remove-select:{pollId}`
+
+String-select submission from the ephemeral remove-option picker. Calls `Poll/RemoveOptions`, deletes the chosen options (with cascade-deleting their votes), renumbers remaining options, and rebuilds the shared poll board.
+
+**Custom ID pattern:** `poll-remove-select:{pollId}`
+
+**Behavior:**
+
+1. Parses `pollId` from the custom ID; reads selected `option_id` values from `data.values`.
+2. Returns an ephemeral deferred response (`DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE` + `Ephemeral`) and forks a background fiber.
+3. The background fiber calls `Poll/RemoveOptions` RPC with `guild_id`, `discord_user_id`, `poll_id`, and `option_ids[]`.
+4. On success: calls `rebuildBoard` to edit the shared poll embed with the updated option list and vote counts, then resolves the ephemeral with a "option removed" confirmation.
+5. If `PollClosed` is returned (the poll closed between picker open and submit): fetches the current `PollView` via `Poll/GetPollView` and rebuilds the closed board, then resolves the ephemeral with a "poll has closed" notice.
+
+**Errors from `Poll/RemoveOptions`:**
+
+| Error tag | User-visible message |
+|-----------|----------------------|
+| `PollForbidden` | Only captains and admins can do that |
+| `PollTooFewOptions` | Cannot remove — poll must keep at least 2 options |
+| `PollOptionNotFound` | Option not found |
+| `PollClosed` | Poll has already been closed (board is rebuilt to closed state) |
+| `PollNotFound` | Poll not found |
+| `PollNotMember` | Not a member of this team |
+| `PollGuildNotFound` | Team not found for this Discord server |
+| `RpcClientError` | Generic error (interaction always resolved) |
+| Any defect in `rebuildBoard` | Generic error (caught by `catchDefect`, interaction always resolved) |
+
+**Source file:** `applications/bot/src/interactions/poll.ts` (`PollRemoveSelectSubmit`, `PollRemoveSelectSubmitReg`)
+
+---
+
 ### Poll "Who voted?" Button — `poll-voters:{pollId}`
 
 Appears on every poll embed (both open and closed). Sends an ephemeral "Who voted?" breakdown to the clicking user, listing each option with the voters' names and a true total count. No Discord @-mentions are sent — voter names are rendered as `Name (@mention)` text.
@@ -2085,6 +2149,7 @@ Status values: `pending`, `partial`, `paid`, `overdue`, `waived`.
 | `Poll/SavePollMessageId` | `guild_id`, `poll_id`, `discord_message_id` | Persist the Discord message ID after posting the poll embed; errors: `PollGuildNotFound`, `PollNotFound` |
 | `Poll/CastVote` | `guild_id`, `discord_user_id`, `poll_id`, `option_id` | Cast or retract a vote; returns `CastVoteResult`; errors: `PollGuildNotFound`, `PollNotMember`, `PollNotFound`, `PollOptionNotFound`, `PollClosed` |
 | `Poll/AddOption` | `guild_id`, `discord_user_id`, `poll_id`, `label`, `member_role_ids` | Add a new option to an open poll; returns `AddOptionResult`; errors: `PollGuildNotFound`, `PollNotMember`, `PollNotFound`, `PollClosed`, `PollOptionLimitReached`, `PollDuplicateOption`, `PollOptionTooLong`, `PollAddOptionForbidden` |
+| `Poll/RemoveOptions` | `guild_id`, `discord_user_id`, `poll_id`, `option_ids[]` | Remove one or more options from an open poll (requires `poll:manage`); votes for removed options are cascade-deleted; remaining options are renumbered to contiguous 0-based positions; returns updated `PollView`; errors: `PollGuildNotFound`, `PollNotMember`, `PollForbidden`, `PollNotFound`, `PollClosed`, `PollOptionNotFound`, `PollTooFewOptions` |
 | `Poll/ClosePoll` | `guild_id`, `discord_user_id`, `poll_id` | Close a poll permanently; returns updated `PollView`; errors: `PollGuildNotFound`, `PollNotMember`, `PollForbidden`, `PollNotFound` |
 | `Poll/GetPollView` | `guild_id`, `discord_user_id`, `poll_id` | Fetch the current `PollView` for a poll; returns `Option<PollView>`; errors: `PollGuildNotFound`, `PollNotMember` |
 | `Poll/GetPollVoters` | `guild_id`, `discord_user_id`, `poll_id` | Fetch a `PollVotersView` containing per-option voter lists (server-side 60-voter cap per option); returns `Option<PollVotersView>`; errors: `PollGuildNotFound`, `PollNotMember` |
