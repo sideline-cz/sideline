@@ -48,10 +48,10 @@ export const EventCreateModalSubmit = Effect.Do.pipe(
 
     const parts = data.custom_id.split(':');
     const eventType = parts[1] ?? 'other';
-    const rawTrainingTypeId =
+    const rawTrainingTypeIdInput =
       parts[2] && parts[2].length > 0 && isValidUuid(parts[2])
-        ? Option.some(decodeTrainingTypeId(parts[2]))
-        : Option.none<TrainingType.TrainingTypeId>();
+        ? Option.some(parts[2])
+        : Option.none<string>();
     const locale = userLocale(interaction);
 
     const discordUserId = interactionUserId(interaction);
@@ -99,23 +99,31 @@ export const EventCreateModalSubmit = Effect.Do.pipe(
       );
     }
 
-    const decodedEventType = decodeEventType(eventType);
-    const training_type_id =
-      decodedEventType === 'training'
-        ? rawTrainingTypeId
-        : Option.none<TrainingType.TrainingTypeId>();
+    // Decode inside the effect (via `Effect.suspend`) rather than eagerly in
+    // this handler body. `decodeUnknownSync` throws on malformed input; doing it
+    // eagerly here would throw *before* the deferred reply is forked below,
+    // killing the whole handler ("This interaction failed") and bypassing the
+    // `catchCause` backstop. Suspending turns any decode throw into a defect on
+    // the forked fiber, which the backstop resolves with `bot_event_error`.
+    const work = Effect.suspend(() => {
+      const decodedEventType = decodeEventType(eventType);
+      const training_type_id =
+        decodedEventType === 'training'
+          ? Option.map(rawTrainingTypeIdInput, decodeTrainingTypeId)
+          : Option.none<TrainingType.TrainingTypeId>();
 
-    const work = rpc['Event/CreateEvent']({
-      guild_id: decodeSnowflake(guildId),
-      discord_user_id: decodeSnowflake(discordUserId.value),
-      event_type: decodedEventType,
-      title: title.value,
-      start_at: startAt.value,
-      end_at: endAt,
-      location,
-      location_url: Option.none(),
-      description,
-      training_type_id,
+      return rpc['Event/CreateEvent']({
+        guild_id: decodeSnowflake(guildId),
+        discord_user_id: decodeSnowflake(discordUserId.value),
+        event_type: decodedEventType,
+        title: title.value,
+        start_at: startAt.value,
+        end_at: endAt,
+        location,
+        location_url: Option.none(),
+        description,
+        training_type_id,
+      });
     }).pipe(
       Effect.map((result) => m.bot_event_created({ title: result.title }, { locale })),
       Effect.catchTag('CreateEventNotMember', () =>

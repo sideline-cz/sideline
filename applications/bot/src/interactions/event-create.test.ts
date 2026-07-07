@@ -168,6 +168,32 @@ describe('event-create modal submit', () => {
     });
   });
 
+  it('malformed event type in custom_id → decode defect is caught, deferred resolves with the error message', async () => {
+    // `decodeEventType` throws on an unknown literal. Previously this ran
+    // eagerly in the handler body (before the fork), killing the whole handler
+    // with "This interaction failed". It now runs inside the forked effect, so
+    // the throw becomes a defect the `catchCause` backstop resolves.
+    const restStub = makeRestStub();
+    const createEvent = vi.fn(() => Effect.succeed({ event_id: 'e1', title: 'My Event' }));
+    const rpcLayer = makeRpcStub(createEvent);
+    const interaction = makeModalInteraction('event-create:not-a-real-type', validFields);
+
+    const response = (await runHandler(restStub.layer, rpcLayer, interaction)) as { type: number };
+
+    // Still returns the deferred response (no "This interaction failed").
+    expect(response.type).toBe(
+      DiscordTypes.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+    );
+    // The RPC is never reached because the decode fails first.
+    expect(createEvent).not.toHaveBeenCalled();
+
+    const locale = userLocale(interaction);
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalledTimes(1);
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalledWith(APP_ID, INTERACTION_TOKEN, {
+      payload: { content: m.bot_event_error({}, { locale }) },
+    });
+  });
+
   it('RPC dies with an untagged defect → backstop still resolves the deferred with the error message', async () => {
     const restStub = makeRestStub();
     const rpcLayer = makeRpcStub(
