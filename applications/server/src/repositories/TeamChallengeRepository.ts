@@ -128,7 +128,7 @@ const make = Effect.gen(function* () {
       kind: TeamChallenge.TeamChallengeKind,
       title: TeamChallenge.TeamChallengeTitle,
       description: Schema.OptionFromNullOr(TeamChallenge.TeamChallengeDescription),
-      created_by: Schema.String,
+      created_by: TeamMember.TeamMemberId,
     }),
     Result: ChallengeRow,
     execute: (input) => sql`
@@ -178,7 +178,7 @@ const make = Effect.gen(function* () {
   const insertCompletionQuery = SqlSchema.void({
     Request: Schema.Struct({
       challenge_id: TeamChallenge.TeamChallengeId,
-      member_id: Schema.String,
+      member_id: TeamMember.TeamMemberId,
     }),
     execute: (input) => sql`
       INSERT INTO team_challenge_completions (challenge_id, member_id)
@@ -190,7 +190,7 @@ const make = Effect.gen(function* () {
   const deleteCompletionQuery = SqlSchema.void({
     Request: Schema.Struct({
       challenge_id: TeamChallenge.TeamChallengeId,
-      member_id: Schema.String,
+      member_id: TeamMember.TeamMemberId,
     }),
     execute: (input) => sql`
       DELETE FROM team_challenge_completions
@@ -313,7 +313,7 @@ const make = Effect.gen(function* () {
     readonly kind: TeamChallenge.TeamChallengeKind;
     readonly title: TeamChallenge.TeamChallengeTitle;
     readonly description: Option.Option<TeamChallenge.TeamChallengeDescription>;
-    readonly created_by: string;
+    readonly created_by: TeamMember.TeamMemberId;
   }): Effect.Effect<TeamChallenge.TeamChallenge, never> =>
     insertChallengeQuery(input).pipe(
       catchSqlErrors,
@@ -348,7 +348,7 @@ const make = Effect.gen(function* () {
 
   const markCompleted = (
     challengeId: TeamChallenge.TeamChallengeId,
-    memberId: string,
+    memberId: TeamMember.TeamMemberId,
     teamTz: string,
   ): Effect.Effect<void, MarkErr> =>
     sql
@@ -375,7 +375,7 @@ const make = Effect.gen(function* () {
 
   const unmarkCompleted = (
     challengeId: TeamChallenge.TeamChallengeId,
-    memberId: string,
+    memberId: TeamMember.TeamMemberId,
     teamTz: string,
   ): Effect.Effect<void, MarkErr> =>
     sql
