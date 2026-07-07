@@ -1084,7 +1084,7 @@ describe('MyComponent', () => {
 
 ## Crash Recovery & Error Fallbacks
 
-The app renders three distinct crash surfaces, each of which must survive the very failure it reports. Their source files: `src/components/layouts/AppErrorBoundary.tsx` (React error boundary wrapping `ThemeProvider` in `__root.tsx`), `src/components/layouts/AppCrashFallback.tsx` (the boundary's fallback UI), `src/components/layouts/RouteErrorComponent.tsx` (TanStack Router's inner `errorComponent`), and the pre-mount watchdog in `src/lib/preMountGuard.ts`.
+The app renders several distinct crash surfaces, each of which must survive the very failure it reports. Their source files: `src/components/layouts/AppErrorBoundary.tsx` (React error boundary wrapping `ThemeProvider` in `__root.tsx`), `src/components/layouts/AppCrashFallback.tsx` (the boundary's manual fallback UI), `src/components/layouts/AppReloadingScreen.tsx` (the boundary's quiet placeholder shown during the automatic one-shot reload — see "Automatic Reloads Must Persist That They Happened Or Refuse To Fire"), `src/components/layouts/RouteErrorComponent.tsx` (TanStack Router's inner `errorComponent`), and the pre-mount watchdog in `src/lib/preMountGuard.ts`.
 
 ### Crash UIs Must Be Self-Contained
 
@@ -1113,19 +1113,31 @@ Rules:
 
 ### Reload Triggers Route Through `reloadGuard`
 
-All programmatic reloads MUST go through `~/lib/reloadGuard` so reload loops are capped via `sessionStorage`. There are two independent counters:
+All programmatic reloads MUST go through `~/lib/reloadGuard` so reload loops are capped via `sessionStorage`. There are three independent counters:
 
 | Trigger | Function | Counter key | Cap |
 |---------|----------|-------------|-----|
 | Crash / recovery reload | `requestReload(reason)` | `sideline-reload-count` (`RELOAD_COUNT_KEY`) | `RELOAD_CAP` = 2 |
 | Service-worker `controllerchange` update | `requestSwReload()` | `sideline-sw-reload-count` (`SW_RELOAD_COUNT_KEY`) | `SW_RELOAD_CAP` = 1 |
+| Automatic one-shot reload on crash | `requestAutoReloadOnce(reason)` | `sideline-auto-reload-count` (`AUTO_RELOAD_COUNT_KEY`) | `AUTO_RELOAD_CAP` = 1 |
 
 Rules:
 
 1. **Never call `window.location.reload()` directly outside `reloadGuard`** (the pre-mount IIFE has its own ES5 copy of the cap logic — see below). `AppCrashFallback`, `resetApp` (`~/lib/sw-recovery`), and the SW `controllerchange` handler in `RootDocument` all route through it.
 2. **SW updates must use the separate counter** so a normal SW update plus one unrelated hiccup does not consume the crash cap and trip the recovery UI.
-3. **The guard is cleared only on a confirmed-healthy render.** `markRouteHealthy()` (called from `HealthyOutlet`'s effect in `__root.tsx`, i.e. once a real child route commits) calls `clearReloadGuard()`. `markAppMounted()` (called from `RootComponent`) MUST NOT clear it — `RootComponent` commits even when the `<Outlet />` crashes.
+3. **The guard is cleared only on a confirmed-healthy render.** `markRouteHealthy()` (called from `HealthyOutlet`'s effect in `__root.tsx`, i.e. once a real child route commits) calls `clearReloadGuard()`, which clears BOTH `RELOAD_COUNT_KEY` and `AUTO_RELOAD_COUNT_KEY`. `markAppMounted()` (called from `RootComponent`) MUST NOT clear it — `RootComponent` commits even when the `<Outlet />` crashes.
 4. **`resetApp` sets `sessionStorage['sideline-resetting']` (`RESETTING_KEY`) before unregistering the SW** so the `controllerchange` handler skips its own reload during the reset.
+
+### Automatic Reloads Must Persist That They Happened Or Refuse To Fire
+
+`AppErrorBoundary` silently reloads once on a post-mount crash (rendering `AppReloadingScreen` instead of flashing `AppCrashFallback`) before falling back to the manual crash screen. Any automatic (non-user-initiated) reload MUST be persistently counted and loop-guarded — an auto-reload that cannot remember it happened would fire on every crash forever.
+
+Rules:
+
+1. **An automatic reload MUST refuse to fire when `sessionStorage` is unavailable.** `requestAutoReloadOnce` returns `false` without reloading when it cannot persist the counter (private-mode / `SecurityError`). This is the OPPOSITE default from user-initiated reloads: `getReloadCount` treats an unreadable counter as `0` (allow) because a human clicked, whereas an automatic reload with no memory would loop, so it defaults to refuse.
+2. **`canAutoReloadOnce()` gates on BOTH budgets** — `AUTO_RELOAD_COUNT_KEY < AUTO_RELOAD_CAP` AND `getReloadCount() < RELOAD_CAP`. `requestAutoReloadOnce` increments the auto counter and then delegates to `requestReload` (which increments the shared counter), so a pre-mount reload plus a crash auto-reload can never chain past `RELOAD_CAP`.
+3. **`canAutoReloadOnce()` is pure and safe to call from render / `getDerivedStateFromError`.** The boundary reads it there to choose `AppReloadingScreen` vs `AppCrashFallback` up front; the actual reload happens in `componentDidCatch` behind a per-instance `_autoReloadTriggered` one-shot guard, and reverts to the manual screen (`setState({ autoReloading: false })`) when `requestAutoReloadOnce` returns `false`.
+4. **`AppReloadingScreen` is a crash surface** — it follows all "Crash UIs Must Be Self-Contained" rules (inline styles, hard-coded copy, theme resolved via `resolveStoredTheme()`, backgrounds `#0a0a0a`/`#ffffff`).
 
 ### `preMountGuard.ts` IIFE Must Stay ES5-Safe and Self-Contained
 

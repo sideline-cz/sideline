@@ -58,6 +58,13 @@ vi.mock('~/components/layouts/AppCrashFallback.js', () => ({
   ),
 }));
 
+// Mock window.location.reload so the auto-reload path doesn't hit jsdom navigation.
+const reloadMock = vi.fn();
+Object.defineProperty(window, 'location', {
+  value: { ...window.location, reload: reloadMock },
+  writable: true,
+});
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -77,6 +84,9 @@ beforeEach(() => {
   _runEffectMock = vi.fn();
   _runtimeIsInitialized = false;
   _beaconCrashMock.mockClear();
+  reloadMock.mockClear();
+  // Start each test with a clean reload/auto-reload budget.
+  sessionStorage.clear();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).__SIDELINE_CRASHED__ = undefined;
 
@@ -96,6 +106,13 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 const { AppErrorBoundary } = await import('~/components/layouts/AppErrorBoundary.js');
+const { AUTO_RELOAD_COUNT_KEY, AUTO_RELOAD_CAP } = await import('~/lib/reloadGuard.js');
+
+// Simulate that the app has already used its single automatic reload this session,
+// so the boundary shows the manual crash screen instead of auto-reloading again.
+function spendAutoReloadBudget() {
+  sessionStorage.setItem(AUTO_RELOAD_COUNT_KEY, String(AUTO_RELOAD_CAP));
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -114,17 +131,19 @@ describe('AppErrorBoundary', () => {
     });
   });
 
-  describe('error path — child throws on first commit', () => {
-    it('shows fallback when a child throws', () => {
+  describe('auto-reload once — first crash of a healthy session', () => {
+    it('reloads exactly once and shows the Reloading placeholder (not the crash screen)', () => {
       render(
         <AppErrorBoundary>
           <ThrowOnRender shouldThrow={true} />
         </AppErrorBoundary>,
       );
-      expect(screen.getByTestId('app-crash-fallback')).not.toBeNull();
+      expect(reloadMock).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Reloading…')).not.toBeNull();
+      expect(screen.queryByTestId('app-crash-fallback')).toBeNull();
     });
 
-    it('hides the crashing child after error', () => {
+    it('hides the crashing child while auto-reloading', () => {
       render(
         <AppErrorBoundary>
           <ThrowOnRender shouldThrow={true} />
@@ -141,6 +160,39 @@ describe('AppErrorBoundary', () => {
       );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       expect((window as any).__SIDELINE_CRASHED__).toBe(true);
+    });
+  });
+
+  describe('manual crash screen — after the one automatic reload is spent', () => {
+    beforeEach(() => {
+      spendAutoReloadBudget();
+    });
+
+    it('shows the crash fallback when a child throws', () => {
+      render(
+        <AppErrorBoundary>
+          <ThrowOnRender shouldThrow={true} />
+        </AppErrorBoundary>,
+      );
+      expect(screen.getByTestId('app-crash-fallback')).not.toBeNull();
+    });
+
+    it('does not auto-reload again', () => {
+      render(
+        <AppErrorBoundary>
+          <ThrowOnRender shouldThrow={true} />
+        </AppErrorBoundary>,
+      );
+      expect(reloadMock).not.toHaveBeenCalled();
+    });
+
+    it('hides the crashing child after error', () => {
+      render(
+        <AppErrorBoundary>
+          <ThrowOnRender shouldThrow={true} />
+        </AppErrorBoundary>,
+      );
+      expect(screen.queryByTestId('child-content')).toBeNull();
     });
   });
 
@@ -235,6 +287,8 @@ describe('AppErrorBoundary', () => {
   describe('loop guard — crash-in-fallback prevention', () => {
     it('renders fallback even if beaconCrash is called more than once (one-shot guard)', () => {
       _runtimeIsInitialized = false;
+      // Past the single auto-reload, so the boundary renders the manual fallback.
+      spendAutoReloadBudget();
 
       // First render
       const { unmount } = render(

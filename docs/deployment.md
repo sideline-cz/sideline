@@ -638,7 +638,7 @@ Discord caches slash command registrations globally. After adding or modifying c
 
 1. **Pre-mount watchdog (`preMountGuard`):** An inline ES5 script injected before the JS bundle sets a 10-second watchdog timer. If the React root has not mounted within 10 seconds (e.g. due to a JS bundle fetch failure), the watchdog replaces the page body with a recovery UI offering two buttons: **Reload** and **Reset app**. Reload retries the page (capped at 2 automatic attempts via a session-storage counter). Reset app unregisters the service worker and clears caches before reloading.
 2. **Vite preload-error guard:** If a JS chunk fails to load (stale service-worker cache after a deployment), the app automatically reloads once to fetch the latest bundle.
-3. **`AppErrorBoundary` (React error boundary):** Wraps the entire component tree. If React throws during render, the boundary renders the same **Reload / Reset app** fallback screen and sends a crash beacon to the OTLP collector (`crashBeacon.ts`).
+3. **`AppErrorBoundary` (React error boundary):** Wraps the entire component tree. If React throws during render, the boundary first attempts a silent one-shot automatic reload (via `requestAutoReloadOnce`) — showing a minimal `AppReloadingScreen` spinner for the brief moment before the page reloads. This auto-reload is bounded by a separate `sideline-auto-reload-count` session-storage counter (cap: 1) and is also gated by the shared reload cap, so it cannot chain into a loop. Only if the auto-reload budget is already spent (or sessionStorage is unavailable) does the boundary fall back to rendering the **Reload / Reset app** fallback screen and sending a crash beacon to the OTLP collector (`crashBeacon.ts`).
 
 **Manual recovery steps for users:**
 

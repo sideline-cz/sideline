@@ -1,7 +1,9 @@
 import { Effect } from 'effect';
 import React from 'react';
 import { AppCrashFallback } from '~/components/layouts/AppCrashFallback.js';
+import { AppReloadingScreen } from '~/components/layouts/AppReloadingScreen.js';
 import { beaconCrash } from '~/lib/crashBeacon.js';
+import { canAutoReloadOnce, requestAutoReloadOnce } from '~/lib/reloadGuard.js';
 import { reassertThemeOnDocument } from '~/lib/resolveStoredTheme.js';
 import { isRuntimeInitialized, runEffect } from '~/lib/runtime.js';
 
@@ -13,22 +15,27 @@ declare global {
 
 export class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },
-  { hasError: boolean }
+  { hasError: boolean; autoReloading: boolean }
 > {
   // Per-instance one-shot guard: prevents the same boundary instance from logging twice
   // (loop prevention: if the fallback itself crashes, we don't log recursively)
   private _hasLoggedCrash = false;
 
+  // Per-instance one-shot guard so the automatic reload is attempted at most once.
+  private _autoReloadTriggered = false;
+
   constructor(props: { children: React.ReactNode }) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, autoReloading: false };
   }
 
-  static getDerivedStateFromError(_error: unknown): { hasError: boolean } {
+  static getDerivedStateFromError(_error: unknown): { hasError: boolean; autoReloading: boolean } {
     // Re-assert theme synchronously so the fallback never renders on a white
     // background even when ThemeProvider is no longer mounted.
     reassertThemeOnDocument();
-    return { hasError: true };
+    // Decide up front whether we'll auto-reload, so render can show the quiet
+    // "Reloading…" placeholder instead of flashing the full crash screen.
+    return { hasError: true, autoReloading: canAutoReloadOnce() };
   }
 
   componentDidCatch(error: Error, _info: React.ErrorInfo): void {
@@ -66,10 +73,30 @@ export class AppErrorBoundary extends React.Component<
     } catch {
       // Never propagate logging errors
     }
+
+    // Auto-reload once: silently reload a single time before showing the manual
+    // crash screen. requestAutoReloadOnce is a no-op (returns false) once the
+    // one-shot budget or the shared reload cap is spent — in that case we fall
+    // back to the manual screen instead of leaving the user on the placeholder.
+    if (this.state.autoReloading && !this._autoReloadTriggered) {
+      this._autoReloadTriggered = true;
+      let reloaded = false;
+      try {
+        reloaded = requestAutoReloadOnce('crash-auto');
+      } catch {
+        reloaded = false;
+      }
+      if (!reloaded) {
+        this.setState({ autoReloading: false });
+      }
+    }
   }
 
   render() {
     if (this.state.hasError) {
+      if (this.state.autoReloading) {
+        return <AppReloadingScreen />;
+      }
       return <AppCrashFallback />;
     }
     return this.props.children;

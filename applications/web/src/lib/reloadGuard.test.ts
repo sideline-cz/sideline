@@ -132,6 +132,63 @@ describe('reloadGuard', () => {
     expect(getReloadCount()).toBe(0);
   });
 
+  it('canAutoReloadOnce is true on a fresh session', async () => {
+    const { canAutoReloadOnce } = await import('~/lib/reloadGuard.js');
+    expect(canAutoReloadOnce()).toBe(true);
+  });
+
+  it('requestAutoReloadOnce reloads once, then refuses the second time', async () => {
+    const { requestAutoReloadOnce, canAutoReloadOnce } = await import('~/lib/reloadGuard.js');
+    expect(requestAutoReloadOnce('crash-auto')).toBe(true);
+    expect(reloadMock).toHaveBeenCalledTimes(1);
+    // Budget spent — no second automatic reload.
+    expect(canAutoReloadOnce()).toBe(false);
+    expect(requestAutoReloadOnce('crash-auto')).toBe(false);
+    expect(reloadMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('requestAutoReloadOnce also consumes the shared reload counter', async () => {
+    const { requestAutoReloadOnce, getReloadCount } = await import('~/lib/reloadGuard.js');
+    requestAutoReloadOnce('crash-auto');
+    expect(getReloadCount()).toBe(1);
+  });
+
+  it('requestAutoReloadOnce refuses when the shared reload cap is already spent', async () => {
+    const { requestAutoReloadOnce, canAutoReloadOnce, RELOAD_COUNT_KEY, RELOAD_CAP } = await import(
+      '~/lib/reloadGuard.js'
+    );
+    // Pre-mount watchdog / manual reloads already exhausted the shared budget.
+    sessionStore[RELOAD_COUNT_KEY] = String(RELOAD_CAP);
+    expect(canAutoReloadOnce()).toBe(false);
+    expect(requestAutoReloadOnce('crash-auto')).toBe(false);
+    expect(reloadMock).not.toHaveBeenCalled();
+  });
+
+  it('requestAutoReloadOnce refuses to reload when sessionStorage is unavailable (loop-safety)', async () => {
+    Object.defineProperty(globalThis, 'sessionStorage', {
+      get() {
+        throw new Error('SecurityError: sessionStorage unavailable');
+      },
+      configurable: true,
+    });
+    const { requestAutoReloadOnce } = await import('~/lib/reloadGuard.js');
+    // Cannot persist that we reloaded → must NOT auto-reload (would loop forever).
+    expect(requestAutoReloadOnce('crash-auto')).toBe(false);
+    expect(reloadMock).not.toHaveBeenCalled();
+  });
+
+  it('clearReloadGuard resets the auto-reload budget so a later crash may auto-reload again', async () => {
+    const { requestAutoReloadOnce, clearReloadGuard, canAutoReloadOnce } = await import(
+      '~/lib/reloadGuard.js'
+    );
+    requestAutoReloadOnce('crash-auto');
+    expect(canAutoReloadOnce()).toBe(false);
+    // App recovered (route rendered healthy) → guard cleared.
+    clearReloadGuard();
+    expect(canAutoReloadOnce()).toBe(true);
+    expect(requestAutoReloadOnce('crash-auto')).toBe(true);
+  });
+
   it('does not throw when sessionStorage throws on setItem (treat count as 0, allow reload)', async () => {
     // Simulate unavailable sessionStorage
     Object.defineProperty(globalThis, 'sessionStorage', {
