@@ -323,8 +323,7 @@ const make = Effect.gen(function* () {
   const cancelEventSeries = (seriesId: EventSeries.EventSeriesId) =>
     cancelSeries(seriesId).pipe(catchSqlErrors);
 
-  const getActiveForGeneration = () =>
-    findActiveForGeneration(undefined as undefined).pipe(catchSqlErrors);
+  const getActiveForGeneration = () => findActiveForGeneration(undefined).pipe(catchSqlErrors);
 
   const updateLastGeneratedDate = (seriesId: EventSeries.EventSeriesId, date: DateTime.Utc) =>
     setLastGeneratedDate({ id: seriesId, last_generated_date: date }).pipe(catchSqlErrors);

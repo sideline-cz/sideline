@@ -473,22 +473,22 @@ const make = Effect.gen(function* () {
     );
 
   const findEventsNeedingReminderAt = (now: Date) =>
-    _findEventsForReminderAt(now.toISOString())(undefined as undefined).pipe(catchSqlErrors);
+    _findEventsForReminderAt(now.toISOString())(undefined).pipe(catchSqlErrors);
 
   const findEventsNeedingReminder = () => findEventsNeedingReminderAt(new Date());
 
   const findEventsNeedingClaimRequestAt = (now: Date) =>
-    _findEventsForClaimRequestAt(now.toISOString())(undefined as undefined).pipe(catchSqlErrors);
+    _findEventsForClaimRequestAt(now.toISOString())(undefined).pipe(catchSqlErrors);
 
   const findEventsNeedingClaimRequest = () => findEventsNeedingClaimRequestAt(new Date());
 
   const findEventsNeedingCoachingStatusAt = (now: Date) =>
-    _findEventsForCoachingStatusAt(now.toISOString())(undefined as undefined).pipe(catchSqlErrors);
+    _findEventsForCoachingStatusAt(now.toISOString())(undefined).pipe(catchSqlErrors);
 
   const findEventsNeedingCoachingStatus = () => findEventsNeedingCoachingStatusAt(new Date());
 
   const findAllWithWeeklySummaryChannel = () =>
-    _findAllWithWeeklySummaryChannel(undefined as unknown as undefined).pipe(catchSqlErrors);
+    _findAllWithWeeklySummaryChannel(undefined).pipe(catchSqlErrors);
 
   return {
     findByTeamId,
