@@ -138,6 +138,28 @@ export const EventCreateModal = Ix.modalSubmit(
         Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (error) =>
           Effect.logError('Failed to update event create response', error),
         ),
+        // Defensive backstop: the RPC call (or anything above it) may surface a
+        // server-side defect (e.g. a `LogicError.die` from `catchSqlErrors`, or a
+        // died `NoSuchElementError`) instead of a tagged error. Without this, the
+        // forked fiber below would die silently and the ephemeral defer would
+        // never resolve, leaving the user stuck on "Sideline is thinking…"
+        // forever. This must always resolve the deferred ephemeral response.
+        Effect.catchCause((cause) =>
+          Effect.logError('event-create: unexpected failure creating event', cause).pipe(
+            Effect.andThen(
+              rest
+                .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+                  payload: { content: m.bot_event_error({}, { locale }) },
+                })
+                .pipe(
+                  Effect.catchTag(
+                    ['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'],
+                    (error) => Effect.logError('Failed to update event create response', error),
+                  ),
+                ),
+            ),
+          ),
+        ),
       );
 
       const deferred: Discord.CreateMessageInteractionCallbackRequest = {
