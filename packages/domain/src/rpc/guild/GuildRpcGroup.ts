@@ -3,6 +3,7 @@ import { Rpc, RpcGroup } from 'effect/unstable/rpc';
 import * as Discord from '~/models/Discord.js';
 import { OnboardingLocale, OnboardingSyncErrorCode } from '~/models/Onboarding.js';
 import { TeamId } from '~/models/Team.js';
+import { TeamMemberId } from '~/models/TeamMember.js';
 import * as User from '~/models/User.js';
 import {
   GuildNotFound,
@@ -237,7 +238,7 @@ export const GuildRpcGroup = RpcGroup.make(
     success: Schema.Array(
       Schema.Struct({
         team_id: TeamId,
-        team_member_id: Schema.String,
+        team_member_id: TeamMemberId,
         discord_id: Discord.Snowflake,
         // Best-effort display name for the {name} channel-format placeholder.
         name: Schema.String,
@@ -253,19 +254,19 @@ export const GuildRpcGroup = RpcGroup.make(
     success: Schema.Array(
       Schema.Struct({
         team_id: TeamId,
-        team_member_id: Schema.String,
+        team_member_id: TeamMemberId,
         discord_channel_id: Discord.Snowflake,
       }),
     ),
   }),
   Rpc.make('ReservePersonalChannel', {
-    payload: { team_id: TeamId, team_member_id: Schema.String },
+    payload: { team_id: TeamId, team_member_id: TeamMemberId },
     success: Schema.Struct({ reserved: Schema.Boolean }),
   }),
   Rpc.make('SavePersonalChannelId', {
     payload: {
       team_id: TeamId,
-      team_member_id: Schema.String,
+      team_member_id: TeamMemberId,
       discord_channel_id: Discord.Snowflake,
       // The channel-name format applied when creating the channel.
       channel_format: Schema.String,
@@ -276,7 +277,7 @@ export const GuildRpcGroup = RpcGroup.make(
   Rpc.make('SavePersonalChannelFormat', {
     payload: {
       team_id: TeamId,
-      team_member_id: Schema.String,
+      team_member_id: TeamMemberId,
       channel_format: Schema.String,
     },
   }),
@@ -287,7 +288,7 @@ export const GuildRpcGroup = RpcGroup.make(
     success: Schema.Array(
       Schema.Struct({
         team_id: TeamId,
-        team_member_id: Schema.String,
+        team_member_id: TeamMemberId,
         discord_id: Discord.Snowflake,
         discord_channel_id: Discord.Snowflake,
         name: Schema.String,
@@ -314,7 +315,7 @@ export const GuildRpcGroup = RpcGroup.make(
     success: Schema.Struct({
       kind: Schema.Literals(['global', 'personal', 'none']),
       team_id: Schema.OptionFromNullOr(TeamId),
-      team_member_id: Schema.OptionFromNullOr(Schema.String),
+      team_member_id: Schema.OptionFromNullOr(TeamMemberId),
       owner_discord_id: Schema.OptionFromNullOr(Discord.Snowflake),
       is_admin: Schema.Boolean,
     }),
@@ -358,18 +359,18 @@ export const GuildRpcGroup = RpcGroup.make(
     }),
   }),
   Rpc.make('GetPersonalChannel', {
-    payload: { team_id: TeamId, team_member_id: Schema.String },
+    payload: { team_id: TeamId, team_member_id: TeamMemberId },
     success: Schema.OptionFromNullOr(Discord.Snowflake),
   }),
   Rpc.make('DeletePersonalChannel', {
-    payload: { team_id: TeamId, team_member_id: Schema.String },
+    payload: { team_id: TeamId, team_member_id: TeamMemberId },
     success: Schema.OptionFromNullOr(Discord.Snowflake),
   }),
   Rpc.make('ListPersonalChannelsForEvent', {
     payload: { event_id: Schema.String },
     success: Schema.Array(
       Schema.Struct({
-        team_member_id: Schema.String,
+        team_member_id: TeamMemberId,
         discord_id: Discord.Snowflake,
         personal_channel_id: Discord.Snowflake,
       }),

@@ -35,12 +35,10 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
 import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
 
-const toTeamMemberId = Schema.decodeSync(TeamMember.TeamMemberId);
-
 type IdentifyEventsChannelResult = {
   readonly kind: 'global' | 'personal' | 'none';
   readonly team_id: Option.Option<Team.TeamId>;
-  readonly team_member_id: Option.Option<string>;
+  readonly team_member_id: Option.Option<TeamMember.TeamMemberId>;
   readonly owner_discord_id: Option.Option<Discord.Snowflake>;
   readonly is_admin: boolean;
 };
@@ -668,7 +666,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 Effect.succeed<
                   ReadonlyArray<{
                     readonly team_id: Team.TeamId;
-                    readonly team_member_id: string;
+                    readonly team_member_id: TeamMember.TeamMemberId;
                     readonly discord_id: Discord.Snowflake;
                     readonly name: string;
                     readonly channel_format: string;
@@ -718,7 +716,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 Effect.succeed<
                   ReadonlyArray<{
                     readonly team_id: Team.TeamId;
-                    readonly team_member_id: string;
+                    readonly team_member_id: TeamMember.TeamMemberId;
                     readonly discord_channel_id: Discord.Snowflake;
                   }>
                 >([]),
@@ -754,7 +752,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                         const seen = new Set<string>();
                         const merged: Array<{
                           readonly team_id: Team.TeamId;
-                          readonly team_member_id: string;
+                          readonly team_member_id: TeamMember.TeamMemberId;
                           readonly discord_channel_id: Discord.Snowflake;
                         }> = [];
                         for (const m of [...groupRows, ...inactiveRows]) {
@@ -781,10 +779,10 @@ export const GuildsRpcLive = Effect.Do.pipe(
         team_member_id,
       }: {
         readonly team_id: Team.TeamId;
-        readonly team_member_id: string;
+        readonly team_member_id: TeamMember.TeamMemberId;
       }) =>
         deps.personalChannels
-          .reservePersonalChannel(team_id, toTeamMemberId(team_member_id))
+          .reservePersonalChannel(team_id, team_member_id)
           .pipe(Effect.map((reserved) => ({ reserved }))),
 
       'Guild/SavePersonalChannelId': ({
@@ -794,13 +792,13 @@ export const GuildsRpcLive = Effect.Do.pipe(
         channel_format,
       }: {
         readonly team_id: Team.TeamId;
-        readonly team_member_id: string;
+        readonly team_member_id: TeamMember.TeamMemberId;
         readonly discord_channel_id: Discord.Snowflake;
         readonly channel_format: string;
       }) =>
         deps.personalChannels.savePersonalChannelId(
           team_id,
-          toTeamMemberId(team_member_id),
+          team_member_id,
           discord_channel_id,
           channel_format,
         ),
@@ -811,14 +809,10 @@ export const GuildsRpcLive = Effect.Do.pipe(
         channel_format,
       }: {
         readonly team_id: Team.TeamId;
-        readonly team_member_id: string;
+        readonly team_member_id: TeamMember.TeamMemberId;
         readonly channel_format: string;
       }) =>
-        deps.personalChannels.savePersonalChannelFormat(
-          team_id,
-          toTeamMemberId(team_member_id),
-          channel_format,
-        ),
+        deps.personalChannels.savePersonalChannelFormat(team_id, team_member_id, channel_format),
 
       'Guild/MarkTeamPersonalEventsDirty': ({ team_id }: { readonly team_id: Team.TeamId }) =>
         deps.events.markTeamUpcomingEventsPersonalMessagesDirty(team_id),
@@ -890,7 +884,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                                   identifyResult({
                                     kind: 'personal',
                                     team_id: Option.some(team.id),
-                                    team_member_id: Option.some(String(owner.team_member_id)),
+                                    team_member_id: Option.some(owner.team_member_id),
                                     owner_discord_id: Option.some(owner.discord_id),
                                     is_admin: isAdmin,
                                   }),
@@ -1106,7 +1100,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 Effect.succeed<
                   ReadonlyArray<{
                     readonly team_id: Team.TeamId;
-                    readonly team_member_id: string;
+                    readonly team_member_id: TeamMember.TeamMemberId;
                     readonly discord_id: Discord.Snowflake;
                     readonly discord_channel_id: Discord.Snowflake;
                     readonly name: string;
@@ -1135,10 +1129,10 @@ export const GuildsRpcLive = Effect.Do.pipe(
         team_member_id,
       }: {
         readonly team_id: Team.TeamId;
-        readonly team_member_id: string;
+        readonly team_member_id: TeamMember.TeamMemberId;
       }) =>
         deps.personalChannels
-          .getPersonalChannel(team_id, toTeamMemberId(team_member_id))
+          .getPersonalChannel(team_id, team_member_id)
           .pipe(Effect.map(Option.flatMap((row) => row.discord_channel_id))),
 
       'Guild/DeletePersonalChannel': ({
@@ -1146,8 +1140,8 @@ export const GuildsRpcLive = Effect.Do.pipe(
         team_member_id,
       }: {
         readonly team_id: Team.TeamId;
-        readonly team_member_id: string;
-      }) => deps.personalChannels.deletePersonalChannel(team_id, toTeamMemberId(team_member_id)),
+        readonly team_member_id: TeamMember.TeamMemberId;
+      }) => deps.personalChannels.deletePersonalChannel(team_id, team_member_id),
 
       'Guild/ListPersonalChannelsForEvent': ({ event_id }: { readonly event_id: string }) =>
         deps.personalChannels.listPersonalChannelsForEvent(event_id),

@@ -36,7 +36,7 @@ class MemberToRename extends Schema.Class<MemberToRename>('MemberToRename')({
 class PersonalChannelForEvent extends Schema.Class<PersonalChannelForEvent>(
   'PersonalChannelForEvent',
 )({
-  team_member_id: Schema.String,
+  team_member_id: TeamMember.TeamMemberId,
   discord_id: Discord.Snowflake,
   personal_channel_id: Discord.Snowflake,
 }) {}

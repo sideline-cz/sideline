@@ -4,12 +4,13 @@ import { Rpc, RpcGroup } from 'effect/unstable/rpc';
 import { Snowflake } from '~/models/Discord.js';
 import { EventId } from '~/models/Event.js';
 import { TeamId } from '~/models/Team.js';
+import { TeamMemberId } from '~/models/TeamMember.js';
 
 export const PersonalEventsRpcGroup = RpcGroup.make(
   Rpc.make('GetPersonalEventMessage', {
     payload: {
       event_id: EventId,
-      team_member_id: Schema.String,
+      team_member_id: TeamMemberId,
     },
     success: Schema.OptionFromNullOr(
       Schema.Struct({
@@ -22,7 +23,7 @@ export const PersonalEventsRpcGroup = RpcGroup.make(
   Rpc.make('UpsertPersonalEventMessage', {
     payload: {
       event_id: EventId,
-      team_member_id: Schema.String,
+      team_member_id: TeamMemberId,
       personal_channel_id: Snowflake,
       discord_message_id: Snowflake,
       payload_hash: Schema.String,
@@ -31,7 +32,7 @@ export const PersonalEventsRpcGroup = RpcGroup.make(
   Rpc.make('DeletePersonalEventMessage', {
     payload: {
       event_id: EventId,
-      team_member_id: Schema.String,
+      team_member_id: TeamMemberId,
     },
   }),
   Rpc.make('GetEventsNeedingReconcile', {
@@ -55,7 +56,7 @@ export const PersonalEventsRpcGroup = RpcGroup.make(
   // and upcoming, ordered by event start ascending. Drives the per-channel reorder
   // that keeps personal channels in the same order as the global events channel.
   Rpc.make('ListMessagesForMember', {
-    payload: { team_member_id: Schema.String },
+    payload: { team_member_id: TeamMemberId },
     success: Schema.Array(
       Schema.Struct({
         event_id: EventId,
