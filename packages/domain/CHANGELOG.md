@@ -1,5 +1,11 @@
 # @sideline/domain
 
+## 0.37.2
+
+### Patch Changes
+
+- [#494](https://github.com/maxa-ondrej/sideline/pull/494) [`0d576b0`](https://github.com/maxa-ondrej/sideline/commit/0d576b0069a968b71aab623126ea6caf2db56f0b) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Brand the `team_member_id` fields in the PersonalEvents and Guild RPC groups as `TeamMember.TeamMemberId` instead of raw `Schema.String` (14 fields across request payloads and success responses). This lets the server RPC handlers drop their two `Schema.decodeSync(TeamMember.TeamMemberId)` helpers and 9 per-call-site decodes — the decoded payload is now branded end-to-end — and removes a latent brand-stripping `String(...)` coercion in `IdentifyEventsChannel`. The bot's personal-channel reconcile/reorder types are branded to match so the ids flow through without widening. The brand is refinement-free so the wire format is unchanged; this is a type-safety tightening with no runtime or protocol change.
+
 ## 0.37.1
 
 ### Patch Changes

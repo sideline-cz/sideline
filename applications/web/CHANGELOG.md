@@ -1,5 +1,18 @@
 # @sideline/web
 
+## 0.27.5
+
+### Patch Changes
+
+- [#492](https://github.com/maxa-ondrej/sideline/pull/492) [`abeb358`](https://github.com/maxa-ondrej/sideline/commit/abeb3583feb1dd85795edae889941a26a372ce4d) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Automatically reload the app once after a crash before showing the manual recovery
+  screen. On a post-mount crash the app now silently reloads a single time (showing a
+  quiet "Reloading…" placeholder); only if it crashes again does the "Something went
+  wrong" screen appear. The single auto-reload resets once a route renders healthy, is
+  bounded by the existing reload cap, and is skipped when sessionStorage is unavailable
+  so it can never loop.
+- Updated dependencies [[`0d576b0`](https://github.com/maxa-ondrej/sideline/commit/0d576b0069a968b71aab623126ea6caf2db56f0b)]:
+  - @sideline/domain@0.37.2
+
 ## 0.27.4
 
 ### Patch Changes

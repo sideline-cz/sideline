@@ -1,5 +1,20 @@
 # @sideline/server
 
+## 0.38.4
+
+### Patch Changes
+
+- [#498](https://github.com/maxa-ondrej/sideline/pull/498) [`dbecb20`](https://github.com/maxa-ondrej/sideline/commit/dbecb20ba5744f4aadabb36685cc383ce9dddaae) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Convert the `ImapClient.fetchSince` fetch loop to a proper Effect pipeline. The mailbox lock and fetch iterator are now managed with `Effect.acquireRelease` (deterministic teardown in reverse order — iterator → lock → logout), uid-watermark validation fails with a typed `ImapConnectionError` instead of a thrown one, and the two `console.warn` break-warnings (the only `console.*` calls left in the server) are replaced with `Effect.logWarning` so they reach structured logging/SigNoz. The contiguous-prefix break, uid validation, and payload-mapping behaviour are unchanged and pinned by the `ImapClient.fetchSince` unit tests.
+
+- [#494](https://github.com/maxa-ondrej/sideline/pull/494) [`0d576b0`](https://github.com/maxa-ondrej/sideline/commit/0d576b0069a968b71aab623126ea6caf2db56f0b) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Brand the `team_member_id` fields in the PersonalEvents and Guild RPC groups as `TeamMember.TeamMemberId` instead of raw `Schema.String` (14 fields across request payloads and success responses). This lets the server RPC handlers drop their two `Schema.decodeSync(TeamMember.TeamMemberId)` helpers and 9 per-call-site decodes — the decoded payload is now branded end-to-end — and removes a latent brand-stripping `String(...)` coercion in `IdentifyEventsChannel`. The bot's personal-channel reconcile/reorder types are branded to match so the ids flow through without widening. The brand is refinement-free so the wire format is unchanged; this is a type-safety tightening with no runtime or protocol change.
+
+- [#491](https://github.com/maxa-ondrej/sideline/pull/491) [`b4f07f0`](https://github.com/maxa-ondrej/sideline/commit/b4f07f07fef8836dce39dff6111ff4aeeb248fa4) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Remove redundant `undefined as undefined` (and one `undefined as unknown as undefined`) casts at the `Schema.Void`-request call sites in `TeamSettingsRepository` and `EventSeriesRepository`. The request parameter is already `void`, to which `undefined` is directly assignable, so the casts were no-ops. Compile-time only — the emitted JavaScript is unchanged.
+
+- [#493](https://github.com/maxa-ondrej/sideline/pull/493) [`5f49bdd`](https://github.com/maxa-ondrej/sideline/commit/5f49bdd000c4012855b97e6432f5f276847b5270) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Tighten the `TeamChallengeRepository` write-side types: the `created_by` and `member_id` request-schema fields and the `create`/`markCompleted`/`unmarkCompleted` method params are now typed as the branded `TeamMember.TeamMemberId` instead of raw `string`. Callers already pass branded ids, so this is a type-level hardening with no behavior change — the brand is refinement-free, so encoding at the SQL boundary is identity.
+
+- Updated dependencies [[`0d576b0`](https://github.com/maxa-ondrej/sideline/commit/0d576b0069a968b71aab623126ea6caf2db56f0b)]:
+  - @sideline/domain@0.37.2
+
 ## 0.38.3
 
 ### Patch Changes

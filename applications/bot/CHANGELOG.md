@@ -1,5 +1,18 @@
 # @sideline/bot
 
+## 0.30.3
+
+### Patch Changes
+
+- [#488](https://github.com/maxa-ondrej/sideline/pull/488) [`0509f78`](https://github.com/maxa-ondrej/sideline/commit/0509f78d3f546f6f21db55d38003f98b8b695b9b) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix the `/event`-create modal hanging on "Sideline is thinking…" when event creation fails in the background fork with an untagged defect. The detached fork that resolves the deferred ephemeral reply now has a `catchCause` backstop (mirroring the profile-complete handler) that always updates the original webhook message, so a server-side defect (e.g. a `LogicError.die` surfaced from the `Event/CreateEvent` RPC) can no longer leave the interaction unresolved. Adds handler-level tests covering the success and defect paths.
+
+- [#490](https://github.com/maxa-ondrej/sideline/pull/490) [`0893574`](https://github.com/maxa-ondrej/sideline/commit/0893574bff3e2c9335c0fdadf31cccaef05bf1f5) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Close the remaining `/event`-create failure path where a malformed input (event type, snowflake, or training-type id) could kill the modal handler with "This interaction failed". The `decodeUnknownSync` calls previously ran eagerly in the handler body — before the deferred reply was forked — so a decode throw escaped the `catchCause` backstop. They now run inside an `Effect.suspend` on the forked fiber, so any decode failure becomes a defect the backstop resolves with the generic error message. Adds a regression test for the malformed-event-type path.
+
+- [#494](https://github.com/maxa-ondrej/sideline/pull/494) [`0d576b0`](https://github.com/maxa-ondrej/sideline/commit/0d576b0069a968b71aab623126ea6caf2db56f0b) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Brand the `team_member_id` fields in the PersonalEvents and Guild RPC groups as `TeamMember.TeamMemberId` instead of raw `Schema.String` (14 fields across request payloads and success responses). This lets the server RPC handlers drop their two `Schema.decodeSync(TeamMember.TeamMemberId)` helpers and 9 per-call-site decodes — the decoded payload is now branded end-to-end — and removes a latent brand-stripping `String(...)` coercion in `IdentifyEventsChannel`. The bot's personal-channel reconcile/reorder types are branded to match so the ids flow through without widening. The brand is refinement-free so the wire format is unchanged; this is a type-safety tightening with no runtime or protocol change.
+
+- Updated dependencies [[`0d576b0`](https://github.com/maxa-ondrej/sideline/commit/0d576b0069a968b71aab623126ea6caf2db56f0b)]:
+  - @sideline/domain@0.37.2
+
 ## 0.30.2
 
 ### Patch Changes
