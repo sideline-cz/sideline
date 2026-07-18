@@ -41,6 +41,7 @@ const makeCarpoolView = (
 ): CarpoolRpcModels.CarpoolView =>
   new CarpoolRpcModels.CarpoolView({
     carpool_id: carpoolId,
+    language: 'en',
     discord_channel_id: boardChannelId as Discord.Snowflake,
     discord_message_id:
       boardMessageId != null ? Option.some(boardMessageId as Discord.Snowflake) : Option.none(),
@@ -76,6 +77,7 @@ const makeCarpoolViewWithCar = (
   });
   return new CarpoolRpcModels.CarpoolView({
     carpool_id: CARPOOL_ID,
+    language: 'en',
     discord_channel_id: boardChannelId as Discord.Snowflake,
     discord_message_id:
       boardMessageId != null ? Option.some(boardMessageId as Discord.Snowflake) : Option.none(),

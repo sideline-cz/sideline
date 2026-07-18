@@ -58,6 +58,7 @@ let removeCarCalls: Array<{
 const makeCarpoolView = (carpoolId: Carpool.CarpoolId): CarpoolRpcModels.CarpoolView =>
   new CarpoolRpcModels.CarpoolView({
     carpool_id: carpoolId,
+    language: 'en',
     discord_channel_id: CHANNEL_ID,
     discord_message_id: Option.none(),
     event_id: Option.none(),
@@ -71,6 +72,7 @@ const makeCarpoolViewWithCar = (
 ): CarpoolRpcModels.CarpoolView =>
   new CarpoolRpcModels.CarpoolView({
     carpool_id: carpoolId,
+    language: 'en',
     discord_channel_id: CHANNEL_ID,
     discord_message_id: Option.none(),
     event_id: Option.none(),

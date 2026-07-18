@@ -2,6 +2,7 @@ import { Schema } from 'effect';
 import { CarpoolCarId, CarpoolId } from '~/models/Carpool.js';
 import { Snowflake } from '~/models/Discord.js';
 import { EventId } from '~/models/Event.js';
+import { OnboardingLocale } from '~/models/Onboarding.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 
 export class MemberDisplay extends Schema.Class<MemberDisplay>('MemberDisplay')({
@@ -24,6 +25,8 @@ export class CarpoolCarView extends Schema.Class<CarpoolCarView>('CarpoolCarView
 
 export class CarpoolView extends Schema.Class<CarpoolView>('CarpoolView')({
   carpool_id: CarpoolId,
+  /** The Sideline team's configured language — used to render the board embed. */
+  language: OnboardingLocale,
   discord_channel_id: Snowflake,
   discord_message_id: Schema.OptionFromNullOr(Snowflake),
   event_id: Schema.OptionFromNullOr(EventId),

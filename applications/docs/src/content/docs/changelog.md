@@ -5,6 +5,19 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-07-19 — Fix: the carpool board's "Add a car" form now opens reliably
+
+Clicking **Add a car** on the carpool board could fail with a Discord interaction error (and "Sideline didn't respond in time") instead of opening the capacity form, on English-locale teams.
+
+- The bug was an over-length label on the capacity input, which Discord rejected before the form could open. The label now uses a short dedicated text and the form opens as expected.
+- No action is needed — this is fixed automatically.
+
+## 2026-07-19 — Carpool board now renders in your team's language
+
+The public carpool board embed posted by `/carpool` (`/doprava`) now uses your team's configured language (set during onboarding) instead of the Discord server's language.
+
+- This matters if your Discord server's locale doesn't match your team's language — for example, a Czech-language team on an English-locale Discord server now sees the board in Czech, matching the rest of the team's Sideline experience.
+
 ## 2026-07-06 — Admins can now remove options from a poll
 
 Captains and admins (anyone with the `poll:manage` permission) can now remove one or more options from an open poll directly in Discord.

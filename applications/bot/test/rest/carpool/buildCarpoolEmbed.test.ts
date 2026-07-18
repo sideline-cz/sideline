@@ -43,6 +43,7 @@ const makeCar = (
 const makeView = (cars: CarpoolRpcModels.CarpoolCarView[]): CarpoolRpcModels.CarpoolView =>
   new CarpoolRpcModels.CarpoolView({
     carpool_id: CARPOOL_ID,
+    language: 'en',
     discord_channel_id: CHANNEL_ID,
     discord_message_id: Option.none(),
     event_id: Option.none(),
@@ -64,7 +65,7 @@ describe('buildCarpoolEmbed', () => {
       const car = makeCar(CAR_ID_A, owner, 4);
       const view = makeView([car]);
 
-      const { components } = buildCarpoolEmbed(view, 'en');
+      const { components } = buildCarpoolEmbed(view);
 
       const row1 = components[0];
       expect(row1.components).toHaveLength(2);
@@ -85,7 +86,7 @@ describe('buildCarpoolEmbed', () => {
     it('empty board: row 1 still has exactly 2 buttons', () => {
       const view = makeView([]);
 
-      const { components } = buildCarpoolEmbed(view, 'en');
+      const { components } = buildCarpoolEmbed(view);
 
       const row1 = components[0];
       expect(row1.components).toHaveLength(2);
@@ -98,7 +99,7 @@ describe('buildCarpoolEmbed', () => {
       const car = makeCar(CAR_ID_A, owner, 4);
       const view = makeView([car]);
 
-      const { components } = buildCarpoolEmbed(view, 'en');
+      const { components } = buildCarpoolEmbed(view);
 
       const leaveBtn = findLeaveMineButton(components[0]);
       expect(leaveBtn).toBeDefined();
@@ -108,7 +109,7 @@ describe('buildCarpoolEmbed', () => {
     it('is DISABLED when there are no cars', () => {
       const view = makeView([]);
 
-      const { components } = buildCarpoolEmbed(view, 'en');
+      const { components } = buildCarpoolEmbed(view);
 
       const leaveBtn = findLeaveMineButton(components[0]);
       expect(leaveBtn).toBeDefined();
@@ -120,7 +121,7 @@ describe('buildCarpoolEmbed', () => {
       const car = makeCar(CAR_ID_A, owner, 4);
       const view = makeView([car]);
 
-      const { components } = buildCarpoolEmbed(view, 'en');
+      const { components } = buildCarpoolEmbed(view);
 
       const leaveBtn = findLeaveMineButton(components[0]);
       expect(leaveBtn?.custom_id).toBe(`carpool-leave-mine:${CARPOOL_ID}`);
@@ -133,7 +134,7 @@ describe('buildCarpoolEmbed', () => {
       const car = makeCar(CAR_ID_A, owner, 4);
       const view = makeView([car]);
 
-      const { components } = buildCarpoolEmbed(view, 'en');
+      const { components } = buildCarpoolEmbed(view);
 
       expect(components.length).toBeGreaterThanOrEqual(2);
       const row2 = components[1];
@@ -150,7 +151,7 @@ describe('buildCarpoolEmbed', () => {
       const car = makeCar(CAR_ID_A, owner, 4);
       const view = makeView([car]);
 
-      const { components } = buildCarpoolEmbed(view, 'en');
+      const { components } = buildCarpoolEmbed(view);
 
       const reserveBtn = (
         components[1].components as ReadonlyArray<{
@@ -170,7 +171,7 @@ describe('buildCarpoolEmbed', () => {
       const car = makeCar(CAR_ID_A, owner, 2, [passenger]);
       const view = makeView([car]);
 
-      const { components } = buildCarpoolEmbed(view, 'en');
+      const { components } = buildCarpoolEmbed(view);
 
       const reserveBtn = (
         components[1].components as ReadonlyArray<{
@@ -190,7 +191,7 @@ describe('buildCarpoolEmbed', () => {
       const car2 = makeCar(CAR_ID_B, owner2, 3);
       const view = makeView([car1, car2]);
 
-      const { components } = buildCarpoolEmbed(view, 'en');
+      const { components } = buildCarpoolEmbed(view);
 
       // Both cars fit in the same reserve row (4 per row)
       const allButtons = components.slice(1).flatMap((row) => row.components as any[]);
@@ -207,7 +208,7 @@ describe('buildCarpoolEmbed', () => {
     it('has only 1 component row (the add row) when there are no cars', () => {
       const view = makeView([]);
 
-      const { components } = buildCarpoolEmbed(view, 'en');
+      const { components } = buildCarpoolEmbed(view);
 
       expect(components).toHaveLength(1);
     });
@@ -221,7 +222,7 @@ describe('buildCarpoolEmbed', () => {
       const car = makeCar(CAR_ID_A, owner, 5, [passenger1, passenger2]);
       const view = makeView([car]);
 
-      const { components } = buildCarpoolEmbed(view, 'en');
+      const { components } = buildCarpoolEmbed(view);
 
       const leaveBtn = findLeaveMineButton(components[0]);
       expect(leaveBtn?.disabled).not.toBe(true);

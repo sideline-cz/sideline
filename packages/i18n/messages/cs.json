@@ -992,7 +992,7 @@
   "bot_carpool_btn_leave_mine": "🚪 Odejít z mého auta",
   "bot_carpool_btn_assign": "👤 Obsadit místo",
   "bot_carpool_btn_remove": "🗑️ Zrušit auto",
-  "bot_carpool_capacity_placeholder": "Kolik míst má tvé auto? (včetně řidiče)",
+  "bot_carpool_capacity_label": "Počet míst (včetně řidiče)",
   "bot_carpool_assign_placeholder": "Koho chceš posadit do auta?",
   "bot_carpool_thread_name": "🚗 Auto {n} — {owner}",
   "bot_carpool_thread_welcome_title": "🚗 Vítej v autě!",

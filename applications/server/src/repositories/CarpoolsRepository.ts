@@ -1,4 +1,12 @@
-import { Carpool, CarpoolRpcModels, Discord, Event, Team, TeamMember } from '@sideline/domain';
+import {
+  Carpool,
+  CarpoolRpcModels,
+  Discord,
+  Event,
+  Onboarding,
+  Team,
+  TeamMember,
+} from '@sideline/domain';
 import { LogicError, SqlErrors } from '@sideline/effect-lib';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -30,6 +38,7 @@ class CarpoolCarRow extends Schema.Class<CarpoolCarRow>('CarpoolCarRow')({
 class CarpoolViewRow extends Schema.Class<CarpoolViewRow>('CarpoolViewRow')({
   // carpool fields
   carpool_id: Carpool.CarpoolId,
+  team_locale: Onboarding.OnboardingLocale,
   discord_channel_id: Discord.Snowflake,
   discord_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
   event_id: Schema.OptionFromNullOr(Event.EventId),
@@ -163,6 +172,7 @@ const buildCarpoolView = (
       ({ cars }) =>
         new CarpoolRpcModels.CarpoolView({
           carpool_id: carpoolId,
+          language: firstRow.team_locale,
           discord_channel_id: discordChannelId,
           discord_message_id: discordMessageId,
           event_id: eventId,
@@ -239,6 +249,7 @@ const make = Effect.gen(function* () {
     execute: (carpoolId) => sql`
       SELECT
         c.id AS carpool_id,
+        t.onboarding_locale AS team_locale,
         c.discord_channel_id,
         c.discord_message_id,
         c.event_id,
@@ -262,6 +273,7 @@ const make = Effect.gen(function* () {
         NULL::text AS seat_username,
         'owner' AS row_kind
       FROM carpools c
+      JOIN teams t ON t.id = c.team_id
       LEFT JOIN carpool_cars cc ON cc.carpool_id = c.id
       LEFT JOIN team_members owner_tm ON owner_tm.id = cc.owner_team_member_id
       LEFT JOIN users owner_user ON owner_user.id = owner_tm.user_id
@@ -271,6 +283,7 @@ const make = Effect.gen(function* () {
 
       SELECT
         c.id AS carpool_id,
+        t.onboarding_locale AS team_locale,
         c.discord_channel_id,
         c.discord_message_id,
         c.event_id,
@@ -294,6 +307,7 @@ const make = Effect.gen(function* () {
         seat_user.username AS seat_username,
         'passenger' AS row_kind
       FROM carpools c
+      JOIN teams t ON t.id = c.team_id
       JOIN carpool_cars cc ON cc.carpool_id = c.id
       JOIN carpool_seats cs ON cs.car_id = cc.id
       LEFT JOIN team_members seat_tm ON seat_tm.id = cs.team_member_id

@@ -5,7 +5,7 @@ import * as Ix from 'dfx/Interactions/index';
 import { Interaction } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
 import { Effect, Metric, Option, Schema } from 'effect';
-import { guildLocale, userLocale } from '~/locale.js';
+import { userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { buildCarpoolEmbed } from '~/rest/carpool/buildCarpoolEmbed.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
@@ -36,7 +36,6 @@ export const carpoolHandler = Interaction.asEffect().pipe(
       );
     }
 
-    const embedLocale = guildLocale(interaction);
     const discordUserId = decodeSnowflake(
       interaction.member?.user?.id ?? interaction.user?.id ?? '',
     );
@@ -52,7 +51,7 @@ export const carpoolHandler = Interaction.asEffect().pipe(
           event_id: Option.none(),
         }).pipe(
           Effect.flatMap((view) => {
-            const { embeds, components } = buildCarpoolEmbed(view, embedLocale);
+            const { embeds, components } = buildCarpoolEmbed(view);
             return rest
               .createMessage(decodeSnowflake(channelId), {
                 embeds,

@@ -4,8 +4,6 @@ import { Option } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { buildCarpoolEmbed } from '~/rest/carpool/buildCarpoolEmbed.js';
 
-const locale = 'en' as const;
-
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -49,6 +47,7 @@ const makeCar = (
 
 const emptyView = new CarpoolRpcModels.CarpoolView({
   carpool_id: CARPOOL_ID,
+  language: 'en',
   discord_channel_id: BOARD_CHANNEL_ID,
   discord_message_id: Option.some(BOARD_MESSAGE_ID),
   event_id: Option.none(),
@@ -61,7 +60,7 @@ const emptyView = new CarpoolRpcModels.CarpoolView({
 
 describe('buildCarpoolEmbed', () => {
   it('empty carpool — only add button present, no car fields', () => {
-    const { embeds, components } = buildCarpoolEmbed(emptyView, locale);
+    const { embeds, components } = buildCarpoolEmbed(emptyView);
 
     expect(embeds).toHaveLength(1);
     // No car fields in the embed
@@ -84,13 +83,14 @@ describe('buildCarpoolEmbed', () => {
     const car = makeCar(CAR_ID_1, 4, owner, [passenger]);
     const view = new CarpoolRpcModels.CarpoolView({
       carpool_id: CARPOOL_ID,
+      language: 'en',
       discord_channel_id: BOARD_CHANNEL_ID,
       discord_message_id: Option.some(BOARD_MESSAGE_ID),
       event_id: Option.none(),
       cars: [car],
     });
 
-    const { embeds, components } = buildCarpoolEmbed(view, locale);
+    const { embeds, components } = buildCarpoolEmbed(view);
 
     expect(embeds).toHaveLength(1);
     const fields = embeds[0].fields ?? [];
@@ -116,13 +116,14 @@ describe('buildCarpoolEmbed', () => {
     const fullCar = makeCar(CAR_ID_1, 2, owner, [passenger]);
     const view = new CarpoolRpcModels.CarpoolView({
       carpool_id: CARPOOL_ID,
+      language: 'en',
       discord_channel_id: BOARD_CHANNEL_ID,
       discord_message_id: Option.some(BOARD_MESSAGE_ID),
       event_id: Option.none(),
       cars: [fullCar],
     });
 
-    const { components } = buildCarpoolEmbed(view, locale);
+    const { components } = buildCarpoolEmbed(view);
 
     const allButtons = components.flatMap((row) => (row as any).components ?? []) as Array<{
       custom_id?: string;
@@ -145,6 +146,7 @@ describe('buildCarpoolEmbed', () => {
     const car = makeCar(CAR_ID_1, 4, nullNameOwner);
     const view = new CarpoolRpcModels.CarpoolView({
       carpool_id: CARPOOL_ID,
+      language: 'en',
       discord_channel_id: BOARD_CHANNEL_ID,
       discord_message_id: Option.some(BOARD_MESSAGE_ID),
       event_id: Option.none(),
@@ -152,9 +154,9 @@ describe('buildCarpoolEmbed', () => {
     });
 
     // Should not throw
-    expect(() => buildCarpoolEmbed(view, locale)).not.toThrow();
+    expect(() => buildCarpoolEmbed(view)).not.toThrow();
 
-    const { embeds } = buildCarpoolEmbed(view, locale);
+    const { embeds } = buildCarpoolEmbed(view);
     expect(embeds).toHaveLength(1);
     // formatName renders 'Unknown' when all name fields are None (no mention appended)
     const embedJson = JSON.stringify(embeds);
@@ -175,13 +177,14 @@ describe('buildCarpoolEmbed', () => {
     });
     const view = new CarpoolRpcModels.CarpoolView({
       carpool_id: CARPOOL_ID,
+      language: 'en',
       discord_channel_id: BOARD_CHANNEL_ID,
       discord_message_id: Option.some(BOARD_MESSAGE_ID),
       event_id: Option.none(),
       cars,
     });
 
-    const { embeds, components } = buildCarpoolEmbed(view, locale);
+    const { embeds, components } = buildCarpoolEmbed(view);
 
     // Should have at most ~10 cars rendered (not 12)
     const allCustomIds = components
@@ -204,13 +207,14 @@ describe('buildCarpoolEmbed', () => {
     const car = makeCar(CAR_ID_1, 4, owner);
     const view = new CarpoolRpcModels.CarpoolView({
       carpool_id: CARPOOL_ID,
+      language: 'en',
       discord_channel_id: BOARD_CHANNEL_ID,
       discord_message_id: Option.some(BOARD_MESSAGE_ID),
       event_id: Option.none(),
       cars: [car],
     });
 
-    const { embeds } = buildCarpoolEmbed(view, locale);
+    const { embeds } = buildCarpoolEmbed(view);
     const fields = embeds[0].fields ?? [];
     const carFieldJson = JSON.stringify(fields);
     // Free seats rendered as italic (markdown *...*) or similar placeholder
@@ -223,14 +227,15 @@ describe('buildCarpoolEmbed', () => {
     const car = makeCar(CAR_ID_1, 4, owner);
     const viewWithCar = new CarpoolRpcModels.CarpoolView({
       carpool_id: CARPOOL_ID,
+      language: 'en',
       discord_channel_id: BOARD_CHANNEL_ID,
       discord_message_id: Option.some(BOARD_MESSAGE_ID),
       event_id: Option.none(),
       cars: [car],
     });
 
-    const { components: componentsWithCar } = buildCarpoolEmbed(viewWithCar, locale);
-    const { components: componentsEmpty } = buildCarpoolEmbed(emptyView, locale);
+    const { components: componentsWithCar } = buildCarpoolEmbed(viewWithCar);
+    const { components: componentsEmpty } = buildCarpoolEmbed(emptyView);
 
     const hasAddWithCar = componentsWithCar
       .flatMap((row) => (row as any).components ?? [])
@@ -251,13 +256,14 @@ describe('buildCarpoolEmbed', () => {
     const car2 = makeCar(CAR_ID_2, 3, owner2);
     const view = new CarpoolRpcModels.CarpoolView({
       carpool_id: CARPOOL_ID,
+      language: 'en',
       discord_channel_id: BOARD_CHANNEL_ID,
       discord_message_id: Option.some(BOARD_MESSAGE_ID),
       event_id: Option.none(),
       cars: [car1, car2],
     });
 
-    const { components } = buildCarpoolEmbed(view, locale);
+    const { components } = buildCarpoolEmbed(view);
     const allCustomIds = components
       .flatMap((row) => (row as any).components ?? [])
       .map((c: any) => c.custom_id as string);

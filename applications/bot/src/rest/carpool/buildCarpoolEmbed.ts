@@ -66,11 +66,13 @@ const buildCarField = (
 
 export const buildCarpoolEmbed = (
   view: CarpoolRpcModels.CarpoolView,
-  locale: Locale,
 ): {
   embeds: ReadonlyArray<Discord.RichEmbed>;
   components: ReadonlyArray<Discord.ActionRowComponentForMessageRequest>;
 } => {
+  // The board is a permanent, whole-team-visible message, so it renders in the
+  // Sideline team's configured language rather than the Discord guild locale.
+  const locale: Locale = view.language;
   const displayedCars = view.cars.slice(0, MAX_CARS_DISPLAYED);
 
   const totalCars = displayedCars.length;

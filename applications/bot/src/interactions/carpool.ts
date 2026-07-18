@@ -6,7 +6,7 @@ import * as Ix from 'dfx/Interactions/index';
 import { Interaction, ModalSubmitData } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
 import { Array as Arr, Effect, Metric, Option, Schema } from 'effect';
-import { guildLocale, type Locale, userLocale } from '~/locale.js';
+import { userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { buildCarpoolEmbed } from '~/rest/carpool/buildCarpoolEmbed.js';
 import { DISCORD_REST_ERROR_TAGS, failAsDiscordError } from '~/rest/discordErrors.js';
@@ -84,9 +84,8 @@ const rebuildBoardMessage = (
   channelId: DiscordSchemas.Snowflake,
   messageId: DiscordSchemas.Snowflake,
   view: CarpoolRpcModels.CarpoolView,
-  embedLocale: Locale,
 ) => {
-  const { embeds, components } = buildCarpoolEmbed(view, embedLocale);
+  const { embeds, components } = buildCarpoolEmbed(view);
   return rest
     .updateMessage(channelId, messageId, { embeds, components, allowed_mentions: { parse: [] } })
     .pipe(Effect.asVoid, logRestErrors('Failed to rebuild carpool embed'));
@@ -95,16 +94,13 @@ const rebuildBoardMessage = (
 /**
  * Rebuild the public carpool board from a view, using the channel/message id stored on the view.
  * Used by the reserve/leave/assign/remove handlers. Swallows REST failures.
+ * Renders in the team language carried by the view (see buildCarpoolEmbed).
  */
-const rebuildBoard = (
-  rest: DiscordRestService,
-  view: CarpoolRpcModels.CarpoolView,
-  embedLocale: Locale,
-) =>
+const rebuildBoard = (rest: DiscordRestService, view: CarpoolRpcModels.CarpoolView) =>
   Option.match(view.discord_message_id, {
     onNone: () => Effect.logWarning('Carpool board message id not set — skipping board update'),
     onSome: (boardMessageId) =>
-      rebuildBoardMessage(rest, view.discord_channel_id, boardMessageId, view, embedLocale),
+      rebuildBoardMessage(rest, view.discord_channel_id, boardMessageId, view),
   });
 
 /** Try to add a user to a thread, handling errors as non-fatal. Returns true on success. */
@@ -164,7 +160,7 @@ export const CarpoolAddButton = Effect.Do.pipe(
           UI.row([
             UI.textInput({
               custom_id: 'carpool_capacity',
-              label: m.bot_carpool_capacity_placeholder({}, { locale }),
+              label: m.bot_carpool_capacity_label({}, { locale }),
               style: DiscordTypes.TextInputStyleTypes.SHORT,
               required: true,
               min_length: 1,
@@ -215,7 +211,6 @@ export const CarpoolAddModal = Ix.modalSubmit(
     Effect.bind('rest', () => DiscordREST.asEffect()),
     Effect.flatMap(({ data, interaction, rpc, rest }) => {
       const locale = userLocale(interaction);
-      const embedLocale = guildLocale(interaction);
       const guildId = interaction.guild_id;
       const discordUserIdOption = interactionUserId(interaction);
 
@@ -304,14 +299,10 @@ export const CarpoolAddModal = Ix.modalSubmit(
           return createThread.pipe(
             Effect.flatMap((threadOption) => {
               if (Option.isNone(threadOption)) {
-                // Thread creation failed — still rebuild the embed using AddCar view
-                return rebuildBoardMessage(
-                  rest,
-                  decodeSnowflake(mainChannelId),
-                  decodeSnowflake(mainMessageId),
-                  addResult.view,
-                  embedLocale,
-                ).pipe(
+                // Thread creation failed — still rebuild the embed using AddCar view.
+                // rebuildBoard resolves the persistent channel/message id from the
+                // server-provided view rather than the modal-encoded ids.
+                return rebuildBoard(rest, addResult.view).pipe(
                   Effect.flatMap(() =>
                     replyWebhook(rest, interaction, {
                       content: m.bot_carpool_car_added(
@@ -388,12 +379,9 @@ export const CarpoolAddModal = Ix.modalSubmit(
               // 5. Re-fetch the view so the embed reflects the saved thread_id
               const rebuildEmbed = rpc['Carpool/GetCarpoolView']({ carpool_id: carpoolId }).pipe(
                 Effect.flatMap((viewOption) =>
-                  rebuildBoardMessage(
+                  rebuildBoard(
                     rest,
-                    decodeSnowflake(mainChannelId),
-                    decodeSnowflake(mainMessageId),
                     Option.getOrElse(viewOption, () => addResult.view),
-                    embedLocale,
                   ),
                 ),
                 Effect.catchTag('RpcClientError', (e) =>
@@ -471,7 +459,6 @@ export const CarpoolReserveButton = Effect.Do.pipe(
     const locale = userLocale(interaction);
     const guildId = interaction.guild_id;
     const discordUserIdOption = interactionUserId(interaction);
-    const embedLocale = guildLocale(interaction);
 
     if (Option.isNone(discordUserIdOption)) {
       return Effect.as(
@@ -502,7 +489,7 @@ export const CarpoolReserveButton = Effect.Do.pipe(
           onSome: (threadId) => tryAddThreadMember(rest, threadId, discordUserId),
         });
 
-        const updateMain = rebuildBoard(rest, result.view, embedLocale);
+        const updateMain = rebuildBoard(rest, result.view);
 
         return Effect.all([addToThread, updateMain], {
           concurrency: 'unbounded',
@@ -600,7 +587,6 @@ export const CarpoolLeaveButton = Effect.Do.pipe(
     const locale = userLocale(interaction);
     const guildId = interaction.guild_id;
     const discordUserIdOption = interactionUserId(interaction);
-    const embedLocale = guildLocale(interaction);
 
     if (Option.isNone(discordUserIdOption)) {
       return Effect.as(
@@ -645,7 +631,7 @@ export const CarpoolLeaveButton = Effect.Do.pipe(
             ),
         });
 
-        const updateMain = rebuildBoard(rest, view, embedLocale);
+        const updateMain = rebuildBoard(rest, view);
 
         return Effect.all([removeFromThread, updateMain], {
           concurrency: 'unbounded',
@@ -711,7 +697,6 @@ export const CarpoolLeaveMineButton = Effect.Do.pipe(
     const locale = userLocale(interaction);
     const guildId = interaction.guild_id;
     const discordUserIdOption = interactionUserId(interaction);
-    const embedLocale = guildLocale(interaction);
 
     if (Option.isNone(discordUserIdOption)) {
       return Effect.as(
@@ -753,7 +738,7 @@ export const CarpoolLeaveMineButton = Effect.Do.pipe(
             ),
         });
 
-        const updateMain = rebuildBoard(rest, view, embedLocale);
+        const updateMain = rebuildBoard(rest, view);
 
         return Effect.all([removeFromThread, updateMain], {
           concurrency: 'unbounded',
@@ -814,7 +799,6 @@ export const CarpoolRemoveButton = Effect.Do.pipe(
     const locale = userLocale(interaction);
     const guildId = interaction.guild_id;
     const discordUserIdOption = interactionUserId(interaction);
-    const embedLocale = guildLocale(interaction);
 
     if (Option.isNone(discordUserIdOption)) {
       return Effect.as(
@@ -850,7 +834,7 @@ export const CarpoolRemoveButton = Effect.Do.pipe(
             ),
         });
 
-        const updateMain = rebuildBoard(rest, result.view, embedLocale);
+        const updateMain = rebuildBoard(rest, result.view);
 
         return Effect.all([archiveThread, updateMain], {
           concurrency: 'unbounded',
@@ -951,7 +935,6 @@ const _CarpoolAssignPickSelectEffect = Effect.Do.pipe(
     const locale = userLocale(interaction);
     const guildId = interaction.guild_id;
     const discordUserIdOption = interactionUserId(interaction);
-    const embedLocale = guildLocale(interaction);
 
     if (Option.isNone(discordUserIdOption)) {
       return Effect.as(
@@ -992,7 +975,7 @@ const _CarpoolAssignPickSelectEffect = Effect.Do.pipe(
             tryAddThreadMember(rest, threadId, targetUserId).pipe(Effect.asVoid),
         });
 
-        const updateMain = rebuildBoard(rest, result.view, embedLocale);
+        const updateMain = rebuildBoard(rest, result.view);
 
         return Effect.all([addToThread, updateMain], {
           concurrency: 'unbounded',
