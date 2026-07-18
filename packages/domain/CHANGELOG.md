@@ -1,5 +1,13 @@
 # @sideline/domain
 
+## 0.37.3
+
+### Patch Changes
+
+- [#499](https://github.com/maxa-ondrej/sideline/pull/499) [`df6359f`](https://github.com/maxa-ondrej/sideline/commit/df6359fc427fbe0d9d421edcf0b4d153b7818455) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Fix the `/carpool` "add car" modal failing with an interaction error (and "Sideline didn't respond in time") on English-locale teams. The capacity input reused a 53-character placeholder string as its Discord input label, exceeding Discord's 45-character label limit and getting the whole modal rejected before it could open. The label now uses a dedicated short message key.
+
+  Also render the carpool board embed in the Sideline team's configured language (`teams.onboarding_locale`) instead of the Discord guild locale: `CarpoolView` now carries the team `language`, the server populates it from the team row, and `buildCarpoolEmbed` reads it directly.
+
 ## 0.37.2
 
 ### Patch Changes
