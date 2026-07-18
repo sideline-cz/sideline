@@ -299,13 +299,10 @@ export const CarpoolAddModal = Ix.modalSubmit(
           return createThread.pipe(
             Effect.flatMap((threadOption) => {
               if (Option.isNone(threadOption)) {
-                // Thread creation failed — still rebuild the embed using AddCar view
-                return rebuildBoardMessage(
-                  rest,
-                  decodeSnowflake(mainChannelId),
-                  decodeSnowflake(mainMessageId),
-                  addResult.view,
-                ).pipe(
+                // Thread creation failed — still rebuild the embed using AddCar view.
+                // rebuildBoard resolves the persistent channel/message id from the
+                // server-provided view rather than the modal-encoded ids.
+                return rebuildBoard(rest, addResult.view).pipe(
                   Effect.flatMap(() =>
                     replyWebhook(rest, interaction, {
                       content: m.bot_carpool_car_added(
@@ -382,10 +379,8 @@ export const CarpoolAddModal = Ix.modalSubmit(
               // 5. Re-fetch the view so the embed reflects the saved thread_id
               const rebuildEmbed = rpc['Carpool/GetCarpoolView']({ carpool_id: carpoolId }).pipe(
                 Effect.flatMap((viewOption) =>
-                  rebuildBoardMessage(
+                  rebuildBoard(
                     rest,
-                    decodeSnowflake(mainChannelId),
-                    decodeSnowflake(mainMessageId),
                     Option.getOrElse(viewOption, () => addResult.view),
                   ),
                 ),
