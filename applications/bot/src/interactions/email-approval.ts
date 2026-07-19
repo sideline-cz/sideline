@@ -171,7 +171,25 @@ const makeEmailDecisionButton = (config: {
           type: Discord.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
           data: { flags: Discord.MessageFlags.Ephemeral },
         };
-        return Effect.as(Effect.forkDetach(decideAndFollowUp), deferred);
+        // Terminal backstop: on ANY unhandled failure or defect (e.g. a
+        // transient RpcClientError or a server-side LogicError.die surfaced as a
+        // defect) still resolve the deferred reply, so the moderator is never
+        // left on "Sideline is thinking…". Mirrors the event-create backstop.
+        const decideWithBackstop = decideAndFollowUp.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError('email-decision: unexpected failure', cause).pipe(
+              Effect.andThen(
+                editFollowUp(rest, interaction, m.bot_email_error({}, { locale })).pipe(
+                  Effect.catchTag(
+                    ['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'],
+                    (e) => Effect.logError('Failed to update email error response', e),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        return Effect.as(Effect.forkDetach(decideWithBackstop), deferred);
       }),
       Effect.withSpan(config.spanName),
     ),

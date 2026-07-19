@@ -652,6 +652,7 @@
   "bot_email_already_handled": "This email has already been handled.",
   "bot_email_not_authorized": "You are not authorized to approve or reject emails.",
   "bot_email_not_found": "This email approval request is no longer valid.",
+  "bot_email_error": "Something went wrong. Please try again.",
   "bot_email_summary_title": "{subject}",
   "bot_email_summary_title_fallback": "📧 Email Summary",
   "bot_email_summary_field_from": "From",
