@@ -76,6 +76,37 @@ const replyWebhook = (
     .updateOriginalWebhookMessage(interaction.application_id, interaction.token, { payload })
     .pipe(logRestErrors(context));
 
+/**
+ * Terminal defect backstop for a detached fork that resolves a deferred reply.
+ * The fork's tail already handles `RpcClientError` + REST, so the remaining
+ * hang risk is an untagged defect (e.g. a renderer throw or a server-side
+ * `LogicError.die`) that would die in the forked fiber and leave the deferred
+ * reply blank. Resolve it with a generic error. Mirrors the existing
+ * poll-voters / poll-remove defect backstops.
+ */
+const withDefectBackstop =
+  (
+    rest: DiscordRestService,
+    interaction: DiscordTypes.APIInteraction,
+    locale: Locale,
+    context: string,
+  ) =>
+  <A, E, R>(work: Effect.Effect<A, E, R>) =>
+    work.pipe(
+      Effect.catchDefect((defect) =>
+        Effect.logError(context, defect).pipe(
+          Effect.flatMap(() =>
+            replyWebhook(
+              rest,
+              interaction,
+              { content: m.bot_poll_err_generic({}, { locale }) },
+              context,
+            ),
+          ),
+        ),
+      ),
+    );
+
 /** Rebuild a poll board message at an explicit channel/message, swallowing REST failures. */
 const rebuildBoardMessage = (
   rest: DiscordRestService,
@@ -239,7 +270,12 @@ export const PollOpenButton = Effect.Do.pipe(
       ),
     );
 
-    return Effect.as(Effect.forkDetach(openAndFollowUp), ephemeralDeferred);
+    return Effect.as(
+      Effect.forkDetach(
+        openAndFollowUp.pipe(withDefectBackstop(rest, interaction, locale, 'poll-open: defect')),
+      ),
+      ephemeralDeferred,
+    );
   }),
   Effect.withSpan('interaction/poll-open-button'),
 );
@@ -423,7 +459,12 @@ export const PollVoteButton = Effect.Do.pipe(
       ),
     );
 
-    return Effect.as(Effect.forkDetach(voteAndFollowUp), deferredUpdateMessage);
+    return Effect.as(
+      Effect.forkDetach(
+        voteAndFollowUp.pipe(withDefectBackstop(rest, interaction, locale, 'poll-vote: defect')),
+      ),
+      deferredUpdateMessage,
+    );
   }),
   Effect.withSpan('interaction/poll-vote-button'),
 );
@@ -690,7 +731,14 @@ export const PollAddModalSubmit = Effect.Do.pipe(
       ),
     );
 
-    return Effect.as(Effect.forkDetach(addAndFollowUp), ephemeralDeferred);
+    return Effect.as(
+      Effect.forkDetach(
+        addAndFollowUp.pipe(
+          withDefectBackstop(rest, interaction, locale, 'poll-add-modal: defect'),
+        ),
+      ),
+      ephemeralDeferred,
+    );
   }),
   Effect.withSpan('interaction/poll-add-modal'),
 );
@@ -822,7 +870,12 @@ export const PollCloseButton = Effect.Do.pipe(
       ),
     );
 
-    return Effect.as(Effect.forkDetach(closeAndFollowUp), ephemeralDeferred);
+    return Effect.as(
+      Effect.forkDetach(
+        closeAndFollowUp.pipe(withDefectBackstop(rest, interaction, locale, 'poll-close: defect')),
+      ),
+      ephemeralDeferred,
+    );
   }),
   Effect.withSpan('interaction/poll-close-button'),
 );
