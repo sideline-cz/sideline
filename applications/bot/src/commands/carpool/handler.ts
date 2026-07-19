@@ -129,6 +129,26 @@ export const carpoolHandler = Interaction.asEffect().pipe(
           ),
         ),
       ),
+      // Terminal backstop: on ANY unhandled failure or defect (transient
+      // RpcClientError from CreateCarpool/SaveCarpoolMessageId, or a server-side
+      // LogicError.die surfaced as a defect) still resolve the deferred reply so
+      // the user is never left on "Sideline is thinking…". Mirrors event-create.
+      Effect.catchCause((cause) =>
+        Effect.logError('carpool command: unexpected failure', cause).pipe(
+          Effect.andThen(DiscordREST.asEffect()),
+          Effect.flatMap((rest) =>
+            rest
+              .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+                payload: { content: m.bot_carpool_err_generic({}, { locale }) },
+              })
+              .pipe(
+                Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (e) =>
+                  Effect.logError('Failed to update carpool error response', e),
+                ),
+              ),
+          ),
+        ),
+      ),
     );
 
     const deferred: DiscordTypes.CreateMessageInteractionCallbackRequest = {
