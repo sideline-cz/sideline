@@ -6,7 +6,7 @@ import * as Ix from 'dfx/Interactions/index';
 import { Interaction, ModalSubmitData } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
 import { Array as Arr, Effect, Metric, Option, Schema } from 'effect';
-import { userLocale } from '~/locale.js';
+import { type Locale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { buildCarpoolEmbed } from '~/rest/carpool/buildCarpoolEmbed.js';
 import { DISCORD_REST_ERROR_TAGS, failAsDiscordError } from '~/rest/discordErrors.js';
@@ -77,6 +77,33 @@ const replyWebhook = (
   rest
     .updateOriginalWebhookMessage(interaction.application_id, interaction.token, { payload })
     .pipe(logRestErrors(context));
+
+/**
+ * Terminal backstop for a detached fork that resolves a deferred ephemeral
+ * reply. On ANY unhandled failure or defect (e.g. a transient `RpcClientError`
+ * or a server-side `LogicError.die` surfaced as a defect) it logs the cause and
+ * still writes the generic error message, so the user is never left on
+ * "Sideline is thinking…". Mirrors the profile-complete / event-create backstop.
+ */
+const withBackstop =
+  (
+    rest: DiscordRestService,
+    interaction: DiscordTypes.APIInteraction,
+    locale: Locale,
+    context: string,
+  ) =>
+  <A, E, R>(work: Effect.Effect<A, E, R>) =>
+    work.pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError(context, cause).pipe(
+          Effect.andThen(
+            replyWebhook(rest, interaction, {
+              content: m.bot_carpool_err_generic({}, { locale }),
+            }),
+          ),
+        ),
+      ),
+    );
 
 /** Rebuild a carpool board message at an explicit channel/message, swallowing REST failures. */
 const rebuildBoardMessage = (
@@ -444,7 +471,14 @@ export const CarpoolAddModal = Ix.modalSubmit(
         ),
       );
 
-      return Effect.as(Effect.forkDetach(addCarAndFollowUp), ephemeralDeferred);
+      return Effect.as(
+        Effect.forkDetach(
+          addCarAndFollowUp.pipe(
+            withBackstop(rest, interaction, locale, 'carpool-add-modal: unexpected failure'),
+          ),
+        ),
+        ephemeralDeferred,
+      );
     }),
     Effect.withSpan('interaction/carpool-add-modal'),
   ),
@@ -568,7 +602,14 @@ export const CarpoolReserveButton = Effect.Do.pipe(
       ),
     );
 
-    return Effect.as(Effect.forkDetach(reserveAndFollowUp), ephemeralDeferred);
+    return Effect.as(
+      Effect.forkDetach(
+        reserveAndFollowUp.pipe(
+          withBackstop(rest, interaction, locale, 'carpool-reserve: unexpected failure'),
+        ),
+      ),
+      ephemeralDeferred,
+    );
   }),
   Effect.withSpan('interaction/carpool-reserve-button'),
 );
@@ -678,7 +719,14 @@ export const CarpoolLeaveButton = Effect.Do.pipe(
       ),
     );
 
-    return Effect.as(Effect.forkDetach(leaveAndFollowUp), ephemeralDeferred);
+    return Effect.as(
+      Effect.forkDetach(
+        leaveAndFollowUp.pipe(
+          withBackstop(rest, interaction, locale, 'carpool-leave: unexpected failure'),
+        ),
+      ),
+      ephemeralDeferred,
+    );
   }),
   Effect.withSpan('interaction/carpool-leave-button'),
 );
@@ -780,7 +828,14 @@ export const CarpoolLeaveMineButton = Effect.Do.pipe(
       ),
     );
 
-    return Effect.as(Effect.forkDetach(leaveAndFollowUp), ephemeralDeferred);
+    return Effect.as(
+      Effect.forkDetach(
+        leaveAndFollowUp.pipe(
+          withBackstop(rest, interaction, locale, 'carpool-leave: unexpected failure'),
+        ),
+      ),
+      ephemeralDeferred,
+    );
   }),
   Effect.withSpan('interaction/carpool-leave-mine-button'),
 );
@@ -874,7 +929,14 @@ export const CarpoolRemoveButton = Effect.Do.pipe(
       ),
     );
 
-    return Effect.as(Effect.forkDetach(removeAndFollowUp), ephemeralDeferred);
+    return Effect.as(
+      Effect.forkDetach(
+        removeAndFollowUp.pipe(
+          withBackstop(rest, interaction, locale, 'carpool-remove: unexpected failure'),
+        ),
+      ),
+      ephemeralDeferred,
+    );
   }),
   Effect.withSpan('interaction/carpool-remove-button'),
 );
@@ -1023,7 +1085,14 @@ export const CarpoolCapacityModal = Ix.modalSubmit(
         ),
       );
 
-      return Effect.as(Effect.forkDetach(updateAndFollowUp), ephemeralDeferred);
+      return Effect.as(
+        Effect.forkDetach(
+          updateAndFollowUp.pipe(
+            withBackstop(rest, interaction, locale, 'carpool-capacity-modal: unexpected failure'),
+          ),
+        ),
+        ephemeralDeferred,
+      );
     }),
     Effect.withSpan('interaction/carpool-capacity-modal'),
   ),
@@ -1189,7 +1258,14 @@ const _CarpoolAssignPickSelectEffect = Effect.Do.pipe(
       ),
     );
 
-    return Effect.as(Effect.forkDetach(assignAndFollowUp), ephemeralDeferred);
+    return Effect.as(
+      Effect.forkDetach(
+        assignAndFollowUp.pipe(
+          withBackstop(rest, interaction, locale, 'carpool-assign-pick: unexpected failure'),
+        ),
+      ),
+      ephemeralDeferred,
+    );
   }),
   Effect.withSpan('interaction/carpool-assign-pick-select'),
 );
@@ -1356,7 +1432,14 @@ const _CarpoolKickPickSelectEffect = Effect.Do.pipe(
       ),
     );
 
-    return Effect.as(Effect.forkDetach(kickAndFollowUp), ephemeralDeferred);
+    return Effect.as(
+      Effect.forkDetach(
+        kickAndFollowUp.pipe(
+          withBackstop(rest, interaction, locale, 'carpool-kick-pick: unexpected failure'),
+        ),
+      ),
+      ephemeralDeferred,
+    );
   }),
   Effect.withSpan('interaction/carpool-kick-pick-select'),
 );
