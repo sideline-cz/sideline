@@ -70,7 +70,32 @@ export const AttendeesButton = Ix.messageComponent(
         type: Discord.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
         data: { flags: Discord.MessageFlags.Ephemeral },
       };
-      return Effect.as(Effect.forkDetach(work), deferred);
+      return Effect.as(
+        Effect.forkDetach(
+          // Terminal backstop: always resolve the deferred reply on an unhandled
+          // failure or defect so the user isn't stuck on "Sideline is thinking…".
+          work.pipe(
+            Effect.catchCause((cause) =>
+              Effect.logError('attendees: unexpected failure', cause).pipe(
+                Effect.andThen(DiscordREST.asEffect()),
+                Effect.flatMap((rest) =>
+                  rest
+                    .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+                      payload: { content: m.bot_attendees_load_error({}, { locale }) },
+                    })
+                    .pipe(
+                      Effect.catchTag(
+                        ['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'],
+                        (e) => Effect.logError('Failed to update attendees error response', e),
+                      ),
+                    ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        deferred,
+      );
     }),
     Effect.withSpan('interaction/attendees'),
   ),
@@ -130,7 +155,29 @@ export const AttendeesPageButton = Ix.messageComponent(
       );
 
       return Effect.as(
-        Effect.forkDetach(work),
+        Effect.forkDetach(
+          // Terminal backstop: always resolve the deferred reply on an unhandled
+          // failure or defect so the user isn't stuck on "Sideline is thinking…".
+          work.pipe(
+            Effect.catchCause((cause) =>
+              Effect.logError('attendees: unexpected failure', cause).pipe(
+                Effect.andThen(DiscordREST.asEffect()),
+                Effect.flatMap((rest) =>
+                  rest
+                    .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+                      payload: { content: m.bot_attendees_load_error({}, { locale }) },
+                    })
+                    .pipe(
+                      Effect.catchTag(
+                        ['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'],
+                        (e) => Effect.logError('Failed to update attendees error response', e),
+                      ),
+                    ),
+                ),
+              ),
+            ),
+          ),
+        ),
         Ix.response({
           type: Discord.InteractionCallbackTypes.DEFERRED_UPDATE_MESSAGE,
         }),
