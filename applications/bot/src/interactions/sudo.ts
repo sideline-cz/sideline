@@ -285,6 +285,23 @@ export const SudoLeaveButton = Effect.Do.pipe(
           ),
         ),
       ),
+      // Terminal backstop: the inner deleteGuildMemberRole/ensureSudoRole chain
+      // only handles ErrorResponse, and the outer catch only RpcClientError — so
+      // an HttpClientError/RatelimitedResponse or an untagged defect would leak
+      // and leave the deferred reply unresolved ("Sideline is thinking…"). Always
+      // resolve it. Mirrors the profile-complete / event-create backstop.
+      Effect.catchCause((cause) =>
+        Effect.logError('sudo-leave: unexpected failure', cause).pipe(
+          Effect.andThen(
+            replyWebhook(
+              rest,
+              interaction,
+              { content: m.bot_sudo_err_generic({}, { locale }) },
+              'Failed to update sudo-leave backstop response',
+            ),
+          ),
+        ),
+      ),
     );
 
     return Effect.as(Effect.forkDetach(checkAndRevoke), ephemeralDeferred);
