@@ -216,7 +216,30 @@ const rosterButtonEffect = (
 
       const discordUserId = decodeSnowflake(discordUserIdOption.value);
       const followUp = makeFollowUp(rpc, rest, interaction, eventId, memberId, discordUserId);
-      return Effect.as(Effect.forkDetach(followUp), deferred);
+      // Terminal backstop: the fork resolves the deferred reply; on any unhandled
+      // failure or defect still resolve it so the user isn't stuck on "Sideline
+      // is thinking…". Mirrors the profile-complete / event-create backstop.
+      const followUpWithBackstop = followUp.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logError('roster-approval: unexpected failure', cause).pipe(
+            Effect.andThen(
+              rest
+                .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+                  payload: {
+                    content: m.bot_roster_ephemeral_error({}, { locale: userLocale(interaction) }),
+                  },
+                })
+                .pipe(
+                  Effect.catchTag(
+                    ['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'],
+                    (e) => Effect.logError('Failed to update roster-approval error response', e),
+                  ),
+                ),
+            ),
+          ),
+        ),
+      );
+      return Effect.as(Effect.forkDetach(followUpWithBackstop), deferred);
     }),
   );
 
