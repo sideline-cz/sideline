@@ -1,7 +1,7 @@
 {
   "private": true,
   "name": "@sideline/i18n",
-  "version": "0.18.4",
+  "version": "0.18.5",
   "type": "module",
   "license": "MIT",
   "description": "Shared translation messages for Sideline",

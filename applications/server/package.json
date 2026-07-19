@@ -1,7 +1,7 @@
 {
   "name": "@sideline/server",
   "private": true,
-  "version": "0.38.6",
+  "version": "0.38.7",
   "type": "module",
   "license": "MIT",
   "description": "The server template",
