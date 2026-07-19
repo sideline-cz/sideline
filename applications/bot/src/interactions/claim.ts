@@ -1,14 +1,47 @@
 import { Discord as DiscordSchemas, Event, Team } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
-import { DiscordREST } from 'dfx/DiscordREST';
+import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction, MessageComponentData } from 'dfx/Interactions/index';
 import * as Discord from 'dfx/types';
 import { Effect, Metric, Option, Schema } from 'effect';
-import { userLocale } from '~/locale.js';
+import { type Locale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { interactionUserId } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
+
+/**
+ * Terminal backstop for a detached fork that resolves a deferred ephemeral
+ * reply. On ANY unhandled failure or defect (e.g. a transient `RpcClientError`
+ * or a server-side `LogicError.die` surfaced as a defect) it logs the cause and
+ * still writes a generic error message, so the user is never left on "Sideline
+ * is thinking…". Mirrors the profile-complete / event-create backstop.
+ */
+const withBackstop =
+  (
+    rest: DiscordRestService,
+    interaction: Discord.APIInteraction,
+    locale: Locale,
+    context: string,
+  ) =>
+  <A, E, R>(work: Effect.Effect<A, E, R>) =>
+    work.pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError(context, cause).pipe(
+          Effect.andThen(
+            rest
+              .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+                payload: { content: m.bot_claim_error({}, { locale }) },
+              })
+              .pipe(
+                Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (e) =>
+                  Effect.logError('Failed to update claim error response', e),
+                ),
+              ),
+          ),
+        ),
+      ),
+    );
 
 const decodeSnowflake = Schema.decodeUnknownSync(DiscordSchemas.Snowflake);
 const decodeEventId = Schema.decodeUnknownSync(Event.EventId);
@@ -87,7 +120,14 @@ export const ClaimButton = Ix.messageComponent(
         type: Discord.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
         data: { flags: Discord.MessageFlags.Ephemeral },
       };
-      return Effect.as(Effect.forkDetach(claimAndFollowUp), deferred);
+      return Effect.as(
+        Effect.forkDetach(
+          claimAndFollowUp.pipe(
+            withBackstop(rest, interaction, locale, 'claim: unexpected failure'),
+          ),
+        ),
+        deferred,
+      );
     }),
     Effect.withSpan('interaction/claim-button'),
   ),
@@ -156,7 +196,14 @@ export const UnclaimButton = Ix.messageComponent(
         type: Discord.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
         data: { flags: Discord.MessageFlags.Ephemeral },
       };
-      return Effect.as(Effect.forkDetach(unclaimAndFollowUp), deferred);
+      return Effect.as(
+        Effect.forkDetach(
+          unclaimAndFollowUp.pipe(
+            withBackstop(rest, interaction, locale, 'unclaim: unexpected failure'),
+          ),
+        ),
+        deferred,
+      );
     }),
     Effect.withSpan('interaction/unclaim-button'),
   ),

@@ -970,6 +970,7 @@
   "bot_claim_event_started": "This training has already started.",
   "bot_claim_release_not_claimer": "Only the coach who claimed this training can release it.",
   "bot_claim_success": "You've claimed this training.",
+  "bot_claim_error": "Something went wrong. Please try again.",
   "bot_claim_release_success": "You've released this training.",
   "bot_coaching_status_title": "Today's training",
   "bot_coaching_status_description": "Coached by {coach} today. See you there!",

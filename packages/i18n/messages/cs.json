@@ -970,6 +970,7 @@
   "bot_claim_event_started": "Tento trénink už začal.",
   "bot_claim_release_not_claimer": "Uvolnit trénink může jen ten trenér, který si ho vzal.",
   "bot_claim_success": "Vzal/a sis tento trénink.",
+  "bot_claim_error": "Něco se nepovedlo. Zkus to prosím znovu.",
   "bot_claim_release_success": "Uvolnil/a jsi tento trénink.",
   "bot_coaching_status_title": "Dnešní trénink",
   "bot_coaching_status_description": "Dnes vede {coach}. Uvidíme se tam!",
