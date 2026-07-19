@@ -93,11 +93,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-      
-      - name: Report new version to ops
-        uses: peter-evans/repository-dispatch@v4
-        with:
-          event-type: deploy
-          repository: maxa-ondrej/majksa-ops
-          token: ${{ secrets.GH_PAT }}
-          client-payload: '{"env":"dev","app":"sideline","service":"${{ matrix.app }}","version":"${{ steps.package.outputs.version }}"}'
+      # MajNet consumes the published image via the GHCR registry_package webhook
+      # (the version tag is recorded as a release); no external deploy dispatch.
