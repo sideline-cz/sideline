@@ -491,6 +491,7 @@
   "bot_rsvp_not_group_member": "You are not in the group assigned to this event.",
   "bot_rsvp_event_not_found": "Event not found.",
   "bot_rsvp_user_error": "Could not identify your Discord user.",
+  "bot_rsvp_error": "Something went wrong. Please try again.",
   "bot_embed_when": "📅 When",
   "bot_embed_all_day": "All day",
   "bot_embed_where": "📍 Where",

@@ -19,6 +19,39 @@ import { formatNameWithMention } from '~/rest/utils.js';
 import { interactionUserId } from '~/schemas.js';
 import { SyncRpc, type SyncRpcClient } from '~/services/SyncRpc.js';
 
+/**
+ * Terminal backstop for a detached fork that resolves a deferred ephemeral
+ * reply. On ANY unhandled failure or defect (e.g. a transient `RpcClientError`
+ * or a server-side `LogicError.die` surfaced as a defect) it logs the cause and
+ * still writes a generic error message, so the user is never left on "Sideline
+ * is thinking…". Mirrors the profile-complete / event-create backstop.
+ */
+const withBackstop =
+  (
+    rest: DiscordRestService,
+    interaction: Discord.APIInteraction,
+    locale: Locale,
+    context: string,
+  ) =>
+  <A, E, R>(work: Effect.Effect<A, E, R>) =>
+    work.pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError(context, cause).pipe(
+          Effect.andThen(
+            rest
+              .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+                payload: { content: m.bot_rsvp_error({}, { locale }) },
+              })
+              .pipe(
+                Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (e) =>
+                  Effect.logError('Failed to update RSVP error response', e),
+                ),
+              ),
+          ),
+        ),
+      ),
+    );
+
 const localizeRsvpResponse = (response: EventRsvp.RsvpResponse, locale: Locale): string => {
   switch (response) {
     case 'yes':
@@ -311,7 +344,14 @@ export const RsvpButton = Ix.messageComponent(
         type: Discord.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
         data: { flags: Discord.MessageFlags.Ephemeral },
       };
-      return Effect.as(Effect.forkDetach(submitAndFollowUp), deferred);
+      return Effect.as(
+        Effect.forkDetach(
+          submitAndFollowUp.pipe(
+            withBackstop(rest, interaction, locale, 'rsvp-submit: unexpected failure'),
+          ),
+        ),
+        deferred,
+      );
     }),
     Effect.withSpan('interaction/rsvp-button'),
   ),
@@ -471,7 +511,14 @@ export const RsvpClearMessageButton = Ix.messageComponent(
         type: Discord.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
         data: { flags: Discord.MessageFlags.Ephemeral },
       };
-      return Effect.as(Effect.forkDetach(clearAndFollowUp), deferred);
+      return Effect.as(
+        Effect.forkDetach(
+          clearAndFollowUp.pipe(
+            withBackstop(rest, interaction, locale, 'rsvp-clear: unexpected failure'),
+          ),
+        ),
+        deferred,
+      );
     }),
     Effect.withSpan('interaction/rsvp-clear-message-button'),
   ),
@@ -600,7 +647,14 @@ export const RsvpModal = Ix.modalSubmit(
         type: Discord.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
         data: { flags: Discord.MessageFlags.Ephemeral },
       };
-      return Effect.as(Effect.forkDetach(submitAndFollowUp), deferred);
+      return Effect.as(
+        Effect.forkDetach(
+          submitAndFollowUp.pipe(
+            withBackstop(rest, interaction, locale, 'rsvp-submit: unexpected failure'),
+          ),
+        ),
+        deferred,
+      );
     }),
     Effect.withSpan('interaction/rsvp-modal'),
   ),

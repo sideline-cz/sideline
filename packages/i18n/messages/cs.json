@@ -508,6 +508,7 @@
   "bot_rsvp_not_group_member": "Nejste členem skupiny přiřazené k této události.",
   "bot_rsvp_event_not_found": "Událost nenalezena.",
   "bot_rsvp_user_error": "Nepodařilo se identifikovat vašeho Discord uživatele.",
+  "bot_rsvp_error": "Něco se nepovedlo. Zkus to prosím znovu.",
   "bot_embed_when": "📅 Kdy",
   "bot_embed_all_day": "Celý den",
   "bot_embed_where": "📍 Kde",
