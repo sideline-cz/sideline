@@ -1,5 +1,15 @@
 # @sideline/docs
 
+## 0.4.5
+
+### Patch Changes
+
+- [#501](https://github.com/maxa-ondrej/sideline/pull/501) [`9933852`](https://github.com/maxa-ondrej/sideline/commit/9933852e34ed10e43a0a90fded2dc59ed5cf8f60) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Carpool improvements:
+
+  - **Stable car ordering** — cars are now numbered in creation order (oldest is car 1, newly added cars append as the next number). Previously the board sorted by a random UUID, so adding a car could renumber the existing one.
+  - **Change seats** — a car's owner can update the seat count from the car thread. Reducing below the number of people already in the car is blocked.
+  - **Kick passenger** — a car's owner can remove a specific passenger from their car (also removes them from the car thread).
+
 ## 0.4.4
 
 ### Patch Changes

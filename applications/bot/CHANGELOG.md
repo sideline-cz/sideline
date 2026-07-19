@@ -1,5 +1,21 @@
 # @sideline/bot
 
+## 0.30.5
+
+### Patch Changes
+
+- [#503](https://github.com/maxa-ondrej/sideline/pull/503) [`bc659ac`](https://github.com/maxa-ondrej/sideline/commit/bc659acda71580cef7133ffcd2159e0802f66fb0) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Reject invalid input in the carpool "change seats" modal instead of silently resetting the car to 4 seats. Unlike adding a car (where an unparseable value sensibly defaults to 4), an out-of-range entry such as `0` or `9` when _updating_ an existing car now returns a validation error and leaves the car unchanged.
+
+- [#501](https://github.com/maxa-ondrej/sideline/pull/501) [`9933852`](https://github.com/maxa-ondrej/sideline/commit/9933852e34ed10e43a0a90fded2dc59ed5cf8f60) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Carpool improvements:
+
+  - **Stable car ordering** — cars are now numbered in creation order (oldest is car 1, newly added cars append as the next number). Previously the board sorted by a random UUID, so adding a car could renumber the existing one.
+  - **Change seats** — a car's owner can update the seat count from the car thread. Reducing below the number of people already in the car is blocked.
+  - **Kick passenger** — a car's owner can remove a specific passenger from their car (also removes them from the car thread).
+
+- Updated dependencies [[`bc659ac`](https://github.com/maxa-ondrej/sideline/commit/bc659acda71580cef7133ffcd2159e0802f66fb0), [`9933852`](https://github.com/maxa-ondrej/sideline/commit/9933852e34ed10e43a0a90fded2dc59ed5cf8f60)]:
+  - @sideline/i18n@0.18.4
+  - @sideline/domain@0.37.4
+
 ## 0.30.4
 
 ### Patch Changes
