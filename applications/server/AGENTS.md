@@ -1244,6 +1244,7 @@ Rules:
 2. **The tiebreaker direction must match the leading key's direction.** `ORDER BY logged_at DESC, id DESC` (not `id ASC`) so the most recent row with the same timestamp is consistently first on every page. Mixing directions across keys breaks the "lexicographic over keys" intuition operators rely on when paginating.
 3. **Do not introduce a new server-generated tiebreaker column** (e.g. a `sequence_no SERIAL`) to solve this — the `id UUID` column already provides a stable order, and a UUID's natural ordering is fine for a tiebreaker (it is consistent within a single query plan; the absolute order between two UUIDs is not semantically meaningful and never should be relied on by callers).
 4. **Migration is silent.** Adding a tiebreaker to an existing ORDER BY only narrows the previously-undefined order — it never changes a previously-defined order. No data backfill is needed.
+5. **Never ORDER BY a random UUID primary key as the LEADING (primary) sort key of a user-facing list.** Because `gen_random_uuid()` order is not semantically meaningful (see rule 3), sorting a list by the PK produces a visually random, insertion-order-unrelated ordering. Order by the row's server-set `created_at` instead and use the PK only as the final tiebreaker. Reference: `CarpoolsRepository.findCarpoolViewQuery` selects `cc.created_at AS car_created_at` solely so the car rows can `ORDER BY car_created_at NULLS LAST, row_kind` — the earlier `ORDER BY car_id` sorted cars in random UUID order.
 
 ## Postgres Type Conventions
 

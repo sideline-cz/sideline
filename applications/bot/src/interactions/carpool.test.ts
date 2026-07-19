@@ -3,13 +3,17 @@
 import type { Carpool, Discord } from '@sideline/domain';
 import { CarpoolRpcModels } from '@sideline/domain';
 import { DiscordREST, type DiscordRestService } from 'dfx/DiscordREST';
-import { Interaction } from 'dfx/Interactions/index';
+import { Interaction, ModalSubmitData } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
 import { Effect, Layer, Option, Schema } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CarpoolAddButton,
   CarpoolAssignButton,
+  CarpoolCapacityButton,
+  CarpoolCapacityModal,
+  CarpoolKickButton,
+  CarpoolKickPickSelect,
   CarpoolLeaveButton,
   CarpoolRemoveButton,
   CarpoolReserveButton,
@@ -156,6 +160,8 @@ interface SyncRpcStubOptions {
   'Carpool/AddCar'?: ReturnType<typeof vi.fn>;
   'Carpool/GetCarpoolView'?: ReturnType<typeof vi.fn>;
   'Carpool/SaveCarThreadId'?: ReturnType<typeof vi.fn>;
+  'Carpool/UpdateCarCapacity'?: ReturnType<typeof vi.fn>;
+  'Carpool/KickPassenger'?: ReturnType<typeof vi.fn>;
 }
 
 const makeSyncRpcStub = (options: SyncRpcStubOptions = {}) => {
@@ -190,6 +196,12 @@ const makeSyncRpcStub = (options: SyncRpcStubOptions = {}) => {
       }
       if (prop === 'Carpool/GetCarpoolView') {
         return vi.fn(() => Effect.succeed(Option.some(makeCarpoolView())));
+      }
+      if (prop === 'Carpool/UpdateCarCapacity') {
+        return vi.fn(() => Effect.succeed(makeCarpoolViewWithCar(CAR_ID, THREAD_ID)));
+      }
+      if (prop === 'Carpool/KickPassenger') {
+        return vi.fn(() => Effect.succeed(makeCarpoolViewWithCar(CAR_ID, THREAD_ID)));
       }
       return vi.fn(() => Effect.succeed(undefined));
     },
@@ -264,6 +276,70 @@ const runHandler = async (
     ) as Effect.Effect<unknown, never, never>,
   );
   // Allow microtask queue to flush so forkDetach tasks complete
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return response;
+};
+
+// ---------------------------------------------------------------------------
+// Modal interaction fixture + runner (mirrors event-create.test.ts)
+// ---------------------------------------------------------------------------
+
+const makeModalInteraction = (
+  customId: string,
+  fields: Record<string, string>,
+  userId: string = USER_DISCORD_ID,
+): DiscordTypes.APIInteraction =>
+  ({
+    id: '1234567890' as DiscordTypes.Snowflake,
+    application_id: APP_ID,
+    token: INTERACTION_TOKEN,
+    version: 1,
+    type: DiscordTypes.InteractionTypes.MODAL_SUBMIT,
+    guild_id: GUILD_ID,
+    member: {
+      user: {
+        id: userId as DiscordTypes.Snowflake,
+        username: 'testuser',
+        discriminator: '0001',
+        global_name: null,
+        avatar: null,
+      },
+      roles: [],
+      joined_at: '2024-01-01T00:00:00Z',
+      deaf: false,
+      mute: false,
+      permissions: '8',
+    },
+    locale: 'en-US',
+    data: {
+      custom_id: customId,
+      components: Object.entries(fields).map(([custom_id, value]) => ({
+        type: 1,
+        components: [{ type: 4, custom_id, value }],
+      })),
+    },
+  }) as unknown as DiscordTypes.APIInteraction;
+
+const runModalHandler = async (
+  handler: Effect.Effect<unknown, unknown, unknown>,
+  restLayer: Layer.Layer<DiscordREST>,
+  rpcLayer: Layer.Layer<SyncRpc>,
+  interaction: DiscordTypes.APIInteraction,
+) => {
+  const response = await Effect.runPromise(
+    handler.pipe(
+      Effect.provide(Layer.succeed(Interaction, interaction)),
+      Effect.provide(
+        Layer.succeed(
+          ModalSubmitData,
+          interaction.data as unknown as InstanceType<typeof ModalSubmitData>,
+        ),
+      ),
+      Effect.provide(restLayer),
+      Effect.provide(rpcLayer),
+    ) as Effect.Effect<unknown, never, never>,
+  );
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
   return response;
@@ -573,6 +649,160 @@ describe('carpool-assign interaction — USER_SELECT component shape', () => {
       custom_id: `carpool-assign-pick:${CAR_ID}`,
       placeholder: 'Who do you want to put in the car?',
     });
+  });
+});
+
+describe('carpool-capacity interaction', () => {
+  it('button renders a MODAL with a single carpool_capacity text input', async () => {
+    const interaction = makeComponentInteraction(`carpool-capacity:${CAR_ID}`);
+    const response = await Effect.runPromise(
+      CarpoolCapacityButton.handle.pipe(
+        Effect.provide(Layer.succeed(Interaction, interaction)),
+      ) as Effect.Effect<unknown, never, never>,
+    );
+
+    const data = (
+      response as {
+        type: number;
+        data: {
+          custom_id: string;
+          components: ReadonlyArray<{
+            type: number;
+            components: ReadonlyArray<{ type: number; custom_id: string }>;
+          }>;
+        };
+      }
+    ).data;
+
+    expect((response as { type: number }).type).toBe(DiscordTypes.InteractionCallbackTypes.MODAL);
+    expect(data.custom_id).toBe(`carpool-capacity-modal:${CAR_ID}`);
+    expect(data.components).toHaveLength(1);
+    const row = data.components[0];
+    expect(row?.components).toHaveLength(1);
+    expect(row?.components[0]?.custom_id).toBe('carpool_capacity');
+  });
+
+  it('modal submit calls Carpool/UpdateCarCapacity with the parsed capacity, then rebuilds the board', async () => {
+    const updateFn = vi.fn(() => Effect.succeed(makeCarpoolViewWithCar(CAR_ID, THREAD_ID)));
+    const rpcStub = makeSyncRpcStub({ 'Carpool/UpdateCarCapacity': updateFn });
+    const restStub = makeRestStub();
+
+    const interaction = makeModalInteraction(`carpool-capacity-modal:${CAR_ID}`, {
+      carpool_capacity: '6',
+    });
+    await runModalHandler(CarpoolCapacityModal.handle, restStub.layer, rpcStub.layer, interaction);
+
+    expect(updateFn).toHaveBeenCalledWith(expect.objectContaining({ car_id: CAR_ID, capacity: 6 }));
+    expect(restStub.updateMessage).toHaveBeenCalledWith(
+      CHANNEL_ID,
+      MESSAGE_ID,
+      expect.objectContaining({ allowed_mentions: { parse: [] } }),
+    );
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+  });
+
+  it('CarpoolCapacityBelowOccupancy → localized ephemeral error', async () => {
+    const updateFn = vi.fn(() => Effect.fail(new CarpoolRpcModels.CarpoolCapacityBelowOccupancy()));
+    const rpcStub = makeSyncRpcStub({ 'Carpool/UpdateCarCapacity': updateFn });
+    const restStub = makeRestStub();
+
+    const interaction = makeModalInteraction(`carpool-capacity-modal:${CAR_ID}`, {
+      carpool_capacity: '1',
+    });
+    await runModalHandler(CarpoolCapacityModal.handle, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const payload = JSON.stringify(restStub.updateOriginalWebhookMessage.mock.calls[0]);
+    expect(payload.length).toBeGreaterThan(0);
+  });
+});
+
+// Regression guard: locks the USER_SELECT component JSON shape produced by
+// CarpoolKickButton, mirroring the carpool-assign shape guard above.
+describe('carpool-kick interaction — USER_SELECT component shape', () => {
+  it('renders a single action row with one USER_SELECT (type 5) component with the exact custom_id and placeholder', async () => {
+    const interaction = makeComponentInteraction(`carpool-kick:${CAR_ID}`);
+    const response = await Effect.runPromise(
+      CarpoolKickButton.handle.pipe(
+        Effect.provide(Layer.succeed(Interaction, interaction)),
+      ) as Effect.Effect<unknown, never, never>,
+    );
+
+    const data = (
+      response as {
+        type: number;
+        data: {
+          components: ReadonlyArray<{
+            type: number;
+            components: ReadonlyArray<{ type: number; custom_id: string; placeholder: string }>;
+          }>;
+        };
+      }
+    ).data;
+
+    expect(data.components).toHaveLength(1);
+    const row = data.components[0];
+    expect(row?.type).toBe(1);
+    expect(row?.components).toHaveLength(1);
+
+    const select = row?.components[0];
+    expect(select).toEqual({
+      type: 5,
+      custom_id: `carpool-kick-pick:${CAR_ID}`,
+      placeholder: 'Who do you want to remove?',
+    });
+  });
+});
+
+describe('carpool-kick-pick interaction', () => {
+  it('calls Carpool/KickPassenger with car_id and target, removes target from thread, rebuilds board', async () => {
+    const targetUserId = '600000000000000050';
+    const kickFn = vi.fn(() => Effect.succeed(makeCarpoolViewWithCar(CAR_ID, THREAD_ID)));
+    const rpcStub = makeSyncRpcStub({ 'Carpool/KickPassenger': kickFn });
+    const restStub = makeRestStub();
+
+    const interaction = {
+      ...makeComponentInteraction(`carpool-kick-pick:${CAR_ID}`),
+      data: {
+        component_type: 5,
+        custom_id: `carpool-kick-pick:${CAR_ID}`,
+        values: [targetUserId],
+      },
+    } as unknown as DiscordTypes.APIInteraction;
+
+    await runHandler(CarpoolKickPickSelect.handle, restStub.layer, rpcStub.layer, interaction);
+
+    expect(kickFn).toHaveBeenCalledWith(
+      expect.objectContaining({ car_id: CAR_ID, target_discord_user_id: targetUserId }),
+    );
+    expect(restStub.deleteThreadMember).toHaveBeenCalledWith(THREAD_ID, targetUserId);
+    expect(restStub.updateMessage).toHaveBeenCalledWith(
+      CHANNEL_ID,
+      MESSAGE_ID,
+      expect.objectContaining({ allowed_mentions: { parse: [] } }),
+    );
+  });
+
+  it('CarpoolTargetNotInCar → localized ephemeral error', async () => {
+    const targetUserId = '600000000000000050';
+    const kickFn = vi.fn(() => Effect.fail(new CarpoolRpcModels.CarpoolTargetNotInCar()));
+    const rpcStub = makeSyncRpcStub({ 'Carpool/KickPassenger': kickFn });
+    const restStub = makeRestStub();
+
+    const interaction = {
+      ...makeComponentInteraction(`carpool-kick-pick:${CAR_ID}`),
+      data: {
+        component_type: 5,
+        custom_id: `carpool-kick-pick:${CAR_ID}`,
+        values: [targetUserId],
+      },
+    } as unknown as DiscordTypes.APIInteraction;
+
+    await runHandler(CarpoolKickPickSelect.handle, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const payload = JSON.stringify(restStub.updateOriginalWebhookMessage.mock.calls[0]);
+    expect(payload.length).toBeGreaterThan(0);
   });
 });
 

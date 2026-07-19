@@ -39,13 +39,19 @@ The capacity must be between 1 and 8 (inclusive). You can only have one car per 
 
 ### Your car's private thread
 
-After you add a car the bot creates a private Discord thread — only you and the passengers in your car can see it. The thread contains three buttons:
+After you add a car the bot creates a private Discord thread — only you and the passengers in your car can see it. The thread contains five buttons:
 
 - **Assign passenger** — pick a team member from a Discord user-select menu to add them to your car on their behalf.
 - **Leave** — for passengers to leave the car directly from the thread (see [Leaving a car](#leaving-a-car)).
 - **Remove car** — remove your car entirely (see [Removing a car](#removing-a-car)).
+- **Change seats** — update how many seats your car has (see [Changing your seat count](#changing-your-seat-count-owner-only)).
+- **Kick passenger** — remove a specific passenger from your car (see [Removing a passenger](#removing-a-passenger-owner-only)).
 
 You are automatically added to the thread when the car is created.
+
+<Aside type="note" title="Car numbers">
+  Cars are numbered in the order they were added — the first car offered on a board is always **Car 1**, and new cars append as the next number. Removing a car does shift the numbers of any cars added after it.
+</Aside>
 
 <Aside type="note" title="Thread creation">
   If Discord cannot create the thread (for example, because of channel permissions), your car is still added to the board — it just won't have a private thread. Everything else continues to work normally.
@@ -107,6 +113,36 @@ Car owners can remove their car from the board at any time using the **Remove ca
   Removing a car is permanent. Passengers are ejected from the thread and will need to reserve a seat in another car.
 </Aside>
 
+## Changing your seat count (owner only)
+
+If your plans change — for example, you find room for one more passenger, or someone drops out and you want fewer seats shown as available — you can update your car's capacity at any time.
+
+<Steps>
+
+1. Open your car's private thread.
+2. Click **Change seats**.
+3. Enter the new total number of seats (including yourself as the driver).
+4. Click **Submit**. The board refreshes to show the new capacity.
+
+</Steps>
+
+The new value must be between 1 and 8 (inclusive). You cannot reduce the seat count below the number of people currently in the car (owner plus passengers) — remove a passenger first if you need to go lower.
+
+## Removing a passenger (owner only)
+
+If a passenger asks to drop out but cannot click **Leave** themselves, or you need to free up their seat for someone else, you can remove them directly.
+
+<Steps>
+
+1. Open your car's private thread.
+2. Click **Kick passenger**.
+3. Select the passenger from the user-select menu.
+4. Click **Submit**. The passenger is removed from your car and from the private thread.
+
+</Steps>
+
+The removed passenger is not notified privately, but they will no longer see the thread and the board's passenger list updates immediately. You can only remove someone who currently has a seat in your car.
+
 ## Troubleshooting
 
 | Problem | Likely cause |
@@ -115,6 +151,8 @@ Car owners can remove their car from the board at any time using the **Remove ca
 | "Car is full" error | All seats (including the driver's) are taken. Find another car. |
 | "Already in another car" error | You already have a seat in a different car on this board, or you own a car on this board. A member can only be in one car per board (as driver or passenger, not both). |
 | Cannot see the private thread | You haven't reserved a seat (or been assigned one) in that car yet. |
+| "Seats can't be fewer than the people already in the car" error | You tried to reduce your car's capacity below its current number of occupants. Remove a passenger first, then lower the seat count. |
+| "That person isn't in this car" error | The passenger you selected in **Kick passenger** doesn't currently have a seat in your car (they may have already left). |
 
 ## See also
 

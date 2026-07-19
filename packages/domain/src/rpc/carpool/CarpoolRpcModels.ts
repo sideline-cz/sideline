@@ -119,3 +119,13 @@ export class CarpoolForbidden extends Schema.TaggedErrorClass<CarpoolForbidden>(
   'CarpoolForbidden',
   {},
 ) {}
+
+export class CarpoolCapacityBelowOccupancy extends Schema.TaggedErrorClass<CarpoolCapacityBelowOccupancy>()(
+  'CarpoolCapacityBelowOccupancy',
+  {},
+) {}
+
+export class CarpoolTargetNotInCar extends Schema.TaggedErrorClass<CarpoolTargetNotInCar>()(
+  'CarpoolTargetNotInCar',
+  {},
+) {}

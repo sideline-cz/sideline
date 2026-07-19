@@ -107,6 +107,8 @@ flowchart LR
         UC_BOT_CARPOOL_ASSIGN["Assign Seat to Member"]
         UC_BOT_CARPOOL_LEAVE["Leave Car"]
         UC_BOT_CARPOOL_REMOVE["Remove Own Car"]
+        UC_BOT_CARPOOL_CAPACITY["Change Car Seat Count"]
+        UC_BOT_CARPOOL_KICK["Kick Passenger from Car"]
         UC_BOT_SUMMARIZE["Summarize Channel via Bot"]
     end
 
@@ -117,6 +119,8 @@ flowchart LR
         UC_CARPOOL_ASSIGN_SEAT["Assign Seat to Member"]
         UC_CARPOOL_LEAVE_SEAT["Leave a Seat"]
         UC_CARPOOL_REMOVE_CAR["Remove Own Car"]
+        UC_CARPOOL_UPDATE_CAPACITY["Change Car Seat Count"]
+        UC_CARPOOL_KICK_PASSENGER["Kick Passenger from Car"]
     end
 
     subgraph NOTIFICATIONS["Notifications"]
@@ -211,6 +215,8 @@ flowchart LR
     CP --> UC_CARPOOL_ADD_CAR
     CP --> UC_CARPOOL_ASSIGN_SEAT
     CP --> UC_CARPOOL_REMOVE_CAR
+    CP --> UC_CARPOOL_UPDATE_CAPACITY
+    CP --> UC_CARPOOL_KICK_PASSENGER
 
     PL --> UC_CARPOOL_ADD_CAR
     PL --> UC_CARPOOL_RESERVE_SEAT
@@ -242,6 +248,8 @@ flowchart LR
     AD --> UC_CARPOOL_ADD_CAR
     AD --> UC_CARPOOL_ASSIGN_SEAT
     AD --> UC_CARPOOL_REMOVE_CAR
+    AD --> UC_CARPOOL_UPDATE_CAPACITY
+    AD --> UC_CARPOOL_KICK_PASSENGER
     AD --> UC_LIST_CHANNELS
     AD --> UC_CREATE_CHANNEL_MANAGED
     AD --> UC_GET_CHANNEL
@@ -283,6 +291,8 @@ flowchart LR
     BOT --> UC_BOT_CARPOOL_ASSIGN
     BOT --> UC_BOT_CARPOOL_LEAVE
     BOT --> UC_BOT_CARPOOL_REMOVE
+    BOT --> UC_BOT_CARPOOL_CAPACITY
+    BOT --> UC_BOT_CARPOOL_KICK
     BOT --> UC_BOT_SUMMARIZE
 
     SYS --> UC_CREATE_EVENT
