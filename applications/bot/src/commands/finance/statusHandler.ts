@@ -97,7 +97,33 @@ export const statusHandler = Interaction.asEffect().pipe(
       type: DiscordTypes.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
       data: { flags: DiscordTypes.MessageFlags.Ephemeral },
     };
-    return Effect.as(Effect.forkDetach(work), deferredEphemeral);
+    // Terminal backstop: the fork resolves the deferred reply; on any unhandled
+    // failure or defect still resolve it so the user isn't stuck on "Sideline is
+    // thinking…". Mirrors the profile-complete / event-create backstop.
+    return Effect.as(
+      Effect.forkDetach(
+        work.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError('finance-status: unexpected failure', cause).pipe(
+              Effect.andThen(DiscordREST.asEffect()),
+              Effect.flatMap((rest) =>
+                rest
+                  .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+                    payload: { content: m.bot_finance_error_generic({}, { locale }) },
+                  })
+                  .pipe(
+                    Effect.catchTag(
+                      ['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'],
+                      (e) => Effect.logError('Failed to update finance status error response', e),
+                    ),
+                  ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      deferredEphemeral,
+    );
   }),
   Effect.withSpan('command/finance/status'),
 );
