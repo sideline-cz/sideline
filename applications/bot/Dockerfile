@@ -24,7 +24,9 @@ COPY --from=build --parents /app/packages/*/package.json /app/packages/*/dist /
 COPY applications/bot/package.json applications/bot/
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 COPY --from=build /app/applications/bot/build/esm applications/bot/build
+COPY applications/bot/docker-entrypoint.sh /app/applications/bot/docker-entrypoint.sh
+RUN chmod +x /app/applications/bot/docker-entrypoint.sh
 
 EXPOSE 9000
 
-CMD ["node", "applications/bot/build/run.js"]
+CMD ["/app/applications/bot/docker-entrypoint.sh"]

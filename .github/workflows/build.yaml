@@ -1,0 +1,32 @@
+name: MajNet build
+
+# Build + push each app's container image to GHCR for MajNet (ADR 0018 monorepo,
+# bring-your-own CI). Each matrix entry calls the reusable build-tier pipeline
+# once, publishing the NESTED image ghcr.io/<owner>/<repo>/<app> with build-tier
+# tags (`pr-<N>` → ephemeral preview, `sha-<sha>`+`latest` → testing). The GHCR
+# publish fires a registry_package webhook whose package name is `<repo>/<app>`;
+# the bot maps it to the MajNet app `<repo>-<app>` and drives the deploy.
+#
+# All app Dockerfiles build from the repo root (they COPY the workspace), so the
+# context is `.` and each entry points at its own Dockerfile.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [proxy, server, web, docs, bot]
+    permissions:
+      contents: read
+      packages: write
+    uses: majnet/majnet/.github/workflows/app-build.yaml@main
+    with:
+      app: ${{ matrix.app }}
+      context: .
+      dockerfile: applications/${{ matrix.app }}/Dockerfile
