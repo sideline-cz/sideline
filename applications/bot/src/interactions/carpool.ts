@@ -356,6 +356,18 @@ export const CarpoolAddModal = Ix.modalSubmit(
                         custom_id: `carpool-remove:${carId}`,
                       }),
                     ]),
+                    UI.row([
+                      UI.button({
+                        style: DiscordTypes.ButtonStyleTypes.SECONDARY,
+                        label: m.bot_carpool_btn_capacity({}, { locale }),
+                        custom_id: `carpool-capacity:${carId}`,
+                      }),
+                      UI.button({
+                        style: DiscordTypes.ButtonStyleTypes.SECONDARY,
+                        label: m.bot_carpool_btn_kick({}, { locale }),
+                        custom_id: `carpool-kick:${carId}`,
+                      }),
+                    ]),
                   ],
                 })
                 .pipe(
@@ -873,6 +885,140 @@ const _CarpoolRemoveButtonReg = Ix.messageComponent(
 );
 
 // ---------------------------------------------------------------------------
+// carpool-capacity:<car_id> button (thread, owner)
+// ---------------------------------------------------------------------------
+
+const _CarpoolCapacityButtonEffect = Effect.Do.pipe(
+  Effect.tap(() =>
+    Metric.update(
+      Metric.withAttributes(discordInteractionsTotal, { interaction_type: 'button' }),
+      1,
+    ),
+  ),
+  Effect.bind('interaction', () => Interaction.asEffect()),
+  Effect.let('data', ({ interaction }) => getComponentData(interaction)),
+  Effect.map(({ data, interaction }) => {
+    const parts = data.custom_id.split(':');
+    const carId = parts[1];
+    const locale = userLocale(interaction);
+
+    return {
+      type: DiscordTypes.InteractionCallbackTypes.MODAL,
+      data: {
+        custom_id: `carpool-capacity-modal:${carId}`,
+        title: m.bot_carpool_btn_capacity({}, { locale }),
+        components: [
+          UI.row([
+            UI.textInput({
+              custom_id: 'carpool_capacity',
+              label: m.bot_carpool_capacity_label({}, { locale }),
+              style: DiscordTypes.TextInputStyleTypes.SHORT,
+              required: true,
+              min_length: 1,
+              max_length: 1,
+              placeholder: '4',
+            }),
+          ]),
+        ],
+      },
+    };
+  }),
+  Effect.withSpan('interaction/carpool-capacity-button'),
+);
+
+export const CarpoolCapacityButton = Ix.messageComponent(
+  Ix.idStartsWith('carpool-capacity:'),
+  _CarpoolCapacityButtonEffect,
+);
+
+// ---------------------------------------------------------------------------
+// carpool-capacity-modal:<car_id> submit (thread, owner)
+// ---------------------------------------------------------------------------
+
+export const CarpoolCapacityModal = Ix.modalSubmit(
+  Ix.idStartsWith('carpool-capacity-modal:'),
+  Effect.Do.pipe(
+    Effect.tap(() =>
+      Metric.update(
+        Metric.withAttributes(discordInteractionsTotal, { interaction_type: 'modal' }),
+        1,
+      ),
+    ),
+    Effect.bind('data', () => ModalSubmitData.asEffect()),
+    Effect.bind('interaction', () => Interaction.asEffect()),
+    Effect.bind('rpc', () => SyncRpc.asEffect()),
+    Effect.bind('rest', () => DiscordREST.asEffect()),
+    Effect.flatMap(({ data, interaction, rpc, rest }) => {
+      const locale = userLocale(interaction);
+      const guildId = interaction.guild_id;
+      const discordUserIdOption = interactionUserId(interaction);
+
+      // custom_id format: carpool-capacity-modal:<car_id>
+      const modalParts = data.custom_id.split(':');
+      const carId = decodeCarId(modalParts[1]);
+
+      if (Option.isNone(discordUserIdOption)) {
+        return Effect.as(
+          Effect.forkDetach(
+            replyWebhook(rest, interaction, { content: m.bot_carpool_err_user({}, { locale }) }),
+          ),
+          ephemeralDeferred,
+        );
+      }
+
+      const discordUserId = discordUserIdOption.value;
+
+      // Extract capacity from modal; default to 4 on parse failure
+      const capacityRaw = modalFieldValue(data, 'carpool_capacity');
+      const capacity = capacityRaw !== undefined ? parseInt(capacityRaw, 10) : 4;
+      const capacityInt =
+        Number.isFinite(capacity) && capacity >= 1 && capacity <= 8 ? capacity : 4;
+
+      const updateAndFollowUp = rpc['Carpool/UpdateCarCapacity']({
+        guild_id: decodeSnowflake(guildId ?? ''),
+        discord_user_id: discordUserId,
+        car_id: carId,
+        capacity: capacityInt,
+      }).pipe(
+        Effect.flatMap((view) =>
+          rebuildBoard(rest, view).pipe(
+            Effect.flatMap(() =>
+              replyWebhook(rest, interaction, {
+                content: m.bot_carpool_capacity_changed({ n: capacityInt }, { locale }),
+              }),
+            ),
+          ),
+        ),
+        Effect.catchTag('CarpoolCapacityBelowOccupancy', () =>
+          replyWebhook(rest, interaction, {
+            content: m.bot_carpool_err_capacity_below_occupancy({}, { locale }),
+          }),
+        ),
+        Effect.catchTag('CarpoolNotCarOwner', () =>
+          replyWebhook(rest, interaction, { content: m.bot_carpool_err_not_owner({}, { locale }) }),
+        ),
+        Effect.catchTag('CarpoolCarNotFound', () =>
+          replyWebhook(rest, interaction, {
+            content: m.bot_carpool_err_car_not_found({}, { locale }),
+          }),
+        ),
+        Effect.catchTag('CarpoolNotMember', () =>
+          replyWebhook(rest, interaction, {
+            content: m.bot_carpool_err_not_member({}, { locale }),
+          }),
+        ),
+        Effect.catchTag('CarpoolGuildNotFound', () =>
+          replyWebhook(rest, interaction, { content: m.bot_carpool_no_guild({}, { locale }) }),
+        ),
+      );
+
+      return Effect.as(Effect.forkDetach(updateAndFollowUp), ephemeralDeferred);
+    }),
+    Effect.withSpan('interaction/carpool-capacity-modal'),
+  ),
+);
+
+// ---------------------------------------------------------------------------
 // carpool-assign:<car_id> button (thread, owner)
 // ---------------------------------------------------------------------------
 
@@ -1040,6 +1186,173 @@ const _CarpoolAssignPickSelectEffect = Effect.Do.pipe(
 export const CarpoolAssignPickSelect = Ix.messageComponent(
   Ix.idStartsWith('carpool-assign-pick:'),
   _CarpoolAssignPickSelectEffect,
+);
+
+// ---------------------------------------------------------------------------
+// carpool-kick:<car_id> button (thread, owner)
+// ---------------------------------------------------------------------------
+
+const _CarpoolKickButtonEffect = Effect.Do.pipe(
+  Effect.tap(() =>
+    Metric.update(
+      Metric.withAttributes(discordInteractionsTotal, { interaction_type: 'button' }),
+      1,
+    ),
+  ),
+  Effect.bind('interaction', () => Interaction.asEffect()),
+  Effect.let('data', ({ interaction }) => getComponentData(interaction)),
+  Effect.map(({ data, interaction }) => {
+    const parts = data.custom_id.split(':');
+    const carId = parts[1];
+    const locale = userLocale(interaction);
+
+    return {
+      type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        flags: DiscordTypes.MessageFlags.Ephemeral,
+        content: m.bot_carpool_kick_placeholder({}, { locale }),
+        components: [
+          UI.row([
+            UI.userSelect({
+              custom_id: `carpool-kick-pick:${carId}`,
+              placeholder: m.bot_carpool_kick_placeholder({}, { locale }),
+            }),
+          ]),
+        ],
+      },
+    };
+  }),
+  Effect.withSpan('interaction/carpool-kick-button'),
+);
+
+export const CarpoolKickButton = Ix.messageComponent(
+  Ix.idStartsWith('carpool-kick:'),
+  _CarpoolKickButtonEffect,
+);
+
+// ---------------------------------------------------------------------------
+// carpool-kick-pick:<car_id> user select submission
+// ---------------------------------------------------------------------------
+
+const _CarpoolKickPickSelectEffect = Effect.Do.pipe(
+  Effect.tap(() =>
+    Metric.update(
+      Metric.withAttributes(discordInteractionsTotal, { interaction_type: 'select' }),
+      1,
+    ),
+  ),
+  Effect.bind('interaction', () => Interaction.asEffect()),
+  Effect.let('data', ({ interaction }) => getComponentData(interaction)),
+  Effect.bind('rpc', () => SyncRpc.asEffect()),
+  Effect.bind('rest', () => DiscordREST.asEffect()),
+  Effect.flatMap(({ data, interaction, rpc, rest }) => {
+    const parts = data.custom_id.split(':');
+    const carId = decodeCarId(parts[1]);
+    const locale = userLocale(interaction);
+    const guildId = interaction.guild_id;
+    const discordUserIdOption = interactionUserId(interaction);
+
+    if (Option.isNone(discordUserIdOption)) {
+      return Effect.as(
+        Effect.forkDetach(
+          replyWebhook(rest, interaction, { content: m.bot_carpool_err_user({}, { locale }) }),
+        ),
+        ephemeralDeferred,
+      );
+    }
+
+    const discordUserId = discordUserIdOption.value;
+
+    const targetUserIdOption = Arr.head(data.values);
+
+    if (Option.isNone(targetUserIdOption)) {
+      return Effect.as(
+        Effect.forkDetach(
+          replyWebhook(rest, interaction, { content: m.bot_carpool_err_generic({}, { locale }) }),
+        ),
+        ephemeralDeferred,
+      );
+    }
+
+    const targetUserId = targetUserIdOption.value;
+
+    const kickAndFollowUp = rpc['Carpool/KickPassenger']({
+      guild_id: decodeSnowflake(guildId ?? ''),
+      discord_user_id: discordUserId,
+      car_id: carId,
+      target_discord_user_id: decodeSnowflake(targetUserId),
+    }).pipe(
+      Effect.flatMap((view) => {
+        const carThreadId = Arr.findFirst(view.cars, (c) => c.car_id === carId).pipe(
+          Option.flatMap((c) => c.thread_id),
+        );
+
+        const removeFromThread = Option.match(carThreadId, {
+          onNone: () => Effect.void,
+          onSome: (threadId) =>
+            rest.deleteThreadMember(decodeSnowflake(threadId), decodeSnowflake(targetUserId)).pipe(
+              Effect.asVoid,
+              Effect.catchTag('ErrorResponse', (e) =>
+                Effect.logWarning('Failed to remove user from thread', e),
+              ),
+              Effect.catchTag('HttpClientError', (e) =>
+                Effect.logWarning('Failed to remove user from thread', e),
+              ),
+              Effect.catchTag('RatelimitedResponse', (e) =>
+                Effect.logWarning('Failed to remove user from thread', e),
+              ),
+            ),
+        });
+
+        const updateMain = rebuildBoard(rest, view);
+
+        return Effect.all([removeFromThread, updateMain], {
+          concurrency: 'unbounded',
+        }).pipe(
+          Effect.flatMap(() =>
+            replyWebhook(rest, interaction, {
+              content: m.bot_carpool_kicked({ userId: targetUserId }, { locale }),
+              allowed_mentions: { parse: [] },
+            }),
+          ),
+        );
+      }),
+      Effect.catchTag('CarpoolTargetNotInCar', () =>
+        replyWebhook(rest, interaction, {
+          content: m.bot_carpool_err_target_not_in_car({}, { locale }),
+        }),
+      ),
+      Effect.catchTag('CarpoolNotCarOwner', () =>
+        replyWebhook(rest, interaction, { content: m.bot_carpool_err_not_owner({}, { locale }) }),
+      ),
+      Effect.catchTag('CarpoolTargetNotMember', () =>
+        replyWebhook(rest, interaction, {
+          content: m.bot_carpool_err_target_not_member({}, { locale }),
+        }),
+      ),
+      Effect.catchTag('CarpoolCarNotFound', () =>
+        replyWebhook(rest, interaction, {
+          content: m.bot_carpool_err_car_not_found({}, { locale }),
+        }),
+      ),
+      Effect.catchTag('CarpoolNotMember', () =>
+        replyWebhook(rest, interaction, {
+          content: m.bot_carpool_err_not_member({}, { locale }),
+        }),
+      ),
+      Effect.catchTag('CarpoolGuildNotFound', () =>
+        replyWebhook(rest, interaction, { content: m.bot_carpool_no_guild({}, { locale }) }),
+      ),
+    );
+
+    return Effect.as(Effect.forkDetach(kickAndFollowUp), ephemeralDeferred);
+  }),
+  Effect.withSpan('interaction/carpool-kick-pick-select'),
+);
+
+export const CarpoolKickPickSelect = Ix.messageComponent(
+  Ix.idStartsWith('carpool-kick-pick:'),
+  _CarpoolKickPickSelectEffect,
 );
 
 // Registration exports for interaction builder

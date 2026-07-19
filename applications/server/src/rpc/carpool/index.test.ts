@@ -26,6 +26,8 @@ const MEMBER_DISCORD_ID = '500000000000000011' as Discord.Snowflake;
 const NON_MEMBER_DISCORD_ID = '500000000000000012' as Discord.Snowflake;
 const MANAGER_MEMBER_ID = '00000000-0000-0000-0000-000000000051' as TeamMember.TeamMemberId;
 const MEMBER_MEMBER_ID = '00000000-0000-0000-0000-000000000052' as TeamMember.TeamMemberId;
+const NOT_IN_CAR_DISCORD_ID = '500000000000000013' as Discord.Snowflake;
+const NOT_IN_CAR_MEMBER_ID = '00000000-0000-0000-0000-000000000053' as TeamMember.TeamMemberId;
 const CHANNEL_ID = '500000000000000020' as Discord.Snowflake;
 const CARPOOL_ID = '00000000-0000-0000-0000-000000000060' as Carpool.CarpoolId;
 const CAR_ID_1 = '00000000-0000-0000-0000-000000000061' as Carpool.CarpoolCarId;
@@ -53,6 +55,15 @@ let leaveSeatCalls: Array<{ carId: Carpool.CarpoolCarId; teamMemberId: TeamMembe
 let removeCarCalls: Array<{
   carId: Carpool.CarpoolCarId;
   ownerTeamMemberId: TeamMember.TeamMemberId;
+}>;
+let updateCarCapacityCalls: Array<{
+  carId: Carpool.CarpoolCarId;
+  ownerTeamMemberId: TeamMember.TeamMemberId;
+  capacity: number;
+}>;
+let kickPassengerCalls: Array<{
+  carId: Carpool.CarpoolCarId;
+  targetTeamMemberId: TeamMember.TeamMemberId;
 }>;
 
 const makeCarpoolView = (carpoolId: Carpool.CarpoolId): CarpoolRpcModels.CarpoolView =>
@@ -101,6 +112,8 @@ const resetStores = () => {
   reserveSeatCalls = [];
   leaveSeatCalls = [];
   removeCarCalls = [];
+  updateCarCapacityCalls = [];
+  kickPassengerCalls = [];
 
   carpoolsStore.set(CARPOOL_ID, {
     id: CARPOOL_ID,
@@ -158,6 +171,18 @@ const MockTeamMembersRepository = Layer.succeed(TeamMembersRepository, {
           id: MEMBER_MEMBER_ID,
           team_id: TEAM_ID,
           user_id: 'user-member',
+          active: true,
+          role_names: ['Player'],
+          permissions: [] as string[],
+        }),
+      );
+    }
+    if (discordId === NOT_IN_CAR_DISCORD_ID) {
+      return Effect.succeed(
+        Option.some({
+          id: NOT_IN_CAR_MEMBER_ID,
+          team_id: TEAM_ID,
+          user_id: 'user-not-in-car',
           active: true,
           role_names: ['Player'],
           permissions: [] as string[],
@@ -277,6 +302,34 @@ const MockCarpoolsRepository = Layer.succeed(CarpoolsRepository, {
     }
     return Effect.succeed(Option.none());
   },
+  updateCarCapacity: (input: {
+    carId: Carpool.CarpoolCarId;
+    ownerTeamMemberId: TeamMember.TeamMemberId;
+    capacity: number;
+  }) => {
+    updateCarCapacityCalls.push({
+      carId: input.carId,
+      ownerTeamMemberId: input.ownerTeamMemberId,
+      capacity: input.capacity,
+    });
+    if (input.carId === CAR_ID_NON_OWNER) {
+      return Effect.fail(new CarpoolRpcModels.CarpoolNotCarOwner());
+    }
+    if (input.capacity === 1) {
+      return Effect.fail(new CarpoolRpcModels.CarpoolCapacityBelowOccupancy());
+    }
+    return Effect.void;
+  },
+  kickPassenger: (input: {
+    carId: Carpool.CarpoolCarId;
+    targetTeamMemberId: TeamMember.TeamMemberId;
+  }) => {
+    kickPassengerCalls.push({
+      carId: input.carId,
+      targetTeamMemberId: input.targetTeamMemberId,
+    });
+    return Effect.succeed(input.targetTeamMemberId !== NOT_IN_CAR_MEMBER_ID);
+  },
 } as any);
 
 const TestLayer = CarpoolsRpcLive.pipe(
@@ -312,6 +365,8 @@ afterEach(() => {
   reserveSeatCalls = [];
   leaveSeatCalls = [];
   removeCarCalls = [];
+  updateCarCapacityCalls = [];
+  kickPassengerCalls = [];
 });
 
 describe('Carpool/CreateCarpool RPC', () => {
@@ -713,6 +768,191 @@ describe('Carpool/RemoveCar RPC', () => {
           expect(result._tag).toBe('Failure');
           if (result._tag === 'Failure') {
             expect(result.failure._tag).toBe('CarpoolNotMember');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+});
+
+describe('Carpool/UpdateCarCapacity RPC', () => {
+  itEffect.effect('owner updates own car capacity → repo receives correct capacity+car', () =>
+    callRpc('Carpool/UpdateCarCapacity', {
+      guild_id: GUILD_ID,
+      discord_user_id: MANAGER_DISCORD_ID,
+      car_id: CAR_ID_1,
+      capacity: 6,
+    }).pipe(
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result).toBeInstanceOf(CarpoolRpcModels.CarpoolView);
+          expect(updateCarCapacityCalls).toHaveLength(1);
+          expect(updateCarCapacityCalls[0].carId).toBe(CAR_ID_1);
+          expect(updateCarCapacityCalls[0].ownerTeamMemberId).toBe(MANAGER_MEMBER_ID);
+          expect(updateCarCapacityCalls[0].capacity).toBe(6);
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect('non-owner → CarpoolNotCarOwner propagated from repo', () =>
+    // CAR_ID_NON_OWNER is owned by MEMBER_MEMBER_ID; MANAGER tries to change its capacity
+    callRpc('Carpool/UpdateCarCapacity', {
+      guild_id: GUILD_ID,
+      discord_user_id: MANAGER_DISCORD_ID,
+      car_id: CAR_ID_NON_OWNER,
+      capacity: 6,
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('CarpoolNotCarOwner');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect('capacity below current occupancy → CarpoolCapacityBelowOccupancy', () =>
+    callRpc('Carpool/UpdateCarCapacity', {
+      guild_id: GUILD_ID,
+      discord_user_id: MANAGER_DISCORD_ID,
+      car_id: CAR_ID_1,
+      capacity: 1,
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('CarpoolCapacityBelowOccupancy');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect('unknown guild_id → CarpoolGuildNotFound', () =>
+    callRpc('Carpool/UpdateCarCapacity', {
+      guild_id: UNKNOWN_GUILD_ID,
+      discord_user_id: MANAGER_DISCORD_ID,
+      car_id: CAR_ID_1,
+      capacity: 6,
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('CarpoolGuildNotFound');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect('non-member → CarpoolNotMember', () =>
+    callRpc('Carpool/UpdateCarCapacity', {
+      guild_id: GUILD_ID,
+      discord_user_id: NON_MEMBER_DISCORD_ID,
+      car_id: CAR_ID_1,
+      capacity: 6,
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('CarpoolNotMember');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+});
+
+describe('Carpool/KickPassenger RPC', () => {
+  itEffect.effect('owner kicks passenger → repo receives correct target', () =>
+    callRpc('Carpool/KickPassenger', {
+      guild_id: GUILD_ID,
+      discord_user_id: MANAGER_DISCORD_ID,
+      car_id: CAR_ID_1,
+      target_discord_user_id: MEMBER_DISCORD_ID,
+    }).pipe(
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result).toBeInstanceOf(CarpoolRpcModels.CarpoolView);
+          expect(kickPassengerCalls).toHaveLength(1);
+          expect(kickPassengerCalls[0].carId).toBe(CAR_ID_1);
+          expect(kickPassengerCalls[0].targetTeamMemberId).toBe(MEMBER_MEMBER_ID);
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect('caller != car owner → CarpoolNotCarOwner', () =>
+    // MEMBER_DISCORD_ID is a member, not the owner of CAR_ID_1 (owned by MANAGER_MEMBER_ID)
+    callRpc('Carpool/KickPassenger', {
+      guild_id: GUILD_ID,
+      discord_user_id: MEMBER_DISCORD_ID,
+      car_id: CAR_ID_1,
+      target_discord_user_id: MANAGER_DISCORD_ID,
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('CarpoolNotCarOwner');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect('target not in this car → CarpoolTargetNotInCar', () =>
+    callRpc('Carpool/KickPassenger', {
+      guild_id: GUILD_ID,
+      discord_user_id: MANAGER_DISCORD_ID,
+      car_id: CAR_ID_1,
+      target_discord_user_id: NOT_IN_CAR_DISCORD_ID,
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('CarpoolTargetNotInCar');
+          }
+        }),
+      ),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect('target not a team member → CarpoolTargetNotMember', () =>
+    callRpc('Carpool/KickPassenger', {
+      guild_id: GUILD_ID,
+      discord_user_id: MANAGER_DISCORD_ID,
+      car_id: CAR_ID_1,
+      target_discord_user_id: NON_MEMBER_DISCORD_ID,
+    }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(result.failure._tag).toBe('CarpoolTargetNotMember');
           }
         }),
       ),

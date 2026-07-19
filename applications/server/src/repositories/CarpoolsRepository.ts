@@ -257,6 +257,7 @@ const make = Effect.gen(function* () {
         cc.capacity AS car_capacity,
         cc.thread_id AS car_thread_id,
         cc.note AS car_note,
+        cc.created_at AS car_created_at,
         -- owner info
         cc.owner_team_member_id AS owner_team_member_id,
         owner_user.discord_id AS owner_discord_id,
@@ -291,6 +292,7 @@ const make = Effect.gen(function* () {
         cc.capacity AS car_capacity,
         cc.thread_id AS car_thread_id,
         cc.note AS car_note,
+        cc.created_at AS car_created_at,
         -- owner info (repeated for join)
         cc.owner_team_member_id AS owner_team_member_id,
         owner_user.discord_id AS owner_discord_id,
@@ -316,7 +318,7 @@ const make = Effect.gen(function* () {
       LEFT JOIN users owner_user ON owner_user.id = owner_tm.user_id
       WHERE c.id = ${carpoolId}
 
-      ORDER BY car_id NULLS LAST, row_kind
+      ORDER BY car_created_at NULLS LAST, row_kind
     `,
   });
 
@@ -783,6 +785,81 @@ const make = Effect.gen(function* () {
 
   const findCarById = (carId: Carpool.CarpoolCarId) => findCarByIdQuery(carId).pipe(catchSqlErrors);
 
+  // ---- updateCarCapacity ----
+
+  const setCarCapacityQuery = SqlSchema.void({
+    Request: Schema.Struct({
+      car_id: Carpool.CarpoolCarId,
+      capacity: Schema.Number,
+    }),
+    execute: (input) => sql`
+      UPDATE carpool_cars SET capacity = ${input.capacity}, updated_at = now()
+      WHERE id = ${input.car_id}
+    `,
+  });
+
+  const updateCarCapacity = (input: {
+    readonly carId: Carpool.CarpoolCarId;
+    readonly ownerTeamMemberId: TeamMember.TeamMemberId;
+    readonly capacity: number;
+  }) =>
+    sql
+      .withTransaction(
+        Effect.Do.pipe(
+          Effect.bind('car', () =>
+            lockCarQuery(input.carId).pipe(
+              catchSqlErrors,
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.fail(new CarpoolRpcModels.CarpoolCarNotFound()),
+                  onSome: Effect.succeed,
+                }),
+              ),
+            ),
+          ),
+          Effect.tap(({ car }) =>
+            car.owner_team_member_id !== input.ownerTeamMemberId
+              ? Effect.fail(new CarpoolRpcModels.CarpoolNotCarOwner())
+              : Effect.void,
+          ),
+          Effect.bind('seatCount', () =>
+            countSeatsQuery(input.carId).pipe(
+              catchSqlErrors,
+              Effect.catchTag('NoSuchElementError', () =>
+                LogicError.die('Seat count returned no row'),
+              ),
+              Effect.map((r) => r.count),
+            ),
+          ),
+          Effect.tap(({ seatCount }) =>
+            // owner occupies no seat row; occupants = passengers + owner
+            input.capacity < seatCount + 1
+              ? Effect.fail(new CarpoolRpcModels.CarpoolCapacityBelowOccupancy())
+              : Effect.void,
+          ),
+          Effect.tap(() =>
+            setCarCapacityQuery({ car_id: input.carId, capacity: input.capacity }).pipe(
+              catchSqlErrors,
+            ),
+          ),
+        ),
+      )
+      .pipe(catchSqlErrors, Effect.asVoid);
+
+  // ---- kickPassenger ----
+
+  const kickPassenger = (input: {
+    readonly carId: Carpool.CarpoolCarId;
+    readonly targetTeamMemberId: TeamMember.TeamMemberId;
+  }) =>
+    deleteSeatQuery({
+      car_id: input.carId,
+      team_member_id: input.targetTeamMemberId,
+    }).pipe(
+      catchSqlErrors,
+      Effect.map((deleted) => deleted.length > 0),
+    );
+
   return {
     createCarpool,
     saveMessageId,
@@ -794,6 +871,8 @@ const make = Effect.gen(function* () {
     leaveSeatByCarpool,
     removeCar,
     findCarById,
+    updateCarCapacity,
+    kickPassenger,
   };
 });
 

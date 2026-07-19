@@ -913,7 +913,7 @@ Handles submission of the car-creation modal. Creates the car, spawns a private 
 4. On success:
    a. Creates a private Discord thread (`type: 12`) named after the car index and owner display name via `rest.createThread`.
    b. Persists the thread ID via `Carpool/SaveCarThreadId`.
-   c. Posts a welcome embed to the thread with an **Assign passenger** button (`carpool-assign:{carId}`), a **Leave** button (`carpool-leave:{carId}`), and a **Remove car** button (`carpool-remove:{carId}`).
+   c. Posts a welcome embed to the thread with an **Assign passenger** button (`carpool-assign:{carId}`), a **Leave** button (`carpool-leave:{carId}`), a **Remove car** button (`carpool-remove:{carId}`), a **Change seats** button (`carpool-capacity:{carId}`), and a **Kick passenger** button (`carpool-kick:{carId}`).
    d. Adds the car owner to the thread via `rest.addThreadMember`.
    e. Re-fetches the carpool view via `Carpool/GetCarpoolView` and edits the public board message to reflect the new car.
 5. The ephemeral reply is updated with a "Car #N added" confirmation. If thread creation fails, the board is still rebuilt and the confirmation is shown without the thread link.
@@ -1083,6 +1083,91 @@ Handles the user-select submission from the Carpool Assign Button. Assigns the c
 | `CarpoolGuildNotFound` | Team not found for this Discord server |
 
 **Source file:** `applications/bot/src/interactions/carpool.ts` (`CarpoolAssignPickSelect`)
+
+---
+
+### Carpool Capacity Button — `carpool-capacity:{carId}` (thread only, owner)
+
+Appears inside the per-car private thread. Lets the car owner change the car's seat count (capacity).
+
+**Custom ID pattern:** `carpool-capacity:{carId}`
+
+**Behavior:**
+
+1. Parses `carId` from the custom ID.
+2. Returns a **modal** immediately (no deferred response) with `custom_id` `carpool-capacity-modal:{carId}`, containing one required single-line text field (`custom_id: carpool_capacity`, max length 1, placeholder `4`).
+
+**Source file:** `applications/bot/src/interactions/carpool.ts` (`CarpoolCapacityButton`)
+
+---
+
+### Carpool Capacity Modal — `carpool-capacity-modal:{carId}`
+
+Handles submission of the change-seats modal. Updates the car's capacity and rebuilds the board.
+
+**Custom ID pattern:** `carpool-capacity-modal:{carId}`
+
+**Behavior:**
+
+1. Parses `carId` from the custom ID; reads `capacity` (1–8, defaults to 4 on parse failure) from the `carpool_capacity` modal field.
+2. Returns a deferred ephemeral acknowledgement and forks a background fiber.
+3. The background fiber calls `Carpool/UpdateCarCapacity` RPC with `guild_id`, `discord_user_id`, `car_id`, and `capacity`.
+4. On success: rebuilds the public board and replies with "Seat count updated to {n}."
+
+**Errors from `Carpool/UpdateCarCapacity`:**
+
+| Error tag | User-visible message |
+|-----------|----------------------|
+| `CarpoolCapacityBelowOccupancy` | Seats can't be fewer than the people already in the car — remove someone first |
+| `CarpoolNotCarOwner` | You are not the owner of this car |
+| `CarpoolCarNotFound` | Car not found |
+| `CarpoolNotMember` | Not a member of this team |
+| `CarpoolGuildNotFound` | Team not found for this Discord server |
+
+**Source file:** `applications/bot/src/interactions/carpool.ts` (`CarpoolCapacityModal`)
+
+---
+
+### Carpool Kick Button — `carpool-kick:{carId}` (thread only, owner)
+
+Appears inside the per-car private thread. Lets the car owner remove a specific passenger from their car.
+
+**Custom ID pattern:** `carpool-kick:{carId}`
+
+**Behavior:**
+
+1. Parses `carId` from the custom ID.
+2. Responds immediately (non-deferred) with an ephemeral message containing a Discord **user-select** component (`custom_id: carpool-kick-pick:{carId}`).
+
+**Source file:** `applications/bot/src/interactions/carpool.ts` (`CarpoolKickButton`)
+
+---
+
+### Carpool Kick-Pick User Select — `carpool-kick-pick:{carId}`
+
+Handles the user-select submission from the Carpool Kick Button. Removes the chosen passenger's seat and removes them from the thread.
+
+**Custom ID pattern:** `carpool-kick-pick:{carId}`
+
+**Behavior:**
+
+1. Parses `carId` from the custom ID; reads the selected `targetUserId` from `data.values[0]`.
+2. Returns a deferred ephemeral acknowledgement and forks a background fiber.
+3. The background fiber calls `Carpool/KickPassenger` RPC with `guild_id`, `discord_user_id`, `car_id`, and `target_discord_user_id`.
+4. On success: removes the target user from the car's private thread (best-effort — thread-removal failures are logged and swallowed), rebuilds the public board, and replies with "Removed <@userId> from the car."
+
+**Errors from `Carpool/KickPassenger`:**
+
+| Error tag | User-visible message |
+|-----------|----------------------|
+| `CarpoolTargetNotInCar` | That person isn't in this car |
+| `CarpoolNotCarOwner` | You are not the owner of this car |
+| `CarpoolTargetNotMember` | Target user is not a team member |
+| `CarpoolCarNotFound` | Car not found |
+| `CarpoolNotMember` | Not a member of this team |
+| `CarpoolGuildNotFound` | Team not found for this Discord server |
+
+**Source file:** `applications/bot/src/interactions/carpool.ts` (`CarpoolKickPickSelect`)
 
 ---
 
@@ -2057,13 +2142,15 @@ The bot communicates with the server using the `SyncRpcs` RPC group defined in `
 | `Carpool/CreateCarpool` | `guild_id`, `discord_user_id`, `discord_channel_id`, `event_id: Option<EventId>` | Create a new carpool board for the current channel. Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolForbidden`. |
 | `Carpool/SaveCarpoolMessageId` | `carpool_id`, `discord_message_id` | Persist the Discord message ID of the public board message after it is posted. |
 | `Carpool/SaveCarThreadId` | `car_id`, `thread_id` | Persist the Discord thread ID of a car's private thread after it is created. |
-| `Carpool/GetCarpoolView` | `carpool_id` | Fetch the current `CarpoolView` (cars + passengers, plus the team's `language` for rendering the board embed) for a carpool; returns `Option<CarpoolView>`. |
+| `Carpool/GetCarpoolView` | `carpool_id` | Fetch the current `CarpoolView` (cars + passengers, plus the team's `language` for rendering the board embed) for a carpool; returns `Option<CarpoolView>`. `view.cars` is ordered by `created_at` (oldest first); the bot derives each car's display number (`#1`, `#2`, …) from this order, so newly added cars always append as the next number instead of appearing at a random position. |
 | `Carpool/AddCar` | `guild_id`, `discord_user_id`, `carpool_id`, `capacity: Int[1–8]`, `note: Option<string>` | Add a new car to a carpool; the owner occupies seat #1. Returns `AddCarResult` (new `car_id` + updated `CarpoolView`). Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolNotFound`, `CarpoolAlreadyOwnsCar`, `CarpoolAlreadyInAnotherCar`. |
 | `Carpool/ReserveSeat` | `guild_id`, `discord_user_id`, `car_id` | Reserve a seat in a car (any member except the owner). Returns `ReserveResult` (`thread_id` + updated `CarpoolView`). Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolCarNotFound`, `CarpoolFull`, `CarpoolAlreadyInThisCar`, `CarpoolAlreadyInAnotherCar`, `CarpoolOwnerCannotReserve`. |
 | `Carpool/AssignSeat` | `guild_id`, `discord_user_id`, `car_id`, `target_discord_user_id` | Owner assigns a seat to another team member. Returns `ReserveResult`. Errors: same as `ReserveSeat` plus `CarpoolNotCarOwner`, `CarpoolTargetNotMember`. |
 | `Carpool/LeaveSeat` | `guild_id`, `discord_user_id`, `car_id` | Release a reserved seat (passengers only; owner cannot leave). Returns updated `CarpoolView`. Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolCarNotFound`, `CarpoolNotInCar`, `CarpoolOwnerCannotLeave`. |
 | `Carpool/LeaveCarpool` | `guild_id`, `discord_user_id`, `carpool_id` | Release a reserved seat by carpool ID — the server resolves the specific car. Returns `LeaveCarpoolResult` (`car_id` + updated `CarpoolView`). Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolNotInCar`, `CarpoolOwnerCannotLeave`. |
 | `Carpool/RemoveCar` | `guild_id`, `discord_user_id`, `car_id` | Owner removes their car entirely (deletes car + all seats). Returns `RemoveCarResult` (`thread_id` of the car's thread + updated `CarpoolView`). Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolCarNotFound`, `CarpoolNotCarOwner`. |
+| `Carpool/UpdateCarCapacity` | `guild_id`, `discord_user_id`, `car_id`, `capacity: Int[1–8]` | Owner changes their car's seat count. Returns updated `CarpoolView`. Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolCarNotFound`, `CarpoolNotCarOwner`, `CarpoolCapacityBelowOccupancy` (new capacity would be below the current number of occupants, i.e. passengers + owner). |
+| `Carpool/KickPassenger` | `guild_id`, `discord_user_id`, `car_id`, `target_discord_user_id` | Owner removes a specific passenger from their car. Returns updated `CarpoolView`. Errors: `CarpoolGuildNotFound`, `CarpoolNotMember`, `CarpoolCarNotFound`, `CarpoolNotCarOwner`, `CarpoolTargetNotMember`, `CarpoolTargetNotInCar` (target is not currently a passenger in this car). |
 
 ### Activity group (`Activity/`)
 

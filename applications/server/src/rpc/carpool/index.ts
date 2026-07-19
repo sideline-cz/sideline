@@ -369,6 +369,94 @@ const rpcHandlers = Effect.Do.pipe(
           ),
         ),
   ),
+  Effect.let(
+    'Carpool/UpdateCarCapacity',
+    ({ carpools }) =>
+      ({
+        guild_id,
+        discord_user_id,
+        car_id,
+        capacity,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly discord_user_id: Discord.Snowflake;
+        readonly car_id: Carpool.CarpoolCarId;
+        readonly capacity: number;
+      }) =>
+        Effect.Do.pipe(
+          Effect.bind('team', () => resolveTeamByGuild(guild_id)),
+          Effect.bind('membership', ({ team }) => resolveMember(discord_user_id, team.id)),
+          Effect.bind('car', () =>
+            carpools.findCarById(car_id).pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.fail(new CarpoolRpcModels.CarpoolCarNotFound()),
+                  onSome: Effect.succeed,
+                }),
+              ),
+            ),
+          ),
+          Effect.tap(({ membership }) =>
+            carpools.updateCarCapacity({
+              carId: car_id,
+              ownerTeamMemberId: membership.id,
+              capacity,
+            }),
+          ),
+          Effect.flatMap(({ car }) => requireCarpoolView(car.carpool_id, carpools.findCarpoolView)),
+        ),
+  ),
+  Effect.let(
+    'Carpool/KickPassenger',
+    ({ carpools }) =>
+      ({
+        guild_id,
+        discord_user_id,
+        car_id,
+        target_discord_user_id,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly discord_user_id: Discord.Snowflake;
+        readonly car_id: Carpool.CarpoolCarId;
+        readonly target_discord_user_id: Discord.Snowflake;
+      }) =>
+        Effect.Do.pipe(
+          Effect.bind('team', () => resolveTeamByGuild(guild_id)),
+          Effect.bind('callerMembership', ({ team }) => resolveMember(discord_user_id, team.id)),
+          Effect.bind('car', () =>
+            carpools.findCarById(car_id).pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.fail(new CarpoolRpcModels.CarpoolCarNotFound()),
+                  onSome: Effect.succeed,
+                }),
+              ),
+            ),
+          ),
+          Effect.tap(({ callerMembership, car }) =>
+            callerMembership.id !== car.owner_team_member_id
+              ? Effect.fail(new CarpoolRpcModels.CarpoolNotCarOwner())
+              : Effect.void,
+          ),
+          Effect.bind('targetMembership', ({ team }) =>
+            resolveMember(target_discord_user_id, team.id).pipe(
+              Effect.catchTag('CarpoolNotMember', () =>
+                Effect.fail(new CarpoolRpcModels.CarpoolTargetNotMember()),
+              ),
+            ),
+          ),
+          Effect.bind('removed', ({ targetMembership }) =>
+            carpools.kickPassenger({
+              carId: car_id,
+              targetTeamMemberId: targetMembership.id,
+            }),
+          ),
+          Effect.tap(({ removed }) =>
+            removed ? Effect.void : Effect.fail(new CarpoolRpcModels.CarpoolTargetNotInCar()),
+          ),
+          Effect.flatMap(({ car }) => requireCarpoolView(car.carpool_id, carpools.findCarpoolView)),
+        ),
+  ),
   Bind.remove('carpools'),
   (handlers) => CarpoolRpcGroup.CarpoolRpcGroup.toLayer(handlers),
 );

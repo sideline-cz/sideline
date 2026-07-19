@@ -5,6 +5,19 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-07-19 — Carpool board: owners can change seat count and remove a passenger
+
+Car owners now have two new tools in their car's private thread, alongside the existing Assign, Leave, and Remove car buttons:
+
+- **Change seats** — update your car's total capacity (1–8, including yourself as the driver) at any time. You cannot reduce it below the number of people already in the car.
+- **Kick passenger** — remove a specific passenger from your car using a Discord user-select menu, same as **Assign passenger**. They are also removed from the private thread.
+
+See the [Carpool board guide](/guides/carpool/) for full details.
+
+## 2026-07-19 — Fix: carpool board car numbers no longer shuffle when adding a car
+
+Cars on the carpool board are now numbered in the order they were added — the first car offered is always **Car 1**, and new cars append as the next number. Previously the order was effectively random, so adding a new car could renumber the existing cars on the board.
+
 ## 2026-07-19 — Fix: the carpool board's "Add a car" form now opens reliably
 
 Clicking **Add a car** on the carpool board could fail with a Discord interaction error (and "Sideline didn't respond in time") instead of opening the capacity form, on English-locale teams.
