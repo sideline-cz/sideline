@@ -715,6 +715,23 @@ describe('carpool-capacity interaction', () => {
     const payload = JSON.stringify(restStub.updateOriginalWebhookMessage.mock.calls[0]);
     expect(payload.length).toBeGreaterThan(0);
   });
+
+  it('out-of-range capacity ("9") is rejected without calling UpdateCarCapacity', async () => {
+    const updateFn = vi.fn(() => Effect.succeed(makeCarpoolViewWithCar(CAR_ID, THREAD_ID)));
+    const rpcStub = makeSyncRpcStub({ 'Carpool/UpdateCarCapacity': updateFn });
+    const restStub = makeRestStub();
+
+    const interaction = makeModalInteraction(`carpool-capacity-modal:${CAR_ID}`, {
+      carpool_capacity: '9',
+    });
+    await runModalHandler(CarpoolCapacityModal.handle, restStub.layer, rpcStub.layer, interaction);
+
+    // The car must be left untouched — no RPC call, no board rebuild — and the
+    // user gets an ephemeral validation error instead of a silent reset to 4.
+    expect(updateFn).not.toHaveBeenCalled();
+    expect(restStub.updateMessage).not.toHaveBeenCalled();
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+  });
 });
 
 // Regression guard: locks the USER_SELECT component JSON shape produced by

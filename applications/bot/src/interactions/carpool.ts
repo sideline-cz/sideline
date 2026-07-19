@@ -968,11 +968,22 @@ export const CarpoolCapacityModal = Ix.modalSubmit(
 
       const discordUserId = discordUserIdOption.value;
 
-      // Extract capacity from modal; default to 4 on parse failure
+      // A capacity *update* must not silently fall back to a default the way
+      // AddCar does — an unparseable or out-of-range entry (e.g. "0"/"9") would
+      // quietly rewrite the car to 4 seats. Reject it and leave the car as-is.
       const capacityRaw = modalFieldValue(data, 'carpool_capacity');
-      const capacity = capacityRaw !== undefined ? parseInt(capacityRaw, 10) : 4;
-      const capacityInt =
-        Number.isFinite(capacity) && capacity >= 1 && capacity <= 8 ? capacity : 4;
+      const capacity = capacityRaw !== undefined ? parseInt(capacityRaw, 10) : Number.NaN;
+      if (!Number.isInteger(capacity) || capacity < 1 || capacity > 8) {
+        return Effect.as(
+          Effect.forkDetach(
+            replyWebhook(rest, interaction, {
+              content: m.bot_carpool_err_capacity_invalid({}, { locale }),
+            }),
+          ),
+          ephemeralDeferred,
+        );
+      }
+      const capacityInt = capacity;
 
       const updateAndFollowUp = rpc['Carpool/UpdateCarCapacity']({
         guild_id: decodeSnowflake(guildId ?? ''),
