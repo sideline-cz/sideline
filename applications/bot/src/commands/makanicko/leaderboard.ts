@@ -125,7 +125,34 @@ export const leaderboardHandler = Interaction.asEffect().pipe(
       type: DiscordTypes.InteractionCallbackTypes.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
       data: { flags: DiscordTypes.MessageFlags.Ephemeral },
     };
-    return Effect.as(Effect.forkDetach(work), deferred);
+    // Terminal backstop: the fork resolves the deferred reply; on any unhandled
+    // failure or defect still resolve it so the user isn't stuck on "Sideline is
+    // thinking…". Mirrors the profile-complete / event-create backstop.
+    return Effect.as(
+      Effect.forkDetach(
+        work.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError('makanicko-leaderboard: unexpected failure', cause).pipe(
+              Effect.andThen(DiscordREST.asEffect()),
+              Effect.flatMap((rest) =>
+                rest
+                  .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+                    payload: { content: m.bot_makanicko_leaderboard_error({}, { locale }) },
+                  })
+                  .pipe(
+                    Effect.catchTag(
+                      ['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'],
+                      (e) =>
+                        Effect.logError('Failed to update makanicko leaderboard error response', e),
+                    ),
+                  ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      deferred,
+    );
   }),
   Effect.withSpan('command/makanicko/leaderboard'),
 );
