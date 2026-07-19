@@ -1,5 +1,15 @@
 # @sideline/i18n
 
+## 0.18.5
+
+### Patch Changes
+
+- [#506](https://github.com/maxa-ondrej/sideline/pull/506) [`687cd1a`](https://github.com/maxa-ondrej/sideline/commit/687cd1a05920e49ceae5abc3198e674e6e207aa9) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add a terminal `catchCause` backstop to the two deferred-reply-resolving claim interaction forks (`ClaimButton`, `UnclaimButton`). Previously they only caught the REST error tags, so a transient `RpcClientError` or an untagged server-side defect left the ephemeral reply unresolved and the user stuck on "Sideline is thinking…". Adds a `bot_claim_error` generic message and a `withBackstop` helper that always resolves the reply, mirroring the profile-complete / event-create backstop.
+
+- [#507](https://github.com/maxa-ondrej/sideline/pull/507) [`970d8c8`](https://github.com/maxa-ondrej/sideline/commit/970d8c814c3e9c1795e463bd3198f1ceba7bda72) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add a terminal `catchCause` backstop to the email-decision interaction fork (shared by `EmailApproveButton`, `EmailRejectButton`, `EmailSendOriginalButton`). Previously it caught `EmailApprovalForbidden`/`EmailRpcMessageNotFound`/REST but not `RpcClientError` or defects, so a transient RPC failure or a server-side defect left the moderator's deferred reply unresolved ("Sideline is thinking…"). Adds a `bot_email_error` generic message; the backstop always resolves the reply, mirroring the event-create backstop.
+
+- [#505](https://github.com/maxa-ondrej/sideline/pull/505) [`cd6c321`](https://github.com/maxa-ondrej/sideline/commit/cd6c3211ad35572378f683b58c6ac9fba5d5ec7a) Thanks [@maxa-ondrej](https://github.com/maxa-ondrej)! - Add a terminal `catchCause` backstop to the three deferred-reply-resolving RSVP interaction forks (`RsvpButton`, `RsvpClearMessageButton`, `RsvpModal`). Previously they only caught the REST error tags, so a transient `RpcClientError` or an untagged server-side defect left the ephemeral reply unresolved and the user stuck on "Sideline is thinking…". Adds a `bot_rsvp_error` generic message and a `withBackstop` helper that always resolves the reply, mirroring the profile-complete / event-create backstop.
+
 ## 0.18.4
 
 ### Patch Changes
