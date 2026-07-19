@@ -222,7 +222,29 @@ export const UpcomingRsvpButton = Ix.messageComponent(
       );
 
       return Effect.as(
-        Effect.forkDetach(work),
+        Effect.forkDetach(
+          // Terminal backstop: always resolve the deferred reply on an unhandled
+          // failure or defect so the user isn't stuck on "Sideline is thinking…".
+          work.pipe(
+            Effect.catchCause((cause) =>
+              Effect.logError('upcoming-rsvp: unexpected failure', cause).pipe(
+                Effect.andThen(DiscordREST.asEffect()),
+                Effect.flatMap((rest) =>
+                  rest
+                    .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+                      payload: { content: m.bot_event_list_error({}, { locale }) },
+                    })
+                    .pipe(
+                      Effect.catchTag(
+                        ['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'],
+                        (e) => Effect.logError('Failed to update upcoming-rsvp error response', e),
+                      ),
+                    ),
+                ),
+              ),
+            ),
+          ),
+        ),
         Ix.response({
           type: Discord.InteractionCallbackTypes.DEFERRED_UPDATE_MESSAGE,
         }),
@@ -404,7 +426,29 @@ export const UpcomingClearMessageButton = Ix.messageComponent(
       );
 
       return Effect.as(
-        Effect.forkDetach(work),
+        Effect.forkDetach(
+          // Terminal backstop: always resolve the deferred reply on an unhandled
+          // failure or defect so the user isn't stuck on "Sideline is thinking…".
+          work.pipe(
+            Effect.catchCause((cause) =>
+              Effect.logError('upcoming-rsvp: unexpected failure', cause).pipe(
+                Effect.andThen(DiscordREST.asEffect()),
+                Effect.flatMap((rest) =>
+                  rest
+                    .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+                      payload: { content: m.bot_event_list_error({}, { locale }) },
+                    })
+                    .pipe(
+                      Effect.catchTag(
+                        ['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'],
+                        (e) => Effect.logError('Failed to update upcoming-rsvp error response', e),
+                      ),
+                    ),
+                ),
+              ),
+            ),
+          ),
+        ),
         Ix.response({
           type: Discord.InteractionCallbackTypes.DEFERRED_UPDATE_MESSAGE,
         }),
@@ -543,7 +587,29 @@ export const UpcomingRsvpModal = Ix.modalSubmit(
       );
 
       return Effect.as(
-        Effect.forkDetach(work),
+        Effect.forkDetach(
+          // Terminal backstop: always resolve the deferred reply on an unhandled
+          // failure or defect so the user isn't stuck on "Sideline is thinking…".
+          work.pipe(
+            Effect.catchCause((cause) =>
+              Effect.logError('upcoming-rsvp: unexpected failure', cause).pipe(
+                Effect.andThen(DiscordREST.asEffect()),
+                Effect.flatMap((rest) =>
+                  rest
+                    .updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+                      payload: { content: m.bot_event_list_error({}, { locale }) },
+                    })
+                    .pipe(
+                      Effect.catchTag(
+                        ['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'],
+                        (e) => Effect.logError('Failed to update upcoming-rsvp error response', e),
+                      ),
+                    ),
+                ),
+              ),
+            ),
+          ),
+        ),
         Ix.response({
           type: Discord.InteractionCallbackTypes.DEFERRED_UPDATE_MESSAGE,
         }),
