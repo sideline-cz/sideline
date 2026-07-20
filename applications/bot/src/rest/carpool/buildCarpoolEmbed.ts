@@ -2,6 +2,7 @@ import type { CarpoolRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
+import { Option } from 'effect';
 import type { Locale } from '~/locale.js';
 import { formatName } from '~/rest/utils.js';
 
@@ -45,6 +46,10 @@ const buildCarField = (
       );
 
   const lines: string[] = [];
+  // Driver route note — rendered directly below the header, above the seat list.
+  if (Option.isSome(car.note)) {
+    lines.push(`📍 *${car.note.value}*`);
+  }
   // Owner is seat #1 with crown
   lines.push(m.bot_carpool_seat_owner({ n: 1, name: ownerName }, { locale }));
   // Passengers starting at seat #2

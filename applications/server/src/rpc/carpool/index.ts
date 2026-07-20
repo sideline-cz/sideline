@@ -407,6 +407,49 @@ const rpcHandlers = Effect.Do.pipe(
         ),
   ),
   Effect.let(
+    'Carpool/UpdateCarNote',
+    ({ carpools }) =>
+      ({
+        guild_id,
+        discord_user_id,
+        car_id,
+        note,
+      }: {
+        readonly guild_id: Discord.Snowflake;
+        readonly discord_user_id: Discord.Snowflake;
+        readonly car_id: Carpool.CarpoolCarId;
+        readonly note: Option.Option<string>;
+      }) =>
+        Effect.Do.pipe(
+          Effect.bind('team', () => resolveTeamByGuild(guild_id)),
+          Effect.bind('membership', ({ team }) => resolveMember(discord_user_id, team.id)),
+          Effect.bind('car', () =>
+            carpools.findCarById(car_id).pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.fail(new CarpoolRpcModels.CarpoolCarNotFound()),
+                  onSome: Effect.succeed,
+                }),
+              ),
+            ),
+          ),
+          Effect.tap(({ membership }) =>
+            carpools.updateCarNote({
+              carId: car_id,
+              ownerTeamMemberId: membership.id,
+              note,
+            }),
+          ),
+          Effect.flatMap(({ car }) => requireCarpoolView(car.carpool_id, carpools.findCarpoolView)),
+        ),
+  ),
+  Effect.let(
+    'Carpool/GetCarNote',
+    ({ carpools }) =>
+      ({ car_id }: { readonly car_id: Carpool.CarpoolCarId }) =>
+        carpools.findCarById(car_id).pipe(Effect.map(Option.flatMap((car) => car.note))),
+  ),
+  Effect.let(
     'Carpool/KickPassenger',
     ({ carpools }) =>
       ({

@@ -195,6 +195,16 @@ export const CarpoolAddButton = Effect.Do.pipe(
               placeholder: '2',
             }),
           ]),
+          UI.row([
+            UI.textInput({
+              custom_id: 'carpool_note',
+              label: m.bot_carpool_note_label({}, { locale }),
+              style: DiscordTypes.TextInputStyleTypes.PARAGRAPH,
+              required: false,
+              max_length: 200,
+              placeholder: m.bot_carpool_note_placeholder({}, { locale }),
+            }),
+          ]),
         ],
       },
     };
@@ -275,13 +285,14 @@ export const CarpoolAddModal = Ix.modalSubmit(
       }
 
       const carpoolId = Schema.decodeUnknownSync(Carpool.CarpoolId)(carpoolIdRaw);
+      const note = Option.fromUndefinedOr(modalFieldValue(data, 'carpool_note'));
 
       const addCarAndFollowUp = rpc['Carpool/AddCar']({
         guild_id: decodeSnowflake(guildId ?? ''),
         discord_user_id: discordUserId,
         carpool_id: carpoolId,
         capacity: capacityInt,
-        note: Option.none(),
+        note,
       }).pipe(
         Effect.flatMap((addResult) => {
           const carId = addResult.car_id;
@@ -393,6 +404,11 @@ export const CarpoolAddModal = Ix.modalSubmit(
                         style: DiscordTypes.ButtonStyleTypes.SECONDARY,
                         label: m.bot_carpool_btn_kick({}, { locale }),
                         custom_id: `carpool-kick:${carId}`,
+                      }),
+                      UI.button({
+                        style: DiscordTypes.ButtonStyleTypes.SECONDARY,
+                        label: m.bot_carpool_btn_note({}, { locale }),
+                        custom_id: `carpool-note:${carId}`,
                       }),
                     ]),
                   ],
@@ -1095,6 +1111,144 @@ export const CarpoolCapacityModal = Ix.modalSubmit(
       );
     }),
     Effect.withSpan('interaction/carpool-capacity-modal'),
+  ),
+);
+
+// ---------------------------------------------------------------------------
+// carpool-note:<car_id> button (thread, owner) — opens a modal prefilled with
+// the car's current note, fetched via GetCarNote before responding.
+// ---------------------------------------------------------------------------
+
+const _CarpoolNoteButtonEffect = Effect.Do.pipe(
+  Effect.tap(() =>
+    Metric.update(
+      Metric.withAttributes(discordInteractionsTotal, { interaction_type: 'button' }),
+      1,
+    ),
+  ),
+  Effect.bind('interaction', () => Interaction.asEffect()),
+  Effect.let('data', ({ interaction }) => getComponentData(interaction)),
+  Effect.bind('rpc', () => SyncRpc.asEffect()),
+  Effect.flatMap(({ data, interaction, rpc }) => {
+    const parts = data.custom_id.split(':');
+    const carId = decodeCarId(parts[1]);
+    const locale = userLocale(interaction);
+
+    return rpc['Carpool/GetCarNote']({ car_id: carId }).pipe(
+      Effect.catchTag('RpcClientError', () => Effect.succeed(Option.none<string>())),
+      Effect.map((currentNote) => ({
+        type: DiscordTypes.InteractionCallbackTypes.MODAL,
+        data: {
+          custom_id: `carpool-note-modal:${carId}`,
+          title: m.bot_carpool_btn_note({}, { locale }),
+          components: [
+            UI.row([
+              UI.textInput({
+                custom_id: 'carpool_note',
+                label: m.bot_carpool_note_label({}, { locale }),
+                style: DiscordTypes.TextInputStyleTypes.PARAGRAPH,
+                required: false,
+                max_length: 200,
+                placeholder: m.bot_carpool_note_placeholder({}, { locale }),
+                ...(Option.isSome(currentNote) ? { value: currentNote.value } : {}),
+              }),
+            ]),
+          ],
+        },
+      })),
+    );
+  }),
+  Effect.withSpan('interaction/carpool-note-button'),
+);
+
+export const CarpoolNoteButton = Ix.messageComponent(
+  Ix.idStartsWith('carpool-note:'),
+  _CarpoolNoteButtonEffect,
+);
+
+// ---------------------------------------------------------------------------
+// carpool-note-modal:<car_id> submit (thread, owner) — empty submit clears the note.
+// ---------------------------------------------------------------------------
+
+export const CarpoolNoteModal = Ix.modalSubmit(
+  Ix.idStartsWith('carpool-note-modal:'),
+  Effect.Do.pipe(
+    Effect.tap(() =>
+      Metric.update(
+        Metric.withAttributes(discordInteractionsTotal, { interaction_type: 'modal' }),
+        1,
+      ),
+    ),
+    Effect.bind('data', () => ModalSubmitData.asEffect()),
+    Effect.bind('interaction', () => Interaction.asEffect()),
+    Effect.bind('rpc', () => SyncRpc.asEffect()),
+    Effect.bind('rest', () => DiscordREST.asEffect()),
+    Effect.flatMap(({ data, interaction, rpc, rest }) => {
+      const locale = userLocale(interaction);
+      const guildId = interaction.guild_id;
+      const discordUserIdOption = interactionUserId(interaction);
+
+      // custom_id format: carpool-note-modal:<car_id>
+      const modalParts = data.custom_id.split(':');
+      const carId = decodeCarId(modalParts[1]);
+
+      if (Option.isNone(discordUserIdOption)) {
+        return Effect.as(
+          Effect.forkDetach(
+            replyWebhook(rest, interaction, { content: m.bot_carpool_err_user({}, { locale }) }),
+          ),
+          ephemeralDeferred,
+        );
+      }
+
+      const discordUserId = discordUserIdOption.value;
+
+      // An empty submit clears the note (Option.none), matching the "clear" UX.
+      const note = Option.fromUndefinedOr(modalFieldValue(data, 'carpool_note'));
+
+      const updateAndFollowUp = rpc['Carpool/UpdateCarNote']({
+        guild_id: decodeSnowflake(guildId ?? ''),
+        discord_user_id: discordUserId,
+        car_id: carId,
+        note,
+      }).pipe(
+        Effect.flatMap((view) =>
+          rebuildBoard(rest, view).pipe(
+            Effect.flatMap(() =>
+              replyWebhook(rest, interaction, {
+                content: m.bot_carpool_note_updated({}, { locale }),
+              }),
+            ),
+          ),
+        ),
+        Effect.catchTag('CarpoolNotCarOwner', () =>
+          replyWebhook(rest, interaction, { content: m.bot_carpool_err_not_owner({}, { locale }) }),
+        ),
+        Effect.catchTag('CarpoolCarNotFound', () =>
+          replyWebhook(rest, interaction, {
+            content: m.bot_carpool_err_car_not_found({}, { locale }),
+          }),
+        ),
+        Effect.catchTag('CarpoolNotMember', () =>
+          replyWebhook(rest, interaction, {
+            content: m.bot_carpool_err_not_member({}, { locale }),
+          }),
+        ),
+        Effect.catchTag('CarpoolGuildNotFound', () =>
+          replyWebhook(rest, interaction, { content: m.bot_carpool_no_guild({}, { locale }) }),
+        ),
+      );
+
+      return Effect.as(
+        Effect.forkDetach(
+          updateAndFollowUp.pipe(
+            withBackstop(rest, interaction, locale, 'carpool-note-modal: unexpected failure'),
+          ),
+        ),
+        ephemeralDeferred,
+      );
+    }),
+    Effect.withSpan('interaction/carpool-note-modal'),
   ),
 );
 

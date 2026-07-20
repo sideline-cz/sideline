@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-07-20 — Carpool board: drivers can add a route note
+
+Car owners can now attach a short free-text route note (up to 200 characters) to their car — for example, where and when you're leaving from.
+
+- Set it when adding your car (a new optional field in the **Add a car** form), or anytime afterwards via the new **📝 Route note** button in your car's private thread. Opening the button prefills your current note, if any; submitting an empty note clears it.
+- The note appears on the public carpool board directly below your car's title, e.g. `📍 leaving from Main Station at 17:30, via Brno`.
+
+See the [Carpool board guide](/guides/carpool/) for full details.
+
 ## 2026-07-19 — Carpool board: owners can change seat count and remove a passenger
 
 Car owners now have two new tools in their car's private thread, alongside the existing Assign, Leave, and Remove car buttons:

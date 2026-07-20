@@ -249,6 +249,52 @@ describe('buildCarpoolEmbed', () => {
     expect(hasAddEmpty).toBe(true);
   });
 
+  it('car with a note — note text renders above the first seat line', () => {
+    const owner = makeMember('tm-note-owner', 'NoteDriver');
+    const car = makeCar(CAR_ID_1, 4, owner, [], 'Leaving from Main Station at 17:30');
+    const view = new CarpoolRpcModels.CarpoolView({
+      carpool_id: CARPOOL_ID,
+      language: 'en',
+      discord_channel_id: BOARD_CHANNEL_ID,
+      discord_message_id: Option.some(BOARD_MESSAGE_ID),
+      event_id: Option.none(),
+      cars: [car],
+    });
+
+    const { embeds } = buildCarpoolEmbed(view);
+    const fields = embeds[0].fields ?? [];
+    const carField = fields.find((f) => f.value.includes('NoteDriver'));
+    expect(carField).toBeDefined();
+
+    const lines = (carField?.value ?? '').split('\n');
+    expect(lines[0]).toContain('📍');
+    expect(lines[0]).toContain('Leaving from Main Station at 17:30');
+    // The note is above the owner's seat line (seat #1, crown marker)
+    const noteLineIndex = lines.findIndex((l) => l.includes('📍'));
+    const ownerSeatLineIndex = lines.findIndex((l) => l.includes('👑'));
+    expect(noteLineIndex).toBeGreaterThanOrEqual(0);
+    expect(ownerSeatLineIndex).toBeGreaterThan(noteLineIndex);
+  });
+
+  it('car without a note — no 📍 line rendered', () => {
+    const owner = makeMember('tm-no-note-owner', 'NoNoteDriver');
+    const car = makeCar(CAR_ID_1, 4, owner);
+    const view = new CarpoolRpcModels.CarpoolView({
+      carpool_id: CARPOOL_ID,
+      language: 'en',
+      discord_channel_id: BOARD_CHANNEL_ID,
+      discord_message_id: Option.some(BOARD_MESSAGE_ID),
+      event_id: Option.none(),
+      cars: [car],
+    });
+
+    const { embeds } = buildCarpoolEmbed(view);
+    const fields = embeds[0].fields ?? [];
+    const carField = fields.find((f) => f.value.includes('NoNoteDriver'));
+    expect(carField).toBeDefined();
+    expect(carField?.value).not.toContain('📍');
+  });
+
   it('multiple cars — each gets its own reserve button with correct car_id', () => {
     const owner1 = makeMember('tm-multi-1', 'Driver1');
     const owner2 = makeMember('tm-multi-2', 'Driver2');

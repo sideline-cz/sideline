@@ -844,6 +844,16 @@ Rules:
 
 Discord requires an interaction ack within 3s. When a command handler's work (RPC round-trips + Discord REST renders) may exceed that, ack immediately and fork the heavy work with `Effect.forkDetach`, returning an ephemeral acknowledgement synchronously. Reference: `src/commands/event/refresh.ts` classifies the channel via `Guild/IdentifyEventsChannel` (and checks its `is_admin` flag first), then `Effect.forkDetach`s the reorder/dirty-mark work and returns an ephemeral reply. For handlers that DEFER (rather than reply immediately), the deferred-response resolution rules in "Paginated Embed Pattern" rule 6 apply.
 
+### A `MODAL` Response Cannot Be Deferred — Prefill Fetches Run Synchronously With an Empty-Modal Fallback
+
+A `MODAL` interaction response (`InteractionCallbackTypes.MODAL`) CANNOT be deferred and MUST NOT be forked — Discord requires the modal in the immediate 3s ack. The "3-Second Ack" fork-heavy-work rule above does NOT apply to a button that opens a modal. Therefore, when a button opens a modal **prefilled** with server state (e.g. an "edit note" button that shows the current note), fetch that state with a **single lean RPC** inside the button handler and return the `MODAL` response from its result. Rules:
+
+1. **The prefill fetch MUST be one lean RPC** dedicated to reading only the field(s) the modal prefills (reference: `Carpool/GetCarNote` returns just the car's `Option<string>` note — NOT the whole `CarpoolView`). Never chain multiple round-trips or heavy renders before returning the `MODAL`; the fetch competes with the 3s ack window.
+2. **The fetch MUST fall back to an empty (unprefilled) modal on failure**, never propagate the error: `rpc['...GetX']({ ... }).pipe(Effect.catchTag('RpcClientError', () => Effect.succeed(Option.none())))`. A failed prefill must still open the modal so the user can act; it must never crash-loop or leave the interaction unanswered.
+3. **Prefill a `UI.textInput` by spreading its `value` only when present** — `...(Option.isSome(currentNote) ? { value: currentNote.value } : {})` — so a `None` yields a blank field rather than `value: undefined`.
+
+Reference: `CarpoolNoteButton` in `src/interactions/carpool.ts` (the paired `CarpoolNoteModal` submit does its mutation in the standard deferred-fork-with-`withBackstop` shape, because a modal *submit* response CAN be deferred — only the modal *open* cannot).
+
 ### Locale Split: Channel Content vs. Ephemeral Reply (`guildLocale` / `userLocale`)
 
 `src/locale.ts` exports two helpers. A command that both renders into a shared channel AND replies to the caller MUST split locales:

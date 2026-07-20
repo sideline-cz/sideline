@@ -9,12 +9,15 @@ import { Effect, Layer, Option, Schema } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CarpoolAddButton,
+  CarpoolAddModal,
   CarpoolAssignButton,
   CarpoolCapacityButton,
   CarpoolCapacityModal,
   CarpoolKickButton,
   CarpoolKickPickSelect,
   CarpoolLeaveButton,
+  CarpoolNoteButton,
+  CarpoolNoteModal,
   CarpoolRemoveButton,
   CarpoolReserveButton,
 } from '~/interactions/carpool.js';
@@ -161,6 +164,8 @@ interface SyncRpcStubOptions {
   'Carpool/GetCarpoolView'?: ReturnType<typeof vi.fn>;
   'Carpool/SaveCarThreadId'?: ReturnType<typeof vi.fn>;
   'Carpool/UpdateCarCapacity'?: ReturnType<typeof vi.fn>;
+  'Carpool/UpdateCarNote'?: ReturnType<typeof vi.fn>;
+  'Carpool/GetCarNote'?: ReturnType<typeof vi.fn>;
   'Carpool/KickPassenger'?: ReturnType<typeof vi.fn>;
 }
 
@@ -199,6 +204,12 @@ const makeSyncRpcStub = (options: SyncRpcStubOptions = {}) => {
       }
       if (prop === 'Carpool/UpdateCarCapacity') {
         return vi.fn(() => Effect.succeed(makeCarpoolViewWithCar(CAR_ID, THREAD_ID)));
+      }
+      if (prop === 'Carpool/UpdateCarNote') {
+        return vi.fn(() => Effect.succeed(makeCarpoolViewWithCar(CAR_ID, THREAD_ID)));
+      }
+      if (prop === 'Carpool/GetCarNote') {
+        return vi.fn(() => Effect.succeed(Option.none()));
       }
       if (prop === 'Carpool/KickPassenger') {
         return vi.fn(() => Effect.succeed(makeCarpoolViewWithCar(CAR_ID, THREAD_ID)));
@@ -609,6 +620,44 @@ describe('carpool-add interaction', () => {
       runHandler(CarpoolAddButton, restStub.layer, rpcStub.layer, interaction),
     ).resolves.not.toThrow();
   });
+
+  it('modal submit with a note passes Option.some(note) to Carpool/AddCar', async () => {
+    const addFn = vi.fn(() =>
+      Effect.succeed(
+        new CarpoolRpcModels.AddCarResult({ car_id: CAR_ID, view: makeCarpoolView() }),
+      ),
+    );
+    const rpcStub = makeSyncRpcStub({ 'Carpool/AddCar': addFn });
+    const restStub = makeRestStub();
+
+    const interaction = makeModalInteraction(
+      `carpool-add-modal:${CHANNEL_ID}:${MESSAGE_ID}:${CARPOOL_ID}`,
+      { carpool_capacity: '4', carpool_note: 'Leaving from Main Station at 17:30' },
+    );
+    await runModalHandler(CarpoolAddModal.handle, restStub.layer, rpcStub.layer, interaction);
+
+    expect(addFn).toHaveBeenCalledWith(
+      expect.objectContaining({ note: Option.some('Leaving from Main Station at 17:30') }),
+    );
+  });
+
+  it('modal submit without a note passes Option.none() to Carpool/AddCar', async () => {
+    const addFn = vi.fn(() =>
+      Effect.succeed(
+        new CarpoolRpcModels.AddCarResult({ car_id: CAR_ID, view: makeCarpoolView() }),
+      ),
+    );
+    const rpcStub = makeSyncRpcStub({ 'Carpool/AddCar': addFn });
+    const restStub = makeRestStub();
+
+    const interaction = makeModalInteraction(
+      `carpool-add-modal:${CHANNEL_ID}:${MESSAGE_ID}:${CARPOOL_ID}`,
+      { carpool_capacity: '4' },
+    );
+    await runModalHandler(CarpoolAddModal.handle, restStub.layer, rpcStub.layer, interaction);
+
+    expect(addFn).toHaveBeenCalledWith(expect.objectContaining({ note: Option.none() }));
+  });
 });
 
 // Regression guard: locks the USER_SELECT component JSON shape produced by
@@ -731,6 +780,134 @@ describe('carpool-capacity interaction', () => {
     expect(updateFn).not.toHaveBeenCalled();
     expect(restStub.updateMessage).not.toHaveBeenCalled();
     expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+  });
+});
+
+describe('carpool-note interaction', () => {
+  it('button fetches the current note via GetCarNote and renders a MODAL prefilled with it', async () => {
+    const getCarNoteFn = vi.fn(() => Effect.succeed(Option.some('Meet at 5pm at the station')));
+    const rpcStub = makeSyncRpcStub({ 'Carpool/GetCarNote': getCarNoteFn });
+    const interaction = makeComponentInteraction(`carpool-note:${CAR_ID}`);
+
+    const response = await Effect.runPromise(
+      CarpoolNoteButton.handle.pipe(
+        Effect.provide(Layer.succeed(Interaction, interaction)),
+        Effect.provide(rpcStub.layer),
+      ) as Effect.Effect<unknown, never, never>,
+    );
+
+    expect(getCarNoteFn).toHaveBeenCalledWith({ car_id: CAR_ID });
+
+    const data = (
+      response as {
+        type: number;
+        data: {
+          custom_id: string;
+          components: ReadonlyArray<{
+            type: number;
+            components: ReadonlyArray<{ type: number; custom_id: string; value?: string }>;
+          }>;
+        };
+      }
+    ).data;
+
+    expect((response as { type: number }).type).toBe(DiscordTypes.InteractionCallbackTypes.MODAL);
+    expect(data.custom_id).toBe(`carpool-note-modal:${CAR_ID}`);
+    const row = data.components[0];
+    expect(row?.components[0]?.custom_id).toBe('carpool_note');
+    expect(row?.components[0]?.value).toBe('Meet at 5pm at the station');
+  });
+
+  it('button renders an empty MODAL (no prefilled value) when GetCarNote returns none', async () => {
+    const rpcStub = makeSyncRpcStub({
+      'Carpool/GetCarNote': vi.fn(() => Effect.succeed(Option.none())),
+    });
+    const interaction = makeComponentInteraction(`carpool-note:${CAR_ID}`);
+
+    const response = await Effect.runPromise(
+      CarpoolNoteButton.handle.pipe(
+        Effect.provide(Layer.succeed(Interaction, interaction)),
+        Effect.provide(rpcStub.layer),
+      ) as Effect.Effect<unknown, never, never>,
+    );
+
+    const data = (
+      response as {
+        data: { components: ReadonlyArray<{ components: ReadonlyArray<{ value?: string }> }> };
+      }
+    ).data;
+    expect(data.components[0]?.components[0]?.value).toBeUndefined();
+  });
+
+  it('GetCarNote RpcClientError — falls back to an empty MODAL instead of failing', async () => {
+    const rpcStub = makeSyncRpcStub({
+      'Carpool/GetCarNote': vi.fn(() => Effect.fail({ _tag: 'RpcClientError' as const })),
+    });
+    const interaction = makeComponentInteraction(`carpool-note:${CAR_ID}`);
+
+    const response = await Effect.runPromise(
+      CarpoolNoteButton.handle.pipe(
+        Effect.provide(Layer.succeed(Interaction, interaction)),
+        Effect.provide(rpcStub.layer),
+      ) as Effect.Effect<unknown, never, never>,
+    );
+
+    expect((response as { type: number }).type).toBe(DiscordTypes.InteractionCallbackTypes.MODAL);
+    const data = (
+      response as {
+        data: { components: ReadonlyArray<{ components: ReadonlyArray<{ value?: string }> }> };
+      }
+    ).data;
+    expect(data.components[0]?.components[0]?.value).toBeUndefined();
+  });
+
+  it('modal submit calls Carpool/UpdateCarNote with Option.some(note), then rebuilds the board', async () => {
+    const updateFn = vi.fn(() => Effect.succeed(makeCarpoolViewWithCar(CAR_ID, THREAD_ID)));
+    const rpcStub = makeSyncRpcStub({ 'Carpool/UpdateCarNote': updateFn });
+    const restStub = makeRestStub();
+
+    const interaction = makeModalInteraction(`carpool-note-modal:${CAR_ID}`, {
+      carpool_note: 'Meet at the gas station',
+    });
+    await runModalHandler(CarpoolNoteModal.handle, restStub.layer, rpcStub.layer, interaction);
+
+    expect(updateFn).toHaveBeenCalledWith(
+      expect.objectContaining({ car_id: CAR_ID, note: Option.some('Meet at the gas station') }),
+    );
+    expect(restStub.updateMessage).toHaveBeenCalledWith(
+      CHANNEL_ID,
+      MESSAGE_ID,
+      expect.objectContaining({ allowed_mentions: { parse: [] } }),
+    );
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+  });
+
+  it('empty modal submit clears the note (Option.none)', async () => {
+    const updateFn = vi.fn(() => Effect.succeed(makeCarpoolViewWithCar(CAR_ID, THREAD_ID)));
+    const rpcStub = makeSyncRpcStub({ 'Carpool/UpdateCarNote': updateFn });
+    const restStub = makeRestStub();
+
+    const interaction = makeModalInteraction(`carpool-note-modal:${CAR_ID}`, {});
+    await runModalHandler(CarpoolNoteModal.handle, restStub.layer, rpcStub.layer, interaction);
+
+    expect(updateFn).toHaveBeenCalledWith(
+      expect.objectContaining({ car_id: CAR_ID, note: Option.none() }),
+    );
+  });
+
+  it('CarpoolNotCarOwner → localized ephemeral error', async () => {
+    const updateFn = vi.fn(() => Effect.fail(new CarpoolRpcModels.CarpoolNotCarOwner()));
+    const rpcStub = makeSyncRpcStub({ 'Carpool/UpdateCarNote': updateFn });
+    const restStub = makeRestStub();
+
+    const interaction = makeModalInteraction(`carpool-note-modal:${CAR_ID}`, {
+      carpool_note: 'Some note',
+    });
+    await runModalHandler(CarpoolNoteModal.handle, restStub.layer, rpcStub.layer, interaction);
+
+    expect(restStub.updateOriginalWebhookMessage).toHaveBeenCalled();
+    const payload = JSON.stringify(restStub.updateOriginalWebhookMessage.mock.calls[0]);
+    expect(payload.length).toBeGreaterThan(0);
   });
 });
 

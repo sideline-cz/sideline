@@ -30,22 +30,23 @@ Any team member (not just captains) can offer a lift by adding a car.
 <Steps>
 
 1. Click **Add a car** on the board embed.
-2. A small form appears. Enter the **capacity** — this is the total number of people the car fits, **including yourself as the driver**. For example, enter `4` if you can take yourself plus 3 passengers.
+2. A small form appears. Enter the **capacity** — this is the total number of people the car fits, **including yourself as the driver**. For example, enter `4` if you can take yourself plus 3 passengers. Optionally, fill in the second field with a **route note** (up to 200 characters) — for example, where and when you're leaving from.
 3. Click **Submit**. The bot adds your car to the board and opens a **private thread** for your car.
 
 </Steps>
 
-The capacity must be between 1 and 8 (inclusive). You can only have one car per board.
+The capacity must be between 1 and 8 (inclusive). You can only have one car per board. If you added a route note, it appears on the board directly below your car's title (see [Adding a route note](#adding-a-route-note-owner-only)).
 
 ### Your car's private thread
 
-After you add a car the bot creates a private Discord thread — only you and the passengers in your car can see it. The thread contains five buttons:
+After you add a car the bot creates a private Discord thread — only you and the passengers in your car can see it. The thread contains six buttons:
 
 - **Assign passenger** — pick a team member from a Discord user-select menu to add them to your car on their behalf.
 - **Leave** — for passengers to leave the car directly from the thread (see [Leaving a car](#leaving-a-car)).
 - **Remove car** — remove your car entirely (see [Removing a car](#removing-a-car)).
 - **Change seats** — update how many seats your car has (see [Changing your seat count](#changing-your-seat-count-owner-only)).
 - **Kick passenger** — remove a specific passenger from your car (see [Removing a passenger](#removing-a-passenger-owner-only)).
+- **📝 Route note** — add, edit, or clear your car's route note (see [Adding a route note](#adding-a-route-note-owner-only)).
 
 You are automatically added to the thread when the car is created.
 
@@ -142,6 +143,21 @@ If a passenger asks to drop out but cannot click **Leave** themselves, or you ne
 </Steps>
 
 The removed passenger is not notified privately, but they will no longer see the thread and the board's passenger list updates immediately. You can only remove someone who currently has a seat in your car.
+
+## Adding a route note (owner only)
+
+Let your passengers know where and when you're leaving from, or any other detail about the ride, by attaching a short route note to your car. You can set this when you first add your car, or anytime afterwards from the private thread.
+
+<Steps>
+
+1. Open your car's private thread.
+2. Click **📝 Route note**. A form appears prefilled with your car's current note, if you've already set one.
+3. Type your note (up to 200 characters), or clear the field to remove the note entirely.
+4. Click **Submit**. The board refreshes to show (or hide) the note.
+
+</Steps>
+
+The note appears on the public board directly below your car's title row, for example `📍 leaving from Main Station at 17:30, via Brno`. Submitting an empty note clears it from the board.
 
 ## Troubleshooting
 

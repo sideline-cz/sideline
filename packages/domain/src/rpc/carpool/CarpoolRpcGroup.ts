@@ -27,6 +27,9 @@ import {
   ReserveResult,
 } from './CarpoolRpcModels.js';
 
+/** Free-text driver route note — capped at 200 chars to match the `carpool_cars.note` column. */
+const CarNote = Schema.OptionFromNullOr(Schema.String.pipe(Schema.check(Schema.isMaxLength(200))));
+
 export const CarpoolRpcGroup = RpcGroup.make(
   Rpc.make('CreateCarpool', {
     payload: {
@@ -62,7 +65,7 @@ export const CarpoolRpcGroup = RpcGroup.make(
       discord_user_id: Discord.Snowflake,
       carpool_id: CarpoolId,
       capacity: Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 8 }))),
-      note: Schema.OptionFromNullOr(Schema.String),
+      note: CarNote,
     },
     success: AddCarResult,
     error: Schema.Union([
@@ -168,6 +171,27 @@ export const CarpoolRpcGroup = RpcGroup.make(
       CarpoolNotCarOwner,
       CarpoolCapacityBelowOccupancy,
     ]),
+  }),
+  Rpc.make('UpdateCarNote', {
+    payload: {
+      guild_id: Discord.Snowflake,
+      discord_user_id: Discord.Snowflake,
+      car_id: CarpoolCarId,
+      note: CarNote,
+    },
+    success: CarpoolView,
+    error: Schema.Union([
+      CarpoolGuildNotFound,
+      CarpoolNotMember,
+      CarpoolCarNotFound,
+      CarpoolNotCarOwner,
+    ]),
+  }),
+  Rpc.make('GetCarNote', {
+    payload: {
+      car_id: CarpoolCarId,
+    },
+    success: Schema.OptionFromNullOr(Schema.String),
   }),
   Rpc.make('KickPassenger', {
     payload: {

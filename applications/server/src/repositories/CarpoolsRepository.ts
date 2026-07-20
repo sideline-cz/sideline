@@ -846,6 +846,50 @@ const make = Effect.gen(function* () {
       )
       .pipe(catchSqlErrors, Effect.asVoid);
 
+  // ---- updateCarNote ----
+
+  const setCarNoteQuery = SqlSchema.void({
+    Request: Schema.Struct({
+      car_id: Carpool.CarpoolCarId,
+      note: Schema.OptionFromNullOr(Schema.String),
+    }),
+    execute: (input) => sql`
+      UPDATE carpool_cars SET note = ${input.note}, updated_at = now()
+      WHERE id = ${input.car_id}
+    `,
+  });
+
+  const updateCarNote = (input: {
+    readonly carId: Carpool.CarpoolCarId;
+    readonly ownerTeamMemberId: TeamMember.TeamMemberId;
+    readonly note: Option.Option<string>;
+  }) =>
+    sql
+      .withTransaction(
+        Effect.Do.pipe(
+          Effect.bind('car', () =>
+            lockCarQuery(input.carId).pipe(
+              catchSqlErrors,
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.fail(new CarpoolRpcModels.CarpoolCarNotFound()),
+                  onSome: Effect.succeed,
+                }),
+              ),
+            ),
+          ),
+          Effect.tap(({ car }) =>
+            car.owner_team_member_id !== input.ownerTeamMemberId
+              ? Effect.fail(new CarpoolRpcModels.CarpoolNotCarOwner())
+              : Effect.void,
+          ),
+          Effect.tap(() =>
+            setCarNoteQuery({ car_id: input.carId, note: input.note }).pipe(catchSqlErrors),
+          ),
+        ),
+      )
+      .pipe(catchSqlErrors, Effect.asVoid);
+
   // ---- kickPassenger ----
 
   const kickPassenger = (input: {
@@ -872,6 +916,7 @@ const make = Effect.gen(function* () {
     removeCar,
     findCarById,
     updateCarCapacity,
+    updateCarNote,
     kickPassenger,
   };
 });
