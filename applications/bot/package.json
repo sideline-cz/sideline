@@ -1,7 +1,7 @@
 {
   "name": "@sideline/bot",
   "private": true,
-  "version": "0.31.0",
+  "version": "0.31.1",
   "type": "module",
   "license": "MIT",
   "description": "Discord bot for Sideline",
