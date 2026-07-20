@@ -21,16 +21,9 @@ Run `git status` and `git diff` to understand what changed. If there are no chan
 
 ---
 
-### Step 2: Create a changeset (if code changed)
+### Step 2: Versioning note (no changesets)
 
-If any package source code changed (not just docs/config), create a changeset file in `.changeset/`:
-
-- Determine which packages were affected — include all `@sideline/*` packages with meaningful code changes (e.g. `@sideline/web`, `@sideline/bot`, `@sideline/server`, `@sideline/proxy`, `@sideline/migrations`, `@sideline/domain`, `@sideline/effect-lib`, `@sideline/i18n`). Private packages are NOT excluded.
-- Apply bump rules:
-  - **patch** — small features, bug fixes, refactors
-  - **minor** — larger features, significant new functionality
-  - **major** — NEVER. Do not bump major.
-- Write a short summary of the changes in the changeset body
+This repo does NOT use Changesets. Do not create `.changeset/` files. Releases are per-app `@sideline/<app>@vX.Y.Z` git tags handled by MajNet after merge (see `/deploy`) — nothing version-related is needed in the PR.
 
 ---
 

@@ -62,7 +62,7 @@ Phase 5   Developer implements code to make tests pass
 Phase 6   Formatter + Analyzer + Tester verify (no round limit)
 Phase 7   Reviewer + Hater review → Developer fixes (no round limit)
 Phase 8   Refactorer cleans up code style
-Phase 9   Commit skill creates changeset, pushes, opens PR
+Phase 9   Commit skill pushes, opens PR
 Phase 10  Wait for CI + poll for code review comments
 Phase 11  Developer addresses review comments → push fixes (no round limit)
 Phase 12  Agile Coach updates Notion statuses, Manager reports final state
@@ -148,7 +148,7 @@ Images are automatically built and pushed to GHCR on pull requests via the Snaps
 | Package mgmt   | pnpm workspaces                                            |
 | Testing        | Vitest + [@effect/vitest](https://effect.website)          |
 | Linting        | [Biome](https://biomejs.dev)                               |
-| CI/CD          | GitHub Actions + [Changesets](https://github.com/changesets/changesets) |
+| CI/CD          | GitHub Actions + [MajNet](https://github.com/majnet/majnet) (repo-wide `vX.Y.Z` tag releases) |
 
 ## Pre-commit Hooks
 

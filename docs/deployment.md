@@ -39,7 +39,7 @@ Server, Bot, Web ────────────────────►
 | `web` | Node.js 25, TanStack Start, React 19 | Server-side rendered frontend |
 | `docs` | Astro + Starlight → nginx:alpine | Static end-user documentation site served at `/docs` |
 
-**Container registry:** `ghcr.io/maxa-ondrej/sideline/<app>`
+**Container registry:** `ghcr.io/sideline-cz/sideline/<app>`
 
 ---
 
@@ -376,46 +376,25 @@ Triggers on every push to `main` and every pull request targeting `main`. Runs w
 | Types | `pnpm codegen && pnpm build && pnpm check` | Full TypeScript type-check across all packages |
 | Test | `pnpm build && pnpm test` | Builds all packages, then runs the Vitest suite (`NODE_OPTIONS=--max_old_space_size=8192`) |
 
-### 6.2 `release.yml` — Versioning and Docker Publish
+### 6.2 `build.yaml` — MajNet Build (Preview & Testing Images)
 
-Triggers on every push to `main`. Uses Changesets to manage versions and releases.
+Triggers on every push to `main` and every pull request. There is no versioning step — this workflow only builds and publishes images.
 
-**Step 1 — Release job:**
-1. Runs the Changesets action (`changesets/action`).
-2. If there are pending changesets, opens or updates a "Version Packages" release PR.
-3. When the release PR is merged, publishes new package versions (`pnpm changeset-publish`) and creates GitHub releases.
-4. Detects which published packages correspond to applications under `applications/` and outputs the list as `changed-apps`.
+For each app in the matrix (`proxy`, `server`, `web`, `docs`, `bot`), calls MajNet's reusable `app-build.yaml` workflow (`majnet/majnet@main`), which builds the Docker image from the root context using `applications/<app>/Dockerfile` and pushes it to the nested image `ghcr.io/<owner>/<repo>/<app>` with build-tier tags:
+- Pull requests → `pr-<N>` (ephemeral preview image)
+- `main` → `sha-<sha>` and `latest` (auto-deployed to MajNet's **testing** class)
 
-**Step 2 — Docker job (matrix, one job per changed app):**
-1. Reads the new version from `applications/<app>/package.json`.
-2. Logs in to GHCR with `GITHUB_TOKEN`.
-3. Sets up Docker Buildx.
-4. Builds the Docker image from the root context using `applications/<app>/Dockerfile`.
-5. Pushes to `ghcr.io/maxa-ondrej/sideline/<app>` with the following tags:
-   - `<version>` (e.g. `1.2.3`)
-   - `main` (branch name)
-   - `sha-<commit>` (short SHA)
-6. Dispatches a `deploy` event to `maxa-ondrej/majksa-ops` with the payload `{"env":"dev","app":"sideline","service":"<app>","version":"<version>"}` — this triggers automated deployment in the ops repository.
+The GHCR `registry_package` webhook fired by the push notifies the MajNet bot, which maps the package name to the MajNet app and drives the deploy.
 
-Required secrets: `GH_PAT` (personal access token with write access), `NPM_TOKEN`.
+### 6.3 `release.yaml` — MajNet Release (Stable & Production)
 
-### 6.3 `publish.yml` — Manual Tag-Based Docker Publish
+Triggers on push of a per-app `@sideline/<app>@vX.Y.Z` git tag (continuing the historical tag naming) — each tag releases that one app; all apps are normally tagged together at one shared version. A plain `vX.Y.Z` tag is a supported fallback that releases every app at once (MajNet ADR 0009/0018). There is no per-package Changesets versioning anymore.
 
-Triggers on any git tag push (e.g. `@sideline/server@1.2.3`).
+A resolve job parses the tag into (app, version); the release job builds and pushes `ghcr.io/<owner>/<repo>/<app>:vX.Y.Z` for the resolved app(s). MajNet's reusable `app-release.yaml` is not used because it derives the image tag from the git ref name, which the per-app tags prefix.
 
-**Detect job:**
-- Strips the `@sideline/` prefix and version suffix from the tag name.
-- Checks whether the resulting name is a directory under `applications/`.
-- Outputs `is_app=true` and the `app` name if so.
+The GHCR `registry_package` webhook tells the MajNet bot, which records the release (version → digest) and auto-tracks it into the **stable** class — the bot opens and auto-merges a render PR on `sideline-cz/ops` targeting `env/stable`.
 
-**Docker job (runs only when `is_app=true`):**
-1. Logs in to GHCR.
-2. Builds the Docker image from the root context using `applications/<app>/Dockerfile`.
-3. Pushes to `ghcr.io/maxa-ondrej/sideline/<app>` with:
-   - The exact tag ref (e.g. `@sideline/server@1.2.3`)
-   - `sha-<commit>` (short SHA)
-
-This workflow is useful for republishing a specific tagged version without going through the full release flow.
+**Production** is a separate, manually triggered **promote** of a chosen release (MajNet dashboard or CLI): the bot commits the digest to the production overlay and opens an `env/production` render PR on `sideline-cz/ops`. Merging that render PR — gated on admin review — is the production deploy trigger; the reconciler then converges the cluster. See `.claude/skills/deploy/SKILL.md` for the full operator-facing flow.
 
 ### 6.4 `close-preview.yml` — Preview Cleanup
 
