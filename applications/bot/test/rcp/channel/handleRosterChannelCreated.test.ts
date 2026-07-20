@@ -320,6 +320,8 @@ describe('handleRosterChannelCreated — idempotency + member backfill', () => {
 
     // Role creation: createDiscordChannelAndRole path calls createGuildRole
     expect(restCalls.createGuildRole).toHaveLength(1);
+    // Bot-created roles must carry no global guild permissions (createDiscordChannelAndRole path)
+    expect(restCalls.createGuildRole[0]?.[1]).toMatchObject({ permissions: 0 });
     // Mapping upserted after role created
     expect(rpcCalls.UpsertRosterMapping).toHaveLength(1);
     expect(rpcCalls.UpdateRosterChannel).toHaveLength(1);
@@ -355,6 +357,8 @@ describe('handleRosterChannelCreated — idempotency + member backfill', () => {
 
     // A role must be created (the existing channel path calls createRoleForChannel → createGuildRole)
     expect(restCalls.createGuildRole).toHaveLength(1);
+    // Bot-created roles must carry no global guild permissions (createRoleForChannel path)
+    expect(restCalls.createGuildRole[0]?.[1]).toMatchObject({ permissions: 0 });
     // Mapping must be upserted
     expect(rpcCalls.UpsertRosterMapping).toHaveLength(1);
     // UpdateRosterChannel NOT called — channel already exists in the mapping

@@ -13,7 +13,9 @@ export const createGuildRole = (
   Effect.Do.pipe(
     Effect.bind('rpc', () => SyncRpc.asEffect()),
     Effect.bind('rest', () => DiscordREST.asEffect()),
-    Effect.bind('role', ({ rest }) => rest.createGuildRole(guildId, { name: roleName })),
+    Effect.bind('role', ({ rest }) =>
+      rest.createGuildRole(guildId, { name: roleName, permissions: 0 }),
+    ),
     Effect.retry(retryPolicy),
     Effect.tap(({ role }) =>
       Effect.logInfo(`Auto-created Discord role "${roleName}" (${role.id}) in guild ${guildId}`),

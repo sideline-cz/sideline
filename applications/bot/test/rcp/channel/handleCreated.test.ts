@@ -318,6 +318,9 @@ describe('handleCreated — Task 1: role-only GetMapping-first idempotency', () 
     // Role must be created exactly once
     expect(restCalls.createGuildRole).toHaveLength(1);
 
+    // Bot-created roles must carry no global guild permissions (createRoleOnly path)
+    expect(restCalls.createGuildRole[0]?.[1]).toMatchObject({ permissions: 0 });
+
     // Role-only upsert written exactly once
     expect(rpcCalls.UpsertMappingRoleOnly).toHaveLength(1);
 
@@ -355,6 +358,9 @@ describe('handleCreated — Task 1: role-only GetMapping-first idempotency', () 
 
     // A role must be created (for the existing channel — the channel+role path)
     expect(restCalls.createGuildRole).toHaveLength(1);
+
+    // Bot-created roles must carry no global guild permissions (createRoleForChannel path)
+    expect(restCalls.createGuildRole[0]?.[1]).toMatchObject({ permissions: 0 });
 
     // Full mapping upsert (channel + role) called with existing channel id
     expect(rpcCalls.UpsertMapping).toHaveLength(1);

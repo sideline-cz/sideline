@@ -16,7 +16,7 @@ export const createRoleForChannel = (
     Effect.bind('rest', () => DiscordREST.asEffect()),
     Effect.bind('role', ({ rest }) =>
       rest
-        .createGuildRole(guildId, { name: roleName, color: roleColor })
+        .createGuildRole(guildId, { name: roleName, color: roleColor, permissions: 0 })
         .pipe(Effect.retry(retryPolicy)),
     ),
     Effect.tap(({ role }) =>

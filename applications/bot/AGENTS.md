@@ -315,6 +315,8 @@ Syncs team roles to Discord guild roles. When roles are created/deleted/assigned
 
 Event types: `role_created`, `role_deleted`, `role_assigned`, `role_unassigned`
 
+**Every bot-created Discord role MUST pass `permissions: 0` to `rest.createGuildRole`.** Access is granted exclusively through channel permission overwrites (see "Access tiers and Discord permission overwrites" below), never through global guild-role permissions. dfx types `createGuildRole`'s `permissions` field as a `number`, so pass the numeric literal `0` (not a `string`, not a bitset). This applies to all five call sites — `src/rest/roles/createGuildRole.ts`, `src/rest/channels/createRoleOnly.ts`, `src/rest/channels/createRoleForChannel.ts`, `src/rest/channels/createChannelWithRole.ts`, and `src/rcp/roleProvision/handleProvisionRole.ts` — and to any new one. Every `createGuildRole` handler test MUST assert `restCalls.createGuildRole[0]?.[1]` `toMatchObject({ permissions: 0 })`.
+
 ### Channel Sync (groups ↔ Discord channels)
 
 Syncs groups to private Discord text channels with per-user permission overwrites. The guild sync uses `DfxSyncableChannel` (type 0 = text, type 4 = category) to sync both text and category channels from Discord to the database.

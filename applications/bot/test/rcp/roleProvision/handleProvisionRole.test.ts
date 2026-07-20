@@ -154,4 +154,40 @@ describe('handleProvisionRole', () => {
       }),
     ]);
   });
+
+  it('creates a new role when no existing role matches the desired name — createGuildRole called once with no global permissions', async () => {
+    // Arrange: DiscordREST has no role named 'Bronze Achiever', forcing the onNone branch
+    const { calls: restCalls, layer: restLayer } = makeRest({
+      listGuildRoles: (...args: any[]) => {
+        restCalls.listGuildRoles.push(args);
+        return Effect.succeed([{ id: '666666666666666666', name: 'Other Role', managed: false }]);
+      },
+    });
+    const { calls: rpcCalls, layer: rpcLayer } = makeSyncRpc();
+
+    const event = makeEvent({ desired_name: 'Bronze Achiever' });
+
+    // Act
+    await Effect.runPromise(
+      handleProvisionRole(event).pipe(
+        Effect.provide(Layer.merge(restLayer, rpcLayer)),
+      ) as Effect.Effect<void>,
+    );
+
+    // Assert
+    // listGuildRoles must have been called to discover existing roles
+    expect(restCalls.listGuildRoles).toHaveLength(1);
+    // No matching role found → createGuildRole must have been called exactly once
+    expect(restCalls.createGuildRole).toHaveLength(1);
+    // Bot-created roles must carry no global guild permissions
+    expect(restCalls.createGuildRole[0]?.[1]).toMatchObject({ permissions: 0 });
+    // UpsertBuiltInRoleMapping must have been called with the newly created role id
+    const upsertCalls = rpcCalls['Achievement/UpsertBuiltInRoleMapping'];
+    expect(upsertCalls).toHaveLength(1);
+    expect(upsertCalls[0]).toMatchObject([
+      expect.objectContaining({
+        discord_role_id: '999999999999999999',
+      }),
+    ]);
+  });
 });
