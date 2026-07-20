@@ -202,6 +202,10 @@ describe('handleMemberAdded — B4: never creates channels, only roles', () => {
     // MUST create a role
     expect(restCalls.createGuildRole).toHaveLength(1);
 
+    // Bot-created roles must carry no global guild permissions (createRoleOnly path)
+    const roleOnlyCallArgs = restCalls.createGuildRole[0] as any[];
+    expect(roleOnlyCallArgs[1]).toMatchObject({ permissions: 0 });
+
     // MUST upsert role-only mapping (no channel_id in payload)
     expect(rpcCalls.UpsertMappingRoleOnly).toHaveLength(1);
     expect(rpcCalls.UpsertMapping).toHaveLength(0);
@@ -229,6 +233,10 @@ describe('handleMemberAdded — B4: never creates channels, only roles', () => {
 
     // MUST create a role (for the existing channel)
     expect(restCalls.createGuildRole).toHaveLength(1);
+
+    // Bot-created roles must carry no global guild permissions (createRoleForChannel path)
+    const roleForChannelCallArgs = restCalls.createGuildRole[0] as any[];
+    expect(roleForChannelCallArgs[1]).toMatchObject({ permissions: 0 });
 
     // MUST upsert full mapping (channel + role)
     expect(rpcCalls.UpsertMapping).toHaveLength(1);

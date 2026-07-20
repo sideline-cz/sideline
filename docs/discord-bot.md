@@ -1660,7 +1660,7 @@ The outbox workers implement the bot's side of the outbox pattern: the server in
 
 **Polling RPC:** `Channel/GetUnprocessedEvents`
 
-Channel sync manages Discord channels and roles for Sideline groups. The Discord role (which gates channel access) and the Discord channel are now independent: a group always gets a role, but a channel is only created when explicitly requested. This means a mapping row can exist with a `discord_role_id` but no `discord_channel_id`.
+Channel sync manages Discord channels and roles for Sideline groups. The Discord role (which gates channel access) and the Discord channel are now independent: a group always gets a role, but a channel is only created when explicitly requested. This means a mapping row can exist with a `discord_role_id` but no `discord_channel_id`. Auto-created roles (for groups, rosters, team-role mappings, and provisioned achievement roles) are always created with `permissions: 0` — no global guild permissions — so channel/member access comes solely from channel permission overwrites, never from the role itself.
 
 **Events processed:**
 
@@ -1825,7 +1825,7 @@ The Role Provision worker drains the `discord_role_provision_events` outbox. Whe
 1. Calls `discord.listGuildRoles` for the event's `guild_id`.
 2. Searches for an existing role whose name exactly matches `desired_name`.
 3. If found, uses that role's ID (reuse semantics — avoids duplicate roles for the same achievement).
-4. If not found, calls `discord.createGuildRole` with `{ name: desired_name }`.
+4. If not found, calls `discord.createGuildRole` with `{ name: desired_name, permissions: 0 }` — the role carries no global guild permissions.
 5. Writes the resolved role ID back to the server:
    - `kind = "builtin_achievement"` → calls `Achievement/UpsertBuiltInRoleMapping` with `(team_id, achievement_slug, discord_role_id)`.
    - `kind = "custom_achievement"` → calls `Achievement/UpsertCustomRoleMapping` with `(team_id, custom_achievement_id, discord_role_id)`.

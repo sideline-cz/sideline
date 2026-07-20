@@ -24,7 +24,7 @@ const resolveRoleId = (guildId: string, desiredName: string) =>
       return Option.match(found, {
         onSome: (role) => Effect.succeed(decodeSnowflake(role.id)),
         onNone: () =>
-          rest.createGuildRole(guildId, { name: desiredName }).pipe(
+          rest.createGuildRole(guildId, { name: desiredName, permissions: 0 }).pipe(
             Effect.retry(retryPolicy),
             Effect.map((role) => decodeSnowflake(role.id)),
           ),

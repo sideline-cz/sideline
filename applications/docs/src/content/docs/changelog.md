@@ -5,6 +5,13 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-07-20 — Security hardening: auto-created Discord roles no longer carry server-wide permissions
+
+Discord roles that Sideline creates automatically — for groups, rosters, and achievements — are now created with no global Discord permissions of their own.
+
+- Access to private channels is unaffected: it continues to come entirely from the channel-specific permission overwrites Sideline sets up for the role, exactly as before.
+- This applies to newly created roles going forward. No action is needed and no existing role assignments or channel access change.
+
 ## 2026-07-20 — Carpool board: drivers can add a route note
 
 Car owners can now attach a short free-text route note (up to 200 characters) to their car — for example, where and when you're leaving from.
