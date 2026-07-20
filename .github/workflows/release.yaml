@@ -1,0 +1,30 @@
+name: MajNet release
+
+# Release tier (MajNet ADR 0009/0018): a release is a repo-wide `vX.Y.Z` git
+# tag — cut from the MajNet dashboard (or `git tag vX.Y.Z && git push --tags`).
+# One tag releases every app in the monorepo: each matrix entry builds + pushes
+# the NESTED image ghcr.io/<owner>/<repo>/<app>:vX.Y.Z. The GHCR publish fires
+# the registry_package webhook; the bot records the release (version → digest)
+# and auto-tracks it into the `stable` class. Production is a separate promote
+# (dashboard/CLI) gated by the admin-reviewed env/production render PR in the
+# sideline-cz/ops repo.
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    name: Release (${{ matrix.app }})
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [proxy, server, web, docs, bot]
+    permissions:
+      contents: read
+      packages: write
+    uses: majnet/majnet/.github/workflows/app-release.yaml@main
+    with:
+      image: ghcr.io/${{ github.repository }}/${{ matrix.app }}
+      context: .
+      dockerfile: applications/${{ matrix.app }}/Dockerfile
