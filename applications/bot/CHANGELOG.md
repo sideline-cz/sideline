@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.32.0
+
+### 🚀 Features
+- MajNet standard /healthz and /info endpoints on all apps (#538)
+
 ## 0.31.1
 
 ### 🐛 Fixes

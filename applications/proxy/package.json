@@ -1,7 +1,7 @@
 {
   "private": true,
   "name": "@sideline/proxy",
-  "version": "0.2.12",
+  "version": "0.3.0",
   "scripts": {
     "test": "vitest"
   }

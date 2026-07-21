@@ -1,5 +1,10 @@
 # @sideline/proxy
 
+## 0.3.0
+
+### 🚀 Features
+- MajNet standard /healthz and /info endpoints on all apps (#538)
+
 ## 0.2.12
 
 ### Patch Changes

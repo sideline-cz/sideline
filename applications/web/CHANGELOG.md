@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.28.0
+
+### 🚀 Features
+- MajNet standard /healthz and /info endpoints on all apps (#538)
+
 ## 0.27.5
 
 ### Patch Changes
