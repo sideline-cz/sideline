@@ -231,12 +231,6 @@ describe('Guild/PendingOnboardingSyncs + sync lifecycle RPCs', () => {
                 expect(r[0].guild_id).toBe(GUILD_ID);
                 expect(typeof r[0].team_name).toBe('string');
                 expect(r[0].is_community_enabled).toBe(true);
-                // The per-type training channel column was removed from team_settings
-                // (see remove-channel-by-type Release A) — server now always emits this
-                // key as NULL, decoded by the tolerant domain schema as Option.none().
-                expect(Option.isNone(r[0].training_channel_id as Option.Option<unknown>)).toBe(
-                  true,
-                );
                 // Row is now claimed (syncing)
                 expect(rowAfter).toBe('syncing');
               }),

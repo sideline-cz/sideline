@@ -23,15 +23,6 @@ export const PendingOnboardingSyncEntry = Schema.Struct({
   onboarding_locale: OnboardingLocale,
   rules_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   welcome_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
-  // Transitional (expand/contract): the key must stay on the wire as an
-  // explicit null in Release A — pre-Release-A bots require the key and
-  // strand claimed syncs in 'syncing' if it's missing (onNoneEncoding
-  // defaults to "omit", which would drop it). Decode tolerates both null
-  // and a missing key so the field can be deleted from this RPC entirely
-  // in Release B once all deployed bots run this schema.
-  training_channel_id: Schema.OptionFromOptionalNullOr(Discord.Snowflake, {
-    onNoneEncoding: null,
-  }),
   onboarding_rules_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
   onboarding_rules_prompt_id: Schema.OptionFromNullOr(Discord.Snowflake),
   is_community_enabled: Schema.Boolean,
