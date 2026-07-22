@@ -144,6 +144,7 @@ export function TeamSettingsPage({
   const [rosterCategory, setRosterCategory] = React.useState(
     Option.getOrElse(settings.discordRosterCategoryId, () => NONE_VALUE),
   );
+  // The single global events channel — per-event-type channels were removed (#541).
   const [eventsChannel, setEventsChannel] = React.useState(
     Option.getOrElse(settings.discordEventsChannelId, () => NONE_VALUE),
   );
