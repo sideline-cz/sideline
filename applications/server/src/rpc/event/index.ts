@@ -590,6 +590,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                   location_url: row.location_url,
                   event_type: row.event_type,
                   all_day: row.all_day,
+                  status: row.status,
                 }),
             ),
           ),

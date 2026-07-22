@@ -1998,7 +1998,7 @@ Runs immediately after the de-provisioning pass for the same guild. Calls `Guild
 
 **Polling interval:** 10 seconds.
 
-This worker keeps the event embeds inside each member's private channel up to date. The server sets `events.personal_messages_dirty_at` whenever an event is created, updated, or cancelled, whenever a member submits an RSVP, or whenever a recurring event series is created, updated, or cancelled (so all generated occurrences within the horizon pick up series-level changes). The reconcile worker drains this dirty queue.
+This worker keeps the event embeds inside each member's private channel up to date. The server sets `events.personal_messages_dirty_at` whenever an event is created, updated, or cancelled, whenever a member submits an RSVP, whenever a recurring event series is created, updated, or cancelled (so all generated occurrences within the horizon pick up series-level changes), and whenever `EventStartCron` transitions an event to `started` (plus a once-per-cycle self-healing sweep in that same cron for any non-active/past event that still has personal-channel rows but was missed). The reconcile worker drains this dirty queue.
 
 On each tick it calls `PersonalEvents/GetEventsNeedingReconcile` to get up to `POLL_BATCH_SIZE` events with a non-null `personal_messages_dirty_at`, ordered oldest-first. For each event it calls `Guild/ListPersonalChannelsForEvent` to enumerate every member who has a personal channel for that event's team. It then reconciles each member's message in the channel:
 
@@ -2016,6 +2016,8 @@ On each tick it calls `PersonalEvents/GetEventsNeedingReconcile` to get up to `P
 
 After all members for an event have been reconciled, any member whose channel received a new message is subject to a reorder pass. The worker calls `PersonalEvents/ListMessagesForMember` to retrieve all stored personal event messages for that member ordered by `start_at` ascending. It then runs the same `longestKeepablePrefix` / delete-and-recreate algorithm used by the global event channel (`reorderChannelMessages`), ensuring that upcoming events inside each personal channel are ordered with the soonest event nearest the input box — matching the ordering in the global events channel. The reorder is serialised per-channel via `ChannelReorderSemaphore`.
 
+**Global message refresh:** After the per-member and reorder passes, the worker also re-fetches the event's global (shared) message via `Event/GetDiscordMessageId` and its embed data via `Event/GetEventEmbedInfo`. If `EventEmbedInfo.status` is `'active'`, it rebuilds the embed (via `Event/GetRsvpCounts` and `Event/GetYesAttendeesForEmbed`), hash-diffs it against the currently posted message, and edits it in place if changed. If the status is not `'active'` (e.g. `'started'` or `'cancelled'`), this refresh is skipped entirely — those events' global-message styling is owned by `handleStarted`/`handleCancelled`, and reconciling here would revert their started/cancelled appearance (and re-add RSVP buttons).
+
 After reconciling all members for an event, calls `PersonalEvents/ClearPersonalMessagesDirty` with the original `dirty_at` timestamp (optimistic concurrency — if a newer dirty timestamp was written since the reconcile started, the clear is skipped and the event remains dirty for the next tick).
 
 **RPCs used by this worker:**
@@ -2029,6 +2031,9 @@ After reconciling all members for an event, calls `PersonalEvents/ClearPersonalM
 - `PersonalEvents/ListMessagesForMember`
 - `PersonalEvents/ClearPersonalMessagesDirty`
 - `Event/GetYesAttendeesForEmbed`
+- `Event/GetDiscordMessageId`
+- `Event/GetEventEmbedInfo`
+- `Event/GetRsvpCounts`
 
 **Source files:**
 - `applications/bot/src/rcp/personalEvents/ProcessorService.ts`

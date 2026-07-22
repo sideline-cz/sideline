@@ -161,6 +161,7 @@ const makeTestLayers = (opts: ReconcileMockOptions = {}) => {
                 end_at: Option.none(),
                 location: Option.none(),
                 event_type: 'training',
+                status: 'active',
               }),
             );
           }

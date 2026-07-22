@@ -86,6 +86,7 @@ const makeEmbedInfo = (): EventRpcModels.EventEmbedInfo =>
     location_url: Option.none(),
     event_type: 'match',
     all_day: false,
+    status: 'active',
   });
 
 // ---------------------------------------------------------------------------

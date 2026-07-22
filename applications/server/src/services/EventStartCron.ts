@@ -11,6 +11,22 @@ export const eventStartCronEffect = Effect.Do.pipe(
   Effect.bind('eventsRsvpsRepo', () => EventRsvpsRepository.asEffect()),
   Effect.tap(() => Effect.logInfo('EventStartCron: starting cycle')),
   Effect.bind('events', ({ eventsRepo }) => eventsRepo.findEventsToStart()),
+  // Once-per-cycle best-effort sweep, independent of the per-event loop below,
+  // that self-heals events which fell out of the active/upcoming window while
+  // still holding personal_event_messages rows (e.g. missed by the per-event
+  // mark below in a prior cycle's failure).
+  Effect.tap(({ eventsRepo }) =>
+    eventsRepo
+      .markStalePersonalMessagesDirty()
+      .pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning(
+            'EventStartCron: stale personal-messages sweep failed, continuing',
+            cause,
+          ),
+        ),
+      ),
+  ),
   Effect.tap(({ events, syncRepo, eventsRepo, eventsRsvpsRepo }) =>
     Effect.all(
       Array.map(events, (event) =>
@@ -38,6 +54,23 @@ export const eventStartCronEffect = Effect.Do.pipe(
                         Effect.catchCause((cause) =>
                           Effect.logWarning(
                             `EventStartCron: failed to increment missed RSVPs for event ${event.id}, continuing`,
+                            cause,
+                          ),
+                        ),
+                      ),
+                  ),
+                  // Mark personal messages dirty immediately after the active→started
+                  // flip, before Discord resolution/emit, so a Discord failure can't
+                  // cause the mark to be lost (the event won't reprocess since it's
+                  // already started). The personal-events reconcile then removes the
+                  // started event from members' personal channels.
+                  Effect.tap(() =>
+                    eventsRepo
+                      .markEventPersonalMessagesDirty(event.id)
+                      .pipe(
+                        Effect.catchCause((cause) =>
+                          Effect.logWarning(
+                            `EventStartCron: failed to mark personal messages dirty for event ${event.id}, continuing`,
                             cause,
                           ),
                         ),

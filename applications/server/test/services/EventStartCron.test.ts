@@ -72,6 +72,11 @@ let channelMappings: Map<
   string,
   { discord_channel_id: Discord.Snowflake; discord_role_id: Option.Option<Discord.Snowflake> }
 >;
+// TDD additions: personal-messages "dirty" bookkeeping (fix/personal-messages-dirty-sweep).
+// dirtyMarked tracks per-event markEventPersonalMessagesDirty calls; staleSweepCalls
+// tracks the once-per-cron-cycle markStalePersonalMessagesDirty sweep.
+let dirtyMarked: Event.EventId[];
+let staleSweepCalls = 0;
 
 const resetStores = () => {
   eventsToStart = [];
@@ -79,6 +84,8 @@ const resetStores = () => {
   emittedStarted = [];
   incrementedNonResponders = [];
   channelMappings = new Map();
+  dirtyMarked = [];
+  staleSweepCalls = 0;
 };
 
 // --- Mock layers ---
@@ -88,6 +95,14 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   startEvent: (eventId: Event.EventId) => {
     startedEvents.push({ eventId });
     return Effect.succeed(Option.some({ id: eventId }));
+  },
+  markEventPersonalMessagesDirty: (eventId: Event.EventId) => {
+    dirtyMarked.push(eventId);
+    return Effect.void;
+  },
+  markStalePersonalMessagesDirty: () => {
+    staleSweepCalls++;
+    return Effect.void;
   },
   // Stubs for unused methods
   findEventsByTeamId: () => Effect.die(new Error('Not implemented')),
@@ -333,6 +348,14 @@ describe('eventStartCronEffect', () => {
         callOrder.push('startEvent');
         return Effect.succeed(Option.some({ id: eventId }));
       },
+      markEventPersonalMessagesDirty: (eventId: Event.EventId) => {
+        dirtyMarked.push(eventId);
+        return Effect.void;
+      },
+      markStalePersonalMessagesDirty: () => {
+        staleSweepCalls++;
+        return Effect.void;
+      },
     } as any);
 
     const OrderTrackingSyncRepo = Layer.succeed(EventSyncEventsRepository, {
@@ -411,6 +434,14 @@ describe('eventStartCronEffect', () => {
         findEventsToStart: () => Effect.succeed(eventsToStart),
         // startEvent returns None → triggers NoSuchElementError path
         startEvent: (_eventId: Event.EventId) => Effect.succeed(Option.none()),
+        markEventPersonalMessagesDirty: (eventId: Event.EventId) => {
+          dirtyMarked.push(eventId);
+          return Effect.void;
+        },
+        markStalePersonalMessagesDirty: () => {
+          staleSweepCalls++;
+          return Effect.void;
+        },
       } as any);
 
       return eventStartCronEffect.pipe(
@@ -475,6 +506,14 @@ describe('eventStartCronEffect', () => {
         if (eventId === EVENT_ID_1) return Effect.die(new Error('Simulated start failure'));
         startedEvents.push({ eventId });
         return Effect.succeed(Option.some({ id: eventId }));
+      },
+      markEventPersonalMessagesDirty: (eventId: Event.EventId) => {
+        dirtyMarked.push(eventId);
+        return Effect.void;
+      },
+      markStalePersonalMessagesDirty: () => {
+        staleSweepCalls++;
+        return Effect.void;
       },
     } as any);
 
@@ -670,6 +709,14 @@ describe('eventStartCronEffect', () => {
       const ReturnsNoneEventsRepo = Layer.succeed(EventsRepository, {
         findEventsToStart: () => Effect.succeed(eventsToStart),
         startEvent: (_eventId: Event.EventId) => Effect.succeed(Option.none()),
+        markEventPersonalMessagesDirty: (eventId: Event.EventId) => {
+          dirtyMarked.push(eventId);
+          return Effect.void;
+        },
+        markStalePersonalMessagesDirty: () => {
+          staleSweepCalls++;
+          return Effect.void;
+        },
       } as any);
 
       return eventStartCronEffect.pipe(
@@ -891,4 +938,430 @@ describe('eventStartCronEffect', () => {
       Effect.asVoid,
     );
   });
+
+  // -------------------------------------------------------------------------
+  // T-dirty — personal-messages "dirty" bookkeeping (fix/personal-messages-dirty-sweep)
+  // -------------------------------------------------------------------------
+  // These tests FAIL until EventStartCron:
+  //   (1) calls eventsRepo.markEventPersonalMessagesDirty(event.id) as a best-effort tap
+  //       right after the active→started flip (after the missed-RSVP increment, before
+  //       the Discord role/channel resolution and emitEventStarted), and
+  //   (2) calls eventsRepo.markStalePersonalMessagesDirty() once per cron cycle,
+  //       independent of the per-event loop.
+
+  it.effect(
+    'T-dirty.1: active→started marks the event personal-messages dirty and still emits the sync event',
+    () => {
+      eventsToStart = [
+        {
+          id: EVENT_ID_1,
+          team_id: TEAM_ID,
+          title: 'Dirty Flag Event',
+          description: Option.none(),
+          start_at: START_AT,
+          end_at: Option.none(),
+          location: Option.none(),
+          event_type: 'match',
+          member_group_id: Option.none(),
+          discord_target_channel_id: Option.none(),
+          owner_group_id: Option.none(),
+          reminders_channel_id: Option.none(),
+          claimed_by: Option.none(),
+        },
+      ];
+
+      return eventStartCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(dirtyMarked).toContain(EVENT_ID_1);
+            expect(emittedStarted).toHaveLength(1);
+            expect(emittedStarted[0].eventId).toBe(EVENT_ID_1);
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T-dirty.2: dirtyMarked stays empty when startEvent returns None (no active→started transition)',
+    () => {
+      eventsToStart = [
+        {
+          id: EVENT_ID_1,
+          team_id: TEAM_ID,
+          title: 'Already Started',
+          description: Option.none(),
+          start_at: START_AT,
+          end_at: Option.none(),
+          location: Option.none(),
+          event_type: 'training',
+          member_group_id: Option.none(),
+          discord_target_channel_id: Option.none(),
+          owner_group_id: Option.none(),
+          reminders_channel_id: Option.none(),
+          claimed_by: Option.none(),
+        },
+      ];
+
+      const ReturnsNoneRepoLocal = Layer.succeed(EventsRepository, {
+        findEventsToStart: () => Effect.succeed(eventsToStart),
+        startEvent: (_eventId: Event.EventId) => Effect.succeed(Option.none()),
+        markEventPersonalMessagesDirty: (eventId: Event.EventId) => {
+          dirtyMarked.push(eventId);
+          return Effect.void;
+        },
+        markStalePersonalMessagesDirty: () => {
+          staleSweepCalls++;
+          return Effect.void;
+        },
+      } as any);
+
+      return eventStartCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(dirtyMarked).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(
+          Layer.mergeAll(
+            ReturnsNoneRepoLocal,
+            MockEventSyncEventsRepositoryLayer,
+            MockChannelMappingRepositoryLayer,
+            MockEventRsvpsRepositoryLayer,
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T-dirty.3: markEventPersonalMessagesDirty dying does not fail the cron; emitEventStarted still runs',
+    () => {
+      eventsToStart = [
+        {
+          id: EVENT_ID_1,
+          team_id: TEAM_ID,
+          title: 'Dirty Mark Failure Event',
+          description: Option.none(),
+          start_at: START_AT,
+          end_at: Option.none(),
+          location: Option.none(),
+          event_type: 'match',
+          member_group_id: Option.none(),
+          discord_target_channel_id: Option.none(),
+          owner_group_id: Option.none(),
+          reminders_channel_id: Option.none(),
+          claimed_by: Option.none(),
+        },
+      ];
+
+      const DyingDirtyMarkRepo = Layer.succeed(EventsRepository, {
+        findEventsToStart: () => Effect.succeed(eventsToStart),
+        startEvent: (eventId: Event.EventId) => {
+          startedEvents.push({ eventId });
+          return Effect.succeed(Option.some({ id: eventId }));
+        },
+        markEventPersonalMessagesDirty: (_eventId: Event.EventId) =>
+          Effect.die(new Error('Simulated dirty-mark failure')),
+        markStalePersonalMessagesDirty: () => {
+          staleSweepCalls++;
+          return Effect.void;
+        },
+      } as any);
+
+      return eventStartCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            // The cron completed without failing (the die was caught by a
+            // catchCause→logWarning backstop) and emitEventStarted still ran.
+            expect(emittedStarted).toHaveLength(1);
+            expect(emittedStarted[0].eventId).toBe(EVENT_ID_1);
+          }),
+        ),
+        Effect.provide(
+          Layer.mergeAll(
+            DyingDirtyMarkRepo,
+            MockEventSyncEventsRepositoryLayer,
+            MockChannelMappingRepositoryLayer,
+            MockEventRsvpsRepositoryLayer,
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T-dirty.4: dirtyMarked still contains the event id even when emitEventStarted dies after the flip',
+    () => {
+      eventsToStart = [
+        {
+          id: EVENT_ID_1,
+          team_id: TEAM_ID,
+          title: 'Emit Failure After Dirty Mark',
+          description: Option.none(),
+          start_at: START_AT,
+          end_at: Option.none(),
+          location: Option.none(),
+          event_type: 'training',
+          member_group_id: Option.none(),
+          discord_target_channel_id: Option.none(),
+          owner_group_id: Option.none(),
+          reminders_channel_id: Option.none(),
+          claimed_by: Option.none(),
+        },
+      ];
+
+      const DyingEmitRepo = Layer.succeed(EventsRepository, {
+        findEventsToStart: () => Effect.succeed(eventsToStart),
+        startEvent: (eventId: Event.EventId) => {
+          startedEvents.push({ eventId });
+          return Effect.succeed(Option.some({ id: eventId }));
+        },
+        markEventPersonalMessagesDirty: (eventId: Event.EventId) => {
+          dirtyMarked.push(eventId);
+          return Effect.void;
+        },
+        markStalePersonalMessagesDirty: () => {
+          staleSweepCalls++;
+          return Effect.void;
+        },
+      } as any);
+
+      const DyingEmitSyncRepo = Layer.succeed(EventSyncEventsRepository, {
+        emitEventStarted: () => Effect.die(new Error('Simulated emit failure')),
+        emitEventCreated: () => Effect.void,
+        emitEventUpdated: () => Effect.void,
+        emitEventCancelled: () => Effect.void,
+        emitRsvpReminder: () => Effect.void,
+        findUnprocessed: () => Effect.succeed([]),
+        markProcessed: () => Effect.void,
+        markFailed: () => Effect.void,
+      } as any);
+
+      return eventStartCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            // The dirty-mark tap runs BEFORE emitEventStarted, so it must have
+            // already recorded the event even though emitEventStarted blew up
+            // (and its per-event Effect.exit backstop swallowed the failure).
+            expect(dirtyMarked).toContain(EVENT_ID_1);
+            expect(emittedStarted).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(
+          Layer.mergeAll(
+            DyingEmitRepo,
+            DyingEmitSyncRepo,
+            MockChannelMappingRepositoryLayer,
+            MockEventRsvpsRepositoryLayer,
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T-dirty.4b: dirtyMarked still contains the event id even when Discord role/channel resolution dies after the flip',
+    () => {
+      // Pins the "before the Discord role/channel binds" half of the placement
+      // claim (T-dirty.4 above only pins "before emitEventStarted"). Uses a
+      // 'match' event with a Some member_group_id so resolveGroupRoleId actually
+      // calls DiscordChannelMappingRepository#findByGroupId (it short-circuits
+      // to None without calling the repo when member_group_id is None).
+      eventsToStart = [
+        {
+          id: EVENT_ID_1,
+          team_id: TEAM_ID,
+          title: 'Discord Resolution Failure After Dirty Mark',
+          description: Option.none(),
+          start_at: START_AT,
+          end_at: Option.none(),
+          location: Option.none(),
+          event_type: 'match',
+          member_group_id: Option.some(GROUP_ID_A),
+          discord_target_channel_id: Option.none(),
+          owner_group_id: Option.none(),
+          reminders_channel_id: Option.none(),
+          claimed_by: Option.none(),
+        },
+      ];
+
+      const DyingDiscordResolutionRepo = Layer.succeed(EventsRepository, {
+        findEventsToStart: () => Effect.succeed(eventsToStart),
+        startEvent: (eventId: Event.EventId) => {
+          startedEvents.push({ eventId });
+          return Effect.succeed(Option.some({ id: eventId }));
+        },
+        markEventPersonalMessagesDirty: (eventId: Event.EventId) => {
+          dirtyMarked.push(eventId);
+          return Effect.void;
+        },
+        markStalePersonalMessagesDirty: () => {
+          staleSweepCalls++;
+          return Effect.void;
+        },
+      } as any);
+
+      const DyingChannelMappingRepo = Layer.succeed(DiscordChannelMappingRepository, {
+        findByGroupId: () => Effect.die(new Error('Simulated Discord channel-mapping failure')),
+        insert: () => Effect.void,
+        insertWithoutRole: () => Effect.void,
+        deleteByGroupId: () => Effect.void,
+        findAllByTeamId: () => Effect.succeed([]),
+        findAllByTeam: () => Effect.succeed([]),
+      } as any);
+
+      return eventStartCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            // The dirty-mark tap runs BEFORE the Discord role/channel binds, so
+            // it must have already recorded the event even though resolving the
+            // Discord role blew up (and the per-event Effect.exit backstop
+            // swallowed the failure).
+            expect(dirtyMarked).toContain(EVENT_ID_1);
+            expect(emittedStarted).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(
+          Layer.mergeAll(
+            DyingDiscordResolutionRepo,
+            MockEventSyncEventsRepositoryLayer,
+            DyingChannelMappingRepo,
+            MockEventRsvpsRepositoryLayer,
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T-dirty.5: markStalePersonalMessagesDirty is called exactly once per cron cycle when there is nothing to start',
+    () => {
+      eventsToStart = [];
+
+      return eventStartCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(staleSweepCalls).toBe(1);
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T-dirty.6: markStalePersonalMessagesDirty is called exactly once per cron cycle even when events are started',
+    () => {
+      eventsToStart = [
+        {
+          id: EVENT_ID_1,
+          team_id: TEAM_ID,
+          title: 'Sweep Alongside Started Event',
+          description: Option.none(),
+          start_at: START_AT,
+          end_at: Option.none(),
+          location: Option.none(),
+          event_type: 'match',
+          member_group_id: Option.none(),
+          discord_target_channel_id: Option.none(),
+          owner_group_id: Option.none(),
+          reminders_channel_id: Option.none(),
+          claimed_by: Option.none(),
+        },
+        {
+          id: EVENT_ID_2,
+          team_id: TEAM_ID,
+          title: 'Second Event',
+          description: Option.none(),
+          start_at: START_AT,
+          end_at: Option.none(),
+          location: Option.none(),
+          event_type: 'match',
+          member_group_id: Option.none(),
+          discord_target_channel_id: Option.none(),
+          owner_group_id: Option.none(),
+          reminders_channel_id: Option.none(),
+          claimed_by: Option.none(),
+        },
+      ];
+
+      return eventStartCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            // Sweep runs once per cycle regardless of how many events were processed.
+            expect(staleSweepCalls).toBe(1);
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T-dirty.7: markStalePersonalMessagesDirty dying does not fail the cron cycle; per-event processing still runs',
+    () => {
+      // Enforces the catchCause backstop on the once-per-cycle sweep: even if the
+      // sweep itself dies, the cron cycle must still complete AND still process
+      // events (a missing/absent backstop would propagate the die and abort the
+      // whole cycle, which would make emittedStarted come back empty).
+      eventsToStart = [
+        {
+          id: EVENT_ID_1,
+          team_id: TEAM_ID,
+          title: 'Sweep Failure Alongside Started Event',
+          description: Option.none(),
+          start_at: START_AT,
+          end_at: Option.none(),
+          location: Option.none(),
+          event_type: 'match',
+          member_group_id: Option.none(),
+          discord_target_channel_id: Option.none(),
+          owner_group_id: Option.none(),
+          reminders_channel_id: Option.none(),
+          claimed_by: Option.none(),
+        },
+      ];
+
+      const DyingSweepRepo = Layer.succeed(EventsRepository, {
+        findEventsToStart: () => Effect.succeed(eventsToStart),
+        startEvent: (eventId: Event.EventId) => {
+          startedEvents.push({ eventId });
+          return Effect.succeed(Option.some({ id: eventId }));
+        },
+        markEventPersonalMessagesDirty: (eventId: Event.EventId) => {
+          dirtyMarked.push(eventId);
+          return Effect.void;
+        },
+        markStalePersonalMessagesDirty: () =>
+          Effect.die(new Error('Simulated stale-sweep failure')),
+      } as any);
+
+      return eventStartCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(emittedStarted).toHaveLength(1);
+            expect(emittedStarted[0].eventId).toBe(EVENT_ID_1);
+          }),
+        ),
+        Effect.provide(
+          Layer.mergeAll(
+            DyingSweepRepo,
+            MockEventSyncEventsRepositoryLayer,
+            MockChannelMappingRepositoryLayer,
+            MockEventRsvpsRepositoryLayer,
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
 });

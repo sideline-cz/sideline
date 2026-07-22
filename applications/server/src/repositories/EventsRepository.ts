@@ -867,6 +867,22 @@ const make = Effect.gen(function* () {
             AND personal_messages_dirty_at IS NULL`,
   });
 
+  // Self-healing sweep: re-marks events that are no longer active/upcoming
+  // (status <> 'active' OR start_at in the past) but still hold
+  // personal_event_messages rows, so the bot's personal-events reconcile
+  // deletes those stale personal messages. Only touches events that aren't
+  // already dirty, and is self-terminating — once the reconcile deletes the
+  // personal_event_messages rows for an event, it no longer matches the
+  // `IN (SELECT DISTINCT event_id FROM personal_event_messages)` filter.
+  const markStalePersonalMessagesDirtySchema = SqlSchema.void({
+    Request: Schema.Void,
+    execute: () => sql`
+        UPDATE events SET personal_messages_dirty_at = date_trunc('milliseconds', now())
+        WHERE id IN (SELECT DISTINCT event_id FROM personal_event_messages)
+          AND (status <> 'active' OR start_at < now())
+          AND personal_messages_dirty_at IS NULL`,
+  });
+
   const markSeriesFuturePersonalMessagesDirtySchema = SqlSchema.void({
     Request: Schema.Struct({
       series_id: Schema.String,
@@ -908,6 +924,9 @@ const make = Effect.gen(function* () {
 
   const markTeamUpcomingEventsPersonalMessagesDirty = (teamId: Team.TeamId) =>
     markTeamUpcomingPersonalMessagesDirty(teamId).pipe(catchSqlErrors);
+
+  const markStalePersonalMessagesDirty = () =>
+    markStalePersonalMessagesDirtySchema(undefined).pipe(catchSqlErrors);
 
   const markSeriesFuturePersonalMessagesDirty = (
     seriesId: EventSeries.EventSeriesId,
@@ -1048,6 +1067,7 @@ const make = Effect.gen(function* () {
     findClaimInfo,
     markEventPersonalMessagesDirty,
     markTeamUpcomingEventsPersonalMessagesDirty,
+    markStalePersonalMessagesDirty,
     markSeriesFuturePersonalMessagesDirty,
     clearEventPersonalMessagesDirty,
     repointChannelEvents,

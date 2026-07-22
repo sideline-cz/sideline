@@ -5,6 +5,13 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-07-22 — Fix: finished events now disappear from your personal events channel
+
+Previously, when an event started, its message could linger in members' personal events channels instead of being removed like it is in the global events channel.
+
+- The bot now removes an event from your personal channel as soon as it starts, matching the global events channel's behaviour.
+- A background self-healing check also cleans up any older events that were missed by this fix before it shipped — no manual action is needed.
+
 ## 2026-07-20 — Security hardening: auto-created Discord roles no longer carry server-wide permissions
 
 Discord roles that Sideline creates automatically — for groups, rosters, and achievements — are now created with no global Discord permissions of their own.

@@ -410,7 +410,7 @@ sequenceDiagram
 
 ## 7. Event Started (Cron)
 
-The `EventStartCron` runs every minute (`* * * * *`). On each tick it queries for `active` events whose `start_at` timestamp is in the past, atomically transitions each to `started` status, and emits an `event_started` row in the `event_sync_events` outbox. The bot's Event Sync worker picks up the event, edits the Discord embed to the started state (yellow, no RSVP buttons), and then reorders channel messages so the started event moves into the channel's "past" section. If the original Discord message has been deleted (error 10008), the bot recreates it and persists the new message ID. The reorder applies a cap of `MAX_CHANNEL_EVENTS = 10`: if there are more than 10 events for the channel the oldest past-events beyond the cap are deleted from Discord. Per-channel reorders are serialised by an in-process `ChannelReorderSemaphore`. On bot startup a `recoverDeletedMessages` task scans every channel with stored event messages and reruns the reorder, recreating any messages that were deleted while the bot was offline.
+The `EventStartCron` runs every minute (`* * * * *`). On each tick it first runs a best-effort, once-per-cycle self-healing sweep (`markStalePersonalMessagesDirty`) that re-marks any event which is no longer `active`/upcoming but still holds `personal_event_messages` rows and isn't already dirty — a backstop for events missed by a prior cycle's per-event mark below. It then queries for `active` events whose `start_at` timestamp is in the past, atomically transitions each to `started` status, marks the event's `personal_messages_dirty_at` (so the personal-events reconcile worker removes the finished event from members' personal channels), and emits an `event_started` row in the `event_sync_events` outbox. The bot's Event Sync worker picks up the event, edits the Discord embed to the started state (yellow, no RSVP buttons), and then reorders channel messages so the started event moves into the channel's "past" section. If the original Discord message has been deleted (error 10008), the bot recreates it and persists the new message ID. The reorder applies a cap of `MAX_CHANNEL_EVENTS = 10`: if there are more than 10 events for the channel the oldest past-events beyond the cap are deleted from Discord. Per-channel reorders are serialised by an in-process `ChannelReorderSemaphore`. On bot startup a `recoverDeletedMessages` task scans every channel with stored event messages and reruns the reorder, recreating any messages that were deleted while the bot was offline.
 
 ```mermaid
 sequenceDiagram
@@ -423,6 +423,10 @@ sequenceDiagram
     participant Discord as Discord API
 
     Clock->>Cron: Trigger — every minute
+
+    Cron->>EventsRepo: markStalePersonalMessagesDirty()
+    EventsRepo->>DB: UPDATE events SET personal_messages_dirty_at=now()<br/>WHERE id IN (SELECT DISTINCT event_id FROM personal_event_messages)<br/>AND (status<>'active' OR start_at < now())<br/>AND personal_messages_dirty_at IS NULL
+    DB-->>EventsRepo: OK (best-effort — failures are logged and swallowed)
 
     Cron->>EventsRepo: findEventsToStart()
     EventsRepo->>DB: SELECT * FROM events<br/>WHERE status='active' AND start_at <= now()
@@ -437,6 +441,9 @@ sequenceDiagram
         alt Already started (0 rows updated)
             Note over Cron: Skip — another process beat us (idempotent)
         else Successfully started
+            Cron->>EventsRepo: markEventPersonalMessagesDirty(event.id)
+            EventsRepo->>DB: UPDATE events SET personal_messages_dirty_at=now()<br/>WHERE id=?
+            DB-->>EventsRepo: OK (best-effort — failures are logged and swallowed)
             Cron->>SyncRepo: emitEventStarted(team_id, event_id, ...)
             SyncRepo->>DB: INSERT event_sync_events {type='event_started', team_id, event_id, ...}
             DB-->>SyncRepo: OK

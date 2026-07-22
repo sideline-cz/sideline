@@ -163,7 +163,7 @@ All cron jobs run inside the server process, launched as concurrent fibers along
 | Job | Schedule (cron) | Purpose |
 |---|---|---|
 | `EventHorizonCron` | `0 3 * * *` (daily at 03:00 UTC) | Generates future event occurrences for recurring event series up to a configurable horizon date; emits an `event_created` sync event for each generated event so the bot publishes a Discord embed |
-| `EventStartCron` | `* * * * *` (every minute) | Transitions `active` events to `started` status when their `start_at` time passes, and emits `event_started` sync events for the bot to remove RSVP buttons from Discord embeds |
+| `EventStartCron` | `* * * * *` (every minute) | Transitions `active` events to `started` status when their `start_at` time passes, emits `event_started` sync events for the bot to remove RSVP buttons from Discord embeds, and marks personal-channel messages dirty (plus a self-healing sweep for stragglers) so the started event is removed from members' personal channels |
 | `RsvpReminderCron` | `* * * * *` (every minute) | Emits RSVP reminder sync events for upcoming events that have not yet had a reminder sent |
 | `AgeCheckCron` | `0 2 * * *` (daily at 02:00 UTC) | Evaluates age-threshold rules per team and applies Discord role changes to members who have crossed an age boundary |
 | `TrainingAutoLogCron` | `*/5 * * * *` (every 5 minutes) | Automatically logs training activity for members who had a "yes" RSVP on completed training events |

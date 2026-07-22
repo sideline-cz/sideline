@@ -47,6 +47,7 @@ export class EventEmbedInfo extends Schema.Class<EventEmbedInfo>('EventEmbedInfo
   location_url: Schema.OptionFromNullOr(Schema.String),
   event_type: Schema.String,
   all_day: Schema.Boolean,
+  status: Schema.String.pipe(Schema.withDecodingDefaultKey(() => 'active')),
 }) {}
 
 export class ChannelEventEntry extends Schema.Class<ChannelEventEntry>('ChannelEventEntry')({

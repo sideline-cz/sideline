@@ -317,8 +317,16 @@ export const reconcileEvent = (event: {
             Effect.flatMap(({ embedInfo }) =>
               Option.match(embedInfo, {
                 onNone: () => Effect.void,
-                onSome: (info) =>
-                  Effect.all({
+                onSome: (info) => {
+                  // Non-active events (started/cancelled) have their global message
+                  // owned by handleStarted/handleCancelled. Refreshing it here would
+                  // revert the started/cancelled styling (and re-add RSVP buttons).
+                  if (info.status !== 'active') {
+                    return Effect.logDebug(
+                      `Skipping global message refresh for non-active event ${event.event_id} (status ${info.status})`,
+                    );
+                  }
+                  return Effect.all({
                     counts: rpc['Event/GetRsvpCounts']({ event_id: event.event_id }),
                     yesAttendees: rpc['Event/GetYesAttendeesForEmbed']({
                       event_id: event.event_id,
@@ -405,7 +413,8 @@ export const reconcileEvent = (event: {
                           e,
                         ),
                     ),
-                  ),
+                  );
+                },
               }),
             ),
             Effect.catchTag('RpcClientError', (e) =>
