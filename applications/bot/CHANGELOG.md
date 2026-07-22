@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.32.2
+
+### 🐛 Fixes
+- ship channel-by-type Release A (mis-typed as chore in #541) (#544)
+
 ## 0.32.1
 
 ### 🐛 Fixes
