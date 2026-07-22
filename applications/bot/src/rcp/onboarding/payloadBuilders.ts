@@ -78,7 +78,8 @@ export const buildWelcomeScreenPayload = (
 ): Option.Option<WelcomeScreenPatchRequestPartial> => {
   // Welcome Screen channels are shown to users before they join, so each must be
   // viewable by @everyone. The rules channel is private by design (the rules prompt
-  // is the gate that grants access), so it must never appear here.
+  // is the gate that grants access), so it must never appear here. Since the
+  // channel-by-type removal (#541), the welcome channel is the only entry.
   const channels: WelcomeChannelEntry[] = [];
 
   if (Option.isSome(team.welcome_channel_id)) {
