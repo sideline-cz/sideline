@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.40.2
+
+### 🐛 Fixes
+- make BotInfoStore.set resolve to void (#542)
+
 ## 0.40.1
 
 ### 🐛 Fixes
