@@ -25,7 +25,6 @@ const resolveStrings = (
       description: m.bot_onboarding_welcomeScreen_description({ teamName }, opts),
       channels_rules: m.bot_onboarding_welcomeScreen_channels_rules({}, opts),
       channels_welcome: m.bot_onboarding_welcomeScreen_channels_welcome({}, opts),
-      channels_training: m.bot_onboarding_welcomeScreen_channels_training({}, opts),
     },
   };
 };

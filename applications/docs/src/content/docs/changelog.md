@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-07-22 — Removed per-event-type Discord channel settings
+
+The six per-event-type channel settings (training, match, tournament, meeting, social, other) have been removed from **Team settings → Discord integration**. They had been unused for event routing since events channel — all event embeds already post to the single global **Events channel** — so removing them simplifies the settings page with no change to where events are posted.
+
+- The **Events channel**, **Late-RSVP channel**, and all other Discord integration settings are unaffected.
+- The Discord onboarding welcome screen no longer includes a training-channel entry.
+- **Coaching status announcements** ("today's coach is X") now post to the training's owner-group channel only — the training-channel fallback is gone. If your team relied on the training channel setting without a channel configured for the owners group, you'll stop receiving these announcements. To keep receiving them, set a Discord channel for the training's owner group.
+
 ## 2026-07-22 — Fix: finished events now disappear from your personal events channel
 
 Previously, when an event started, its message could linger in members' personal events channels instead of being removed like it is in the global events channel.

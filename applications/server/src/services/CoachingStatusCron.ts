@@ -17,12 +17,7 @@ export const coachingStatusCronEffect = Effect.Do.pipe(
       Array.map(events, (event) =>
         Effect.Do.pipe(
           Effect.flatMap(() => {
-            // Step 1: try discord_channel_training as the primary channel
-            if (Option.isSome(event.discord_channel_training)) {
-              return Effect.succeed(Option.some(event.discord_channel_training.value));
-            }
-
-            // Step 2: fallback to owner-group channel
+            // Resolve the target channel via the event's owner-group channel mapping.
             if (Option.isNone(event.owner_group_id)) {
               return Effect.succeed(Option.none());
             }

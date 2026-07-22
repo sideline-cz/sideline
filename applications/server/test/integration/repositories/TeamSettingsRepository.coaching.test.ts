@@ -1,15 +1,15 @@
-// NOTE: These tests are written in TDD mode BEFORE the implementation.
-// They require:
-//   - TeamSettingsRepository.findEventsNeedingCoachingStatusAt(now: Date) method
-//   - New DB columns: events.coaching_status_sent_at (timestamptz nullable)
-//   - The query returns only CLAIMED trainings (claimed_by IS NOT NULL),
-//     starting later today, after 07:00 local team time, coaching_status_sent_at IS NULL,
-//     event status = 'active'.
+// NOTE: These tests cover TeamSettingsRepository.findEventsNeedingCoachingStatusAt.
+// The query requires:
+//   - events.coaching_status_sent_at (timestamptz nullable)
+//   - Only CLAIMED trainings (claimed_by IS NOT NULL), starting later today,
+//     after 07:00 local team time, coaching_status_sent_at IS NULL, event status = 'active'.
 //
 // ASSUMPTION: Result type is EventNeedingCoachingStatus with at minimum:
 //   { event_id, team_id, title, start_at, claimed_by, claimer_display_name,
-//     claimer_discord_id, discord_channel_training, timezone }
-//   where discord_channel_training comes from team_settings.discord_channel_training.
+//     claimer_discord_id, owner_group_id, timezone }
+//   (the per-type `discord_channel_training` channel was removed — see
+//   remove-channel-by-type Release A; channel resolution is done by the caller
+//   via the event's owner-group channel mapping.)
 //
 // ASSUMPTION: The 07:00 cutoff is applied in the team's local timezone.
 // ASSUMPTION: Self-healing: once coaching_status_sent_at is NULL and start_at is later
@@ -17,11 +17,12 @@
 //   for the rest of the day (self-healing within the day).
 
 import { describe, expect, it } from '@effect/vitest';
-import type { Discord, Team, User } from '@sideline/domain';
+import type { Discord, GroupModel, Team, User } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
@@ -34,6 +35,7 @@ const TestLayer = Layer.mergeAll(
   TeamMembersRepository.Default,
   TeamsRepository.Default,
   UsersRepository.Default,
+  GroupsRepository.Default,
 ).pipe(Layer.provideMerge(TestPgClient));
 
 beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runPromise));
@@ -103,25 +105,25 @@ const seedTeamWithMember = (discordId: string, username: string, guildId: Discor
     Effect.map(({ team, member }) => ({ team, memberId: member.id })),
   );
 
-/** Upsert team_settings with timezone and discord_channel_training via raw SQL. */
-const upsertSettingsWithTrainingChannel = (
-  teamId: Team.TeamId,
-  timezone: string,
-  trainingChannelId: Discord.Snowflake | null,
-) =>
+const createGroup = (teamId: Team.TeamId, name: string) =>
+  GroupsRepository.asEffect().pipe(
+    Effect.andThen((repo) =>
+      repo.insertGroup(teamId, name, Option.none(), Option.none(), Option.none()),
+    ),
+  );
+
+/** Upsert team_settings with the team's timezone via raw SQL. */
+const upsertSettings = (teamId: Team.TeamId, timezone: string) =>
   SqlClient.SqlClient.asEffect().pipe(
-    Effect.andThen((sql) => {
-      const channelSql = trainingChannelId === null ? 'NULL' : `'${trainingChannelId}'`;
-      return sql.unsafe(`
+    Effect.andThen((sql) =>
+      sql.unsafe(`
         INSERT INTO team_settings (team_id, event_horizon_days, min_players_threshold,
-          rsvp_reminders_enabled, rsvp_reminder_days_before, rsvp_reminder_time, timezone,
-          discord_channel_training)
-        VALUES ('${teamId}', 30, 5, false, 1, '18:00', '${timezone}', ${channelSql})
+          rsvp_reminders_enabled, rsvp_reminder_days_before, rsvp_reminder_time, timezone)
+        VALUES ('${teamId}', 30, 5, false, 1, '18:00', '${timezone}')
         ON CONFLICT (team_id) DO UPDATE SET
-          timezone = '${timezone}',
-          discord_channel_training = ${channelSql}
-      `);
-    }),
+          timezone = '${timezone}'
+      `),
+    ),
   );
 
 const createTrainingEvent = (
@@ -129,6 +131,7 @@ const createTrainingEvent = (
   createdBy: string,
   startAtIso: string,
   eventType = 'training',
+  ownerGroupId: Option.Option<GroupModel.GroupId> = Option.none(),
 ) =>
   EventsRepository.asEffect().pipe(
     Effect.andThen((repo) =>
@@ -140,7 +143,7 @@ const createTrainingEvent = (
         startAt: DateTime.fromDateUnsafe(new Date(startAtIso)),
         endAt: Option.none(),
         location: Option.none(),
-        ownerGroupId: Option.none(),
+        ownerGroupId,
         memberGroupId: Option.none(),
         trainingTypeId: Option.none(),
         seriesId: Option.none(),
@@ -184,7 +187,7 @@ const findEventsNeedingCoachingStatusAt = (now: Date) =>
 
 describe('TeamSettingsRepository — findEventsNeedingCoachingStatusAt', () => {
   it.effect(
-    'CLAIMED training starting later today after 07:00 local, coaching_status_sent_at NULL → returned with discord_channel_training and claimer info',
+    'CLAIMED training starting later today after 07:00 local, coaching_status_sent_at NULL → returned with owner_group_id and claimer info',
     () =>
       Effect.Do.pipe(
         // Timezone UTC+2 (CEST). now = 2026-05-01T06:00:00Z = 08:00 CEST (after 07:00).
@@ -196,28 +199,31 @@ describe('TeamSettingsRepository — findEventsNeedingCoachingStatusAt', () => {
             '601010101010101010' as Discord.Snowflake,
           ),
         ),
-        Effect.tap(({ seed }) =>
-          upsertSettingsWithTrainingChannel(
+        Effect.tap(({ seed }) => upsertSettings(seed.team.id, 'Europe/Prague')),
+        Effect.bind('group', ({ seed }) => createGroup(seed.team.id, 'Coaching Group')),
+        Effect.bind('event', ({ seed, group }) =>
+          createTrainingEvent(
             seed.team.id,
-            'Europe/Prague',
-            '777000000000000001' as Discord.Snowflake,
+            seed.memberId,
+            '2026-05-01T14:00:00Z',
+            'training',
+            Option.some(group.id),
           ),
-        ),
-        Effect.bind('event', ({ seed }) =>
-          createTrainingEvent(seed.team.id, seed.memberId, '2026-05-01T14:00:00Z'),
         ),
         Effect.tap(({ event, seed }) => claimEvent(event.id, seed.memberId)),
         // now = 2026-05-01T06:00:00Z = 08:00 CEST — after 07:00 cutoff
         Effect.bind('events', () =>
           findEventsNeedingCoachingStatusAt(new Date('2026-05-01T06:00:00Z')),
         ),
-        Effect.tap(({ events }) =>
+        Effect.tap(({ events, group }) =>
           Effect.sync(() => {
             expect(Array.isArray(events)).toBe(true);
             expect((events as unknown[]).length).toBeGreaterThanOrEqual(1);
             const row = (events as any[])[0];
-            // discord_channel_training should be populated
-            expect(Option.isSome(row.discord_channel_training)).toBe(true);
+            // owner_group_id should be populated (the caller resolves the target
+            // channel from the group's channel mapping)
+            expect(Option.isSome(row.owner_group_id)).toBe(true);
+            expect(Option.getOrThrow(row.owner_group_id)).toBe(group.id);
             // claimed_by must be present
             expect(row.claimed_by !== null && row.claimed_by !== undefined).toBe(true);
           }),
@@ -237,13 +243,7 @@ describe('TeamSettingsRepository — findEventsNeedingCoachingStatusAt', () => {
             '602020202020202020' as Discord.Snowflake,
           ),
         ),
-        Effect.tap(({ seed }) =>
-          upsertSettingsWithTrainingChannel(
-            seed.team.id,
-            'Europe/Prague',
-            '777000000000000002' as Discord.Snowflake,
-          ),
-        ),
+        Effect.tap(({ seed }) => upsertSettings(seed.team.id, 'Europe/Prague')),
         // Same scenario but do NOT claim the event
         Effect.bind('_event', ({ seed }) =>
           createTrainingEvent(seed.team.id, seed.memberId, '2026-05-01T14:00:00Z'),
@@ -269,13 +269,7 @@ describe('TeamSettingsRepository — findEventsNeedingCoachingStatusAt', () => {
           '603030303030303030' as Discord.Snowflake,
         ),
       ),
-      Effect.tap(({ seed }) =>
-        upsertSettingsWithTrainingChannel(
-          seed.team.id,
-          'Europe/Prague',
-          '777000000000000003' as Discord.Snowflake,
-        ),
-      ),
+      Effect.tap(({ seed }) => upsertSettings(seed.team.id, 'Europe/Prague')),
       Effect.bind('event', ({ seed }) =>
         createTrainingEvent(seed.team.id, seed.memberId, '2026-05-01T14:00:00Z'),
       ),
@@ -307,13 +301,7 @@ describe('TeamSettingsRepository — findEventsNeedingCoachingStatusAt', () => {
             '604040404040404040' as Discord.Snowflake,
           ),
         ),
-        Effect.tap(({ seed }) =>
-          upsertSettingsWithTrainingChannel(
-            seed.team.id,
-            'Europe/Prague',
-            '777000000000000004' as Discord.Snowflake,
-          ),
-        ),
+        Effect.tap(({ seed }) => upsertSettings(seed.team.id, 'Europe/Prague')),
         Effect.bind('event', ({ seed }) =>
           createTrainingEvent(seed.team.id, seed.memberId, '2026-05-01T14:00:00Z'),
         ),
@@ -345,13 +333,7 @@ describe('TeamSettingsRepository — findEventsNeedingCoachingStatusAt', () => {
           '605050505050505050' as Discord.Snowflake,
         ),
       ),
-      Effect.tap(({ seed }) =>
-        upsertSettingsWithTrainingChannel(
-          seed.team.id,
-          'Europe/Prague',
-          '777000000000000005' as Discord.Snowflake,
-        ),
-      ),
+      Effect.tap(({ seed }) => upsertSettings(seed.team.id, 'Europe/Prague')),
       Effect.bind('event', ({ seed }) =>
         createTrainingEvent(seed.team.id, seed.memberId, '2026-05-01T14:00:00Z'),
       ),

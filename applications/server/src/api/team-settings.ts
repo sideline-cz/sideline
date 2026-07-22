@@ -7,7 +7,6 @@ import { requireMembership, requirePermission } from '~/api/permissions.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
-import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import {
   DEFAULT_CHANNEL_FORMAT,
   DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT,
@@ -20,9 +19,8 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
   Effect.Do.pipe(
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('settings', () => TeamSettingsRepository.asEffect()),
-    Effect.bind('teams', () => TeamsRepository.asEffect()),
     Effect.bind('syncEvents', () => EventSyncEventsRepository.asEffect()),
-    Effect.map(({ members, settings, teams, syncEvents }) =>
+    Effect.map(({ members, settings, syncEvents }) =>
       handlers
         .handle('getTeamSettings', ({ params: { teamId } }) =>
           Effect.Do.pipe(
@@ -45,12 +43,6 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     rsvpReminderTime: '18:00',
                     remindersChannelId: Option.none(),
                     timezone: 'Europe/Prague',
-                    discordChannelTraining: Option.none(),
-                    discordChannelMatch: Option.none(),
-                    discordChannelTournament: Option.none(),
-                    discordChannelMeeting: Option.none(),
-                    discordChannelSocial: Option.none(),
-                    discordChannelOther: Option.none(),
                     discordChannelLateRsvp: Option.none(),
                     createDiscordChannelOnGroup: true,
                     createDiscordChannelOnRoster: true,
@@ -77,12 +69,6 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     rsvpReminderTime: s.rsvp_reminder_time,
                     remindersChannelId: s.reminders_channel_id,
                     timezone: s.timezone,
-                    discordChannelTraining: s.discord_channel_training,
-                    discordChannelMatch: s.discord_channel_match,
-                    discordChannelTournament: s.discord_channel_tournament,
-                    discordChannelMeeting: s.discord_channel_meeting,
-                    discordChannelSocial: s.discord_channel_social,
-                    discordChannelOther: s.discord_channel_other,
                     discordChannelLateRsvp: s.discord_channel_late_rsvp,
                     createDiscordChannelOnGroup: s.create_discord_channel_on_group,
                     createDiscordChannelOnRoster: s.create_discord_channel_on_roster,
@@ -111,22 +97,6 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
             ),
             Effect.tap(({ membership }) => requirePermission(membership, 'team:manage', forbidden)),
             Effect.bind('existing', () => settings.findByTeamId(teamId)),
-            Effect.let('prevTrainingChannel', ({ existing }) =>
-              Option.match(existing, {
-                onNone: () => Option.none<string>(),
-                onSome: (s) => s.discord_channel_training,
-              }),
-            ),
-            Effect.let('nextTrainingChannel', ({ existing }) =>
-              Option.match(payload.discordChannelTraining, {
-                onNone: () =>
-                  Option.match(existing, {
-                    onNone: () => Option.none<string>(),
-                    onSome: (s) => s.discord_channel_training,
-                  }),
-                onSome: (v) => v,
-              }),
-            ),
             Effect.let('prevEventsChannel', ({ existing }) =>
               Option.match(existing, {
                 onNone: () => Option.none(),
@@ -165,12 +135,6 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     rsvpReminderTime: Option.getOrElse(payload.rsvpReminderTime, () => '18:00'),
                     remindersChannelId: Option.flatten(payload.remindersChannelId),
                     timezone: Option.getOrElse(payload.timezone, () => 'Europe/Prague'),
-                    discordChannelTraining: Option.flatten(payload.discordChannelTraining),
-                    discordChannelMatch: Option.flatten(payload.discordChannelMatch),
-                    discordChannelTournament: Option.flatten(payload.discordChannelTournament),
-                    discordChannelMeeting: Option.flatten(payload.discordChannelMeeting),
-                    discordChannelSocial: Option.flatten(payload.discordChannelSocial),
-                    discordChannelOther: Option.flatten(payload.discordChannelOther),
                     discordChannelLateRsvp: Option.flatten(payload.discordChannelLateRsvp),
                     createDiscordChannelOnGroup: Option.getOrElse(
                       payload.createDiscordChannelOnGroup,
@@ -241,30 +205,6 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                       onSome: (v) => v,
                     }),
                     timezone: Option.getOrElse(payload.timezone, () => s.timezone),
-                    discordChannelTraining: Option.match(payload.discordChannelTraining, {
-                      onNone: () => s.discord_channel_training,
-                      onSome: (v) => v,
-                    }),
-                    discordChannelMatch: Option.match(payload.discordChannelMatch, {
-                      onNone: () => s.discord_channel_match,
-                      onSome: (v) => v,
-                    }),
-                    discordChannelTournament: Option.match(payload.discordChannelTournament, {
-                      onNone: () => s.discord_channel_tournament,
-                      onSome: (v) => v,
-                    }),
-                    discordChannelMeeting: Option.match(payload.discordChannelMeeting, {
-                      onNone: () => s.discord_channel_meeting,
-                      onSome: (v) => v,
-                    }),
-                    discordChannelSocial: Option.match(payload.discordChannelSocial, {
-                      onNone: () => s.discord_channel_social,
-                      onSome: (v) => v,
-                    }),
-                    discordChannelOther: Option.match(payload.discordChannelOther, {
-                      onNone: () => s.discord_channel_other,
-                      onSome: (v) => v,
-                    }),
                     discordChannelLateRsvp: Option.match(payload.discordChannelLateRsvp, {
                       onNone: () => s.discord_channel_late_rsvp,
                       onSome: (v) => v,
@@ -330,12 +270,6 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                   }),
               }),
             ),
-            Effect.tap(({ prevTrainingChannel, nextTrainingChannel }) => {
-              if (Option.getOrNull(prevTrainingChannel) !== Option.getOrNull(nextTrainingChannel)) {
-                return teams.markOnboardingSyncPending(teamId);
-              }
-              return Effect.void;
-            }),
             Effect.tap(({ prevEventsChannel, nextEventsChannel }) => {
               if (Option.getOrNull(prevEventsChannel) !== Option.getOrNull(nextEventsChannel)) {
                 return syncEvents
@@ -360,12 +294,6 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                   rsvpReminderTime: result.rsvp_reminder_time,
                   remindersChannelId: result.reminders_channel_id,
                   timezone: result.timezone,
-                  discordChannelTraining: result.discord_channel_training,
-                  discordChannelMatch: result.discord_channel_match,
-                  discordChannelTournament: result.discord_channel_tournament,
-                  discordChannelMeeting: result.discord_channel_meeting,
-                  discordChannelSocial: result.discord_channel_social,
-                  discordChannelOther: result.discord_channel_other,
                   discordChannelLateRsvp: result.discord_channel_late_rsvp,
                   createDiscordChannelOnGroup: result.create_discord_channel_on_group,
                   createDiscordChannelOnRoster: result.create_discord_channel_on_roster,

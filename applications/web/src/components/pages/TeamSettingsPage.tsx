@@ -135,24 +135,6 @@ export function TeamSettingsPage({
   );
 
   // Discord channels state
-  const [channelTraining, setChannelTraining] = React.useState(
-    Option.getOrElse(settings.discordChannelTraining, () => NONE_VALUE),
-  );
-  const [channelMatch, setChannelMatch] = React.useState(
-    Option.getOrElse(settings.discordChannelMatch, () => NONE_VALUE),
-  );
-  const [channelTournament, setChannelTournament] = React.useState(
-    Option.getOrElse(settings.discordChannelTournament, () => NONE_VALUE),
-  );
-  const [channelMeeting, setChannelMeeting] = React.useState(
-    Option.getOrElse(settings.discordChannelMeeting, () => NONE_VALUE),
-  );
-  const [channelSocial, setChannelSocial] = React.useState(
-    Option.getOrElse(settings.discordChannelSocial, () => NONE_VALUE),
-  );
-  const [channelOther, setChannelOther] = React.useState(
-    Option.getOrElse(settings.discordChannelOther, () => NONE_VALUE),
-  );
   const [channelLateRsvp, setChannelLateRsvp] = React.useState(
     Option.getOrElse(settings.discordChannelLateRsvp, () => NONE_VALUE),
   );
@@ -264,12 +246,6 @@ export function TeamSettingsPage({
     rsvpReminderTime !== (settings.rsvpReminderTime || '18:00') ||
     timezone !== (settings.timezone || 'Europe/Prague') ||
     remindersChannelId !== Option.getOrElse(settings.remindersChannelId, () => NONE_VALUE) ||
-    channelTraining !== Option.getOrElse(settings.discordChannelTraining, () => NONE_VALUE) ||
-    channelMatch !== Option.getOrElse(settings.discordChannelMatch, () => NONE_VALUE) ||
-    channelTournament !== Option.getOrElse(settings.discordChannelTournament, () => NONE_VALUE) ||
-    channelMeeting !== Option.getOrElse(settings.discordChannelMeeting, () => NONE_VALUE) ||
-    channelSocial !== Option.getOrElse(settings.discordChannelSocial, () => NONE_VALUE) ||
-    channelOther !== Option.getOrElse(settings.discordChannelOther, () => NONE_VALUE) ||
     channelLateRsvp !== Option.getOrElse(settings.discordChannelLateRsvp, () => NONE_VALUE) ||
     archiveCategory !== Option.getOrElse(settings.discordArchiveCategoryId, () => NONE_VALUE) ||
     rosterCategory !== Option.getOrElse(settings.discordRosterCategoryId, () => NONE_VALUE) ||
@@ -374,12 +350,6 @@ export function TeamSettingsPage({
             rsvpReminderTime: Option.some(rsvpReminderTime),
             timezone: Option.some(timezone),
             remindersChannelId: Option.some(channelToOption(remindersChannelId)),
-            discordChannelTraining: Option.some(channelToOption(channelTraining)),
-            discordChannelMatch: Option.some(channelToOption(channelMatch)),
-            discordChannelTournament: Option.some(channelToOption(channelTournament)),
-            discordChannelMeeting: Option.some(channelToOption(channelMeeting)),
-            discordChannelSocial: Option.some(channelToOption(channelSocial)),
-            discordChannelOther: Option.some(channelToOption(channelOther)),
             discordChannelLateRsvp: Option.some(channelToOption(channelLateRsvp)),
             discordArchiveCategoryId: Option.some(channelToOption(archiveCategory)),
             discordRosterCategoryId: Option.some(channelToOption(rosterCategory)),
@@ -414,12 +384,6 @@ export function TeamSettingsPage({
     rsvpReminderTime,
     timezone,
     remindersChannelId,
-    channelTraining,
-    channelMatch,
-    channelTournament,
-    channelMeeting,
-    channelSocial,
-    channelOther,
     channelLateRsvp,
     archiveCategory,
     rosterCategory,
@@ -535,51 +499,6 @@ export function TeamSettingsPage({
       router.invalidate();
     }
   }, [teamInfo.teamId, run, router]);
-
-  const channelConfigs = [
-    {
-      key: 'training',
-      value: channelTraining,
-      setter: setChannelTraining,
-      label: tr('teamSettings_channelTraining'),
-    },
-    {
-      key: 'match',
-      value: channelMatch,
-      setter: setChannelMatch,
-      label: tr('teamSettings_channelMatch'),
-    },
-    {
-      key: 'tournament',
-      value: channelTournament,
-      setter: setChannelTournament,
-      label: tr('teamSettings_channelTournament'),
-    },
-    {
-      key: 'meeting',
-      value: channelMeeting,
-      setter: setChannelMeeting,
-      label: tr('teamSettings_channelMeeting'),
-    },
-    {
-      key: 'social',
-      value: channelSocial,
-      setter: setChannelSocial,
-      label: tr('teamSettings_channelSocial'),
-    },
-    {
-      key: 'other',
-      value: channelOther,
-      setter: setChannelOther,
-      label: tr('teamSettings_channelOther'),
-    },
-    {
-      key: 'lateRsvp',
-      value: channelLateRsvp,
-      setter: setChannelLateRsvp,
-      label: tr('teamSettings_channelLateRsvp'),
-    },
-  ] as const;
 
   return (
     <div>
@@ -952,37 +871,6 @@ export function TeamSettingsPage({
               </div>
               <Separator />
 
-              {/* Event notification channels */}
-              <div>
-                <h4 className='text-sm font-semibold mb-3'>
-                  {tr('teamSettings_discordEventChannels')}
-                </h4>
-                <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
-                  {channelConfigs.map(({ key, value, setter, label }) => (
-                    <div key={key}>
-                      <label htmlFor={`channel-${key}`} className='text-sm font-medium mb-1 block'>
-                        {label}
-                      </label>
-                      <SearchableSelect
-                        id={`channel-${key}`}
-                        value={value}
-                        onValueChange={setter}
-                        placeholder={tr('teamSettings_channelNone')}
-                        pinnedValues={[NONE_VALUE]}
-                        options={[
-                          { value: NONE_VALUE, label: tr('teamSettings_channelNone') },
-                          ...discordChannels
-                            .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
-                            .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
-                        ]}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <Separator />
-
               {/* Group channels sub-section */}
               <div className='flex flex-col gap-4'>
                 <h4 className='text-sm font-semibold'>{tr('teamSettings_groupChannelSettings')}</h4>
@@ -1149,6 +1037,24 @@ export function TeamSettingsPage({
                     id='events-channel'
                     value={eventsChannel}
                     onValueChange={setEventsChannel}
+                    placeholder={tr('teamSettings_channelNone')}
+                    pinnedValues={[NONE_VALUE]}
+                    options={[
+                      { value: NONE_VALUE, label: tr('teamSettings_channelNone') },
+                      ...discordChannels
+                        .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
+                        .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
+                    ]}
+                  />
+                </div>
+                <div>
+                  <label htmlFor='channel-late-rsvp' className='text-sm font-medium mb-1 block'>
+                    {tr('teamSettings_channelLateRsvp')}
+                  </label>
+                  <SearchableSelect
+                    id='channel-late-rsvp'
+                    value={channelLateRsvp}
+                    onValueChange={setChannelLateRsvp}
                     placeholder={tr('teamSettings_channelNone')}
                     pinnedValues={[NONE_VALUE]}
                     options={[

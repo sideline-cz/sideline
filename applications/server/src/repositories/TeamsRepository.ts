@@ -28,6 +28,11 @@ class PendingOnboardingSyncRow extends Schema.Class<PendingOnboardingSyncRow>(
   onboarding_locale: Onboarding.OnboardingLocale,
   rules_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   welcome_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  // Transitional (expand/contract): the `team_settings.discord_channel_training`
+  // column and its query source were removed in Release A, so the server now
+  // always emits this key as NULL — the tolerant domain schema decodes it as
+  // Option.none(). Removed entirely (row field + key) in Release B once the
+  // column is dropped and all deployed bots tolerate the missing key.
   training_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   onboarding_rules_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
   onboarding_rules_prompt_id: Schema.OptionFromNullOr(Discord.Snowflake),
@@ -162,10 +167,9 @@ const make = Effect.gen(function* () {
         c.welcome_channel_id,
         c.onboarding_rules_role_id,
         c.onboarding_rules_prompt_id,
-        ts.discord_channel_training AS training_channel_id,
+        NULL::text AS training_channel_id,
         COALESCE(bg.is_community_enabled, false) AS is_community_enabled
       FROM claimed c
-      LEFT JOIN team_settings ts ON ts.team_id = c.id
       LEFT JOIN bot_guilds bg ON bg.guild_id = c.guild_id
     `.pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(PendingOnboardingSyncRow))),

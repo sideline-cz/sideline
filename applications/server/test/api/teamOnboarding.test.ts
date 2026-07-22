@@ -335,15 +335,11 @@ const MockPendingGuildJoinsLayer = Layer.succeed(PendingGuildJoinsRepository, {
   markFailed: () => Effect.void,
 } as never);
 
-// Tracks calls to the settings upsert (used to verify discord_channel_training flip)
+// Tracks calls to the settings upsert
 let settingsUpsertCalls: unknown[] = [];
-// Current simulated discord_channel_training value in team_settings
-let currentTrainingChannelId: Option.Option<string> = Option.none();
-const TRAINING_CHANNEL_ID = '777777777777777777' as Discord.Snowflake;
 
 const resetSettingsState = () => {
   settingsUpsertCalls = [];
-  currentTrainingChannelId = Option.none();
 };
 
 const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
@@ -361,12 +357,6 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
             rsvp_reminder_time: '18:00',
             reminders_channel_id: Option.none(),
             timezone: 'Europe/Prague',
-            discord_channel_training: currentTrainingChannelId,
-            discord_channel_match: Option.none(),
-            discord_channel_tournament: Option.none(),
-            discord_channel_meeting: Option.none(),
-            discord_channel_social: Option.none(),
-            discord_channel_other: Option.none(),
             discord_channel_late_rsvp: Option.none(),
             create_discord_channel_on_group: true,
             create_discord_channel_on_roster: true,
@@ -384,20 +374,6 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
           }),
         )
       : Effect.succeed(Option.none()),
-  upsertSettings: (input: any) => {
-    settingsUpsertCalls.push(input);
-    // Simulate the auto-flip: if discord_channel_training changed, flip onboarding status
-    const prevTraining = Option.getOrNull(currentTrainingChannelId);
-    const nextTraining = input.discord_channel_training
-      ? Option.getOrNull(input.discord_channel_training as Option.Option<string>)
-      : prevTraining;
-    if (prevTraining !== nextTraining) {
-      teamState.onboarding_sync_status = 'pending';
-      syncPendingCalls.push(String(TEST_TEAM_ID));
-    }
-    currentTrainingChannelId = input.discord_channel_training ?? currentTrainingChannelId;
-    return Effect.succeed({ team_id: 'test', event_horizon_days: 30 });
-  },
   upsert: (input: any) => {
     settingsUpsertCalls.push(input);
     return Effect.succeed({
@@ -410,12 +386,6 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       rsvp_reminder_time: input.rsvpReminderTime ?? '18:00',
       reminders_channel_id: input.remindersChannelId ?? Option.none(),
       timezone: input.timezone ?? 'Europe/Prague',
-      discord_channel_training: input.discordChannelTraining ?? Option.none(),
-      discord_channel_match: input.discordChannelMatch ?? Option.none(),
-      discord_channel_tournament: input.discordChannelTournament ?? Option.none(),
-      discord_channel_meeting: input.discordChannelMeeting ?? Option.none(),
-      discord_channel_social: input.discordChannelSocial ?? Option.none(),
-      discord_channel_other: input.discordChannelOther ?? Option.none(),
       discord_channel_late_rsvp: input.discordChannelLateRsvp ?? Option.none(),
       create_discord_channel_on_group: input.createDiscordChannelOnGroup ?? true,
       create_discord_channel_on_roster: input.createDiscordChannelOnRoster ?? true,
@@ -528,23 +498,10 @@ beforeEach(() => {
 
 const TEAM_URL = `http://localhost/teams/${TEST_TEAM_ID}`;
 const RETRY_URL = `http://localhost/teams/${TEST_TEAM_ID}/onboarding/retry`;
-const SETTINGS_URL = `http://localhost/teams/${TEST_TEAM_ID}/settings`;
 
 const patchTeam = (body: Record<string, unknown>, token = 'manager-token') =>
   handler(
     new Request(TEAM_URL, {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }),
-  );
-
-const patchTeamSettings = (body: Record<string, unknown>, token = 'manager-token') =>
-  handler(
-    new Request(SETTINGS_URL, {
       method: 'PATCH',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -622,37 +579,6 @@ describe('PATCH /teams/:id — onboarding field change detection', () => {
     expect(response.status).toBe(200);
     expect(teamState.onboarding_sync_status).toBe('done');
     expect(syncPendingCalls).toHaveLength(0);
-  });
-});
-
-describe('PATCH /teams/:id/settings — discord_channel_training change', () => {
-  it('changing discord_channel_training flips onboarding_sync_status to pending (plan §4 settings endpoint)', async () => {
-    // Plan §4: captain saves to team-settings go through team-settings.ts which must apply
-    // the SAME auto-flip narrowing for discord_channel_training changes.
-    currentMembership = managerMembership;
-    teamState.onboarding_sync_status = 'done';
-    currentTrainingChannelId = Option.none(); // no training channel set currently
-
-    const response = await patchTeamSettings({
-      discordChannelTraining: TRAINING_CHANNEL_ID,
-    });
-
-    expect(response.status).toBe(200);
-    // The settings handler must call markOnboardingSyncPending when training channel changes
-    expect(teamState.onboarding_sync_status).toBe('pending');
-  });
-
-  it('saving same discord_channel_training value does NOT flip status (idempotent)', async () => {
-    currentMembership = managerMembership;
-    teamState.onboarding_sync_status = 'done';
-    currentTrainingChannelId = Option.some(TRAINING_CHANNEL_ID);
-
-    const response = await patchTeamSettings({
-      discordChannelTraining: TRAINING_CHANNEL_ID,
-    });
-
-    expect(response.status).toBe(200);
-    expect(teamState.onboarding_sync_status).toBe('done');
   });
 });
 

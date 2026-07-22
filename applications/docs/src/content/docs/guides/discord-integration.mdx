@@ -23,7 +23,7 @@ See [Quick start for Admins](/quick-start/admins/#steps) for the full install fl
 
 You link Discord channels to Sideline for specific purposes:
 
-- **Events channel** — where event posts with RSVP buttons appear (configurable per event type: training, match, tournament, etc.).
+- **Events channel** — a single global channel where event posts with RSVP buttons for every event type (training, match, tournament, meeting, social, other) appear.
 - **Reminders channel** (optional) — where RSVP reminders and event-start announcements are posted. If unset, the bot falls back to the event's owner-group channel.
 - **Late-RSVP channel** (optional) — where the bot posts a notification when a member RSVPs after the reminder has already been sent.
 - **Welcome channel** (optional) — where the bot posts a public welcome embed when a new member joins via an invite.
@@ -135,7 +135,7 @@ When the training starts, the claim embed is automatically removed from the thre
 - If a coach claimed the training, the announcement **@-mentions the coach directly** (e.g. `<@CoachDiscordId>`).
 - If no coach claimed the training (or the claimer has no linked Discord account), the announcement **@-mentions the owners-group role** and includes the message "No coach claimed this training."
 
-On the day of the training, if the training has been claimed, the bot also posts a **"today's coach is X"** announcement to the member training channel so players know who is running the session.
+On the day of the training, if the training has been claimed, the bot also posts a **"today's coach is X"** announcement to the training's owner-group channel so players know who is running the session.
 
 <Aside type="note" title="Who can claim?">
   Only members (including coaches in sub-groups) of the training's **owner group** can claim or release a training. The Claim button silently rejects everyone else.

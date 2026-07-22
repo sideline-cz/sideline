@@ -22,7 +22,6 @@ interface OnboardingTeamView {
   onboarding_locale: 'en' | 'cs';
   rules_channel_id: Option.Option<string>;
   welcome_channel_id: Option.Option<string>;
-  training_channel_id: Option.Option<string>;
   overview_channel_id: Option.Option<string>;
   onboarding_rules_role_id: Option.Option<string>;
   onboarding_rules_prompt_id: Option.Option<string>;
@@ -33,7 +32,6 @@ interface WelcomeScreenStrings {
   description: string;
   channels_rules: string;
   channels_welcome: string;
-  channels_training: string;
   channels_overview: string;
 }
 
@@ -50,7 +48,6 @@ interface RulesPromptStrings {
 const GUILD_ID = '111111111111111111';
 const RULES_CHANNEL_ID = '222222222222222222';
 const WELCOME_CHANNEL_ID = '333333333333333333';
-const TRAINING_CHANNEL_ID = '444444444444444444';
 const ROLE_ID = '555555555555555555';
 const PROMPT_ID = '666666666666666666';
 
@@ -61,7 +58,6 @@ const makeTeam = (overrides: Partial<OnboardingTeamView> = {}): OnboardingTeamVi
   onboarding_locale: 'en',
   rules_channel_id: Option.some(RULES_CHANNEL_ID),
   welcome_channel_id: Option.some(WELCOME_CHANNEL_ID),
-  training_channel_id: Option.some(TRAINING_CHANNEL_ID),
   overview_channel_id: Option.none(),
   onboarding_rules_role_id: Option.some(ROLE_ID),
   onboarding_rules_prompt_id: Option.none(),
@@ -80,8 +76,6 @@ const makeStrings = (locale: 'en' | 'cs' = 'en'): WelcomeScreenStrings => ({
       : 'Read and acknowledge the team rules.',
   channels_welcome:
     locale === 'cs' ? 'Pozdravte a seznamte se s týmem.' : 'Say hi and meet the team.',
-  channels_training:
-    locale === 'cs' ? 'Aktuální tréninky a oznámení.' : 'Latest training calls and announcements.',
   channels_overview: locale === 'cs' ? 'Procházej všechny akce týmu.' : 'Browse all team events.',
 });
 
@@ -96,21 +90,19 @@ const makeRulesPromptStrings = (): RulesPromptStrings => ({
 // ---------------------------------------------------------------------------
 
 describe('buildWelcomeScreenPayload', () => {
-  it('all 3 captain channels set → Some with 2 welcome_channels (rules excluded as private)', () => {
+  it('welcome channel set (rules also set) → Some with 1 welcome_channels entry (rules excluded as private)', () => {
     const result = buildWelcomeScreenPayload(makeTeam(), makeStrings());
     expect(Option.isSome(result)).toBe(true);
     const payload = Option.getOrThrow(result) as any;
-    expect(payload.welcome_channels).toHaveLength(2);
+    expect(payload.welcome_channels).toHaveLength(1);
     const channelIds = payload.welcome_channels.map((ch: any) => ch.channel_id);
     expect(channelIds).not.toContain(RULES_CHANNEL_ID);
     expect(channelIds).toContain(WELCOME_CHANNEL_ID);
-    expect(channelIds).toContain(TRAINING_CHANNEL_ID);
   });
 
   it('only welcome_channel_id set → Some with 1 channel', () => {
     const team = makeTeam({
       rules_channel_id: Option.none(),
-      training_channel_id: Option.none(),
     });
     const result = buildWelcomeScreenPayload(team, makeStrings());
     expect(Option.isSome(result)).toBe(true);
@@ -122,7 +114,6 @@ describe('buildWelcomeScreenPayload', () => {
   it("only rules channel set → None (rules is private, can't be featured)", () => {
     const team = makeTeam({
       welcome_channel_id: Option.none(),
-      training_channel_id: Option.none(),
     });
     const result = buildWelcomeScreenPayload(team, makeStrings());
     expect(Option.isNone(result)).toBe(true);
@@ -132,7 +123,6 @@ describe('buildWelcomeScreenPayload', () => {
     const team = makeTeam({
       rules_channel_id: Option.none(),
       welcome_channel_id: Option.none(),
-      training_channel_id: Option.none(),
     });
     const result = buildWelcomeScreenPayload(team, makeStrings());
     expect(Option.isNone(result)).toBe(true);
@@ -183,15 +173,6 @@ describe('buildWelcomeScreenPayload', () => {
     const result = buildWelcomeScreenPayload(makeTeam(), makeStrings());
     const payload = Option.getOrThrow(result) as any;
     expect(payload.enabled).toBe(true);
-  });
-
-  it('rules + welcome set, no training → 1 channel (welcome only; rules excluded)', () => {
-    const team = makeTeam({ training_channel_id: Option.none() });
-    const result = buildWelcomeScreenPayload(team, makeStrings());
-    expect(Option.isSome(result)).toBe(true);
-    const payload = Option.getOrThrow(result) as any;
-    expect(payload.welcome_channels).toHaveLength(1);
-    expect(payload.welcome_channels[0].channel_id).toBe(WELCOME_CHANNEL_ID);
   });
 });
 
@@ -320,7 +301,7 @@ describe('mergeOnboardingPayload', () => {
   });
 
   it('captain channels are never added to default_channel_ids (Discord requires @everyone access; rules channel is private)', () => {
-    // The rules channel is private by design. Welcome/training are surfaced via the
+    // The rules channel is private by design. Welcome is surfaced via the
     // Welcome Screen, not default channels. So when current.default_channel_ids is
     // empty, ours stays empty too.
     const team = makeTeam();
@@ -330,7 +311,6 @@ describe('mergeOnboardingPayload', () => {
     expect(merged.mode).toBe(1);
     expect(merged.default_channel_ids).not.toContain(RULES_CHANNEL_ID);
     expect(merged.default_channel_ids).not.toContain(WELCOME_CHANNEL_ID);
-    expect(merged.default_channel_ids).not.toContain(TRAINING_CHANNEL_ID);
   });
 
   it('stale stored prompt id + existing prompt already references our role → exactly 1 Sideline-shaped prompt, no duplicate', () => {
@@ -371,7 +351,6 @@ describe('mergeOnboardingPayload', () => {
     const team = makeTeam({
       rules_channel_id: Option.none(),
       welcome_channel_id: Option.none(),
-      training_channel_id: Option.none(),
     });
     const current = makeOnboardingResponse([]);
     const { merged } = mergeOnboardingPayload(current, team, makeRulesPromptStrings());
@@ -394,8 +373,7 @@ describe('mergeOnboardingPayload', () => {
     expect(merged.default_channel_ids).toContain(EXISTING_1);
     expect(merged.default_channel_ids).toContain(EXISTING_2);
     expect(merged.default_channel_ids).not.toContain(RULES_CHANNEL_ID);
-    // Welcome and training stay out: we never add them.
+    // Welcome stays out: we never add it.
     expect(merged.default_channel_ids).not.toContain(WELCOME_CHANNEL_ID);
-    expect(merged.default_channel_ids).not.toContain(TRAINING_CHANNEL_ID);
   });
 });

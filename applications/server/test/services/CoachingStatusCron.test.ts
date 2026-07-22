@@ -1,19 +1,18 @@
-// NOTE: These tests are written in TDD mode BEFORE the implementation.
-// They test CoachingStatusCron (new cron service) behavior:
-//   - CLAIMED training with discord_channel_training set →
-//       emitCoachingStatus to THAT channel (NOT owner channel) + markCoachingStatusSent
-//   - discord_channel_training None but owner-group channel resolvable →
-//       emits to owner-group fallback
-//   - Both None → warns + marks sent, no emit
+// NOTE: CoachingStatusCron resolves the target channel via the event's
+// owner-group channel mapping only (the `discord_channel_training` per-type
+// channel was removed — see Release A of remove-channel-by-type).
+//   - owner-group channel resolvable → emits to it + markCoachingStatusSent
+//   - owner_group_id is None → warns + marks sent, no emit
+//   - owner group present but has no channel mapping → warns + marks sent, no emit
 //
-// ASSUMPTION: coachingStatusCronEffect is exported from ~/services/CoachingStatusCron.ts (new file).
-// ASSUMPTION: EventsRepository.markCoachingStatusSent(eventId) is a new method.
-//   It does: UPDATE events SET coaching_status_sent_at = now() WHERE id = $eventId.
-// ASSUMPTION: EventSyncEventsRepository.emitCoachingStatus(teamId, eventId, ...) is a new method.
+// ASSUMPTION: coachingStatusCronEffect is exported from ~/services/CoachingStatusCron.ts.
+// ASSUMPTION: EventsRepository.markCoachingStatusSent(eventId) does:
+//   UPDATE events SET coaching_status_sent_at = now() WHERE id = $eventId.
+// ASSUMPTION: EventSyncEventsRepository.emitCoachingStatus(teamId, eventId, ...) exists.
 // ASSUMPTION: TeamSettingsRepository.findEventsNeedingCoachingStatus() returns events
 //   that are CLAIMED, starting later today, after 07:00 local, coaching_status_sent_at IS NULL.
 // ASSUMPTION: EventNeedingCoachingStatus has: event_id, team_id, title, start_at,
-//   discord_channel_training, owner_group_id, claimed_by, claimer_display_name, claimer_discord_id.
+//   owner_group_id, claimed_by, claimer_display_name, claimer_discord_id.
 
 import { afterEach, beforeEach, describe, expect, it } from '@effect/vitest';
 import type { Discord, Event, GroupModel, Team, TeamMember } from '@sideline/domain';
@@ -31,7 +30,6 @@ import { coachingStatusCronEffect } from '~/services/CoachingStatusCron.js';
 const TEAM_ID = '00000000-0000-0000-0000-000000000030' as Team.TeamId;
 const EVENT_ID_1 = '00000000-0000-0000-0000-000000000201' as Event.EventId;
 const GROUP_ID_A = '00000000-0000-0000-0000-000000000050' as GroupModel.GroupId;
-const TRAINING_CHANNEL = '444444444444444444' as Discord.Snowflake;
 const OWNER_CHANNEL = '555555555555555555' as Discord.Snowflake;
 const MEMBER_ID = '00000000-0000-0000-0000-000000000060' as TeamMember.TeamMemberId;
 const COACH_DISCORD_ID = '666666666666666666' as Discord.Snowflake;
@@ -47,8 +45,6 @@ type CoachingEvent = {
   title: string;
   start_at: DateTime.Utc;
   owner_group_id: Option.Option<GroupModel.GroupId>;
-  /** From team_settings.discord_channel_training */
-  discord_channel_training: Option.Option<Discord.Snowflake>;
   claimed_by: Option.Option<TeamMember.TeamMemberId>;
   claimer_display_name: Option.Option<string>;
   claimer_discord_id: Option.Option<Discord.Snowflake>;
@@ -180,7 +176,6 @@ const makeCoachingEvent = (overrides: Partial<CoachingEvent> = {}): CoachingEven
   title: 'Monday Training',
   start_at: DateTime.makeUnsafe('2026-06-01T14:00:00Z'),
   owner_group_id: Option.some(GROUP_ID_A),
-  discord_channel_training: Option.some(TRAINING_CHANNEL),
   claimed_by: Option.some(MEMBER_ID),
   claimer_display_name: Option.some(COACH_NAME),
   claimer_discord_id: Option.some(COACH_DISCORD_ID),
@@ -195,86 +190,59 @@ afterEach(() => resetStores());
 // ---------------------------------------------------------------------------
 
 describe('CoachingStatusCron — coachingStatusCronEffect', () => {
-  it.effect(
-    'claimed event with discord_channel_training set → emitCoachingStatus to THAT channel (NOT owner channel) + markCoachingStatusSent',
-    () => {
-      pendingCoachingEvents = [makeCoachingEvent()];
-      // Register owner channel too, to verify training channel takes priority
-      channelMappings.set(`${TEAM_ID}:${GROUP_ID_A}`, {
-        discord_channel_id: Option.some(OWNER_CHANNEL),
-        discord_role_id: Option.none(),
-      });
+  it.effect('owner-group channel resolvable → emitCoachingStatus + markCoachingStatusSent', () => {
+    pendingCoachingEvents = [makeCoachingEvent({ owner_group_id: Option.some(GROUP_ID_A) })];
+    channelMappings.set(`${TEAM_ID}:${GROUP_ID_A}`, {
+      discord_channel_id: Option.some(OWNER_CHANNEL),
+      discord_role_id: Option.none(),
+    });
 
-      return coachingStatusCronEffect.pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(emittedCoachingStatuses).toHaveLength(1);
-            // Must be the training channel, NOT the owner channel
-            expect(emittedCoachingStatuses[0].channelId).toBe(TRAINING_CHANNEL);
-            expect(emittedCoachingStatuses[0].channelId).not.toBe(OWNER_CHANNEL);
-            expect(markedCoachingStatusSent).toHaveLength(1);
-            expect(markedCoachingStatusSent[0]).toBe(EVENT_ID_1);
-          }),
-        ),
-        Effect.provide(buildLayer()),
-        Effect.asVoid,
-      );
-    },
-  );
-
-  it.effect(
-    'discord_channel_training None but owner-group channel resolvable → emits to owner-group fallback',
-    () => {
-      pendingCoachingEvents = [
-        makeCoachingEvent({
-          discord_channel_training: Option.none(),
-          owner_group_id: Option.some(GROUP_ID_A),
+    return coachingStatusCronEffect.pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(emittedCoachingStatuses).toHaveLength(1);
+          expect(emittedCoachingStatuses[0].channelId).toBe(OWNER_CHANNEL);
+          expect(markedCoachingStatusSent).toHaveLength(1);
+          expect(markedCoachingStatusSent[0]).toBe(EVENT_ID_1);
         }),
-      ];
-      channelMappings.set(`${TEAM_ID}:${GROUP_ID_A}`, {
-        discord_channel_id: Option.some(OWNER_CHANNEL),
-        discord_role_id: Option.none(),
-      });
+      ),
+      Effect.provide(buildLayer()),
+      Effect.asVoid,
+    );
+  });
 
-      return coachingStatusCronEffect.pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(emittedCoachingStatuses).toHaveLength(1);
-            // Falls back to owner group channel
-            expect(emittedCoachingStatuses[0].channelId).toBe(OWNER_CHANNEL);
-            expect(markedCoachingStatusSent).toHaveLength(1);
-          }),
-        ),
-        Effect.provide(buildLayer()),
-        Effect.asVoid,
-      );
-    },
-  );
+  it.effect('owner_group_id is None → warns + marks sent, no emit', () => {
+    pendingCoachingEvents = [makeCoachingEvent({ owner_group_id: Option.none() })];
 
-  it.effect(
-    'both discord_channel_training and owner group are None → warns + marks sent, no emit',
-    () => {
-      pendingCoachingEvents = [
-        makeCoachingEvent({
-          discord_channel_training: Option.none(),
-          owner_group_id: Option.none(),
+    return coachingStatusCronEffect.pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(emittedCoachingStatuses).toHaveLength(0);
+          // Must still mark sent to prevent infinite rescan
+          expect(markedCoachingStatusSent).toHaveLength(1);
+          expect(markedCoachingStatusSent[0]).toBe(EVENT_ID_1);
         }),
-      ];
+      ),
+      Effect.provide(buildLayer()),
+      Effect.asVoid,
+    );
+  });
 
-      return coachingStatusCronEffect.pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(emittedCoachingStatuses).toHaveLength(0);
-            // Must still mark sent to prevent infinite rescan
-            expect(markedCoachingStatusSent).toHaveLength(1);
-            expect(markedCoachingStatusSent[0]).toBe(EVENT_ID_1);
-          }),
-        ),
-        Effect.provide(buildLayer()),
-        Effect.asVoid,
-      );
-    },
-  );
+  it.effect('owner group without a channel mapping → warns + marks sent, no emit', () => {
+    pendingCoachingEvents = [makeCoachingEvent({ owner_group_id: Option.some(GROUP_ID_A) })];
+    // No channel mapping registered for GROUP_ID_A
+
+    return coachingStatusCronEffect.pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(emittedCoachingStatuses).toHaveLength(0);
+          expect(markedCoachingStatusSent).toHaveLength(1);
+        }),
+      ),
+      Effect.provide(buildLayer()),
+      Effect.asVoid,
+    );
+  });
 
   it.effect('empty pending list → does nothing', () => {
     pendingCoachingEvents = [];
@@ -290,28 +258,4 @@ describe('CoachingStatusCron — coachingStatusCronEffect', () => {
       Effect.asVoid,
     );
   });
-
-  it.effect(
-    'discord_channel_training None and owner group has no mapping → warns + marks sent, no emit',
-    () => {
-      pendingCoachingEvents = [
-        makeCoachingEvent({
-          discord_channel_training: Option.none(),
-          owner_group_id: Option.some(GROUP_ID_A),
-        }),
-      ];
-      // No channel mapping for GROUP_ID_A
-
-      return coachingStatusCronEffect.pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            expect(emittedCoachingStatuses).toHaveLength(0);
-            expect(markedCoachingStatusSent).toHaveLength(1);
-          }),
-        ),
-        Effect.provide(buildLayer()),
-        Effect.asVoid,
-      );
-    },
-  );
 });

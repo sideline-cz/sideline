@@ -283,12 +283,6 @@ erDiagram
         TEXT timezone
         INTEGER max_missed_rsvps
         INTEGER claim_request_days_before
-        TEXT discord_channel_training
-        TEXT discord_channel_match
-        TEXT discord_channel_tournament
-        TEXT discord_channel_meeting
-        TEXT discord_channel_social
-        TEXT discord_channel_other
         TEXT discord_channel_late_rsvp
         BOOLEAN create_discord_channel_on_group
         BOOLEAN create_discord_channel_on_roster

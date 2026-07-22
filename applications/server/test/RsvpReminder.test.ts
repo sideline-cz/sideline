@@ -537,12 +537,6 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
         timezone: teamSettingsStore.timezone,
         max_missed_rsvps: teamSettingsStore.max_missed_rsvps,
-        discord_channel_training: Option.none(),
-        discord_channel_match: Option.none(),
-        discord_channel_tournament: Option.none(),
-        discord_channel_meeting: Option.none(),
-        discord_channel_social: Option.none(),
-        discord_channel_other: Option.none(),
         discord_channel_late_rsvp: Option.none(),
         create_discord_channel_on_group: true,
         create_discord_channel_on_roster: true,
@@ -571,12 +565,6 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
         timezone: teamSettingsStore.timezone,
         max_missed_rsvps: teamSettingsStore.max_missed_rsvps,
-        discord_channel_training: Option.none(),
-        discord_channel_match: Option.none(),
-        discord_channel_tournament: Option.none(),
-        discord_channel_meeting: Option.none(),
-        discord_channel_social: Option.none(),
-        discord_channel_other: Option.none(),
         discord_channel_late_rsvp: Option.none(),
         create_discord_channel_on_group: true,
         create_discord_channel_on_roster: true,
@@ -602,12 +590,6 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
     reminders_channel_id?: Option.Option<string>;
     timezone?: string;
     max_missed_rsvps?: number;
-    discord_channel_training: Option.Option<string>;
-    discord_channel_match: Option.Option<string>;
-    discord_channel_tournament: Option.Option<string>;
-    discord_channel_meeting: Option.Option<string>;
-    discord_channel_social: Option.Option<string>;
-    discord_channel_other: Option.Option<string>;
   }) =>
     Effect.succeed({
       team_id: TEST_TEAM_ID,
@@ -622,12 +604,6 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       reminders_channel_id: input.reminders_channel_id ?? teamSettingsStore.reminders_channel_id,
       timezone: input.timezone ?? teamSettingsStore.timezone,
       max_missed_rsvps: input.max_missed_rsvps ?? teamSettingsStore.max_missed_rsvps,
-      discord_channel_training: Option.none(),
-      discord_channel_match: Option.none(),
-      discord_channel_tournament: Option.none(),
-      discord_channel_meeting: Option.none(),
-      discord_channel_social: Option.none(),
-      discord_channel_other: Option.none(),
       discord_channel_late_rsvp: Option.none(),
       create_discord_channel_on_group: false,
       create_discord_channel_on_roster: true,
@@ -652,12 +628,6 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
     remindersChannelId?: Option.Option<string>;
     timezone?: string;
     maxMissedRsvps?: number;
-    discordChannelTraining?: Option.Option<string>;
-    discordChannelMatch?: Option.Option<string>;
-    discordChannelTournament?: Option.Option<string>;
-    discordChannelMeeting?: Option.Option<string>;
-    discordChannelSocial?: Option.Option<string>;
-    discordChannelOther?: Option.Option<string>;
   }) => {
     teamSettingsStore.min_players_threshold = input.minPlayersThreshold;
     teamSettingsStore.event_horizon_days = input.eventHorizonDays;
@@ -683,12 +653,6 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       reminders_channel_id: teamSettingsStore.reminders_channel_id,
       timezone: teamSettingsStore.timezone,
       max_missed_rsvps: teamSettingsStore.max_missed_rsvps,
-      discord_channel_training: Option.none(),
-      discord_channel_match: Option.none(),
-      discord_channel_tournament: Option.none(),
-      discord_channel_meeting: Option.none(),
-      discord_channel_social: Option.none(),
-      discord_channel_other: Option.none(),
       discord_channel_late_rsvp: Option.none(),
       create_discord_channel_on_group: false,
       create_discord_channel_on_roster: true,
