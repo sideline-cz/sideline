@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.32.1
+
+### 🐛 Fixes
+- remove finished events from personal channels (#540)
+
 ## 0.32.0
 
 ### 🚀 Features
