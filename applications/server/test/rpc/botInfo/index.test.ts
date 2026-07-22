@@ -75,6 +75,22 @@ describe('BotInfoRpcLive — ReportBotInfo', () => {
     const { BotInfoRpcLive } = await import('~/rpc/botInfo/index.js');
     expect(BotInfoRpcLive).toBeDefined();
   });
+
+  it('real BotInfoStore.set resolves to void so the Void RPC response encodes', async () => {
+    // Regression: `Ref.set` yields the underlying ref at runtime, so without
+    // `asVoid` the handler result failed to encode against the RPC's Void
+    // success schema ("Failed to report bot version" warning on every startup).
+    const { BotInfoStore } = await import('~/services/BotInfoStore.js');
+    const store = await Effect.runPromise(
+      BotInfoStore.asEffect().pipe(Effect.provide(BotInfoStore.Default)),
+    );
+
+    const result = await Effect.runPromise(store.set('0.30.6'));
+    expect(result).toBeUndefined();
+
+    const stored = await Effect.runPromise(store.get);
+    expect(Option.getOrNull(stored)).toBe('0.30.6');
+  });
 });
 
 describe('BotInfoRpcLive — GetServerVersion', () => {
