@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.41.0
+
+### 🚀 Features
+- remove the global events board (Release A) (#547)
+
 ## 0.40.3
 
 ### 🐛 Fixes

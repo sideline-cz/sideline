@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.29.0
+
+### 🚀 Features
+- remove the global events board (Release A) (#547)
+
 ## 0.28.1
 
 ### 🐛 Fixes
