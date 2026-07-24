@@ -35,7 +35,7 @@
     "arctic": "^3.7.0",
     "dfx": "1.0.11",
     "effect": "4.0.0-beta.40",
-    "imapflow": "^1.4.7",
+    "imapflow": "^1.5.0",
     "mailparser": "^3.9.14"
   },
   "effect": {
