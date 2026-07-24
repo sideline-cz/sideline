@@ -32,9 +32,13 @@ export const buildAttendeesEmbed = (opts: {
   const locale = opts.locale;
   const fields: Array<Discord.RichEmbedField> = [];
 
-  const grouped = { yes: [] as string[], no: [] as string[], maybe: [] as string[] };
+  // Legacy `maybe` and the newer `coming_later` response both land in the
+  // same "coming later" bucket — the wire still only ever sends 'maybe' for
+  // this read-model, but grouping is written defensively either way.
+  const grouped = { yes: [] as string[], coming_later: [] as string[], no: [] as string[] };
   for (const entry of opts.attendees) {
-    grouped[entry.response].push(formatEntry(entry));
+    const key = entry.response === 'maybe' ? 'coming_later' : entry.response;
+    grouped[key].push(formatEntry(entry));
   }
 
   if (grouped.yes.length > 0) {
@@ -43,16 +47,16 @@ export const buildAttendeesEmbed = (opts: {
       value: grouped.yes.join('\n'),
     });
   }
+  if (grouped.coming_later.length > 0) {
+    fields.push({
+      name: m.bot_attendees_maybe({ count: `${grouped.coming_later.length}` }, { locale }),
+      value: grouped.coming_later.join('\n'),
+    });
+  }
   if (grouped.no.length > 0) {
     fields.push({
       name: m.bot_attendees_no({ count: `${grouped.no.length}` }, { locale }),
       value: grouped.no.join('\n'),
-    });
-  }
-  if (grouped.maybe.length > 0) {
-    fields.push({
-      name: m.bot_attendees_maybe({ count: `${grouped.maybe.length}` }, { locale }),
-      value: grouped.maybe.join('\n'),
     });
   }
 

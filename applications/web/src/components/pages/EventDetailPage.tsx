@@ -390,7 +390,7 @@ export function EventDetailPage({
   }, [hasSeries, doCancelThisOnly]);
 
   const handleRsvpSubmit = React.useCallback(
-    (response: 'yes' | 'no' | 'maybe', message: string) =>
+    (response: 'yes' | 'no' | 'maybe' | 'coming_later', message: string) =>
       ApiClient.asEffect().pipe(
         Effect.flatMap((api) =>
           api.eventRsvp.submitRsvp({
@@ -400,6 +400,9 @@ export function EventDetailPage({
               message: message ? Option.some(message) : Option.none(),
             },
           }),
+        ),
+        Effect.catchTag('EventRsvpMessageRequired', () =>
+          Effect.fail(ClientError.make(tr('rsvp_messageRequired'))),
         ),
         Effect.mapError(() => ClientError.make(tr('rsvp_submitFailed'))),
         Effect.tap(() => Effect.sync(() => router.invalidate())),

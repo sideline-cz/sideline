@@ -1,4 +1,4 @@
-import type { EventRpcModels } from '@sideline/domain';
+import type { EventRpcModels, EventRsvp } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
@@ -143,6 +143,21 @@ export const buildUpcomingEventEmbed = (params: {
 
   const myResponse = entry.my_response;
 
+  // The TRUE (unprojected) response, falling back to the legacy projected
+  // `my_response` if the server hasn't shipped the new field yet (rolling
+  // deploy safety). Row 2's Edit/Clear message buttons must encode this true
+  // value in their custom_id — the projected `my_response` can't be told
+  // apart from a real legacy `maybe`, so building those buttons from it would
+  // let "Clear message" silently downgrade a `coming_later` RSVP to `maybe`
+  // and bypass the mandatory-comment guard. Row 1's RSVP buttons and the
+  // visual highlight logic intentionally keep using the projected
+  // `my_response` above — those are confirmed correct as-is.
+  const myActualResponse: Option.Option<EventRsvp.RsvpResponse> = Option.isSome(
+    entry.my_response_actual,
+  )
+    ? entry.my_response_actual
+    : entry.my_response;
+
   // Row 1: RSVP buttons
   // Styles: 1=Primary(blurple), 2=Secondary(grey), 3=Success(green), 4=Danger(red)
   const yesStyle =
@@ -158,7 +173,9 @@ export const buildUpcomingEventEmbed = (params: {
       ? Discord.ButtonStyleTypes.PRIMARY
       : Discord.ButtonStyleTypes.SECONDARY;
 
-  // custom_id: upcoming-rsvp:<event_id>:<team_id>:<response>
+  // custom_id: upcoming-rsvp:<event_id>:<team_id>:<response> — except the
+  // third (coming_later) button, which always opens the required-comment
+  // modal instead of instant-submitting (custom_id: u-add-msg:...).
   const rsvpRow: Discord.ActionRowComponentForMessageRequest = UI.row([
     UI.button({
       style: yesStyle,
@@ -173,36 +190,44 @@ export const buildUpcomingEventEmbed = (params: {
     UI.button({
       style: maybeStyle,
       label: m.bot_btn_maybe({}, { locale }),
-      custom_id: `upcoming-rsvp:${entry.event_id}:${entry.team_id}:maybe`,
+      custom_id: `u-add-msg:${entry.team_id}:${entry.event_id}:coming_later`,
     }),
   ]);
 
   // Row 2: Attendees button, plus (when user has responded) add/edit/clear message buttons
-  const messageButtons: ReadonlyArray<Discord.ButtonComponentForMessageRequest> = myResponse.pipe(
-    Option.map((response) =>
-      Option.isSome(entry.my_message)
-        ? [
-            UI.button({
-              style: Discord.ButtonStyleTypes.SECONDARY,
-              label: m.bot_rsvp_edit_message({}, { locale }),
-              custom_id: `u-add-msg:${entry.team_id}:${entry.event_id}:${response}`,
-            }),
-            UI.button({
-              style: Discord.ButtonStyleTypes.DANGER,
-              label: m.bot_rsvp_clear_message({}, { locale }),
-              custom_id: `u-clear-msg:${entry.team_id}:${entry.event_id}:${response}`,
-            }),
-          ]
-        : [
-            UI.button({
-              style: Discord.ButtonStyleTypes.SECONDARY,
-              label: m.bot_rsvp_add_message({}, { locale }),
-              custom_id: `u-add-msg:${entry.team_id}:${entry.event_id}:${response}`,
-            }),
-          ],
-    ),
-    Option.getOrElse(() => []),
-  );
+  const messageButtons: ReadonlyArray<Discord.ButtonComponentForMessageRequest> =
+    myActualResponse.pipe(
+      Option.map((response) =>
+        Option.isSome(entry.my_message)
+          ? [
+              UI.button({
+                style: Discord.ButtonStyleTypes.SECONDARY,
+                label: m.bot_rsvp_edit_message({}, { locale }),
+                custom_id: `u-add-msg:${entry.team_id}:${entry.event_id}:${response}`,
+              }),
+              // coming_later requires a message, so clearing it is illegal —
+              // never render the "clear message" button for that response
+              // (mirrors rsvp.ts's buildMessageActionRow).
+              ...(response === 'coming_later'
+                ? []
+                : [
+                    UI.button({
+                      style: Discord.ButtonStyleTypes.DANGER,
+                      label: m.bot_rsvp_clear_message({}, { locale }),
+                      custom_id: `u-clear-msg:${entry.team_id}:${entry.event_id}:${response}`,
+                    }),
+                  ]),
+            ]
+          : [
+              UI.button({
+                style: Discord.ButtonStyleTypes.SECONDARY,
+                label: m.bot_rsvp_add_message({}, { locale }),
+                custom_id: `u-add-msg:${entry.team_id}:${entry.event_id}:${response}`,
+              }),
+            ],
+      ),
+      Option.getOrElse(() => []),
+    );
 
   const messageRow: Discord.ActionRowComponentForMessageRequest = UI.row([
     UI.button({

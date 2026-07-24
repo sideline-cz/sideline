@@ -1,22 +1,22 @@
 ---
 title: RSVP to an event
-description: How to respond to your team's events and what Yes / No / Maybe actually mean.
+description: How to respond to your team's events and what Yes / No / Coming later actually mean.
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
-Every event you're invited to gets an RSVP prompt — in Discord, on the web, or both. Responding is a single click.
+Every event you're invited to gets an RSVP prompt — in Discord, on the web, or both. Responding is a single click (or two, for "Coming later" — see below).
 
 ## What the responses mean
 
-- **Yes** — I'll be there. Counts as present for attendance stats.
+- **Yes** — I'll be there, on time. Counts as present for attendance stats.
 - **No** — I won't be there. Counts as an explicit decline, not a no-show.
-- **Maybe** — I'm not sure yet. Counts as undecided; you'll get a reminder closer to the event.
+- **Coming later** — I'll be there, but arriving late. Counts as present for attendance stats, roster headcounts, and team generation, exactly like **Yes** — the only difference is you're letting your team know to expect you after the start time. Choosing this response requires a short note explaining when you expect to arrive (e.g. "~7pm after work") — you can't submit it blank.
 
 The key difference between **No** and silence: **No** tells your captain you got the message. Silence doesn't. That's why reminders keep nudging people who haven't answered.
 
 <Aside type="note" title="Reminders stop after repeated non-responses">
-  If you have a **Player** role and miss a configurable number of events in a row without responding, the bot stops sending you RSVP reminder DMs. Respond to any event — yes, no, or maybe — to reset your streak and start receiving reminders again. Your captain can adjust the threshold in **Team settings → RSVP reminders → Stop reminding after N missed RSVPs**.
+  If you have a **Player** role and miss a configurable number of events in a row without responding, the bot stops sending you RSVP reminder DMs. Respond to any event — yes, no, or coming later — to reset your streak and start receiving reminders again. Your captain can adjust the threshold in **Team settings → RSVP reminders → Stop reminding after N missed RSVPs**.
 </Aside>
 
 ## Responding in Discord
@@ -24,8 +24,8 @@ The key difference between **No** and silence: **No** tells your captain you got
 <Steps>
 
 1. Find the event post in your private personal events channel (or via `/event list`). It shows the date, time, location, and current counts.
-2. Click **Yes**, **No**, or **Maybe**. The buttons are under the event details.
-3. The bot confirms your response right away; the post itself refreshes with your name in the right bucket within a few seconds.
+2. Click **Yes**, **No**, or **Coming later**. The buttons are under the event details.
+3. **Yes** and **No** save immediately — the bot confirms your response right away, and the post itself refreshes with your name in the right bucket within a few seconds. **Coming later** instead opens a pop-up asking for your reason/ETA; fill it in and submit to record your response.
 
 </Steps>
 
@@ -35,7 +35,7 @@ The key difference between **No** and silence: **No** tells your captain you got
 
 1. Open the Sideline web app and go to your team's Events tab.
 2. Click an event to see details.
-3. Click the RSVP button you want. The count updates live.
+3. Click the RSVP button you want. **Yes** and **No** update the count live. Clicking **Coming later** reveals a required note field below the buttons — type your reason/ETA and click **Save note**; the button stays disabled until the note is filled in.
 
 </Steps>
 
@@ -49,7 +49,7 @@ You can change your RSVP at any time until the event starts. Click a different b
 
 ## What if I'm running late?
 
-RSVPing Yes doesn't mean you promise to be on time. If you're running late, say so in the team's Discord. Sideline doesn't track late arrivals — that's on your team's culture.
+Use the **Coming later** response instead of **Yes** — add a short note with your expected arrival time so the rest of the team (and your captain) knows to expect you after the start. It still counts as attending, so you won't show up as a no-show or get left out of roster/team-generation headcounts.
 
 ## See also
 

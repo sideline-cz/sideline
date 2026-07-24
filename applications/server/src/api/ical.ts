@@ -140,7 +140,12 @@ const buildICalFeed = (
   ];
 
   for (const event of events) {
-    const prefix = event.rsvp_response === 'maybe' ? '[Maybe] ' : '';
+    const prefix =
+      event.rsvp_response === 'maybe'
+        ? '[Maybe] '
+        : event.rsvp_response === 'coming_later'
+          ? '[Later] '
+          : '';
     lines.push('BEGIN:VEVENT');
     lines.push(`UID:${event.id}@sideline`);
     lines.push(`DTSTAMP:${dtstamp}`);

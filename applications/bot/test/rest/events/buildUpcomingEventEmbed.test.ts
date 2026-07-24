@@ -25,6 +25,7 @@ const makeEntry = (
     no_count: 0,
     maybe_count: 0,
     my_response: Option.none(),
+    my_response_actual: Option.none(),
     my_message: Option.none(),
     all_day: false,
     ...overrides,
@@ -248,7 +249,10 @@ describe('buildUpcomingEventEmbed', () => {
       }>;
       expect(yesBtn.custom_id).toBe('upcoming-rsvp:ev-42:tm-7:yes');
       expect(noBtn.custom_id).toBe('upcoming-rsvp:ev-42:tm-7:no');
-      expect(maybeBtn.custom_id).toBe('upcoming-rsvp:ev-42:tm-7:maybe');
+      // coming_later always opens the required-comment modal instead of an
+      // instant upcoming-rsvp:...:maybe submit — see the dedicated
+      // "message action row" describe block below for full coverage.
+      expect(maybeBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later');
     });
   });
 
@@ -311,6 +315,38 @@ describe('buildUpcomingEventEmbed', () => {
       expect(secondRow[2].custom_id).toBe('u-clear-msg:team-1:event-1:yes');
     });
 
+    // -----------------------------------------------------------------------
+    // coming_later — row 1's third RSVP button ("Maybe") now routes to the
+    // add-message modal for the new coming_later response (coming_later
+    // always requires a non-empty comment, so it can no longer be an
+    // instant-submit `upcoming-rsvp:...:maybe` button). Unlike row 2's
+    // edit/clear pairing (buildMessageActionRow-equivalent), this row-1 slot
+    // never has a "clear message" variant — it is always the single
+    // modal-trigger button, regardless of the user's current my_response /
+    // my_message state.
+    // -----------------------------------------------------------------------
+
+    it('third rsvp button routes to u-add-msg:...:coming_later, not an instant upcoming-rsvp:...:maybe submit', () => {
+      const entry = makeEntry({ event_id: 'ev-42', team_id: 'tm-7' });
+      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const [, , thirdBtn] = components[0].components as ReadonlyArray<{ custom_id: string }>;
+      expect(thirdBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later');
+      expect(thirdBtn.custom_id).not.toBe('upcoming-rsvp:ev-42:tm-7:maybe');
+    });
+
+    it('row 1 still has exactly 3 buttons regardless of my_response/my_message state (no clear-message variant for coming_later)', () => {
+      const entry = makeEntry({
+        event_id: 'ev-42',
+        team_id: 'tm-7',
+        my_response: Option.some('maybe'),
+        my_message: Option.some('Already responded with a note'),
+      });
+      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      expect(components[0].components).toHaveLength(3);
+      const [, , thirdBtn] = components[0].components as ReadonlyArray<{ custom_id: string }>;
+      expect(thirdBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later');
+    });
+
     it('encodes team_id and event_id in message-button custom_ids', () => {
       const entry = makeEntry({
         event_id: 'ev-99',
@@ -337,6 +373,71 @@ describe('buildUpcomingEventEmbed', () => {
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const clearBtn = components[1].components[2] as { style: number };
       expect(clearBtn.style).toBe(4);
+    });
+
+    // -----------------------------------------------------------------------
+    // my_response_actual — row 2's edit/clear buttons must be built from the
+    // TRUE (unprojected) response, not the legacy-projected `my_response`
+    // (which downgrades `coming_later` to `maybe`). Building them from the
+    // projected value would let "Clear message" silently rewrite a stored
+    // `coming_later` RSVP to `maybe` and bypass the mandatory-comment guard.
+    // -----------------------------------------------------------------------
+
+    it('edit button custom_id encodes the true coming_later response, not the projected maybe', () => {
+      const entry = makeEntry({
+        event_id: 'ev-42',
+        team_id: 'tm-7',
+        my_response: Option.some('maybe'),
+        my_response_actual: Option.some('coming_later'),
+        my_message: Option.some('Running late'),
+      });
+      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const secondRow = components[1].components as ReadonlyArray<{ custom_id: string }>;
+      const editBtn = secondRow.find((b) => b.custom_id.startsWith('u-add-msg:'));
+      expect(editBtn?.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later');
+    });
+
+    it('does not render a clear-message button when the true response is coming_later', () => {
+      const entry = makeEntry({
+        event_id: 'ev-42',
+        team_id: 'tm-7',
+        my_response: Option.some('maybe'),
+        my_response_actual: Option.some('coming_later'),
+        my_message: Option.some('Running late'),
+      });
+      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const secondRow = components[1].components as ReadonlyArray<{ custom_id: string }>;
+      expect(secondRow.some((b) => b.custom_id.startsWith('u-clear-msg:'))).toBe(false);
+    });
+
+    it('still renders the clear-message button when the true response is a legacy maybe', () => {
+      const entry = makeEntry({
+        event_id: 'ev-42',
+        team_id: 'tm-7',
+        my_response: Option.some('maybe'),
+        my_response_actual: Option.some('maybe'),
+        my_message: Option.some('Not sure yet'),
+      });
+      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const secondRow = components[1].components as ReadonlyArray<{ custom_id: string }>;
+      const clearBtn = secondRow.find((b) => b.custom_id.startsWith('u-clear-msg:'));
+      expect(clearBtn?.custom_id).toBe('u-clear-msg:tm-7:ev-42:maybe');
+    });
+
+    it('falls back to the legacy my_response when my_response_actual is absent (rolling-deploy safety)', () => {
+      const entry = makeEntry({
+        event_id: 'ev-42',
+        team_id: 'tm-7',
+        my_response: Option.some('yes'),
+        my_response_actual: Option.none(),
+        my_message: Option.some('See you there'),
+      });
+      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const secondRow = components[1].components as ReadonlyArray<{ custom_id: string }>;
+      const editBtn = secondRow.find((b) => b.custom_id.startsWith('u-add-msg:'));
+      const clearBtn = secondRow.find((b) => b.custom_id.startsWith('u-clear-msg:'));
+      expect(editBtn?.custom_id).toBe('u-add-msg:tm-7:ev-42:yes');
+      expect(clearBtn?.custom_id).toBe('u-clear-msg:tm-7:ev-42:yes');
     });
   });
 

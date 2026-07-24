@@ -6,18 +6,26 @@ import { RsvpResponse } from '~/models/EventRsvp.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 
+// This HTTP surface (used by the web app's HTTP client) is intentionally still
+// restricted to the legacy 3-value wire vocabulary (`'yes' | 'no' | 'maybe'`) —
+// mirrors `RsvpAttendeeEntry.response` / `UpcomingEventForUserEntry.my_response`
+// on the RPC side. `coming_later` is projected down to `'maybe'` by the server
+// (see `applications/server/src/utils/rsvpWireProjection.ts`) before it reaches
+// here, so already-deployed clients never decode an unrecognized value.
+const LegacyRsvpResponse = Schema.Literals(['yes', 'no', 'maybe']);
+
 export class RsvpEntry extends Schema.Class<RsvpEntry>('RsvpEntry')({
   teamMemberId: TeamMemberId,
   memberName: Schema.OptionFromNullOr(Schema.String),
   username: Schema.OptionFromNullOr(Schema.String),
-  response: RsvpResponse,
+  response: LegacyRsvpResponse,
   message: Schema.OptionFromNullOr(Schema.String),
   /** Resolved display name (profile name → Discord nickname → Discord display name → username). */
   displayName: Schema.String,
 }) {}
 
 export class EventRsvpDetail extends Schema.Class<EventRsvpDetail>('EventRsvpDetail')({
-  myResponse: Schema.OptionFromNullOr(RsvpResponse),
+  myResponse: Schema.OptionFromNullOr(LegacyRsvpResponse),
   myMessage: Schema.OptionFromNullOr(Schema.String),
   rsvps: Schema.Array(RsvpEntry),
   yesCount: Schema.Number,
@@ -42,6 +50,11 @@ export class Forbidden extends Schema.TaggedErrorClass<Forbidden>()('EventRsvpFo
 
 export class RsvpDeadlinePassed extends Schema.TaggedErrorClass<RsvpDeadlinePassed>()(
   'RsvpDeadlinePassed',
+  {},
+) {}
+
+export class RsvpMessageRequired extends Schema.TaggedErrorClass<RsvpMessageRequired>()(
+  'EventRsvpMessageRequired',
   {},
 ) {}
 
@@ -77,6 +90,7 @@ export class EventRsvpApiGroup extends HttpApiGroup.make('eventRsvp')
         Forbidden.pipe(HttpApiSchema.status(403)),
         EventNotFound.pipe(HttpApiSchema.status(404)),
         RsvpDeadlinePassed.pipe(HttpApiSchema.status(400)),
+        RsvpMessageRequired.pipe(HttpApiSchema.status(400)),
       ],
       payload: SubmitRsvpRequest,
       params: { teamId: TeamId, eventId: EventId },

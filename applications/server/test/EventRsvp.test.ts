@@ -1132,7 +1132,7 @@ describe('Event RSVP API', () => {
       expect(response.status).toBe(204);
     });
 
-    it('player can submit RSVP maybe', async () => {
+    it('player can submit RSVP maybe (legacy response, tolerated with no message — stale Discord buttons)', async () => {
       const response = await handler(
         new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
           method: 'PUT',
@@ -1141,6 +1141,114 @@ describe('Event RSVP API', () => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ response: 'maybe', message: null }),
+        }),
+      );
+      expect(response.status).toBe(204);
+    });
+
+    // ------------------------------------------------------------
+    // "coming_later" — full-attendance response that REQUIRES a
+    // non-empty comment (server-side effective-value guard).
+    // ------------------------------------------------------------
+
+    it('rejects RSVP coming_later with message: null → 400 EventRsvpMessageRequired', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer user-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ response: 'coming_later', message: null }),
+        }),
+      );
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body._tag).toBe('EventRsvpMessageRequired');
+    });
+
+    it('rejects RSVP coming_later with a whitespace-only message → 400 EventRsvpMessageRequired', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer user-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ response: 'coming_later', message: '   ' }),
+        }),
+      );
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body._tag).toBe('EventRsvpMessageRequired');
+    });
+
+    it('accepts RSVP coming_later when a real message is provided → 204', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer user-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ response: 'coming_later', message: 'Running 15 min late' }),
+        }),
+      );
+      expect(response.status).toBe(204);
+    });
+
+    it('accepts RSVP coming_later with message: null when a prior non-null message exists (effective-value keeps prior note)', async () => {
+      // Seed an existing coming_later RSVP with a message via the repository upsert path,
+      // then re-submit with message: null (e.g. an instant button re-click) — the effective
+      // (COALESCE-resolved) message is the prior one, so the guard must NOT reject this.
+      const seed = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer user-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ response: 'coming_later', message: 'On my way, 10 min' }),
+        }),
+      );
+      expect(seed.status).toBe(204);
+
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer user-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ response: 'coming_later', message: null }),
+        }),
+      );
+      expect(response.status).toBe(204);
+    });
+
+    it('does not over-fire the message-required guard for RSVP yes with message: null → 204', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer user-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ response: 'yes', message: null }),
+        }),
+      );
+      expect(response.status).toBe(204);
+    });
+
+    it('does not over-fire the message-required guard for RSVP no with message: null → 204', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer user-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ response: 'no', message: null }),
         }),
       );
       expect(response.status).toBe(204);
@@ -1281,6 +1389,72 @@ describe('Event RSVP API', () => {
       const body = await getResponse.json();
       expect(body.yesCount).toBe(1);
       expect(body.maybeCount).toBe(1);
+      expect(body.noCount).toBe(0);
+      expect(body.rsvps).toHaveLength(2);
+    });
+
+    it('a stored coming_later RSVP increments maybeCount (not a separate bucket)', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer user-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ response: 'coming_later', message: 'Running late' }),
+        }),
+      );
+      expect(response.status).toBe(204);
+
+      const getResponse = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvps`, {
+          method: 'GET',
+          headers: { Authorization: 'Bearer user-token' },
+        }),
+      );
+      const body = await getResponse.json();
+      expect(body.maybeCount).toBe(1);
+      expect(body.yesCount).toBe(0);
+      expect(body.noCount).toBe(0);
+    });
+
+    it('SUMS legacy maybe + coming_later into maybeCount (accumulation, not overwrite)', async () => {
+      // User submits legacy maybe
+      const maybeResponse = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer user-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ response: 'maybe', message: null }),
+        }),
+      );
+      expect(maybeResponse.status).toBe(204);
+
+      // Admin submits coming_later (with required message)
+      const comingLaterResponse = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ response: 'coming_later', message: 'On my way' }),
+        }),
+      );
+      expect(comingLaterResponse.status).toBe(204);
+
+      const getResponse = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvps`, {
+          method: 'GET',
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      const body = await getResponse.json();
+      // Both rows aggregate into maybeCount — 2, not two separate 1s.
+      expect(body.maybeCount).toBe(2);
+      expect(body.yesCount).toBe(0);
       expect(body.noCount).toBe(0);
       expect(body.rsvps).toHaveLength(2);
     });
@@ -2018,4 +2192,207 @@ describe('Event/SubmitRsvp RPC — resetMissedRsvps', () => {
       Effect.asVoid,
     );
   });
+});
+
+// ============================================================
+// coming_later — full-attendance response that REQUIRES a
+// non-empty comment (server-side effective-value guard, RPC path)
+// ============================================================
+
+describe('Event/SubmitRsvp RPC — coming_later requires a message', () => {
+  beforeEach(() => {
+    resetRpcStores();
+  });
+
+  itEffect.effect('message: none → Failure(RsvpMessageRequired)', () =>
+    makeSubmitRsvp({ response: 'coming_later', message: Option.none() }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(JSON.stringify(result.failure)).toContain('RsvpMessageRequired');
+          }
+        }),
+      ),
+      Effect.provide(RpcTestLayer),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect('message: whitespace-only → Failure(RsvpMessageRequired)', () =>
+    makeSubmitRsvp({ response: 'coming_later', message: Option.some('   ') }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Failure');
+          if (result._tag === 'Failure') {
+            expect(JSON.stringify(result.failure)).toContain('RsvpMessageRequired');
+          }
+        }),
+      ),
+      Effect.provide(RpcTestLayer),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect('message: a real note → Success', () =>
+    makeSubmitRsvp({ response: 'coming_later', message: Option.some('Running late') }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Success');
+        }),
+      ),
+      Effect.provide(RpcTestLayer),
+      Effect.asVoid,
+    ),
+  );
+
+  itEffect.effect(
+    'message: none but a prior non-null message exists → Success (COALESCE-effective value keeps the prior note)',
+    () => {
+      // Seed a prior coming_later RSVP with a message
+      const priorKey = `${RPC_TEST_EVENT_ID}:${RPC_TEST_MEMBER_ID}`;
+      rpcRsvpsStore.set(priorKey, {
+        id: crypto.randomUUID() as EventRsvp.EventRsvpId,
+        event_id: RPC_TEST_EVENT_ID,
+        team_member_id: RPC_TEST_MEMBER_ID,
+        response: 'coming_later',
+        message: Option.some('On my way, 10 min'),
+        member_name: Option.none(),
+        username: Option.none(),
+        nickname: Option.none(),
+        display_name: Option.none(),
+      });
+
+      return makeSubmitRsvp({ response: 'coming_later', message: Option.none() }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result._tag).toBe('Success');
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  itEffect.effect(
+    'legacy maybe (stale Discord button) with message: none → Success (guard does not apply to maybe)',
+    () =>
+      makeSubmitRsvp({ response: 'maybe', message: Option.none() }).pipe(
+        Effect.result,
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result._tag).toBe('Success');
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      ),
+  );
+
+  itEffect.effect('yes with message: none → Success (guard must not over-fire)', () =>
+    makeSubmitRsvp({ response: 'yes', message: Option.none() }).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(result._tag).toBe('Success');
+        }),
+      ),
+      Effect.provide(RpcTestLayer),
+      Effect.asVoid,
+    ),
+  );
+});
+
+// ============================================================
+// Read projection — RPC per-row response fields surface "maybe"
+// for a stored "coming_later" row (deployed-web / deployed-bot safety)
+// ============================================================
+
+describe('Event/GetRsvpAttendees RPC — coming_later read projection', () => {
+  beforeEach(() => {
+    resetRpcStores();
+  });
+
+  itEffect.effect(
+    'a stored coming_later row surfaces response: "maybe" on the wire (not coming_later)',
+    () => {
+      const ComingLaterAttendeeRow = {
+        discord_id: Option.some(RPC_TEST_DISCORD_USER_ID),
+        member_name: Option.some('Alice'),
+        nickname: Option.none<string>(),
+        username: Option.none<string>(),
+        display_name: Option.none<string>(),
+        response: 'coming_later' as EventRsvp.RsvpResponse,
+        message: Option.some('Running 10 min late'),
+      };
+
+      const RowsRsvpsLayer = Layer.succeed(EventRsvpsRepository, {
+        _tag: 'api/EventRsvpsRepository',
+        findByEventId: () => Effect.succeed([]),
+        findRsvpsByEventId: () => Effect.succeed([]),
+        findByEventAndMember: () => Effect.succeed(Option.none()),
+        findRsvpByEventAndMember: () => Effect.succeed(Option.none()),
+        upsert: () => Effect.die(new Error('Not implemented')),
+        upsertRsvp: () => Effect.die(new Error('Not implemented')),
+        countByEventId: () => Effect.succeed([]),
+        countRsvpsByEventId: () => Effect.succeed([]),
+        findNonResponders: () => Effect.succeed([]),
+        findNonRespondersByEventId: () => Effect.succeed([]),
+        findRsvpAttendeesPage: () => Effect.succeed([ComingLaterAttendeeRow]),
+        countRsvpTotal: () => Effect.succeed(1),
+        findYesAttendeesForEmbed: () => Effect.succeed([]),
+        findYesRsvpMemberIdsByEventId: () => Effect.succeed([]),
+        incrementMissedForEventNonRespondersByEventId: () => Effect.void,
+      } as any);
+
+      const RpcTestLayerWithRow = EventsRpcLive.pipe(
+        Layer.provide(MockRpcEventsRepositoryLayer),
+        Layer.provide(RowsRsvpsLayer),
+        Layer.provide(MockRpcTeamSettingsRepositoryLayer),
+        Layer.provide(MockRpcEventSyncEventsRepositoryLayer),
+        Layer.provide(MockRpcTeamMembersRepositoryLayer),
+        Layer.provide(MockRpcGroupsRepositoryLayer),
+        Layer.provide(MockRpcTeamsRepositoryLayer),
+        Layer.provide(MockRpcTrainingTypesRepositoryLayer),
+        Layer.provide(MockRpcChannelEventDividersRepositoryLayer),
+        Layer.provide(MockDiscordChannelMappingRepositoryLayer),
+        Layer.provide(MockSqlClientLayer),
+        Layer.provide(MockEventRosterLayers),
+      );
+
+      const callGetRsvpAttendees = (): Effect.Effect<
+        EventRpcModels.RsvpAttendeesResult,
+        unknown,
+        typeof RpcTestLayer extends Layer.Layer<infer A, any, any> ? A : never
+      > =>
+        Effect.scoped(
+          (RpcTest.makeClient(EventRpcGroup.EventRpcGroup) as Effect.Effect<any, never, any>).pipe(
+            Effect.flatMap(
+              (rpc: any) =>
+                rpc['Event/GetRsvpAttendees']({
+                  event_id: RPC_TEST_EVENT_ID,
+                  offset: 0,
+                  limit: 10,
+                }) as Effect.Effect<EventRpcModels.RsvpAttendeesResult, unknown, never>,
+            ),
+          ),
+        );
+
+      return callGetRsvpAttendees().pipe(
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result.attendees).toHaveLength(1);
+            expect(result.attendees[0].response).toBe('maybe');
+          }),
+        ),
+        Effect.provide(RpcTestLayerWithRow),
+        Effect.asVoid,
+      );
+    },
+  );
 });

@@ -184,7 +184,7 @@ sequenceDiagram
 
 ## 4. RSVP via Discord Button
 
-An event embed posted to a member's personal event channel (or shown via `/event list`) contains RSVP buttons (Yes / No / Maybe, `custom_id="upcoming-rsvp:{eventId}:{teamId}:{response}"`). When a member clicks one, the bot immediately saves the RSVP without opening a modal and replies with an ephemeral confirmation. The confirmation includes a `[💬 Add a message]` button if no message exists, or `[💬 Edit message]` and `[🗑️ Clear message]` buttons if a message is already stored. Clicking the add/edit button opens a modal where the member can type an optional message; submitting the modal saves the message via a second `Event/SubmitRsvp` call. As of the remove-global-events-board release there is no shared board embed to rebuild synchronously on click: the bot only posts a late-RSVP notification (if applicable), and the member's personal-channel message content is refreshed asynchronously by the server-side dirty-mark + personal-events reconcile worker. (The legacy `custom_id="rsvp:{teamId}:{eventId}:{response}"` button is still handled for any pre-existing shared-board message an admin hasn't deleted yet, but no new message uses it.)
+An event embed posted to a member's personal event channel (or shown via `/event list`) contains RSVP buttons (Yes / No / Coming later, `custom_id="upcoming-rsvp:{eventId}:{teamId}:{response}"` for Yes/No). Clicking Yes or No immediately saves the RSVP without opening a modal (flow below). **Coming later is different**: because it requires a non-blank comment, its button never uses the instant-submit custom ID — clicking it goes straight to the message modal (`custom_id="u-add-msg:{teamId}:{eventId}:coming_later"`) described in the "Add a message" flow further down, and the RSVP is only submitted once that modal is filled in and submitted; if the submitted message ends up blank (and there is no prior stored message to fall back to), the server rejects with `RsvpMessageRequired` instead of recording the response. The ephemeral confirmation includes a `[💬 Add a message]` button if no message exists, or `[💬 Edit message]` and (for Yes/No only — never for Coming later, since clearing would leave the mandatory comment blank) `[🗑️ Clear message]` buttons if a message is already stored. As of the remove-global-events-board release there is no shared board embed to rebuild synchronously on click: the bot only posts a late-RSVP notification (if applicable), and the member's personal-channel message content is refreshed asynchronously by the server-side dirty-mark + personal-events reconcile worker. (The legacy `custom_id="rsvp:{teamId}:{eventId}:{response}"` button, fixed to the historical `yes`/`no`/`maybe` values, is still handled for any pre-existing shared-board message an admin hasn't deleted yet, but no new message uses it.)
 
 ```mermaid
 sequenceDiagram
@@ -220,9 +220,12 @@ sequenceDiagram
     else Not in member group
         Server-->>Bot: RPC error RsvpNotGroupMember
         Bot->>Discord: Edit original ephemeral → "You are not in the event's member group"
+    else response = coming_later and effective message is blank
+        Server-->>Bot: RPC error RsvpMessageRequired
+        Bot->>Discord: Edit original ephemeral → "A reason is required when choosing 'Coming later'"
     else Success
         Server->>DB: UPSERT event_rsvps {event_id, member_id, response}<br/>message = COALESCE(new_message, existing_message)
-        DB-->>Server: SubmitRsvpResult {yes, no, maybe, isLateRsvp, lateRsvpChannelId, message}
+        DB-->>Server: SubmitRsvpResult {yes, no, maybe, isLateRsvp, lateRsvpChannelId, message}<br/>(maybe here also folds in coming_later)
 
         Server-->>Bot: RPC success — SubmitRsvpResult
         Server->>DB: UPDATE events SET personal_messages_dirty_at = now() (server-side, decoupled from this call)
@@ -235,8 +238,8 @@ sequenceDiagram
             Bot->>Discord: POST /channels/{lateRsvpChannelId}/messages<br/>(orange embed — late RSVP notification)
         end
 
-        Note over Bot: Determine action row buttons<br/>message present → [Edit message] [Clear message]<br/>no message → [Add a message]
-        Bot->>Discord: Edit original ephemeral → "Your response (Yes/No/Maybe) has been recorded"<br/>+ action row with message management buttons
+        Note over Bot: Determine action row buttons<br/>message present → [Edit message] [Clear message] (Clear omitted for coming_later)<br/>no message → [Add a message]
+        Bot->>Discord: Edit original ephemeral → "Your response (Yes/No/Coming later) has been recorded"<br/>+ action row with message management buttons
 
         Note over DB: Asynchronously, the personal-events reconcile worker (10s poll)<br/>picks up the dirty event and edits the member's personal-channel<br/>message with the updated RSVP counts
     end
@@ -246,7 +249,7 @@ sequenceDiagram
         Discord->>Bot: Interaction payload (MESSAGE_COMPONENT)
 
         Note over Bot: Must respond within 3 seconds
-        Bot-->>Discord: MODAL response<br/>custom_id="rsvp-modal:{teamId}:{eventId}:{response}"<br/>Field: optional message (max 200 chars)
+        Bot-->>Discord: MODAL response<br/>custom_id="rsvp-modal:{teamId}:{eventId}:{response}"<br/>Field: message (max 200 chars; required and non-empty when response = coming_later, optional otherwise)
 
         User->>Discord: Fill message field, submit modal
         Discord->>Bot: Interaction payload (MODAL_SUBMIT)

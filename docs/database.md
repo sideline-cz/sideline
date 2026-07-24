@@ -161,7 +161,7 @@ Membership record joining a user to a team, carrying per-team profile data.
 
 **Indexes**: `idx_team_members_team_user` on `(team_id, user_id)`
 
-**Notes**: The original `role TEXT` column was replaced by the `member_roles` junction table across migrations `1740614400` and `1740700800`. `active` was added in migration `1740355200`. `jersey_number` was moved from `users` in migration `1740990000`; it can also be set from Discord via the `/complete` slash command (`Guild/CompleteMemberProfile` RPC → `TeamMembersRepository.setJerseyNumber`), alongside completing the profile. `missed_rsvps` added in migration `1790300000_add_team_members_missed_rsvps` — a consecutive count of events for which an invited Player did not respond. Incremented by `EventStartCron` when an active event transitions to `started` and the member (who holds the built-in `Player` role and belongs to the event's member group) has no `event_rsvps` row for that event. Reset to `0` by any RSVP submission (yes, no, or maybe).
+**Notes**: The original `role TEXT` column was replaced by the `member_roles` junction table across migrations `1740614400` and `1740700800`. `active` was added in migration `1740355200`. `jersey_number` was moved from `users` in migration `1740990000`; it can also be set from Discord via the `/complete` slash command (`Guild/CompleteMemberProfile` RPC → `TeamMembersRepository.setJerseyNumber`), alongside completing the profile. `missed_rsvps` added in migration `1790300000_add_team_members_missed_rsvps` — a consecutive count of events for which an invited Player did not respond. Incremented by `EventStartCron` when an active event transitions to `started` and the member (who holds the built-in `Player` role and belongs to the event's member group) has no `event_rsvps` row for that event. Reset to `0` by any RSVP submission (yes, no, maybe, or coming later).
 
 ---
 
@@ -559,7 +559,7 @@ Attendance responses submitted by team members for a specific event.
 | `id` | UUID | PK | `gen_random_uuid()` |
 | `event_id` | UUID | NOT NULL, FK → `events(id)` ON DELETE CASCADE | — |
 | `team_member_id` | UUID | NOT NULL, FK → `team_members(id)` ON DELETE CASCADE | — |
-| `response` | TEXT | NOT NULL, CHECK (`'yes'`, `'no'`, `'maybe'`) | — |
+| `response` | TEXT | NOT NULL, CHECK (`'yes'`, `'no'`, `'maybe'`, `'coming_later'`) | — |
 | `message` | TEXT | — | — |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 | `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
@@ -567,6 +567,8 @@ Attendance responses submitted by team members for a specific event.
 **Unique**: `(event_id, team_member_id)`
 
 **Indexes**: `idx_event_rsvps_event_id` on `(event_id)`
+
+**Notes**: `'coming_later'` ("Coming later" — a member who will attend but arrive late) was added to the CHECK constraint by migration `1790300016_rename_rsvp_maybe_to_coming_later`, which widens the constraint permissively without rewriting historical `'maybe'` rows. `coming_later` counts as full attendance everywhere `'yes'` does (roster auto-provisioning, team generation, training auto-log, player ratings, min-players headcount) and requires a non-empty `message` (enforced at the application layer, not by a CHECK constraint — see `RsvpMessageRequired` in `docs/api.md`). This release, RPC/HTTP read surfaces still project `coming_later` down to `'maybe'` on the wire for compatibility with already-deployed clients (see `applications/server/src/utils/rsvpWireProjection.ts`); only the write path (`SubmitRsvp`) accepts `coming_later` directly. The legacy `'maybe'` value is intentionally left in place this release and is only removed in a future follow-up once no client relies on it.
 
 ---
 
@@ -1972,6 +1974,7 @@ All 109 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1790300011 | `add_personal_channel_applied_format` | Adds `applied_channel_format TEXT` (nullable) to `personal_event_channels`. Stores the channel-name format template that was applied when the channel was last created or renamed; NULL on rows predating this migration, which causes the provisioning worker to treat those channels as drifted and rename them to the current format on the next tick. |
 | 1790300012 | `create_sudo_sessions` | Creates `sudo_sessions` (PK id, team_id FK CASCADE, discord_user_id TEXT, system_channel_id TEXT, audit_message_id TEXT, started_at TIMESTAMPTZ; UNIQUE (team_id, discord_user_id)). Tracks a team admin's active `/sudo` session so the audit message can be closed and its duration reported when the session ends. |
 | 1790300013 | `add_event_channel_moved_event_type` | Drops and re-adds the `event_sync_events.event_type` CHECK constraint to include `'event_channel_moved'`. Emitted by `updateTeamSettings` when `discord_events_channel_id` changes; reuses `discord_target_channel_id` (new channel) and `discord_role_id` (old channel); `event_id` is set to the nil UUID sentinel. |
+| 1790300016 | `rename_rsvp_maybe_to_coming_later` | Drops and re-adds the `event_rsvps.response` CHECK constraint to permit both `'maybe'` and the new `'coming_later'` value. Historical `'maybe'` rows are left untouched this release; converting them and dropping `'maybe'` from the constraint is deferred to a follow-up. |
 
 ### After Migrations (seed data)
 

@@ -5,6 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-07-24 — RSVP "Maybe" is now "Coming later" and counts as attending
+
+The **Maybe** RSVP response has been renamed to **Coming later** and now means something more useful: "I'll be there, just running late" — not "I'm undecided".
+
+- **Coming later** now counts as full attendance, exactly like **Yes** — for roster headcounts, event roster auto-approval, training team generation, training attendance auto-logging, and player ratings.
+- Choosing **Coming later** requires a short note (reason/ETA) — on the web a required note field appears and **Save** stays disabled until you fill it in; in Discord the button opens a pop-up asking for the note instead of saving instantly.
+- Because the note is mandatory, the **Clear message** option is not offered while your response is **Coming later** — clearing it would leave the note blank. Switch to a different response first if you want to remove the note.
+- See the [RSVP guide](/guides/rsvp-to-an-event/) for the full rundown of what each response means.
+- API integrators: `SubmitRsvpRequest.response` now also accepts `"coming_later"`, which requires a non-blank `message` (submitted or already stored) or the request fails with `400 EventRsvpMessageRequired`. Read endpoints (`GET .../rsvps`, the dashboard, and RPC read surfaces) still report `"coming_later"` as `"maybe"` this release for compatibility with already-deployed clients; `maybeCount` includes both.
+
 ## 2026-07-23 — Removed the shared team events board
 
 Events no longer post to a single shared Discord channel. The **Events channel** ("Global events channel") team setting is gone — every member's own private **personal events channel** (and the web app) is now the only place events appear in Discord.

@@ -2,6 +2,7 @@ import {
   Discord,
   Event,
   EventRpcModels,
+  EventRsvp,
   EventSeries,
   GroupModel,
   Team,
@@ -458,7 +459,7 @@ const make = Effect.gen(function* () {
       location: Schema.OptionFromNullOr(Schema.String),
       location_url: Schema.OptionFromNullOr(Schema.String),
       member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
-      my_rsvp: Schema.OptionFromNullOr(Schema.String),
+      my_rsvp: Schema.OptionFromNullOr(EventRsvp.RsvpResponse),
       all_day: Schema.Boolean,
     }),
     execute: (input) => sql`
@@ -544,7 +545,7 @@ const make = Effect.gen(function* () {
                    e.location, e.location_url, e.event_type, e.all_day,
                    COALESCE(SUM(CASE WHEN er.response = 'yes' THEN 1 ELSE 0 END), 0)::int AS yes_count,
                    COALESCE(SUM(CASE WHEN er.response = 'no' THEN 1 ELSE 0 END), 0)::int AS no_count,
-                   COALESCE(SUM(CASE WHEN er.response = 'maybe' THEN 1 ELSE 0 END), 0)::int AS maybe_count
+                   COALESCE(SUM(CASE WHEN er.response IN ('maybe', 'coming_later') THEN 1 ELSE 0 END), 0)::int AS maybe_count
             FROM events e
             LEFT JOIN event_rsvps er ON er.event_id = e.id
             WHERE e.team_id = (SELECT id FROM teams WHERE guild_id = ${input.guild_id})
@@ -576,7 +577,7 @@ const make = Effect.gen(function* () {
                    e.location, e.location_url, e.event_type, e.all_day,
                    COALESCE(SUM(CASE WHEN er.response = 'yes' THEN 1 ELSE 0 END), 0)::int AS yes_count,
                    COALESCE(SUM(CASE WHEN er.response = 'no' THEN 1 ELSE 0 END), 0)::int AS no_count,
-                   COALESCE(SUM(CASE WHEN er.response = 'maybe' THEN 1 ELSE 0 END), 0)::int AS maybe_count
+                   COALESCE(SUM(CASE WHEN er.response IN ('maybe', 'coming_later') THEN 1 ELSE 0 END), 0)::int AS maybe_count
             FROM events e
             LEFT JOIN event_rsvps er ON er.event_id = e.id
             WHERE e.team_id = (SELECT id FROM teams WHERE guild_id = ${input.guild_id})
@@ -616,7 +617,7 @@ const make = Effect.gen(function* () {
             JOIN event_rsvps er ON er.event_id = e.id AND er.team_member_id = tm.id
             WHERE tm.user_id = ${userId}
               AND e.status IN ('active', 'started')
-              AND er.response IN ('yes', 'maybe')
+              AND er.response IN ('yes', 'maybe', 'coming_later')
             ORDER BY e.start_at ASC
           `,
   });

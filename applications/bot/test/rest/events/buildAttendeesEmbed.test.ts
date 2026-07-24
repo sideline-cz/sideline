@@ -171,3 +171,64 @@ describe('buildAttendeesEmbed - formatEntry', () => {
     expect(text).toContain('**Global Nick** (<@123>)');
   });
 });
+
+// ---------------------------------------------------------------------------
+// coming_later grouping and field order
+//
+// The wire projects a stored "coming_later" row down to response: 'maybe'
+// (RsvpAttendeeEntry.response is restricted to 'yes'|'no'|'maybe' — see
+// packages/domain/src/rpc/event/EventRpcModels.ts), so both a legacy `maybe`
+// attendee and a converted `coming_later` attendee arrive here with the same
+// response: 'maybe' literal and land in the same group. What changes is the
+// FIELD ORDER: yes → coming_later(maybe) → no (previously yes → no → maybe).
+// ---------------------------------------------------------------------------
+
+describe('buildAttendeesEmbed — field order (yes -> coming_later -> no)', () => {
+  it('places the maybe/coming_later group between yes and no, not after no', () => {
+    const yesAttendee = makeAttendee({ name: Option.some('Yes Person'), response: 'yes' });
+    const maybeAttendee = makeAttendee({ name: Option.some('Maybe Person'), response: 'maybe' });
+    const noAttendee = makeAttendee({ name: Option.some('No Person'), response: 'no' });
+
+    const { embeds } = buildAttendeesEmbed({
+      ...baseOpts,
+      attendees: [yesAttendee, maybeAttendee, noAttendee],
+      total: 3,
+    });
+
+    const fields = embeds[0].fields ?? [];
+    const yesIndex = fields.findIndex((f) => f.value.includes('Yes Person'));
+    const maybeIndex = fields.findIndex((f) => f.value.includes('Maybe Person'));
+    const noIndex = fields.findIndex((f) => f.value.includes('No Person'));
+
+    expect(yesIndex).toBeGreaterThanOrEqual(0);
+    expect(maybeIndex).toBeGreaterThanOrEqual(0);
+    expect(noIndex).toBeGreaterThanOrEqual(0);
+    expect(yesIndex).toBeLessThan(maybeIndex);
+    expect(maybeIndex).toBeLessThan(noIndex);
+  });
+
+  it('both a legacy maybe attendee and a projected coming_later (maybe on the wire) attendee land in the same group', () => {
+    // Both arrive as response: 'maybe' post-projection — this just locks that
+    // grouping continues to work when two independently-originated rows share
+    // the literal 'maybe' value.
+    const legacyMaybe = makeAttendee({ name: Option.some('Legacy'), response: 'maybe' });
+    const convertedComingLater = makeAttendee({
+      name: Option.some('Converted'),
+      response: 'maybe',
+    });
+
+    const { embeds } = buildAttendeesEmbed({
+      ...baseOpts,
+      attendees: [legacyMaybe, convertedComingLater],
+      total: 2,
+    });
+
+    const fields = embeds[0].fields ?? [];
+    const groupField = fields.find(
+      (f) => f.value.includes('Legacy') || f.value.includes('Converted'),
+    );
+    expect(groupField).toBeDefined();
+    expect(groupField?.value).toContain('Legacy');
+    expect(groupField?.value).toContain('Converted');
+  });
+});

@@ -117,4 +117,49 @@ describe('RsvpAddMessageButton modal shape', () => {
       max_length: 200,
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // coming_later — the message is REQUIRED (server enforces via
+  // RsvpMessageRequired), so the modal's text input must be built with
+  // required: true. yes/no keep required: false (message optional).
+  // ---------------------------------------------------------------------------
+
+  it('builds the text input with required: true for coming_later', async () => {
+    const response = await runHandler(`rsvp-add-msg:${TEAM_ID}:${EVENT_ID}:coming_later`);
+    const typed = response as {
+      data: {
+        components: ReadonlyArray<{ type: number; components: ReadonlyArray<TextInputComponent> }>;
+      };
+    };
+    const input = typed.data.components[0]?.components[0];
+    expect(input?.required).toBe(true);
+  });
+
+  it('builds the text input with required: false for yes', async () => {
+    const response = await runHandler(`rsvp-add-msg:${TEAM_ID}:${EVENT_ID}:yes`);
+    const typed = response as {
+      data: {
+        components: ReadonlyArray<{ type: number; components: ReadonlyArray<TextInputComponent> }>;
+      };
+    };
+    const input = typed.data.components[0]?.components[0];
+    expect(input?.required).toBe(false);
+  });
+
+  it('builds the text input with required: false for no', async () => {
+    const response = await runHandler(`rsvp-add-msg:${TEAM_ID}:${EVENT_ID}:no`);
+    const typed = response as {
+      data: {
+        components: ReadonlyArray<{ type: number; components: ReadonlyArray<TextInputComponent> }>;
+      };
+    };
+    const input = typed.data.components[0]?.components[0];
+    expect(input?.required).toBe(false);
+  });
+
+  it('modal custom_id for coming_later is "rsvp-modal:<teamId>:<eventId>:coming_later"', async () => {
+    const response = await runHandler(`rsvp-add-msg:${TEAM_ID}:${EVENT_ID}:coming_later`);
+    const typed = response as { data: { custom_id: string } };
+    expect(typed.data.custom_id).toBe(`rsvp-modal:${TEAM_ID}:${EVENT_ID}:coming_later`);
+  });
 });

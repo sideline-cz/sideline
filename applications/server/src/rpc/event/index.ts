@@ -3,7 +3,7 @@ import {
   type Event,
   EventRpcGroup,
   EventRpcModels,
-  type EventRsvp,
+  EventRsvp,
   type GroupModel,
   type RosterModel,
   Team,
@@ -39,6 +39,9 @@ import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
+import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
+import { isRsvpMessageRequiredAndMissing } from '~/utils/rsvpMessageRequired.js';
+import { projectRsvpResponseToLegacy } from '~/utils/rsvpWireProjection.js';
 import { constructEvent } from './events.js';
 
 class NoChanges extends Data.TaggedError('NoChanges')<{
@@ -72,7 +75,7 @@ const getRsvpCounts = (
       for (const c of counts) {
         if (c.response === 'yes') yesCount = c.count;
         else if (c.response === 'no') noCount = c.count;
-        else if (c.response === 'maybe') maybeCount = c.count;
+        else if (c.response === 'maybe' || c.response === 'coming_later') maybeCount += c.count;
       }
       const canRsvp = event !== undefined && event.status === 'active';
       return new EventRpcModels.RsvpCountsResult({ yesCount, noCount, maybeCount, canRsvp });
@@ -465,6 +468,19 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                   ),
             }),
           ),
+          Effect.bind('priorRsvp', ({ member }) =>
+            svc.rsvps.findRsvpByEventAndMember(event_id, member.id),
+          ),
+          Effect.tap(({ priorRsvp }) =>
+            isRsvpMessageRequiredAndMissing(
+              response,
+              clearMessage,
+              message,
+              Option.flatMap(priorRsvp, (r) => r.message),
+            )
+              ? Effect.fail(new EventRpcModels.RsvpMessageRequired())
+              : Effect.void,
+          ),
           Effect.bind('upsertResult', ({ member }) =>
             svc.rsvps.upsertRsvp(event_id, member.id, response, message, clearMessage).pipe(
               Effect.catchTag(
@@ -653,7 +669,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                       nickname: row.nickname,
                       username: row.username,
                       display_name: row.display_name,
-                      response: row.response,
+                      response: projectRsvpResponseToLegacy(row.response),
                       message: row.message,
                     }),
                 ),
@@ -695,7 +711,8 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
             for (const c of counts) {
               if (c.response === 'yes') yesCount = c.count;
               else if (c.response === 'no') noCount = c.count;
-              else if (c.response === 'maybe') maybeCount = c.count;
+              else if (c.response === 'maybe' || c.response === 'coming_later')
+                maybeCount += c.count;
             }
             return new EventRpcModels.RsvpReminderSummary({
               yesCount,
@@ -878,6 +895,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                 no_count: Schema.Number,
                 maybe_count: Schema.Number,
                 my_response: Schema.OptionFromNullOr(Schema.Literals(['yes', 'no', 'maybe'])),
+                my_response_actual: Schema.OptionFromNullOr(EventRsvp.RsvpResponse),
                 my_message: Schema.OptionFromNullOr(Schema.String),
                 all_day: Schema.Boolean,
               }),
@@ -896,8 +914,9 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                   e.all_day,
                   COALESCE(SUM(CASE WHEN er.response = 'yes' THEN 1 ELSE 0 END), 0)::int AS yes_count,
                   COALESCE(SUM(CASE WHEN er.response = 'no' THEN 1 ELSE 0 END), 0)::int AS no_count,
-                  COALESCE(SUM(CASE WHEN er.response = 'maybe' THEN 1 ELSE 0 END), 0)::int AS maybe_count,
-                  my_rsvp.response AS my_response,
+                  COALESCE(SUM(CASE WHEN er.response IN ('maybe', 'coming_later') THEN 1 ELSE 0 END), 0)::int AS maybe_count,
+                  CASE WHEN my_rsvp.response = 'coming_later' THEN 'maybe' ELSE my_rsvp.response END AS my_response,
+                  my_rsvp.response AS my_response_actual,
                   my_rsvp.message AS my_message
                 FROM events e
                 LEFT JOIN event_rsvps er ON er.event_id = e.id
@@ -1002,6 +1021,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                       no_count: row.no_count,
                       maybe_count: row.maybe_count,
                       my_response: row.my_response,
+                      my_response_actual: row.my_response_actual,
                       my_message: row.my_message,
                       all_day: row.all_day,
                     }),
@@ -1057,7 +1077,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                   nickname: row.nickname,
                   username: row.username,
                   display_name: row.display_name,
-                  response: row.response,
+                  response: projectRsvpResponseToLegacy(row.response),
                   message: row.message,
                 }),
             ),
@@ -1477,7 +1497,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
             return svc.rsvps.findRsvpsByEventId(event_id).pipe(
               Effect.flatMap((allRsvps) => {
                 const yesResponders = allRsvps
-                  .filter((r) => r.response === 'yes')
+                  .filter((r) => isAttendingRsvpResponse(r.response))
                   .map((r) => ({
                     team_member_id: r.team_member_id,
                     discord_user_id: Option.none<Discord.Snowflake>(),
