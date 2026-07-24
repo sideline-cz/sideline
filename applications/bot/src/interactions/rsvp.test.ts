@@ -133,6 +133,7 @@ describe('RsvpAddMessageButton modal shape', () => {
     };
     const input = typed.data.components[0]?.components[0];
     expect(input?.required).toBe(true);
+    expect(input?.label).toBe('Add a reason (required)');
   });
 
   it('builds the text input with required: false for yes', async () => {

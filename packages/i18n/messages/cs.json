@@ -487,6 +487,7 @@
   "trainingType_discordChannelHelp": "Události tohoto typu tréninku budou publikovány zde.",
   "bot_rsvp_modal_title": "Účast — {response}",
   "bot_rsvp_modal_label": "Přidejte zprávu (nepovinné)",
+  "bot_rsvp_modal_label_required": "Uveďte důvod (povinné)",
   "bot_rsvp_recorded": "Vaše účast (**{response}**) byla zaznamenána!",
   "bot_rsvp_add_message": "💬 Přidat zprávu",
   "bot_rsvp_edit_message": "💬 Upravit zprávu",

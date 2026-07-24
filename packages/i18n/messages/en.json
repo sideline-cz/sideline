@@ -470,6 +470,7 @@
   "trainingType_discordChannelHelp": "Events of this training type will post here by default.",
   "bot_rsvp_modal_title": "RSVP — {response}",
   "bot_rsvp_modal_label": "Add a message (optional)",
+  "bot_rsvp_modal_label_required": "Add a reason (required)",
   "bot_rsvp_recorded": "Your RSVP (**{response}**) has been recorded!",
   "bot_rsvp_add_message": "💬 Add a message",
   "bot_rsvp_edit_message": "💬 Edit message",

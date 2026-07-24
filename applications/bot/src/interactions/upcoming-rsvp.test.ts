@@ -117,4 +117,16 @@ describe('UpcomingAddMessageButton modal shape', () => {
       max_length: 200,
     });
   });
+
+  it('builds a required text input with the "reason (required)" label for coming_later', async () => {
+    const response = await runHandler(`u-add-msg:${TEAM_ID}:${EVENT_ID}:coming_later`);
+    const typed = response as {
+      data: {
+        components: ReadonlyArray<{ type: number; components: ReadonlyArray<TextInputComponent> }>;
+      };
+    };
+    const input = typed.data.components[0]?.components[0];
+    expect(input?.required).toBe(true);
+    expect(input?.label).toBe('Add a reason (required)');
+  });
 });
