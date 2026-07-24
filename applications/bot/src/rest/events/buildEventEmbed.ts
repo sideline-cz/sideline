@@ -149,9 +149,9 @@ export const buildEventEmbed = (opts: {
         custom_id: `rsvp:${opts.teamId}:${opts.eventId}:no`,
       }),
       UI.button({
-        style: Discord.ButtonStyleTypes.SECONDARY,
+        style: Discord.ButtonStyleTypes.PRIMARY,
         label: m.bot_btn_maybe({}, { locale }),
-        custom_id: `rsvp:${opts.teamId}:${opts.eventId}:maybe`,
+        custom_id: `rsvp-add-msg:${opts.teamId}:${opts.eventId}:coming_later`,
       }),
     );
   }

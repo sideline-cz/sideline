@@ -9,7 +9,7 @@ Most amateur teams run on a messy mix of Discord threads, WhatsApp groups, Googl
 
 ### RSVP chaos
 
-Three threads, two polls, and a "who's in tonight?" message at 8 PM. Sideline puts a single RSVP next to each event with three buttons: Yes, No, Maybe. Captains see the count live.
+Three threads, two polls, and a "who's in tonight?" message at 8 PM. Sideline puts a single RSVP next to each event with three buttons: Yes, No, Coming later. Captains see the count live.
 
 ### Roster drift
 

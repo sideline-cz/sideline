@@ -847,6 +847,183 @@ describe('EventRosterProvisioningService — onRsvp', () => {
     );
   });
 
+  // ---------------------------------------------------------------------------
+  // coming_later — full attendance, identical to yes for roster provisioning
+  // ---------------------------------------------------------------------------
+
+  it.effect(
+    'T1-coming_later: coming_later + autoON + not member → request approved, addMember, emitRosterMemberAdded once (identical to yes)',
+    () => {
+      const calls = makeCalls();
+
+      return Effect.Do.pipe(
+        Effect.bind('service', () => EventRosterProvisioningService.asEffect()),
+        Effect.flatMap(({ service }) =>
+          service.onRsvp({
+            teamId: TEAM_ID,
+            event: baseEventRecord as any,
+            memberId: MEMBER_ID,
+            discordUserId: Option.some(DISCORD_USER_ID),
+            priorResponse: Option.none(),
+            newResponse: 'coming_later',
+            displayName: Option.some('Alice'),
+          }),
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(calls.rosterMemberAdded).toHaveLength(1);
+            expect(calls.rosterMemberAdded[0].rosterId).toBe(ROSTER_ID);
+            expect(calls.approvalRequestEmitted).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(
+          buildTestLayer(
+            makeEventRostersRepository({ autoApprove: true }),
+            makeRequestsRepository(),
+            makeRostersRepository({ isMember: false }),
+            makeChannelSyncEventsRepository(calls),
+            makeEventSyncEventsRepository(calls),
+            makeGroupsRepository(),
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T2-coming_later: coming_later + autoOFF + ownerGroup → request pending, emitApprovalRequest once (identical to yes)',
+    () => {
+      const calls = makeCalls();
+
+      return Effect.Do.pipe(
+        Effect.bind('service', () => EventRosterProvisioningService.asEffect()),
+        Effect.flatMap(({ service }) =>
+          service.onRsvp({
+            teamId: TEAM_ID,
+            event: baseEventRecord as any,
+            memberId: MEMBER_ID,
+            discordUserId: Option.some(DISCORD_USER_ID),
+            priorResponse: Option.none(),
+            newResponse: 'coming_later',
+            displayName: Option.some('Alice'),
+          }),
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(calls.approvalRequestEmitted).toHaveLength(1);
+            expect(calls.approvalRequestEmitted[0].memberId).toBe(MEMBER_ID);
+            expect(calls.rosterMemberAdded).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(
+          buildTestLayer(
+            makeEventRostersRepository({ autoApprove: false }),
+            makeRequestsRepository(),
+            makeRostersRepository({ isMember: false }),
+            makeChannelSyncEventsRepository(calls),
+            makeEventSyncEventsRepository(calls),
+            makeGroupsRepository({ isInOwnerGroup: true }),
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'T9-coming_later: withdraw FROM coming_later (approved, was_member_before=false) → removeMember + emitRosterMemberRemoved',
+    () => {
+      const calls = makeCalls();
+
+      return Effect.Do.pipe(
+        Effect.bind('service', () => EventRosterProvisioningService.asEffect()),
+        Effect.flatMap(({ service }) =>
+          service.onRsvp({
+            teamId: TEAM_ID,
+            event: baseEventRecord as any,
+            memberId: MEMBER_ID,
+            discordUserId: Option.some(DISCORD_USER_ID),
+            priorResponse: Option.some('coming_later'),
+            newResponse: 'no',
+            displayName: Option.some('Alice'),
+          }),
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(calls.rosterMemberRemoved).toHaveLength(1);
+            expect(calls.rosterMemberRemoved[0].rosterId).toBe(ROSTER_ID);
+          }),
+        ),
+        Effect.provide(
+          buildTestLayer(
+            makeEventRostersRepository({ autoApprove: true }),
+            makeRequestsRepository({
+              existingRequest: Option.some({
+                id: REQUEST_ID,
+                status: 'approved',
+                was_member_before: false,
+                discord_message_id: Option.none(),
+              }),
+              cancelResult: Option.some({ status: 'approved', was_member_before: false }),
+            }),
+            makeRostersRepository({ isMember: true }),
+            makeChannelSyncEventsRepository(calls),
+            makeEventSyncEventsRepository(calls),
+            makeGroupsRepository(),
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'duplicate coming_later, already approved → no second emit/add (treated like duplicate yes)',
+    () => {
+      const calls = makeCalls();
+
+      return Effect.Do.pipe(
+        Effect.bind('service', () => EventRosterProvisioningService.asEffect()),
+        Effect.flatMap(({ service }) =>
+          service.onRsvp({
+            teamId: TEAM_ID,
+            event: baseEventRecord as any,
+            memberId: MEMBER_ID,
+            discordUserId: Option.some(DISCORD_USER_ID),
+            priorResponse: Option.some('coming_later'),
+            newResponse: 'coming_later',
+            displayName: Option.some('Alice'),
+          }),
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(calls.rosterMemberAdded).toHaveLength(0);
+            expect(calls.approvalRequestEmitted).toHaveLength(0);
+          }),
+        ),
+        Effect.provide(
+          buildTestLayer(
+            makeEventRostersRepository({ autoApprove: true }),
+            makeRequestsRepository({
+              existingRequest: Option.some({
+                id: REQUEST_ID,
+                status: 'approved',
+                was_member_before: false,
+                discord_message_id: Option.none(),
+              }),
+            }),
+            makeRostersRepository({ isMember: true }),
+            makeChannelSyncEventsRepository(calls),
+            makeEventSyncEventsRepository(calls),
+            makeGroupsRepository(),
+          ),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
   it.effect('no linked roster → onRsvp is a no-op', () => {
     const calls = makeCalls();
 

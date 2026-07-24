@@ -31,6 +31,7 @@ import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsReposit
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { type RosterEntry, TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -226,12 +227,13 @@ const make = Effect.Do.pipe(
     const onRsvp = (params: OnRsvpParams): Effect.Effect<void, never, never> => {
       const { teamId, event, memberId, priorResponse, newResponse, displayName } = params;
 
-      const isYes = newResponse === 'yes';
-      const wasYes = Option.isSome(priorResponse) && priorResponse.value === 'yes';
-      const isWithdraw = wasYes && !isYes;
+      const isAttending = isAttendingRsvpResponse(newResponse);
+      const wasAttending =
+        Option.isSome(priorResponse) && isAttendingRsvpResponse(priorResponse.value);
+      const isWithdraw = wasAttending && !isAttending;
 
-      // Not a yes and not a withdrawal of a yes → nothing to do
-      if (!isYes && !isWithdraw) return Effect.void;
+      // Not attending and not a withdrawal of an attending response → nothing to do
+      if (!isAttending && !isWithdraw) return Effect.void;
 
       const inner = eventRosters.findByEventId(event.id).pipe(
         Effect.flatMap(
@@ -245,7 +247,7 @@ const make = Effect.Do.pipe(
               const owners_thread_id = safeOption(link.owners_thread_id);
               const owner_channel_id = safeOption(link.owner_channel_id);
 
-              if (isYes) {
+              if (isAttending) {
                 // ---- Yes branch (T1–T5) ----------------------------------------
                 return requests.findByEventAndMember(event.id, memberId).pipe(
                   Effect.flatMap((existingRequest) => {

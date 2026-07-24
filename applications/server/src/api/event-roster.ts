@@ -12,6 +12,7 @@ import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
+import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
 
 const forbidden = new EventRosterApi.Forbidden();
 const eventNotFound = new EventRosterApi.EventNotFound();
@@ -192,7 +193,7 @@ export const EventRosterApiLive = HttpApiBuilder.group(Api, 'eventRoster', (hand
                 return rsvps.findRsvpsByEventId(eventId).pipe(
                   Effect.flatMap((allRsvps) => {
                     const yesResponders = allRsvps
-                      .filter((r) => r.response === 'yes')
+                      .filter((r) => isAttendingRsvpResponse(r.response))
                       .map((r) => ({
                         team_member_id: r.team_member_id,
                         discord_user_id:

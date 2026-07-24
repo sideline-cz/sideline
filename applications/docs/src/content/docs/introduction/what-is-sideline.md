@@ -3,7 +3,7 @@ title: What is Sideline?
 description: A short introduction to Sideline and who it's for.
 ---
 
-Sideline is a team management tool for amateur sports clubs. It lives where your team already hangs out — Discord — and adds the bits that chat alone doesn't handle well: a proper roster, a calendar of events, and clear yes/no/maybe RSVPs with reminders.
+Sideline is a team management tool for amateur sports clubs. It lives where your team already hangs out — Discord — and adds the bits that chat alone doesn't handle well: a proper roster, a calendar of events, and clear yes/no/coming-later RSVPs with reminders.
 
 ## Who it's for
 
@@ -16,7 +16,7 @@ Sideline is a team management tool for amateur sports clubs. It lives where your
 1. You connect Sideline to your Discord server.
 2. You add the people in your team to a roster — Sideline matches them to their Discord accounts.
 3. You create events (one-off or recurring). Sideline posts them in Discord with RSVP buttons.
-4. Players click Yes / No / Maybe. Captains see the headcount in real time.
+4. Players click Yes / No / Coming later. Captains see the headcount in real time.
 5. Reminders nudge anyone who hasn't answered. Captains can export attendance to a spreadsheet or subscribe to the calendar.
 
 That's the core loop. Everything else — groups, permissions, age thresholds, training types, iCal feeds — exists to make that loop comfortable at your team's scale.

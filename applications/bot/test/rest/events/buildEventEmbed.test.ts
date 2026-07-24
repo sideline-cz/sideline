@@ -221,6 +221,41 @@ describe('buildEventEmbed', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// RSVP buttons — the third button ("Maybe") becomes a modal-route trigger for
+// the new "coming_later" response, since coming_later always requires a
+// non-empty comment (it can no longer be an instant-submit button like
+// yes/no).
+// ---------------------------------------------------------------------------
+
+describe('buildEventEmbed — RSVP buttons', () => {
+  it('third RSVP button routes to the add-message modal for coming_later, not an instant rsvp:...:maybe submit', () => {
+    const { components } = buildEventEmbed({
+      ...baseOpts,
+      counts: makeCounts(0, 0, 0, true),
+      yesAttendees: [],
+    });
+    const rsvpRow = components[0].components as ReadonlyArray<{ custom_id: string }>;
+    expect(rsvpRow).toHaveLength(4); // yes, no, coming_later-modal-trigger, attendees
+    const thirdButton = rsvpRow[2];
+    expect(thirdButton.custom_id).toBe(
+      `rsvp-add-msg:${baseOpts.teamId}:${baseOpts.eventId}:coming_later`,
+    );
+    expect(thirdButton.custom_id).not.toBe(`rsvp:${baseOpts.teamId}:${baseOpts.eventId}:maybe`);
+  });
+
+  it('yes and no buttons remain instant-submit (unaffected by the coming_later modal route)', () => {
+    const { components } = buildEventEmbed({
+      ...baseOpts,
+      counts: makeCounts(0, 0, 0, true),
+      yesAttendees: [],
+    });
+    const rsvpRow = components[0].components as ReadonlyArray<{ custom_id: string }>;
+    expect(rsvpRow[0].custom_id).toBe(`rsvp:${baseOpts.teamId}:${baseOpts.eventId}:yes`);
+    expect(rsvpRow[1].custom_id).toBe(`rsvp:${baseOpts.teamId}:${baseOpts.eventId}:no`);
+  });
+});
+
 describe('buildCancelledEmbed — thumbnail', () => {
   it('cancelled embed has no thumbnail regardless of title', () => {
     const { embeds } = buildCancelledEmbed('Cancelled Event', 'en');

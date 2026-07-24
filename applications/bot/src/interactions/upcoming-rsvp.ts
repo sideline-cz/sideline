@@ -33,6 +33,8 @@ const localizeRsvpResponse = (response: EventRsvp.RsvpResponse, locale: Locale):
       return m.rsvp_no({}, { locale });
     case 'maybe':
       return m.rsvp_maybe({}, { locale });
+    case 'coming_later':
+      return m.rsvp_maybe({}, { locale });
   }
 };
 
@@ -191,6 +193,11 @@ export const UpcomingRsvpButton = Ix.messageComponent(
             payload: { content: m.bot_rsvp_deadline_passed({}, { locale }) },
           }),
         ),
+        Effect.catchTag('RsvpMessageRequired', () =>
+          rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+            payload: { content: m.bot_rsvp_message_required({}, { locale }) },
+          }),
+        ),
         Effect.catchTag('RsvpMemberNotFound', () =>
           rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
             payload: { content: m.bot_rsvp_not_member({}, { locale }) },
@@ -272,6 +279,7 @@ export const UpcomingAddMessageButton = Ix.messageComponent(
       const eventId = parts[2];
       const response = decodeRsvpResponse(parts[3]);
       const locale = userLocale(interaction);
+      const required = response === 'coming_later';
       return Ix.response({
         type: Discord.InteractionCallbackTypes.MODAL,
         data: {
@@ -286,7 +294,8 @@ export const UpcomingAddMessageButton = Ix.messageComponent(
                 custom_id: 'rsvp_message',
                 label: m.bot_rsvp_modal_label({}, { locale }),
                 style: Discord.TextInputStyleTypes.PARAGRAPH,
-                required: false,
+                required,
+                ...(required ? { min_length: 1 } : {}),
                 max_length: 200,
               }),
             ]),
@@ -393,6 +402,11 @@ export const UpcomingClearMessageButton = Ix.messageComponent(
         Effect.catchTag('RsvpDeadlinePassed', () =>
           rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
             payload: { content: m.bot_rsvp_deadline_passed({}, { locale }) },
+          }),
+        ),
+        Effect.catchTag('RsvpMessageRequired', () =>
+          rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+            payload: { content: m.bot_rsvp_message_required({}, { locale }) },
           }),
         ),
         Effect.catchTag('RsvpMemberNotFound', () =>
@@ -554,6 +568,11 @@ export const UpcomingRsvpModal = Ix.modalSubmit(
         Effect.catchTag('RsvpDeadlinePassed', () =>
           rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
             payload: { content: m.bot_rsvp_deadline_passed({}, { locale }) },
+          }),
+        ),
+        Effect.catchTag('RsvpMessageRequired', () =>
+          rest.updateOriginalWebhookMessage(interaction.application_id, interaction.token, {
+            payload: { content: m.bot_rsvp_message_required({}, { locale }) },
           }),
         ),
         Effect.catchTag('RsvpMemberNotFound', () =>

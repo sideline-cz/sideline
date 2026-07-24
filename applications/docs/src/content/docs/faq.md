@@ -44,7 +44,7 @@ There is no per-member opt-out at this time. Reminders are sent automatically to
 
 ### How do I change my RSVP after I submitted it?
 
-Click a different button — Yes, No, or Maybe. The new answer overwrites the old one. You can change it as many times as you like until the event starts.
+Click a different button — Yes, No, or Coming later. The new answer overwrites the old one. You can change it as many times as you like until the event starts. Switching to **Coming later** requires a short note (reason/ETA).
 
 ### Why didn't I get a Discord notification?
 

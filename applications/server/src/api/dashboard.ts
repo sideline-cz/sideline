@@ -8,6 +8,7 @@ import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { projectRsvpResponseToLegacy } from '~/utils/rsvpWireProjection.js';
 
 const forbidden = new DashboardApi.Forbidden();
 const allTimeframe: Leaderboard.LeaderboardTimeframe = 'all';
@@ -75,9 +76,7 @@ export const DashboardApiLive = HttpApiBuilder.group(Api, 'dashboard', (handlers
                 endAt: e.end_at,
                 location: e.location,
                 locationUrl: e.location_url,
-                myRsvp: Option.flatMap(e.my_rsvp, (r) =>
-                  r === 'yes' || r === 'no' || r === 'maybe' ? Option.some(r) : Option.none(),
-                ),
+                myRsvp: Option.map(e.my_rsvp, projectRsvpResponseToLegacy),
               });
 
             const toEpochMs = (dt: DateTime.Utc) => Number(DateTime.toEpochMillis(dt));

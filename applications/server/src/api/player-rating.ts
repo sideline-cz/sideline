@@ -297,7 +297,7 @@ export const PlayerRatingApiLive = HttpApiBuilder.group(Api, 'playerRating', (ha
             Effect.tap(({ rosterIds }) =>
               validateGameComposition(payload.teamA, payload.teamB, rosterIds),
             ),
-            // Verify all members have RSVP=yes for this event
+            // Verify all members have an attending RSVP (yes / coming later) for this event
             Effect.bind('yesRsvpIds', ({ eventRsvps }) =>
               eventRsvps
                 .findYesRsvpMemberIdsByEventId(eventId)

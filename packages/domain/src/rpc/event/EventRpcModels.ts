@@ -2,6 +2,7 @@ import * as Schemas from '@sideline/effect-lib/Schemas';
 import { Schema } from 'effect';
 import { Snowflake } from '~/models/Discord.js';
 import { EventId } from '~/models/Event.js';
+import { RsvpResponse } from '~/models/EventRsvp.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 import { TrainingTypeId } from '~/models/TrainingType.js';
 
@@ -73,6 +74,11 @@ export class RsvpMemberNotFound extends Schema.TaggedErrorClass<RsvpMemberNotFou
 
 export class RsvpDeadlinePassed extends Schema.TaggedErrorClass<RsvpDeadlinePassed>()(
   'RsvpDeadlinePassed',
+  {},
+) {}
+
+export class RsvpMessageRequired extends Schema.TaggedErrorClass<RsvpMessageRequired>()(
+  'RsvpMessageRequired',
   {},
 ) {}
 
@@ -186,6 +192,19 @@ export class UpcomingEventForUserEntry extends Schema.Class<UpcomingEventForUser
   maybe_count: Schema.Number,
   all_day: Schema.Boolean,
   my_response: Schema.OptionFromNullOr(Schema.Literals(['yes', 'no', 'maybe'])),
+  /**
+   * The TRUE (unprojected) stored response, additive alongside the legacy
+   * `my_response` above. `my_response` intentionally stays pinned to the
+   * legacy 3-value vocabulary for wire safety (see `rsvpWireProjection.ts`),
+   * but bot-side logic that must distinguish a real `coming_later` RSVP from a
+   * legacy `maybe` (e.g. which message-management buttons to render) needs
+   * the unprojected value. Uses `OptionFromOptionalKey` (not `OptionFromNullOr`)
+   * so a rolling deploy where the bot updates before the server — and briefly
+   * decodes a response from an older producer that omits this key entirely —
+   * tolerates the missing key as `Option.none()` instead of a hard decode
+   * failure.
+   */
+  my_response_actual: Schema.OptionFromOptionalKey(RsvpResponse),
   my_message: Schema.OptionFromNullOr(Schema.String),
 }) {}
 

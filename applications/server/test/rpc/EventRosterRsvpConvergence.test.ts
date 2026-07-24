@@ -384,6 +384,7 @@ const RpcTestLayer = EventsRpcLive.pipe(
 // Helper to call Event/SubmitRsvp via RPC
 const submitRsvp = (
   response: string,
+  message: Option.Option<string> = Option.none(),
 ): Effect.Effect<
   unknown,
   unknown,
@@ -398,7 +399,7 @@ const submitRsvp = (
             team_id: RPC_TEAM_ID,
             discord_user_id: RPC_DISCORD_USER_ID,
             response,
-            message: Option.none(),
+            message,
             clearMessage: false,
           }) as Effect.Effect<unknown, unknown, never>,
       ),
@@ -463,4 +464,56 @@ describe('Event/SubmitRsvp RPC — provisioning service convergence', () => {
       Effect.asVoid,
     );
   });
+
+  // ---------------------------------------------------------------------------
+  // coming_later — the RPC handler must pass this response value straight
+  // through to the provisioning service unchanged (the "is this full
+  // attendance" decision lives inside EventRosterProvisioningService, covered
+  // separately in EventRosterProvisioning.test.ts). A non-blank message is
+  // required for coming_later (mandatory-comment guard), so this test
+  // supplies one — the no-message case is covered by the RsvpMessageRequired
+  // guard tests.
+  // ---------------------------------------------------------------------------
+
+  itEffect.effect(
+    'onRsvp called with newResponse=coming_later and a message (passed through as-is)',
+    () =>
+      submitRsvp('coming_later', Option.some('running 10 min late')).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(provisioningCalls).toHaveLength(1);
+            expect(provisioningCalls[0].newResponse).toBe('coming_later');
+            expect(provisioningCalls[0].memberId).toBe(RPC_MEMBER_ID);
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      ),
+  );
+
+  itEffect.effect(
+    'onRsvp called with priorResponse=Some(coming_later) when withdrawing from coming_later',
+    () => {
+      // Pre-populate a coming_later RSVP
+      rsvpStore.set(`${RPC_EVENT_ID}:${RPC_MEMBER_ID}`, {
+        response: 'coming_later',
+        priorResponse: Option.none(),
+      });
+
+      return submitRsvp('no').pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(provisioningCalls).toHaveLength(1);
+            expect(provisioningCalls[0].newResponse).toBe('no');
+            expect(Option.isSome(provisioningCalls[0].priorResponse)).toBe(true);
+            if (Option.isSome(provisioningCalls[0].priorResponse)) {
+              expect(provisioningCalls[0].priorResponse.value).toBe('coming_later');
+            }
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      );
+    },
+  );
 });

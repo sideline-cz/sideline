@@ -67,24 +67,27 @@ const formatRelativeDate = (dt: DateTime.Utc): string => {
   return date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 };
 
-const RsvpBadge = ({ rsvp }: { rsvp: Option.Option<'yes' | 'no' | 'maybe'> }) => {
+const RsvpBadge = ({ rsvp }: { rsvp: Option.Option<'yes' | 'no' | 'maybe' | 'coming_later'> }) => {
   if (Option.isNone(rsvp)) {
     return <Badge variant='secondary'>{tr('dashboard_noResponse')}</Badge>;
   }
+  // "Coming later" is written as `coming_later` and read back as `maybe` this release — both
+  // render as the same "coming later" badge, grouped under the `late` style/label key.
+  const key: 'yes' | 'no' | 'late' =
+    rsvp.value === 'yes' ? 'yes' : rsvp.value === 'no' ? 'no' : 'late';
   const styles = {
     yes: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/50 dark:text-green-200 dark:border-green-800',
     no: 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/50 dark:text-red-200 dark:border-red-800',
-    maybe:
-      'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/50 dark:text-amber-200 dark:border-amber-800',
+    late: 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/50 dark:text-blue-200 dark:border-blue-800',
   };
   const labels = {
     yes: tr('dashboard_rsvpYes'),
     no: tr('dashboard_rsvpNo'),
-    maybe: tr('dashboard_rsvpMaybe'),
+    late: tr('dashboard_rsvpMaybe'),
   };
   return (
-    <Badge variant='outline' className={styles[rsvp.value]}>
-      {labels[rsvp.value]}
+    <Badge variant='outline' className={styles[key]}>
+      {labels[key]}
     </Badge>
   );
 };

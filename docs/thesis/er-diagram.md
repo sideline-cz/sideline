@@ -1373,7 +1373,7 @@ erDiagram
 | `role_training_types` | Many-to-many junction controlling which roles can access a training type. |
 | `events` | Individual scheduled occurrences (training, match, tournament, etc.). |
 | `event_series` | Recurring event schedules that generate individual event rows on a rolling horizon. |
-| `event_rsvps` | Attendance responses (yes / no / maybe) submitted by team members for events. |
+| `event_rsvps` | Attendance responses (yes / no / maybe / coming later) submitted by team members for events. `coming_later` counts as full attendance and requires a comment. |
 | `bot_guilds` | Registry of Discord servers where the Sideline bot is installed. |
 | `discord_channels` | Cached channel list fetched from Discord for each bot guild. |
 | `discord_role_mappings` | Links an application role to its corresponding Discord role. |

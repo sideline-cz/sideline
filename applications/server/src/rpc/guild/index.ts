@@ -2,6 +2,7 @@ import {
   Auth,
   type Discord,
   EventRpcModels,
+  EventRsvp,
   type GroupModel,
   GuildRpcGroup,
   GuildRpcModels,
@@ -1258,6 +1259,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 no_count: Schema.Number,
                 maybe_count: Schema.Number,
                 my_response: Schema.OptionFromNullOr(Schema.Literals(['yes', 'no', 'maybe'])),
+                my_response_actual: Schema.OptionFromNullOr(EventRsvp.RsvpResponse),
                 my_message: Schema.OptionFromNullOr(Schema.String),
                 all_day: Schema.Boolean,
               }),
@@ -1277,8 +1279,9 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     e.all_day,
                     COALESCE(SUM(CASE WHEN er.response = 'yes' THEN 1 ELSE 0 END), 0)::int AS yes_count,
                     COALESCE(SUM(CASE WHEN er.response = 'no' THEN 1 ELSE 0 END), 0)::int AS no_count,
-                    COALESCE(SUM(CASE WHEN er.response = 'maybe' THEN 1 ELSE 0 END), 0)::int AS maybe_count,
-                    my_rsvp.response AS my_response,
+                    COALESCE(SUM(CASE WHEN er.response IN ('maybe', 'coming_later') THEN 1 ELSE 0 END), 0)::int AS maybe_count,
+                    CASE WHEN my_rsvp.response = 'coming_later' THEN 'maybe' ELSE my_rsvp.response END AS my_response,
+                    my_rsvp.response AS my_response_actual,
                     my_rsvp.message AS my_message
                   FROM events e
                   LEFT JOIN event_rsvps er ON er.event_id = e.id
@@ -1333,6 +1336,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                       no_count: row.no_count,
                       maybe_count: row.maybe_count,
                       my_response: row.my_response,
+                      my_response_actual: row.my_response_actual,
                       my_message: row.my_message,
                       all_day: row.all_day,
                     }),

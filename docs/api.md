@@ -563,7 +563,7 @@ Returns a summary view for the authenticated user within a team: upcoming events
 | `endAt` | `string \| null` | Yes | End date/time |
 | `location` | `string \| null` | Yes | Location |
 | `locationUrl` | `string \| null` | Yes | Optional location URL (public `https://`, max 2048 chars) |
-| `myRsvp` | `"yes" \| "no" \| "maybe" \| null` | Yes | User's current RSVP response |
+| `myRsvp` | `"yes" \| "no" \| "maybe" \| null` | Yes | User's current RSVP response. A `"coming_later"` response is projected to `"maybe"` on this read surface this release (see the Event RSVP section's Enums) |
 
 `DashboardActivitySummary`:
 
@@ -2050,7 +2050,9 @@ Cancels an event. This action is irreversible.
 
 #### Enums
 
-**RsvpResponse:** `"yes"`, `"no"`, `"maybe"`
+**RsvpResponse (submit):** `"yes"`, `"no"`, `"maybe"`, `"coming_later"` — `"coming_later"` ("Coming later") means the member will attend but arrive late; it counts as full attendance (roster auto-provisioning, team generation, training auto-log, player ratings, and the min-players headcount all treat it like `"yes"`) and requires a non-empty `message` (see `RsvpMessageRequired` below).
+
+**RsvpResponse (read):** `"yes"`, `"no"`, `"maybe"` — read endpoints (`GET .../rsvps`) are intentionally still restricted to this legacy 3-value vocabulary this release: a stored `"coming_later"` response is projected down to `"maybe"` before it reaches these responses, so already-deployed clients never decode an unrecognized value. `maybeCount` (below) counts both legacy `"maybe"` and `"coming_later"` responses together.
 
 ---
 
@@ -2076,7 +2078,7 @@ Returns RSVP details for an event including all responses and counts.
 | `rsvps` | `RsvpEntry[]` | No | All RSVP entries |
 | `yesCount` | `number` | No | Number of "yes" responses |
 | `noCount` | `number` | No | Number of "no" responses |
-| `maybeCount` | `number` | No | Number of "maybe" responses |
+| `maybeCount` | `number` | No | Number of "maybe" responses, including "coming later" (projected to `"maybe"` on this read surface — see the Enums section above) |
 | `canRsvp` | `boolean` | No | Whether the user can submit/update their RSVP |
 | `minPlayersThreshold` | `number` | No | Team's minimum players threshold |
 
@@ -2117,8 +2119,8 @@ Submits or updates the authenticated user's RSVP for an event.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `response` | `RsvpResponse` | Yes | `"yes"`, `"no"`, or `"maybe"` |
-| `message` | `string \| null` | Yes | Optional message to accompany the RSVP |
+| `response` | `RsvpResponse` | Yes | `"yes"`, `"no"`, `"maybe"`, or `"coming_later"` |
+| `message` | `string \| null` | Yes | Message to accompany the RSVP. Optional for `"yes"`/`"no"`/`"maybe"`; required (non-blank, after falling back to any existing stored message) for `"coming_later"` |
 
 **Response:** `204 No Content`
 
@@ -2129,6 +2131,7 @@ Submits or updates the authenticated user's RSVP for an event.
 | `EventRsvpForbidden` | 403 | Not eligible to RSVP (not a group member or not a team member) |
 | `EventRsvpEventNotFound` | 404 | Event does not exist |
 | `RsvpDeadlinePassed` | 400 | The RSVP deadline has passed |
+| `EventRsvpMessageRequired` | 400 | `response` is `"coming_later"` and no non-blank message is present (submitted or previously stored) |
 
 ---
 
@@ -2726,7 +2729,7 @@ Manually triggers age threshold evaluation for all members. Moves members betwee
 
 **Source:** `packages/domain/src/api/ActivityLogApi.ts`
 
-Activity logs track physical activities for individual members. Entries can be created manually or automatically (e.g. via `TrainingAutoLogCron` when a member RSVPs "yes" to a training event that ends).
+Activity logs track physical activities for individual members. Entries can be created manually or automatically (e.g. via `TrainingAutoLogCron` when a member RSVPs "yes" — or "coming later", which counts as attending — to a training event that ends).
 
 #### Enums
 
@@ -5776,7 +5779,7 @@ Downloads an attachment file. Returns the raw file bytes with `Content-Type`, `C
 
 **Source:** `packages/domain/src/api/EventRosterApi.ts`
 
-Links a tournament event to a named roster and manages the attendance-approval workflow. A linked event–roster pair optionally runs an auto-approve flow (members who RSVP "yes" are added to the roster automatically) or a manual-approval flow (owners review each request via a dedicated Discord thread and from the roster detail page).
+Links a tournament event to a named roster and manages the attendance-approval workflow. A linked event–roster pair optionally runs an auto-approve flow (members who RSVP "yes" are added to the roster automatically) or a manual-approval flow (owners review each request via a dedicated Discord thread and from the roster detail page). Throughout this section, "yes" RSVP also includes a `"coming_later"` response — it counts as full attendance for this workflow the same as `"yes"`.
 
 **Required Permission:** All write endpoints require `roster:manage`.
 
@@ -6244,7 +6247,7 @@ Applies a game result, updating the Elo ratings for all members on both teams. R
 | `emptyTeam` | `teamA` or `teamB` array is empty |
 | `overlap` | The same member appears on both teams |
 | `unknownMember` | A member ID is not found in this team |
-| `notRsvpYes` | A member in `teamA` or `teamB` did not RSVP "yes" for the associated event (training-game endpoint only) |
+| `notRsvpYes` | A member in `teamA` or `teamB` did not submit an attending RSVP (`"yes"` or `"coming_later"`) for the associated event (training-game endpoint only) |
 
 ---
 
@@ -6438,7 +6441,7 @@ The response always has `gamesPlayed: 0`, `wins: 0`, `losses: 0`, `draws: 0`, `p
 **Source:** `packages/domain/src/api/TeamGenerationApi.ts`
 **Prefix:** `/teams/:teamId`
 
-Generates balanced training teams for a specific event and manages per-team configuration for the generator algorithm. The generator uses a weighted scoring function that can balance by Elo rating spread, team-size equality, and gender distribution.
+Generates balanced training teams for a specific event and manages per-team configuration for the generator algorithm. The generator uses a weighted scoring function that can balance by Elo rating spread, team-size equality, and gender distribution. The eligible player pool is every member with an attending RSVP (`"yes"` or `"coming_later"`), referred to below as "RSVP-yes".
 
 All endpoints require the caller to be an authenticated team member. Write endpoints (`generateTeams`, `updateGenerationConfig`, `postTeamsToDiscord`) require the `member:edit` permission (Captain, Admin, or any role with that permission).
 
@@ -6674,7 +6677,7 @@ Handles Discord guild lifecycle events.
 | `Guild/AllocatePersonalOverflowCategory` | `team_id` → `{ sequence: number, exists: boolean }` | Inserts a new `personal_event_overflow_categories` row (next sequence number) with `ON CONFLICT DO NOTHING`; returns whether a new row was inserted |
 | `Guild/SavePersonalOverflowCategoryId` | `team_id`, `sequence`, `discord_category_id` | Writes the Discord category snowflake back to the overflow row |
 | `Guild/ListPersonalOverflowCategories` | `team_id` → `{ sequence: number, discord_category_id: Snowflake }[]` | Lists all provisioned overflow categories for a team in sequence order |
-| `Guild/GetAllUpcomingEventsForUser` | `guild_id`, `discord_user_id` → `UpcomingEventsForUserResult` | Returns all upcoming active events for the requesting Discord user with their RSVP status; used by the personal-channel reconcile worker to build the member's personal-channel embed list |
+| `Guild/GetAllUpcomingEventsForUser` | `guild_id`, `discord_user_id` → `UpcomingEventsForUserResult` | Returns all upcoming active events for the requesting Discord user with their RSVP status; used by the personal-channel reconcile worker to build the member's personal-channel embed list. Same `my_response` / `my_response_actual` projection split as `Event/GetUpcomingEventsForUser` (see the Event RPC group below) |
 
 #### Event
 
@@ -6687,20 +6690,20 @@ Manages event embeds, RSVPs, and event sync outbox processing. As of the remove-
 | `Event/MarkEventFailed` | `id`, `error` | Marks an outbox event as failed |
 | `Event/SaveDiscordMessageId` | `event_id`, `discord_channel_id`, `discord_message_id` | Stores the Discord message ID for an event embed |
 | `Event/GetDiscordMessageId` | `event_id` → `EventDiscordMessage \| null` | Retrieves the stored Discord message for an event |
-| `Event/SubmitRsvp` | `event_id`, `team_id`, `discord_user_id`, `response`, `message` → `SubmitRsvpResult` | Submits an RSVP from the bot; result includes late-RSVP flag and optional notification channel |
-| `Event/GetRsvpCounts` | `event_id` → `RsvpCountsResult` | Returns yes/no/maybe counts for an event |
+| `Event/SubmitRsvp` | `event_id`, `team_id`, `discord_user_id`, `response`, `message` → `SubmitRsvpResult` | Submits an RSVP from the bot; `response` accepts `"coming_later"` (requires a non-blank `message`, or `RsvpMessageRequired` is returned); result includes late-RSVP flag and optional notification channel |
+| `Event/GetRsvpCounts` | `event_id` → `RsvpCountsResult` | Returns yes/no/maybe counts for an event; `maybeCount` includes both legacy `maybe` and `coming_later` responses |
 | `Event/GetEventEmbedInfo` | `event_id` → `EventEmbedInfo \| null` | Retrieves info needed to render the Discord embed |
 | `Event/GetChannelEvents` | `discord_channel_id` → `ChannelEventEntry[]` | Lists events posted in a Discord channel |
-| `Event/GetRsvpAttendees` | `event_id`, `offset`, `limit` → `RsvpAttendeesResult` | Returns paginated RSVP attendee list |
-| `Event/GetRsvpReminderSummary` | `event_id` → `RsvpReminderSummary` | Returns RSVP reminder data including non-responders and yes-attendee list |
+| `Event/GetRsvpAttendees` | `event_id`, `offset`, `limit` → `RsvpAttendeesResult` | Returns paginated RSVP attendee list; each entry's `response` is projected to the legacy `"yes" \| "no" \| "maybe"` vocabulary (`coming_later` → `maybe`) |
+| `Event/GetRsvpReminderSummary` | `event_id` → `RsvpReminderSummary` | Returns RSVP reminder data including non-responders and yes-attendee list; the yes-attendee list also includes `coming_later` responders (both count as attending) |
 | `Event/GetUpcomingGuildEvents` | `guild_id`, `offset`, `limit` → `GuildEventListResult` | Lists upcoming events for a guild (guild-scoped, no per-user RSVP data) |
-| `Event/GetUpcomingEventsForUser` | `guild_id`, `discord_user_id`, `offset`, `limit` → `UpcomingEventsForUserResult` | Lists upcoming events with the invoking user's RSVP status; used by `/event list`, the overview show button, and per-user embed pagination |
+| `Event/GetUpcomingEventsForUser` | `guild_id`, `discord_user_id`, `offset`, `limit` → `UpcomingEventsForUserResult` | Lists upcoming events with the invoking user's RSVP status; used by `/event list`, the overview show button, and per-user embed pagination. Each entry's `my_response` stays projected to the legacy 3-value vocabulary; `my_response_actual` additionally carries the true unprojected response (including `coming_later`) so the bot can build the correct message-management buttons |
 | `Event/GetTrainingTypesByGuild` | `guild_id` → `TrainingTypeChoice[]` | Lists training types for a guild (for autocomplete) |
 | `Event/CreateEvent` | `guild_id`, `discord_user_id`, `event_type`, `title`, `start_at`, ... → `CreateEventResult` | Creates an event from the bot slash command |
 | `Event/GetChannelDivider` | `discord_channel_id` → `Snowflake \| null` | Returns the stored divider message ID for a channel |
 | `Event/SaveChannelDivider` | `discord_channel_id`, `discord_message_id` | Persists or updates the divider message ID |
 | `Event/DeleteChannelDivider` | `discord_channel_id` | Removes the stored divider message ID |
-| `Event/GetYesAttendeesForEmbed` | `event_id`, `limit`, `member_group_id` → `RsvpAttendeeEntry[]` | Returns up to `limit` yes-RSVP attendees filtered to a member group (including descendants) |
+| `Event/GetYesAttendeesForEmbed` | `event_id`, `limit`, `member_group_id` → `RsvpAttendeeEntry[]` | Returns up to `limit` attending (`"yes"` or `"coming_later"`/legacy `"maybe"`) RSVPs filtered to a member group (including descendants) |
 | `Event/ClaimTraining` | `event_id`, `team_id`, `discord_user_id` → `EventClaimInfo` | Claims an unclaimed training for the invoking user; errors: `ClaimEventNotFound`, `ClaimNotTraining`, `ClaimEventInactive`, `ClaimNotOwnerGroupMember`, `ClaimAlreadyClaimed` |
 | `Event/UnclaimTraining` | `event_id`, `team_id`, `discord_user_id` → `EventClaimInfo` | Unclaims a previously claimed training; errors: `ClaimEventNotFound`, `ClaimEventInactive`, `ClaimNotClaimer` |
 | `Event/SaveClaimDiscordMessageId` | `event_id`, `channel_id`, `message_id` | Stores the claim-board message ID after posting |
@@ -6944,6 +6947,7 @@ The following table consolidates all error tags across all API groups.
 | `EventCancelled` | 400 | Event | Attempted to update an already-cancelled event |
 | `EventSeriesCancelled` | 400 | Event Series | Attempted to update an already-cancelled series |
 | `RsvpDeadlinePassed` | 400 | Event RSVP | RSVP deadline has passed for this event |
+| `EventRsvpMessageRequired` | 400 | Event RSVP | Submitted `"coming_later"` without a non-blank message |
 | `AgeThresholdSelfRequired` | 400 | Age Threshold | `requiredGroupId` equals the rule's target `groupId` |
 | `RoleNameAlreadyTaken` | 409 | Role | A role with this name already exists |
 | `GroupNameAlreadyTaken` | 409 | Group | A group with this name already exists |

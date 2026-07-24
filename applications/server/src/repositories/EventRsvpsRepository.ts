@@ -165,7 +165,7 @@ const make = Effect.gen(function* () {
       JOIN team_members tm ON tm.id = r.team_member_id
       LEFT JOIN users u ON u.id = tm.user_id
       WHERE r.event_id = ${input.event_id}
-      ORDER BY CASE r.response WHEN 'yes' THEN 1 WHEN 'maybe' THEN 2 WHEN 'no' THEN 3 ELSE 99 END ASC, r.created_at ASC, r.id ASC
+      ORDER BY CASE r.response WHEN 'yes' THEN 1 WHEN 'coming_later' THEN 2 WHEN 'maybe' THEN 2 WHEN 'no' THEN 3 ELSE 99 END ASC, r.created_at ASC, r.id ASC
       LIMIT ${input.limit} OFFSET ${input.offset}
     `,
   });
@@ -193,7 +193,7 @@ const make = Effect.gen(function* () {
       JOIN team_members tm ON tm.id = r.team_member_id
       LEFT JOIN users u ON u.id = tm.user_id
       WHERE r.event_id = ${input.event_id}
-        AND r.response = 'yes'
+        AND r.response IN ('yes', 'coming_later', 'maybe')
         AND (
           ${input.member_group_id}::uuid IS NULL
           OR tm.id IN (
@@ -219,7 +219,7 @@ const make = Effect.gen(function* () {
       SELECT team_member_id
       FROM event_rsvps
       WHERE event_id = ${eventId}
-        AND response = 'yes'
+        AND response IN ('yes', 'coming_later', 'maybe')
     `,
   });
 

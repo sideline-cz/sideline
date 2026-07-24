@@ -18,10 +18,13 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
+import { isRsvpMessageRequiredAndMissing } from '~/utils/rsvpMessageRequired.js';
+import { projectRsvpResponseToLegacy } from '~/utils/rsvpWireProjection.js';
 
 const forbidden = new EventRsvpApi.Forbidden();
 const notFound = new EventRsvpApi.EventNotFound();
 const deadlinePassed = new EventRsvpApi.RsvpDeadlinePassed();
+const messageRequired = new EventRsvpApi.RsvpMessageRequired();
 
 const checkGroupAccess = (
   groups: ServiceMap.Service.Shape<typeof GroupsRepository>,
@@ -67,7 +70,7 @@ const buildRsvpDetail = (
     Effect.map(
       ({ allRsvps, myRsvp, counts }) =>
         new EventRsvpApi.EventRsvpDetail({
-          myResponse: Option.map(myRsvp, (my) => my.response),
+          myResponse: Option.map(myRsvp, (my) => projectRsvpResponseToLegacy(my.response)),
           myMessage: Option.flatMap(myRsvp, (my) => my.message),
           rsvps: Array.map(
             allRsvps,
@@ -76,7 +79,7 @@ const buildRsvpDetail = (
                 teamMemberId: r.team_member_id,
                 memberName: r.member_name,
                 username: r.username,
-                response: r.response,
+                response: projectRsvpResponseToLegacy(r.response),
                 message: r.message,
                 displayName: Option.getOrElse(
                   DisplayName.pickDisplayName({
@@ -103,9 +106,8 @@ const buildRsvpDetail = (
           ),
           maybeCount: pipe(
             counts,
-            Array.findFirst((c) => c.response === 'maybe'),
-            Option.map((c) => c.count),
-            Option.getOrElse(() => 0),
+            Array.filter((c) => c.response === 'maybe' || c.response === 'coming_later'),
+            Array.reduce(0, (acc, c) => acc + c.count),
           ),
           canRsvp,
           minPlayersThreshold,
@@ -189,6 +191,19 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
               checkGroupAccess(groups, membership.id, event.member_group_id).pipe(
                 Effect.flatMap((isMember) => (isMember ? Effect.void : Effect.fail(forbidden))),
               ),
+            ),
+            Effect.bind('priorRsvp', ({ membership }) =>
+              rsvps.findRsvpByEventAndMember(eventId, membership.id),
+            ),
+            Effect.tap(({ priorRsvp }) =>
+              isRsvpMessageRequiredAndMissing(
+                payload.response,
+                false,
+                payload.message,
+                Option.flatMap(priorRsvp, (r) => r.message),
+              )
+                ? Effect.fail(messageRequired)
+                : Effect.void,
             ),
             Effect.bind('upsertResult', ({ membership }) =>
               rsvps.upsertRsvp(eventId, membership.id, payload.response, payload.message).pipe(

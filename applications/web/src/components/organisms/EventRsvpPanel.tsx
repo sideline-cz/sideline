@@ -1,7 +1,7 @@
 import type { EventApi, EventRsvpApi } from '@sideline/domain';
 import { type Effect, Option } from 'effect';
 import { Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '~/components/ui/button';
 import { Textarea } from '~/components/ui/textarea';
 import type { ClientConfig } from '~/lib/client';
@@ -13,10 +13,14 @@ interface EventRsvpPanelProps {
   rsvpDetail: EventRsvpApi.EventRsvpDetail;
   nonResponders: ReadonlyArray<EventRsvpApi.NonResponderEntry>;
   onRsvpSubmit: (
-    response: 'yes' | 'no' | 'maybe',
+    response: 'yes' | 'no' | 'maybe' | 'coming_later',
     message: string,
   ) => Effect.Effect<void, ClientError, ApiClient | ClientConfig>;
 }
+
+// The server projects the legacy `coming_later` write value to `maybe` on the read wire this
+// release, so a late RSVP can come back as either tag — treat them as the same display state.
+const isLate = (response: string): boolean => response === 'coming_later' || response === 'maybe';
 
 export function EventRsvpPanel({
   eventDetail,
@@ -27,32 +31,65 @@ export function EventRsvpPanel({
   const currentResponse = Option.getOrNull(rsvpDetail.myResponse);
   const savedMessage = Option.getOrElse(rsvpDetail.myMessage, () => '');
 
-  const [submittingResponse, setSubmittingResponse] = useState<'yes' | 'no' | 'maybe' | null>(null);
+  const [submittingResponse, setSubmittingResponse] = useState<
+    'yes' | 'no' | 'coming_later' | null
+  >(null);
   const [draftMessage, setDraftMessage] = useState(savedMessage);
   const [savingMessage, setSavingMessage] = useState(false);
+  // Set while the user has clicked "Coming later" but not yet saved a required note.
+  const [pendingResponse, setPendingResponse] = useState<'coming_later' | null>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     setDraftMessage(savedMessage);
   }, [savedMessage]);
 
+  useEffect(() => {
+    if (pendingResponse === 'coming_later') {
+      messageInputRef.current?.focus();
+    }
+  }, [pendingResponse]);
+
   const run = useRun();
 
   const isBusy = submittingResponse !== null || savingMessage;
 
-  const handleResponseClick = async (response: 'yes' | 'no' | 'maybe') => {
-    if (response === currentResponse) return;
+  // The response that a note-save would currently target: the pending "coming later" choice
+  // takes priority over the already-saved response.
+  const targetResponse = pendingResponse ?? currentResponse;
+  const displayedResponse = submittingResponse ?? targetResponse;
+  const messageRequired = targetResponse !== null && isLate(targetResponse);
+  const messageMissing = messageRequired && draftMessage.trim().length === 0;
+
+  const handleResponseClick = async (response: 'yes' | 'no' | 'coming_later') => {
     if (isBusy) return;
+    if (response === 'coming_later') {
+      // Mandatory comment: "Coming later" never instant-submits — it only reveals + focuses the
+      // note field (focus happens in a `useEffect` on `pendingResponse`, after the textarea has
+      // been committed to the DOM) and requires a non-empty note before Save will submit it.
+      setPendingResponse('coming_later');
+      return;
+    }
+    if (response === currentResponse) {
+      setPendingResponse(null);
+      return;
+    }
+    setPendingResponse(null);
     setSubmittingResponse(response);
     await run({ success: tr('event_rsvpSubmitted') })(onRsvpSubmit(response, savedMessage));
     setSubmittingResponse(null);
   };
 
   const handleSaveNote = async () => {
-    if (!currentResponse) return;
+    if (!targetResponse) return;
     if (isBusy) return;
+    // Mandatory comment: block saving when the pending/current response is a late RSVP and the
+    // note is blank — the note is what carries the "coming later" reason and is required.
+    if (isLate(targetResponse) && draftMessage.trim().length === 0) return;
     setSavingMessage(true);
-    await run({ success: tr('event_rsvpSubmitted') })(onRsvpSubmit(currentResponse, draftMessage));
+    await run({ success: tr('event_rsvpSubmitted') })(onRsvpSubmit(targetResponse, draftMessage));
     setSavingMessage(false);
+    setPendingResponse(null);
   };
 
   return (
@@ -62,11 +99,16 @@ export function EventRsvpPanel({
       {rsvpDetail.canRsvp ? (
         <div className='flex flex-col gap-4'>
           <div className='flex gap-2'>
-            {(['yes', 'maybe', 'no'] as const).map((response) => {
+            {(['yes', 'coming_later', 'no'] as const).map((response) => {
               const activeVariant =
-                response === 'yes' ? 'default' : response === 'maybe' ? 'secondary' : 'destructive';
-              const displayedResponse = submittingResponse ?? currentResponse;
-              const isActive = displayedResponse === response;
+                response === 'yes'
+                  ? 'default'
+                  : response === 'coming_later'
+                    ? 'secondary'
+                    : 'destructive';
+              const isActive = isLate(response)
+                ? isLate(displayedResponse ?? '')
+                : displayedResponse === response;
               const isLoadingThis = submittingResponse === response;
               return (
                 <Button
@@ -74,12 +116,12 @@ export function EventRsvpPanel({
                   variant={isActive ? activeVariant : 'outline'}
                   onClick={() => handleResponseClick(response)}
                   disabled={isBusy}
-                  aria-pressed={displayedResponse === response}
+                  aria-pressed={isActive}
                 >
                   {isLoadingThis && <Loader2 className='animate-spin' aria-hidden='true' />}
                   {response === 'yes'
                     ? tr('rsvp_yes')
-                    : response === 'maybe'
+                    : response === 'coming_later'
                       ? tr('rsvp_maybe')
                       : tr('rsvp_no')}
                 </Button>
@@ -87,22 +129,36 @@ export function EventRsvpPanel({
             })}
           </div>
 
-          {currentResponse && (
+          {targetResponse && (
             <>
               <div>
                 <label htmlFor='rsvp-message' className='text-sm font-medium mb-1 block'>
                   {tr('rsvp_message')}
+                  {messageRequired && ' *'}
                 </label>
                 <Textarea
                   id='rsvp-message'
+                  ref={messageInputRef}
                   value={draftMessage}
                   onChange={(e) => setDraftMessage(e.target.value)}
                   placeholder={tr('rsvp_messagePlaceholder')}
                   rows={2}
+                  aria-required={messageRequired}
+                  aria-invalid={messageMissing}
+                  aria-describedby={messageMissing ? 'rsvp-message-error' : undefined}
                 />
+                {messageMissing && (
+                  <p
+                    id='rsvp-message-error'
+                    role='alert'
+                    className='mt-1 text-sm text-red-600 dark:text-red-400'
+                  >
+                    {tr('rsvp_messageRequired')}
+                  </p>
+                )}
               </div>
               <div>
-                <Button onClick={handleSaveNote} disabled={isBusy}>
+                <Button onClick={handleSaveNote} disabled={isBusy || messageMissing}>
                   {savingMessage && <Loader2 className='animate-spin' aria-hidden='true' />}
                   {savingMessage ? tr('rsvp_savingNote') : tr('rsvp_saveNote')}
                 </Button>
@@ -120,7 +176,7 @@ export function EventRsvpPanel({
           <span className='text-green-700 dark:text-green-400'>
             {tr('rsvp_attending', { count: String(rsvpDetail.yesCount) })}
           </span>
-          <span className='text-yellow-600 dark:text-yellow-400'>
+          <span className='text-blue-600 dark:text-blue-400'>
             {tr('rsvp_undecided', { count: String(rsvpDetail.maybeCount) })}
           </span>
           <span className='text-red-600 dark:text-red-400'>
@@ -129,10 +185,10 @@ export function EventRsvpPanel({
         </div>
 
         {rsvpDetail.minPlayersThreshold > 0 &&
-          rsvpDetail.yesCount < rsvpDetail.minPlayersThreshold && (
+          rsvpDetail.yesCount + rsvpDetail.maybeCount < rsvpDetail.minPlayersThreshold && (
             <div className='mb-4 rounded-md border border-yellow-300 bg-yellow-50 px-4 py-2 text-sm text-yellow-800 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-200'>
               {tr('rsvp_belowMinPlayers', {
-                count: String(rsvpDetail.yesCount),
+                count: String(rsvpDetail.yesCount + rsvpDetail.maybeCount),
                 threshold: String(rsvpDetail.minPlayersThreshold),
               })}
             </div>
@@ -142,8 +198,8 @@ export function EventRsvpPanel({
           <ul className='space-y-1 text-sm'>
             {[...rsvpDetail.rsvps]
               .sort((a, b) => {
-                const order: Record<string, number> = { yes: 0, maybe: 1, no: 2 };
-                return (order[a.response] ?? 3) - (order[b.response] ?? 3);
+                const order = (r: string) => (r === 'yes' ? 0 : isLate(r) ? 1 : 2);
+                return order(a.response) - order(b.response);
               })
               .map((r) => (
                 <li key={r.teamMemberId} className='flex items-center gap-2'>
@@ -151,14 +207,14 @@ export function EventRsvpPanel({
                     className={
                       r.response === 'yes'
                         ? 'text-green-700 dark:text-green-400'
-                        : r.response === 'maybe'
-                          ? 'text-yellow-600 dark:text-yellow-400'
+                        : isLate(r.response)
+                          ? 'text-blue-600 dark:text-blue-400'
                           : 'text-red-600 dark:text-red-400'
                     }
                   >
                     {r.response === 'yes'
                       ? tr('rsvp_yes')
-                      : r.response === 'maybe'
+                      : isLate(r.response)
                         ? tr('rsvp_maybe')
                         : tr('rsvp_no')}
                   </span>

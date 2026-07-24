@@ -31,7 +31,7 @@ A repeating pattern (e.g. "every Tuesday at 19:00") that generates individual Ev
 
 ## RSVP
 
-A player's response to an event: **Yes**, **No**, or **Maybe**. RSVPs can be changed until the event starts. Captains see live counts; reminders target players who haven't replied.
+A player's response to an event: **Yes**, **No**, or **Coming later**. "Coming later" means the player will attend but arrive after the start time — it requires a short note (reason/ETA) and counts as full attendance, same as **Yes**. RSVPs can be changed until the event starts. Captains see live counts; reminders target players who haven't replied.
 
 ## Training type
 

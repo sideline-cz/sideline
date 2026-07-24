@@ -722,6 +722,7 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       no_count: 0,
       maybe_count: 0,
       my_response: Option.none(),
+      my_response_actual: Option.none(),
       my_message: Option.none(),
       all_day: false,
     });
@@ -748,6 +749,7 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       no_count: 0,
       maybe_count: 0,
       my_response: Option.none(),
+      my_response_actual: Option.none(),
       my_message: Option.none(),
       all_day: false,
     });

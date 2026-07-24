@@ -107,6 +107,8 @@ export default Effect.flatMap(SqlClient.SqlClient, (sql) =>
 
 Always use the exact constraint name. Check the original migration that created the constraint for the name.
 
+**Rolling-deploy-safe enum widening.** When the new value cannot yet appear on the wire for already-deployed clients (see `packages/domain/AGENTS.md` → wire-value projection), widen the CHECK to a permissive **superset** that keeps every legacy value AND the new one (`CHECK (response IN ('yes', 'no', 'maybe', 'coming_later'))`), use `DROP CONSTRAINT IF EXISTS` so the widening is idempotent, and do NOT rewrite historical rows in this migration. Eagerly converting historical rows would expose an old still-running instance's legacy decode to every historical row (not just newly-written ones) during the rolling deploy, for no functional benefit — the app already tolerates both the legacy and new values this release. Drop the legacy value from the CHECK and convert any leftover rows in the Release B follow-up, once no client relies on the old value. Reference: `1790300016_rename_rsvp_maybe_to_coming_later.ts`.
+
 ### Trigger-Maintained Denormalized Aggregates
 
 When a derived aggregate (e.g. `fee_assignments.paid_minor = SUM(payments.amount_minor) WHERE voided_at IS NULL`) is read on every status query, prefer a **trigger-maintained denormalized column** over re-aggregating with `SUM(...)` on each read. Reference implementation: `recompute_paid_minor` + `payments_recompute_trigger` in `1783000000_create_finance.ts`.

@@ -140,7 +140,7 @@ On the day of the training, if the training has been claimed, the bot also posts
 
 ## Event roster attendance
 
-Captains can link a named roster to a specific event (for example, a tournament squad list) from the event's detail page in the web app. Once linked, every **"yes" RSVP** from a team member triggers one of two flows depending on the **auto-approve** setting:
+Captains can link a named roster to a specific event (for example, a tournament squad list) from the event's detail page in the web app. Once linked, every **"yes" RSVP** from a team member — "Coming later" counts too, since it's a full attendance response — triggers one of two flows depending on the **auto-approve** setting:
 
 ### Auto-approve ON
 
@@ -222,7 +222,7 @@ Each event message in a personal channel displays a **Going** attendee list and 
 
 ### Mention on unanswered events
 
-When the bot posts a new upcoming event to a personal channel and the member has not yet responded, the message includes a quiet mention of the member (highlighted as unread in Discord). No actual notification ping is sent — the `allowed_mentions` setting suppresses it. As soon as the member responds (yes, no, or maybe), the mention is cleared.
+When the bot posts a new upcoming event to a personal channel and the member has not yet responded, the message includes a quiet mention of the member (highlighted as unread in Discord). No actual notification ping is sent — the `allowed_mentions` setting suppresses it. As soon as the member responds (yes, no, or coming later), the mention is cleared.
 
 ### Restricting personal channels to a group
 

@@ -59,6 +59,8 @@ const localizeRsvpResponse = (response: EventRsvp.RsvpResponse, locale: Locale):
       return m.rsvp_no({}, { locale });
     case 'maybe':
       return m.rsvp_maybe({}, { locale });
+    case 'coming_later':
+      return m.rsvp_maybe({}, { locale });
   }
 };
 
@@ -82,11 +84,17 @@ const buildMessageActionRow = (
             label: m.bot_rsvp_edit_message({}, { locale }),
             custom_id: `rsvp-add-msg:${teamId}:${eventId}:${response}`,
           }),
-          UI.button({
-            style: Discord.ButtonStyleTypes.DANGER,
-            label: m.bot_rsvp_clear_message({}, { locale }),
-            custom_id: `rsvp-clear-msg:${teamId}:${eventId}:${response}`,
-          }),
+          // coming_later requires a message, so clearing it is illegal — never
+          // render the "clear message" button for that response.
+          ...(response === 'coming_later'
+            ? []
+            : [
+                UI.button({
+                  style: Discord.ButtonStyleTypes.DANGER,
+                  label: m.bot_rsvp_clear_message({}, { locale }),
+                  custom_id: `rsvp-clear-msg:${teamId}:${eventId}:${response}`,
+                }),
+              ]),
         ]
       : [
           UI.button({
@@ -252,6 +260,13 @@ export const RsvpButton = Ix.messageComponent(
             content: m.bot_rsvp_deadline_passed({}, { locale }),
           }),
         ),
+        Effect.catchTag('RsvpMessageRequired', () =>
+          Effect.succeed({
+            _tag: 'error' as const,
+            hasMessage: false,
+            content: m.bot_rsvp_message_required({}, { locale }),
+          }),
+        ),
         Effect.catchTag('RsvpMemberNotFound', () =>
           Effect.succeed({
             _tag: 'error' as const,
@@ -331,6 +346,7 @@ export const RsvpAddMessageButton = Ix.messageComponent(
       const eventId = parts[2];
       const response = decodeRsvpResponse(parts[3]);
       const locale = userLocale(interaction);
+      const required = response === 'coming_later';
       return Ix.response({
         type: Discord.InteractionCallbackTypes.MODAL,
         data: {
@@ -345,7 +361,8 @@ export const RsvpAddMessageButton = Ix.messageComponent(
                 custom_id: 'rsvp_message',
                 label: m.bot_rsvp_modal_label({}, { locale }),
                 style: Discord.TextInputStyleTypes.PARAGRAPH,
-                required: false,
+                required,
+                ...(required ? { min_length: 1 } : {}),
                 max_length: 200,
               }),
             ]),
@@ -553,6 +570,13 @@ export const RsvpModal = Ix.modalSubmit(
             _tag: 'error' as const,
             hasMessage: false,
             content: m.bot_rsvp_deadline_passed({}, { locale }),
+          }),
+        ),
+        Effect.catchTag('RsvpMessageRequired', () =>
+          Effect.succeed({
+            _tag: 'error' as const,
+            hasMessage: false,
+            content: m.bot_rsvp_message_required({}, { locale }),
           }),
         ),
         Effect.catchTag('RsvpMemberNotFound', () =>

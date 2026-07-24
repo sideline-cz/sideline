@@ -6,7 +6,7 @@ import { TeamMemberId } from '~/models/TeamMember.js';
 export const EventRsvpId = Schema.String.pipe(Schema.brand('EventRsvpId'));
 export type EventRsvpId = typeof EventRsvpId.Type;
 
-export const RsvpResponse = Schema.Literals(['yes', 'no', 'maybe']);
+export const RsvpResponse = Schema.Literals(['yes', 'no', 'maybe', 'coming_later']);
 export type RsvpResponse = typeof RsvpResponse.Type;
 
 export class EventRsvp extends Model.Class<EventRsvp>('EventRsvp')({

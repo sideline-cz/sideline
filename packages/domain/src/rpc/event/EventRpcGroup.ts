@@ -42,6 +42,7 @@ import {
   RsvpDeadlinePassed,
   RsvpEventNotFound,
   RsvpMemberNotFound,
+  RsvpMessageRequired,
   RsvpNotGroupMember,
   RsvpReminderSummary,
   SetAutoApproveResult,
@@ -95,6 +96,7 @@ export const EventRpcGroup = RpcGroup.make(
       RsvpDeadlinePassed,
       RsvpEventNotFound,
       RsvpNotGroupMember,
+      RsvpMessageRequired,
     ]),
   }),
   Rpc.make('GetRsvpCounts', {
