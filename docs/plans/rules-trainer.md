@@ -33,6 +33,10 @@ Confirmed with the user before planning:
 | Which surfaces? | **Both public and members** — a free public trainer *and* member-only progress/leaderboards |
 | Integration depth? | **Native React port**, not an iframe embed |
 | Progress? | **Per-user progress plus team leaderboards** |
+| Authoring repo? | **`frisbee-rules` is retired** — content, the WFDF source PDFs and the authoring docs all move into `packages/rules` |
+| Leaderboard visibility? | **Self and captains only** — a member sees their own standing; captains see the team |
+| Public discovery? | **SSR + per-locale routes** (`/en/rules`, `/cs/rules`) so both languages are indexable |
+| Czech content? | **Proofread gates the public launch** — see Phase 1 |
 
 ### Decision: a `@sideline/rules` package, not code inside `web`
 
@@ -108,7 +112,13 @@ Each phase is independently shippable. Phase 1 delivers user-visible value with 
 
 ### Phase 1 — public `/rules`, native React, local-only progress
 
-4. `applications/web/src/routes/rules.tsx` (+ `rules.$package.tsx`), outside `(authenticated)`.
+**Gate: the Czech proofread must land before this ships publicly** (see Risks). The trainer is
+already live in Czech at rules.sideline.cz, but a Sideline-branded, SSR-indexed page teaching
+rules to Czech players is a higher bar than a side-project subdomain.
+
+4. Routes under `applications/web/src/routes/`, outside `(authenticated)`, **server-rendered and
+   per-locale**: `/en/rules` and `/cs/rules` (+ a package-level route), so both languages are
+   independently indexable. Decide the redirect for a bare `/rules`.
 5. `components/organisms/RulesTrainer/` — per Atomic Design, since it owns significant local
    state. The SVG field + animation runtime becomes a component driven by a
    `requestAnimationFrame` hook; the chain/exam/summary views become shadcn.
@@ -119,6 +129,17 @@ Each phase is independently shippable. Phase 1 delivers user-visible value with 
 8. Add the content chunks to the service worker's `STATIC_CACHE` so the installed PWA works
    offline. This is the "app" half of "web and app", and it is genuinely useful — a rules
    argument at a tournament happens where there is no signal.
+9. **Surface it on the sideline.cz homepage.** `HomePage.tsx` is a hero (headline, subheadline,
+   Discord CTA, three `hero_feature_*` badges) over a demo bento grid (`DemoStats`,
+   `DemoUpcomingEvents`, `DemoLeaderboard`, `DemoRsvpBanner`, `DemoFinance`,
+   `DemoAchievements`). Add:
+   - a fourth hero badge (`hero_feature_rules`, `BookOpen` from `lucide-react`) alongside
+     team/events/workout;
+   - a bento card for the trainer that, unlike its siblings, is a **real link** rather than a
+     static demo — it is the one thing on that page a visitor can use without signing in;
+   - new `tr()` keys in `@sideline/i18n` for both.
+
+   This must ship **in the same change as the route**, or the homepage links to a 404.
 
 ### Phase 2 — per-user progress (server-scored)
 
@@ -170,22 +191,33 @@ Each phase is independently shippable. Phase 1 delivers user-visible value with 
 - **Bundle size.** 740 KB of content today, ~1.4 MB at 200 situations. Phase 1 step 7 is not
   optional.
 - **Content authoring must not fork.** Once content lives in `packages/rules`, the
-  `frisbee-rules` repo must stop being a second source of truth. See open questions.
+  `frisbee-rules` repo stops being a source of truth and is retired.
+- **The Czech is AI-written and unreviewed** beyond the first 23 situations — that is 86 situations
+  of unreviewed rules translation. It is already live that way at rules.sideline.cz, so this is
+  about *exposure*, not a new defect: an SSR-indexed, Sideline-branded `/cs/rules` teaching a
+  mistranslated ruling to Czech players is a different proposition. **Decided: the proofread gates
+  the public launch.** A per-package review checklist is the deliverable that unblocks it.
+
+## Elsewhere (outside this repo)
+
+- **Portfolio** — the trainer is listed on majksa.cz as project 03, tagged `tool`
+  (`websites` repo, branch `feat/portfolio-rules-trainer`). Done. Once Phase 4 moves the canonical
+  URL, that entry's `link` needs updating from `rules.sideline.cz`.
+- **`frisbee-rules`** — retired as of the Phase 0 move. Until then it stays the authoring repo and
+  the standalone site stays live.
 
 ## Open questions
 
-1. **Where does authoring live after the move?** Options: (a) move content + the rulebook PDFs
-   into `packages/rules` and retire `frisbee-rules`; (b) keep `frisbee-rules` as the authoring
-   repo and sync content in. (a) is cleaner but drags 2 MB of WFDF PDFs and the authoring docs
-   into the monorepo. **Recommendation: (a)** — a second source of truth for content that encodes
-   rule citations is the more expensive problem.
-2. **Does the public trainer need SSR/SEO?** TanStack Start can server-render it. If the point is
-   discovery ("free WFDF rules trainer"), it should; if it is just a member perk with a public
-   door, client-only is simpler.
-3. **Should the public trainer be per-locale routed** (`/en/rules`, `/cs/rules`) for SEO, or use
-   the existing locale-persistence strategy?
-4. **Leaderboard privacy.** Is a member's rules accuracy visible to the whole team, or only to
-   themselves and captains? Accuracy is more personal than attendance.
-5. **Czech content is AI-written and unreviewed** beyond the first 23 situations — a standing item
-   from the source project. Shipping it on a Sideline-branded surface raises the bar; it wants a
-   proofread before Phase 1 goes public.
+The five questions this plan opened with are now decided (see Decisions taken). What remains:
+
+1. **What counts as "mastering" a package?** Needed before Phase 2's schema is fixed, because it
+   defines what the leaderboard ranks. Candidates: every situation in the package answered
+   correctly at least once; correct in a single clean exam run; or a decaying score so mastery
+   lapses and invites re-practice. The third is the best teaching design and the most work.
+2. **Does anonymous progress import into the account on login?** Phase 2 step 12 assumes yes. It
+   is friendly but needs a trust boundary — imported local progress is self-reported, so it must
+   not feed the leaderboard the way server-scored attempts do.
+3. **After Phase 4, does `rules.sideline.cz` redirect or retire?** A redirect preserves any
+   accumulated links and the portfolio entry; retiring is cleaner. The subdomain currently has
+   its own identity ("Ultimate Rules Trainer") that the in-app version will not.
+4. **Bare `/rules`** — redirect to the negotiated locale, or serve a locale-picking landing page?
