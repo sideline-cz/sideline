@@ -11,6 +11,17 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
   };
 }
 
+// Polyfill requestAnimationFrame/cancelAnimationFrame for jsdom (used by
+// useAnimationFrame, the rules trainer's animation loop). jsdom has no
+// rendering pipeline to drive a real rAF, so this falls back to a timer.
+if (typeof globalThis.requestAnimationFrame === 'undefined') {
+  globalThis.requestAnimationFrame = (callback: FrameRequestCallback): number =>
+    Number(setTimeout(() => callback(performance.now()), 16));
+}
+if (typeof globalThis.cancelAnimationFrame === 'undefined') {
+  globalThis.cancelAnimationFrame = (handle: number): void => clearTimeout(handle);
+}
+
 // Ensure localStorage is available in jsdom tests (needed by @sideline/i18n/runtime)
 beforeAll(() => {
   if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') {

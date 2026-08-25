@@ -105,6 +105,31 @@ this would crash the server on boot the moment anything reached `@sideline/rules
 `node --input-type=module -e "import(...)"` smoke test catches it. `tsc -b` itself copies the
 JSON into `dist/` (no separate copy step needed) but does not validate the runtime attribute.
 
+### …but the attribute is exactly what stops a BUNDLER rewriting the import
+
+The attribute is a Node requirement and a bundler obstacle, and those pull in opposite directions.
+Vite/Rolldown will **not** rewrite a dynamic `import()` that carries `with { type: 'json' }` — it
+leaves the specifier verbatim, so the browser resolves it relative to `/assets/` and every request
+404s. This is not theoretical: it shipped to a preview build with a green `pnpm build`, green
+`pnpm check`, and green unit tests (they mock the loaders), and was only caught by driving the page
+in a real browser.
+
+Confirmed by elimination — it is the attribute, not the specifier shape. Both of these are left
+un-rewritten: the relative `'./packages/01-pull.json'` and the bare
+`'@sideline/rules/packages/01-pull.json'`. Removing the attribute rewrites correctly.
+
+So consumers split:
+
+| Consumer | Loader | Attribute |
+|---|---|---|
+| server, bot, tests (Node) | `PACKAGE_LOADERS` from `@sideline/rules` | **required** — Node throws without it |
+| `applications/web` (bundled) | `WEB_PACKAGE_LOADERS` in `applications/web/src/lib/rules/loaders.ts` | **must be omitted** — web is `moduleResolution: "bundler"`, so TS does not want it either |
+
+The `./packages/*` subpath export exists to serve the web map. Its specifiers must stay **literal**
+— a computed `` `…/${level}.json` `` is also unfollowable. `applications/web/src/lib/rules/loaders.test.ts`
+asserts that map's keys equal `LEVELS` and that every loader resolves real content, so adding a
+tenth package without wiring it there fails a test rather than 404ing at runtime.
+
 `resolveJsonModule: true` is already on via `tsconfig.base.json`; `tsconfig.src.json`'s `include`
 was extended with `src/**/*.json` because, under the repo's composite/project-references
 tsconfig layout, `tsc -b` refuses to typecheck an imported JSON file that isn't also matched by
