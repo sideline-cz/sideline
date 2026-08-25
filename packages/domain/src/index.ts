@@ -64,6 +64,18 @@ export * as RoleApi from './api/RoleApi.js';
 
 export * as Roster from './api/Roster.js';
 
+/**
+ * HTTP API for the Rules Trainer's per-user progress (Phase 2 of
+ * `docs/plans/rules-trainer.md`). HTTP, not RPC, because this is a
+ * web-facing feature — RPC groups in this package are bot-only.
+ *
+ * Both endpoints are caller-scoped: there is no team parameter and no
+ * cross-user lookup, so (like `ICalApiGroup`'s `/me/ical-token`) neither
+ * endpoint declares a custom error beyond what `AuthMiddleware` already
+ * provides (401 on missing/invalid token). `myProgress` is named per
+ * "Caller-Scoped Reads" (`applications/server/AGENTS.md`) — the query is
+ * always scoped to the authenticated user, never to a caller-supplied id.
+ */
 export * as RulesTrainerApi from './api/RulesTrainerApi.js';
 
 export * as TeamApi from './api/TeamApi.js';
@@ -186,6 +198,24 @@ export * as RosterMemberModel from './models/RosterMemberModel.js';
 
 export * as RosterModel from './models/RosterModel.js';
 
+/**
+ * Rows for the Rules Trainer's per-user progress (`rules_attempts` +
+ * `rules_scenario_results`) — see `docs/plans/rules-trainer.md` Phase 2 and
+ * `packages/rules/src/engine/mastery.ts`.
+ *
+ * This module intentionally does NOT import `@sideline/rules`: `ScenarioId`
+ * there is a plain TS brand from a non-Effect package (no `Schema`), and
+ * `Level` is a plain `1 | 2 | ... | 9` union — neither needs an Effect
+ * schema to cross this boundary, so `scenario_id` decodes as `Schema.String`
+ * and package levels decode as the local `Level` schema below. Keeping the
+ * two packages decoupled means `@sideline/rules` (browser + Node, zero I/O)
+ * never has to know about `@sideline/domain`'s wire/HTTP concerns.
+ *
+ * `RulesPackageMastery` / `RulesOverallMastery` mirror `PackageMastery` /
+ * the return type of `overallMastery` in `@sideline/rules`'s
+ * `engine/mastery.ts` field-for-field so the server (follow-up PR) can map
+ * the pure computation onto the wire DTO 1:1, with no renaming in between.
+ */
 export * as RulesProgress from './models/RulesProgress.js';
 
 export * as Session from './models/Session.js';
