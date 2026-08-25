@@ -44,6 +44,9 @@ importers:
       '@playwright/test':
         specifier: ^1.61
         version: 1.61.1
+      '@sideline/rules':
+        specifier: workspace:^
+        version: link:packages/rules
       '@types/node':
         specifier: 26.1.1
         version: 26.1.1
