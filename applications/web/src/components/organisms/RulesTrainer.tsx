@@ -1,27 +1,40 @@
 import type {
   Answer,
-  ChainEntry,
+  ExamState,
   Lang,
   Level,
+  Mode,
   RulesPackage,
   Scenario,
   ScenarioId,
 } from '@sideline/rules';
 import {
+  advanceExam,
   animLimit,
   answerStep,
   blankAnswer,
   buildRunPerms,
-  chainView,
+  EXAM_N,
+  examAnswer,
+  examScore,
   LEVEL_META,
   LEVELS,
+  openReview,
   pool,
   score,
+  startExam,
   text,
 } from '@sideline/rules';
-import { RULES, SIGNALS } from '@sideline/rules/reference';
+import { RULES } from '@sideline/rules/reference';
 import { Check, Lock, X } from 'lucide-react';
 import React from 'react';
+import { FeedbackPanel, Legend, StepChain } from '~/components/organisms/RulesChain.js';
+import { RulesCheatSheet } from '~/components/organisms/RulesCheatSheet.js';
+import {
+  RulesExamQuestion,
+  RulesExamResults,
+  RulesReview,
+} from '~/components/organisms/RulesExam.js';
 import { RulesFieldSvg } from '~/components/organisms/RulesFieldSvg.js';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
@@ -45,60 +58,20 @@ interface RulesTrainerProps {
   readonly locale: Lang;
 }
 
-type Screen = 'intro' | 'loadingPractice' | 'practiceError' | 'practice' | 'summary';
+type Screen =
+  | 'intro'
+  | 'loadingPractice'
+  | 'practiceError'
+  | 'practice'
+  | 'summary'
+  | 'loadingExam'
+  | 'exam'
+  | 'examResults'
+  | 'review';
 
 type PackagesByLevel = Readonly<Partial<Record<Level, RulesPackage>>>;
 type AnswersById = Readonly<Record<ScenarioId, Answer>>;
 type PermsById = Readonly<Record<ScenarioId, ReadonlyArray<ReadonlyArray<number>>>>;
-
-const OFF_LEGEND = '#2f6df6';
-const DEF_LEGEND = '#e0483d';
-const YOU_LEGEND_RING = '#ffd23f';
-const DISC_LEGEND = '#ffe066';
-
-// ---------------------------------------------------------------------------
-// Small shared bits
-// ---------------------------------------------------------------------------
-
-function Legend({ locale }: { readonly locale: Lang }) {
-  return (
-    <div className='flex flex-wrap items-center gap-4 text-xs text-muted-foreground'>
-      <span className='flex items-center gap-1.5'>
-        <span className='inline-block size-3 rounded-full' style={{ background: OFF_LEGEND }} />
-        {tr('rules_legendOff', undefined, { locale })}
-      </span>
-      <span className='flex items-center gap-1.5'>
-        <span className='inline-block size-3 rounded-full' style={{ background: DEF_LEGEND }} />
-        {tr('rules_legendDef', undefined, { locale })}
-      </span>
-      <span className='flex items-center gap-1.5'>
-        <span
-          className='inline-block size-3 rounded-full'
-          style={{ background: OFF_LEGEND, boxShadow: `0 0 0 2px ${YOU_LEGEND_RING}` }}
-        />
-        {tr('rules_legendYou', undefined, { locale })}
-      </span>
-      <span className='flex items-center gap-1.5'>
-        <span className='inline-block size-2.5 rounded-full' style={{ background: DISC_LEGEND }} />
-        {tr('rules_legendDisc', undefined, { locale })}
-      </span>
-    </div>
-  );
-}
-
-function RuleChip({
-  rule,
-  onOpen,
-}: {
-  readonly rule: string;
-  readonly onOpen: (rule: string) => void;
-}) {
-  return (
-    <Button variant='outline' size='sm' type='button' onClick={() => onOpen(rule)}>
-      § {rule}
-    </Button>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Intro screen — package picker
@@ -111,6 +84,8 @@ function IntroScreen({
   onSelectAll,
   onSelectNone,
   onStart,
+  onStartExam,
+  onOpenCheat,
 }: {
   readonly locale: Lang;
   readonly sel: readonly Level[];
@@ -118,10 +93,13 @@ function IntroScreen({
   readonly onSelectAll: () => void;
   readonly onSelectNone: () => void;
   readonly onStart: () => void;
+  readonly onStartExam: () => void;
+  readonly onOpenCheat: () => void;
 }) {
   const totalSituations = LEVELS.reduce((n, l) => n + LEVEL_META[l].scenarioCount, 0);
   const pickedSituations = sel.reduce((n, l) => n + LEVEL_META[l].scenarioCount, 0);
   const canStart = sel.length > 0;
+  const examCount = Math.min(EXAM_N, pickedSituations || totalSituations);
 
   return (
     <div className='flex flex-col gap-4'>
@@ -169,7 +147,12 @@ function IntroScreen({
           <p className='text-sm text-muted-foreground'>
             {tr('rules_introPersp', undefined, { locale })}
           </p>
-          <Legend locale={locale} />
+          <div className='flex flex-wrap items-center justify-between gap-3'>
+            <Legend locale={locale} />
+            <Button type='button' variant='outline' size='sm' onClick={onOpenCheat}>
+              {tr('rules_cheat', undefined, { locale })}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -220,193 +203,30 @@ function IntroScreen({
             <Button type='button' size='lg' disabled={!canStart} onClick={onStart}>
               {tr('rules_start', undefined, { locale })} ({pickedSituations})
             </Button>
+            <Button
+              type='button'
+              size='lg'
+              variant='outline'
+              disabled={!canStart}
+              onClick={onStartExam}
+            >
+              🎓 {tr('rules_startExam', undefined, { locale })} ({examCount})
+            </Button>
             <span className='text-sm text-muted-foreground'>
               {canStart
                 ? `${pickedSituations} ${tr('rules_statSituations', undefined, { locale })} · ${sel.length}/${LEVELS.length} ${tr('rules_statPackages', undefined, { locale })} ${tr('rules_selSum', undefined, { locale })}`
                 : tr('rules_selNone', undefined, { locale })}
             </span>
           </div>
+          <p className='text-xs text-muted-foreground'>
+            {tr('rules_examDesc', undefined, { locale })}
+          </p>
         </CardContent>
       </Card>
 
       <p className='text-xs text-muted-foreground'>
         WFDF Rules of Ultimate 2025–2028 · CC BY 4.0 World Flying Disc Federation
       </p>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Step chain — the spoiler gate's UI half. Renders exactly what `chainView`
-// says: a `locked` step never gets its key label or question, and a step's
-// verdict/why text only appears when `showVerdict` is true.
-// ---------------------------------------------------------------------------
-
-function StepChain({
-  scenario,
-  answer,
-  perms,
-  locale,
-  onAnswer,
-  onOpenRule,
-}: {
-  readonly scenario: Scenario;
-  readonly answer: Answer;
-  readonly perms: ReadonlyArray<ReadonlyArray<number>> | undefined;
-  readonly locale: Lang;
-  readonly onAnswer: (pick: number) => void;
-  readonly onOpenRule: (rule: string) => void;
-}) {
-  const entries: ChainEntry[] = chainView(scenario, answer, 'learn', perms);
-  const n = scenario.steps.length;
-
-  return (
-    <div className='flex flex-col gap-3'>
-      {entries.map((entry) => {
-        if (entry.state === 'hidden') return null;
-        const step = scenario.steps[entry.index];
-        if (!step) return null;
-
-        const stepLabel = `${tr('rules_stepWord', undefined, { locale })} ${entry.index + 1}/${n}`;
-
-        if (entry.state === 'locked') {
-          return (
-            <div
-              key={entry.index}
-              className='rounded-md border border-dashed p-3 text-sm text-muted-foreground'
-            >
-              <div className='mb-1 flex items-center gap-2 font-medium'>
-                <Lock className='size-3.5' aria-hidden='true' />
-                {stepLabel}
-              </div>
-              <p>{tr('rules_stepLocked', undefined, { locale })}</p>
-            </div>
-          );
-        }
-
-        const rec = entry.state === 'answered' ? answer.steps[entry.index] : undefined;
-        const keyLabel = entry.showKeyLabel
-          ? ` · ${tr(`rules_k${step.k}`, undefined, { locale })}`
-          : '';
-
-        return (
-          <div
-            key={entry.index}
-            className={`rounded-md border p-3 ${entry.state === 'answered' ? (rec?.ok ? 'border-success' : 'border-destructive') : ''}`}
-          >
-            <div className='mb-2 flex items-center gap-2 text-sm font-medium'>
-              <span>
-                {stepLabel}
-                {keyLabel}
-              </span>
-              {entry.showVerdict &&
-                (rec?.ok ? (
-                  <Check className='size-4 text-success' aria-hidden='true' />
-                ) : (
-                  <X className='size-4 text-destructive' aria-hidden='true' />
-                ))}
-            </div>
-            <p className='mb-3 text-sm'>{text(step.q, locale)}</p>
-            <div className='flex flex-col gap-2'>
-              {entry.order.map((originalIndex, pos) => {
-                const opt = step.opts[originalIndex];
-                if (!opt) return null;
-                const letter = ['A', 'B', 'C', 'D'][pos] ?? String(pos + 1);
-                const answered = entry.state === 'answered';
-                const isPicked = rec?.pick === originalIndex;
-                const showVerdictStyle = entry.showVerdict;
-                const correct = showVerdictStyle && opt.ok === true;
-                const wrong = showVerdictStyle && isPicked && opt.ok !== true;
-
-                return (
-                  <div key={originalIndex} className='flex flex-col gap-1'>
-                    <Button
-                      type='button'
-                      variant={correct ? 'default' : wrong ? 'destructive' : 'outline'}
-                      className='h-auto justify-start whitespace-normal text-left'
-                      disabled={answered || entry.state !== 'current'}
-                      onClick={() => onAnswer(originalIndex)}
-                    >
-                      <span className='mr-2 font-mono text-xs opacity-70'>{letter}</span>
-                      {text(opt.t, locale)}
-                    </Button>
-                    {showVerdictStyle && (
-                      <p className='pl-2 text-xs text-muted-foreground'>{text(opt.why, locale)}</p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            {entry.showVerdict && step.rules.length > 0 && (
-              <div className='mt-3 flex flex-wrap gap-2'>
-                {step.rules.map((rule) => (
-                  <RuleChip key={rule} rule={rule} onOpen={onOpenRule} />
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Feedback panel — shown once the whole chain is answered.
-// ---------------------------------------------------------------------------
-
-function FeedbackPanel({
-  scenario,
-  answer,
-  locale,
-  onOpenRule,
-}: {
-  readonly scenario: Scenario;
-  readonly answer: Answer;
-  readonly locale: Lang;
-  readonly onOpenRule: (rule: string) => void;
-}) {
-  const okCount = answer.steps.filter((s) => s.ok).length;
-  const total = answer.steps.length;
-  const verdict = answer.ok
-    ? `${tr('rules_correct', undefined, { locale })} ${tr('rules_chainDone', undefined, { locale })}`
-    : `${tr('rules_incorrect', undefined, { locale })} ${okCount}/${total} ${tr('rules_chainSteps', undefined, { locale })}`;
-
-  return (
-    <div
-      className={`rounded-md border p-4 ${answer.ok ? 'border-success bg-success/10' : 'border-destructive bg-destructive/10'}`}
-    >
-      <p className='font-semibold'>{verdict}</p>
-      <p className='mt-1 text-sm'>{text(scenario.explain, locale)}</p>
-      {scenario.note && (
-        <p className='mt-2 text-sm text-muted-foreground'>
-          <b>{tr('rules_alsoNote', undefined, { locale })}:</b> {text(scenario.note, locale)}
-        </p>
-      )}
-      <div className='mt-3 flex flex-wrap items-center gap-2'>
-        <span className='text-xs font-semibold text-muted-foreground'>
-          {tr('rules_refs', undefined, { locale })}
-        </span>
-        {scenario.rules.map((rule) => (
-          <RuleChip key={rule} rule={rule} onOpen={onOpenRule} />
-        ))}
-      </div>
-      {scenario.signals && scenario.signals.length > 0 && (
-        <div className='mt-2 flex flex-wrap items-center gap-2'>
-          <span className='text-xs font-semibold text-muted-foreground'>
-            {tr('rules_signals', undefined, { locale })}
-          </span>
-          {scenario.signals.map((signalId) => {
-            const entry = SIGNALS[String(signalId)];
-            if (!entry) return null;
-            return (
-              <Badge key={signalId} variant='outline'>
-                #{signalId} {text(entry, locale)}
-              </Badge>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
@@ -424,6 +244,32 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
   const [screen, setScreen] = React.useState<Screen>('intro');
   const [currentId, setCurrentId] = React.useState<ScenarioId | null>(null);
   const [openRule, setOpenRule] = React.useState<string | null>(null);
+  const [cheatOpen, setCheatOpen] = React.useState(false);
+
+  // Exam/review — a single sitting, never persisted (see `AGENTS.md`'s "no
+  // I/O" note and the plan's explicit "do not persist exam state").
+  const [examState, setExamState] = React.useState<ExamState | null>(null);
+  const [reviewQ, setReviewQ] = React.useState(0);
+  // The option just clicked in the exam, while the engine's own `Answer`
+  // update is deliberately held back for the pacing delay below — see
+  // `handleExamAnswer`.
+  const [examPendingPick, setExamPendingPick] = React.useState<number | null>(null);
+  const examTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(
+    () => () => {
+      if (examTimerRef.current !== null) clearTimeout(examTimerRef.current);
+    },
+    [],
+  );
+
+  // The cheat sheet must never be reachable during an exam (`app.js:238`
+  // hid the same button) — force it closed the moment the exam screen is
+  // entered, rather than relying solely on no screen ever rendering the
+  // trigger there.
+  React.useEffect(() => {
+    if (screen === 'exam') setCheatOpen(false);
+  }, [screen]);
 
   const [animT, setAnimT] = React.useState(0);
   const [animPlaying, setAnimPlaying] = React.useState(false);
@@ -462,7 +308,7 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
   // `PACKAGE_LOADERS`), never the eager
   // `@sideline/rules/content` entry.
   React.useEffect(() => {
-    if (screen !== 'loadingPractice') return;
+    if (screen !== 'loadingPractice' && screen !== 'loadingExam') return;
     const missing = sel.filter((l) => packages[l] === undefined);
 
     if (missing.length > 0) {
@@ -486,11 +332,26 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
       };
     }
 
-    // Everything selected is loaded — build the run once and enter practice.
+    // Everything selected is loaded.
     if (poolIds.length === 0) {
       setScreen('practiceError');
       return;
     }
+
+    if (screen === 'loadingExam') {
+      const ex = startExam(scenarios, sel);
+      if (ex.qs.length === 0) {
+        setScreen('practiceError');
+        return;
+      }
+      setExamState(ex);
+      setReviewQ(0);
+      setExamPendingPick(null);
+      setScreen('exam');
+      return;
+    }
+
+    // Build the practice run once and enter practice.
     setPerms(buildRunPerms(scenarios, sel));
     const firstUnanswered = poolIds.find((id) => !(answers[id]?.done ?? false));
     setCurrentId(firstUnanswered ?? poolIds[0] ?? null);
@@ -502,25 +363,56 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
   const currentAnswer = currentScenario
     ? (answers[currentScenario.id] ?? blankAnswer())
     : blankAnswer();
-  const limit = currentScenario
-    ? animLimit({ mode: 'learn', scenario: currentScenario, answer: currentAnswer })
+
+  const examQId = examState ? examState.qs[examState.i] : undefined;
+  const examScenario = examQId ? (scenariosById.get(examQId) ?? null) : null;
+  const examCurrentAnswer = examState
+    ? (examState.answers[examState.i] ?? blankAnswer())
+    : blankAnswer();
+  const examCurrentPerms = examState ? examState.perms[examState.i] : undefined;
+
+  const reviewQId = examState ? examState.qs[reviewQ] : undefined;
+  const reviewScenario = reviewQId ? (scenariosById.get(reviewQId) ?? null) : null;
+  const reviewAnswer = examState ? (examState.answers[reviewQ] ?? blankAnswer()) : blankAnswer();
+  const reviewPerms = examState ? examState.perms[reviewQ] : undefined;
+
+  // The scenario/answer/mode actually driving the field animation right
+  // now — one indirection so `animLimit` (the spoiler gate) and the replay
+  // controls work identically whether the active screen is practice, the
+  // exam, or a review.
+  const activeMode: Mode = screen === 'exam' ? 'exam' : screen === 'review' ? 'review' : 'learn';
+  const activeScenario =
+    screen === 'exam' ? examScenario : screen === 'review' ? reviewScenario : currentScenario;
+  const activeAnswer =
+    screen === 'exam' ? examCurrentAnswer : screen === 'review' ? reviewAnswer : currentAnswer;
+  const activeId = activeScenario?.id ?? null;
+
+  const limit = activeScenario
+    ? animLimit({ mode: activeMode, scenario: activeScenario, answer: activeAnswer })
     : 0;
 
-  // Reset/autoplay the demo when navigating to a (possibly new) scenario.
-  // Deliberately scoped to `currentId` only — answering a step must not
-  // rewind or restart the demo (see `handleAnswer` below).
+  // Reset/autoplay the demo when navigating to a (possibly new) scenario —
+  // in ANY of the three modes that show one (practice, exam, review).
+  // Deliberately scoped to `activeId`/`screen` only — answering a step
+  // must not rewind or restart the demo (see `handleAnswer` /
+  // `handleExamAnswer` below), and `activeId` stays constant while
+  // stepping through a single scenario's chain in every mode.
   // biome-ignore lint/correctness/useExhaustiveDependencies: navigation-only reset is the design
   React.useEffect(() => {
-    if (screen !== 'practice' || currentId === null) return;
-    const scenario = scenariosById.get(currentId);
+    if (screen !== 'practice' && screen !== 'exam' && screen !== 'review') return;
+    if (activeId === null) return;
+    const scenario = scenariosById.get(activeId);
     if (!scenario) return;
-    const answer = answers[currentId] ?? blankAnswer();
-    setAnimT(answer.done ? scenario.dur : 0);
+    // Practice resumes at rest if the chain was already completed earlier
+    // (e.g. navigating back via the pips); exam/review always restart the
+    // lead-up from 0 for the newly-entered question.
+    const restAtDur = screen === 'practice' && (answers[activeId]?.done ?? false);
+    setAnimT(restAtDur ? scenario.dur : 0);
     setAnimPlaying(false);
-    if (answer.done) return;
+    if (restAtDur) return;
     const timer = setTimeout(() => setAnimPlaying(true), 500);
     return () => clearTimeout(timer);
-  }, [currentId]);
+  }, [activeId, screen]);
 
   useAnimationFrame((dt) => {
     setAnimT((prev) => Math.min(prev + dt * (slow ? 0.42 : 1), limit));
@@ -576,6 +468,8 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
     setAnswers({});
     setPerms({});
     setCurrentId(null);
+    setExamState(null);
+    setExamPendingPick(null);
     setScreen('intro');
   };
 
@@ -593,6 +487,93 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
     : null;
   const currentScore = runStateForScore ? score(runStateForScore, scenarios) : 0;
 
+  // A `RunState` for the engine's exam/review transitions — `sel`/`answers`/
+  // `perms` are along for the ride (the type requires them) but none of
+  // `examAnswer`/`advanceExam`/`openReview`/`examScore` ever read them; only
+  // `exam` (and, for `openReview`, the `k` argument) matters.
+  const buildExamRunState = (mode: Mode, current: ScenarioId) => ({
+    lang: locale,
+    mode,
+    current,
+    sel,
+    answers,
+    perms,
+    exam: examState,
+    reviewQ,
+  });
+
+  const handleStartExam = () => {
+    if (sel.length === 0) return;
+    setScreen('loadingExam');
+  };
+
+  /**
+   * One click in the exam. Mirrors the source's `examAnswer` pacing
+   * (`AGENTS.md`: 450ms once the chain completes, 350ms between steps)
+   * exactly: the underlying `Answer` update is computed immediately (so an
+   * invalid pick is rejected up front, same as `answerStep`), but is only
+   * COMMITTED to `examState` after the delay — until then, `examPendingPick`
+   * disables the step's options and marks the clicked one, with no verdict,
+   * so the visible chain does not silently jump to the next step/question a
+   * frame after the click.
+   */
+  const handleExamAnswer = (scenario: Scenario, pick: number) => {
+    if (!examState || examPendingPick !== null) return;
+    const probe = buildExamRunState('exam', scenario.id);
+    const afterAnswer = examAnswer(probe, scenario, pick);
+    if (afterAnswer === probe || !afterAnswer.exam) return;
+    const nextExam = afterAnswer.exam;
+    const justAnswered = nextExam.answers[examState.i];
+    const done = justAnswered?.done ?? false;
+
+    setExamPendingPick(pick);
+    examTimerRef.current = setTimeout(
+      () => {
+        examTimerRef.current = null;
+        setExamPendingPick(null);
+        if (done) {
+          const advanced = advanceExam({ ...probe, exam: nextExam });
+          setExamState(advanced.exam);
+          setScreen(advanced.mode === 'examResults' ? 'examResults' : 'exam');
+        } else {
+          setExamState(nextExam);
+        }
+      },
+      done ? 450 : 350,
+    );
+  };
+
+  const handleOpenReview = (k: number) => {
+    if (!examState) return;
+    const qId = examState.qs[k];
+    if (qId === undefined) return;
+    const next = openReview(buildExamRunState('examResults', qId), k);
+    setReviewQ(next.reviewQ);
+    setScreen('review');
+  };
+
+  const handleBackToResults = () => setScreen('examResults');
+
+  const handleExamAgain = () => {
+    const ex = startExam(scenarios, sel);
+    if (ex.qs.length === 0) return;
+    setExamState(ex);
+    setReviewQ(0);
+    setExamPendingPick(null);
+    setScreen('exam');
+  };
+
+  const handleExamToPractice = () => {
+    setExamState(null);
+    setScreen('intro');
+  };
+
+  const firstExamId = examState?.qs[0];
+  const examResultsScore =
+    examState && firstExamId !== undefined
+      ? examScore(buildExamRunState('examResults', firstExamId))
+      : 0;
+
   return (
     <div className='flex flex-col gap-4'>
       {screen === 'intro' && (
@@ -603,10 +584,12 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
           onSelectAll={() => setSel(LEVELS)}
           onSelectNone={() => setSel([])}
           onStart={() => setScreen('loadingPractice')}
+          onStartExam={handleStartExam}
+          onOpenCheat={() => setCheatOpen(true)}
         />
       )}
 
-      {screen === 'loadingPractice' && (
+      {(screen === 'loadingPractice' || screen === 'loadingExam') && (
         <Card>
           <CardContent className='flex flex-col gap-3'>
             <Skeleton className='h-6 w-48' />
@@ -702,6 +685,9 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
                     {tr('rules_revealHint', undefined, { locale })}
                   </span>
                 )}
+                <Button type='button' variant='ghost' size='sm' onClick={() => setCheatOpen(true)}>
+                  {tr('rules_cheat', undefined, { locale })}
+                </Button>
                 <div className='ml-auto'>
                   <Legend locale={locale} />
                 </div>
@@ -717,6 +703,7 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
                 scenario={currentScenario}
                 answer={currentAnswer}
                 perms={perms[currentScenario.id]}
+                mode='learn'
                 locale={locale}
                 onAnswer={(pick) => handleAnswer(currentScenario, pick)}
                 onOpenRule={setOpenRule}
@@ -781,7 +768,10 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
                 );
               })}
             </div>
-            <div>
+            <div className='flex flex-wrap gap-2'>
+              <Button type='button' onClick={handleStartExam}>
+                🎓 {tr('rules_startExam', undefined, { locale })}
+              </Button>
               <Button type='button' variant='outline' onClick={handleRestart}>
                 {tr('rules_restart', undefined, { locale })}
               </Button>
@@ -789,6 +779,60 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
           </CardContent>
         </Card>
       )}
+
+      {screen === 'exam' && examState && examScenario && (
+        <RulesExamQuestion
+          locale={locale}
+          scenario={examScenario}
+          answer={examCurrentAnswer}
+          perms={examCurrentPerms}
+          questionIndex={examState.i}
+          questionCount={examState.qs.length}
+          pendingPick={examPendingPick}
+          animT={animT}
+          slow={slow}
+          onPlay={() => {
+            setAnimT(0);
+            setAnimPlaying(true);
+          }}
+          onToggleSlow={() => setSlow((v) => !v)}
+          onAnswer={(pick) => handleExamAnswer(examScenario, pick)}
+        />
+      )}
+
+      {screen === 'examResults' && examState && (
+        <RulesExamResults
+          locale={locale}
+          examState={examState}
+          score={examResultsScore}
+          scenariosById={scenariosById}
+          onReview={handleOpenReview}
+          onExamAgain={handleExamAgain}
+          onToPractice={handleExamToPractice}
+        />
+      )}
+
+      {screen === 'review' && examState && reviewScenario && (
+        <RulesReview
+          locale={locale}
+          scenario={reviewScenario}
+          answer={reviewAnswer}
+          perms={reviewPerms}
+          questionIndex={reviewQ}
+          questionCount={examState.qs.length}
+          animT={animT}
+          slow={slow}
+          onPlay={() => {
+            setAnimT(0);
+            setAnimPlaying(true);
+          }}
+          onToggleSlow={() => setSlow((v) => !v)}
+          onOpenRule={setOpenRule}
+          onBackToResults={handleBackToResults}
+        />
+      )}
+
+      <RulesCheatSheet locale={locale} open={cheatOpen} onOpenChange={setCheatOpen} />
 
       <Dialog open={openRule !== null} onOpenChange={(open) => !open && setOpenRule(null)}>
         <DialogContent>

@@ -84,23 +84,80 @@ const FIXTURE_PACKAGE: RulesPackage = {
   scenarios: [FIXTURE_SCENARIO],
 };
 
+// A second, single-step level — exists solely so the exam tests can select
+// two packages and assert both are representable (`startExam`'s own
+// per-level stratification is tested in `packages/rules`; this only checks
+// that the web wiring passes `scenarios`/`sel` through correctly).
+const FIXTURE_SCENARIO_2: Scenario = {
+  id: sid('fix2'),
+  level: 2,
+  topic: { en: 'Fixture topic 2', cs: 'Fixture topic 2' },
+  title: { en: 'Fixture title 2', cs: 'Fixture title 2' },
+  roleTeam: 'off',
+  role: { en: 'Marker', cs: 'Marker' },
+  view: [0, 0, 100, 37],
+  dur: 6,
+  qAt: 2,
+  actors: [],
+  disc: {
+    kf: [
+      [0, 5, 5],
+      [6, 20, 20],
+    ],
+  },
+  fx: [],
+  situation: { en: 'Fixture situation 2', cs: 'Fixture situation 2' },
+  question: { en: 'Fixture question 2?', cs: 'Fixture question 2?' },
+  explain: { en: 'Fixture explanation 2', cs: 'Fixture explanation 2' },
+  rules: [],
+  steps: [
+    {
+      k: 'what',
+      q: { en: 'OnlyStep?', cs: 'OnlyStep?' },
+      rules: [],
+      opts: [{ t: { en: 'OnlyOption', cs: 'OnlyOption' }, ok: true, why: { en: 'w', cs: 'w' } }],
+    },
+  ],
+};
+
+const FIXTURE_PACKAGE_2: RulesPackage = {
+  level: 2,
+  name: 'Fixture package 2',
+  scenarios: [FIXTURE_SCENARIO_2],
+};
+
 vi.mock('@sideline/rules', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@sideline/rules')>();
   return {
     ...actual,
-    LEVELS: [1],
+    LEVELS: [1, 2],
     LEVEL_META: {
       1: { level: 1, name: { en: 'Fixture package', cs: 'Fixture package' }, scenarioCount: 1 },
+      2: { level: 2, name: { en: 'Fixture package 2', cs: 'Fixture package 2' }, scenarioCount: 1 },
     },
   };
 });
 
-vi.mock('@sideline/rules/reference', () => ({ RULES: {}, SIGNALS: {} }));
+const FIXTURE_CHEAT_SHEET = {
+  cheatStallH: { en: ['a', 'b'], cs: ['a', 'b'] },
+  cheatStallRows: { en: [['1', '2']], cs: [['1', '2']] },
+  cheatWhoRows: { en: [['x', 'y']], cs: [['x', 'y']] },
+  cheatGoldRows: { en: [['p', 'q']], cs: [['p', 'q']] },
+};
+
+vi.mock('@sideline/rules/reference', () => ({
+  RULES: {},
+  SIGNALS: {},
+  CHEAT_SHEET: FIXTURE_CHEAT_SHEET,
+}));
 
 // The organism loads content through the web-local map, not the package's
 // own PACKAGE_LOADERS — see `~/lib/rules/loaders.ts`.
 vi.mock('~/lib/rules/loaders.js', () => ({
-  WEB_PACKAGE_LOADERS: { 1: () => Promise.resolve(FIXTURE_PACKAGE) },
+  WEB_PACKAGE_LOADERS: {
+    1: () => Promise.resolve(FIXTURE_PACKAGE),
+    2: () => Promise.resolve(FIXTURE_PACKAGE_2),
+  },
 }));
 
 const { RulesTrainer } = await import('~/components/organisms/RulesTrainer.js');
@@ -141,11 +198,41 @@ function discGroup(): Element {
   return group;
 }
 
+/** Deselects level 2 (the default selection is both fixture levels), so a
+ * run only ever covers `FIXTURE_SCENARIO` — every pre-existing assertion in
+ * this file about "step 1"/"step 2" was written against that one scenario,
+ * before the exam tests added a second level. */
+async function selectOnlyLevel1() {
+  fireEvent.click(await screen.findByRole('button', { name: /rules_level_2_name/ }));
+}
+
 async function startPractice() {
   render(<RulesTrainer locale='en' />);
-  fireEvent.click(await screen.findByRole('button', { name: /rules_start/ }));
+  await selectOnlyLevel1();
+  // Anchored + `\b` so this never also matches the "🎓 rules_startExam (…)"
+  // button the exam entry point added alongside it.
+  fireEvent.click(await screen.findByRole('button', { name: /^rules_start\b/ }));
   // Practice screen renders once the (mocked) package promise resolves.
   await screen.findByText('Step1?');
+}
+
+/** Starts a single-question exam (level 1 only, so it is always
+ * `FIXTURE_SCENARIO`) and waits for the first (only) step to render. */
+async function startExamFlow() {
+  render(<RulesTrainer locale='en' />);
+  await selectOnlyLevel1();
+  fireEvent.click(await screen.findByRole('button', { name: /🎓 rules_startExam/ }));
+  await screen.findByText('Step1?');
+}
+
+/** Every button on the exam question screen other than the play/slow
+ * transport controls is a live option button for the currently-visible
+ * step — exam mode never shows more than one step at a time, so this is
+ * always exactly that step's option(s). */
+function currentExamOptionButtons(): HTMLElement[] {
+  return screen
+    .getAllByRole('button')
+    .filter((b) => !/^(rules_play|rules_replay|rules_slow)$/.test(b.textContent ?? ''));
 }
 
 beforeEach(() => {
@@ -260,5 +347,174 @@ describe('RulesTrainer', () => {
 
     anim.restore();
     randomSpy.mockRestore();
+  });
+});
+
+describe('RulesTrainer — exam mode', () => {
+  it('never reveals the resolution once the chain is complete — the demo stays at qAt (the strictest spoiler case)', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    const anim = stubAnimationFrame();
+    await startExamFlow();
+
+    fireEvent.click(screen.getByRole('button', { name: /rules_play|rules_replay/ }));
+    let now = 0;
+    for (let i = 0; i < 200; i++) {
+      now += 10_000;
+      anim.tick(now);
+    }
+    const [qAtX, qAtY] = ipos(FIXTURE_SCENARIO.disc.kf, FIXTURE_SCENARIO.qAt);
+    expect(discGroup().getAttribute('transform')).toBe(`translate(${qAtX} ${qAtY})`);
+
+    // Answer step 1 (the pacing delay commits it after 350ms).
+    fireEvent.click(screen.getByRole('button', { name: /Right1/ }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    await screen.findByText('Step2?');
+
+    for (let i = 0; i < 50; i++) {
+      now += 10_000;
+      anim.tick(now);
+    }
+    expect(discGroup().getAttribute('transform')).toBe(`translate(${qAtX} ${qAtY})`);
+
+    // Answer step 2 — completes the whole chain. Even though `answer.done`
+    // is now `true`, `animLimit` in exam mode ignores that entirely.
+    fireEvent.click(screen.getByRole('button', { name: /Right0/ }));
+    for (let i = 0; i < 50; i++) {
+      now += 10_000;
+      anim.tick(now);
+    }
+    expect(discGroup().getAttribute('transform')).toBe(`translate(${qAtX} ${qAtY})`);
+    // No verdict text ever leaked either, even while the completed step
+    // sits disabled waiting out its pacing delay.
+    expect(screen.queryByText(/why0|why1/)).toBeNull();
+
+    anim.restore();
+    randomSpy.mockRestore();
+  });
+
+  it('shows exactly one step at a time, with no verdict and no `why`', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    await startExamFlow();
+
+    // Only step 1's two options are on screen — no locked placeholder for
+    // step 2 (exam hides everything but the live step outright).
+    expect(screen.queryByText('Step2?')).toBeNull();
+    expect(screen.queryByText('rules_stepLocked')).toBeNull();
+    expect(currentExamOptionButtons()).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: /Wrong0/ }));
+    // No why text, even for the option just clicked, and even though it is
+    // now visibly disabled.
+    expect(screen.queryByText(/why0|why1/)).toBeNull();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    await screen.findByText('Step2?');
+
+    // Step 1 is gone entirely now — exam never shows more than one step,
+    // unlike practice where an answered step stays visible (disabled).
+    expect(screen.queryByText('Step1?')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Wrong0|Right1/ })).toBeNull();
+    expect(currentExamOptionButtons()).toHaveLength(2);
+
+    randomSpy.mockRestore();
+  });
+
+  it('exam length is min(EXAM_N, poolSize), and every selected level can appear', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.3);
+    render(<RulesTrainer locale='en' />);
+    // Both fixture levels stay selected (the default) — pool size is 2
+    // (one single-scenario level each), well under the real `EXAM_N` (10),
+    // so `startExam` must draw both.
+    fireEvent.click(await screen.findByRole('button', { name: /🎓 rules_startExam/ }));
+    await screen.findByText(/rules_examQ 1 \/ 2/);
+
+    const seenTitles = new Set<string>();
+    for (let i = 0; i < 3; i++) {
+      if (screen.queryByText(/rules_examResTitle/)) break;
+      const heading = screen.queryByRole('heading', { level: 2 });
+      if (heading?.textContent) seenTitles.add(heading.textContent);
+      fireEvent.click(currentExamOptionButtons()[0] as HTMLElement);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      });
+    }
+
+    await screen.findByText(/rules_examResTitle/);
+    expect(seenTitles).toEqual(new Set(['Fixture title', 'Fixture title 2']));
+
+    randomSpy.mockRestore();
+  });
+
+  it('review reveals verdicts and `why`, using the SAME option order the exam displayed (not a fresh shuffle)', async () => {
+    // A non-constant rng: if review ever recomputed a fresh permutation
+    // instead of reusing `ExamState.perms[k]`, a constant stub could not
+    // tell the difference (both calls would just reproduce the same
+    // shuffle) — this is the same trap the practice-mode "does not
+    // reshuffle" test above calls out.
+    let call = 0;
+    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(() => (++call <= 50 ? 0 : 0.9));
+    await startExamFlow();
+
+    const step1OrderExam = screen
+      .getAllByRole('button', { name: /Wrong0|Right1/ })
+      .map((b) => b.textContent);
+
+    fireEvent.click(screen.getByRole('button', { name: /Right1/ }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    await screen.findByText('Step2?');
+
+    const step2OrderExam = screen
+      .getAllByRole('button', { name: /Right0|Wrong1/ })
+      .map((b) => b.textContent);
+
+    fireEvent.click(screen.getByRole('button', { name: /Wrong1/ }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+
+    await screen.findByText(/rules_examResTitle/);
+    fireEvent.click(screen.getByText('Fixture title'));
+    await screen.findByText('rules_backToResults');
+
+    const step1OrderReview = screen
+      .getAllByRole('button', { name: /Wrong0|Right1/ })
+      .map((b) => b.textContent);
+    const step2OrderReview = screen
+      .getAllByRole('button', { name: /Right0|Wrong1/ })
+      .map((b) => b.textContent);
+
+    expect(step1OrderReview).toEqual(step1OrderExam);
+    expect(step2OrderReview).toEqual(step2OrderExam);
+
+    // Full reveal: `why` now shows for every option of every step (once
+    // per step, so twice total across the two steps).
+    expect(screen.getAllByText('why0')).toHaveLength(2);
+    expect(screen.getAllByText('why1')).toHaveLength(2);
+
+    randomSpy.mockRestore();
+  });
+
+  it('the cheat sheet is reachable from the intro screen but never during an exam', async () => {
+    render(<RulesTrainer locale='en' />);
+
+    // Available (and renders real content) from the intro screen.
+    fireEvent.click(await screen.findByRole('button', { name: 'rules_cheat' }));
+    await screen.findByText('rules_cheatTitle');
+    fireEvent.click(screen.getByRole('button', { name: 'rules_close' }));
+    expect(screen.queryByText('rules_cheatTitle')).toBeNull();
+
+    // No trigger exists once an exam starts.
+    await selectOnlyLevel1();
+    fireEvent.click(await screen.findByRole('button', { name: /🎓 rules_startExam/ }));
+    await screen.findByText('Step1?');
+
+    expect(screen.queryByRole('button', { name: 'rules_cheat' })).toBeNull();
+    expect(screen.queryByText('rules_cheatTitle')).toBeNull();
   });
 });

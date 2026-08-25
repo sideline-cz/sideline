@@ -13,6 +13,7 @@
  */
 import type {
   Actor,
+  CheatSheet,
   Disc,
   Fx,
   FxArrow,
@@ -809,3 +810,70 @@ export function findShapeViolations(packages: readonly RulesPackage[]): string[]
 
 /** Re-exported only so fixture builders elsewhere can type fx overrides. */
 export type { Fx };
+
+/* --------------------------------------------------------------- G19 ---- */
+/**
+ * The cheat-sheet tables have matching EN/CS shape.
+ *
+ * This is the one content file where the two languages could drift out of
+ * ALIGNMENT rather than merely go missing: the tables are localised whole
+ * (`Localized<string[][]>`), so a translator dropping or merging a row leaves
+ * both languages present and non-empty — G9 stays green — while the rendered
+ * Czech table silently shows a different set of rows to the English one, with
+ * citations attached to the wrong entries. Compares row and column counts,
+ * and requires every cell to be a non-empty string.
+ */
+export function findCheatSheetShapeViolations(sheet: CheatSheet): string[] {
+  const problems: string[] = [];
+
+  const headerEn = sheet.cheatStallH.en;
+  const headerCs = sheet.cheatStallH.cs;
+  if (headerEn.length !== headerCs.length) {
+    problems.push(`cheatStallH: en has ${headerEn.length} headers, cs has ${headerCs.length}`);
+  }
+  headerEn.forEach((cell, i) => {
+    if (!cell.trim()) problems.push(`cheatStallH.en[${i}] is empty`);
+  });
+  headerCs.forEach((cell, i) => {
+    if (!cell.trim()) problems.push(`cheatStallH.cs[${i}] is empty`);
+  });
+
+  const tables: ReadonlyArray<readonly [string, Localized<readonly (readonly string[])[]>]> = [
+    ['cheatStallRows', sheet.cheatStallRows],
+    ['cheatWhoRows', sheet.cheatWhoRows],
+    ['cheatGoldRows', sheet.cheatGoldRows],
+  ];
+
+  for (const [name, table] of tables) {
+    if (table.en.length !== table.cs.length) {
+      problems.push(`${name}: en has ${table.en.length} rows, cs has ${table.cs.length}`);
+      continue;
+    }
+    table.en.forEach((row, r) => {
+      const csRow = table.cs[r];
+      if (!csRow) return;
+      if (row.length !== csRow.length) {
+        problems.push(`${name} row ${r + 1}: en has ${row.length} cells, cs has ${csRow.length}`);
+      }
+      row.forEach((cell, c) => {
+        if (!cell.trim()) problems.push(`${name} row ${r + 1} cell ${c + 1}: en is empty`);
+      });
+      csRow.forEach((cell, c) => {
+        if (!cell.trim()) problems.push(`${name} row ${r + 1} cell ${c + 1}: cs is empty`);
+      });
+    });
+  }
+
+  // The stall table's rows must match its own header width, or the rendered
+  // table is ragged.
+  const width = headerEn.length;
+  sheet.cheatStallRows.en.forEach((row, r) => {
+    if (row.length !== width) {
+      problems.push(
+        `cheatStallRows row ${r + 1}: ${row.length} cells but cheatStallH declares ${width} columns`,
+      );
+    }
+  });
+
+  return problems;
+}
