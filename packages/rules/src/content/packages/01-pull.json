@@ -1,0 +1,3366 @@
+{
+  "level": 1,
+  "name": "Level 1 · The pull",
+  "scenarios": [
+    {
+      "id": "s1",
+      "level": 1,
+      "topic": {
+        "en": "The pull",
+        "cs": "Pull"
+      },
+      "title": {
+        "en": "The pull sails out",
+        "cs": "Pull letí do autu"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the handler picking up the pull",
+        "cs": "handler, který jde pro pull"
+      },
+      "view": [-2, -4.5, 104, 46],
+      "dur": 7.2,
+      "qAt": 4.6,
+      "actors": [
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 91, 18.5], [1, 88, 18.5], [7.2, 80, 18.5]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 86, 10], [1.4, 84, 10], [7.2, 62, 12]]
+        },
+        {
+          "id": "D3",
+          "team": "def",
+          "label": "D3",
+          "kf": [[0, 86, 27], [1.4, 84, 27], [7.2, 60, 25]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 18, 22], [1.4, 18, 22], [4.5, 30, 26], [6, 34, 28], [7.2, 34, 28]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 18, 10], [1.4, 18, 10], [7.2, 40, 12]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 18, 16], [1.4, 18, 16], [7.2, 44, 18]]
+        },
+        {
+          "id": "O4",
+          "team": "off",
+          "label": "O4",
+          "kf": [[0, 18, 28], [1.4, 18, 28], [7.2, 42, 32]]
+        }
+      ],
+      "disc": {
+        "kf": [
+          [0, 90, 18.5],
+          [1, 89, 18.5],
+          [2.2, 70, 26],
+          [3.2, 52, 33],
+          [3.9, 44, 37.2],
+          [4.5, 41, 40.3]
+        ],
+        "downAt": 4.5
+      },
+      "fx": [
+        {
+          "t": 4,
+          "type": "mark",
+          "x": 44,
+          "y": 37,
+          "kind": "x",
+          "label": {
+            "en": "crossed the line here",
+            "cs": "tady přešel čáru"
+          }
+        },
+        {
+          "t": 5,
+          "type": "mark",
+          "x": 36,
+          "y": 18.5,
+          "kind": "target",
+          "labelAbove": true,
+          "label": {
+            "en": "brick mark",
+            "cs": "brick mark"
+          }
+        },
+        {
+          "t": 5.4,
+          "type": "bubble",
+          "dur": 2.5,
+          "actor": "O1",
+          "text": {
+            "en": "BRICK! ✋",
+            "cs": "BRICK! ✋"
+          },
+          "style": "call"
+        }
+      ],
+      "situation": {
+        "en": "The pull floats over the sideline and lands out-of-bounds without touching anyone or the playing field. You jog over to restart play.",
+        "cs": "Pull se snese za postranní čáru a dopadne do autu, aniž by se dotkl kohokoli nebo hřiště. Běžíš si pro disk, abys obnovil hru."
+      },
+      "question": {
+        "en": "Where can you put the disc into play?",
+        "cs": "Kde můžeš zahájit hru s diskem?"
+      },
+      "explain": {
+        "en": "A pull that lands out-of-bounds untouched gives the offence a choice (7.12): take the disc where it crossed the perimeter line, or play it from the brick mark closest to your defending end zone. The brick option is binding and must be signalled before picking the disc up — one arm fully extended overhead, calling “brick”.",
+        "cs": "Pull, který spadne do autu, aniž by se čehokoli dotkl, dává útoku volbu (7.12): vzít disk tam, kde přešel obvodovou čáru, nebo hrát z brick marku blíž k vlastní bráněné endzóně. Volba bricku je závazná a musí se signalizovat před zvednutím disku — plně natažená paže nad hlavou a zavolání „brick“."
+      },
+      "note": {
+        "en": "If the pull first lands in the field and then rolls out, there is no brick: you take it where it crossed the line (7.11). And you must walk it in at walking pace or faster (8.5).",
+        "cs": "Pokud pull nejdřív dopadne do hřiště a pak se vykutálí do autu, brick není: bere se tam, kde přešel čáru (7.11). A pro disk se chodí minimálně rychlostí chůze (8.5)."
+      },
+      "rules": ["7.12", "8.5"],
+      "signals": [7],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The pull flew out of bounds untouched. What are your options?",
+            "cs": "Pull letěl do autu a nikdo se ho nedotkl. Jaké máš možnosti?"
+          },
+          "rules": ["7.12"],
+          "opts": [
+            {
+              "t": {
+                "en": "Either where it crossed the perimeter line, or the brick",
+                "cs": "Buď tam, kde disk protnul obvodovou čáru, nebo brick"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.12 — a pull that goes out untouched gives the offence exactly these two spots to choose from.",
+                "cs": "7.12 — pull, který skončí v autu bez doteku, dává útoku na výběr právě tyto dvě místa."
+              }
+            },
+            {
+              "t": {
+                "en": "Only where it crossed the line",
+                "cs": "Jen tam, kde protnul čáru"
+              },
+              "why": {
+                "en": "That is the rolled-out branch (7.11) — a disc that lands in and then rolls out. This one never landed in.",
+                "cs": "To je větev s dorolováním (7.11) — disk, který dopadne do hřiště a teprve pak vyjede. Tenhle v hřišti nikdy nebyl."
+              }
+            },
+            {
+              "t": {
+                "en": "Only the brick",
+                "cs": "Jen brick"
+              },
+              "why": {
+                "en": "The brick is an option, never an obligation — you may always take the crossing point instead (7.12).",
+                "cs": "Brick je možnost, ne povinnost — vždycky si můžeš vzít místo protnutí čáry (7.12)."
+              }
+            },
+            {
+              "t": {
+                "en": "Where the disc finally came to rest out of bounds",
+                "cs": "Tam, kde disk skončil v autu"
+              },
+              "why": {
+                "en": "Out-of-bounds resting spots never matter; what counts is where it crossed the line (7.12).",
+                "cs": "Kde disk skončí v autu, nikdy nehraje roli; rozhoduje místo protnutí čáry (7.12)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "You take the brick. Which mark is it?",
+            "cs": "Bereš si brick. Která značka to je?"
+          },
+          "rules": ["7.12"],
+          "opts": [
+            {
+              "t": {
+                "en": "The brick mark closest to the end zone you are defending",
+                "cs": "Brick nejblíž tvé bráněné endzóně"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.12 — the brick nearest your own defending end zone, i.e. the near one, not the deep one.",
+                "cs": "7.12 — brick nejblíž tvé vlastní bráněné endzóně, tedy ten bližší, ne vzdálený."
+              }
+            },
+            {
+              "t": {
+                "en": "The brick mark closest to the end zone you attack",
+                "cs": "Brick nejblíž endzóně, na kterou útočíš"
+              },
+              "why": {
+                "en": "That would hand the offence 40 m of free field — the brick is always the defensive-side mark (7.12).",
+                "cs": "To by útoku darovalo 40 m hřiště zdarma — brick je vždy značka na tvé obranné straně (7.12)."
+              }
+            },
+            {
+              "t": {
+                "en": "The centre of the field at midfield",
+                "cs": "Střed hřiště v polovině"
+              },
+              "why": {
+                "en": "There is no midfield restart in ultimate; the brick marks sit 18 m in from each goal line.",
+                "cs": "Restart v polovině hřiště v ultimate neexistuje; brick marky jsou 18 m od každé brankové čáry."
+              }
+            }
+          ]
+        },
+        {
+          "k": "how",
+          "q": {
+            "en": "What has to happen for the brick option to count?",
+            "cs": "Co musíš udělat, aby brick platil?"
+          },
+          "rules": ["7.12"],
+          "opts": [
+            {
+              "t": {
+                "en": "Signal it before you pick the disc up — one arm fully extended overhead, calling “brick”",
+                "cs": "Signalizovat dřív, než disk zvedneš — jedna paže napnutá nad hlavou a zvolat „brick“"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.12 — the choice is binding and must be signalled before the disc is picked up.",
+                "cs": "7.12 — volba je závazná a musí se signalizovat dřív, než disk zvedneš."
+              }
+            },
+            {
+              "t": {
+                "en": "Any time before your first pass",
+                "cs": "Kdykoli před první přihrávkou"
+              },
+              "why": {
+                "en": "Too late — once you have picked the disc up, the choice is made (7.12).",
+                "cs": "Pozdě — jakmile disk zvedneš, je rozhodnuto (7.12)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — just pick the disc up at the brick",
+                "cs": "Nic — prostě disk zvedni na bricku"
+              },
+              "why": {
+                "en": "Without the signal the defence has no way to know; the call is binding precisely because it is announced (7.12).",
+                "cs": "Bez signálu obrana nemá jak vědět; volba je závazná právě proto, že se ohlásí (7.12)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "how",
+          "q": {
+            "en": "How do you get the disc to the spot you are restarting from?",
+            "cs": "Jak disk dopravíš na místo, odkud rozehráváš?"
+          },
+          "rules": ["8.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Carry it there at walking pace or faster",
+                "cs": "Doneseš ho tam chůzí nebo rychleji"
+              },
+              "ok": true,
+              "why": {
+                "en": "8.5 — moving the disc to the correct spot must happen at walking pace or faster; dawdling is a delay.",
+                "cs": "8.5 — přesun disku na správné místo musí být chůzí nebo rychleji; loudání je zdržování."
+              }
+            },
+            {
+              "t": {
+                "en": "Take your time — the count cannot start yet anyway",
+                "cs": "V klidu — stall stejně ještě nemůže běžet"
+              },
+              "why": {
+                "en": "True that the count has not started, but 8.5 still obliges you to move at walking pace or faster.",
+                "cs": "Stall opravdu neběží, ale 8.5 tě stejně zavazuje jít chůzí nebo rychleji."
+              }
+            },
+            {
+              "t": {
+                "en": "Throw it to a team-mate already standing on the brick",
+                "cs": "Hodíš ho spoluhráči, co už stojí na bricku"
+              },
+              "why": {
+                "en": "Play has not restarted yet — there is no pass to make until the pivot is set at the chosen spot.",
+                "cs": "Hra ještě nezačala — dokud není pivot na zvoleném místě, není co přihrávat."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "level": 1,
+      "topic": {
+        "en": "The pull",
+        "cs": "Pull"
+      },
+      "title": {
+        "en": "Your teammate drops the pull",
+        "cs": "Spoluhráč upustí pull"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the nearest teammate of the catcher",
+        "cs": "nejbližší spoluhráč chytajícího"
+      },
+      "view": [-2, -4.5, 104, 46],
+      "dur": 7.5,
+      "qAt": 5.2,
+      "actors": [
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 91, 18.5], [1, 88, 18.5], [7.5, 60, 17]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 86, 12], [1.4, 84, 12], [5, 55, 13], [7.5, 40, 15]]
+        },
+        {
+          "id": "D3",
+          "team": "def",
+          "label": "D3",
+          "kf": [[0, 86, 25], [1.4, 84, 25], [7.5, 52, 22]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 18, 22], [1.4, 18, 22], [5, 27, 18], [7.5, 29, 17]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 18, 10], [1.4, 20, 10], [3.2, 34, 13], [4.6, 33, 14.6], [7.5, 33, 15]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 18, 16], [1.4, 18, 16], [7.5, 26, 12]]
+        }
+      ],
+      "disc": {
+        "kf": [
+          [0, 88, 18.5],
+          [1, 87, 18.5],
+          [2.4, 62, 15.5],
+          [3.6, 34.6, 12.6],
+          [3.95, 33.8, 13.4],
+          [4.3, 33.2, 14.2],
+          [4.7, 32.4, 15.4]
+        ],
+        "downAt": 4.7
+      },
+      "fx": [
+        {
+          "t": 3.7,
+          "type": "flash",
+          "x": 34.4,
+          "y": 12.8
+        },
+        {
+          "t": 3.9,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "O2",
+          "text": {
+            "en": "…!",
+            "cs": "…!"
+          },
+          "style": "count"
+        },
+        {
+          "t": 5,
+          "type": "mark",
+          "x": 32.4,
+          "y": 15.4,
+          "kind": "x",
+          "label": {
+            "en": "disc down",
+            "cs": "disk na zemi"
+          }
+        },
+        {
+          "t": 5.4,
+          "type": "bubble",
+          "dur": 2.2,
+          "actor": "D2",
+          "text": {
+            "en": "TURNOVER!",
+            "cs": "TURNOVER!"
+          },
+          "style": "call"
+        }
+      ],
+      "situation": {
+        "en": "Your teammate attacks the pull in the air, gets fingers on it — and bobbles it to the ground. The other team starts jogging towards the disc.",
+        "cs": "Spoluhráč jde po pullu ve vzduchu, dostane na něj prsty — a upustí ho na zem. Soupeř se rozbíhá k disku."
+      },
+      "question": {
+        "en": "What is the right ruling?",
+        "cs": "Jak je to správně?"
+      },
+      "explain": {
+        "en": "If any offensive player touches the pull before it hits the ground and the offence fails to establish possession, it is a turnover — the “dropped pull” (7.8, 13.1.4). The defence simply picks the disc up where it stopped (13.7) and plays on. If the disc had landed untouched, the offence keeps it wherever it stops (7.10).",
+        "cs": "Pokud se kterýkoli útočník dotkne pullu před dopadem a útok nezíská držení, je to ztráta — „dropped pull“ (7.8, 13.1.4). Obrana prostě zvedne disk tam, kde se zastavil (13.7), a hraje se dál. Kdyby disk dopadl bez teče, útok si ho nechává tam, kde zůstane ležet (7.10)."
+      },
+      "note": {
+        "en": "Same logic during play: a bobbled catch that hits the ground is simply a “down” turnover (13.1.1). Signal it calmly — arm sweeping down (#8 disc down, #13 turnover) — and transition to defence.",
+        "cs": "Stejná logika platí i ve hře: zbrklé chycení, které skončí na zemi, je prostě ztráta „down“ (13.1.1). V klidu to signalizuj (#8 disk na zemi, #13 ztráta) a přepni do obrany."
+      },
+      "rules": ["7.8", "13.1.4", "13.7"],
+      "signals": [8, 13],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "A team-mate touched the pull in the air and it hit the ground. What is it?",
+            "cs": "Spoluhráč se pullu dotkl ve vzduchu a disk spadl na zem. Co to je?"
+          },
+          "rules": ["7.8", "13.1.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "Turnover — the offence touched it and failed to establish possession",
+                "cs": "Turnover — útok se disku dotkl a nezískal držení"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.8 / 13.1.4 — the classic “dropped pull”: touch it in the air, fail to catch it, lose it.",
+                "cs": "7.8 / 13.1.4 — klasický „dropped pull“: dotkneš se ve vzduchu, nechytíš, ztrácíš disk."
+              }
+            },
+            {
+              "t": {
+                "en": "Offence keeps it where the disc stopped",
+                "cs": "Útok si ho nechá tam, kde disk zastavil"
+              },
+              "why": {
+                "en": "That is the untouched branch (7.10) — a pull nobody touches belongs to the offence where it stops.",
+                "cs": "To je větev bez doteku (7.10) — pull, kterého se nikdo nedotkne, patří útoku tam, kde zastaví."
+              }
+            },
+            {
+              "t": {
+                "en": "Offence keeps it, played from the brick",
+                "cs": "Útok si ho nechá a hraje z bricku"
+              },
+              "why": {
+                "en": "The brick only exists for a pull that goes out of bounds untouched (7.12).",
+                "cs": "Brick existuje jen pro pull, který skončí v autu bez doteku (7.12)."
+              }
+            },
+            {
+              "t": {
+                "en": "The pull is re-taken",
+                "cs": "Pull se opakuje"
+              },
+              "why": {
+                "en": "Nothing in the rules re-takes a pull for an offensive drop; re-pulls come from offside/false-start remedies only.",
+                "cs": "Nic v pravidlech kvůli dropu útoku pull neopakuje; opakování patří jen k nápravám offside/false start."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Who has the disc now?",
+            "cs": "Kdo má teď disk?"
+          },
+          "rules": ["13.1.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "The defence — they are now the offence",
+                "cs": "Obrana — od teď je z ní útok"
+              },
+              "ok": true,
+              "why": {
+                "en": "A turnover swaps the roles immediately (13.1.4).",
+                "cs": "Turnover okamžitě prohodí role (13.1.4)."
+              }
+            },
+            {
+              "t": {
+                "en": "Whoever picks it up first, either team",
+                "cs": "Kdo ho zvedne první, jedno ze kterého týmu"
+              },
+              "why": {
+                "en": "Possession after a turnover belongs to the team that did not turn it over — it is not a race.",
+                "cs": "Držení po turnoveru patří týmu, který ho nezpůsobil — není to závod."
+              }
+            },
+            {
+              "t": {
+                "en": "The offence, but they must walk it to the brick first",
+                "cs": "Útok, ale musí ho nejdřív donést na brick"
+              },
+              "why": {
+                "en": "The offence lost it — there is no brick and no second chance after a dropped pull (7.8).",
+                "cs": "Útok o disk přišel — po dropnutém pullu není žádný brick ani druhá šance (7.8)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Where do they play it from?",
+            "cs": "Odkud se hraje?"
+          },
+          "rules": ["13.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "Where the disc came to rest",
+                "cs": "Tam, kde disk zastavil"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.7 — after a turnover the disc is picked up where it stopped.",
+                "cs": "13.7 — po turnoveru se disk zvedá tam, kde zastavil."
+              }
+            },
+            {
+              "t": {
+                "en": "Where the team-mate touched it",
+                "cs": "Tam, kde se ho spoluhráč dotkl"
+              },
+              "why": {
+                "en": "The touch decides that it is a turnover, not where play resumes (13.7).",
+                "cs": "Dotek rozhoduje o tom, že jde o turnover, ne o místě pokračování (13.7)."
+              }
+            },
+            {
+              "t": {
+                "en": "At the nearest brick mark",
+                "cs": "Na nejbližší brick značce"
+              },
+              "why": {
+                "en": "Bricks belong to pull rules only (7.12), never to a turnover in open play.",
+                "cs": "Brick patří jen k pravidlům pro pull (7.12), nikdy k turnoveru ve hře."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "Is there a check, and what does the count do?",
+            "cs": "Je check a co dělá stall count?"
+          },
+          "rules": ["13.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "No check — pick it up and play on; the count starts fresh when a marker sets up",
+                "cs": "Žádný check — zvednout a hrát; počítání začne, až se postaví marker"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.7 — an uncontested turnover never stops play, so nothing is checked in.",
+                "cs": "13.7 — nesporný turnover hru nezastavuje, takže se nic necheckuje."
+              }
+            },
+            {
+              "t": {
+                "en": "Check required, count resumes at “stalling 1”",
+                "cs": "Check je nutný, počítá se od „stalling 1“"
+              },
+              "why": {
+                "en": "Stall resumptions belong to stoppages after a call (9.5.1) — a plain turnover is not one.",
+                "cs": "Obnovení stallu patří k zastavením po callu (9.5.1) — obyčejný turnover mezi ně nepatří."
+              }
+            },
+            {
+              "t": {
+                "en": "Check required, count resumes at max 6",
+                "cs": "Check je nutný, počítá se od max 6"
+              },
+              "why": {
+                "en": "Max 6 is the resumption for other calls after a stoppage (9.5.5); no call was made here.",
+                "cs": "Max 6 je obnovení po ostatních callech (9.5.5); tady žádný call nezazněl."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p3",
+      "level": 1,
+      "topic": {
+        "en": "The pull",
+        "cs": "Pull"
+      },
+      "title": {
+        "en": "They left early — offside",
+        "cs": "Vyběhli dřív — offside"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "a receiver on the goal line",
+        "cs": "hráč útoku na brankové čáře"
+      },
+      "view": [-2, -4.5, 104, 46],
+      "dur": 8.2,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 91, 18.5], [1.2, 87.5, 18.5], [8.2, 80, 18.5]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 82, 10], [0.7, 82, 10], [1.05, 79.6, 10], [8.2, 58, 12]]
+        },
+        {
+          "id": "D3",
+          "team": "def",
+          "label": "D3",
+          "kf": [[0, 82, 26], [1.3, 82, 26], [8.2, 62, 24]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 18, 22], [1.3, 18, 22], [3, 24, 20], [8.2, 26, 19]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [
+            [0, 18, 12],
+            [1.3, 20, 12],
+            [3, 32, 14.5],
+            [3.4, 33.5, 15],
+            [4.6, 37, 18.5],
+            [8.2, 37, 18.5]
+          ]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 18, 28], [1.3, 18, 28], [8.2, 28, 26]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 90, 18.5], [1.2, 89, 18.5], [2.4, 64, 16], [3.4, 46, 14.5], [4.4, 36, 14]],
+        "downAt": 4.4
+      },
+      "fx": [
+        {
+          "t": 1.15,
+          "type": "mark",
+          "x": 79.6,
+          "y": 10,
+          "kind": "x",
+          "label": {
+            "en": "over the line before the release",
+            "cs": "za čárou před výhozem"
+          }
+        },
+        {
+          "t": 3.9,
+          "type": "bubble",
+          "dur": 1.8,
+          "actor": "O1",
+          "text": {
+            "en": "OFFSIDE!",
+            "cs": "OFFSIDE!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5.4,
+          "type": "mark",
+          "x": 36,
+          "y": 18.5,
+          "kind": "target",
+          "labelAbove": true,
+          "label": {
+            "en": "resume as if brick was called — no check",
+            "cs": "hraje se jako po bricku — bez checku"
+          }
+        },
+        {
+          "t": 5.8,
+          "type": "arrow",
+          "x1": 36,
+          "y1": 14.6,
+          "x2": 36,
+          "y2": 17.2
+        }
+      ],
+      "situation": {
+        "en": "Just before the pull is released, a defender’s feet cross their goal line. The pull is now floating down toward your teammate, who is set to catch it. You saw the offside clearly.",
+        "cs": "Těsně před vypuštěním pullu překročí jeden obránce chodidly svou brankovou čáru. Pull se teď snáší k tvému spoluhráči, který se ho chystá chytit. Offside jsi viděl jasně."
+      },
+      "question": {
+        "en": "What is the correct way to use the offside call?",
+        "cs": "Jak správně využít hlášku offside?"
+      },
+      "explain": {
+        "en": "Offside (defenders’ feet not behind the vertical plane of their goal line until the release, 7.4) is the offence’s call — and it must be made before your team touches the disc (7.5). The remedy: let the pull land untouched, then resume play exactly as if a brick had been called — from the brick mark, no check required (7.5.2). Touch the disc first and the call is gone; a drop would even be a turnover (7.8).",
+        "cs": "Offside (chodidla obránců nejsou do vypuštění za svislou rovinou jejich brankové čáry, 7.4) hlásí útok — a musí to stihnout dřív, než se váš tým disku dotkne (7.5). Řešení: nech pull dopadnout bez teče a pak se hraje přesně jako po hlášce brick — z brick marku, bez checku (7.5.2). Jakmile se disku dotknete, hláška padá; upuštění by dokonce byla ztráta (7.8)."
+      },
+      "note": {
+        "en": "The mirror call belongs to the defence: a “false start” (offence changing position on the line before the release, 7.3) — there the thrower sets a pivot per 7.9–7.12 and play restarts like after a time-out (7.5.1). Signal offside/false start with #15.",
+        "cs": "Zrcadlová hláška patří obraně: „false start“ (útok před vypuštěním změní postavení na čáře, 7.3) — tam si házeč založí pivot podle 7.9–7.12 a hra se rozjede jako po time-outu (7.5.1). Offside/false start signalizuj #15."
+      },
+      "rules": ["7.4", "7.5.2", "7.12"],
+      "signals": [15],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "Defenders crossed their goal line before the release. Whose call is it, and when?",
+            "cs": "Obránci překročili svou brankovou čáru před vypuštěním. Čí je to call a kdy musí zaznít?"
+          },
+          "rules": ["7.4", "7.5.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yours — the offence — and it must come before your team touches the disc",
+                "cs": "Tvůj — útoku — a musí zaznít dřív, než se tvůj tým disku dotkne"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.4 / 7.5 — offside is the receiving team’s call and dies the moment you touch the disc.",
+                "cs": "7.4 / 7.5 — offside je call přijímajícího týmu a zaniká ve chvíli, kdy se disku dotkneš."
+              }
+            },
+            {
+              "t": {
+                "en": "Yours, any time before your first pass",
+                "cs": "Tvůj, kdykoli před první přihrávkou"
+              },
+              "why": {
+                "en": "Touching the disc — not throwing it — is the deadline (7.5).",
+                "cs": "Hranicí je dotek disku, ne přihrávka (7.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "Either team may call it",
+                "cs": "Může ho zavolat kterýkoli tým"
+              },
+              "why": {
+                "en": "The defence has the mirror call — false start against the offence (7.3) — but offside is yours.",
+                "cs": "Obrana má zrcadlový call — false start proti útoku (7.3) — ale offside je tvůj."
+              }
+            },
+            {
+              "t": {
+                "en": "Yours, but only after the pull lands",
+                "cs": "Tvůj, ale až po dopadu pullu"
+              },
+              "why": {
+                "en": "You may call it as soon as you see it; waiting only risks a team-mate touching the disc first (7.5).",
+                "cs": "Můžeš ho zavolat hned, jak to uvidíš; čekáním jen riskuješ, že se disku dotkne spoluhráč (7.5)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "You call it correctly. What must happen to the pull?",
+            "cs": "Zavoláš to správně. Co se musí stát s pullem?"
+          },
+          "rules": ["7.5.2", "7.8"],
+          "opts": [
+            {
+              "t": {
+                "en": "Let it land untouched — then play resumes as if a brick had been called",
+                "cs": "Nechat ho dopadnout bez doteku — pak se pokračuje, jako by byl volán brick"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.5.2 — the remedy is a brick-style restart, and it only survives if nobody touches the disc.",
+                "cs": "7.5.2 — nápravou je restart jako po bricku a platí jen tehdy, když se disku nikdo nedotkne."
+              }
+            },
+            {
+              "t": {
+                "en": "Catch it and play on from there with a free pass",
+                "cs": "Chytit ho a hrát odtud s volnou přihrávkou"
+              },
+              "why": {
+                "en": "Touching the disc cancels the call entirely (7.5) — and a drop would even be a turnover (7.8).",
+                "cs": "Dotek disku call úplně ruší (7.5) — a drop by dokonce byl turnover (7.8)."
+              }
+            },
+            {
+              "t": {
+                "en": "The pull is taken again",
+                "cs": "Pull se opakuje"
+              },
+              "why": {
+                "en": "Offside is remedied by the brick-style restart, not by re-pulling (7.5.2).",
+                "cs": "Offside se napravuje restartem jako po bricku, ne opakováním pullu (7.5.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Where do you put it into play?",
+            "cs": "Odkud disk uvedeš do hry?"
+          },
+          "rules": ["7.5.2", "7.12"],
+          "opts": [
+            {
+              "t": {
+                "en": "From the brick mark closest to your defending end zone",
+                "cs": "Z brick marku nejblíž tvé bráněné endzóně"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.5.2 — exactly as if a brick had been called (7.12).",
+                "cs": "7.5.2 — přesně jako by byl volán brick (7.12)."
+              }
+            },
+            {
+              "t": {
+                "en": "Where the pull crossed the perimeter line",
+                "cs": "Tam, kde pull protnul obvodovou čáru"
+              },
+              "why": {
+                "en": "That is the ordinary out-of-bounds pull choice (7.12) — the offside remedy is the brick specifically.",
+                "cs": "To je běžná volba u pullu do autu (7.12) — nápravou offside je konkrétně brick."
+              }
+            },
+            {
+              "t": {
+                "en": "Where the pull came to rest",
+                "cs": "Tam, kde pull zastavil"
+              },
+              "why": {
+                "en": "That is the untouched in-bounds branch (7.10), not the offside remedy.",
+                "cs": "To je větev pro nedotčený pull v hřišti (7.10), ne náprava offside."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "Does the restart need a check?",
+            "cs": "Vyžaduje restart check?"
+          },
+          "rules": ["7.5.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "No check — you simply put it into play from the brick",
+                "cs": "Žádný check — prostě uvedeš disk do hry z bricku"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.5.2 — play resumes as after a brick, and a brick restart needs no check.",
+                "cs": "7.5.2 — pokračuje se jako po bricku a restart po bricku check nepotřebuje."
+              }
+            },
+            {
+              "t": {
+                "en": "Check required, count starts at “stalling 1”",
+                "cs": "Check je nutný, počítá se od „stalling 1“"
+              },
+              "why": {
+                "en": "Stall resumption numbers apply after a stoppage during play (9.5.1), not to a pull restart.",
+                "cs": "Čísla pro obnovení stallu platí po zastavení během hry (9.5.1), ne pro restart po pullu."
+              }
+            },
+            {
+              "t": {
+                "en": "Check required, count starts at max 6",
+                "cs": "Check je nutný, počítá se od max 6"
+              },
+              "why": {
+                "en": "Max 6 is the generic post-call resumption (9.5.5); nothing here is a mid-play stoppage.",
+                "cs": "Max 6 je obecné obnovení po callu (9.5.5); tady o zastavení hry nejde."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p4",
+      "level": 1,
+      "topic": {
+        "en": "The pull",
+        "cs": "Pull"
+      },
+      "title": {
+        "en": "It rolls out through your end zone",
+        "cs": "Vykutálí se přes vaši endzónu"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the handler picking up the pull",
+        "cs": "handler, který jde pro pull"
+      },
+      "view": [-2, -4.5, 104, 46],
+      "dur": 8.4,
+      "qAt": 6,
+      "actors": [
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 91, 18.5], [1, 87, 18.5], [8.4, 72, 18]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 86, 10], [1.4, 84, 10], [8.4, 56, 12]]
+        },
+        {
+          "id": "D3",
+          "team": "def",
+          "label": "D3",
+          "kf": [[0, 86, 27], [1.4, 84, 27], [8.4, 60, 25]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 18, 22], [1.4, 18, 22], [4.5, 20, 15], [6.5, 17, 7], [8.4, 17, 7]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 18, 10], [1.4, 20, 10], [8.4, 30, 12]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 18, 28], [1.4, 18, 28], [8.4, 32, 26]]
+        }
+      ],
+      "disc": {
+        "kf": [
+          [0, 90, 18.5],
+          [1, 89, 18.5],
+          [2.4, 58, 13],
+          [3.2, 30, 14],
+          [4.2, 22, 10],
+          [5, 14.5, 6],
+          [5.7, 10.5, 1.5],
+          [6.05, 9, -1.4]
+        ],
+        "downAt": 3.25
+      },
+      "fx": [
+        {
+          "t": 3.3,
+          "type": "mark",
+          "x": 30,
+          "y": 14,
+          "kind": "x",
+          "label": {
+            "en": "landed in-bounds",
+            "cs": "dopadl do hřiště"
+          }
+        },
+        {
+          "t": 5.85,
+          "type": "mark",
+          "x": 9.7,
+          "y": 0,
+          "kind": "x",
+          "label": {
+            "en": "crossed inside your end zone",
+            "cs": "přešel ve vaší endzóně"
+          }
+        },
+        {
+          "t": 6.7,
+          "type": "mark",
+          "x": 18,
+          "y": 1.4,
+          "kind": "target",
+          "label": {
+            "en": "nearest central-zone spot",
+            "cs": "nejbližší místo centrální zóny"
+          }
+        },
+        {
+          "t": 6.9,
+          "type": "arrow",
+          "x1": 10.5,
+          "y1": 0.8,
+          "x2": 16.6,
+          "y2": 1.3
+        }
+      ],
+      "situation": {
+        "en": "The pull lands in the central zone, then rolls untouched all the way back — through your defending end zone and out over the sideline there. Nobody touched it at any point.",
+        "cs": "Pull dopadne do centrální zóny a pak se nedotčený kutálí zpátky — přes vaši bráněnou endzónu a tam přes postranní čáru do autu. Nikdo se ho ani nedotkl."
+      },
+      "question": {
+        "en": "Where do you establish the pivot?",
+        "cs": "Kde si založíš pivot?"
+      },
+      "explain": {
+        "en": "A pull that lands in-bounds and then rolls out untouched is played from where it first crossed the perimeter line (7.11) — but with one twist: if that spot lies in your defending end zone, the pivot moves to the nearest location in the central zone, so you are not pinned deep. Here that is the goal-line corner area nearest the crossing point. No brick, no check — walk it there at walking pace or faster (8.5).",
+        "cs": "Pull, který dopadne do hřiště a pak se nedotčený vykutálí, se hraje z místa, kde poprvé přešel obvodovou čáru (7.11) — s jedním háčkem: pokud to místo leží ve vaší bráněné endzóně, pivot se posouvá na nejbližší místo centrální zóny, abyste nezůstali zamčení vzadu. Tady je to roh u brankové čáry nejblíž místu přechodu. Žádný brick, žádný check — dojdi tam minimálně rychlostí chůze (8.5)."
+      },
+      "note": {
+        "en": "Had the rolling disc brushed a teammate on the way out, you would play exactly at the crossing point — even deep in your end zone (7.11.1). Three pull endings, three spots: stays in → where it stops (7.10); rolls out → crossing point/central zone (7.11); flies straight out → crossing point or brick (7.12).",
+        "cs": "Kdyby kutálející se disk cestou ven škrtl o spoluhráče, hrálo by se přesně z místa přechodu — klidně hluboko ve vaší endzóně (7.11.1). Tři konce pullu, tři místa: zůstane ve hřišti → kde se zastaví (7.10); vykutálí se → místo přechodu/centrální zóna (7.11); letí rovnou do autu → místo přechodu, nebo brick (7.12)."
+      },
+      "rules": ["7.11", "7.11.1", "7.12", "7.10"],
+      "signals": [7],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The pull landed in bounds, then rolled out through your end zone untouched. Which spot governs?",
+            "cs": "Pull dopadl do hřiště a pak vyjel ven přes tvou endzónu, nikdo se ho nedotkl. Které místo rozhoduje?"
+          },
+          "rules": ["7.11", "7.12"],
+          "opts": [
+            {
+              "t": {
+                "en": "Where it first crossed the perimeter line",
+                "cs": "Tam, kde poprvé protnul obvodovou čáru"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.11 — a disc that lands in and rolls out is played from the crossing point. No brick option here.",
+                "cs": "7.11 — disk, který dopadne do hřiště a vyjede ven, se hraje z místa protnutí. Brick tady není."
+              }
+            },
+            {
+              "t": {
+                "en": "The brick, at your choice",
+                "cs": "Brick, podle tvé volby"
+              },
+              "why": {
+                "en": "The brick belongs to a pull that flies out without landing in bounds (7.12).",
+                "cs": "Brick patří pullu, který skončí v autu, aniž by dopadl do hřiště (7.12)."
+              }
+            },
+            {
+              "t": {
+                "en": "Where it came to rest out of bounds",
+                "cs": "Tam, kde skončil v autu"
+              },
+              "why": {
+                "en": "Resting spots out of bounds never define the restart (7.11).",
+                "cs": "Místo, kde disk skončí v autu, restart nikdy neurčuje (7.11)."
+              }
+            },
+            {
+              "t": {
+                "en": "Where it first landed in bounds",
+                "cs": "Tam, kde poprvé dopadl do hřiště"
+              },
+              "why": {
+                "en": "Landing point matters only for a disc that stays in (7.10); once it rolls out, the crossing point rules.",
+                "cs": "Místo dopadu platí jen pro disk, který zůstane v hřišti (7.10); jakmile vyjede ven, rozhoduje místo protnutí."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "That crossing point lies inside your own end zone. Where is the pivot?",
+            "cs": "Místo protnutí leží uvnitř tvé vlastní endzóny. Kde bude pivot?"
+          },
+          "rules": ["7.11"],
+          "opts": [
+            {
+              "t": {
+                "en": "At the nearest location in the central zone — on the goal line",
+                "cs": "Na nejbližším místě v centrální zóně — na brankové čáře"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.11 — a crossing point in your own end zone moves out to the nearest central-zone spot, so you are not pinned deep.",
+                "cs": "7.11 — místo protnutí ve tvé vlastní endzóně se posouvá na nejbližší bod centrální zóny, abys nezůstal zatlačený hluboko."
+              }
+            },
+            {
+              "t": {
+                "en": "Exactly at the crossing point, deep in your end zone",
+                "cs": "Přesně v místě protnutí, hluboko ve tvé endzóně"
+              },
+              "why": {
+                "en": "That is the touched-on-the-way-out branch (7.11.1) — if a team-mate brushes the rolling disc, you really do play it there.",
+                "cs": "To je větev s dotekem cestou ven (7.11.1) — když se rolujícího disku spoluhráč dotkne, hraješ opravdu odtud."
+              }
+            },
+            {
+              "t": {
+                "en": "Anywhere along your goal line you like",
+                "cs": "Kdekoli na tvé brankové čáře, kde chceš"
+              },
+              "why": {
+                "en": "It is the nearest point, not a free choice (7.11).",
+                "cs": "Je to nejbližší bod, ne volný výběr (7.11)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "How does play restart from there?",
+            "cs": "Jak se odtud pokračuje?"
+          },
+          "rules": ["8.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "No check — carry it there at walking pace or faster and set the pivot",
+                "cs": "Žádný check — donést disk chůzí nebo rychleji a postavit pivot"
+              },
+              "ok": true,
+              "why": {
+                "en": "8.5 — a pull restart needs no check; you just must not dawdle getting to the spot.",
+                "cs": "8.5 — restart po pullu check nepotřebuje; jen se nesmíš loudat na cestě k místu."
+              }
+            },
+            {
+              "t": {
+                "en": "Check required, count from “stalling 1”",
+                "cs": "Check je nutný, počítá se od „stalling 1“"
+              },
+              "why": {
+                "en": "That resumption follows an accepted defensive breach during play (9.5.1), not a pull.",
+                "cs": "Tohle obnovení následuje po uznaném prohřešku obrany během hry (9.5.1), ne po pullu."
+              }
+            },
+            {
+              "t": {
+                "en": "Check required, count from max 6",
+                "cs": "Check je nutný, počítá se od max 6"
+              },
+              "why": {
+                "en": "Max 6 is the generic post-stoppage number (9.5.5); a pull restart is not a stoppage.",
+                "cs": "Max 6 je obecné číslo po zastavení hry (9.5.5); restart po pullu zastavením není."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "Had a team-mate brushed the rolling disc on its way out, where would you play it from?",
+            "cs": "Kdyby se rolujícího disku cestou ven dotkl spoluhráč, odkud bys hrál?"
+          },
+          "rules": ["7.11.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "You would play exactly at the crossing point — even deep in your end zone",
+                "cs": "Hrál bys přesně z místa protnutí — i hluboko ve své endzóně"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.11.1 — touching it forfeits the move out to the central zone. Let rolling discs roll.",
+                "cs": "7.11.1 — dotekem přicházíš o posun do centrální zóny. Nech rolující disky rolovat."
+              }
+            },
+            {
+              "t": {
+                "en": "It would be a turnover",
+                "cs": "Byl by to turnover"
+              },
+              "why": {
+                "en": "Only touching a pull in the air and failing to catch it is a turnover (7.8); a disc on the ground is not.",
+                "cs": "Turnover je jen dotek pullu ve vzduchu bez chycení (7.8); disk na zemi turnover nezpůsobí."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — the pivot still moves to the goal line",
+                "cs": "Nic — pivot se stejně posune na brankovou čáru"
+              },
+              "why": {
+                "en": "7.11.1 exists precisely to remove that relief once you touch it.",
+                "cs": "7.11.1 existuje právě proto, aby ti tuhle úlevu po doteku vzala."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pl5",
+      "level": 1,
+      "topic": {
+        "en": "The pull",
+        "cs": "Pull"
+      },
+      "title": {
+        "en": "The pull lands in and stays",
+        "cs": "Pull dopadne do hřiště a zůstane"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the handler jogging to the disc",
+        "cs": "handler, který k disku doběhne"
+      },
+      "view": [-2, -4.5, 104, 46],
+      "dur": 6.8,
+      "qAt": 3.6,
+      "actors": [
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 80, 14], [3.6, 58, 15], [6.8, 44, 16]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 84, 24], [3.6, 64, 23], [6.8, 50, 22]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 16, 10], [3.6, 26, 8], [6.8, 30, 7]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 14, 22], [3, 30, 20.4], [3.6, 31.6, 20.2], [5, 33.4, 20.2], [6.8, 33.4, 20.2]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 86, 18], [1.9, 34, 20], [2.4, 34.2, 20], [6.8, 34.2, 20]],
+        "downAt": 2
+      },
+      "fx": [
+        {
+          "t": 2.2,
+          "type": "mark",
+          "x": 34.2,
+          "y": 20,
+          "kind": "x",
+          "label": {
+            "en": "landed in, never moved",
+            "cs": "dopadl v hřišti a nehnul se"
+          }
+        },
+        {
+          "t": 4.4,
+          "type": "mark",
+          "x": 34.2,
+          "y": 20,
+          "kind": "target",
+          "label": {
+            "en": "your pivot is here",
+            "cs": "tvůj pivot je tady"
+          },
+          "labelAbove": true
+        },
+        {
+          "t": 5.2,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "O1",
+          "text": {
+            "en": "no brick",
+            "cs": "žádný brick"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "The pull lands in the central zone, well short of the brick mark, and stops dead where it hit. Nobody touched it. You jog over to put it into play.",
+        "cs": "Pull dopadne v centrální zóně, hodně před brick markem, a zastaví přesně tam, kde dopadl. Nikdo se ho nedotkl. Doběhneš k němu, abys ho uvedl do hry."
+      },
+      "question": {
+        "en": "Where do you put it into play?",
+        "cs": "Odkud disk uvedeš do hry?"
+      },
+      "explain": {
+        "en": "A pull that lands in-bounds and stays in-bounds is played from exactly where it came to rest (7.10). There is no choice here — the brick option belongs only to a pull that goes out of bounds untouched (7.12), and the crossing-point rule only to one that rolls or is carried out (7.11). Walk to it at walking pace or faster and set your pivot (8.5); no check is needed.",
+        "cs": "Pull, který dopadne do hřiště a v hřišti zůstane, se hraje přesně tam, kde zastavil (7.10). Volba tady není — brick patří jen pullu, který skončí v autu bez doteku (7.12), a pravidlo o protnutí čáry jen tomu, který vyjede nebo je vynesen ven (7.11). Dojdi k němu chůzí nebo rychleji a postav pivot (8.5); check není potřeba."
+      },
+      "note": {
+        "en": "Three pull endings, three spots: stays in → where it stops (7.10); rolls out → the crossing point, or the nearest central-zone spot if that is in your own end zone (7.11); flies out untouched → the crossing point or the brick, your choice (7.12).",
+        "cs": "Tři konce pullu, tři místa: zůstane v hřišti → kde zastaví (7.10); vyjede ven → místo protnutí, nebo nejbližší bod centrální zóny, když je to ve tvé endzóně (7.11); letí ven bez doteku → místo protnutí nebo brick, tvoje volba (7.12)."
+      },
+      "rules": ["7.10", "7.11", "7.12", "8.5"],
+      "signals": [9],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The pull landed in-bounds and stopped in-bounds, untouched. Which spot governs?",
+            "cs": "Pull dopadl do hřiště a v hřišti zastavil, nikdo se ho nedotkl. Které místo rozhoduje?"
+          },
+          "rules": ["7.10"],
+          "opts": [
+            {
+              "t": {
+                "en": "Where it came to rest",
+                "cs": "Tam, kde zastavil"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.10 — a pull that stays in-bounds is played from where it stops. No choice, no brick.",
+                "cs": "7.10 — pull, který zůstane v hřišti, se hraje tam, kde zastaví. Žádná volba, žádný brick."
+              }
+            },
+            {
+              "t": {
+                "en": "Either there or the brick, your choice",
+                "cs": "Buď tam, nebo brick, tvoje volba"
+              },
+              "why": {
+                "en": "The brick option exists only for a pull that goes out of bounds untouched (7.12).",
+                "cs": "Brick existuje jen pro pull, který skončí v autu bez doteku (7.12)."
+              }
+            },
+            {
+              "t": {
+                "en": "Where it first hit the ground",
+                "cs": "Tam, kde poprvé dopadl"
+              },
+              "why": {
+                "en": "Landing point matters only if the disc then leaves the field (7.11); here it stopped where it lies.",
+                "cs": "Místo dopadu platí jen když disk pak opustí hřiště (7.11); tady zastavil tam, kde leží."
+              }
+            },
+            {
+              "t": {
+                "en": "The nearest point on your goal line",
+                "cs": "Nejbližší bod na tvé brankové čáře"
+              },
+              "why": {
+                "en": "Goal-line relocation belongs to possession gained in an end zone (14.3, 13.11).",
+                "cs": "Posun na brankovou čáru patří k držení získanému v endzóně (14.3, 13.11)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "how",
+          "q": {
+            "en": "How do you get play started from there?",
+            "cs": "Jak odtud rozehraješ?"
+          },
+          "rules": ["8.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Walk or run to the disc, set the pivot, play — no check",
+                "cs": "Dojít nebo doběhnout k disku, postavit pivot, hrát — bez checku"
+              },
+              "ok": true,
+              "why": {
+                "en": "8.5 — get there at walking pace or faster; a pull restart needs no check.",
+                "cs": "8.5 — dostaň se tam chůzí nebo rychleji; restart po pullu check nepotřebuje."
+              }
+            },
+            {
+              "t": {
+                "en": "Signal your choice of spot first",
+                "cs": "Nejdřív signalizovat volbu místa"
+              },
+              "why": {
+                "en": "There is nothing to signal — you have no choice to announce (7.10). Signals belong to the brick (7.12) and the end-zone option (13.11).",
+                "cs": "Není co signalizovat — žádnou volbu neohlašuješ (7.10). Signály patří k bricku (7.12) a k volbě v endzóně (13.11)."
+              }
+            },
+            {
+              "t": {
+                "en": "Wait for the defence to be set, then check it in",
+                "cs": "Počkat, až je obrana postavená, a checknout"
+              },
+              "why": {
+                "en": "Checks belong to restarts after a stoppage (10.2.1); the pull is not one.",
+                "cs": "Checky patří k restartům po zastavení (10.2.1); pull mezi ně nepatří."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "When can a marker start counting on you?",
+            "cs": "Odkdy na tebe může marker počítat?"
+          },
+          "rules": ["8.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Once you have established the pivot at the disc",
+                "cs": "Až postavíš pivot u disku"
+              },
+              "ok": true,
+              "why": {
+                "en": "A count needs an established pivot; until then 8.5 is what obliges you to hurry.",
+                "cs": "Počítání potřebuje postavený pivot; do té doby tě ke spěchu zavazuje 8.5."
+              }
+            },
+            {
+              "t": {
+                "en": "From the moment the pull stops moving",
+                "cs": "Od chvíle, kdy pull přestane hrát"
+              },
+              "why": {
+                "en": "You may still be 30 metres away; nothing counts before the pivot exists.",
+                "cs": "Můžeš být ještě 30 metrů daleko; před existencí pivotu se nepočítá nic."
+              }
+            },
+            {
+              "t": {
+                "en": "From the moment you touch the disc",
+                "cs": "Od chvíle, kdy se disku dotkneš"
+              },
+              "why": {
+                "en": "Touching is not a pivot — the count starts once the pivot is set.",
+                "cs": "Dotek není pivot — počítání začíná, až pivot stojí."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pl6",
+      "level": 1,
+      "topic": {
+        "en": "The pull",
+        "cs": "Pull"
+      },
+      "title": {
+        "en": "They came off the line early",
+        "cs": "Vyběhli z čáry dřív"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the puller’s team-mate who saw it",
+        "cs": "spoluhráč pullera, který to viděl"
+      },
+      "view": [-2, -4.5, 104, 46],
+      "dur": 7,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 16, 10], [1.2, 16, 10], [2, 24, 9], [3.4, 32, 8], [7, 32, 8]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 16, 26], [1.6, 16, 26], [3.4, 24, 26], [7, 30, 25]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 84, 26], [3.4, 78, 26], [7, 62, 24]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 82, 14], [2.4, 80, 14], [3.4, 79, 14], [7, 64, 16]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 84, 18], [2.2, 50, 19], [3.2, 34, 20], [7, 34, 20]],
+        "downAt": 3.3
+      },
+      "fx": [
+        {
+          "t": 0.9,
+          "type": "mark",
+          "x": 18,
+          "y": 18.5,
+          "kind": "zone",
+          "r": 5,
+          "label": {
+            "en": "their goal line",
+            "cs": "jejich branková čára"
+          }
+        },
+        {
+          "t": 1.3,
+          "type": "flash",
+          "x": 16,
+          "y": 10
+        },
+        {
+          "t": 1.7,
+          "type": "bubble",
+          "dur": 1.3,
+          "actor": "D1",
+          "text": {
+            "en": "FALSE START!",
+            "cs": "FALSE START!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.6,
+          "type": "mark",
+          "x": 34,
+          "y": 20,
+          "kind": "target",
+          "label": {
+            "en": "their pivot, per the pull rules",
+            "cs": "jejich pivot podle pravidel pro pull"
+          }
+        },
+        {
+          "t": 5.6,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "D1",
+          "text": {
+            "en": "we set up anywhere",
+            "cs": "stavíme se, kam chceme"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "You are on the line about to pull. A receiver breaks forward off their goal line a clear half-second before the disc is released — an unfair head start. You call “false start” immediately.",
+        "cs": "Stojíš na čáře a chystáš se pullovat. Jeden z příjemců vyrazí ze své brankové čáry jasně půl sekundy před vypuštěním disku — nefér start. Okamžitě voláš „false start“."
+      },
+      "question": {
+        "en": "What does the false start call get you?",
+        "cs": "Co ti call „false start“ přinese?"
+      },
+      "explain": {
+        "en": "A false start is the mirror of offside: the receiving team changing position on the line before the release (7.3), and it is the pulling team’s call. It does not win you the disc — they still take possession under the ordinary pull rules (7.9–7.12) — but play then restarts as after a time-out (7.5.1), which means your team may set up anywhere it likes before the check. That is the whole remedy: their head start is cancelled because you get to re-position too.",
+        "cs": "False start je zrcadlem offsidu: přijímající tým změní pozici na čáře před vypuštěním disku (7.3) a volá ho pullující tým. Disk ti nezíská — držení mají dál podle běžných pravidel pro pull (7.9–7.12) — ale hra se pak restartuje jako po time-outu (7.5.1), což znamená, že se tvůj tým může před checkem postavit, kam chce. V tom je celá náprava: jejich výhoda z předběhnutí padá, protože se můžeš přestavit taky."
+      },
+      "note": {
+        "en": "Both line calls must come before the disc is touched by the receiving team, and both are about position at the moment of release: offside is the defence crossing their goal line early (7.4), false start is the offence leaving theirs (7.3). Signal both with #15.",
+        "cs": "Oba cally z čáry musí zaznít dřív, než se disku dotkne přijímající tým, a oba jsou o pozici v momentě vypuštění: offside je předčasné překročení brankové čáry obranou (7.4), false start je odchod útoku ze své (7.3). Oba signalizuj #15."
+      },
+      "rules": ["7.3", "7.5.1", "7.4", "7.10"],
+      "signals": [15, 21],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "A receiver leaves their goal line before the pull is released. What is that, and whose call?",
+            "cs": "Příjemce opustí svou brankovou čáru dřív, než je pull vypuštěný. Co to je a čí je to call?"
+          },
+          "rules": ["7.3", "7.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "A false start — the pulling team’s call",
+                "cs": "False start — call pullujícího týmu"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.3 — the receiving team changing position on the line before the release; the mirror of offside (7.4), which is the receivers’ call against the defence.",
+                "cs": "7.3 — přijímající tým mění pozici na čáře před vypuštěním; zrcadlo offsidu (7.4), který volají příjemci proti obraně."
+              }
+            },
+            {
+              "t": {
+                "en": "Offside — the pulling team’s call",
+                "cs": "Offside — call pullujícího týmu"
+              },
+              "why": {
+                "en": "Offside is the DEFENCE crossing their own goal line early, and it belongs to the receiving team (7.4).",
+                "cs": "Offside je předčasné překročení vlastní brankové čáry OBRANOU a patří přijímajícímu týmu (7.4)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — receivers may move as soon as the puller starts the motion",
+                "cs": "Nic — příjemci se mohou hýbat, jakmile puller začne pohyb"
+              },
+              "why": {
+                "en": "The line holds until the disc is released, not until the wind-up (7.3).",
+                "cs": "Čára platí do vypuštění disku, ne do nápřahu (7.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "A travel on the receiver",
+                "cs": "Travel na příjemce"
+              },
+              "why": {
+                "en": "Travel is about the thrower’s pivot (18.2); nobody has the disc yet.",
+                "cs": "Travel je o pivotu házeče (18.2); disk ještě nikdo nemá."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Does the call win you the disc?",
+            "cs": "Získá ti call disk?"
+          },
+          "rules": ["7.10"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — they still take possession under the normal pull rules",
+                "cs": "Ne — držení mají dál podle běžných pravidel pro pull"
+              },
+              "ok": true,
+              "why": {
+                "en": "The remedy is about position, not possession: they play the pull per 7.9–7.12 as usual.",
+                "cs": "Náprava je o pozici, ne o držení: pull hrají podle 7.9–7.12 jako obvykle."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — your team gets the disc where the pull stopped",
+                "cs": "Ano — tvůj tým dostane disk tam, kde pull zastavil"
+              },
+              "why": {
+                "en": "No line call transfers possession; that would make a false start worse than a turnover (7.3).",
+                "cs": "Žádný call z čáry nepředává držení; z false startu by to udělalo něco horšího než turnover (7.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — the pull is taken again",
+                "cs": "Ano — pull se opakuje"
+              },
+              "why": {
+                "en": "Re-pulling is not the remedy; play restarts from where the pull left the disc (7.5.1).",
+                "cs": "Opakování pullu není nápravou; hra se restartuje odtud, kde pull disk nechal (7.5.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "So what actually changes?",
+            "cs": "Co se tedy vlastně změní?"
+          },
+          "rules": ["7.5.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Play restarts as after a time-out — your team may set up anywhere, then check",
+                "cs": "Hra se restartuje jako po time-outu — tvůj tým se může postavit kamkoli, pak check"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.5.1 — that free re-position is exactly what cancels their head start.",
+                "cs": "7.5.1 — právě tohle volné přestavení ruší jejich výhodu z předběhnutí."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing changes; the call is a warning only",
+                "cs": "Nic se nemění; call je jen napomenutí"
+              },
+              "why": {
+                "en": "The rules do not do warnings here — there is a concrete restart (7.5.1).",
+                "cs": "Pravidla tady napomenutí neznají — restart je konkrétní (7.5.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Their receivers must return to the goal line and wait 10 seconds",
+                "cs": "Jejich příjemci se musí vrátit na brankovou čáru a čekat 10 sekund"
+              },
+              "why": {
+                "en": "There is no timed penalty anywhere in the rules (7.5.1).",
+                "cs": "Žádný časový trest v pravidlech neexistuje (7.5.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "how",
+          "q": {
+            "en": "When does the call have to be made?",
+            "cs": "Kdy musí call zaznít?"
+          },
+          "rules": ["7.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "Before the receiving team touches the disc",
+                "cs": "Dřív, než se přijímající tým dotkne disku"
+              },
+              "ok": true,
+              "why": {
+                "en": "Both line calls die at first touch — exactly as offside does (7.4, 7.5).",
+                "cs": "Oba cally z čáry zanikají prvním dotekem — přesně jako offside (7.4, 7.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "Any time before their first pass",
+                "cs": "Kdykoli před jejich první přihrávkou"
+              },
+              "why": {
+                "en": "The deadline is the touch, not the throw (7.5).",
+                "cs": "Hranicí je dotek, ne hod (7.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "At the end of the point, to the captains",
+                "cs": "Po skončení bodu, kapitánům"
+              },
+              "why": {
+                "en": "Calls are immediate (15.8); a post-hoc complaint changes nothing.",
+                "cs": "Cally jsou okamžité (15.8); stížnost po akci nic nemění."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pl7",
+      "level": 1,
+      "topic": {
+        "en": "The pull",
+        "cs": "Pull"
+      },
+      "title": {
+        "en": "You catch the pull deep in your own end zone",
+        "cs": "Chytíš pull hluboko ve vlastní endzóně"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the receiver who caught it",
+        "cs": "receiver, který chytil"
+      },
+      "view": [-2, -4.5, 104, 46],
+      "dur": 7,
+      "qAt": 3.8,
+      "actors": [
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 82, 14], [3.8, 58, 15], [7, 40, 16]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 84, 24], [3.8, 62, 23], [7, 44, 22]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 18, 10], [3.8, 28, 9], [7, 34, 8]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 18, 24], [2.6, 11, 21], [3.4, 9, 20.4], [3.8, 9, 20.4], [7, 9, 20.4]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 86, 18], [3.2, 9.4, 20], [7, 9.4, 20]]
+      },
+      "fx": [
+        {
+          "t": 3.4,
+          "type": "bubble",
+          "dur": 1.1,
+          "actor": "O1",
+          "text": {
+            "en": "caught",
+            "cs": "chyceno"
+          },
+          "style": "count"
+        },
+        {
+          "t": 4.8,
+          "type": "mark",
+          "x": 9.4,
+          "y": 20,
+          "kind": "target",
+          "label": {
+            "en": "pivot right here",
+            "cs": "pivot přesně tady"
+          }
+        },
+        {
+          "t": 5.8,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "O1",
+          "text": {
+            "en": "no brick, no relief",
+            "cs": "žádný brick, žádná úleva"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "The pull hangs up and drops short. You run back and catch it cleanly, eight metres deep inside the end zone you are defending, and establish possession there.",
+        "cs": "Pull se zastaví ve vzduchu a padá krátce. Doběhneš zpátky, čistě ho chytíš osm metrů hluboko v endzóně, kterou brániš, a získáš tam držení."
+      },
+      "question": {
+        "en": "Where do you have to play it from?",
+        "cs": "Odkud musíš hrát?"
+      },
+      "explain": {
+        "en": "From exactly where you caught it. If an offensive player catches the pull and establishes possession, they must establish the pivot point at the location nearest to where possession is established — explicitly “even if that pivot point is in their defending end zone” (7.9). Catching it costs you the relief the other pull endings give: no brick, no move out to the central zone.",
+        "cs": "Přesně z místa, kde jsi chytil. Když hráč útoku pull chytí a získá držení, musí postavit pivot na místě nejblíž tomu, kde držení získal — výslovně „i když je ten pivot v jeho bráněné endzóně“ (7.9). Chycením přicházíš o úlevu, kterou dávají ostatní konce pullu: žádný brick, žádný posun do centrální zóny."
+      },
+      "note": {
+        "en": "That is the trade-off nobody teaches: catching a deep pull looks tidy, but letting it land gives you options — untouched to the ground is where it stops (7.10), rolling out gets you the central zone (7.11), and straight out gets you the brick (7.12).",
+        "cs": "To je kompromis, který nikdo neučí: chytit hluboký pull vypadá čistě, ale nechat ho dopadnout ti dá možnosti — nedotčený na zem znamená místo, kde zastaví (7.10), vyjede ven a máš centrální zónu (7.11), letí rovnou ven a máš brick (7.12)."
+      },
+      "rules": ["7.9", "7.10", "7.12"],
+      "signals": [9],
+      "steps": [
+        {
+          "k": "where",
+          "q": {
+            "en": "You caught the pull and established possession eight metres deep in the end zone you defend. Where is the pivot?",
+            "cs": "Chytil jsi pull a získal držení osm metrů hluboko v endzóně, kterou brániš. Kde bude pivot?"
+          },
+          "rules": ["7.9"],
+          "opts": [
+            {
+              "t": {
+                "en": "Right where you established possession — even that deep in your own end zone",
+                "cs": "Přesně tam, kde jsi získal držení — i takhle hluboko ve vlastní endzóně"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.9 — the pivot goes at the location nearest to where possession is established, explicitly “even if that pivot point is in their defending end zone”.",
+                "cs": "7.9 — pivot patří na místo nejblíž tomu, kde bylo získáno držení, výslovně „i když je ten pivot v bráněné endzóně“."
+              }
+            },
+            {
+              "t": {
+                "en": "At the nearest point on your goal line",
+                "cs": "Na nejbližším bodě tvé brankové čáry"
+              },
+              "why": {
+                "en": "That relief is for a disc that ROLLS out through your end zone (7.11), not for one you caught.",
+                "cs": "Tahle úleva patří disku, který tvou endzónou VYJEDE ven (7.11), ne tomu, který jsi chytil."
+              }
+            },
+            {
+              "t": {
+                "en": "At the brick, your choice",
+                "cs": "Na bricku, podle tvé volby"
+              },
+              "why": {
+                "en": "The brick is for a pull that goes out untouched (7.12); you touched it, deliberately.",
+                "cs": "Brick je pro pull, který skončí v autu bez doteku (7.12); ty ses ho dotkl, schválně."
+              }
+            },
+            {
+              "t": {
+                "en": "Wherever the disc would have stopped had you let it land",
+                "cs": "Tam, kde by disk zastavil, kdybys ho nechal dopadnout"
+              },
+              "why": {
+                "en": "That counterfactual is 7.10, and it is exactly what catching it gave up.",
+                "cs": "Tahle „co kdyby“ je 7.10 a přesně o ni jsi chycením přišel."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "So what did catching it cost you?",
+            "cs": "Co tě tedy chycení stálo?"
+          },
+          "rules": ["7.10", "7.12"],
+          "opts": [
+            {
+              "t": {
+                "en": "Every option the other pull endings give you",
+                "cs": "Všechny možnosti, které dávají ostatní konce pullu"
+              },
+              "ok": true,
+              "why": {
+                "en": "Untouched to the ground = where it stops (7.10); rolls out = central zone (7.11); straight out = crossing point or brick (7.12). Catch it and you get none of those.",
+                "cs": "Nedotčený na zem = kde zastaví (7.10); vyjede ven = centrální zóna (7.11); rovnou ven = místo protnutí nebo brick (7.12). Když chytíš, nemáš nic z toho."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — catching is always the safe choice",
+                "cs": "Nic — chytit je vždycky bezpečná volba"
+              },
+              "why": {
+                "en": "Safe from a drop, yes; but it pins you deep (7.9).",
+                "cs": "Bezpečné proti dropu ano; ale zatlačí tě to hluboko (7.9)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only the brick — the other spots still apply",
+                "cs": "Jen brick — ostatní místa platí dál"
+              },
+              "why": {
+                "en": "7.9 governs a caught pull completely, and it has no alternatives.",
+                "cs": "7.9 řídí chycený pull úplně a žádné alternativy nemá."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "When can their marker start counting on you?",
+            "cs": "Odkdy na tebe může jejich marker počítat?"
+          },
+          "rules": ["9.3.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Once your pivot is established at that location",
+                "cs": "Jakmile stojí tvůj pivot na tom místě"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.3.1 — a count needs live play or an established pivot after a turnover; the pull restart is the same shape.",
+                "cs": "9.3.1 — count vyžaduje živou hru nebo postavený pivot po turnoveru; restart po pullu má stejný tvar."
+              }
+            },
+            {
+              "t": {
+                "en": "From the moment you caught it",
+                "cs": "Od chvíle, kdy jsi chytil"
+              },
+              "why": {
+                "en": "Catching is not a pivot; you still have to establish one (7.9, 9.3.1).",
+                "cs": "Chycení není pivot; ten musíš teprve postavit (7.9, 9.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only once you leave the end zone",
+                "cs": "Až když opustíš endzónu"
+              },
+              "why": {
+                "en": "Nothing lets you carry a caught pull out of the end zone (7.9).",
+                "cs": "Nic ti nedovolí odnést chycený pull z endzóny (7.9)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pl8",
+      "level": 1,
+      "topic": {
+        "en": "The pull",
+        "cs": "Pull"
+      },
+      "title": {
+        "en": "They start running early",
+        "cs": "Rozbíhají se dřív"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "a receiver on the line",
+        "cs": "příjemce na čáře"
+      },
+      "view": [-2, -4.5, 104, 46],
+      "dur": 6.8,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 82, 12], [1.4, 82, 12], [2.2, 78, 12], [3.4, 74, 12], [6.8, 60, 14]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 82, 26], [2.4, 82, 26], [3.4, 79, 25], [6.8, 64, 24]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 18, 10], [3.4, 18, 10], [4.4, 24, 10], [6.8, 32, 9]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 18, 24], [3.4, 18, 24], [4.4, 24, 23], [6.8, 30, 22]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 84, 18], [2.6, 84, 18], [3.6, 60, 18], [5, 30, 19], [6.8, 26, 19.4]],
+        "downAt": 5.2
+      },
+      "fx": [
+        {
+          "t": 1.6,
+          "type": "mark",
+          "x": 82,
+          "y": 18.5,
+          "kind": "zone",
+          "r": 5,
+          "label": {
+            "en": "their goal line",
+            "cs": "jejich branková čára"
+          }
+        },
+        {
+          "t": 2.4,
+          "type": "mark",
+          "x": 78,
+          "y": 12,
+          "kind": "x",
+          "label": {
+            "en": "moved before the release",
+            "cs": "pohyb před vypuštěním"
+          }
+        },
+        {
+          "t": 4.4,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "O1",
+          "text": {
+            "en": "OFFSIDE!",
+            "cs": "OFFSIDE!"
+          },
+          "style": "call"
+        }
+      ],
+      "situation": {
+        "en": "Both teams have signalled readiness. As the puller starts their run-up, two of their defenders are already a metre in front of their goal line, sprinting. The disc has not left the puller’s hand.",
+        "cs": "Oba týmy signalizovaly připravenost. Ve chvíli, kdy puller začíná rozběh, jsou dva jejich obránci už metr před svou brankovou čárou a běží. Disk pullerovi ještě neopustil ruku."
+      },
+      "question": {
+        "en": "When are they actually allowed to move?",
+        "cs": "Odkdy se vlastně smějí hýbat?"
+      },
+      "explain": {
+        "en": "Not until the pull is released. After signalling readiness, all defensive players must keep their feet entirely behind the vertical plane of their goal line until the pull is released (7.4); as soon as it is released, everybody may move in any direction (7.6). Moving early is offside, and it is your call to make — before your team touches the disc (7.5).",
+        "cs": "Až po vypuštění pullu. Po signalizaci připravenosti musí mít všichni obránci chodidla celá za svislou rovinou své brankové čáry, dokud není pull vypuštěný (7.4); jakmile je vypuštěný, mohou se všichni pohybovat kamkoli (7.6). Dřívější pohyb je offside a call je na tobě — dřív, než se tvůj tým dotkne disku (7.5)."
+      },
+      "note": {
+        "en": "Your own line has a matching duty: after signalling readiness every offensive player must stand with one foot on their defending goal line and not change position relative to one another until the release (7.3). Breaking that is the false start, and it is their call.",
+        "cs": "Tvoje čára má zrcadlovou povinnost: po signalizaci připravenosti musí každý hráč útoku stát jednou nohou na své bráněné brankové čáře a nesmí měnit pozici vůči ostatním, dokud disk neodletí (7.3). Porušení je false start a to je jejich call."
+      },
+      "rules": ["7.4", "7.6", "7.3"],
+      "signals": [15],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "Defenders are a metre in front of their goal line and sprinting before the release. What is it?",
+            "cs": "Obránci jsou metr před svou brankovou čárou a běží ještě před vypuštěním. Co to je?"
+          },
+          "rules": ["7.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "Offside — their feet must stay entirely behind the plane of the goal line until the release",
+                "cs": "Offside — chodidla musí zůstat celá za rovinou brankové čáry, dokud disk neodletí"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.4 — the requirement runs from signalling readiness until the pull is released.",
+                "cs": "7.4 — požadavek platí od signalizace připravenosti do vypuštění pullu."
+              }
+            },
+            {
+              "t": {
+                "en": "False start",
+                "cs": "False start"
+              },
+              "why": {
+                "en": "That is the OFFENCE leaving their line (7.3); the defence crossing early is offside (7.4).",
+                "cs": "To je odchod ÚTOKU ze své čáry (7.3); předčasné překročení obranou je offside (7.4)."
+              }
+            },
+            {
+              "t": {
+                "en": "Legal — the puller had already started running",
+                "cs": "Legální — puller už se rozbíhal"
+              },
+              "why": {
+                "en": "The run-up is not the release (7.4, 7.6).",
+                "cs": "Rozběh není vypuštění (7.4, 7.6)."
+              }
+            },
+            {
+              "t": {
+                "en": "Legal — the line only applies to the puller",
+                "cs": "Legální — čára platí jen pro pullera"
+              },
+              "why": {
+                "en": "7.4 binds all defensive players.",
+                "cs": "7.4 zavazuje všechny hráče obrany."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "When may everybody move?",
+            "cs": "Odkdy se smějí všichni hýbat?"
+          },
+          "rules": ["7.6"],
+          "opts": [
+            {
+              "t": {
+                "en": "As soon as the pull is released — then anyone, in any direction",
+                "cs": "Jakmile je pull vypuštěný — pak kdokoli a kamkoli"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.6 — the release is the single moment that frees both lines.",
+                "cs": "7.6 — vypuštění je jediný okamžik, který uvolní obě čáry."
+              }
+            },
+            {
+              "t": {
+                "en": "Once the disc crosses the halfway point",
+                "cs": "Až disk přeletí půlku hřiště"
+              },
+              "why": {
+                "en": "No such rule; movement is free from the release (7.6).",
+                "cs": "Takové pravidlo neexistuje; od vypuštění se smí pohybovat (7.6)."
+              }
+            },
+            {
+              "t": {
+                "en": "Once an offensive player touches the disc",
+                "cs": "Až se disku dotkne hráč útoku"
+              },
+              "why": {
+                "en": "That threshold is for the defence TOUCHING the disc (7.7), not for movement.",
+                "cs": "Tahle hranice platí pro DOTEK disku obranou (7.7), ne pro pohyb."
+              }
+            }
+          ]
+        },
+        {
+          "k": "how",
+          "q": {
+            "en": "You want to call it. When must the call come?",
+            "cs": "Chceš to zavolat. Kdy musí call zaznít?"
+          },
+          "rules": ["7.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Before your team touches the disc",
+                "cs": "Dřív, než se tvůj tým dotkne disku"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.5 — both line calls must be made before the offence touches the disc, and 7.8 still applies if you touch it and drop it.",
+                "cs": "7.5 — oba cally z čáry musí zaznít dřív, než se útok dotkne disku, a 7.8 platí dál, pokud se ho dotkneš a upustíš."
+              }
+            },
+            {
+              "t": {
+                "en": "Any time before the first pass",
+                "cs": "Kdykoli před první přihrávkou"
+              },
+              "why": {
+                "en": "The deadline is the touch, not the throw (7.5).",
+                "cs": "Hranicí je dotek, ne hod (7.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "After the point, to their captain",
+                "cs": "Po bodu, jejich kapitánovi"
+              },
+              "why": {
+                "en": "Calls are immediate (15.8) and this one has a hard deadline (7.5).",
+                "cs": "Cally jsou okamžité (15.8) a tenhle má tvrdou hranici (7.5)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pl9",
+      "level": 1,
+      "topic": {
+        "en": "The pull",
+        "cs": "Pull"
+      },
+      "title": {
+        "en": "A defender taps the pull down",
+        "cs": "Obránce pull srazí"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the receiver waiting under it",
+        "cs": "příjemce čekající pod ním"
+      },
+      "view": [-2, -4.5, 104, 46],
+      "dur": 7,
+      "qAt": 3.6,
+      "actors": [
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 80, 24], [3.6, 60, 23], [7, 50, 22]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 18, 10], [3.6, 26, 10], [7, 32, 10]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 78, 14], [2.4, 50, 17], [3.2, 44, 17.6], [3.6, 43, 17.8], [7, 40, 18]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 18, 20], [2.6, 36, 19], [3.6, 40, 18.8], [7, 42, 18.6]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 84, 18], [3, 44.6, 17.4], [3.6, 43.6, 19.6], [7, 43.6, 19.6]],
+        "downAt": 3.7
+      },
+      "fx": [
+        {
+          "t": 2.9,
+          "type": "flash",
+          "x": 44.4,
+          "y": 17.6
+        },
+        {
+          "t": 3.2,
+          "type": "mark",
+          "x": 44.4,
+          "y": 17.2,
+          "kind": "x",
+          "label": {
+            "en": "defender touched it",
+            "cs": "dotkl se obránce"
+          }
+        },
+        {
+          "t": 4.4,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "O1",
+          "text": {
+            "en": "they may not do that",
+            "cs": "to nesmí"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5.6,
+          "type": "mark",
+          "x": 43.6,
+          "y": 19.6,
+          "kind": "target",
+          "label": {
+            "en": "still your disc",
+            "cs": "pořád tvůj disk"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You are camped under the pull waiting to catch it when their trailing defender reaches in and taps it away from you. It falls to the ground a few metres on. Nobody on your team ever touched it.",
+        "cs": "Stojíš pod pullem a čekáš, až ho chytíš, když do něj dobíhající obránce sáhne a srazí ti ho. Disk dopadne pár metrů dál. Nikdo z tvého týmu se ho nedotkl."
+      },
+      "question": {
+        "en": "Was the defender allowed to do that?",
+        "cs": "Směl to obránce udělat?"
+      },
+      "explain": {
+        "en": "No. No player on the defensive team may touch the disc after a pull until a member of the offensive team contacts it, or it hits the ground (7.7). Their touch is a breach of that rule, and it certainly does not make it your team’s turnover — the dropped-pull turnover in 7.8 requires an OFFENSIVE player to touch it and then fail to establish possession. Your team keeps the disc.",
+        "cs": "Ne. Žádný hráč obrany se po pullu nesmí disku dotknout, dokud se ho nedotkne hráč útoku nebo dokud nedopadne na zem (7.7). Jeho dotek je porušením toho pravidla a rozhodně z toho nedělá turnover pro tvůj tým — dropped-pull turnover podle 7.8 vyžaduje dotek hráče ÚTOKU a následné nezískání držení. Disk zůstává tvému týmu."
+      },
+      "note": {
+        "en": "The two touch rules are easy to mix up. An offensive touch that ends on the ground is a turnover (7.8). A defensive touch is simply not allowed at all (7.7) — the defence has to let the pull resolve on its own.",
+        "cs": "Ta dvě pravidla o doteku se snadno pletou. Dotek útoku, který skončí na zemi, je turnover (7.8). Dotek obrany je prostě zakázaný (7.7) — obrana musí nechat pull dopadnout sám."
+      },
+      "rules": ["7.7", "7.8", "7.10"],
+      "signals": [2, 9],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "A defender taps the pull away before anyone on your team touches it. Allowed?",
+            "cs": "Obránce srazí pull dřív, než se ho někdo z tvého týmu dotkne. Smí?"
+          },
+          "rules": ["7.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — the defence may not touch the pull until the offence contacts it or it hits the ground",
+                "cs": "Ne — obrana se pullu nesmí dotknout, dokud se ho nedotkne útok nebo dokud nedopadne"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.7 states it plainly, and it applies to every defensive player.",
+                "cs": "7.7 to říká napřímo a platí pro každého hráče obrany."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — a pull is live once released",
+                "cs": "Ano — pull je po vypuštění živý"
+              },
+              "why": {
+                "en": "Live for the offence, not for the defence to touch (7.7).",
+                "cs": "Živý pro útok, ne aby se ho dotýkala obrana (7.7)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, as long as they do not catch it",
+                "cs": "Ano, pokud ho nechytí"
+              },
+              "why": {
+                "en": "7.7 forbids touching it at all, not just catching it.",
+                "cs": "7.7 zakazuje dotek jako takový, nejen chycení."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "The disc lands. Whose is it?",
+            "cs": "Disk dopadne. Čí je?"
+          },
+          "rules": ["7.8"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yours — your team never touched it, so there is no dropped pull",
+                "cs": "Tvůj — tvůj tým se ho nedotkl, takže žádný dropped pull není"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.8 makes it a turnover only when an OFFENSIVE player touches it and possession is then not established.",
+                "cs": "7.8 z toho dělá turnover jen tehdy, když se disku dotkne hráč ÚTOKU a držení se pak nezíská."
+              }
+            },
+            {
+              "t": {
+                "en": "Theirs — the disc hit the ground untouched by you",
+                "cs": "Jejich — disk dopadl, aniž by ses ho dotkl"
+              },
+              "why": {
+                "en": "An untouched pull that lands belongs to the receiving team (7.10).",
+                "cs": "Nedotčený pull, který dopadne, patří přijímajícímu týmu (7.10)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nobody’s — the pull is re-taken",
+                "cs": "Ničí — pull se opakuje"
+              },
+              "why": {
+                "en": "Re-pulls do not exist as a remedy here (7.7).",
+                "cs": "Opakování pullu tu jako náprava neexistuje (7.7)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "What would have made it a turnover?",
+            "cs": "Co by z toho udělalo turnover?"
+          },
+          "rules": ["7.8"],
+          "opts": [
+            {
+              "t": {
+                "en": "One of YOUR players touching it in the air and then failing to establish possession",
+                "cs": "Kdyby se ho ve vzduchu dotkl někdo z TVÉHO týmu a držení se pak nezískalo"
+              },
+              "ok": true,
+              "why": {
+                "en": "7.8 — the dropped pull, and it applies whether that player is in-bounds or out-of-bounds.",
+                "cs": "7.8 — dropped pull, a platí, ať je ten hráč v hřišti, nebo v autu."
+              }
+            },
+            {
+              "t": {
+                "en": "The disc landing in your end zone",
+                "cs": "Kdyby disk dopadl ve tvé endzóně"
+              },
+              "why": {
+                "en": "That is just a deep spot to restart from (7.10).",
+                "cs": "To je jen hluboké místo pro rozehrání (7.10)."
+              }
+            },
+            {
+              "t": {
+                "en": "A defender catching it cleanly",
+                "cs": "Kdyby ho obránce čistě chytil"
+              },
+              "why": {
+                "en": "They may not touch it at all (7.7) — that is their breach, not your turnover.",
+                "cs": "Nesmí se ho vůbec dotknout (7.7) — to je jeho prohřešek, ne tvůj turnover."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gm1",
+      "level": 1,
+      "topic": {
+        "en": "The pull",
+        "cs": "Pull"
+      },
+      "title": {
+        "en": "You scored — now what?",
+        "cs": "Skórovali jste — a co teď?"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the player who just caught the goal",
+        "cs": "hráč, který právě chytil bod"
+      },
+      "view": [60, 0, 40, 37],
+      "dur": 7.0,
+      "qAt": 3.6,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 88, 18], [7.0, 88, 18]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 78, 12], [7.0, 84, 14]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 90, 20], [7.0, 92, 22]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 80, 25], [7.0, 86, 24]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 88, 18], [7.0, 88, 18]]
+      },
+      "fx": [
+        {
+          "t": 1.2,
+          "type": "mark",
+          "x": 88,
+          "y": 18,
+          "kind": "dot",
+          "label": {
+            "en": "caught in the end zone — 4–2",
+            "cs": "chyceno v endzóně — 4–2"
+          }
+        },
+        {
+          "t": 2.6,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "O2",
+          "text": {
+            "en": "GOAL!",
+            "cs": "GÓL!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.6,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "O1",
+          "text": {
+            "en": "we pull now",
+            "cs": "teď rozehráváme my"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "You catch the disc cleanly in your attacking end zone. Goal — the score is now 4–2 to you, so the game is not won and it is not half time.",
+        "cs": "Chytíš disk čistě ve své útočné endzóně. Gól — stav je teď 4–2 pro vás, hra tedy není rozhodnutá a není poločas."
+      },
+      "question": {
+        "en": "What happens for the next point?",
+        "cs": "Co se stane v dalším bodu?"
+      },
+      "explain": {
+        "en": "The next point starts immediately (4.5.1), the teams switch the end zone they defend (4.5.2), and the team that scored becomes defence and pulls next (4.5.3). So scoring costs you the disc — you throw the next pull.",
+        "cs": "Další bod začíná okamžitě (4.5.1), týmy si vymění bráněné endzóny (4.5.2) a tým, který skóroval, se stává obranou a rozehrává pull (4.5.3). Skórování tě tedy stojí disk — další pull hodíte vy."
+      },
+      "rules": ["4.5.1", "4.5.2", "4.5.3"],
+      "steps": [
+        {
+          "k": "flow",
+          "q": {
+            "en": "Your team just scored to make it 4–2, so neither the game nor half time has been reached. When does the next point start?",
+            "cs": "Tvůj tým právě skóroval na 4–2, hra tedy není rozhodnutá a není poločas. Kdy začíná další bod?"
+          },
+          "rules": ["4.5.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Immediately",
+                "cs": "Okamžitě"
+              },
+              "ok": true,
+              "why": {
+                "en": "4.5.1 — the next point starts immediately.",
+                "cs": "4.5.1 — další bod začíná okamžitě."
+              }
+            },
+            {
+              "t": {
+                "en": "After a seventy-five second break for both teams",
+                "cs": "Po sedmdesátipětisekundové pauze pro oba týmy"
+              },
+              "why": {
+                "en": "Seventy-five seconds is the length of a time-out (20.2, 20.3), not a break between points.",
+                "cs": "Sedmdesát pět sekund je délka time-outu (20.2, 20.3), ne pauzy mezi body."
+              }
+            },
+            {
+              "t": {
+                "en": "Once both captains have confirmed the score",
+                "cs": "Až oba kapitáni potvrdí stav"
+              },
+              "why": {
+                "en": "Nothing in 4.5 makes the restart wait on a score confirmation.",
+                "cs": "Nic v 4.5 nepodmiňuje rozehrání potvrzením stavu."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Your team scored in the end zone it was attacking. Which end zone does your team defend for the next point?",
+            "cs": "Tvůj tým skóroval v endzóně, na kterou útočil. Kterou endzónu bude tvůj tým bránit v dalším bodu?"
+          },
+          "rules": ["4.5.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "You switch — you now defend the one you were just attacking",
+                "cs": "Vyměníte se — teď budete bránit tu, na kterou jste útočili"
+              },
+              "ok": true,
+              "why": {
+                "en": "4.5.2 — after a goal the teams switch the end zone they are defending.",
+                "cs": "4.5.2 — po bodu si týmy vymění bráněnou endzónu."
+              }
+            },
+            {
+              "t": {
+                "en": "The same one you were already defending",
+                "cs": "Tu samou, kterou jste bránili"
+              },
+              "why": {
+                "en": "Ends change every point, not every half (4.5.2).",
+                "cs": "Strany se mění každý bod, ne každou polovinu (4.5.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Whichever one the captains agree on",
+                "cs": "Tu, na které se shodnou kapitáni"
+              },
+              "why": {
+                "en": "4.5.2 decides it — there is nothing to agree.",
+                "cs": "Rozhoduje 4.5.2 — není na čem se shodnout."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "A goal has just been scored and the next point is starting. Which team throws the pull?",
+            "cs": "Právě padl bod a začíná další bod. Který tým hází pull?"
+          },
+          "rules": ["4.5.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "The team that scored — they become defence and pull",
+                "cs": "Tým, který skóroval — stává se obranou a rozehrává"
+              },
+              "ok": true,
+              "why": {
+                "en": "4.5.3 — the team that scored becomes defence and pulls next.",
+                "cs": "4.5.3 — tým, který skóroval, se stává obranou a rozehrává pull."
+              }
+            },
+            {
+              "t": {
+                "en": "The team that conceded, so they get the disc back",
+                "cs": "Tým, který inkasoval, aby dostal disk zpět"
+              },
+              "why": {
+                "en": "The opposite: the scoring team pulls, so the conceding team receives (4.5.3).",
+                "cs": "Právě naopak: rozehrává skórující tým, takže inkasující tým přijímá (4.5.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Whoever won the choice at the start of the game",
+                "cs": "Ten, kdo vyhrál volbu na začátku hry"
+              },
+              "why": {
+                "en": "That choice only sets up the first pull of a half (6.1, 6.3); afterwards 4.5.3 governs.",
+                "cs": "Ta volba určuje jen první pull poloviny (6.1, 6.3); dál platí 4.5.3."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sb1",
+      "level": 1,
+      "topic": {
+        "en": "The pull",
+        "cs": "Pull"
+      },
+      "title": {
+        "en": "Fresh legs, but how many?",
+        "cs": "Svěží nohy, ale kolik?"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "a player coming on from the sideline",
+        "cs": "hráč přicházející z postranní čáry"
+      },
+      "view": [8, -4.5, 54, 46],
+      "dur": 7.4,
+      "qAt": 3.8,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 14, 36], [2.4, 16, 30], [3.8, 17, 26], [5.6, 18, 20], [7.4, 18, 18]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 18, 12], [7.4, 18, 12]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 18, 24], [7.4, 18, 24]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 40, 18], [7.4, 40, 18]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 40, 18], [7.4, 40, 18]]
+      },
+      "fx": [
+        {
+          "t": 1.4,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "O2",
+          "text": {
+            "en": "goal — subs on!",
+            "cs": "gól — střídání!"
+          },
+          "style": "count"
+        },
+        {
+          "t": 5.0,
+          "type": "mark",
+          "x": 18,
+          "y": 18,
+          "kind": "dot",
+          "label": {
+            "en": "on before readiness is signalled",
+            "cs": "na hřišti před signalizací připravenosti"
+          }
+        }
+      ],
+      "situation": {
+        "en": "A goal has just been scored and the next point is about to start. Your team wants to change several players, and nobody on your team has raised a hand to signal readiness for the pull yet.",
+        "cs": "Právě padl bod a chystá se další. Tvůj tým chce vyměnit několik hráčů a nikdo z tvého týmu ještě nezvedl ruku na signál připravenosti k pullu."
+      },
+      "question": {
+        "en": "How many players may you swap, and until when?",
+        "cs": "Kolik hráčů můžete vyměnit a do kdy?"
+      },
+      "explain": {
+        "en": "Unlimited substitutions, but only up to the moment your team signals readiness for the pull (5.3) — not up to the release. On the field you need at least five and at most seven (5.1).",
+        "cs": "Neomezené střídání, ale jen do chvíle, kdy tvůj tým signalizuje připravenost k pullu (5.3) — ne do vypuštění disku. Na hřišti musí být nejméně pět a nejvíce sedm hráčů (5.1)."
+      },
+      "rules": ["5.3", "5.1"],
+      "steps": [
+        {
+          "k": "flow",
+          "q": {
+            "en": "A goal has just been scored and your team has not yet signalled readiness. Until what moment may your team substitute?",
+            "cs": "Právě padl bod a tvůj tým ještě nesignalizoval připravenost. Do kterého okamžiku může tvůj tým střídat?"
+          },
+          "rules": ["5.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Until your team signals readiness for the pull",
+                "cs": "Dokud tvůj tým nesignalizuje připravenost k pullu"
+              },
+              "ok": true,
+              "why": {
+                "en": "5.3 — the window closes at your team's readiness signal.",
+                "cs": "5.3 — okno se zavírá signálem připravenosti tvého týmu."
+              }
+            },
+            {
+              "t": {
+                "en": "Until the pull is actually released",
+                "cs": "Dokud není pull skutečně vypuštěn"
+              },
+              "why": {
+                "en": "Readiness is the cut-off, not the release (5.3).",
+                "cs": "Hranicí je připravenost, ne vypuštění (5.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only at half time",
+                "cs": "Jen v poločase"
+              },
+              "why": {
+                "en": "5.3 allows it after every goal, not only at half time.",
+                "cs": "5.3 to dovoluje po každém bodu, ne jen v poločase."
+              }
+            }
+          ]
+        },
+        {
+          "k": "how",
+          "q": {
+            "en": "In that window between a goal and your team's readiness signal, how many substitutions may your team make?",
+            "cs": "V okně mezi bodem a signálem připravenosti tvého týmu — kolik střídání může tvůj tým udělat?"
+          },
+          "rules": ["5.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Unlimited",
+                "cs": "Neomezeně"
+              },
+              "ok": true,
+              "why": {
+                "en": "5.3 — a team may make unlimited substitutions in that window.",
+                "cs": "5.3 — v tomto okně může tým střídat neomezeně."
+              }
+            },
+            {
+              "t": {
+                "en": "One",
+                "cs": "Jedno"
+              },
+              "why": {
+                "en": "One is the cap when the OPPOSITION matches an injury substitution (19.3), not here.",
+                "cs": "Jedno je limit, když SOUPEŘ dorovnává střídání po zranění (19.3), ne tady."
+              }
+            },
+            {
+              "t": {
+                "en": "Three per point",
+                "cs": "Tři za bod"
+              },
+              "why": {
+                "en": "There is no per-point cap in 5.3.",
+                "cs": "Žádný limit na bod v 5.3 není."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Injuries have left your team with only five players available for this point. May you start it?",
+            "cs": "Kvůli zraněním má tvůj tým na tento bod jen pět hráčů. Můžete ho začít?"
+          },
+          "rules": ["5.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — five is the minimum, seven the maximum",
+                "cs": "Ano — pět je minimum, sedm maximum"
+              },
+              "ok": true,
+              "why": {
+                "en": "5.1 — a maximum of seven and a minimum of five players per point.",
+                "cs": "5.1 — maximálně sedm a minimálně pět hráčů na bod."
+              }
+            },
+            {
+              "t": {
+                "en": "No — you must field seven",
+                "cs": "Ne — musíte nastoupit se sedmi"
+              },
+              "why": {
+                "en": "Seven is the maximum, not a requirement (5.1).",
+                "cs": "Sedm je maximum, ne povinnost (5.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "No — you have to forfeit the point",
+                "cs": "Ne — musíte bod odevzdat"
+              },
+              "why": {
+                "en": "Nothing in 5.1 forfeits a point at five players.",
+                "cs": "Nic v 5.1 nenutí při pěti hráčích bod odevzdat."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hf1",
+      "level": 1,
+      "topic": {
+        "en": "The pull",
+        "cs": "Pull"
+      },
+      "title": {
+        "en": "Eight goals in",
+        "cs": "Osm bodů"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "a captain working out what comes next",
+        "cs": "kapitán, který zjišťuje, co bude dál"
+      },
+      "view": [60, 0, 40, 37],
+      "dur": 7.2,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 86, 20], [7.2, 86, 20]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 90, 14], [7.2, 88, 16]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 80, 24], [7.2, 84, 24]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 86, 20], [7.2, 86, 20]]
+      },
+      "fx": [
+        {
+          "t": 1.4,
+          "type": "mark",
+          "x": 86,
+          "y": 20,
+          "kind": "dot",
+          "label": {
+            "en": "8–5",
+            "cs": "8–5"
+          }
+        },
+        {
+          "t": 2.4,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "O2",
+          "text": {
+            "en": "that's eight!",
+            "cs": "to je osm!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.4,
+          "type": "bubble",
+          "dur": 1.8,
+          "actor": "O1",
+          "text": {
+            "en": "half time",
+            "cs": "poločas"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "The goal your team has just scored takes the score to 8–5. Nobody is sure whether to line up for the next pull or walk off.",
+        "cs": "Bod, který tvůj tým právě dal, mění stav na 8–5. Nikdo si není jistý, jestli se postavit na další pull, nebo odejít ze hřiště."
+      },
+      "question": {
+        "en": "What does reaching eight mean?",
+        "cs": "Co znamená dosažení osmi bodů?"
+      },
+      "explain": {
+        "en": "Half time. It occurs when a team first scores eight goals (4.3) — but the game itself is won by the first team to fifteen (4.2). At the start of the second half the initial choices from the beginning of the game are simply switched (6.3); there is no new determination.",
+        "cs": "Poločas. Nastává, když některý tým poprvé dosáhne osmi bodů (4.3) — hru ale vyhrává tým, který první dosáhne patnácti (4.2). Na začátku druhé poloviny se počáteční volby z úvodu hry jen vymění (6.3); nic se neurčuje znovu."
+      },
+      "rules": ["4.3", "4.2", "6.3"],
+      "steps": [
+        {
+          "k": "flow",
+          "q": {
+            "en": "A goal takes the score to 8–5. What does that trigger?",
+            "cs": "Bod mění stav na 8–5. Co to spouští?"
+          },
+          "rules": ["4.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Half time",
+                "cs": "Poločas"
+              },
+              "ok": true,
+              "why": {
+                "en": "4.3 — half time occurs when a team first scores eight goals.",
+                "cs": "4.3 — poločas nastává, když tým poprvé dosáhne osmi bodů."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing in particular — play straight on",
+                "cs": "Nic zvláštního — hraje se dál"
+              },
+              "why": {
+                "en": "Eight is the half-time mark (4.3), so play does not simply continue.",
+                "cs": "Osm je hranice poločasu (4.3), takže se prostě nepokračuje."
+              }
+            },
+            {
+              "t": {
+                "en": "The game is over — first to eight wins",
+                "cs": "Hra končí — vítězí první tým na osmi"
+              },
+              "why": {
+                "en": "A game is won by the first team to fifteen (4.2); eight is half time (4.3).",
+                "cs": "Hru vyhrává tým, který první dosáhne patnácti (4.2); osm je poločas (4.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "How many goals does it take to win the whole game?",
+            "cs": "Kolik bodů je potřeba k vítězství v celé hře?"
+          },
+          "rules": ["4.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Fifteen",
+                "cs": "Patnáct"
+              },
+              "ok": true,
+              "why": {
+                "en": "4.2 — a game is finished and won by the first team to score fifteen goals.",
+                "cs": "4.2 — hra končí a vyhrává ji tým, který první dosáhne patnácti bodů."
+              }
+            },
+            {
+              "t": {
+                "en": "Eight",
+                "cs": "Osm"
+              },
+              "why": {
+                "en": "Eight is when half time occurs (4.3), not the win.",
+                "cs": "Osm je hranice poločasu (4.3), ne vítězství."
+              }
+            },
+            {
+              "t": {
+                "en": "Thirteen",
+                "cs": "Třináct"
+              },
+              "why": {
+                "en": "4.2 sets it at fifteen.",
+                "cs": "4.2 stanoví patnáct."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "The second half is about to start. Who chooses whether to receive, or which end to defend?",
+            "cs": "Chystá se začátek druhé poloviny. Kdo volí, zda přijímá, nebo kterou stranu bránit?"
+          },
+          "rules": ["6.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Nobody chooses again — the initial selections are simply switched",
+                "cs": "Nikdo nevolí znovu — počáteční volby se jen vymění"
+              },
+              "ok": true,
+              "why": {
+                "en": "6.3 — at the start of the second half these initial selections are switched.",
+                "cs": "6.3 — na začátku druhé poloviny se počáteční volby vymění."
+              }
+            },
+            {
+              "t": {
+                "en": "There is a fresh determination, as at the start of the game",
+                "cs": "Určuje se znovu, jako na začátku hry"
+              },
+              "why": {
+                "en": "6.1 and 6.2 run once, at the start of the game; 6.3 just switches their result.",
+                "cs": "6.1 a 6.2 se použijí jednou, na začátku hry; 6.3 jen vymění jejich výsledek."
+              }
+            },
+            {
+              "t": {
+                "en": "The team that is behind chooses",
+                "cs": "Volí tým, který prohrává"
+              },
+              "why": {
+                "en": "The score does not enter into it (6.3).",
+                "cs": "Stav do toho nijak nevstupuje (6.3)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fd1",
+      "level": 1,
+      "topic": {
+        "en": "The pull",
+        "cs": "Pull"
+      },
+      "title": {
+        "en": "No lines, just cones",
+        "cs": "Žádné čáry, jen kužely"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the handler pacing out the brick mark",
+        "cs": "handler, který si odkrokuje brick mark"
+      },
+      "view": [-2, -4.5, 104, 46],
+      "dur": 8.2,
+      "qAt": 4.4,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 18, 18], [3.0, 18, 18], [4.4, 20, 18.2], [6.4, 29, 18.4], [8.2, 36, 18.5]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 18, 26], [8.2, 24, 24]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 82, 18], [8.2, 82, 18]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 46, -1.4], [8.2, 46, -1.4]]
+      },
+      "fx": [
+        {
+          "t": 1.4,
+          "type": "mark",
+          "x": 46,
+          "y": 0,
+          "kind": "x",
+          "label": {
+            "en": "pull went straight out",
+            "cs": "pull šel přímo do autu"
+          }
+        },
+        {
+          "t": 2.8,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "O1",
+          "text": {
+            "en": "where IS the brick?",
+            "cs": "kde ten brick JE?"
+          },
+          "style": "count"
+        },
+        {
+          "t": 5.6,
+          "type": "mark",
+          "x": 36,
+          "y": 18.5,
+          "kind": "dot",
+          "label": {
+            "en": "one end-zone length in, midway across",
+            "cs": "délku endzóny dovnitř, uprostřed šířky"
+          }
+        },
+        {
+          "t": 7.0,
+          "type": "mark",
+          "x": 18,
+          "y": 0,
+          "kind": "dot",
+          "label": {
+            "en": "cones mark the corners",
+            "cs": "kužely značí rohy"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You are playing on a pitch with no painted lines at all — just eight cones. A brick has been called and you have to pace out where the brick mark actually is.",
+        "cs": "Hrajete na hřišti bez jakýchkoli namalovaných čar — jen s osmi kužely. Byl zvolán brick a ty musíš odkrokovat, kde brick mark vlastně je."
+      },
+      "question": {
+        "en": "Where is it, and what are those cones telling you?",
+        "cs": "Kde je a co ti ty kužely říkají?"
+      },
+      "explain": {
+        "en": "2.5 places the brick marks precisely: a distance equal to the length of the end zone away from each goal line, midway between the sidelines — so on a standard pitch you pace the end zone's own length in from the goal line. The eight cones are not decoration: 2.6 says they mark the corners of the central zone AND the end zones, which is how you find the goal lines on an unpainted pitch. And 2.1 sets the standard for the pitch itself — essentially flat, free of obstructions, affording reasonable player safety.",
+        "cs": "2.5 určuje polohu brick marků přesně: vzdálenost rovnou délce endzóny od každé brankové čáry, uprostřed mezi postranními čarami — na standardním hřišti tedy odkrokuješ od brankové čáry délku endzóny. Osm kuželů není dekorace: 2.6 říká, že vyznačují rohy centrální zóny A endzón, čímž na nenalinkovaném hřišti najdeš brankové čáry. A 2.1 stanoví požadavky na hřiště samotné — v podstatě rovné, bez překážek a s rozumnou bezpečností hráčů."
+      },
+      "rules": ["2.5", "2.6", "2.1"],
+      "steps": [
+        {
+          "k": "where",
+          "q": {
+            "en": "How far in from the goal line does a brick mark sit, and where across the width of the field?",
+            "cs": "Jak daleko od brankové čáry leží brick mark a kde po šířce hřiště?"
+          },
+          "rules": ["2.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "A distance equal to the length of the end zone, midway between the sidelines",
+                "cs": "Vzdálenost rovnou délce endzóny, uprostřed mezi postranními čarami"
+              },
+              "ok": true,
+              "why": {
+                "en": "2.5 — that is exactly how the brick marks are defined.",
+                "cs": "2.5 — přesně tak jsou brick marky definovány."
+              }
+            },
+            {
+              "t": {
+                "en": "Ten metres in, midway between the sidelines",
+                "cs": "Deset metrů dovnitř, uprostřed mezi postranními čarami"
+              },
+              "why": {
+                "en": "The distance is not a fixed ten metres — it is the end zone's own length (2.5).",
+                "cs": "Vzdálenost není pevných deset metrů — je to délka endzóny (2.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "At the exact centre of the field",
+                "cs": "Přesně ve středu hřiště"
+              },
+              "why": {
+                "en": "The centre of the field is halfway down it; a brick mark is one end-zone length from a goal line (2.5).",
+                "cs": "Střed hřiště je v jeho polovině; brick mark je jednu délku endzóny od brankové čáry (2.5)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "On a pitch marked only with cones, what do the eight cones mark out?",
+            "cs": "Co na hřišti vyznačeném jen kužely těch osm kuželů značí?"
+          },
+          "rules": ["2.6"],
+          "opts": [
+            {
+              "t": {
+                "en": "The corners of the central zone and of the end zones",
+                "cs": "Rohy centrální zóny a endzón"
+              },
+              "ok": true,
+              "why": {
+                "en": "2.6 — eight brightly-coloured flexible objects mark the corners of the central zone and the end zones.",
+                "cs": "2.6 — osm výrazně barevných pružných předmětů vyznačuje rohy centrální zóny a endzón."
+              }
+            },
+            {
+              "t": {
+                "en": "Only the four outer corners of the whole pitch",
+                "cs": "Jen čtyři vnější rohy celého hřiště"
+              },
+              "why": {
+                "en": "That would be four cones. Eight are needed because the goal-line corners are marked too (2.6).",
+                "cs": "To by byly čtyři kužely. Osm je potřeba proto, že se značí i rohy u brankových čar (2.6)."
+              }
+            },
+            {
+              "t": {
+                "en": "The brick marks and the centre of the pitch",
+                "cs": "Brick marky a střed hřiště"
+              },
+              "why": {
+                "en": "Brick marks are crossed lines in the central zone (2.5); the cones mark corners (2.6).",
+                "cs": "Brick marky jsou zkřížené čáry v centrální zóně (2.5); kužely značí rohy (2.6)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "What does the rulebook require of the playing surface itself?",
+            "cs": "Co pravidla vyžadují od samotné hrací plochy?"
+          },
+          "rules": ["2.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Essentially flat, free of obstructions, affording reasonable player safety",
+                "cs": "V podstatě rovná, bez překážek a s rozumnou bezpečností hráčů"
+              },
+              "ok": true,
+              "why": {
+                "en": "2.1 — that is the standard for the playing field.",
+                "cs": "2.1 — to je požadavek na hřiště."
+              }
+            },
+            {
+              "t": {
+                "en": "Grass only, never sand or artificial turf",
+                "cs": "Jen tráva, nikdy písek nebo umělý povrch"
+              },
+              "why": {
+                "en": "2.1 sets no surface material — it asks for flat, unobstructed and reasonably safe.",
+                "cs": "2.1 neurčuje materiál povrchu — žádá rovný, bez překážek a rozumně bezpečný."
+              }
+            },
+            {
+              "t": {
+                "en": "Perfectly level, with no slope at all",
+                "cs": "Naprosto vodorovná, bez jakéhokoli sklonu"
+              },
+              "why": {
+                "en": "2.1 says “essentially flat”, not perfectly level.",
+                "cs": "2.1 říká „v podstatě rovná“, ne naprosto vodorovná."
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

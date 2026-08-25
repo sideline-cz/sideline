@@ -1,0 +1,790 @@
+{
+  "1.12": {
+    "en": "If after discussion players cannot agree, or it is not clear and obvious what occurred, the disc must be returned to the last non-disputed thrower.",
+    "cs": "Pokud se hráči po diskuzi neshodnou, nebo není jasné a zřejmé, co se stalo, disk se musí vrátit poslednímu nerozporovanému házeči."
+  },
+  "7.8": {
+    "en": "If an offensive player, in-bounds or out-of-bounds, touches the disc before it hits the ground, and the offensive team fails to subsequently establish possession, that is a turnover (a “dropped pull”).",
+    "cs": "Pokud se útočící hráč (v autu i ve hřišti) dotkne disku dřív, než dopadne na zem, a útok následně nezíská držení, jde o ztrátu („dropped pull“)."
+  },
+  "7.12": {
+    "en": "If the disc contacts the out-of-bounds area without first touching the playing field or an offensive player, the thrower may establish a pivot either at the brick mark or where the disc went out-of-bounds. The brick option must be signalled before picking up the disc, by fully extending one arm overhead, calling “brick”.",
+    "cs": "Pokud disk skončí v autu, aniž by se předtím dotkl hřiště nebo útočícího hráče, házeč si může založit pivot buď na brick marku, nebo v místě, kde disk opustil hřiště. Volbu brick je nutné signalizovat před zvednutím disku — plně nataženou paží nad hlavou a zavoláním „brick“."
+  },
+  "8.5": {
+    "en": "After a turnover, and after the pull, an offensive player must move at walking pace or faster to directly retrieve the disc and establish a pivot point.",
+    "cs": "Po ztrátě a po pullu se musí útočící hráč pohybovat minimálně rychlostí chůze, aby přímo došel pro disk a založil pivot."
+  },
+  "9.4": {
+    "en": "If the marker moves beyond 3 metres, or a different player becomes the marker, the stall count restarts at “Stalling 1”.",
+    "cs": "Pokud se marker vzdálí za 3 metry, nebo markuje jiný hráč, stall count začíná znovu na „Stalling 1“."
+  },
+  "9.5.1": {
+    "en": "After an accepted breach by the defence the stall count restarts at “Stalling one (1)”.",
+    "cs": "Po uznaném porušení pravidel obranou pokračuje stall count od „Stalling 1“."
+  },
+  "9.5.2": {
+    "en": "After an accepted breach by the offence the stall count restarts at maximum nine (9).",
+    "cs": "Po uznaném porušení pravidel útokem pokračuje stall count na maximálně devíti (9)."
+  },
+  "9.5.5": {
+    "en": "After all other calls, including “pick”, the stall count restarts at maximum six (6).",
+    "cs": "Po všech ostatních hláškách, včetně „pick“, pokračuje stall count na maximálně šesti (6)."
+  },
+  "9.6.1": {
+    "en": "To restart “at maximum n”: if “x” is the last agreed number fully uttered before the call, the count resumes at “Stalling (x+1)” or “Stalling n”, whichever is lower.",
+    "cs": "Restart „na maximálně n“: pokud „x“ je poslední shodnuté celé vyslovené číslo před hláškou, count pokračuje na „Stalling (x+1)“, nebo „Stalling n“ — podle toho, co je nižší."
+  },
+  "10.2.1": {
+    "en": "If play stops before a pass is thrown, all players must return to the location they held when the call was made.",
+    "cs": "Pokud se hra zastaví před vypuštěním přihrávky, všichni hráči se vrací na místa, kde stáli v okamžiku hlášky."
+  },
+  "10.2.2.1": {
+    "en": "If play stops after a pass and the disc is returned to the thrower, all players return to the location they held when the thrower released the pass, or at the time of the call, whichever is earlier.",
+    "cs": "Pokud se hra zastaví po přihrávce a disk se vrací házeči, všichni se vrací na místa, kde stáli při vypuštění disku, případně při hlášce — podle toho, co nastalo dřív."
+  },
+  "12.8": {
+    "en": "Some minor contact may occur as two or more players move towards a single point simultaneously. Minor contact should be minimized but is not considered a foul.",
+    "cs": "Když se dva a více hráčů pohybuje současně k jednomu bodu, může dojít k drobnému kontaktu. Má se minimalizovat, ale není faulem."
+  },
+  "13.1.4": {
+    "en": "A turnover occurs when, during the pull, the offence touches the disc before it hits the ground and subsequently fails to establish possession (a “dropped pull”).",
+    "cs": "Ztráta nastává, když se útok při pullu dotkne disku před dopadem na zem a následně nezíská držení („dropped pull“)."
+  },
+  "13.7": {
+    "en": "After a turnover the turnover location is where the disc came to a stop or was picked up, where an intercepting player stopped, where the thrower was at the time of the call (stall-out, handover, deflection, self-catch), or where an accepted offensive receiving foul occurred.",
+    "cs": "Místo turnoveru je tam, kde disk zastavil nebo byl zvednut, kde zastavil hráč, který přihrávku zachytil, kde byl házeč v momentě callu (stall-out, handover, deflection, self-catch), nebo kde nastal uznaný receiving foul útoku."
+  },
+  "14.3": {
+    "en": "If a player in possession ends up in the end zone they are attacking without scoring a goal, the player must establish a pivot at the nearest location on the goal line.",
+    "cs": "Pokud hráč s diskem skončí v útočné endzóně, aniž by padl gól, musí si založit pivot na nejbližším místě brankové čáry."
+  },
+  "15.4": {
+    "en": "Only the player fouled may claim a foul, by calling “Foul”.",
+    "cs": "Faul smí hlásit jen faulovaný hráč, a to zavoláním „Foul“."
+  },
+  "15.5.1": {
+    "en": "In general only the thrower may claim an infraction; however any offensive player may call a double team, and any defensive player may call a travel infraction.",
+    "cs": "Obecně může infraction nárokovat jen házeč; double team však může volat kterýkoli hráč útoku a travel kterýkoli obránce."
+  },
+  "15.8": {
+    "en": "Calls must be made immediately after the breach is recognised.",
+    "cs": "Hlášky se musí dělat okamžitě po rozpoznání porušení pravidel."
+  },
+  "16.2": {
+    "en": "If a foul or violation is called against the thrower attempting a pass, by the thrower during the throw, or when the disc is in the air — play continues until possession has been established.",
+    "cs": "Pokud je faul nebo violation hlášen proti házeči při přihrávce, házečem během hodu, nebo když je disk ve vzduchu — hraje se dál, dokud není rozhodnuto o držení disku."
+  },
+  "16.2.4.1": {
+    "en": "If the team that called the foul or violation gains or retains possession as a result of the pass, the play stands. Play can continue without a stoppage if the caller makes a “Play on” call as soon as possible.",
+    "cs": "Pokud tým, který foul či violation volal, díky přihrávce získá nebo udrží držení, akce platí. Hra může pokračovat bez zastavení, když volající co nejdřív zavolá „play on“."
+  },
+  "16.2.4.2.1": {
+    "en": "If the calling team believes possession has been affected by the foul or violation, the disc is returned to the thrower for a check (unless the specific rule says otherwise).",
+    "cs": "Pokud se hlásící tým domnívá, že faul či violation ovlivnily držení disku, disk se vrací házeči a hra se obnovuje checkem (pokud konkrétní pravidlo neříká jinak)."
+  },
+  "16.3": {
+    "en": "Regardless of when any call is made, if the players involved from both teams agree that the event or call did not affect the outcome, the play stands. If the play resulted in a goal, the goal stands.",
+    "cs": "Bez ohledu na to, kdy hláška padla: pokud se zúčastnění hráči obou týmů shodnou, že událost ani hláška neovlivnily výsledek, akce platí. Pokud akce skončila gólem, gól platí."
+  },
+  "17.2.1": {
+    "en": "A Receiving Foul occurs when a player initiates non-minor contact with an opponent before, while, or directly after, either player makes a play on the disc.",
+    "cs": "Faul při chytání nastává, když hráč iniciuje výrazný (non-minor) kontakt se soupeřem předtím, během, nebo těsně poté, co jeden z nich hraje diskem."
+  },
+  "17.2.2": {
+    "en": "After an accepted receiving foul the fouled player gains possession at the location of the breach, even if that location is in an end zone, and play restarts with a check. If the foul is contested, the disc is returned to the thrower.",
+    "cs": "Po uznaném faulu při chytání získává faulovaný hráč disk v místě prohřešku pravidel — i kdyby to bylo v endzóně — a hra se obnovuje checkem. Pokud je faul kontestovaný, disk se vrací házeči."
+  },
+  "17.3.2": {
+    "en": "(Strip foul) If the reception would have otherwise been a goal, and the foul is accepted, a goal is awarded.",
+    "cs": "(Strip foul) Pokud by chycení jinak znamenalo gól a faul je uznaný, gól se přiznává."
+  },
+  "17.5.2": {
+    "en": "(Force-out foul) If the receiver would have caught the disc in their attacking end zone, it is a goal.",
+    "cs": "(Force-out foul) Pokud by receiver chytil disk ve své útočné endzóně, je to gól."
+  },
+  "17.6.1.2": {
+    "en": "A Defensive Throwing Foul occurs when a defender initiates non-minor contact with the thrower prior to the release. (Contact to the thrower’s hand during the throwing motion is never “minor”.)",
+    "cs": "Faul obrany na házeče nastává, když obránce iniciuje výrazný kontakt s házečem před vypuštěním disku. (Kontakt s házející rukou během hodu není nikdy „minor“.)"
+  },
+  "17.6.1.3": {
+    "en": "If a defensive throwing foul occurs prior to the release and not during the throwing motion, the thrower may instead call “Contact”. After an uncontested contact infraction play does not stop and the marker resumes the stall count at one (1).",
+    "cs": "Pokud k faulu obrany dojde před vypuštěním disku a mimo samotný hod, házeč může místo faulu zavolat „Contact“. Po nekontestovaném contactu se hra nestaví a marker pokračuje ve stall countu od jedničky."
+  },
+  "17.7.1": {
+    "en": "An Offensive Throwing Foul occurs when the thrower is solely responsible for initiating non-minor contact with a defensive player who is in a legal position.",
+    "cs": "Faul házeče nastává, když je házeč výhradně odpovědný za iniciování výrazného kontaktu s obráncem v legálním postavení."
+  },
+  "18.1.1.3": {
+    "en": "“Disc Space” — any part of a defensive player is less than one disc diameter away from the torso of the thrower. (Not an infraction if caused solely by the thrower’s movement.)",
+    "cs": "„Disc Space“ — jakákoli část těla obránce je blíž než průměr disku od trupu házeče. (Není infraction, pokud to způsobil výhradně pohyb házeče.)"
+  },
+  "18.1.2": {
+    "en": "A marking infraction may be contested by the defence, in which case play stops.",
+    "cs": "Marking infraction může obrana kontestovat — v tom případě se hra staví."
+  },
+  "18.1.3": {
+    "en": "After a marking infraction where play has not stopped, the marker must resume the stall count with the number last fully uttered before the call, minus one. The marker must not resume counting until the illegal positioning is corrected.",
+    "cs": "Po marking infraction, kdy se hra nezastavila, musí marker pokračovat číslem naposledy celým vysloveným před hláškou, minus jedna. Nesmí pokračovat, dokud nesrovná své nelegální postavení."
+  },
+  "18.1.4": {
+    "en": "Instead of an infraction the player may call a marking violation and stop play if the count is not corrected, there is no count, the infraction is egregious, or there is a pattern of repeats.",
+    "cs": "Místo infraction může hráč zavolat marking violation a zastavit hru — pokud count nebyl opraven, žádný není, infraction je hrubá, nebo se opakuje."
+  },
+  "18.1.5": {
+    "en": "If a marking infraction or violation is called and the thrower also attempts a pass before, during or after the call, the call has no consequences; if the pass is incomplete, the turnover stands.",
+    "cs": "Pokud je hlášena marking infraction či violation a házeč zároveň (před, během či po hlášce) hodí, hláška nemá žádné důsledky; nezdaří-li se přihrávka, ztráta platí."
+  },
+  "18.2.4.1": {
+    "en": "A travel infraction occurs if the thrower establishes a pivot point at an incorrect location, including by not reducing speed as quickly as possible after a catch, or changing direction after a catch.",
+    "cs": "Travel nastává, když si házeč založí pivot na nesprávném místě — včetně toho, že po chycení nebrzdí co nejrychleji, nebo změní směr."
+  },
+  "18.2.5": {
+    "en": "After an accepted travel infraction play does not stop. The thrower establishes a pivot at the correct location indicated by the caller; the stall count is paused and the thrower may not throw until the pivot is corrected.",
+    "cs": "Po uznaném travelu se hra nestaví. Házeč si založí pivot na správném místě, které ukáže hlásící hráč; stall count je pozastaven a házeč nesmí házet, dokud pivot neopraví."
+  },
+  "18.2.6": {
+    "en": "If, after a travel infraction but before correcting the pivot, the thrower throws a completed pass, the defence may call a travel violation. Play stops, the disc is returned to the thrower, who returns to the location occupied at the time of the infraction. Restart with a check.",
+    "cs": "Pokud házeč po travelu, ale před opravou pivotu, hodí zkompletovanou přihrávku, obrana může zavolat travel violation. Hra se staví, disk se vrací házeči, který se vrátí na místo, kde byl při travelu. Hra se obnoví checkem."
+  },
+  "18.2.7": {
+    "en": "If, after a travel infraction, the thrower throws an incomplete pass, play continues (the turnover stands).",
+    "cs": "Pokud házeč po travelu hodí nezkompletovanou přihrávku, hraje se dál (ztráta platí)."
+  },
+  "18.2.8": {
+    "en": "After a contested travel infraction where the thrower has not released a pass, play stops.",
+    "cs": "Po kontestovaném travelu, kdy házeč ještě nehodil, se hra staví."
+  },
+  "18.3.1": {
+    "en": "If a defender guarding one offensive player is prevented from moving towards/with that player by another player, they may call “Pick”. It is not a pick if both the guarded player and the obstructing player are making a play on the disc.",
+    "cs": "Pokud obránci, který brání jednoho útočníka, zabrání v pohybu za ním jiný hráč, může zavolat „Pick“. Není to pick, pokud bráněný i překážející hráč zrovna oba hrají na disk."
+  },
+  "18.3.1.1": {
+    "en": "Prior to making the “Pick” call, the defender may delay the call up to two (2) seconds to determine if the obstruction will affect the play.",
+    "cs": "Před zavoláním „Pick“ může obránce hlášku odložit až o dvě (2) sekundy, aby zjistil, jestli překážka ovlivní hru."
+  },
+  "18.3.2": {
+    "en": "If play has stopped, the obstructed player may move to the agreed position they would have otherwise occupied if the obstruction had not occurred.",
+    "cs": "Po zastavení hry se blokovaný hráč může přesunout na dohodnutou pozici, kterou by zaujímal, kdyby k bloku nedošlo."
+  },
+  "20.1": {
+    "en": "The player calling a time-out must form a “T” with their hands, or with one hand and the disc.",
+    "cs": "Hráč hlásící time-out musí rukama (nebo rukou a diskem) udělat „T“."
+  },
+  "7.4": {
+    "en": "After signalling readiness all defensive players must keep their feet entirely behind the vertical plane of the goal line until the pull is released.",
+    "cs": "Po signalizaci připravenosti musí všichni bránící hráči držet chodidla zcela za svislou rovinou brankové čáry, dokud není pull vypuštěn."
+  },
+  "7.5.2": {
+    "en": "If the offence chooses to call offside, they must let the disc hit the ground untouched and then resume play as if a brick has been called (no check is required).",
+    "cs": "Pokud se útok rozhodne hlásit offside, musí nechat disk dopadnout na zem bez doteku a pak obnovit hru, jako by byl hlášen brick (check není potřeba)."
+  },
+  "7.10": {
+    "en": "If the disc initially contacts the playing field and never becomes out-of-bounds, the thrower must establish a pivot point where the disc stops, even in their defending end zone.",
+    "cs": "Pokud disk nejdřív dopadne do hřiště a nikdy neskončí v autu, házeč si založí pivot tam, kde se disk zastaví — i ve vlastní bráněné endzóně."
+  },
+  "7.11": {
+    "en": "If the disc initially contacts the playing field and then becomes out-of-bounds without contacting an offensive player, the pivot is where the disc first crossed the perimeter line — or the nearest location in the central zone if that pivot would be in their defending end zone.",
+    "cs": "Pokud disk nejdřív dopadne do hřiště a pak skončí v autu, aniž by se dotkl útočícího hráče, pivot je tam, kde disk poprvé přešel obvodovou čáru — nebo na nejbližším místě centrální zóny, pokud by pivot vyšel do vlastní bráněné endzóny."
+  },
+  "7.11.1": {
+    "en": "If the disc does contact an offensive player before it becomes out-of-bounds, the pivot is where the disc first crossed the perimeter line, even if that is in their defending end zone.",
+    "cs": "Pokud se disk před odchodem do autu dotkne útočícího hráče, pivot je tam, kde disk poprvé přešel obvodovou čáru — i kdyby to bylo ve vlastní bráněné endzóně."
+  },
+  "11.4.2": {
+    "en": "It is an out-of-bounds turnover if, after catching the disc while airborne, an offensive receiver’s first contact is out-of-bounds while still in contact with the disc.",
+    "cs": "Jde o ztrátu do autu, pokud útočící receiver chytí disk ve vzduchu a jeho první kontakt se zemí je v autu, zatímco disk stále drží."
+  },
+  "13.5.2": {
+    "en": "After an accepted receiving foul caused by the offence, the fouled player must establish possession.",
+    "cs": "Po uznaném faulu při chytání způsobeném útokem musí držení disku získat faulovaný hráč."
+  },
+  "17.5.1": {
+    "en": "A Force-out Foul occurs when a receiver is fouled while establishing possession and the contact caused them to catch the disc out-of-bounds instead of in-bounds, or in the central zone instead of their attacking end zone.",
+    "cs": "Force-out foul nastane, když je receiver faulován při získávání držení a kontakt způsobil, že chytil disk v autu místo v hřišti, nebo v centrální zóně místo ve své útočné endzóně."
+  },
+  "17.5.3": {
+    "en": "If the force-out foul is contested, the disc is returned to the thrower if the receiver became out-of-bounds, otherwise the disc stays with the receiver.",
+    "cs": "Pokud je force-out foul kontestovaný, disk se vrací házeči, pokud receiver skončil v autu; jinak disk zůstává receiverovi."
+  },
+  "18.1.1.5": {
+    "en": "“Double Team” — a defensive player other than the marker is within three (3) metres of the thrower’s pivot point without also guarding another offensive player. Merely running across this area is not a double team.",
+    "cs": "„Double team“ — jiný bránící hráč než marker je blíž než tři (3) metry od pivotu házeče, aniž by zároveň bránil jiného útočníka. Pouhé proběhnutí tímto prostorem double team není."
+  },
+  "18.2.1": {
+    "en": "After catching the disc, the thrower must reduce speed as quickly as possible, without changing direction, until they have established a pivot point.",
+    "cs": "Po chycení disku musí házeč co nejrychleji zpomalit, bez změny směru, dokud si nezaloží pivot."
+  },
+  "9.5.3": {
+    "en": "Contested stall-out: the disc goes back to the thrower and, after the check, the stall count resumes at 8.",
+    "cs": "Contestovaný stall-out: disk se vrací házeči a po checku se stall count obnoví na 8."
+  },
+  "13.11": {
+    "en": "A player who gains possession in the end zone they are defending may put the disc into play there, or take it to the nearest point on the goal line and establish the pivot.",
+    "cs": "Hráč, který získá držení v endzóně, kterou brání, může rozehrát tam, nebo si disk vzít na nejbližší bod goal line a postavit pivot."
+  },
+  "17.3": {
+    "en": "Strip: a defender who knocks the disc out of a player’s established possession commits a foul; accepted, the loss of possession is undone.",
+    "cs": "Strip: obránce, který vyrazí disk z už získaného držení hráče, se dopouští faulu; po uznání se ztráta držení ruší."
+  },
+  "17.9.1": {
+    "en": "Offsetting fouls: when players from both teams foul on the same play, the fouls offset — the disc returns to the thrower.",
+    "cs": "Offsetting fouls: když v jedné akci faulují hráči obou týmů, fouly se ruší — disk se vrací házeči."
+  },
+  "7.3": {
+    "en": "False start: the receiving team may not change position along the goal line until the pull is released.",
+    "cs": "False start: přijímající tým nesmí měnit pozici na goal line, dokud není pull vypuštěný."
+  },
+  "7.5.1": {
+    "en": "After an accepted false start the thrower establishes a pivot per the pull rules and play restarts as after a time-out — both teams may set up freely, then check.",
+    "cs": "Po uznaném false startu házeč postaví pivot podle pravidel pro pull a hra se restartuje jako po time-outu — oba týmy se mohou postavit svobodně, pak check."
+  },
+  "18.1.1": {
+    "en": "The marking infractions: blocking the thrower’s vision, straddling the pivot, disc space, wrapping, double team, and fast count.",
+    "cs": "Marking infractions: blokování výhledu házeče, stání přes pivot, disc space, wrapping, double team a fast count."
+  },
+  "18.2.1.1": {
+    "en": "A player who catches the disc in motion may throw without stopping, provided they do not speed up, do not change direction, and use at most two further points of contact with the ground.",
+    "cs": "Hráč, který chytí disk v pohybu, může hodit bez zastavení, pokud nezrychlí, nezmění směr a použije nejvýš dva další kontakty se zemí."
+  },
+  "11.3.1": {
+    "en": "An airborne player retains their in-bounds / out-of-bounds status until they contact the playing field or the out-of-bounds area.",
+    "cs": "Hráč ve vzduchu si drží status „v hřišti / v autu“, dokud se nedotkne hřiště nebo autového území."
+  },
+  "11.7": {
+    "en": "The disc may fly outside a perimeter line and return to the playing field, and players may go out-of-bounds to make a play on the disc.",
+    "cs": "Disk může vyletět za perimeter line a vrátit se do hřiště a hráči mohou jít do autu, aby disk zahráli."
+  },
+  "13.2.2": {
+    "en": "It is a turnover (a “stall-out”) if the thrower has not released the pass before the marker first starts to say the word “ten” in the stall count.",
+    "cs": "Je to turnover („stall-out“), pokud házeč nevypustil přihrávku dřív, než marker začne říkat slovo „ten“."
+  },
+  "13.4.1": {
+    "en": "After a stall-out call, if the thrower still has possession and believes a fast count denied them a reasonable opportunity to call it, the play is treated as either an accepted defensive breach (9.5.1) or a contested stall-out (9.5.3).",
+    "cs": "Po stall-outu: pokud házeč disk pořád drží a věří, že fast count mu nedal rozumnou možnost ho zavolat, hra se posuzuje jako uznaný prohřešek obrany (9.5.1), nebo jako contestovaný stall-out (9.5.3)."
+  },
+  "13.8": {
+    "en": "If the turnover location is out-of-bounds, or the disc touched an out-of-bounds area after the turnover, the pivot point is established at the location on the CENTRAL ZONE nearest to where the disc went out-of-bounds. (The central zone includes the goal lines but excludes the end zones and the perimeter lines.)",
+    "cs": "Je-li místo turnoveru v autu, nebo se disk po turnoveru dotkl autového území, pivot se staví na místě CENTRÁLNÍ ZÓNY nejblíž tomu, kde disk opustil hřiště. (Centrální zóna zahrnuje goal line, ale ne endzóny ani perimeter lines.)"
+  },
+  "13.11.3": {
+    "en": "Immediate movement, staying at the turnover location, faking a pass, or signalling the goal-line option determines where the pivot is established — and cannot be reversed.",
+    "cs": "Okamžitý pohyb, zůstání na místě turnoveru, naznačení hodu nebo signalizace volby goal line určuje, kde se staví pivot — a nedá se vzít zpět."
+  },
+  "17.3.1": {
+    "en": "A Strip Foul occurs when an opponent fouls a player and that causes the player to drop a disc they caught, or to lose possession of the disc.",
+    "cs": "Strip foul nastane, když soupeř fauluje hráče a tím způsobí, že hráč upustí chycený disk nebo přijde o držení."
+  },
+  "17.9.2": {
+    "en": "Non-minor contact caused by two or more opposing players moving towards a single point simultaneously must be treated as offsetting fouls.",
+    "cs": "Nezanedbatelný kontakt způsobený dvěma či více soupeři, kteří míří současně do jednoho bodu, se musí posoudit jako offsetting fouls."
+  },
+  "18.1.1.1": {
+    "en": "“Fast Count” — the marker starts or continues the count illegally, omits “Stalling”, counts in less than one-second intervals, fails to reduce or reset the count when required, or starts from the wrong number.",
+    "cs": "„Fast count“ — marker začne či pokračuje v countu nelegálně, vynechá „Stalling“, počítá v intervalech kratších než sekunda, nesníží nebo neresetuje count, když má, nebo začne od špatného čísla."
+  },
+  "18.1.1.2": {
+    "en": "“Straddle” — a line between a defensive player’s feet comes within one disc diameter of the thrower’s pivot point.",
+    "cs": "„Straddle“ — spojnice mezi chodidly obránce se dostane blíž než jeden průměr disku k pivotu házeče."
+  },
+  "18.1.1.6": {
+    "en": "“Vision” — a defensive player uses any part of their body to intentionally obstruct the thrower’s vision.",
+    "cs": "„Vision“ — obránce jakoukoli částí těla záměrně blokuje výhled házeče."
+  },
+  "20.3.6": {
+    "en": "After a time-out the stall count restarts at maximum nine (9). However if the marker has been switched, it restarts at “Stalling one (1)”.",
+    "cs": "Po time-outu se stall count obnoví na maximálně devět (9). Pokud se ale vyměnil marker, začíná znovu od „Stalling one (1)“."
+  },
+  "9.3.2": {
+    "en": "The marker may only start and continue a stall count while within three (3) metres of the thrower’s pivot point (or the pivot location if the thrower is not there).",
+    "cs": "Marker smí začít a pokračovat ve stall countu jen do tří (3) metrů od pivotu házeče (nebo od místa pivotu, pokud tam házeč není)."
+  },
+  "9.3.3": {
+    "en": "The marker may only start and continue a stall count while all defenders are legally positioned (Section 18.1).",
+    "cs": "Marker smí začít a pokračovat ve stall countu jen tehdy, když jsou všichni obránci postavení legálně (oddíl 18.1)."
+  },
+  "9.5.5.2": {
+    "en": "If a violation is called related to The Check, the stall count resumes at the same count that was determined prior to that violation.",
+    "cs": "Pokud je vyhlášena violation týkající se checku, stall count se obnoví na stejném čísle, které bylo určeno před ní."
+  },
+  "10.2.3": {
+    "en": "All players must remain stationary in their required location until the disc is checked in.",
+    "cs": "Všichni hráči musí zůstat nehybně na svém místě, dokud není disk checknutý."
+  },
+  "10.7.5": {
+    "en": "After a violation call regarding the check, any pass does not count regardless of whether it is complete or incomplete, and possession reverts back to the thrower (unless 16.3 applies).",
+    "cs": "Po violation ohledně checku žádná přihrávka neplatí, ať dokončená či nedokončená, a držení se vrací házeči (pokud neplatí 16.3)."
+  },
+  "11.1": {
+    "en": "The entire playing field is in-bounds. The perimeter lines are not part of the playing field and are out-of-bounds.",
+    "cs": "Celé hřiště je „in-bounds“. Perimeter lines nejsou součástí hřiště a jsou v autu."
+  },
+  "11.3.2": {
+    "en": "A player who has caught the disc, contacts the playing field and then contacts an out-of-bounds area, is still considered in-bounds, as long as they maintain the catch until they establish possession. If they leave the field they establish the pivot where they crossed the perimeter line.",
+    "cs": "Hráč, který chytil disk, dotkne se hřiště a pak autového území, se pořád považuje za hráče v hřišti, pokud chycení udrží až do získání držení. Pokud hřiště opustí, staví pivot v místě, kde protnul perimeter line."
+  },
+  "11.3.3": {
+    "en": "A thrower who contacts an out-of-bounds area is considered in-bounds until they make a pass.",
+    "cs": "Házeč, který se dotkne autového území, se považuje za hráče v hřišti, dokud nehodí."
+  },
+  "11.4.1": {
+    "en": "It is an out-of-bounds turnover, and no catch is deemed to have occurred, if any part of an offensive receiver is out-of-bounds when they contact the disc.",
+    "cs": "Je to turnover v autu a chycení se považuje za neuskutečněné, pokud je jakákoli část receivera při doteku disku v autu."
+  },
+  "18.1.1.4": {
+    "en": "“Wrapping” — a line between a defender’s hands or arms comes within one disc diameter of the thrower’s torso, or any part of the defender is above the thrower’s pivot point. Not an infraction if caused solely by the thrower’s movement.",
+    "cs": "„Wrapping“ — spojnice mezi rukama či pažemi obránce se dostane blíž než jeden průměr disku k trupu házeče, nebo je jakákoli část obránce nad pivotem. Není to infraction, pokud to způsobil výhradně pohyb házeče."
+  },
+  "18.1.1.5.1": {
+    "en": "A defender guarding another offensive player may attempt to prevent a pass from the thrower, as long as they continue to guard that player.",
+    "cs": "Obránce, který brání jiného hráče útoku, se může pokoušet zabránit přihrávce, dokud toho hráče dál brání."
+  },
+  "18.1.1.5.2": {
+    "en": "Merely running across the area within three metres of the pivot is not a double team.",
+    "cs": "Pouhý průběh prostorem do tří metrů od pivotu není double team."
+  },
+  "19.1.1": {
+    "en": "An injury stoppage (“Injury”) may be called by the injured player, or by any player on the injured player’s team.",
+    "cs": "Zastavení kvůli zranění („Injury“) může vyhlásit zraněný hráč, nebo kterýkoli hráč jeho týmu."
+  },
+  "19.1.2": {
+    "en": "If the injury was not caused by an opponent, the player must choose either to be substituted, or to charge their own team with a time-out.",
+    "cs": "Pokud zranění nezpůsobil soupeř, hráč si musí vybrat: buď střídání, nebo time-out na vrub vlastního týmu."
+  },
+  "19.1.3": {
+    "en": "If the injury was caused by an opponent, the player may choose to stay or to be substituted.",
+    "cs": "Pokud zranění způsobil soupeř, hráč si může vybrat, jestli zůstane, nebo se nechá vystřídat."
+  },
+  "19.1.4": {
+    "en": "If the injured player had established possession and dropped the disc due to the injury, that player retains possession.",
+    "cs": "Pokud zraněný hráč měl držení a disk upustil kvůli zranění, držení mu zůstává."
+  },
+  "19.1.6": {
+    "en": "If the disc was in the air when an injury stoppage was called, play continues until a player establishes possession or the disc hits the ground. If the injury is not the result of a foul by an opponent, the completion or turnover stands, and play restarts there.",
+    "cs": "Pokud disk letěl, když bylo vyhlášeno zranění, hra pokračuje, dokud někdo nezíská držení nebo disk nedopadne. Není-li zranění důsledkem faulu soupeře, dokončená přihrávka nebo turnover platí a hraje se odtud."
+  },
+  "20.4": {
+    "en": "If the thrower attempts to call a time-out their team does not have, play stops and the marker adds two (2) seconds to the stall count they would have restarted on. If this results in a count of ten (10) or above, it is a stall-out turnover.",
+    "cs": "Pokud si házeč vezme time-out, který tým nemá, hra se zastaví a marker přidá dvě (2) sekundy k countu, na kterém by se rozehrávalo. Pokud to vyjde na deset (10) nebo víc, je to stall-out a turnover."
+  },
+  "17.1.1": {
+    "en": "Dangerous play: actions demonstrating reckless disregard for the safety of fellow players, or posing significant risk of injury, must be treated as a foul regardless of whether or when contact occurs. This rule is not superseded by any other foul rule; if accepted it is treated as the most relevant foul from Section 17.",
+    "cs": "Dangerous play: jednání ukazující bezohlednost vůči bezpečí ostatních hráčů nebo vytvářející výrazné riziko zranění se musí posoudit jako foul bez ohledu na to, jestli a kdy dojde ke kontaktu. Toto pravidlo nepřebíjí žádné jiné; po uznání se řeší jako nejrelevantnější foul z oddílu 17."
+  },
+  "17.4.1": {
+    "en": "A Blocking Foul occurs when a player takes a position that an opponent moving in a legal manner will be unable to avoid — judged on that opponent’s expected position from their established speed and direction — and non-minor contact results. Treated as a receiving foul or an indirect foul, whichever applies.",
+    "cs": "Blocking foul nastane, když hráč zaujme pozici, které se legálně pohybující soupeř nemůže vyhnout — posuzováno podle jeho očekávané pozice z jeho rychlosti a směru — a dojde k nezanedbatelnému kontaktu. Řeší se jako receiving foul, nebo indirect foul, podle toho, co sedí."
+  },
+  "17.6.1.1": {
+    "en": "A Defensive Throwing Foul occurs when there is non-minor contact between the thrower and an illegally positioned defensive player (Section 18.1).",
+    "cs": "Defensive throwing foul nastane, když dojde k nezanedbatelnému kontaktu mezi házečem a nelegálně postaveným obráncem (oddíl 18.1)."
+  },
+  "17.7.2": {
+    "en": "Contact occurring during the thrower’s follow-through is not a sufficient basis for a foul, but should be avoided.",
+    "cs": "Kontakt při dohmatu házeče není dostatečným důvodem k foulu, ale měl by se mu vyhýbat."
+  },
+  "17.8.1": {
+    "en": "An Indirect Foul occurs when there is non-minor contact between a receiver and a defensive player that does not directly affect an attempt to make a play on the disc.",
+    "cs": "Indirect foul nastane, když dojde k nezanedbatelnému kontaktu mezi receiverem a obráncem, který přímo neovlivní pokus zahrát disk."
+  },
+  "17.8.1.1": {
+    "en": "Before making an “Indirect Foul” call, the player may delay the call up to two (2) seconds to determine if the breach will affect the play.",
+    "cs": "Před vyslovením „indirect foul“ může hráč call odložit až o dvě (2) sekundy, aby zjistil, jestli prohřešek ovlivní hru."
+  },
+  "17.8.2": {
+    "en": "If an indirect foul is accepted, the fouled player may make up any positional disadvantage caused by the foul.",
+    "cs": "Pokud je indirect foul uznaný, faulovaný hráč si může vynahradit poziční nevýhodu, kterou foul způsobil."
+  },
+  "11.6": {
+    "en": "A disc becomes out-of-bounds when it first contacts the out-of-bounds area or an out-of-bounds offensive player. A caught disc has the same status as the player holding it.",
+    "cs": "Disk je v autu, jakmile se poprvé dotkne autového území nebo hráče útoku v autu. Chycený disk má stejný status jako hráč, který ho drží."
+  },
+  "11.8": {
+    "en": "The place where a disc went out-of-bounds is where, prior to contacting the out-of-bounds area, it was most recently partly or wholly over the playing field, or contacted by an in-bounds player.",
+    "cs": "Místo, kde disk opustil hřiště, je tam, kde byl před dotekem autového území naposledy zčásti nebo celý nad hřištěm, nebo kde se ho naposledy dotkl hráč v hřišti."
+  },
+  "18.2.2": {
+    "en": "The thrower may move in any direction (pivot) only by establishing and maintaining a pivot point until releasing a pass.",
+    "cs": "Házeč se smí pohybovat kterýmkoli směrem (pivotovat) jen tak, že postaví a udrží pivot až do vypuštění přihrávky."
+  },
+  "18.2.3": {
+    "en": "A thrower who is not standing can use any part of their body as the pivot point. Standing up is not a travel, but only if a pivot point is established at the same location.",
+    "cs": "Házeč, který nestojí, může jako pivot použít jakoukoli část těla. Vstát není travel, ale jen když se pivot postaví na stejném místě."
+  },
+  "18.2.4.3": {
+    "en": "It is a travel infraction if, whenever the thrower must move to a specified location, they do not establish a pivot point before a wind-up or throwing motion begins.",
+    "cs": "Je to travel infraction, když se házeč musí přesunout na určené místo a nepostaví pivot dřív, než začne nápřah nebo hodový pohyb."
+  },
+  "18.2.4.4": {
+    "en": "It is a travel infraction if the thrower fails to keep the established pivot point until releasing a pass.",
+    "cs": "Je to travel infraction, když házeč neudrží postavený pivot až do vypuštění přihrávky."
+  },
+  "18.2.4.5": {
+    "en": "It is a travel infraction if a player intentionally bobbles, fumbles or delays the disc to themselves for the sole purpose of moving in a specific direction.",
+    "cs": "Je to travel infraction, když si hráč záměrně žongluje, upouští nebo zdržuje disk jen proto, aby se posunul určitým směrem."
+  },
+  "18.2.5.1": {
+    "en": "After an accepted travel the thrower establishes a pivot point at the correct location, as indicated by the player who called it. This must occur without delay from either player involved.",
+    "cs": "Po uznaném travelu házeč postaví pivot na správném místě podle toho, kdo travel volal. Musí to proběhnout bez zdržování z obou stran."
+  },
+  "18.2.5.3": {
+    "en": "The marker does not need to say “Stalling” before resuming the stall count after an accepted travel.",
+    "cs": "Marker po uznaném travelu nemusí před pokračováním ve stall countu říkat „Stalling“."
+  },
+  "18.3.3": {
+    "en": "All players should take reasonable efforts to avoid the occurrence of picks.",
+    "cs": "Všichni hráči by se měli rozumně snažit, aby k pickům nedocházelo."
+  },
+  "18.3.3.1": {
+    "en": "During any stoppage opposing players may agree to slightly adjust their locations to avoid potential picks.",
+    "cs": "Během jakéhokoli zastavení se soupeři mohou dohodnout na mírné úpravě pozic, aby předešli možným pickům."
+  },
+  "7.2": {
+    "en": "The pull may be made only after both teams have signalled readiness, by the puller and a player on offence raising a hand above their head.",
+    "cs": "Pull smí být zahrán, až když oba týmy signalizují připravenost — puller a jeden hráč útoku zvednou ruku nad hlavu."
+  },
+  "7.6": {
+    "en": "As soon as the pull is released, all players may move in any direction.",
+    "cs": "Jakmile je pull vypuštěný, všichni hráči se mohou pohybovat kterýmkoli směrem."
+  },
+  "7.7": {
+    "en": "No player on the defensive team may touch the disc after a pull until a member of the offensive team contacts the disc, or the disc hits the ground.",
+    "cs": "Žádný hráč obrany se po pullu nesmí disku dotknout, dokud se ho nedotkne hráč útoku nebo dokud disk nedopadne na zem."
+  },
+  "7.9": {
+    "en": "If an offensive player catches the pull and establishes possession, they must establish a pivot point at the location nearest to where possession is established, even if that pivot point is in their defending end zone.",
+    "cs": "Když hráč útoku pull chytí a získá držení, musí postavit pivot na místě nejblíž tomu, kde držení získal — i když je ten pivot v jeho bráněné endzóně."
+  },
+  "9.1": {
+    "en": "The marker administers the stall count by announcing “Stalling” and then counting from one to ten. The interval between the start of each number must be at least one second.",
+    "cs": "Marker vede stall count tak, že řekne „Stalling“ a pak počítá od jedné do deseti. Interval mezi začátky čísel musí být aspoň jedna sekunda."
+  },
+  "9.2": {
+    "en": "The stall count must be clearly communicated to the thrower.",
+    "cs": "Stall count musí být házeči jasně sdělován."
+  },
+  "9.3.1": {
+    "en": "The marker may only start and continue a stall count when play is live, or once a pivot point is established after a turnover.",
+    "cs": "Marker smí začít a pokračovat ve stall countu jen když je hra živá, nebo jakmile je po turnoveru postavený pivot."
+  },
+  "11.2": {
+    "en": "The out-of-bounds area consists of the ground which is not in-bounds and everything in contact with it, except for defensive players, who are always considered “in-bounds”.",
+    "cs": "Autové území tvoří země, která není hřištěm, a všechno, co se jí dotýká — kromě obránců, kteří se vždy považují za hráče „v hřišti“."
+  },
+  "20.2": {
+    "en": "After the start of a point and before both teams have signalled readiness, a player from either team may call a time-out, extending the time between the start of the point and the pull by seventy-five seconds.",
+    "cs": "Po začátku bodu a předtím, než oba týmy signalizují připravenost, může time-out vzít hráč kteréhokoli týmu; prodlouží čas mezi začátkem bodu a pullem o sedmdesát pět sekund."
+  },
+  "20.3": {
+    "en": "After the pull only a thrower with possession of the disc may call a time-out. It lasts seventy-five seconds; play restarts at the pivot location with the same thrower.",
+    "cs": "Po pullu může time-out vzít jen házeč, který drží disk. Trvá sedmdesát pět sekund; hra se rozehrává na místě pivotu se stejným házečem."
+  },
+  "7.5": {
+    "en": "If a team breaches 7.3 (“false start”) or 7.4 (“offside”) the opposing team may call the relevant violation. It must be called before the offence touches the disc.",
+    "cs": "Když tým poruší 7.3 („false start“) nebo 7.4 („offside“), může soupeř příslušnou violation zavolat. Musí zaznít dřív, než se útok dotkne disku."
+  },
+  "12.1": {
+    "en": "A “catch” occurs when a player has a non-spinning disc trapped between at least two body parts. A catch can enable a player to establish possession.",
+    "cs": "„Chycení“ nastane, když má hráč nerotující disk sevřený mezi aspoň dvěma částmi těla. Chycení může hráči umožnit získat držení."
+  },
+  "12.1.1": {
+    "en": "If the player fails to maintain the catch due to subsequent ground contact related to the catch, or contact related to the catch with a team-mate or a legitimately positioned opponent, possession is deemed to have not occurred.",
+    "cs": "Pokud hráč neudrží chycení kvůli následnému doteku země souvisejícímu s chycením, nebo kvůli souvisejícímu kontaktu se spoluhráčem či legitimně postaveným soupeřem, držení se považuje za nezískané."
+  },
+  "12.3": {
+    "en": "If offensive and defensive players catch the disc simultaneously, the offence retains possession.",
+    "cs": "Když disk chytí současně hráč útoku a hráč obrany, držení si ponechává útok."
+  },
+  "12.5": {
+    "en": "Every player is entitled to occupy any position on the field not occupied by any opposing player, provided they do not initiate contact in taking it.",
+    "cs": "Každý hráč má právo zaujmout jakoukoli pozici na hřišti, kterou neobsazuje soupeř, pokud přitom nevyvolá kontakt."
+  },
+  "12.5.1": {
+    "en": "When the disc is in the air a player may not move in a manner solely to prevent an opponent from taking an unoccupied path to make a play on the disc.",
+    "cs": "Když disk letí, hráč se nesmí pohybovat způsobem, jehož jediným účelem je zabránit soupeři využít volnou cestu k zahrání disku."
+  },
+  "12.6": {
+    "en": "All players must attempt to avoid initiating contact, and there is no situation where a player may justify initiating contact — including with a stationary opponent, or an opponent’s expected position based on their established speed and direction.",
+    "cs": "Všichni hráči se musí snažit vyhnout vyvolání kontaktu a neexistuje situace, kdy by ho hráč mohl ospravedlnit — včetně kontaktu se stojícím soupeřem nebo s jeho očekávanou pozicí podle jeho rychlosti a směru."
+  },
+  "12.6.1": {
+    "en": "“Making a play for the disc” is not a valid excuse for initiating contact with other players.",
+    "cs": "„Hraju disk“ není platná omluva pro vyvolání kontaktu s jinými hráči."
+  },
+  "12.6.2": {
+    "en": "Before a player dives, leaps or jumps away from their position, they must be reasonably certain they will not initiate contact with an opponent.",
+    "cs": "Než se hráč vrhne, skočí nebo se odrazí ze své pozice, musí si být rozumně jistý, že nevyvolá kontakt se soupeřem."
+  },
+  "12.6.3": {
+    "en": "If a player is not reasonably certain they can make a legal play at the disc before a legally moving opponent, they must adjust to avoid initiating contact. If that adjustment is made, the result of the play still stands.",
+    "cs": "Pokud si hráč není rozumně jistý, že zahraje disk legálně dřív než legálně se pohybující soupeř, musí pohyb upravit, aby kontakt nevyvolal. Když to udělá, výsledek akce i tak platí."
+  },
+  "14.1": {
+    "en": "A goal is scored if an in-bounds player catches a legal pass and all their ground contacts (or, for an airborne player, all their first simultaneous points of contact) are entirely within their attacking end zone, and they then establish and maintain possession.",
+    "cs": "Gól padne, když hráč v hřišti chytí legální přihrávku a všechny jeho doteky se zemí (u hráče ve vzduchu všechny první současné doteky) jsou celé v jeho útočné endzóně, a následně získá a udrží držení."
+  },
+  "14.2": {
+    "en": "If a player believes a goal has been scored they may call “goal” and play stops. After a contested or retracted goal call play restarts with a check, and the call is deemed to have been made when the player established possession.",
+    "cs": "Když hráč věří, že padl gól, může zavolat „gól“ a hra se zastaví. Po contestovaném či odvolaném gólovém callu se restartuje checkem a call se považuje za vyslovený v okamžiku získání držení."
+  },
+  "14.4": {
+    "en": "The time at which a goal is deemed to have been scored is when the player established possession.",
+    "cs": "Okamžik, kdy je gól považován za vstřelený, je chvíle, kdy hráč získal držení."
+  },
+  "15.1.1": {
+    "en": "A player intentionally initiating minor contact is still a breach of the rules, but is treated as a violation, not a foul.",
+    "cs": "Záměrné vyvolání drobného kontaktu je pořád porušení pravidel, ale řeší se jako violation, ne foul."
+  },
+  "15.6": {
+    "en": "Any opposing player may claim a violation, by calling the specific name of the violation or “Violation”, unless specified otherwise by the particular rule.",
+    "cs": "Violation může nárokovat kterýkoli soupeř voláním konkrétního názvu nebo slova „Violation“, pokud dané pravidlo neříká jinak."
+  },
+  "15.9.1": {
+    "en": "After a player initiates a stoppage incorrectly, if the opposition gains or retains possession, any subsequent play stands.",
+    "cs": "Když hráč neoprávněně zastaví hru a soupeř získá nebo udrží držení, následná hra platí."
+  },
+  "15.9.2": {
+    "en": "After a player initiates a stoppage incorrectly, if the opposition does not gain or retain possession, the disc must be returned to the last non-disputed thrower, unless 16.3 applies.",
+    "cs": "Když hráč neoprávněně zastaví hru a soupeř držení nezíská ani neudrží, disk se musí vrátit poslednímu nespornému házeči, pokud neplatí 16.3."
+  },
+  "15.9.3": {
+    "en": "After an incorrect stoppage the stall count resumes as if an accepted breach had been caused by the player who initiated the stoppage.",
+    "cs": "Po neoprávněném zastavení se stall count obnoví, jako by uznaný prohřešek způsobil hráč, který zastavení vyvolal."
+  },
+  "15.11": {
+    "en": "If a player making any call subsequently determines that their call was incorrect, they can retract it by calling “Retracted”. Play resumes as if an accepted breach had been caused by that player.",
+    "cs": "Pokud hráč zjistí, že jeho call byl nesprávný, může ho odvolat slovem „Retracted“. Hra pokračuje, jako by uznaný prohřešek způsobil ten hráč."
+  },
+  "15.12": {
+    "en": "If multiple breaches occur on the same play or before play stops, the outcomes are resolved in reverse sequence — latest breach first, earliest last.",
+    "cs": "Když v jedné akci (nebo před zastavením hry) nastane víc prohřešků, výsledky se řeší v opačném pořadí — nejpozdější prohřešek první, nejstarší poslední."
+  },
+  "8.1.3": {
+    "en": "Play is dead, and no turnover is possible, after a call which stops play or any other stoppage, until the disc is checked in.",
+    "cs": "Hra je mrtvá a turnover není možný po callu, který zastaví hru, nebo po jiném zastavení, až do checku."
+  },
+  "8.1.4": {
+    "en": "Play is dead, and no turnover is possible, after a disc hits the ground, until possession is established by the appropriate team.",
+    "cs": "Hra je mrtvá a turnover není možný po dopadu disku na zem, dokud držení nezíská příslušný tým."
+  },
+  "8.1.5": {
+    "en": "Players are allowed to move during dead play, unless specified otherwise.",
+    "cs": "Během mrtvé hry se hráči mohou pohybovat, pokud není stanoveno jinak."
+  },
+  "8.3": {
+    "en": "The thrower may not transfer possession of the disc during dead play to another player.",
+    "cs": "Házeč nesmí během mrtvé hry předat držení disku jinému hráči."
+  },
+  "8.4": {
+    "en": "Any player may attempt to stop a disc from rolling or sliding after it has hit the ground.",
+    "cs": "Kterýkoli hráč se může pokusit zastavit disk, který se po dopadu kutálí nebo klouže."
+  },
+  "8.4.1": {
+    "en": "If, in attempting to stop such a disc, a player significantly alters its position, the opposition may request that the pivot point be established where the disc was contacted.",
+    "cs": "Pokud při tom hráč výrazně změní pozici disku, může soupeř požádat, aby se pivot postavil tam, kde se disku dotkl."
+  },
+  "12.4": {
+    "en": "A player in an established position is entitled to remain in that position and must not be contacted by an opposing player.",
+    "cs": "Hráč v zaujaté pozici má právo v ní zůstat a soupeř do něj nesmí narazit."
+  },
+  "12.7.1": {
+    "en": "The player who initiates contact is the one who arrived at the point of contact after the opponent had already established a legitimate position there (stationary or moving).",
+    "cs": "Kontakt vyvolal ten hráč, který do místa kontaktu dorazil poté, co tam soupeř už zaujal legitimní pozici (stojící i pohybující se)."
+  },
+  "12.7.3": {
+    "en": "If it is unclear which player initiated contact, and one of them dived, leaped or jumped away from their position, that player is deemed to have initiated it.",
+    "cs": "Není-li jasné, kdo kontakt vyvolal, a jeden z hráčů se vrhl, skočil nebo odrazil ze své pozice, považuje se za původce on."
+  },
+  "12.9": {
+    "en": "Players may not use their extended arms or legs to obstruct the movement of opposing players.",
+    "cs": "Hráči nesmí používat natažené paže ani nohy k bránění pohybu soupeřů."
+  },
+  "12.10": {
+    "en": "No player may physically assist the movement of another player, nor use an item of equipment or object to assist in contacting the disc.",
+    "cs": "Žádný hráč nesmí fyzicky pomáhat pohybu jiného hráče ani používat vybavení či předmět k doteku disku."
+  },
+  "13.6": {
+    "en": "If the player in possession after a turnover, or after a pull that has hit the ground, intentionally drops, places or transfers the disc, they must re-establish possession and restart play with a check.",
+    "cs": "Pokud hráč, který má po turnoveru (nebo po pullu, který dopadl) držení, disk záměrně upustí, položí či předá, musí držení znovu získat a rozehrát checkem."
+  },
+  "16.1": {
+    "en": "Whenever a foul or violation call is made, or a player attempts to stop play in any way, play stops immediately and no turnover is possible (unless 15.9, 16.2 or 16.3 applies).",
+    "cs": "Kdykoli zazní foul nebo violation, nebo se hráč jakkoli pokusí zastavit hru, hra se okamžitě zastaví a turnover není možný (pokud neplatí 15.9, 16.2 nebo 16.3)."
+  },
+  "16.3.2": {
+    "en": "If a play that both teams agree was unaffected did not result in a goal, the affected players may make up any positional disadvantage and restart play with a check.",
+    "cs": "Pokud akce, na jejíž neovlivněnosti se oba týmy shodnou, neskončila gólem, mohou si dotčení hráči vynahradit poziční nevýhodu a rozehrát checkem."
+  },
+  "9.5.4": {
+    "en": "After continuation of play in accordance with rule 16.3.2 the stall count restarts at “Stalling one (1)”.",
+    "cs": "Po pokračování hry podle pravidla 16.3.2 se stall count obnoví na „Stalling one (1)“."
+  },
+  "11.3.4": {
+    "en": "Contact between players does not confer the state of being in- or out-of-bounds from one to another.",
+    "cs": "Kontakt mezi hráči nepřenáší stav „v hřišti / v autu“ z jednoho na druhého."
+  },
+  "10.5": {
+    "en": "If there is an unnecessary delay in checking the disc in, the opposition may give a warning (“Delay of Game”). If the delay continues, the team that gave the warning may check the disc in by calling “Disc In”, but only if they are all stationary and positioned as per 10.2.",
+    "cs": "Při zbytečném zdržování checku může soupeř dát varování („Delay of Game“). Pokud zdržování pokračuje, může tým, který varoval, disk uvést do hry zvoláním „Disc In“ — ale jen když všichni jeho hráči stojí na místech podle 10.2."
+  },
+  "13.1.1": {
+    "en": "A turnover occurs when the disc contacts the ground while it is not in the possession of an offensive player (a “down”).",
+    "cs": "Turnover nastane, když se disk dotkne země, aniž by ho držel hráč útoku („down“)."
+  },
+  "13.1.1.1": {
+    "en": "However it is not “down” if a receiver catches a pass before the disc contacts the ground, and maintains the catch while the disc is in contact with the ground.",
+    "cs": "Není to však „down“, pokud receiver chytí přihrávku dřív, než se disk dotkne země, a chycení udrží i během doteku disku se zemí."
+  },
+  "13.3": {
+    "en": "A turnover must be called immediately. If the opposition disagrees they may call “contest” and play stops. If players cannot agree, or it is unclear what occurred, the disc must be returned to the last non-disputed thrower.",
+    "cs": "Turnover se musí zavolat okamžitě. Když soupeř nesouhlasí, může zavolat „contest“ a hra se zastaví. Pokud se hráči neshodnou nebo není jasné, co se stalo, disk se musí vrátit poslednímu nespornému házeči."
+  },
+  "13.12": {
+    "en": "If, after an accepted turnover, play has continued unknowingly, play stops and the disc is returned to the turnover location, players resume their positions at the time the turnover occurred, and play restarts with a check.",
+    "cs": "Pokud se po uznaném turnoveru pokračovalo bez povšimnutí, hra se zastaví, disk se vrátí na místo turnoveru, hráči zaujmou pozice z okamžiku turnoveru a rozehrává se checkem."
+  },
+  "19.2.1": {
+    "en": "Any player who recognises a condition that endangers players, including an open or bleeding wound, should call a technical stoppage (“technical” or “stop”) and play must stop immediately. A player with a bleeding wound has seventy (70) seconds to address it, then must be substituted or charge their team a time-out.",
+    "cs": "Kterýkoli hráč, který zaznamená stav ohrožující hráče — včetně otevřené či krvácející rány — by měl zavolat technical stoppage („technical“ nebo „stop“) a hra se musí okamžitě zastavit. Hráč s krvácející ranou má na ošetření sedmdesát (70) sekund, pak musí být vystřídán, nebo si tým vezme time-out."
+  },
+  "19.2.2": {
+    "en": "The thrower may call a technical stoppage during play to replace a severely damaged disc.",
+    "cs": "Házeč může během hry vzít technical stoppage kvůli výměně vážně poškozeného disku."
+  },
+  "19.2.3.1": {
+    "en": "After a technical stoppage called while the disc is in the air, or where play continued unknowingly: if the call or issue did not affect play, the completion or turnover stands and play restarts there.",
+    "cs": "Po technical stoppage vyhlášené, když disk letí, nebo když se pokračovalo bez povšimnutí: pokud call ani daná situace hru neovlivnily, dokončená přihrávka nebo turnover platí a hraje se odtud."
+  },
+  "19.2.3.2": {
+    "en": "If the call or issue did affect the play, the disc goes back to the thrower.",
+    "cs": "Pokud call či daná situace hru ovlivnily, disk se vrací házeči."
+  },
+  "10.2.2.2": {
+    "en": "If play stops after a pass and the result of the play stands, all players return to the location they held when a player established possession, or the disc hit the ground.",
+    "cs": "Pokud se hra zastaví po přihrávce a výsledek akce platí, všichni hráči se vrátí na místa, kde stáli ve chvíli, kdy hráč získal držení, nebo disk dopadl na zem."
+  },
+  "2.3": {
+    "en": "The perimeter lines are not part of the playing field.",
+    "cs": "Postranní a koncové čáry nejsou součástí hřiště."
+  },
+  "2.4": {
+    "en": "The goal lines are the lines that separate the central zone from the end zones and are part of the central zone.",
+    "cs": "Brankové čáry oddělují centrální zónu od koncových zón a jsou součástí centrální zóny."
+  },
+  "2.5": {
+    "en": "The brick marks are the intersection of two (2) crossed one (1) metre lines in the central zone, located a distance equal to the length of the end zone away from each goal line, midway between the sidelines.",
+    "cs": "Brick marky jsou průsečíky dvou zkřížených jednometrových čar v centrální zóně, vzdálené od každé brankové čáry na délku koncové zóny a uprostřed mezi postranními čarami."
+  },
+  "2.7": {
+    "en": "The immediate surroundings of the playing field shall be kept clear of movable objects. If play is obstructed by non-players or objects within three (3) metres of the perimeter line, any obstructed player or thrower in possession may call “Violation”.",
+    "cs": "Bezprostřední okolí hřiště musí být bez pohyblivých předmětů. Pokud hru blízkí nehráči nebo předměty do tří metrů od čáry omezují, může kterýkoli omezený hráč nebo házeč v držbě zvolat „Violation“."
+  },
+  "4.2": {
+    "en": "A game is finished and won by the first team to score fifteen (15) goals.",
+    "cs": "Hra končí a vítězí tým, který první dosáhne patnácti (15) bodů."
+  },
+  "4.3": {
+    "en": "A game is separated into two (2) periods of play, called halves. Half time occurs when a team first scores eight (8) goals.",
+    "cs": "Hra je rozdělena na dvě (2) poloviny. Poločas nastane, když některý tým poprvé dosáhne osmi (8) bodů."
+  },
+  "4.5.1": {
+    "en": "After a goal is scored, and the game has not been won or half time has not been reached, the next point starts immediately.",
+    "cs": "Po dosažení bodu, pokud hra není rozhodnutá a nenastal poločas, začíná další bod okamžitě."
+  },
+  "4.5.2": {
+    "en": "After a goal is scored, the teams switch the end zone that they are defending.",
+    "cs": "Po dosažení bodu si týmy vymění koncové zóny, které brání."
+  },
+  "4.5.3": {
+    "en": "After a goal is scored, the team that scored becomes defence and pulls next.",
+    "cs": "Po dosažení bodu se tým, který skóroval, stává obranou a rozehrává pull."
+  },
+  "5.1": {
+    "en": "Each team will put a maximum of seven (7) players and a minimum of five (5) players on the field during each point.",
+    "cs": "Každý tým nastoupí v každém bodu s maximálně sedmi (7) a minimálně pěti (5) hráči."
+  },
+  "5.3": {
+    "en": "A team may make unlimited substitutions after a goal is scored and before their team signals readiness for the pull.",
+    "cs": "Tým může provést neomezené střídání po dosažení bodu a předtím, než jeho tým signalizuje připravenost k pullu."
+  },
+  "6.1": {
+    "en": "Representatives of the two teams fairly determine which team first chooses either whether to receive or throw the initial pull, or which end zone they will initially defend.",
+    "cs": "Zástupci obou týmů spravedlivě určí, který tým volí jako první — buď zda přijímá nebo rozehrává první pull, nebo kterou koncovou zónu bude zpočátku bránit."
+  },
+  "6.2": {
+    "en": "The other team is given the remaining choice.",
+    "cs": "Druhý tým dostane zbývající volbu."
+  },
+  "6.3": {
+    "en": "At the start of the second half, these initial selections are switched.",
+    "cs": "Na začátku druhé poloviny se tyto počáteční volby vymění."
+  },
+  "19.2.1.2": {
+    "en": "A player who has an issue regarding an open or bleeding wound has seventy (70) seconds to effectively address the issue. If they need additional time to address the issue, they must choose either to be substituted, or to charge their own team with a time-out.",
+    "cs": "Hráč s otevřenou nebo krvácející ranou má sedmdesát (70) sekund na to, aby ji účinně ošetřil. Pokud potřebuje víc času, musí si zvolit buď výměnu, nebo přičíst svému týmu time-out."
+  },
+  "19.3": {
+    "en": "If a player is substituted after an injury, or due to illegal or faulty equipment, the opposing team may also choose to substitute one player.",
+    "cs": "Pokud je hráč vyměněn po zranění nebo kvůli nedovolené či vadné výstroji, může i soupeř vyměnit jednoho hráče."
+  },
+  "19.3.1": {
+    "en": "Substitute players take on the full state (location, possession, stall count etc) of the player they are substituting and may make a call on their behalf.",
+    "cs": "Střídající hráči přebírají celý stav (pozici, držbu, stall count atd.) hráče, kterého nahrazují, a mohou za něj zvolat call."
+  },
+  "20.3.2": {
+    "en": "After a time-out called by a thrower with possession, play is restarted at the pivot location.",
+    "cs": "Po time-outu, který zavolal házeč v držbě, se hra rozehrává na místě pivotu."
+  },
+  "10.2": {
+    "en": "Player positioning after a call (except in the case of a time-out, and unless specified otherwise).",
+    "cs": "Rozestavení hráčů po callu (kromě time-outu a pokud není stanoveno jinak)."
+  },
+  "1.3.10": {
+    "en": "Players must only make a call where a breach is significant enough to make a difference to the outcome of the action, or where a player’s safety is at risk.",
+    "cs": "Hráči mají zvolat call jen tam, kde je porušení dost významné, aby ovlivnilo výsledek akce, nebo kde je ohrožena bezpečnost hráče."
+  },
+  "1.6.6": {
+    "en": "The following actions are clear violations of the Spirit of the Game and must be avoided: … calling for a pass from an opposition player.",
+    "cs": "Následující jednání jsou jasným porušením Spirit of the Game a je třeba se jim vyhnout: … vyžádání přihrávky od hráče soupeře."
+  },
+  "1.7.4": {
+    "en": "Teams are guardians of the Spirit of the Game, and must … call a Spirit Stoppage to address Spirit issues, as appropriate.",
+    "cs": "Týmy jsou ochránci Spirit of the Game a musí … v případě potřeby zvolat Spirit Stoppage k řešení otázek spirit."
+  },
+  "1.10": {
+    "en": "Calls should be discussed by the players directly involved in the play, and by players who had the best perspective on the play.",
+    "cs": "Cally mají řešit hráči přímo zapojení do situace a hráči, kteří na ni měli nejlepší výhled."
+  },
+  "1.10.2": {
+    "en": "Non-players, apart from the captains, should refrain from getting involved. However players may seek other peoples’ perspectives to clarify the rules, and to assist players to make the appropriate call.",
+    "cs": "Nehráči kromě kapitánů se do toho nemají zapojovat. Hráči si však mohou vyžádat pohled dalších lidí k vyjasnění pravidel a k pomoci se správným callem."
+  },
+  "1.11": {
+    "en": "Players and captains are solely responsible for making and resolving all calls.",
+    "cs": "Za všechny cally a jejich vyřešení odpovídají výhradně hráči a kapitáni."
+  },
+  "2.1": {
+    "en": "The playing field is a rectangular area with dimensions and zones as shown on Figure 1 and should be essentially flat, free of obstructions and afford reasonable player safety.",
+    "cs": "Hřiště je pravoúhlá plocha s rozměry a zónami podle Obrázku 1 a má být v podstatě rovné, bez překážek a poskytovat rozumnou bezpečnost hráčů."
+  },
+  "2.6": {
+    "en": "Eight brightly-coloured, flexible objects (such as plastic cones) mark the corners of the central zone and the end zones.",
+    "cs": "Osm výrazně barevných pružných předmětů (například plastových kuželů) vyznačuje rohy centrální zóny a koncových zón."
+  },
+  "3.1": {
+    "en": "Any flying disc acceptable to both captains may be used.",
+    "cs": "Použít lze jakýkoli disk, na kterém se shodnou oba kapitáni."
+  },
+  "3.3": {
+    "en": "Each player must wear a uniform that distinguishes their team.",
+    "cs": "Každý hráč musí mít oblečení, které odlišuje jeho tým."
+  },
+  "3.4": {
+    "en": "No player may wear items of clothing or equipment that reasonably could harm the wearer or other players, or impede an opponent's ability to play.",
+    "cs": "Žádný hráč nesmí nosit oblečení nebo výstroj, které by rozumně mohly poranit jeho samotného nebo jiné hráče, nebo omezit schopnost soupeře hrát."
+  },
+  "10.3": {
+    "en": "Any player may briefly extend a stoppage of play to fix faulty equipment (“equipment”), but active play may not be stopped for this purpose.",
+    "cs": "Kterýkoli hráč může krátce prodloužit přerušení hry kvůli opravě vadné výstroje („equipment“), ale živou hru kvůli tomu zastavit nelze."
+  }
+}

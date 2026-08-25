@@ -63,7 +63,9 @@ graph TD
 
 ## 2. Monorepo Package Dependency Diagram
 
-The workspace is managed with pnpm. Shared logic lives in four packages under `packages/`; application code in `applications/` depends on them.
+The workspace is managed with pnpm. Shared logic lives in packages under `packages/`; application code in `applications/` depends on them.
+
+The diagram below shows the four Effect-based packages that participate in the application dependency graph. Two further packages are deliberately **Effect-free**, because they are called synchronously from React render and so cannot afford an Effect runtime in the hot path: `@sideline/template-renderer` (welcome-template rendering, used by `server` and `web`) and `@sideline/rules` (WFDF Rules of Ultimate trainer content and its pure engine). `@sideline/rules` has no consumers yet — the trainer UI is a later phase of `docs/plans/rules-trainer.md` — which is why neither appears as a node here.
 
 ```mermaid
 graph TD

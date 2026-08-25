@@ -114,6 +114,24 @@
           }
         }
       }
+    },
+    {
+      "includes": ["applications/web/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@sideline/i18n/messages": "Use tr() from ~/lib/translations.js instead of importing message functions directly.",
+                  "@sideline/rules/content": "Import PACKAGE_LOADERS from @sideline/rules — /content is eager and pulls all nine packages."
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

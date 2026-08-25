@@ -1,0 +1,2521 @@
+{
+  "level": 5,
+  "name": "Level 5 · Travel",
+  "scenarios": [
+    {
+      "id": "s11",
+      "level": 5,
+      "topic": {
+        "en": "Travel",
+        "cs": "Travel"
+      },
+      "title": {
+        "en": "Too many steps",
+        "cs": "Moc kroků"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the defender guarding the catcher",
+        "cs": "obránce bránící chytajícího"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 6.6,
+      "qAt": 4.4,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 52, 20]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 53.5, 22.3]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [
+            [0, 60, 10],
+            [2.2, 67, 13.4],
+            [3, 70, 15.8],
+            [3.8, 72.5, 19.5],
+            [4.6, 72.5, 19.5],
+            [5.8, 70.2, 16.2],
+            [6.6, 70.2, 16.2]
+          ]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "you": true,
+          "kf": [[0, 58, 8], [2.2, 66, 11], [3.4, 69, 14], [6.6, 69, 14]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 78, 28], [3, 80, 26], [6.6, 80, 26]]
+        },
+        {
+          "id": "D3",
+          "team": "def",
+          "label": "D3",
+          "kf": [[0, 79, 30], [3, 81, 28], [6.6, 81, 28]]
+        }
+      ],
+      "disc": {
+        "kf": [
+          [0, 52.6, 19.4],
+          [0.8, 52.6, 19.4],
+          [2.2, 67.6, 13],
+          [3, 70.4, 15.2],
+          [3.8, 72.9, 18.9],
+          [4.6, 72.9, 18.9],
+          [5.8, 70.6, 15.6]
+        ]
+      },
+      "fx": [
+        {
+          "t": 3.9,
+          "type": "flash",
+          "x": 72.5,
+          "y": 19.5
+        },
+        {
+          "t": 4.15,
+          "type": "bubble",
+          "dur": 1.7,
+          "actor": "D2",
+          "text": {
+            "en": "TRAVEL!",
+            "cs": "TRAVEL!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.7,
+          "type": "mark",
+          "x": 70,
+          "y": 15.8,
+          "kind": "target",
+          "label": {
+            "en": "correct pivot spot",
+            "cs": "správné místo pivotu"
+          }
+        },
+        {
+          "t": 4.9,
+          "type": "arrow",
+          "x1": 72.5,
+          "y1": 19.5,
+          "x2": 70.4,
+          "y2": 16.2
+        }
+      ],
+      "situation": {
+        "en": "The receiver catches the disc on the run, slows — but then drifts two extra steps sideways to a better throwing angle before putting a pivot down. No throw yet. You saw it clearly.",
+        "cs": "Receiver chytí disk v běhu, zpomalí — ale pak si přešlápne dva kroky do strany za lepším úhlem, než si založí pivot. Zatím nehází. Viděl jsi to jasně."
+      },
+      "question": {
+        "en": "You call “Travel”. What happens now?",
+        "cs": "Zavoláš „Travel“. Co se stane teď?"
+      },
+      "explain": {
+        "en": "Failing to slow down as quickly as possible or changing direction after the catch is a travel (18.2.4.1). An accepted travel does not stop play (18.2.5): the stall count pauses, you — the caller — indicate the correct pivot location, the thrower re-establishes the pivot there without delay and may not throw until it is corrected. The marker then resumes counting (no need to repeat “stalling”).",
+        "cs": "Nezabrzdit co nejrychleji nebo po chycení změnit směr je travel (18.2.4.1). Uznaný travel hru nestaví (18.2.5): stall count se pozastaví, ty — hlásící hráč — ukážeš správné místo pivotu, házeč si ho tam bez otálení znovu založí a do té doby nesmí házet. Marker pak pokračuje v countu (nemusí opakovat „stalling“)."
+      },
+      "note": {
+        "en": "The travel signal: rotate your fists around each other (#11). If the thrower contests and has not thrown, play does stop (18.2.8) and resumes at max 6. Catching on the run and throwing within two extra ground contacts, without speeding up or changing direction, is legal (18.2.1.1).",
+        "cs": "Signál travelu: zatoč pěstmi kolem sebe (#11). Pokud házeč kontestuje a ještě nehodil, hra se staví (18.2.8) a count pokračuje na max 6. Chytit v běhu a hodit do dvou došlapů — bez zrychlení a změny směru — je legální (18.2.1.1)."
+      },
+      "rules": ["18.2.4.1", "18.2.5", "18.2.8", "15.5.1"],
+      "signals": [11],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You call “Travel” on a receiver who did not slow down. What happens to play?",
+            "cs": "Voláš „Travel“ na receivera, který nezpomalil. Co se stane s hrou?"
+          },
+          "rules": ["18.2.4.1", "18.2.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Nothing stops — an accepted travel does not stop play",
+                "cs": "Nic se nezastaví — uznaný travel hru nezastavuje"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.4.1 defines the travel; 18.2.5 keeps play running: the count pauses, the pivot gets fixed, play carries on.",
+                "cs": "18.2.4.1 definuje travel; 18.2.5 nechá hru běžet: počítání se pozastaví, pivot se opraví, hraje se dál."
+              }
+            },
+            {
+              "t": {
+                "en": "Play stops immediately for a check",
+                "cs": "Hra se okamžitě zastaví pro check"
+              },
+              "why": {
+                "en": "That is the contested branch (18.2.8), or a travel violation after a completed pass (18.2.6).",
+                "cs": "To je contestovaná větev (18.2.8), nebo travel violation po dokončené přihrávce (18.2.6)."
+              }
+            },
+            {
+              "t": {
+                "en": "Play stops and the disc comes back to the previous thrower",
+                "cs": "Hra se zastaví a disk se vrátí předchozímu házeči"
+              },
+              "why": {
+                "en": "Nothing rewinds a completed catch for a travel on the catcher (18.2.5).",
+                "cs": "Nic neruší dokončené chycení kvůli travelu chytajícího (18.2.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "It is a turnover",
+                "cs": "Je to turnover"
+              },
+              "why": {
+                "en": "A travel is never a turnover — the remedy is a corrected pivot (18.2.5).",
+                "cs": "Travel nikdy není turnover — nápravou je opravený pivot (18.2.5)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "What has to be fixed, and by whom?",
+            "cs": "Co se musí opravit a kdo to určí?"
+          },
+          "rules": ["18.2.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "You indicate the correct pivot spot; the thrower must re-establish it without delay and may not throw until it is fixed",
+                "cs": "Ty ukážeš správné místo pivotu; házeč ho musí bez zdržení obnovit a nesmí hodit, dokud to není opraveno"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.5 — the caller marks the spot, the thrower moves there promptly, and throwing before correcting invites a violation.",
+                "cs": "18.2.5 — volající ukáže místo, házeč se tam neprodleně přesune, a hod před nápravou si říká o violation."
+              }
+            },
+            {
+              "t": {
+                "en": "The thrower decides where they think the pivot should be",
+                "cs": "Házeč sám rozhodne, kde má pivot být"
+              },
+              "why": {
+                "en": "The caller indicates the location (18.2.5); the thrower may contest if they disagree (18.2.8).",
+                "cs": "Místo ukazuje volající (18.2.5); házeč může contestovat, když nesouhlasí (18.2.8)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — the travel is purely a warning",
+                "cs": "Nic — travel je jen napomenutí"
+              },
+              "why": {
+                "en": "The pivot really does move; that is the entire remedy (18.2.5).",
+                "cs": "Pivot se skutečně posouvá; v tom je celá náprava (18.2.5)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "What does the stall count do?",
+            "cs": "Co dělá stall count?"
+          },
+          "rules": ["18.2.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "It pauses, then resumes where it paused once the pivot is corrected",
+                "cs": "Pozastaví se a po opravě pivotu pokračuje tam, kde skončil"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.5 — the count pauses during the correction and simply picks up again; the marker need not repeat “stalling”.",
+                "cs": "18.2.5 — počítání se během nápravy pozastaví a pak zase pokračuje; marker nemusí znovu říkat „stalling“."
+              }
+            },
+            {
+              "t": {
+                "en": "Back to “stalling 1”",
+                "cs": "Zpátky na „stalling 1“"
+              },
+              "why": {
+                "en": "Resets to 1 follow accepted defensive breaches that stop play (9.5.1) or an uncontested contact call (17.6.1.3).",
+                "cs": "Resety na 1 následují po uznaných prohřešcích obrany se zastavením (9.5.1) nebo po neconstestovaném contactu (17.6.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 6 after a check",
+                "cs": "Max 6 po checku"
+              },
+              "why": {
+                "en": "There is no check — play never stopped (18.2.5). Max 6 arrives only if the thrower contests (18.2.8).",
+                "cs": "Žádný check není — hra se nezastavila (18.2.5). Max 6 přijde jen když házeč contestuje (18.2.8)."
+              }
+            },
+            {
+              "t": {
+                "en": "Down one number, like a marking infraction",
+                "cs": "O jedno číslo dolů, jako u marking infraction"
+              },
+              "why": {
+                "en": "Minus-one is the marker’s penalty (18.1.3); a travel is the thrower’s breach.",
+                "cs": "Minus jedna je penalizace markera (18.1.3); travel je prohřešek házeče."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "The thrower contests your travel and has not thrown. What now?",
+            "cs": "Házeč tvůj travel contestuje a ještě nehodil. Co teď?"
+          },
+          "rules": ["18.2.8", "9.5.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Play stops, disc stays with them, count resumes at max 6 after the check",
+                "cs": "Hra se zastaví, disk zůstává jim, po checku se počítá od max 6"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.8 — a contested travel with no throw made stops play; 9.5.5 sets the resumption at max 6.",
+                "cs": "18.2.8 — contestovaný travel bez hodu zastaví hru; 9.5.5 nastavuje obnovení na max 6."
+              }
+            },
+            {
+              "t": {
+                "en": "Play carries on and the pivot still moves",
+                "cs": "Hraje se dál a pivot se stejně posune"
+              },
+              "why": {
+                "en": "The pivot only moves when the travel is accepted (18.2.5).",
+                "cs": "Pivot se posouvá jen když je travel uznaný (18.2.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "The disc comes to you",
+                "cs": "Disk jde tobě"
+              },
+              "why": {
+                "en": "Contests never transfer possession (18.2.8).",
+                "cs": "Contesty nikdy nepředávají držení (18.2.8)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "s12",
+      "level": 5,
+      "topic": {
+        "en": "Travel",
+        "cs": "Travel"
+      },
+      "title": {
+        "en": "They huck it before fixing the pivot",
+        "cs": "Hodí to dřív, než opraví pivot"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the defender who called the travel",
+        "cs": "obránce, který hlásil travel"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 6.5,
+      "qAt": 4,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 52, 20]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 53.5, 22.3]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 72.5, 19.5]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "you": true,
+          "kf": [[0, 69, 14]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 80, 30], [1.8, 83, 28.5], [3.2, 87.6, 26.4], [6.5, 87.6, 26.4]]
+        },
+        {
+          "id": "D3",
+          "team": "def",
+          "label": "D3",
+          "kf": [[0, 81.5, 31.5], [1.8, 84.5, 30], [3.2, 89, 27.8], [6.5, 89, 27.8]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 72.9, 18.9], [1.6, 72.9, 18.9], [2.5, 81, 22.5], [3.3, 88, 26.2]]
+      },
+      "fx": [
+        {
+          "t": 0.5,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "D2",
+          "text": {
+            "en": "TRAVEL!",
+            "cs": "TRAVEL!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 1.9,
+          "type": "flash",
+          "x": 73.2,
+          "y": 19.2
+        },
+        {
+          "t": 3.4,
+          "type": "bubble",
+          "dur": 1.1,
+          "actor": "O3",
+          "text": {
+            "en": "catch",
+            "cs": "chyceno"
+          },
+          "style": "count"
+        },
+        {
+          "t": 4.2,
+          "type": "bubble",
+          "dur": 1.8,
+          "actor": "D2",
+          "text": {
+            "en": "VIOLATION!",
+            "cs": "VIOLATION!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5.2,
+          "type": "arrow",
+          "x1": 88,
+          "y1": 26.2,
+          "x2": 73.4,
+          "y2": 19.5
+        },
+        {
+          "t": 5.4,
+          "type": "mark",
+          "x": 72.5,
+          "y": 19.5,
+          "kind": "target",
+          "label": {
+            "en": "back here · check · stall max 9",
+            "cs": "zpět sem · check · stall max 9"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You called the travel; the stall is paused and the pivot is not fixed yet. Instead of correcting it, the thrower fires a huck — completed deep. What can you do?",
+        "cs": "Hlásil jsi travel; stall je pozastavený a pivot ještě není opravený. Místo opravy házeč pálí huck — a spojka dojde. Co s tím můžeš dělat?"
+      },
+      "question": {
+        "en": "The pass after your travel call was completed. What now?",
+        "cs": "Přihrávka po tvém travelu byla zkompletovaná. Co teď?"
+      },
+      "explain": {
+        "en": "If the thrower completes a pass after a travel infraction but before correcting the pivot, the defence may call a travel violation (18.2.6): play stops, the disc returns to the thrower, who returns to the location they occupied at the time of the infraction, and play restarts with a check. The accepted breach belongs to the offence, so the stall count resumes at maximum 9 (9.5.2).",
+        "cs": "Pokud házeč po travelu, ale před opravou pivotu, zkompletuje přihrávku, obrana může zavolat travel violation (18.2.6): hra se staví, disk se vrací házeči, který se vrátí na místo, kde byl v okamžiku travelu, a hra se obnoví checkem. Uznané porušení pravidel je na straně útoku, takže stall count pokračuje na maximálně 9 (9.5.2)."
+      },
+      "note": {
+        "en": "The sneaky twin (18.2.7): if that huck had been INCOMPLETE, play just continues — the turnover stands. A travel call never rescues a bad throw.",
+        "cs": "Záludné dvojče (18.2.7): kdyby ten huck SPADL, hraje se prostě dál — ztráta platí. Hláška travel nikdy nezachrání špatnou přihrávku."
+      },
+      "rules": ["18.2.6", "18.2.7", "9.5.2"],
+      "signals": [11, 2, 21],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "After your travel call, they hucked it without correcting the pivot — and it was caught. What is available to you?",
+            "cs": "Po tvém travel callu hodili huck, aniž by opravili pivot — a byl chycený. Co máš k dispozici?"
+          },
+          "rules": ["18.2.6"],
+          "opts": [
+            {
+              "t": {
+                "en": "A travel violation — play stops and the completion is undone",
+                "cs": "Travel violation — hra se zastaví a dokončená přihrávka se ruší"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.6 — completing a pass after a travel infraction but before correcting the pivot lets the defence call a travel violation.",
+                "cs": "18.2.6 — dokončení přihrávky po travel infraction, ale před opravou pivotu, umožňuje obraně zavolat travel violation."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — the catch stands, you were too slow",
+                "cs": "Nic — chycení platí, byl jsi pomalý"
+              },
+              "why": {
+                "en": "18.2.6 exists precisely so that throwing around a travel call gains nothing.",
+                "cs": "18.2.6 existuje právě proto, aby hod přes travel call nic nezískal."
+              }
+            },
+            {
+              "t": {
+                "en": "A turnover to your team",
+                "cs": "Turnover pro tvůj tým"
+              },
+              "why": {
+                "en": "Travel remedies return the disc to the thrower, they never hand it to the defence (18.2.6).",
+                "cs": "Nápravy travelu vracejí disk házeči, obraně ho nikdy nedají (18.2.6)."
+              }
+            },
+            {
+              "t": {
+                "en": "A re-do of the huck from the corrected pivot",
+                "cs": "Opakování hucku z opraveného pivotu"
+              },
+              "why": {
+                "en": "The disc goes back and play restarts with a check — there is no free replay of the throw (18.2.6).",
+                "cs": "Disk se vrací a hra se restartuje checkem — žádné volné opakování hodu není (18.2.6)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Who ends up with the disc?",
+            "cs": "Kdo skončí s diskem?"
+          },
+          "rules": ["18.2.6"],
+          "opts": [
+            {
+              "t": {
+                "en": "The thrower who travelled",
+                "cs": "Házeč, který travelnul"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.6 — the disc returns to the thrower, and the completion never counted.",
+                "cs": "18.2.6 — disk se vrací házeči a dokončená přihrávka se nepočítá."
+              }
+            },
+            {
+              "t": {
+                "en": "The receiver who caught the huck",
+                "cs": "Receiver, který huck chytil"
+              },
+              "why": {
+                "en": "That is what happens if the defence lets the travel go (18.2.5 uncalled).",
+                "cs": "To nastane, když obrana travel neřeší (18.2.5 bez callu)."
+              }
+            },
+            {
+              "t": {
+                "en": "Your team, at the spot of the catch",
+                "cs": "Tvůj tým, na místě chycení"
+              },
+              "why": {
+                "en": "A travel is not a turnover, however cynical the throw was (18.2.6).",
+                "cs": "Travel není turnover, ať byl hod jakkoli vypočítavý (18.2.6)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Where does the thrower restart from?",
+            "cs": "Odkud házeč rozehrává?"
+          },
+          "rules": ["18.2.6"],
+          "opts": [
+            {
+              "t": {
+                "en": "The location they occupied at the time of the travel infraction",
+                "cs": "Z místa, kde byl v momentě travel infraction"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.6 — back to the infraction spot, then a check. The travel gains no ground.",
+                "cs": "18.2.6 — zpátky na místo infraction, pak check. Travel nezíská ani metr."
+              }
+            },
+            {
+              "t": {
+                "en": "Wherever they were standing when they released the huck",
+                "cs": "Z místa, kde stál, když vypustil huck"
+              },
+              "why": {
+                "en": "That is the ground the travel stole; 18.2.6 takes it back.",
+                "cs": "To je území, které travel ukradl; 18.2.6 ho bere zpátky."
+              }
+            },
+            {
+              "t": {
+                "en": "The nearest point on the goal line",
+                "cs": "Nejbližší bod na brankové čáře"
+              },
+              "why": {
+                "en": "Goal-line relocation is for gaining possession in your attacking end zone (14.3).",
+                "cs": "Posun na brankovou čáru je pro získání držení ve své útočné endzóně (14.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "Where does the count resume after the check?",
+            "cs": "Od kolika se po checku obnoví počítání?"
+          },
+          "rules": ["9.5.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Max 9 — the accepted breach was the offence’s",
+                "cs": "Max 9 — uznaný prohřešek byl útoku"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.5.2 — an accepted offensive breach resumes at maximum 9. Travelling is the offence’s breach.",
+                "cs": "9.5.2 — uznaný prohřešek útoku se obnovuje na maximálně 9. Travel je prohřešek útoku."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 6",
+                "cs": "Max 6"
+              },
+              "why": {
+                "en": "Max 6 is the generic/contested number (9.5.5); this violation was accepted against the offence.",
+                "cs": "Max 6 je obecné/contestované číslo (9.5.5); tahle violation byla uznaná proti útoku."
+              }
+            },
+            {
+              "t": {
+                "en": "“Stalling 1”",
+                "cs": "„Stalling 1“"
+              },
+              "why": {
+                "en": "That would reward the travelling team (9.5.1 is for defensive breaches).",
+                "cs": "To by odměnilo travelující tým (9.5.1 je pro prohřešky obrany)."
+              }
+            },
+            {
+              "t": {
+                "en": "It resumes where it paused before the huck",
+                "cs": "Pokračuje tam, kde se pozastavilo před huckem"
+              },
+              "why": {
+                "en": "Pausing belongs to an accepted travel with no stoppage (18.2.5); this one stopped play.",
+                "cs": "Pozastavení patří k uznanému travelu bez zastavení (18.2.5); tenhle hru zastavil."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "Same travel call and same uncorrected pivot, but the huck is INCOMPLETE. What happens?",
+            "cs": "Stejný travel call a stejně neopravený pivot, ale huck je NEDOKONČENÝ. Co se stane?"
+          },
+          "rules": ["18.2.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "Play just continues — the turnover stands",
+                "cs": "Hra prostě pokračuje — turnover platí"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.7 — a travel call never rescues a bad throw. Incomplete is incomplete.",
+                "cs": "18.2.7 — travel call nikdy nezachrání špatný hod. Nedokončená je nedokončená."
+              }
+            },
+            {
+              "t": {
+                "en": "The disc still returns to the thrower",
+                "cs": "Disk se stejně vrací házeči"
+              },
+              "why": {
+                "en": "That is the completed-pass branch (18.2.6); 18.2.7 is its deliberate opposite.",
+                "cs": "To je větev s dokončenou přihrávkou (18.2.6); 18.2.7 je její záměrný protiklad."
+              }
+            },
+            {
+              "t": {
+                "en": "The pivot must be corrected before play resumes",
+                "cs": "Pivot se musí opravit, než se pokračuje"
+              },
+              "why": {
+                "en": "There is nothing to correct — possession has already changed (18.2.7).",
+                "cs": "Není co opravovat — držení už se změnilo (18.2.7)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t3",
+      "level": 5,
+      "topic": {
+        "en": "Travel",
+        "cs": "Travel"
+      },
+      "title": {
+        "en": "“Travel!” — but you braked cleanly",
+        "cs": "„Travel!“ — ale tys zabrzdil čistě"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower who just caught on the run",
+        "cs": "házeč, který právě chytil v běhu"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 6.8,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 52, 20]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 53.5, 22.3]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "you": true,
+          "kf": [[0, 60, 10], [2, 66.5, 13.2], [2.6, 68.4, 14.4], [3, 69, 14.8], [6.8, 69, 14.8]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 58, 8], [2.2, 66, 11], [3.2, 68, 12.4], [6.8, 68, 12.4]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 80, 28], [3, 81, 26.5], [6.8, 81, 26.5]]
+        },
+        {
+          "id": "D3",
+          "team": "def",
+          "label": "D3",
+          "kf": [[0, 81.5, 30], [3, 82.5, 28.5], [6.8, 82.5, 28.5]]
+        }
+      ],
+      "disc": {
+        "kf": [
+          [0, 52.6, 19.4],
+          [0.9, 52.6, 19.4],
+          [2.2, 66.9, 12.8],
+          [3, 69.4, 14.2],
+          [6.8, 69.4, 14.2]
+        ]
+      },
+      "fx": [
+        {
+          "t": 3,
+          "type": "bubble",
+          "dur": 1.5,
+          "actor": "D2",
+          "text": {
+            "en": "TRAVEL!",
+            "cs": "TRAVEL!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 3.9,
+          "type": "bubble",
+          "dur": 1.5,
+          "actor": "O2",
+          "text": {
+            "en": "CONTEST!",
+            "cs": "CONTEST!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5.2,
+          "type": "bubble",
+          "dur": 1.5,
+          "actor": "O2",
+          "text": {
+            "en": "play stops · check · max 6",
+            "cs": "hra se staví · check · max 6"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "You catch the disc at speed and slam the brakes — two quick steps, straight line, pivot down. Clean, you are sure. The defender behind you still calls “Travel”. You genuinely disagree, and you have not thrown.",
+        "cs": "Chytíš disk v rychlosti a dupneš na brzdu — dva rychlé kroky, rovný směr, pivot na zemi. Čisté, jsi si jistý. Obránce za tebou přesto volá „Travel“. Upřímně nesouhlasíš a zatím jsi neházel."
+      },
+      "question": {
+        "en": "You contest the travel. What happens?",
+        "cs": "Travel kontestuješ. Co se stane?"
+      },
+      "explain": {
+        "en": "Catching on the run is legal if you brake as fast as possible without changing direction (18.2.1) — so a clean two-step stop is defensible. When you contest a travel and have not thrown, play stops (18.2.8): everyone holds, the disc stays with you at your current spot, and after the check the count resumes at max 6 (9.5.5). Nobody moves anybody — the pivot only gets relocated when the travel is accepted (18.2.5.1).",
+        "cs": "Chytit v běhu je legální, pokud brzdíš co nejrychleji a neměníš směr (18.2.1) — čisté zastavení na dva kroky je tedy obhajitelné. Když travel kontestuješ a nehodil jsi, hra se staví (18.2.8): všichni stojí, disk ti zůstává na aktuálním místě a po checku count pokračuje na max 6 (9.5.5). Nikdo nikoho nepřemisťuje — pivot se překládá, jen když je travel uznaný (18.2.5.1)."
+      },
+      "note": {
+        "en": "Running throw rule, for the discussion: you may even throw without stopping if you neither speed up nor change direction and use at most two extra ground contacts after the catch (18.2.1.1). Knowing it verbatim wins these debates politely.",
+        "cs": "Pravidlo hodu z běhu, ať máš do diskuze: hodit smíš i bez zastavení, pokud nezrychlíš, nezměníš směr a po chycení uděláš maximálně dva další doteky se zemí (18.2.1.1). Kdo ho zná doslova, vyhrává tyhle debaty slušně."
+      },
+      "rules": ["18.2.8", "18.2.1", "9.5.5"],
+      "signals": [11, 4],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You caught on the run, braked as fast as you could, and “Travel!” is called. You contest, having not thrown. What happens?",
+            "cs": "Chytil jsi v běhu, zabrzdil co nejrychleji a zazní „Travel!“. Contestuješ a ještě jsi nehodil. Co se stane?"
+          },
+          "rules": ["18.2.8", "18.2.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Play stops — a contested travel with no throw made is a stoppage",
+                "cs": "Hra se zastaví — contestovaný travel bez hodu je zastavení"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.8 — contesting stops play; 18.2.1 is why you are right: braking as fast as possible without changing direction is legal.",
+                "cs": "18.2.8 — contest zastaví hru; 18.2.1 je důvod, proč máš pravdu: zabrzdit co nejrychleji bez změny směru je legální."
+              }
+            },
+            {
+              "t": {
+                "en": "Play carries on and you must move your pivot anyway",
+                "cs": "Hraje se dál a pivot musíš stejně přesunout"
+              },
+              "why": {
+                "en": "The pivot only moves for an ACCEPTED travel (18.2.5).",
+                "cs": "Pivot se posouvá jen u UZNANÉHO travelu (18.2.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "It is a turnover for contesting a clear travel",
+                "cs": "Turnover za contestování jasného travelu"
+              },
+              "why": {
+                "en": "Contesting never costs possession (18.2.8).",
+                "cs": "Contest nikdy nestojí držení (18.2.8)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Where do you and the disc end up?",
+            "cs": "Kde skončíš ty a disk?"
+          },
+          "rules": ["18.2.8"],
+          "opts": [
+            {
+              "t": {
+                "en": "You keep the disc at your current spot — nobody gets relocated",
+                "cs": "Disk zůstává tobě na tvém současném místě — nikdo se nepřemisťuje"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.8 — everyone holds; the pivot is only relocated when a travel is accepted (18.2.5).",
+                "cs": "18.2.8 — všichni zůstávají; pivot se přemisťuje jen u uznaného travelu (18.2.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "You move back to where the defence says the catch happened",
+                "cs": "Vrátíš se tam, kde podle obrany chycení proběhlo"
+              },
+              "why": {
+                "en": "That concession is exactly what contesting refuses (18.2.8).",
+                "cs": "Tenhle ústupek je přesně to, co contest odmítá (18.2.8)."
+              }
+            },
+            {
+              "t": {
+                "en": "The disc goes back to the previous thrower",
+                "cs": "Disk se vrací předchozímu házeči"
+              },
+              "why": {
+                "en": "Completed catches survive a contested travel (18.2.8).",
+                "cs": "Dokončená chycení contestovaný travel přežijí (18.2.8)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "What does the count do after the check?",
+            "cs": "Co dělá počítání po checku?"
+          },
+          "rules": ["9.5.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Resumes at max 6",
+                "cs": "Obnoví se na max 6"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.5.5 — the catch-all resumption for contested calls and anything not specifically listed.",
+                "cs": "9.5.5 — univerzální obnovení pro contestované cally a vše, co není uvedeno konkrétně."
+              }
+            },
+            {
+              "t": {
+                "en": "Starts fresh at “stalling 1” — you had only just caught it",
+                "cs": "Začne znovu od „stalling 1“ — právě jsi chytil"
+              },
+              "why": {
+                "en": "A stoppage uses the 9.5 table, even on a brand-new possession (9.5.5).",
+                "cs": "Zastavení používá tabulku 9.5, i u nové držby (9.5.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 9",
+                "cs": "Max 9"
+              },
+              "why": {
+                "en": "Max 9 needs an ACCEPTED offensive breach (9.5.2); you contested.",
+                "cs": "Max 9 vyžaduje UZNANÝ prohřešek útoku (9.5.2); ty jsi contestoval."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "Which rule makes your two-step stop defensible?",
+            "cs": "Které pravidlo tvoje dvoukrokové zastavení obhájí?"
+          },
+          "rules": ["18.2.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Catching on the run is legal if you slow as quickly as possible without changing direction",
+                "cs": "Chycení v běhu je legální, když zpomaluješ co nejrychleji a nemění směr"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.1 — and 18.2.1.1 even lets you throw without stopping, within two extra ground contacts, if you neither speed up nor change direction.",
+                "cs": "18.2.1 — a 18.2.1.1 ti dokonce dovolí hodit bez zastavení, do dvou dalších kontaktů se zemí, když nezrychlíš ani nezměníš směr."
+              }
+            },
+            {
+              "t": {
+                "en": "A receiver always gets three steps after the catch",
+                "cs": "Receiver má po chycení vždy tři kroky"
+              },
+              "why": {
+                "en": "There is no step allowance in WFDF rules — the test is deceleration and direction (18.2.1).",
+                "cs": "Pravidla WFDF žádný příděl kroků neznají — testuje se zpomalování a směr (18.2.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Travel can only be called by the marker",
+                "cs": "Travel může volat jen marker"
+              },
+              "why": {
+                "en": "Any defender may call a travel (15.5.1); that is not your defence here.",
+                "cs": "Travel může volat kterýkoli obránce (15.5.1); tohle není tvoje obhajoba."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tv4",
+      "level": 5,
+      "topic": {
+        "en": "Travel",
+        "cs": "Travel"
+      },
+      "title": {
+        "en": "They throw without stopping",
+        "cs": "Hodí bez zastavení"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the trailing defender",
+        "cs": "dobíhající obránce"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 7,
+      "qAt": 4.2,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 48, 18], [7, 48, 18]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 72, 30], [4.2, 80, 26], [7, 88, 22]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 62, 12], [2.6, 70, 11], [3.4, 73, 10.6], [4.2, 75.6, 10.4], [7, 79, 10]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 60, 15], [2.6, 68, 14], [4.2, 73, 13.6], [7, 77, 13]]
+        }
+      ],
+      "disc": {
+        "kf": [
+          [0, 48.4, 17.4],
+          [2.6, 70, 11],
+          [3.6, 73.2, 10.6],
+          [4.4, 80, 15],
+          [5.6, 87.6, 21.6],
+          [7, 87.6, 21.6]
+        ]
+      },
+      "fx": [
+        {
+          "t": 2.7,
+          "type": "bubble",
+          "dur": 0.9,
+          "actor": "O2",
+          "text": {
+            "en": "catch",
+            "cs": "chyceno"
+          },
+          "style": "count"
+        },
+        {
+          "t": 3.3,
+          "type": "mark",
+          "x": 73.2,
+          "y": 10.6,
+          "kind": "x",
+          "label": {
+            "en": "two ground contacts, straight line",
+            "cs": "dva kontakty se zemí, přímý směr"
+          }
+        },
+        {
+          "t": 5,
+          "type": "bubble",
+          "dur": 1.3,
+          "actor": "D1",
+          "text": {
+            "en": "no travel",
+            "cs": "žádný travel"
+          },
+          "style": "count"
+        },
+        {
+          "t": 5.8,
+          "type": "mark",
+          "x": 87.6,
+          "y": 21.6,
+          "kind": "target",
+          "label": {
+            "en": "completion stands",
+            "cs": "spojka platí"
+          }
+        }
+      ],
+      "situation": {
+        "en": "Their cutter catches at full speed and releases the next pass while still moving — two ground contacts after the catch, no acceleration, dead straight, never a pivot down. The pass is completed. Your instinct is to shout “travel”.",
+        "cs": "Jejich nabíhač chytí v plné rychlosti a další přihrávku vypustí ještě v pohybu — dva kontakty se zemí po chycení, žádné zrychlení, naprosto přímo, pivot nikdy nepostavil. Přihrávka je dokončená. Instinkt ti říká zakřičet „travel“."
+      },
+      "question": {
+        "en": "Is that a travel?",
+        "cs": "Je to travel?"
+      },
+      "explain": {
+        "en": "No — this is the running throw, and it is explicitly legal (18.2.1.1): a player who catches the disc in motion may throw without stopping, provided they neither speed up nor change direction and use at most two additional points of contact with the ground after the catch. Nothing about it requires a pivot first. The completion stands and play simply continues.",
+        "cs": "Ne — tohle je hod v běhu a je výslovně legální (18.2.1.1): hráč, který chytí disk v pohybu, může hodit bez zastavení, pokud nezrychlí ani nezmění směr a použije nejvýš dva další kontakty se zemí po chycení. Nic z toho nevyžaduje nejdřív pivot. Dokončená přihrávka platí a hraje se dál."
+      },
+      "note": {
+        "en": "What WOULD be a travel is the same catch followed by extra steps to a better angle, a change of direction, or speeding up (18.2.1) — knowing 18.2.1.1 verbatim is what lets you tell those apart on the field, and stops you spending a call you cannot win.",
+        "cs": "Travel by byl tentýž záběh s dalšími kroky na lepší úhel, se změnou směru nebo se zrychlením (18.2.1) — právě znalost 18.2.1.1 doslova ti umožní je rozlišit na hřišti a nespálit call, který nemůžeš vyhrát."
+      },
+      "rules": ["18.2.1.1", "18.2.1", "18.2.8"],
+      "signals": [11, 23],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "A receiver catches at speed and releases within two ground contacts, straight line, no acceleration. Travel?",
+            "cs": "Receiver chytí v rychlosti a vypustí do dvou kontaktů se zemí, přímo, bez zrychlení. Travel?"
+          },
+          "rules": ["18.2.1.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — that is the legal running throw",
+                "cs": "Ne — to je legální hod v běhu"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.1.1 — throwing without stopping is legal within two additional ground contacts, provided there is no speed-up and no change of direction.",
+                "cs": "18.2.1.1 — hod bez zastavení je legální do dvou dalších kontaktů se zemí, pokud nedojde ke zrychlení ani změně směru."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — they never established a pivot",
+                "cs": "Ano — nikdy nepostavil pivot"
+              },
+              "why": {
+                "en": "A pivot is not required before a running throw (18.2.1.1).",
+                "cs": "Pivot se před hodem v běhu nevyžaduje (18.2.1.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — any steps after a catch are a travel",
+                "cs": "Ano — jakékoli kroky po chycení jsou travel"
+              },
+              "why": {
+                "en": "The test is deceleration and direction, not step count (18.2.1).",
+                "cs": "Testuje se zpomalování a směr, ne počet kroků (18.2.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if the pass was completed",
+                "cs": "Jen pokud byla přihrávka dokončená"
+              },
+              "why": {
+                "en": "Legality of the throw never depends on whether it was caught (18.2.1.1).",
+                "cs": "Legálnost hodu nikdy nezávisí na tom, jestli byl chycený (18.2.1.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "What would have made it a travel?",
+            "cs": "Co by z toho travel udělalo?"
+          },
+          "rules": ["18.2.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Speeding up, changing direction, or extra steps to a better angle",
+                "cs": "Zrychlení, změna směru nebo kroky navíc pro lepší úhel"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.1 — you must slow as quickly as possible without changing direction; anything else is the breach.",
+                "cs": "18.2.1 — musíš zpomalovat co nejrychleji a bez změny směru; cokoli jiného je prohřešek."
+              }
+            },
+            {
+              "t": {
+                "en": "Throwing before the marker arrives",
+                "cs": "Hod dřív, než dojde marker"
+              },
+              "why": {
+                "en": "The marker’s arrival is irrelevant to travel (18.2.1).",
+                "cs": "Příchod markera s travelem nemá nic společného (18.2.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Throwing while both feet are off the ground",
+                "cs": "Hod, když jsou obě nohy ve vzduchu"
+              },
+              "why": {
+                "en": "Airborne throws are ordinary ultimate; the rule counts ground contacts, not airtime (18.2.1.1).",
+                "cs": "Hody ve vzduchu jsou běžné ultimate; pravidlo počítá kontakty se zemí, ne dobu ve vzduchu (18.2.1.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "You call “travel” anyway and the thrower contests, having already thrown. What have you cost your team?",
+            "cs": "Přesto zavoláš „travel“ a házeč, který už hodil, contestuje. Co to tvůj tým stálo?"
+          },
+          "rules": ["18.2.8", "9.5.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "A stoppage you cannot win — and a count that resumes at max 6",
+                "cs": "Zastavení, které nemůžeš vyhrát — a počítání od max 6"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.8 / 9.5.5 — a contested travel stops play and hands the offence a max-6 restart. A call you know is wrong is worse than no call.",
+                "cs": "18.2.8 / 9.5.5 — contestovaný travel zastaví hru a útoku dá restart na max 6. Call, o kterém víš, že je špatný, je horší než žádný."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — a wrong call is free",
+                "cs": "Nic — špatný call je zdarma"
+              },
+              "why": {
+                "en": "It costs positions, tempo and the resumption number (18.2.8).",
+                "cs": "Stojí pozice, tempo a číslo obnovení (18.2.8)."
+              }
+            },
+            {
+              "t": {
+                "en": "A turnover to the offence",
+                "cs": "Turnover pro útok"
+              },
+              "why": {
+                "en": "No call turns the disc over for being wrong (18.2.8).",
+                "cs": "Žádný call nezpůsobí turnover jen proto, že byl špatný (18.2.8)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tv5",
+      "level": 5,
+      "topic": {
+        "en": "Travel",
+        "cs": "Travel"
+      },
+      "title": {
+        "en": "The pivot foot shifts",
+        "cs": "Pivotová noha se posune"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the marker watching the pivot",
+        "cs": "marker, který sleduje pivot"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.6,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 26], [3.4, 80, 24], [6.6, 80, 24]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 27], [3.4, 81.4, 25.4], [6.6, 81.4, 25.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 63.8, 18], [6.6, 63.8, 18]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [
+            [0, 62, 18],
+            [2.2, 62, 18],
+            [3, 60.4, 17.2],
+            [3.4, 60, 17],
+            [4.8, 62, 18],
+            [6.6, 62, 18]
+          ]
+        }
+      ],
+      "disc": {
+        "kf": [
+          [0, 62.4, 17.4],
+          [2.2, 62.4, 17.4],
+          [3.4, 60.4, 16.4],
+          [4.8, 62.4, 17.4],
+          [6.6, 62.4, 17.4]
+        ]
+      },
+      "fx": [
+        {
+          "t": 0.8,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 4…",
+            "cs": "…stalling 4…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 2.6,
+          "type": "mark",
+          "x": 62.4,
+          "y": 18.6,
+          "kind": "x",
+          "label": {
+            "en": "pivot left the spot",
+            "cs": "pivot opustil místo"
+          }
+        },
+        {
+          "t": 3,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "D1",
+          "text": {
+            "en": "TRAVEL!",
+            "cs": "TRAVEL!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.2,
+          "type": "arrow",
+          "x1": 60.4,
+          "y1": 17,
+          "x2": 62.2,
+          "y2": 17.8
+        },
+        {
+          "t": 5,
+          "type": "mark",
+          "x": 62.4,
+          "y": 17.4,
+          "kind": "target",
+          "label": {
+            "en": "pivot back here, count resumes",
+            "cs": "pivot zpátky sem, počítání pokračuje"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You are marking at “stalling 4”. Fighting for a throwing lane, the thrower slides their pivot foot half a metre off the spot — no throw yet, and they have not tried to hide it. You call “travel”, and they accept it.",
+        "cs": "Markuješ na „stalling 4“. Ve snaze najít si okno na hod si házeč posune pivotovou nohu o půl metru z místa — hod ještě nepadl a nesnaží se to zamaskovat. Voláš „travel“ a on to uznává."
+      },
+      "question": {
+        "en": "What happens now?",
+        "cs": "Co se stane teď?"
+      },
+      "explain": {
+        "en": "An accepted travel does not stop play (18.2.5): the count pauses, you indicate where the pivot belongs, the thrower must re-establish it there without delay and may not throw until it is corrected — and then the count simply carries on from where it paused. No check, no restart, no number lost by either side.",
+        "cs": "Uznaný travel hru nezastaví (18.2.5): počítání se pozastaví, ty ukážeš, kam pivot patří, házeč ho tam musí bez zdržování obnovit a nesmí hodit, dokud to není opravené — a pak počítání prostě pokračuje tam, kde se pozastavilo. Žádný check, žádný restart, žádné číslo nikomu neubude."
+      },
+      "note": {
+        "en": "If they throw before correcting it and the pass is COMPLETED, you may call a travel violation: play stops, the disc comes back, and the count resumes at max 9 (18.2.6). If that pass is incomplete, the turnover simply stands (18.2.7).",
+        "cs": "Pokud hodí, než to opraví, a přihrávka je DOKONČENÁ, můžeš zavolat travel violation: hra se zastaví, disk se vrací a počítání se obnoví na max 9 (18.2.6). Pokud je ta přihrávka nedokončená, turnover prostě platí (18.2.7)."
+      },
+      "rules": ["18.2.5", "18.2.6", "18.2.8"],
+      "signals": [11],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The thrower slides the pivot foot off its spot before throwing, and accepts your call. What happens to play?",
+            "cs": "Házeč před hodem posune pivotovou nohu z místa a tvůj call uznává. Co se stane s hrou?"
+          },
+          "rules": ["18.2.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Nothing stops — the count pauses and the pivot gets fixed",
+                "cs": "Nic se nezastaví — počítání se pozastaví a pivot se opraví"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.5 — an accepted travel is repaired inside live play.",
+                "cs": "18.2.5 — uznaný travel se opravuje v živé hře."
+              }
+            },
+            {
+              "t": {
+                "en": "Play stops and the disc is checked in",
+                "cs": "Hra se zastaví a disk se checkne"
+              },
+              "why": {
+                "en": "That is the contested branch (18.2.8) or a travel violation after a completed pass (18.2.6).",
+                "cs": "To je contestovaná větev (18.2.8) nebo travel violation po dokončené přihrávce (18.2.6)."
+              }
+            },
+            {
+              "t": {
+                "en": "It is a turnover",
+                "cs": "Je to turnover"
+              },
+              "why": {
+                "en": "A travel is never a turnover (18.2.5).",
+                "cs": "Travel nikdy není turnover (18.2.5)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Who decides where the pivot goes back to?",
+            "cs": "Kdo určí, kam se pivot vrátí?"
+          },
+          "rules": ["18.2.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "You do — the caller indicates the correct spot, and they must move there without delay",
+                "cs": "Ty — volající ukáže správné místo a házeč se tam musí bez zdržování přesunout"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.5 — and they may not throw until it is corrected.",
+                "cs": "18.2.5 — a nesmí hodit, dokud to není opravené."
+              }
+            },
+            {
+              "t": {
+                "en": "The thrower, from their own memory of the spot",
+                "cs": "Házeč, podle své vlastní paměti"
+              },
+              "why": {
+                "en": "The caller indicates it; disagreement is what contesting is for (18.2.8).",
+                "cs": "Ukazuje ho volající; na nesouhlas je contest (18.2.8)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nobody — the pivot stays where it now is",
+                "cs": "Nikdo — pivot zůstává, kde teď je"
+              },
+              "why": {
+                "en": "Then the travel would have gained them ground, which is exactly what 18.2.5 prevents.",
+                "cs": "Pak by jim travel získal území, čemuž 18.2.5 přesně zabraňuje."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "What does the count do?",
+            "cs": "Co dělá počítání?"
+          },
+          "rules": ["18.2.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "It pauses, then continues from where it paused",
+                "cs": "Pozastaví se a pak pokračuje tam, kde skončilo"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.5 — no number is lost by either side, and the marker need not repeat “stalling”.",
+                "cs": "18.2.5 — ani jedna strana o číslo nepřijde a marker nemusí znovu říkat „stalling“."
+              }
+            },
+            {
+              "t": {
+                "en": "It drops by one, as with a marking infraction",
+                "cs": "Jde o jedno dolů, jako u marking infraction"
+              },
+              "why": {
+                "en": "Minus-one punishes the MARKER (18.1.3); a travel is the thrower’s breach.",
+                "cs": "Minus jedna trestá MARKERA (18.1.3); travel je prohřešek házeče."
+              }
+            },
+            {
+              "t": {
+                "en": "It restarts at max 9, because the offence breached",
+                "cs": "Restartuje na max 9, protože se prohřešil útok"
+              },
+              "why": {
+                "en": "Max 9 needs a stoppage (9.5.2); an accepted travel has none (18.2.5).",
+                "cs": "Max 9 vyžaduje zastavení (9.5.2); uznaný travel žádné nemá (18.2.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "It restarts at 1",
+                "cs": "Restartuje na 1"
+              },
+              "why": {
+                "en": "Nothing rewards the travelling team with a fresh count (18.2.5).",
+                "cs": "Nic travelujícímu týmu nové počítání nedává (18.2.5)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "They throw a completed pass before fixing the pivot. What is available to you?",
+            "cs": "Hodí dokončenou přihrávku, ještě než pivot opraví. Co máš k dispozici?"
+          },
+          "rules": ["18.2.6", "18.2.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "A travel violation — play stops, the disc comes back, count at max 9",
+                "cs": "Travel violation — hra se zastaví, disk se vrací, počítání na max 9"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.6 — completing a pass before correcting the pivot undoes the completion.",
+                "cs": "18.2.6 — dokončení přihrávky před opravou pivotu tu přihrávku ruší."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — the completion stands either way",
+                "cs": "Nic — dokončená přihrávka platí tak i tak"
+              },
+              "why": {
+                "en": "That is only true for an INCOMPLETE pass, where the turnover stands (18.2.7).",
+                "cs": "To platí jen pro NEDOKONČENOU přihrávku, kde turnover platí (18.2.7)."
+              }
+            },
+            {
+              "t": {
+                "en": "A turnover to your team",
+                "cs": "Turnover pro tvůj tým"
+              },
+              "why": {
+                "en": "The disc goes back to the thrower, never to the defence (18.2.6).",
+                "cs": "Disk se vrací házeči, nikdy obraně (18.2.6)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tv6",
+      "level": 5,
+      "topic": {
+        "en": "Travel",
+        "cs": "Travel"
+      },
+      "title": {
+        "en": "You catch it lying on the ground",
+        "cs": "Chytíš disk vleže na zemi"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the receiver who laid out",
+        "cs": "receiver po skoku"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 7,
+      "qAt": 3.8,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 50, 18], [7, 50, 18]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 74, 26], [3.8, 78, 24], [7, 78, 24]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 72, 14], [3, 75.6, 15.4], [3.8, 76, 15.8], [5.4, 74.6, 17.4], [7, 74.6, 17.4]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "you": true,
+          "kf": [[0, 68, 18], [2.8, 73, 16.6], [3.8, 73.4, 16.6], [7, 73.4, 16.6]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 50.4, 17.4], [2.8, 73.4, 16.2], [7, 73.4, 16.2]]
+      },
+      "fx": [
+        {
+          "t": 2.9,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "O2",
+          "text": {
+            "en": "caught, on the deck",
+            "cs": "chyceno, na zemi"
+          },
+          "style": "count"
+        },
+        {
+          "t": 4.4,
+          "type": "mark",
+          "x": 73.4,
+          "y": 16.4,
+          "kind": "target",
+          "label": {
+            "en": "hip is the pivot",
+            "cs": "pivotem je bok"
+          }
+        },
+        {
+          "t": 5.4,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "O2",
+          "text": {
+            "en": "stand up — same spot",
+            "cs": "vstát — stejné místo"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "You lay out, catch it, and end up flat on the grass with the disc. The marker sets up over you and starts counting. You want to get to your feet and throw.",
+        "cs": "Skočíš, chytíš a zůstaneš ležet na trávě s diskem. Marker se nad tebou postaví a začne počítat. Ty chceš vstát a hodit."
+      },
+      "question": {
+        "en": "Can you stand up without travelling?",
+        "cs": "Můžeš vstát, aniž bys travelnul?"
+      },
+      "explain": {
+        "en": "Yes. A thrower who is not standing may use any part of their body as the pivot point (18.2.3) — your hip, your shoulder, whatever is on the ground. Standing up is explicitly not a travel, but only if you establish the pivot point at the same location (18.2.3.1). Get up over that spot and you are fine; drift a metre while rising and you have travelled.",
+        "cs": "Ano. Házeč, který nestojí, může jako pivot použít jakoukoli část těla (18.2.3) — bok, rameno, cokoli je na zemi. Vstát výslovně travel není, ale jen když postavíš pivot na stejném místě (18.2.3.1). Zvedni se nad tím místem a je to v pořádku; posuň se přitom o metr a travelnul jsi."
+      },
+      "note": {
+        "en": "The marker may count while you are down — nothing about lying on the ground pauses the stall. What it does not let them do is rush you into moving off the spot.",
+        "cs": "Marker může počítat, i když ležíš — ležení na zemi stall nijak nepozastavuje. Co nesmí, je uspěchat tě k tomu, abys se z místa hnul."
+      },
+      "rules": ["18.2.3", "18.2.2", "18.2.4.4"],
+      "signals": [11],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You are lying on the ground holding the disc. What can serve as your pivot point?",
+            "cs": "Ležíš na zemi s diskem. Co může sloužit jako tvůj pivot?"
+          },
+          "rules": ["18.2.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Any part of your body",
+                "cs": "Jakákoli část tvého těla"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.3 — a thrower who is not standing can use any part of their body as the pivot point.",
+                "cs": "18.2.3 — házeč, který nestojí, může jako pivot použít jakoukoli část těla."
+              }
+            },
+            {
+              "t": {
+                "en": "Only a foot — pivots are always feet",
+                "cs": "Jen noha — pivot je vždycky noha"
+              },
+              "why": {
+                "en": "That is the standing case; 18.2.3 exists for exactly this one.",
+                "cs": "To je případ ve stoje; 18.2.3 existuje přesně pro tenhle."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — you must stand before you have a pivot",
+                "cs": "Nic — než vstaneš, žádný pivot nemáš"
+              },
+              "why": {
+                "en": "You have a pivot immediately, wherever your body is (18.2.3).",
+                "cs": "Pivot máš okamžitě, tam, kde je tvoje tělo (18.2.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "Can you stand up?",
+            "cs": "Můžeš vstát?"
+          },
+          "rules": ["18.2.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — standing up is not a travel, provided the pivot ends up at the same location",
+                "cs": "Ano — vstát není travel, pokud pivot skončí na stejném místě"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.3.1 — same spot, no travel; drift while rising and you have travelled.",
+                "cs": "18.2.3.1 — stejné místo, žádný travel; posuň se při vstávání a travelnul jsi."
+              }
+            },
+            {
+              "t": {
+                "en": "No — you must throw from the ground",
+                "cs": "Ne — musíš hodit ze země"
+              },
+              "why": {
+                "en": "Nothing traps you on the grass (18.2.3.1).",
+                "cs": "Nic tě na trávě nedrží (18.2.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, and you may take a step as you rise",
+                "cs": "Ano, a při vstávání můžeš udělat krok"
+              },
+              "why": {
+                "en": "The pivot must be established at the SAME location (18.2.3.1).",
+                "cs": "Pivot musí být na STEJNÉM místě (18.2.3.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "Can the marker count while you are still down?",
+            "cs": "Může marker počítat, dokud ležíš?"
+          },
+          "rules": ["18.2.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — nothing about being on the ground pauses the count",
+                "cs": "Ano — ležení na zemi počítání nijak nepozastavuje"
+              },
+              "ok": true,
+              "why": {
+                "en": "The count only pauses for specific reasons, such as an accepted travel (18.2.5.2); lying down is not one.",
+                "cs": "Počítání se pozastavuje jen z konkrétních důvodů, třeba po uznaném travelu (18.2.5.2); ležení mezi ně nepatří."
+              }
+            },
+            {
+              "t": {
+                "en": "No — the count waits until you are standing",
+                "cs": "Ne — počítání čeká, až budeš stát"
+              },
+              "why": {
+                "en": "No such rule exists; the marker’s conditions are in 9.3.",
+                "cs": "Takové pravidlo neexistuje; podmínky pro markera jsou v 9.3."
+              }
+            },
+            {
+              "t": {
+                "en": "Only from “stalling 1” once you are up",
+                "cs": "Jen od „stalling 1“, až vstaneš"
+              },
+              "why": {
+                "en": "A restart at one needs the marker to change or leave the radius (9.4).",
+                "cs": "Restart na jedničce vyžaduje výměnu markera nebo jeho odchod z poloměru (9.4)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tv7",
+      "level": 5,
+      "topic": {
+        "en": "Travel",
+        "cs": "Travel"
+      },
+      "title": {
+        "en": "Winding up before the pivot is set",
+        "cs": "Nápřah dřív, než stojí pivot"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the defender who called the travel",
+        "cs": "obránce, který volal travel"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.8,
+      "qAt": 3.6,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 26], [3.6, 79, 24], [6.8, 79, 24]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 27], [3.6, 80.4, 25.4], [6.8, 80.4, 25.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 66, 20], [2.4, 64.4, 18.6], [3.6, 64, 18.2], [6.8, 64, 18.2]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [
+            [0, 64, 17],
+            [2, 62.6, 17.6],
+            [3, 62.2, 17.8],
+            [3.6, 62.2, 17.8],
+            [6.8, 62.2, 17.8]
+          ]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 64.4, 16.4], [2.6, 62.6, 17.2], [3.6, 62.6, 17.2], [6.8, 62.6, 17.2]]
+      },
+      "fx": [
+        {
+          "t": 1.2,
+          "type": "mark",
+          "x": 62.2,
+          "y": 18,
+          "kind": "target",
+          "label": {
+            "en": "the spot you indicated",
+            "cs": "místo, které jsi ukázal"
+          }
+        },
+        {
+          "t": 2.8,
+          "type": "mark",
+          "x": 63,
+          "y": 17.4,
+          "kind": "x",
+          "label": {
+            "en": "winding up, still moving",
+            "cs": "nápřah, ještě v pohybu"
+          }
+        },
+        {
+          "t": 3.2,
+          "type": "bubble",
+          "dur": 1.1,
+          "actor": "D1",
+          "text": {
+            "en": "TRAVEL!",
+            "cs": "TRAVEL!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "D1",
+          "text": {
+            "en": "pivot first, then wind up",
+            "cs": "nejdřív pivot, pak nápřah"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "You called a travel a moment ago and indicated the spot. The thrower is walking back towards it — and starts their wind-up while still on the move, disc already going back for a big break throw, foot not down.",
+        "cs": "Před chvílí jsi volal travel a ukázal místo. Házeč se k němu vrací — a začne nápřah ještě v pohybu, disk už jde dozadu na velký break hod, noha není dole."
+      },
+      "question": {
+        "en": "Can they wind up while walking back?",
+        "cs": "Může se nápřahovat cestou zpátky?"
+      },
+      "explain": {
+        "en": "No. Whenever the thrower must move to a specified location, failing to establish a pivot point BEFORE a wind-up or throwing motion begins is itself a travel infraction (18.2.4.3). The sequence is fixed: get to the spot, put the pivot down, then start the throw. And 18.2.5.1 requires that relocation to happen without delay — from both of you.",
+        "cs": "Ne. Kdykoli se házeč musí přesunout na určené místo, nepostavení pivotu PŘED začátkem nápřahu nebo hodového pohybu je samo travel infraction (18.2.4.3). Pořadí je dané: dojít na místo, položit pivot, teprve pak začít hod. A 18.2.5.1 vyžaduje, aby ten přesun proběhl bez zdržování — od vás obou."
+      },
+      "note": {
+        "en": "This is the rule that stops a “corrected” travel from becoming a free running start. It applies to every specified-location restart, not just travels: end-zone options, pull spots, anywhere the rules send the thrower somewhere.",
+        "cs": "Tohle je pravidlo, které brání tomu, aby se z „napraveného“ travelu stal rozběh zdarma. Platí pro každý restart na určeném místě, nejen po travelu: volby v endzóně, místa po pullu, kamkoli tě pravidla pošlou."
+      },
+      "rules": ["18.2.4.3", "18.2.5.1", "18.2.5"],
+      "signals": [11],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The thrower begins their wind-up while still walking back to the indicated spot. What is that?",
+            "cs": "Házeč začne nápřah, ještě když se vrací na určené místo. Co to je?"
+          },
+          "rules": ["18.2.4.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "A travel infraction — the pivot must be down before the wind-up begins",
+                "cs": "Travel infraction — pivot musí stát dřív, než začne nápřah"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.4.3 — whenever the thrower must move to a specified location, no wind-up or throwing motion may begin before the pivot is established.",
+                "cs": "18.2.4.3 — kdykoli se házeč musí přesunout na určené místo, nápřah ani hodový pohyb nesmí začít dřív, než stojí pivot."
+              }
+            },
+            {
+              "t": {
+                "en": "Legal — they can throw as soon as they arrive",
+                "cs": "Legální — může hodit, jakmile dorazí"
+              },
+              "why": {
+                "en": "Arriving is not establishing; the pivot has to be down first (18.2.4.3).",
+                "cs": "Dorazit neznamená postavit; pivot musí být dole první (18.2.4.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "A violation, so play stops",
+                "cs": "Violation, takže se hra zastaví"
+              },
+              "why": {
+                "en": "It is a travel infraction, and accepted travels never stop play (18.2.5).",
+                "cs": "Je to travel infraction a uznané travely hru nikdy nezastaví (18.2.5)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "How quickly does the relocation have to happen?",
+            "cs": "Jak rychle musí přesun proběhnout?"
+          },
+          "rules": ["18.2.5.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Without delay — from both of you",
+                "cs": "Bez zdržování — od vás obou"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.5.1 — the thrower must move without delay, and you must indicate the spot without delay too.",
+                "cs": "18.2.5.1 — házeč se musí přesunout bez zdržování a ty musíš bez zdržování ukázat místo."
+              }
+            },
+            {
+              "t": {
+                "en": "They have ten seconds",
+                "cs": "Má deset sekund"
+              },
+              "why": {
+                "en": "No clock is specified; “without delay” is the standard (18.2.5.1).",
+                "cs": "Žádný časový limit není; standardem je „bez zdržování“ (18.2.5.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Whenever they like — the count is paused anyway",
+                "cs": "Kdykoli chce — počítání stejně stojí"
+              },
+              "why": {
+                "en": "The pause is not a rest; 18.2.5.1 requires promptness precisely because the count is stopped.",
+                "cs": "Pozastavení není odpočinek; 18.2.5.1 vyžaduje svižnost právě proto, že počítání stojí."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "What is the count doing while they walk back?",
+            "cs": "Co dělá počítání, když se vrací?"
+          },
+          "rules": ["18.2.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Paused, and they may not throw until the pivot is correct",
+                "cs": "Stojí a on nesmí hodit, dokud pivot nestojí správně"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.5.2 — both halves of the same sentence: count paused, no throwing.",
+                "cs": "18.2.5.2 — obě půlky téže věty: počítání stojí, hod ne."
+              }
+            },
+            {
+              "t": {
+                "en": "Running on — they caused the delay",
+                "cs": "Běží dál — zdržení způsobil on"
+              },
+              "why": {
+                "en": "The count is paused by the accepted travel (18.2.5.2).",
+                "cs": "Počítání pozastavil uznaný travel (18.2.5.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Reset to one",
+                "cs": "Reset na jedničku"
+              },
+              "why": {
+                "en": "Resets to one belong to 9.4 and 9.5.1, not to a travel (18.2.5).",
+                "cs": "Resety na jedničku patří k 9.4 a 9.5.1, ne k travelu (18.2.5)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tv8",
+      "level": 5,
+      "topic": {
+        "en": "Travel",
+        "cs": "Travel"
+      },
+      "title": {
+        "en": "A very convenient bobble",
+        "cs": "Velmi šikovné žonglování"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the marker watching closely",
+        "cs": "marker, který dává pozor"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.8,
+      "qAt": 3.6,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 10], [3.6, 79, 8], [6.8, 79, 8]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 11], [3.6, 80.4, 9.4], [6.8, 80.4, 9.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 63.8, 18], [3.6, 65.6, 17], [6.8, 66, 16.8]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 62, 18], [1.8, 62.6, 17.6], [2.8, 63.4, 17.2], [3.6, 64, 17], [6.8, 64, 17]]
+        }
+      ],
+      "disc": {
+        "kf": [
+          [0, 62.4, 17.4],
+          [1.6, 62.6, 16.6],
+          [2.4, 63.2, 16.8],
+          [3.2, 64, 16.6],
+          [3.6, 64.2, 16.6],
+          [6.8, 64.2, 16.6]
+        ]
+      },
+      "fx": [
+        {
+          "t": 1.9,
+          "type": "mark",
+          "x": 62.4,
+          "y": 18.2,
+          "kind": "target",
+          "label": {
+            "en": "original pivot",
+            "cs": "původní pivot"
+          }
+        },
+        {
+          "t": 3,
+          "type": "mark",
+          "x": 64.2,
+          "y": 17.6,
+          "kind": "x",
+          "label": {
+            "en": "two metres later",
+            "cs": "o dva metry dál"
+          }
+        },
+        {
+          "t": 4.2,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "D1",
+          "text": {
+            "en": "TRAVEL!",
+            "cs": "TRAVEL!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5.4,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "D1",
+          "text": {
+            "en": "that was deliberate",
+            "cs": "to bylo schválně"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "Boxed in on the line, the thrower “fumbles” the disc off their fingertips, chases the bobble two metres upfield, gathers it — and now has a much better angle. It looked deliberate because it was.",
+        "cs": "Zavřený u čáry si házeč disk „upustí“ z konečků prstů, jde za ním dva metry dopředu, sebere ho — a najednou má mnohem lepší úhel. Vypadalo to schválně, protože to schválně bylo."
+      },
+      "question": {
+        "en": "Anything you can do?",
+        "cs": "Můžeš s tím něco udělat?"
+      },
+      "explain": {
+        "en": "Yes — that is a travel. A player who intentionally bobbles, fumbles or delays the disc to themselves for the sole purpose of moving in a specific direction commits a travel infraction (18.2.4.5). Call it; the count pauses, they return to the correct pivot location as you indicate, and play carries on (18.2.5).",
+        "cs": "Ano — je to travel. Hráč, který si disk záměrně žongluje, upouští nebo si ho zdržuje jen proto, aby se posunul určitým směrem, se dopouští travel infraction (18.2.4.5). Zavolej to; počítání se pozastaví, on se vrátí na správné místo pivotu podle tvého ukázání a hraje se dál (18.2.5)."
+      },
+      "note": {
+        "en": "The word doing the work is “intentionally”. A genuine bobble is just a bobble — and if it hits the ground it is a turnover anyway. This rule is aimed at the deliberate version, and calling it is not an accusation of cheating, just of gaining ground.",
+        "cs": "Klíčové slovo je „záměrně“. Skutečné upuštění je prostě upuštění — a když disk dopadne na zem, je to stejně turnover. Tohle pravidlo míří na tu úmyslnou verzi a zavolat ho neznamená obvinit někoho z podvádění, jen ze získávání území."
+      },
+      "rules": ["18.2.4.5", "18.2.5", "18.2.4.4"],
+      "signals": [11],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The thrower deliberately bobbles the disc to themselves and gains two metres. What is it?",
+            "cs": "Házeč si disk záměrně upustí a získá dva metry. Co to je?"
+          },
+          "rules": ["18.2.4.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "A travel infraction",
+                "cs": "Travel infraction"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.4.5 — intentionally bobbling, fumbling or delaying the disc to yourself for the sole purpose of moving in a specific direction.",
+                "cs": "18.2.4.5 — záměrné žonglování, upuštění nebo zdržování disku sám sobě jen proto, aby ses posunul určitým směrem."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — the disc never hit the ground",
+                "cs": "Nic — disk nedopadl na zem"
+              },
+              "why": {
+                "en": "18.2.4.5 does not need it to; the breach is the deliberate movement.",
+                "cs": "18.2.4.5 to nevyžaduje; prohřeškem je záměrný posun."
+              }
+            },
+            {
+              "t": {
+                "en": "A turnover — that counts as a drop",
+                "cs": "Turnover — počítá se to jako drop"
+              },
+              "why": {
+                "en": "A drop needs the disc to contact the ground (13.1); this one stayed up.",
+                "cs": "Drop vyžaduje dotek disku se zemí (13.1); tenhle zůstal nahoře."
+              }
+            },
+            {
+              "t": {
+                "en": "A violation, so play stops",
+                "cs": "Violation, takže se hra zastaví"
+              },
+              "why": {
+                "en": "It is an infraction; accepted travels do not stop play (18.2.5).",
+                "cs": "Je to infraction; uznané travely hru nezastavují (18.2.5)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "What if the bobble was genuinely accidental?",
+            "cs": "Co když bylo to upuštění opravdu nechtěné?"
+          },
+          "rules": ["18.2.4.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Then there is no travel — the rule requires it to be intentional",
+                "cs": "Pak žádný travel není — pravidlo vyžaduje záměr"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.4.5 turns on “intentionally … for the sole purpose of moving in a specific direction”.",
+                "cs": "18.2.4.5 stojí na „záměrně … jen proto, aby se posunul určitým směrem“."
+              }
+            },
+            {
+              "t": {
+                "en": "Still a travel — intent is impossible to judge",
+                "cs": "Pořád travel — úmysl se stejně nedá posoudit"
+              },
+              "why": {
+                "en": "The rules ask players to judge intent here, as elsewhere (18.2.4.5).",
+                "cs": "Pravidla tady po hráčích posouzení úmyslu chtějí, stejně jako jinde (18.2.4.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "It becomes a turnover instead",
+                "cs": "Místo toho je to turnover"
+              },
+              "why": {
+                "en": "Only if the disc hits the ground (13.1).",
+                "cs": "Jen pokud disk dopadne na zem (13.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "You call it and they accept. Where does the pivot go?",
+            "cs": "Zavoláš to a on uzná. Kam patří pivot?"
+          },
+          "rules": ["18.2.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Back to the correct location, as you indicate — and the count stays paused until it is there",
+                "cs": "Zpátky na správné místo podle tvého ukázání — a počítání stojí, dokud tam není"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.5.1/18.2.5.2 — the ground gained by the bobble is given straight back.",
+                "cs": "18.2.5.1/18.2.5.2 — území získané žonglováním se rovnou vrací."
+              }
+            },
+            {
+              "t": {
+                "en": "It stays where they gathered it; only the count drops",
+                "cs": "Zůstane tam, kde disk sebral; jen počítání klesne"
+              },
+              "why": {
+                "en": "Then the infraction would have worked (18.2.5.1).",
+                "cs": "Tím by infraction fungoval (18.2.5.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Back to the thrower’s previous team-mate",
+                "cs": "Zpátky k předchozímu spoluhráči"
+              },
+              "why": {
+                "en": "Nothing undoes the completed pass that got them the disc (18.2.5).",
+                "cs": "Nic neruší dokončenou přihrávku, kterou disk získal (18.2.5)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tv9",
+      "level": 5,
+      "topic": {
+        "en": "Travel",
+        "cs": "Travel"
+      },
+      "title": {
+        "en": "Does the marker restart at “Stalling”?",
+        "cs": "Musí marker znovu říct „Stalling“?"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower correcting the pivot",
+        "cs": "házeč, který opravuje pivot"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.6,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 26], [3.4, 79, 24], [6.6, 79, 24]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 27], [3.4, 80.4, 25.4], [6.6, 80.4, 25.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 63.8, 18], [6.6, 63.8, 18]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [
+            [0, 63.4, 17],
+            [2.2, 63.4, 17],
+            [3.4, 63, 17.2],
+            [4.6, 62.2, 17.6],
+            [6.6, 62.2, 17.6]
+          ]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 63.8, 16.4], [3.4, 63.4, 16.6], [4.6, 62.6, 17], [6.6, 62.6, 17]]
+      },
+      "fx": [
+        {
+          "t": 1,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "D1",
+          "text": {
+            "en": "TRAVEL!",
+            "cs": "TRAVEL!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 2.2,
+          "type": "mark",
+          "x": 62.2,
+          "y": 18,
+          "kind": "target",
+          "label": {
+            "en": "correct pivot spot",
+            "cs": "správné místo pivotu"
+          }
+        },
+        {
+          "t": 4.8,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "D1",
+          "text": {
+            "en": "…6…",
+            "cs": "…6…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 5.6,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "O1",
+          "text": {
+            "en": "no “Stalling” needed",
+            "cs": "„Stalling“ netřeba"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "The marker had reached “stalling 5” when they called a travel on you. You walk back to the spot they indicate and put the pivot down. They immediately say “…six”.",
+        "cs": "Marker byl na „stalling 5“, když na tebe zavolal travel. Vrátíš se na místo, které ukázal, a položíš pivot. On okamžitě řekne „…šest“."
+      },
+      "question": {
+        "en": "Should they have restarted with the word “Stalling”?",
+        "cs": "Měl začít znovu slovem „Stalling“?"
+      },
+      "explain": {
+        "en": "No — the marker does not need to say “Stalling” before resuming the count after an accepted travel (18.2.5.3). The count was only paused, not restarted: it pauses while you fix the pivot and picks up where it left off once the pivot is established at the correct location (18.2.5.2).",
+        "cs": "Ne — marker po uznaném travelu nemusí před pokračováním říct „Stalling“ (18.2.5.3). Počítání bylo jen pozastavené, ne restartované: pozastaví se, dokud opravuješ pivot, a naváže tam, kde skončilo, jakmile pivot stojí na správném místě (18.2.5.2)."
+      },
+      "note": {
+        "en": "Contrast a genuine restart: after a stoppage, or when a new or returning marker starts counting (9.4), the word “Stalling” is required — and omitting it is a fast count (18.1.1.1.2).",
+        "cs": "Srovnej to se skutečným restartem: po zastavení hry nebo když počítat začíná nový či vracející se marker (9.4), je slovo „Stalling“ povinné — a jeho vynechání je fast count (18.1.1.1.2)."
+      },
+      "rules": ["18.2.5.3", "18.2.5", "18.1.1.1"],
+      "signals": [11],
+      "steps": [
+        {
+          "k": "stall",
+          "q": {
+            "en": "After you fix the pivot, must the marker say the word “Stalling” before continuing the count?",
+            "cs": "Když opravíš pivot, musí marker před pokračováním v countu vyslovit slovo „Stalling“?"
+          },
+          "rules": ["18.2.5.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — after an accepted travel they simply continue the count",
+                "cs": "Ne — po uznaném travelu prostě pokračuje v počítání"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.5.3 says so explicitly; the count was paused, not restarted.",
+                "cs": "18.2.5.3 to říká výslovně; počítání bylo pozastavené, ne restartované."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — every resumption needs the word",
+                "cs": "Ano — každé pokračování to slovo potřebuje"
+              },
+              "why": {
+                "en": "True after a stoppage or a new marker (9.4, 18.1.1.1.2), not after a travel (18.2.5.3).",
+                "cs": "Platí po zastavení nebo u nového markera (9.4, 18.1.1.1.2), ne po travelu (18.2.5.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if more than three seconds passed",
+                "cs": "Jen když uplynuly víc než tři sekundy"
+              },
+              "why": {
+                "en": "No time threshold exists (18.2.5.3).",
+                "cs": "Žádná časová hranice neexistuje (18.2.5.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "And what number do they continue from?",
+            "cs": "A od jakého čísla pokračuje?"
+          },
+          "rules": ["18.2.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "From where the count was paused — 5, so “six”",
+                "cs": "Odtud, kde se počítání pozastavilo — 5, tedy „šest“"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.2.5.2 — the count is paused during the correction and picks up where it left off.",
+                "cs": "18.2.5.2 — počítání se během nápravy pozastaví a naváže tam, kde skončilo."
+              }
+            },
+            {
+              "t": {
+                "en": "From the last number minus one — “four”",
+                "cs": "Od posledního čísla minus jedna — „čtyři“"
+              },
+              "why": {
+                "en": "Minus-one punishes the MARKER for a marking infraction (18.1.3); a travel is the thrower’s breach.",
+                "cs": "Minus jedna trestá MARKERA za marking infraction (18.1.3); travel je prohřešek házeče."
+              }
+            },
+            {
+              "t": {
+                "en": "From max 9 — the offence breached",
+                "cs": "Od max 9 — prohřešil se útok"
+              },
+              "why": {
+                "en": "Max 9 needs a stoppage (9.5.2); an accepted travel has none (18.2.5).",
+                "cs": "Max 9 vyžaduje zastavení (9.5.2); uznaný travel žádné nemá (18.2.5)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "When IS the word “Stalling” required?",
+            "cs": "Kdy je slovo „Stalling“ povinné?"
+          },
+          "rules": ["18.1.1.1", "9.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "Starting or restarting a count — after a stoppage, or by a new or returned marker",
+                "cs": "Při začátku nebo restartu počítání — po zastavení, nebo u nového či vráceného markera"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.4 restarts the count at one in those cases, and omitting “Stalling” is itself a fast count (18.1.1.1.2).",
+                "cs": "9.4 v těch případech restartuje počítání na jedničku a vynechání „Stalling“ je samo fast count (18.1.1.1.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Every single number",
+                "cs": "U každého čísla"
+              },
+              "why": {
+                "en": "Only the first of a count (9.1).",
+                "cs": "Jen u prvního čísla countu (9.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Never — it is a convention, not a rule",
+                "cs": "Nikdy — je to zvyk, ne pravidlo"
+              },
+              "why": {
+                "en": "9.1 requires it, and 18.1.1.1.2 makes omitting it an infraction.",
+                "cs": "9.1 ho vyžaduje a 18.1.1.1.2 z jeho vynechání dělá infraction."
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

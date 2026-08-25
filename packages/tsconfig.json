@@ -5,6 +5,7 @@
     { "path": "./domain" },
     { "path": "./effect-lib" },
     { "path": "./migrations" },
+    { "path": "./rules" },
     { "path": "./template-renderer" }
   ]
 }

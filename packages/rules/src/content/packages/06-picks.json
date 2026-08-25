@@ -1,0 +1,2372 @@
+{
+  "level": 6,
+  "name": "Level 6 · Picks",
+  "scenarios": [
+    {
+      "id": "s13",
+      "level": 6,
+      "topic": {
+        "en": "Picks",
+        "cs": "Picky"
+      },
+      "title": {
+        "en": "Blocked in the stack",
+        "cs": "Zablokovaný ve stacku"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the defender chasing a cutter",
+        "cs": "obránce dobíhající nabíhače"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 6,
+      "qAt": 2.4,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 52, 20]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 53.5, 22.3]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 68, 14]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 68, 18], [1.5, 73, 13], [3, 80, 8], [6, 80, 8]]
+        },
+        {
+          "id": "D3",
+          "team": "def",
+          "label": "D3",
+          "you": true,
+          "kf": [
+            [0, 67, 20],
+            [1.5, 69.3, 15.5],
+            [1.9, 69.2, 14.6],
+            [2.4, 69, 14.8],
+            [3.2, 73, 12],
+            [6, 73, 12]
+          ]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 69.5, 12.5]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 52.6, 19.4]]
+      },
+      "fx": [
+        {
+          "t": 1.9,
+          "type": "flash",
+          "x": 69,
+          "y": 14.3
+        },
+        {
+          "t": 2.6,
+          "type": "bubble",
+          "dur": 1.7,
+          "actor": "D3",
+          "text": {
+            "en": "PICK!",
+            "cs": "PICK!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.4,
+          "type": "arrow",
+          "x1": 73,
+          "y1": 12,
+          "x2": 78.4,
+          "y2": 8.9
+        },
+        {
+          "t": 4.6,
+          "type": "mark",
+          "x": 78.8,
+          "y": 8.6,
+          "kind": "target",
+          "label": {
+            "en": "you may catch up to here",
+            "cs": "sem smíš dostoupit"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You chase your cutter through the stack. A stationary offensive player is suddenly in your running lane — you have to stop, and your cutter breaks free. Neither of them is making a play on the disc; the thrower still holds it.",
+        "cs": "Doprovázíš svého nabíhače skrz stack. V dráze ti najednou stojí jiný útočník — musíš zastavit a tvůj hráč se utrhne. Ani jeden z nich nehraje na disk; házeč ho pořád drží."
+      },
+      "question": {
+        "en": "What do you call, and how is it resolved?",
+        "cs": "Co zavoláš a jak se to vyřeší?"
+      },
+      "explain": {
+        "en": "You were prevented from moving with the player you guard — that is a pick (18.3.1), and only you, the obstructed defender, may call it. You may wait up to 2 seconds to see whether it matters (18.3.1.1). Play stops (a pick is a violation), everyone returns to their positions at the time of the call (10.2.1), and you move to the position you would have reached without the block (18.3.2). Restart with a check; stall resumes at max 6 (9.5.5).",
+        "cs": "Něco ti zabránilo pohybovat se s hráčem, kterého bráníš — to je pick (18.3.1), a hlásit ho smíš jen ty, blokovaný obránce. Můžeš až 2 sekundy počkat, jestli to bude mít vliv (18.3.1.1). Hra se staví (pick je violation), všichni se vrátí na místa v okamžiku hlášky (10.2.1) a ty si dostoupíš tam, kde bys bez bloku byl (18.3.2). Hra se obnoví checkem; stall pokračuje na max 6 (9.5.5)."
+      },
+      "note": {
+        "en": "Not a pick: when both your cutter and the obstructing player are making a play on the disc (18.3.1). Everyone should work to avoid picks — and during any stoppage players may slightly adjust positions to prevent the next one (18.3.3).",
+        "cs": "Pick to není, když bráněný i překážející hráč zrovna oba hrají na disk (18.3.1). Všichni by se měli pickům snažit předcházet — a během přerušení se hráči můžou lehce posunout, aby nevznikaly další (18.3.3)."
+      },
+      "rules": ["18.3.1", "18.3.1.1", "18.3.2", "9.5.5"],
+      "signals": [10, 21],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "An offensive player blocks you off the cutter you are guarding. What is it, and who may call it?",
+            "cs": "Hráč útoku ti zablokuje cestu za cutterem, kterého bráníš. Co to je a kdo to může volat?"
+          },
+          "rules": ["18.3.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "A pick — and only you, the obstructed defender, may call it",
+                "cs": "Pick — a volat ho můžeš jen ty, zablokovaný obránce"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.1 — being prevented from moving with the player you guard is a pick, called by the obstructed player.",
+                "cs": "18.3.1 — když ti brání pohybovat se s hráčem, kterého bráníš, je to pick, a volá ho zablokovaný hráč."
+              }
+            },
+            {
+              "t": {
+                "en": "A pick — any defender may call it",
+                "cs": "Pick — může ho volat kterýkoli obránce"
+              },
+              "why": {
+                "en": "Only the obstructed player calls a pick (18.3.1); the any-player rule is for double teams (15.5.1).",
+                "cs": "Pick volá jen zablokovaný hráč (18.3.1); pravidlo „kterýkoli hráč“ je pro double team (15.5.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "A foul — there was contact",
+                "cs": "Faul — došlo ke kontaktu"
+              },
+              "why": {
+                "en": "A pick does not require contact at all; if there is significant contact, a foul may co-exist (18.3.1).",
+                "cs": "Pick kontakt vůbec nevyžaduje; při výrazném kontaktu může faul existovat vedle něj (18.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — stacks legally block defenders",
+                "cs": "Nic — stack legálně blokuje obránce"
+              },
+              "why": {
+                "en": "Everyone must work to avoid picks; being blocked off your player is exactly the breach (18.3.1).",
+                "cs": "Všichni se mají snažit pickům předcházet; zablokování od tvého hráče je právě ten prohřešek (18.3.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "You are not sure it mattered yet. How long may you wait?",
+            "cs": "Ještě si nejsi jistý, jestli to hrálo roli. Jak dlouho můžeš čekat?"
+          },
+          "rules": ["18.3.1.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Up to two seconds, to see whether it affects the play",
+                "cs": "Až dvě sekundy, abys viděl, jestli to hru ovlivní"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.1.1 — a deliberate grace window so you do not stop play for a pick that changed nothing.",
+                "cs": "18.3.1.1 — záměrné okno, abys nezastavoval hru kvůli picku, který nic nezměnil."
+              }
+            },
+            {
+              "t": {
+                "en": "You must call it instantly or lose it",
+                "cs": "Musíš volat okamžitě, jinak o call přijdeš"
+              },
+              "why": {
+                "en": "Immediate calling is the general rule (15.8), but picks get the explicit 2-second allowance (18.3.1.1).",
+                "cs": "Okamžitý call je obecné pravidlo (15.8), ale picky mají výslovné dvousekundové okno (18.3.1.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Until the pass is caught",
+                "cs": "Dokud není přihrávka chycená"
+              },
+              "why": {
+                "en": "Two seconds, not “until the outcome” (18.3.1.1).",
+                "cs": "Dvě sekundy, ne „dokud nebude výsledek“ (18.3.1.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Play stops. Where does everyone go?",
+            "cs": "Hra se zastaví. Kam se všichni přesunou?"
+          },
+          "rules": ["10.2.1", "18.3.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Back to their positions at the time of the call — and you move up to where you would have been",
+                "cs": "Na pozice v momentě callu — a ty se posuneš tam, kde bys byl"
+              },
+              "ok": true,
+              "why": {
+                "en": "10.2.1 resets positions; 18.3.2 lets the picked defender make up the ground the block cost them.",
+                "cs": "10.2.1 vrací pozice; 18.3.2 nechá zablokovaného obránce dohnat území, které mu blok vzal."
+              }
+            },
+            {
+              "t": {
+                "en": "Back to their positions when the pass was released",
+                "cs": "Na pozice ve chvíli vypuštění přihrávky"
+              },
+              "why": {
+                "en": "That is 10.2.2.1, for when the disc goes back to a thrower after a pass.",
+                "cs": "To je 10.2.2.1, když se disk po přihrávce vrací házeči."
+              }
+            },
+            {
+              "t": {
+                "en": "Nobody moves — you simply lost that step",
+                "cs": "Nikdo se nehýbe — ten krok jsi prostě ztratil"
+              },
+              "why": {
+                "en": "18.3.2 exists precisely to give that step back.",
+                "cs": "18.3.2 existuje právě proto, aby ti ten krok vrátil."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "Where does the count resume?",
+            "cs": "Od kolika se obnoví počítání?"
+          },
+          "rules": ["9.5.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Max 6",
+                "cs": "Max 6"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.5.5 — all other calls, picks included, resume at maximum 6. (The diagrams PDF still prints the old 9.5.4 number.)",
+                "cs": "9.5.5 — všechny ostatní cally včetně picků se obnovují na maximálně 6. (PDF s diagramy stále tiskne staré číslo 9.5.4.)"
+              }
+            },
+            {
+              "t": {
+                "en": "“Stalling 1”",
+                "cs": "„Stalling 1“"
+              },
+              "why": {
+                "en": "A pick is not an accepted defensive breach against the offence (9.5.1) — the offence caused it.",
+                "cs": "Pick není uznaný prohřešek obrany proti útoku (9.5.1) — způsobil ho útok."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 9 — the offence committed the breach",
+                "cs": "Max 9 — prohřešek spáchal útok"
+              },
+              "why": {
+                "en": "Tempting, but 9.5.2 lists specific accepted offensive breaches; a pick falls into 9.5.5.",
+                "cs": "Svůdné, ale 9.5.2 vypisuje konkrétní uznané prohřešky útoku; pick spadá do 9.5.5."
+              }
+            },
+            {
+              "t": {
+                "en": "8",
+                "cs": "8"
+              },
+              "why": {
+                "en": "8 is the contested stall-out number (9.5.3).",
+                "cs": "8 je číslo po contestovaném stall-outu (9.5.3)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "k3",
+      "level": 6,
+      "topic": {
+        "en": "Picks",
+        "cs": "Picky"
+      },
+      "title": {
+        "en": "Picked — but the pass went the other way",
+        "cs": "Pick — ale přihrávka letěla jinam"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the picked defender",
+        "cs": "obránce zablokovaný pickem"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 7,
+      "qAt": 4.2,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 52, 20]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 53.5, 22.3]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 68, 14]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 68, 18], [1.5, 73, 13], [3.4, 80, 8], [7, 80, 8]]
+        },
+        {
+          "id": "D3",
+          "team": "def",
+          "label": "D3",
+          "you": true,
+          "kf": [
+            [0, 67, 20],
+            [1.5, 69.3, 15.5],
+            [1.9, 69.2, 14.6],
+            [2.4, 69, 14.8],
+            [3.4, 72, 12.5],
+            [7, 72, 12.5]
+          ]
+        },
+        {
+          "id": "O4",
+          "team": "off",
+          "label": "O4",
+          "kf": [[0, 70, 28], [1.6, 74, 30], [3.2, 78.6, 31.4], [7, 78.6, 31.4]]
+        },
+        {
+          "id": "D4",
+          "team": "def",
+          "label": "D4",
+          "kf": [[0, 71.5, 29.5], [1.6, 75.5, 31.5], [3.2, 80.4, 33], [7, 80.4, 33]]
+        }
+      ],
+      "disc": {
+        "kf": [
+          [0, 52.6, 19.4],
+          [1.6, 52.6, 19.4],
+          [2.5, 67, 26],
+          [3.5, 78.2, 30.8],
+          [7, 78.2, 30.8]
+        ]
+      },
+      "fx": [
+        {
+          "t": 1.9,
+          "type": "flash",
+          "x": 69,
+          "y": 14.3
+        },
+        {
+          "t": 2.4,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "D3",
+          "text": {
+            "en": "PICK!",
+            "cs": "PICK!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 3.7,
+          "type": "bubble",
+          "dur": 1.1,
+          "actor": "O4",
+          "text": {
+            "en": "catch",
+            "cs": "chyceno"
+          },
+          "style": "count"
+        },
+        {
+          "t": 5,
+          "type": "arrow",
+          "x1": 72,
+          "y1": 12.5,
+          "x2": 78.2,
+          "y2": 9
+        },
+        {
+          "t": 5.2,
+          "type": "mark",
+          "x": 78.6,
+          "y": 8.6,
+          "kind": "target",
+          "label": {
+            "en": "you still catch up",
+            "cs": "i tak si dostoupíš"
+          }
+        },
+        {
+          "t": 6,
+          "type": "bubble",
+          "dur": 1.5,
+          "actor": "D3",
+          "text": {
+            "en": "completion stands",
+            "cs": "spojka platí"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "You are chasing your cutter through the stack when a stationary offensive player blocks your lane, and you call “Pick!” just as the throw goes up. The pass flies to the OTHER side of the field, nowhere near your cutter, and is caught cleanly. Everyone agrees the pick had nothing to do with it.",
+        "cs": "Běžíš za svým cutterem skrz stack, když ti stojící hráč útoku zablokuje dráhu, a ve chvíli, kdy jde přihrávka nahoru, voláš „Pick!“. Přihrávka letí na DRUHOU stranu hřiště, daleko od tvého hráče, a je čistě chycená. Všichni se shodnou, že pick s ní neměl nic společného."
+      },
+      "question": {
+        "en": "What is the correct resolution?",
+        "cs": "Jaké je správné řešení?"
+      },
+      "explain": {
+        "en": "A legitimate pick call does not need the disc to come to your cutter — it is about being blocked off the player you guard (18.3.1). But its EFFECT decides the outcome: this pass was caught far away, the pick did not affect possession, so the completion stands (16.3). Play still stops to sort positions: everyone returns to where they were when possession was established (10.2.2.2), you move up the ground you lost to the block (18.3.2), and the new thrower checks the disc in.",
+        "cs": "Oprávněná hláška pick nepotřebuje, aby disk letěl na tvého hráče — jde o zablokování cesty za hráčem, kterého bráníš (18.3.1). O výsledku ale rozhoduje VLIV: tahle přihrávka byla chycená daleko, pick držení neovlivnil, takže spojka platí (16.3). Hra se přesto staví kvůli srovnání pozic: všichni se vrátí tam, kde byli při získání držení (10.2.2.2), ty si dostoupíš, co ti blok vzal (18.3.2), a nový házeč rozehraje checkem."
+      },
+      "note": {
+        "en": "Sequence for the field: call it immediately (or use your 2 seconds, 18.3.1.1), echo “play has stopped” once the catch is made, fix positions, check, go. The stall count on the NEW thrower simply starts fresh — the max-6 resumption applies when the disc returns to the original thrower.",
+        "cs": "Postup na hřišti: hlas hned (nebo využij své 2 sekundy, 18.3.1.1), po chycení dej vědět „hra stojí“, srovnejte pozice, check a jede se. Stall count na NOVÉHO házeče prostě začíná od začátku — pokračování na max 6 platí, když se disk vrací původnímu házeči."
+      },
+      "rules": ["18.3.1", "10.2.2.2", "18.3.2", "16.3"],
+      "signals": [10, 23, 21],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You were genuinely picked, but the pass was caught far away on the other side. What happens to the completion?",
+            "cs": "Byl jsi skutečně picknutý, ale přihrávka byla chycená daleko na druhé straně. Co se stane s dokončenou přihrávkou?"
+          },
+          "rules": ["18.3.1", "16.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "It stands — the pick did not affect possession",
+                "cs": "Platí — pick držení neovlivnil"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.1 makes the call legitimate; 16.3 keeps the outcome because the breach did not affect it.",
+                "cs": "18.3.1 dělá call legitimním; 16.3 zachovává výsledek, protože ho prohřešek neovlivnil."
+              }
+            },
+            {
+              "t": {
+                "en": "It is undone — the disc goes back to the thrower",
+                "cs": "Ruší se — disk se vrací házeči"
+              },
+              "why": {
+                "en": "That is the affected-the-play branch (16.2.4.2.1) — typically when you would have contested the disc.",
+                "cs": "To je větev „ovlivnilo hru“ (16.2.4.2.1) — typicky když bys o disk bojoval."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing at all — your call was invalid because the disc went elsewhere",
+                "cs": "Vůbec nic — tvůj call byl neplatný, protože disk šel jinam"
+              },
+              "why": {
+                "en": "A pick is about being blocked off your player, not about where the disc goes (18.3.1).",
+                "cs": "Pick je o zablokování od tvého hráče, ne o tom, kam letí disk (18.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Turnover to your team",
+                "cs": "Turnover pro tvůj tým"
+              },
+              "why": {
+                "en": "A pick never turns the disc over (18.3.1).",
+                "cs": "Pick nikdy nezpůsobí turnover (18.3.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "Does play stop at all?",
+            "cs": "Zastaví se hra vůbec?"
+          },
+          "rules": ["18.3.2", "16.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — play stops to sort out positions, then restarts with a check",
+                "cs": "Ano — hra se zastaví, aby se srovnaly pozice, pak restart checkem"
+              },
+              "ok": true,
+              "why": {
+                "en": "The completion stands, but the pick still has to be remedied: positions and your lost ground (18.3.2).",
+                "cs": "Dokončená přihrávka platí, ale pick se stejně musí napravit: pozice a tvoje ztracené území (18.3.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "No — since the completion stands, play just continues",
+                "cs": "Ne — když dokončená přihrávka platí, hra prostě běží dál"
+              },
+              "why": {
+                "en": "A pick is a violation, and violations stop play; only the OUTCOME survives (16.3).",
+                "cs": "Pick je violation a violations hru zastavují; přežívá jen VÝSLEDEK (16.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if the thrower agrees the pick happened",
+                "cs": "Jen když házeč uzná, že pick nastal"
+              },
+              "why": {
+                "en": "A contest changes the resumption, not whether play stops (18.3.2).",
+                "cs": "Contest mění obnovení, ne to, jestli se hra zastaví (18.3.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Which positions does everyone return to?",
+            "cs": "Na které pozice se všichni vracejí?"
+          },
+          "rules": ["10.2.2.2", "18.3.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Those held when possession was established — and you make up the ground the block cost you",
+                "cs": "Na ty v momentě získání držení — a ty doženeš území, které ti blok vzal"
+              },
+              "ok": true,
+              "why": {
+                "en": "10.2.2.2 — when the outcome stands, positions reset to the moment possession was established; 18.3.2 restores your lost ground.",
+                "cs": "10.2.2.2 — když výsledek platí, pozice se vracejí k momentu získání držení; 18.3.2 ti vrací ztracené území."
+              }
+            },
+            {
+              "t": {
+                "en": "Those held at the moment of the pick call",
+                "cs": "Na ty v momentě zavolání picku"
+              },
+              "why": {
+                "en": "10.2.1 applies when the disc does not change hands; here a catch was completed (10.2.2.2).",
+                "cs": "10.2.1 platí, když disk nemění držitele; tady byla dokončená přihrávka (10.2.2.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Those held when the pass was released",
+                "cs": "Na ty ve chvíli vypuštění přihrávky"
+              },
+              "why": {
+                "en": "10.2.2.1 is for a disc returning to the thrower — this one stayed caught.",
+                "cs": "10.2.2.1 je pro disk vracející se házeči — tenhle zůstal chycený."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "What is the stall count on the new thrower?",
+            "cs": "Jaký je stall count na novém házeči?"
+          },
+          "rules": ["9.5.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "A fresh count — the max-6 resumption belongs to a disc returning to the ORIGINAL thrower",
+                "cs": "Nové počítání — obnovení max 6 patří disku, který se vrací PŮVODNÍMU házeči"
+              },
+              "ok": true,
+              "why": {
+                "en": "The completion stood, so this is a new possession and the marker starts a new count; 9.5.5’s max 6 applies where the disc goes back.",
+                "cs": "Dokončená přihrávka platila, takže jde o novou držbu a marker začíná nové počítání; max 6 z 9.5.5 platí tam, kde se disk vrací."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 6, like every other call",
+                "cs": "Max 6, jako u každého jiného callu"
+              },
+              "why": {
+                "en": "Max 6 resumes an interrupted count; the new thrower never had one (9.5.5).",
+                "cs": "Max 6 obnovuje přerušené počítání; nový házeč žádné neměl (9.5.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 9",
+                "cs": "Max 9"
+              },
+              "why": {
+                "en": "Max 9 is for accepted offensive breaches on the thrower who kept the disc (9.5.2).",
+                "cs": "Max 9 je pro uznané prohřešky útoku u házeče, který si disk nechal (9.5.2)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "s14",
+      "level": 6,
+      "topic": {
+        "en": "Picks",
+        "cs": "Picky"
+      },
+      "title": {
+        "en": "“Pick!” — but your pass is already flying",
+        "cs": "„Pick!“ — ale tvoje přihrávka už letí"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower who just released a huck",
+        "cs": "házeč, který právě vypustil huck"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 6.3,
+      "qAt": 5,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 52, 20]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 53.5, 22.3]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 68, 14]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 68, 18], [1.5, 73, 13], [3.4, 80.5, 8], [6.3, 80.5, 8]]
+        },
+        {
+          "id": "D3",
+          "team": "def",
+          "label": "D3",
+          "kf": [
+            [0, 67, 20],
+            [1.5, 69.3, 15.5],
+            [1.9, 69.2, 14.6],
+            [2.4, 69, 14.8],
+            [3.4, 74, 11.5],
+            [6.3, 74, 11.5]
+          ]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 69.5, 12.5]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 52.6, 19.4], [1.7, 52.6, 19.4], [2.6, 68, 12.5], [3.6, 80.9, 7.4]]
+      },
+      "fx": [
+        {
+          "t": 1.9,
+          "type": "flash",
+          "x": 69,
+          "y": 14.3
+        },
+        {
+          "t": 2.5,
+          "type": "bubble",
+          "dur": 1.5,
+          "actor": "D3",
+          "text": {
+            "en": "PICK!",
+            "cs": "PICK!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 3.7,
+          "type": "bubble",
+          "dur": 1.1,
+          "actor": "O3",
+          "text": {
+            "en": "catch",
+            "cs": "chyceno"
+          },
+          "style": "count"
+        },
+        {
+          "t": 4.6,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "O1",
+          "text": {
+            "en": "…does it stand?",
+            "cs": "…platí to?"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "You launch a huck to your free cutter. Right around your release, their defender gets picked in the stack and calls it. Your cutter catches the disc cleanly downfield.",
+        "cs": "Pálíš huck na volného nabíhače. Zhruba ve chvíli vypuštění disku jeho obránce narazí na pick a hlásí ho. Tvůj hráč disk v pohodě chytá."
+      },
+      "question": {
+        "en": "Does your completion stand?",
+        "cs": "Platí tvoje spojka?"
+      },
+      "explain": {
+        "en": "A call while the disc is in the air lets play run until possession is decided (16.2). Then the branch: if the pick affected possession — typically, the picked defender would have made a play on the disc — the pass comes back to you (16.2.4.2.1) and players return to their release positions (10.2.2.1). If it did not affect the play, the completion stands (16.3). In both cases the picked defender may catch up (18.3.2) — and when the disc comes back to you, your stall count resumes at max 6 (9.5.5).",
+        "cs": "Při hlášce s diskem ve vzduchu se hraje, dokud se nerozhodne o držení (16.2). Pak přijde větvení: pokud pick ovlivnil držení — typicky by blokovaný obránce na disk zahrál — přihrávka se vrací tobě (16.2.4.2.1) a hráči se vrátí na místa při vypuštění (10.2.2.1). Pokud hru neovlivnil, spojka platí (16.3). V obou případech si obránce dostoupí (18.3.2) — a když se disk vrací tobě, tvůj stall count pokračuje na max 6 (9.5.5)."
+      },
+      "note": {
+        "en": "If everyone agrees the pick changed nothing and the pass scored — the goal stands (16.3.1). The “did not affect” signal (#23, flat hands sweeping) is how you close these discussions gracefully.",
+        "cs": "Když se všichni shodnou, že pick nic nezměnil, a přihrávka skončila v endzóně — gól platí (16.3.1). Signál „neovlivnilo hru“ (#23, mávnutí dlaněmi) je způsob, jak tyhle debaty elegantně uzavřít."
+      },
+      "rules": ["16.2", "16.2.4.2.1", "16.3", "18.3.2", "9.5.5"],
+      "signals": [10, 23, 5],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "“Pick!” is called while your pass is in the air. What happens immediately?",
+            "cs": "„Pick!“ zazní, když tvoje přihrávka letí. Co se stane okamžitě?"
+          },
+          "rules": ["16.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Play runs on until possession is decided, then the call is resolved",
+                "cs": "Hra běží, dokud se nerozhodne o držení, a pak se call vyřeší"
+              },
+              "ok": true,
+              "why": {
+                "en": "16.2 — a call while the disc is in the air never freezes the disc mid-flight; the outcome happens first.",
+                "cs": "16.2 — call, když disk letí, nikdy disk nezmrazí ve vzduchu; nejdřív se stane výsledek."
+              }
+            },
+            {
+              "t": {
+                "en": "Play stops instantly — the pass is void",
+                "cs": "Hra se okamžitě zastaví — přihrávka je neplatná"
+              },
+              "why": {
+                "en": "Discs in flight are never voided on the call itself (16.2).",
+                "cs": "Letící disk se nikdy neruší jen kvůli callu (16.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "The receiver must let the disc drop",
+                "cs": "Receiver musí disk nechat spadnout"
+              },
+              "why": {
+                "en": "Nobody may deliberately abandon a play on the disc after a call (16.2).",
+                "cs": "Nikdo nesmí po callu záměrně opustit hru o disk (16.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "The picked defender would have made a play on that disc. What follows?",
+            "cs": "Picknutý obránce by o ten disk bojoval. Co následuje?"
+          },
+          "rules": ["16.2.4.2.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "The pass comes back to you — the pick affected the play",
+                "cs": "Přihrávka se vrací tobě — pick hru ovlivnil"
+              },
+              "ok": true,
+              "why": {
+                "en": "16.2.4.2.1 — a breach that affected the outcome undoes it; the disc returns to the thrower.",
+                "cs": "16.2.4.2.1 — prohřešek, který ovlivnil výsledek, ho ruší; disk se vrací házeči."
+              }
+            },
+            {
+              "t": {
+                "en": "The completion stands",
+                "cs": "Dokončená přihrávka platí"
+              },
+              "why": {
+                "en": "That is the did-not-affect branch (16.3) — a pass caught far away from the pick.",
+                "cs": "To je větev „neovlivnilo“ (16.3) — přihrávka chycená daleko od picku."
+              }
+            },
+            {
+              "t": {
+                "en": "It is a turnover",
+                "cs": "Je to turnover"
+              },
+              "why": {
+                "en": "A pick never turns the disc over, in either direction (18.3.1).",
+                "cs": "Pick nikdy nezpůsobí turnover, ani na jednu stranu (18.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "The receiver keeps it, but the defender may reposition",
+                "cs": "Receiver si ho nechá, ale obránce se může přemístit"
+              },
+              "why": {
+                "en": "Repositioning happens in both branches (18.3.2); the difference is who ends up with the disc.",
+                "cs": "Přemístění nastane v obou větvích (18.3.2); rozdíl je v tom, kdo skončí s diskem."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Where does everyone go before the check?",
+            "cs": "Kam se všichni přesunou před checkem?"
+          },
+          "rules": ["10.2.2.1", "18.3.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Back to their release positions; the picked defender also catches up the ground they lost",
+                "cs": "Na pozice v momentě vypuštění; picknutý obránce navíc dohoní ztracené území"
+              },
+              "ok": true,
+              "why": {
+                "en": "10.2.2.1 — the disc returns to the thrower, so positions reset to the release; 18.3.2 still repairs the pick.",
+                "cs": "10.2.2.1 — disk se vrací házeči, takže pozice se vracejí k vypuštění; 18.3.2 pick i tak napraví."
+              }
+            },
+            {
+              "t": {
+                "en": "Back to their positions at the moment of the pick call",
+                "cs": "Na pozice v momentě zavolání picku"
+              },
+              "why": {
+                "en": "10.2.1 covers stoppages where the disc stays put; yours travelled and came back (10.2.2.1).",
+                "cs": "10.2.1 pokrývá zastavení, kdy disk zůstává; ten tvůj letěl a vrátil se (10.2.2.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "To where possession was established",
+                "cs": "Tam, kde bylo získáno držení"
+              },
+              "why": {
+                "en": "10.2.2.2 is for an outcome that stands — this one was undone.",
+                "cs": "10.2.2.2 je pro výsledek, který platí — tenhle se zrušil."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "Where does your count resume?",
+            "cs": "Od kolika se obnoví tvoje počítání?"
+          },
+          "rules": ["9.5.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Max 6",
+                "cs": "Max 6"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.5.5 — the disc came back to you after another call, so the generic maximum 6 applies.",
+                "cs": "9.5.5 — disk se ti vrátil po jiném callu, takže platí obecné maximum 6."
+              }
+            },
+            {
+              "t": {
+                "en": "“Stalling 1”",
+                "cs": "„Stalling 1“"
+              },
+              "why": {
+                "en": "Stalling 1 needs an accepted DEFENSIVE breach (9.5.1); the pick was the offence’s.",
+                "cs": "Stalling 1 vyžaduje uznaný prohřešek OBRANY (9.5.1); pick byl útoku."
+              }
+            },
+            {
+              "t": {
+                "en": "A fresh count from zero",
+                "cs": "Nové počítání od nuly"
+              },
+              "why": {
+                "en": "Fresh counts belong to a new possession; this is your same possession resumed (9.5.5).",
+                "cs": "Nové počítání patří nové držbě; tohle je pokračování té tvojí (9.5.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 9",
+                "cs": "Max 9"
+              },
+              "why": {
+                "en": "Max 9 lists specific accepted offensive breaches (9.5.2); a pick resolves under 9.5.5.",
+                "cs": "Max 9 vypisuje konkrétní uznané prohřešky útoku (9.5.2); pick se řeší podle 9.5.5."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pk4",
+      "level": 6,
+      "topic": {
+        "en": "Picks",
+        "cs": "Picky"
+      },
+      "title": {
+        "en": "Blocked — but you were both going for the disc",
+        "cs": "Zablokovaný — ale oba jste šli po disku"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the defender who got blocked",
+        "cs": "obránce, kterému se to postavilo do cesty"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 7,
+      "qAt": 4.4,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 50, 18], [7, 50, 18]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 74, 10], [3.2, 79, 13], [4.4, 80.6, 14.4], [7, 82, 15]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 70, 24], [3.2, 76, 18], [4.4, 78.4, 16], [7, 79, 15.6]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 68, 21], [3.2, 73.6, 18.6], [4.4, 75.4, 17.6], [7, 76, 17.4]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 50.4, 17.4], [3.6, 72, 16], [4.6, 80.4, 14.6], [7, 80.4, 14.6]]
+      },
+      "fx": [
+        {
+          "t": 3.4,
+          "type": "mark",
+          "x": 78,
+          "y": 16.4,
+          "kind": "zone",
+          "r": 3.4,
+          "label": {
+            "en": "all three playing the disc",
+            "cs": "všichni tři hrají disk"
+          }
+        },
+        {
+          "t": 4,
+          "type": "flash",
+          "x": 77,
+          "y": 17
+        },
+        {
+          "t": 5,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "D1",
+          "text": {
+            "en": "no pick — play on",
+            "cs": "žádný pick — hraje se"
+          },
+          "style": "count"
+        },
+        {
+          "t": 5.8,
+          "type": "mark",
+          "x": 80.4,
+          "y": 14.6,
+          "kind": "target",
+          "label": {
+            "en": "completion stands",
+            "cs": "spojka platí"
+          }
+        }
+      ],
+      "situation": {
+        "en": "The huck goes up between three players. You are guarding the near cutter, but another offensive player crosses your path as you all converge on the flight of the disc — every one of you is playing the disc, not screening. Your cutter gets there first and catches it.",
+        "cs": "Huck letí mezi tři hráče. Bráníš bližšího nabíhače, ale do cesty se ti dostane jiný hráč útoku, jak všichni sbíháte k letícímu disku — každý z vás hraje disk, nikdo nestaví blok. Tvůj hráč je tam první a chytá."
+      },
+      "question": {
+        "en": "Is that a pick?",
+        "cs": "Je to pick?"
+      },
+      "explain": {
+        "en": "No. The pick rule has an explicit exception: it does not apply when the obstructing player and the player you are guarding are both making a play on the disc (18.3.1). Bodies crossing in a contested airspace is ordinary ultimate, not a screen — so there is no call, the catch stands, and play continues.",
+        "cs": "Ne. Pravidlo o picku má výslovnou výjimku: neplatí, když blokující hráč i hráč, kterého brániš, oba hrají disk (18.3.1). Křížení těl v prostoru, o který se bojuje, je běžné ultimate, ne blok — takže žádný call, chycení platí a hraje se dál."
+      },
+      "note": {
+        "en": "What separates a pick from this is intent-free geometry: was the obstructing player involved in the play on the disc, or just in your way? If there was significant contact you may still have a foul — but the pick call itself is off the table (18.3.1).",
+        "cs": "Pick od tohohle odděluje geometrie, ne úmysl: byl blokující hráč zapojený do hry o disk, nebo ti jen stál v cestě? Při výrazném kontaktu můžeš mít pořád faul — ale pick jako call je ze hry (18.3.1)."
+      },
+      "rules": ["18.3.1", "12.8", "16.3"],
+      "signals": [10, 23],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "An offensive player crosses your path while you, your cutter and they are all playing the flight of the disc. Is it a pick?",
+            "cs": "Hráč útoku ti zkříží cestu, zatímco ty, tvůj cutter i on hrajete letící disk. Je to pick?"
+          },
+          "rules": ["18.3.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — the rule does not apply when both are making a play on the disc",
+                "cs": "Ne — pravidlo neplatí, když oba hrají disk"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.1 carries that exception explicitly; contested airspace is not a screen.",
+                "cs": "18.3.1 tuhle výjimku obsahuje výslovně; prostor, o který se bojuje, není blok."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — you were prevented from moving with your player",
+                "cs": "Ano — bylo ti zabráněno jít se svým hráčem"
+              },
+              "why": {
+                "en": "That is the general definition, but the disc-play exception overrides it (18.3.1).",
+                "cs": "To je obecná definice, ale výjimka pro hru o disk ji přebíjí (18.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, but only if the pass is completed",
+                "cs": "Ano, ale jen když je přihrávka dokončená"
+              },
+              "why": {
+                "en": "Outcome decides the remedy (16.3), never whether a pick exists (18.3.1).",
+                "cs": "Výsledek rozhoduje o nápravě (16.3), nikdy o tom, jestli pick existuje (18.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if there was contact",
+                "cs": "Jen pokud došlo ke kontaktu"
+              },
+              "why": {
+                "en": "Picks never require contact; and here the exception applies regardless (18.3.1).",
+                "cs": "Picky kontakt nikdy nevyžadují; a tady výjimka platí bez ohledu na něj (18.3.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "So what do you do?",
+            "cs": "Co tedy udělat?"
+          },
+          "rules": ["16.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Play on — the catch stands and nothing stops",
+                "cs": "Hrát dál — chycení platí a nic se nezastaví"
+              },
+              "ok": true,
+              "why": {
+                "en": "With no valid call there is nothing to resolve; stopping play would be your own breach (16.3).",
+                "cs": "Bez platného callu není co řešit; zastavit hru by byl tvůj vlastní prohřešek (16.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Call it anyway and let the offence contest",
+                "cs": "Zavolat to i tak a nechat útok contestovat"
+              },
+              "why": {
+                "en": "A call you know is invalid costs positions and tempo, and the count resumes against you (9.5.5).",
+                "cs": "Call, o kterém víš, že je neplatný, stojí pozice i tempo a počítání se obnoví proti tobě (9.5.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "Ask your team-mate to call it instead",
+                "cs": "Nechat to zavolat spoluhráče"
+              },
+              "why": {
+                "en": "Only the obstructed player may call a pick, and here even they cannot (18.3.1).",
+                "cs": "Pick smí volat jen zablokovaný hráč, a tady ani ten ne (18.3.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "There was some shoulder contact as you crossed. Does that change anything?",
+            "cs": "Při křížení došlo ke kontaktu ramen. Mění to něco?"
+          },
+          "rules": ["12.8"],
+          "opts": [
+            {
+              "t": {
+                "en": "Only if it was non-minor — then it is a foul, judged on its own",
+                "cs": "Jen pokud byl nezanedbatelný — pak je to faul, posuzovaný sám za sebe"
+              },
+              "ok": true,
+              "why": {
+                "en": "12.8 — simultaneous minor contact between converging players is not a foul; real contact is, and it is assessed separately from the pick.",
+                "cs": "12.8 — současný drobný kontakt sbíhajících se hráčů není faul; skutečný kontakt ano a posuzuje se odděleně od picku."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — any contact converts it back into a pick",
+                "cs": "Ano — jakýkoli kontakt to zpátky mění na pick"
+              },
+              "why": {
+                "en": "Contact and picks are separate mechanisms; contact never revives the pick (18.3.1).",
+                "cs": "Kontakt a picky jsou oddělené mechanismy; kontakt pick neoživí (18.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "No — contact between converging players is always ignored",
+                "cs": "Ne — kontakt sbíhajících se hráčů se vždy ignoruje"
+              },
+              "why": {
+                "en": "Only MINOR simultaneous contact is ignored (12.8).",
+                "cs": "Ignoruje se jen DROBNÝ současný kontakt (12.8)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pk5",
+      "level": 6,
+      "topic": {
+        "en": "Picks",
+        "cs": "Picky"
+      },
+      "title": {
+        "en": "You call the pick too late",
+        "cs": "Zavoláš pick moc pozdě"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the defender who hesitated",
+        "cs": "obránce, který zaváhal"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 7.4,
+      "qAt": 4.6,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 50, 18], [7.4, 50, 18]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 64, 24], [7.4, 64, 24]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 68, 20], [2, 74, 17], [3.6, 80, 15], [4.6, 83, 14], [7.4, 85, 13.6]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 66, 22], [1.4, 64.6, 23.4], [2.4, 66, 22.6], [4.6, 74, 19], [7.4, 79, 17]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 50.4, 17.4], [3.4, 72, 16], [4.4, 82.6, 14.2], [7.4, 82.6, 14.2]]
+      },
+      "fx": [
+        {
+          "t": 1.3,
+          "type": "mark",
+          "x": 64.6,
+          "y": 23.4,
+          "kind": "x",
+          "label": {
+            "en": "blocked here",
+            "cs": "zablokovaný tady"
+          }
+        },
+        {
+          "t": 4.3,
+          "type": "bubble",
+          "dur": 1.1,
+          "actor": "O2",
+          "text": {
+            "en": "caught",
+            "cs": "chyceno"
+          },
+          "style": "count"
+        },
+        {
+          "t": 5.4,
+          "type": "bubble",
+          "dur": 1.3,
+          "actor": "D1",
+          "text": {
+            "en": "…PICK?",
+            "cs": "…PICK?"
+          },
+          "style": "call"
+        },
+        {
+          "t": 6.2,
+          "type": "mark",
+          "x": 82.6,
+          "y": 14.2,
+          "kind": "target",
+          "label": {
+            "en": "too late — completion stands",
+            "cs": "pozdě — spojka platí"
+          }
+        }
+      ],
+      "situation": {
+        "en": "A stationary offensive player blocks your lane at the top of the play. You chase on, hoping it will not matter — and only after your cutter has caught the disc, a good four seconds later, do you call “pick”.",
+        "cs": "Na začátku akce ti stojící hráč útoku zablokuje dráhu. Běžíš dál a doufáš, že to nebude hrát roli — a teprve až tvůj hráč disk chytí, dobré čtyři sekundy později, zavoláš „pick“."
+      },
+      "question": {
+        "en": "Does your call stand?",
+        "cs": "Platí tvůj call?"
+      },
+      "explain": {
+        "en": "No. Picks get a deliberate grace window: you may wait up to two seconds to see whether the block actually matters (18.3.1.1). Beyond that the general rule bites — calls must be made immediately (15.8) — so a call four seconds later is too late to have any effect. The completion stands, and stopping play over it would be a breach of your own.",
+        "cs": "Ne. Picky mají záměrné ochranné okno: můžeš čekat až dvě sekundy, abys viděl, jestli blok vůbec hraje roli (18.3.1.1). Za tou hranicí platí obecné pravidlo — cally musí zaznít okamžitě (15.8) — takže call o čtyři sekundy později už nemá žádný efekt. Dokončená přihrávka platí a zastavit kvůli tomu hru by byl tvůj vlastní prohřešek."
+      },
+      "note": {
+        "en": "The two seconds are for judging effect, not for shopping for an outcome. Use them honestly: if the block cost you the play, call it inside the window; if it did not, let it go and keep running.",
+        "cs": "Ty dvě sekundy jsou na posouzení vlivu, ne na vybírání výsledku. Používej je poctivě: pokud ti blok vzal akci, zavolej ho v okně; pokud ne, nech to být a běž dál."
+      },
+      "rules": ["18.3.1.1", "15.8", "18.3.1"],
+      "signals": [10, 23],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You were genuinely blocked, but you only call “pick” about four seconds later, after the catch. Does the call stand?",
+            "cs": "Byl jsi skutečně zablokovaný, ale „pick“ zavoláš až po čtyřech sekundách, po chycení. Platí call?"
+          },
+          "rules": ["18.3.1.1", "15.8"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — the window was two seconds, and calls must otherwise be immediate",
+                "cs": "Ne — okno bylo dvě sekundy a jinak musí cally zaznít okamžitě"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.1.1 gives picks up to two seconds to judge effect; 15.8 requires immediacy beyond that.",
+                "cs": "18.3.1.1 dává pickům až dvě sekundy na posouzení vlivu; 15.8 pak vyžaduje okamžitost."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — a pick is a pick whenever you notice it",
+                "cs": "Ano — pick je pick, kdykoli si ho všimneš"
+              },
+              "why": {
+                "en": "Late calls are exactly what the two-second limit exists to prevent (18.3.1.1).",
+                "cs": "Pozdním callům má dvousekundový limit přesně zabránit (18.3.1.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, if the pick clearly affected the play",
+                "cs": "Ano, pokud pick jasně ovlivnil hru"
+              },
+              "why": {
+                "en": "Effect decides the remedy for a VALID call; it does not extend the deadline (18.3.1.1).",
+                "cs": "Vliv rozhoduje o nápravě u PLATNÉHO callu; hranici neposouvá (18.3.1.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Who has the disc?",
+            "cs": "Kdo má disk?"
+          },
+          "rules": ["16.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Their offence — the completion stands and play never stopped",
+                "cs": "Jejich útok — dokončená přihrávka platí a hra se nezastavila"
+              },
+              "ok": true,
+              "why": {
+                "en": "An invalid call has no consequences at all (16.3).",
+                "cs": "Neplatný call nemá vůbec žádné důsledky (16.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "The thrower, for a replay",
+                "cs": "Házeč, na zopakování"
+              },
+              "why": {
+                "en": "Replays follow valid calls that affected the play (16.2.4.2.1).",
+                "cs": "Opakování následuje po platných callech, které ovlivnily hru (16.2.4.2.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Your team, because you were obstructed",
+                "cs": "Tvůj tým, protože ti bylo zabráněno v pohybu"
+              },
+              "why": {
+                "en": "A pick never turns the disc over, valid or not (18.3.1).",
+                "cs": "Pick nikdy nezpůsobí turnover, ať platný nebo ne (18.3.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "You had used the two seconds properly and the block had cost you the play. What would you have got?",
+            "cs": "Kdybys dvě sekundy využil správně a blok ti akci vzal — co bys dostal?"
+          },
+          "rules": ["18.3.2", "10.2.1", "9.5.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Play stops, everyone resets, you make up the ground you lost, count at max 6",
+                "cs": "Hra se zastaví, všichni srovnají pozice, doženeš ztracené území, počítání na max 6"
+              },
+              "ok": true,
+              "why": {
+                "en": "10.2.1 resets positions, 18.3.2 gives you the lost ground, 9.5.5 sets the resumption.",
+                "cs": "10.2.1 srovná pozice, 18.3.2 ti vrátí ztracené území, 9.5.5 určí obnovení."
+              }
+            },
+            {
+              "t": {
+                "en": "A turnover to your team",
+                "cs": "Turnover pro tvůj tým"
+              },
+              "why": {
+                "en": "Picks never award possession (18.3.1).",
+                "cs": "Picky nikdy nepřiznávají držení (18.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "The pass replayed from the thrower, with no repositioning",
+                "cs": "Přihrávka zopakovaná od házeče, bez přestavení"
+              },
+              "why": {
+                "en": "Repositioning is the core of the pick remedy (18.3.2).",
+                "cs": "Přestavení je jádrem nápravy u picku (18.3.2)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pk6",
+      "level": 6,
+      "topic": {
+        "en": "Picks",
+        "cs": "Picky"
+      },
+      "title": {
+        "en": "How far do you get to move up?",
+        "cs": "Kam až se smíš posunout?"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the obstructed defender",
+        "cs": "zablokovaný obránce"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 7.2,
+      "qAt": 4.2,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 50, 18], [7.2, 50, 18]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 66, 20], [7.2, 66, 20]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 68, 24], [2.6, 74, 20], [4.2, 78, 17.4], [7.2, 78, 17.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [
+            [0, 66.6, 23],
+            [1.6, 66.4, 21.4],
+            [2.6, 68, 20.6],
+            [4.2, 72, 19],
+            [5.6, 76, 17.8],
+            [7.2, 76, 17.8]
+          ]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 50.4, 17.4], [7.2, 50.4, 17.4]]
+      },
+      "fx": [
+        {
+          "t": 1.5,
+          "type": "mark",
+          "x": 66.4,
+          "y": 21.6,
+          "kind": "x",
+          "label": {
+            "en": "blocked here",
+            "cs": "zablokovaný tady"
+          }
+        },
+        {
+          "t": 2.2,
+          "type": "bubble",
+          "dur": 1.1,
+          "actor": "D1",
+          "text": {
+            "en": "PICK!",
+            "cs": "PICK!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5,
+          "type": "arrow",
+          "x1": 72,
+          "y1": 19,
+          "x2": 75.6,
+          "y2": 17.9
+        },
+        {
+          "t": 5.8,
+          "type": "mark",
+          "x": 76,
+          "y": 17.8,
+          "kind": "target",
+          "label": {
+            "en": "agreed position",
+            "cs": "dohodnutá pozice"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You call a pick and play stops. Your cutter had three metres on you by then, but they gained two of those before the obstruction and only one because of it. They want you to stay put; you want the whole three.",
+        "cs": "Zavoláš pick a hra se zastaví. Tvůj nabíhač měl v tu chvíli tříметrový náskok, ale dva metry z něj získal ještě před blokem a jen jeden kvůli němu. On chce, abys zůstal; ty chceš celé tři."
+      },
+      "question": {
+        "en": "How much ground do you get back?",
+        "cs": "Kolik území dostaneš zpátky?"
+      },
+      "explain": {
+        "en": "The position you would have occupied if the obstruction had not happened — and it is an AGREED position (18.3.2). That means the one metre the block cost you, not the three-metre gap: the rule restores what the pick took, not what their cut earned. It is a negotiation, and the honest answer is usually somewhere you can both point at.",
+        "cs": "Na pozici, kterou bys zaujal, kdyby k bloku nedošlo — a je to DOHODNUTÁ pozice (18.3.2). To znamená ten jeden metr, který tě blok stál, ne celý třímetrový odstup: pravidlo vrací, co vzal pick, ne co si vyběhal nabíhač. Je to dohoda a poctivá odpověď je většinou někde, kam si oba můžete ukázat."
+      },
+      "note": {
+        "en": "“Agreed” is doing real work here — if you cannot agree, you are in 1.12 territory and the disc goes back to the last non-disputed thrower. Pointing at the spot and asking “fair?” resolves almost all of these.",
+        "cs": "Slovo „dohodnutá“ tu nese skutečnou váhu — pokud se nedohodnete, jste v území 1.12 a disk se vrací poslednímu nespornému házeči. Ukázat na místo a zeptat se „fér?“ vyřeší skoro všechny tyhle případy."
+      },
+      "rules": ["18.3.2", "1.12", "18.3.1"],
+      "signals": [10, 22],
+      "steps": [
+        {
+          "k": "where",
+          "q": {
+            "en": "Play stopped for your pick. Where may you move to?",
+            "cs": "Hra se zastavila kvůli tvému picku. Kam se smíš přesunout?"
+          },
+          "rules": ["18.3.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "To the agreed position you would otherwise have occupied",
+                "cs": "Na dohodnutou pozici, kterou bys jinak zaujal"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.2 — the position you would have occupied had the obstruction not happened, and it is agreed between you.",
+                "cs": "18.3.2 — pozice, kterou bys zaujal, kdyby k bloku nedošlo, a je věcí dohody."
+              }
+            },
+            {
+              "t": {
+                "en": "Level with the player you are guarding, whatever the gap",
+                "cs": "Na úroveň hráče, kterého brániš, ať je odstup jakýkoli"
+              },
+              "why": {
+                "en": "That would hand you the ground their cut earned, not just what the pick took (18.3.2).",
+                "cs": "Tím bys dostal i území, které si vyběhal, ne jen to, co vzal pick (18.3.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nowhere — positions reset to the moment of the call",
+                "cs": "Nikam — pozice se vrací k momentu callu"
+              },
+              "why": {
+                "en": "10.2.1 resets everyone else; 18.3.2 is the explicit exception for you.",
+                "cs": "10.2.1 vrací všechny ostatní; 18.3.2 je výslovná výjimka pro tebe."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "They gained three metres, but only one of them because of the block. How much do you take?",
+            "cs": "Získal tři metry, ale jen jeden kvůli bloku. Kolik si vezmeš?"
+          },
+          "rules": ["18.3.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "One — the pick restores what it cost, not what their cut earned",
+                "cs": "Jeden — pick vrací, co vzal, ne co si nabíhač vyběhal"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.2 asks where you WOULD have been; two of those metres you were losing anyway.",
+                "cs": "18.3.2 se ptá, kde bys BYL; o dva z těch metrů jsi přicházel tak jako tak."
+              }
+            },
+            {
+              "t": {
+                "en": "Three — the whole gap",
+                "cs": "Tři — celý odstup"
+              },
+              "why": {
+                "en": "That converts a pick into a reset of the whole matchup (18.3.2).",
+                "cs": "Tím se z picku stává reset celého souboje (18.3.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "None — you cannot prove the difference",
+                "cs": "Žádný — rozdíl nedokážeš"
+              },
+              "why": {
+                "en": "The rule expects an agreement, not proof (18.3.2).",
+                "cs": "Pravidlo čeká dohodu, ne důkaz (18.3.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "You cannot agree on the spot. What then?",
+            "cs": "Na místě se nedohodnete. Co pak?"
+          },
+          "rules": ["1.12"],
+          "opts": [
+            {
+              "t": {
+                "en": "If it cannot be resolved, the disc goes back to the last non-disputed thrower",
+                "cs": "Když se to vyřešit nedá, disk se vrací poslednímu nespornému házeči"
+              },
+              "ok": true,
+              "why": {
+                "en": "1.12 — the general tie-breaker when players cannot agree what happened.",
+                "cs": "1.12 — obecné rozseknutí, když se hráči nedohodnou, co se stalo."
+              }
+            },
+            {
+              "t": {
+                "en": "The defender’s judgement wins — it was their call",
+                "cs": "Rozhoduje obránce — byl to jeho call"
+              },
+              "why": {
+                "en": "Nobody’s judgement automatically wins (1.12).",
+                "cs": "Ničí posouzení automaticky nevyhrává (1.12)."
+              }
+            },
+            {
+              "t": {
+                "en": "Play restarts with nobody moving",
+                "cs": "Rozehrává se, aniž by se kdokoli hnul"
+              },
+              "why": {
+                "en": "That silently resolves the dispute in the offence’s favour (18.3.2, 1.12).",
+                "cs": "Tím se spor mlčky rozhodne ve prospěch útoku (18.3.2, 1.12)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pk7",
+      "level": 6,
+      "topic": {
+        "en": "Picks",
+        "cs": "Picky"
+      },
+      "title": {
+        "en": "Nudging over during a stoppage",
+        "cs": "Posunutí se během zastavení"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the defender in a crowded lane",
+        "cs": "obránce v přeplněné dráze"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 6.8,
+      "qAt": 3.6,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 50, 18], [6.8, 50, 18]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 70, 17], [3.6, 70, 17], [5, 70, 15], [6.8, 70, 15]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 68, 21], [6.8, 68, 21]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 69, 19], [3.6, 69, 19], [5, 69, 21.6], [6.8, 69, 21.6]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 50.4, 17.4], [6.8, 50.4, 17.4]]
+      },
+      "fx": [
+        {
+          "t": 1.4,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "D1",
+          "text": {
+            "en": "play has stopped",
+            "cs": "hra je zastavená"
+          },
+          "style": "count"
+        },
+        {
+          "t": 2.6,
+          "type": "mark",
+          "x": 69.2,
+          "y": 18.4,
+          "kind": "zone",
+          "r": 2.6,
+          "label": {
+            "en": "a pick waiting to happen",
+            "cs": "pick čekající, až se stane"
+          }
+        },
+        {
+          "t": 4.6,
+          "type": "arrow",
+          "x1": 69,
+          "y1": 19.6,
+          "x2": 69,
+          "y2": 21.2
+        },
+        {
+          "t": 5.4,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "D1",
+          "text": {
+            "en": "agreed nudge",
+            "cs": "dohodnutý posun"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "Play is stopped for someone else’s call. Looking around, you are wedged between two stationary offensive players with your own mark on the far side — the moment play restarts, you are getting picked, and everyone can see it.",
+        "cs": "Hra stojí kvůli cizímu callu. Rozhlédneš se a zjistíš, že jsi vklíněný mezi dva stojící hráče útoku a svého hráče máš za nimi — jakmile se rozehraje, dostaneš pick, a je to vidět všem."
+      },
+      "question": {
+        "en": "Can anything be done before the check?",
+        "cs": "Dá se před checkem něco udělat?"
+      },
+      "explain": {
+        "en": "Yes. During any stoppage, opposing players may agree to slightly adjust their locations to avoid potential picks (18.3.3.1). Ask, point at the problem, and take the small step that removes it. That sits under the general duty in 18.3.3: all players should take reasonable efforts to avoid picks happening at all.",
+        "cs": "Ano. Během jakéhokoli zastavení se soupeři mohou dohodnout na mírné úpravě pozic, aby předešli možným pickům (18.3.3.1). Zeptej se, ukaž na problém a udělej ten malý krok, který ho odstraní. Spadá to pod obecnou povinnost v 18.3.3: všichni hráči se mají rozumně snažit pickům předcházet."
+      },
+      "note": {
+        "en": "Note the word “agree”: this is not a free repositioning. You cannot use it to slide into a better defensive position — only to remove a pick that is obviously about to happen (18.3.3.1).",
+        "cs": "Všimni si slova „dohodnout“: tohle není volné přestavení. Nemůžeš ho použít k tomu, aby ses posunul do lepší obranné pozice — jen k odstranění picku, který se očividně chystá (18.3.3.1)."
+      },
+      "rules": ["18.3.3.1", "18.3.3", "10.2.3"],
+      "signals": [10],
+      "steps": [
+        {
+          "k": "flow",
+          "q": {
+            "en": "You can see a pick coming the moment play restarts. May anything be adjusted?",
+            "cs": "Vidíš, že pick přijde hned po rozehrání. Smí se něco upravit?"
+          },
+          "rules": ["18.3.3.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — during a stoppage opposing players may agree to slightly adjust their locations",
+                "cs": "Ano — během zastavení se soupeři mohou dohodnout na mírné úpravě pozic"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.3.1 — a small, agreed nudge specifically to avoid a potential pick.",
+                "cs": "18.3.3.1 — malý, dohodnutý posun právě proto, aby se předešlo možnému picku."
+              }
+            },
+            {
+              "t": {
+                "en": "No — everyone is frozen until the check",
+                "cs": "Ne — všichni stojí až do checku"
+              },
+              "why": {
+                "en": "10.2.3 is the default, and 18.3.3.1 is the explicit exception to it.",
+                "cs": "10.2.3 je výchozí stav a 18.3.3.1 je z něj výslovná výjimka."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, and you may move wherever you like",
+                "cs": "Ano, a můžeš se přesunout kamkoli"
+              },
+              "why": {
+                "en": "“Slightly”, and by agreement (18.3.3.1) — free repositioning belongs to a time-out (20.3.4).",
+                "cs": "„Mírně“ a po dohodě (18.3.3.1) — volné přestavení patří k time-outu (20.3.4)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Who has to agree?",
+            "cs": "Kdo musí souhlasit?"
+          },
+          "rules": ["18.3.3.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "The opposing players involved",
+                "cs": "Zúčastnění soupeři"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.3.1 — it is a mutual adjustment, not a unilateral one.",
+                "cs": "18.3.3.1 — je to oboustranná úprava, ne jednostranná."
+              }
+            },
+            {
+              "t": {
+                "en": "Nobody — you just move",
+                "cs": "Nikdo — prostě se přesuneš"
+              },
+              "why": {
+                "en": "Then it is not an adjustment, it is repositioning (10.2.3).",
+                "cs": "Pak to není úprava, ale přestavení (10.2.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Both captains",
+                "cs": "Oba kapitáni"
+              },
+              "why": {
+                "en": "The players on the spot handle it (18.3.3.1).",
+                "cs": "Řeší to hráči na místě (18.3.3.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "What broader duty does that sit under?",
+            "cs": "Pod jakou širší povinnost to spadá?"
+          },
+          "rules": ["18.3.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "All players should take reasonable efforts to avoid picks happening at all",
+                "cs": "Všichni hráči se mají rozumně snažit pickům předcházet"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.3 — the pick rules are a remedy of last resort, not a tactic.",
+                "cs": "18.3.3 — pravidla o picku jsou krajní náprava, ne taktika."
+              }
+            },
+            {
+              "t": {
+                "en": "The offence must keep three metres between cutters",
+                "cs": "Útok musí držet tři metry mezi nabíhači"
+              },
+              "why": {
+                "en": "No spacing rule exists; the duty is on everyone, in general terms (18.3.3).",
+                "cs": "Žádné pravidlo o rozestupech neexistuje; povinnost je obecná a pro všechny (18.3.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Defenders must switch rather than call picks",
+                "cs": "Obránci mají raději přebírat, než volat picky"
+              },
+              "why": {
+                "en": "Switching is tactics; the rule asks for reasonable efforts to avoid picks (18.3.3).",
+                "cs": "Přebírání je taktika; pravidlo žádá rozumnou snahu pickům předcházet (18.3.3)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pk8",
+      "level": 6,
+      "topic": {
+        "en": "Picks",
+        "cs": "Picky"
+      },
+      "title": {
+        "en": "Your own team-mate blocks you",
+        "cs": "Zablokuje tě vlastní spoluhráč"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the defender who ran into a team-mate",
+        "cs": "obránce, který narazil do spoluhráče"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 7,
+      "qAt": 4,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 50, 18], [7, 50, 18]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 70, 26], [2, 68.6, 22.4], [4, 68, 20.6], [7, 70, 19]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 66, 24], [2.6, 72, 20], [4, 76, 17.6], [7, 80, 16]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 64.6, 23], [2, 67.4, 21.6], [2.8, 67.6, 21.4], [4, 70, 20], [7, 74, 17.8]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 50.4, 17.4], [7, 50.4, 17.4]]
+      },
+      "fx": [
+        {
+          "t": 2.2,
+          "type": "mark",
+          "x": 67.8,
+          "y": 21.6,
+          "kind": "x",
+          "label": {
+            "en": "your own team-mate",
+            "cs": "tvůj vlastní spoluhráč"
+          }
+        },
+        {
+          "t": 2.9,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "D1",
+          "text": {
+            "en": "PICK!",
+            "cs": "PICK!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5,
+          "type": "mark",
+          "x": 74,
+          "y": 17.8,
+          "kind": "target",
+          "label": {
+            "en": "you still get the ground back",
+            "cs": "území stejně dostaneš zpátky"
+          }
+        }
+      ],
+      "situation": {
+        "en": "Chasing your cutter across the field, you run straight into your own team-mate, who is busy chasing theirs. You lose three metres. Nobody on the other team did anything at all.",
+        "cs": "Když honíš svého nabíhače přes hřiště, narazíš do vlastního spoluhráče, který honí toho svého. Ztratíš tři metry. Nikdo ze soupeřů neudělal vůbec nic."
+      },
+      "question": {
+        "en": "Is there a call for that?",
+        "cs": "Existuje na to call?"
+      },
+      "explain": {
+        "en": "Yes — this is still a pick. The rule says a defender guarding an offensive player may call “Pick” when they are prevented from moving towards or with that player by ANOTHER PLAYER (18.3.1) — it does not say an opponent. Your own team-mate obstructing you counts, and you get the ground back the same way (18.3.2).",
+        "cs": "Ano — pořád je to pick. Pravidlo říká, že obránce bránící hráče útoku může zavolat „Pick“, když mu v pohybu k němu nebo s ním zabrání JINÝ HRÁČ (18.3.1) — neříká soupeř. Vlastní spoluhráč, který ti zabrání, se počítá a území dostaneš zpátky stejně (18.3.2)."
+      },
+      "note": {
+        "en": "Surprising, but it follows from the wording, and it is fair: the offence should not profit from a collision it did not cause any more than from one it did. The same two-second window applies before you call it (18.3.1.1).",
+        "cs": "Překvapivé, ale plyne to ze znění a je to fér: útok by neměl těžit ze srážky, kterou nezpůsobil, o nic víc než z té, kterou způsobil. Před callem platí stejné dvousekundové okno (18.3.1.1)."
+      },
+      "rules": ["18.3.1", "18.3.2", "18.3.1.1"],
+      "signals": [10],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "Your own team-mate blocks your path to the player you are guarding. Can you call a pick?",
+            "cs": "Cestu k hráči, kterého brániš, ti zablokuje vlastní spoluhráč. Můžeš volat pick?"
+          },
+          "rules": ["18.3.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — the rule says “another player”, not “an opponent”",
+                "cs": "Ano — pravidlo říká „jiný hráč“, ne „soupeř“"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.1 — a defender prevented from moving towards or with their player by ANOTHER PLAYER may call “Pick”.",
+                "cs": "18.3.1 — obránce, kterému v pohybu k jeho hráči nebo s ním zabrání JINÝ HRÁČ, může zavolat „Pick“."
+              }
+            },
+            {
+              "t": {
+                "en": "No — picks only exist against the offence",
+                "cs": "Ne — picky existují jen proti útoku"
+              },
+              "why": {
+                "en": "That is the common assumption, and the wording does not support it (18.3.1).",
+                "cs": "To je běžný předpoklad, ale znění ho nepodporuje (18.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "No — you must switch instead",
+                "cs": "Ne — musíš místo toho přebrat"
+              },
+              "why": {
+                "en": "Switching is a choice, not an obligation (18.3.1).",
+                "cs": "Přebírání je volba, ne povinnost (18.3.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "How long may you wait before calling it?",
+            "cs": "Jak dlouho můžeš před callem čekat?"
+          },
+          "rules": ["18.3.1.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Up to two seconds, to see whether it affects the play",
+                "cs": "Až dvě sekundy, abys viděl, jestli to hru ovlivní"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.1.1 — the same window regardless of who obstructed you.",
+                "cs": "18.3.1.1 — stejné okno bez ohledu na to, kdo tě zablokoval."
+              }
+            },
+            {
+              "t": {
+                "en": "No window — a team-mate pick must be called instantly",
+                "cs": "Žádné okno — pick od spoluhráče se musí volat okamžitě"
+              },
+              "why": {
+                "en": "18.3.1.1 draws no such distinction.",
+                "cs": "18.3.1.1 žádný takový rozdíl nedělá."
+              }
+            },
+            {
+              "t": {
+                "en": "Until the pass is caught",
+                "cs": "Dokud není přihrávka chycená"
+              },
+              "why": {
+                "en": "Two seconds is the limit (18.3.1.1).",
+                "cs": "Limit jsou dvě sekundy (18.3.1.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "It is accepted. What do you get?",
+            "cs": "Je uznaný. Co dostaneš?"
+          },
+          "rules": ["18.3.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "The agreed position you would have occupied without the obstruction",
+                "cs": "Dohodnutou pozici, kterou bys bez bloku zaujal"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.2 — the remedy does not care who obstructed you.",
+                "cs": "18.3.2 — nápravu nezajímá, kdo tě zablokoval."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — your team caused it, so your team pays",
+                "cs": "Nic — způsobil to tvůj tým, tak tvůj tým platí"
+              },
+              "why": {
+                "en": "The rules do not punish the defence for its own collision here (18.3.2).",
+                "cs": "Pravidla tady obranu za vlastní srážku netrestají (18.3.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "A turnover",
+                "cs": "Turnover"
+              },
+              "why": {
+                "en": "A pick never awards possession (18.3.1).",
+                "cs": "Pick nikdy nepřiznává držení (18.3.1)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sp5",
+      "level": 6,
+      "topic": {
+        "en": "Picks",
+        "cs": "Picky"
+      },
+      "title": {
+        "en": "Everyone should be avoiding picks",
+        "cs": "Pickům se mají vyhýbat všichni"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the cutter clearing through",
+        "cs": "nabíhač, který uvolňuje prostor"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 7,
+      "qAt": 3.8,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 50, 18], [7, 50, 18]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 72, 22], [3.8, 76, 20], [7, 80, 19]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 70, 24], [2.2, 72, 22.4], [3.8, 74.4, 21], [7, 78, 19.6]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "you": true,
+          "kf": [[0, 68, 20], [2.2, 70.6, 21.6], [3.8, 72, 23.4], [7, 72, 25.6]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 50.4, 17.4], [7, 50.4, 17.4]]
+      },
+      "fx": [
+        {
+          "t": 4.4,
+          "type": "arrow",
+          "x1": 71.4,
+          "y1": 23.4,
+          "x2": 72,
+          "y2": 25.4
+        },
+        {
+          "t": 5.4,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "O2",
+          "text": {
+            "en": "clear behind them",
+            "cs": "uvolnit za nimi"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "Your cut is finished and you are clearing out. The straight line back takes you directly across the path of a defender who is chasing your team-mate. You can go behind them instead at almost no cost.",
+        "cs": "Náběh máš odehraný a uvolňuješ prostor. Nejkratší cesta zpět tě vede přímo přes dráhu obránce, který honí tvého spoluhráče. Můžeš jít za ním, skoro to nic nestojí."
+      },
+      "question": {
+        "en": "Do the rules have anything to say about your route?",
+        "cs": "Mají pravidla co říct k tomu, kudy poběžíš?"
+      },
+      "explain": {
+        "en": "Yes: all players should take reasonable efforts to avoid the occurrence of picks (18.3.3). It is written as a duty on everyone, not just on the defence to call them — and the offence is the side that usually has the freedom to choose a route. Clearing behind the defender rather than across them is exactly what the rule asks of you.",
+        "cs": "Ano: všichni hráči by se měli rozumně snažit, aby k pickům nedocházelo (18.3.3). Je to napsané jako povinnost všech, ne jen jako právo obrany je volat — a útok je obvykle ta strana, která má volnost zvolit si trasu. Uvolnit za obráncem místo přes něj je přesně to, co po tobě pravidlo chce."
+      },
+      "note": {
+        "en": "And if a pick is brewing while play is stopped, opposing players may agree to slightly adjust their positions to prevent it (18.3.3.1). The rules would rather the pick never happened than be well remedied.",
+        "cs": "A když se pick chystá během zastavení hry, mohou se soupeři dohodnout na mírné úpravě pozic, aby k němu nedošlo (18.3.3.1). Pravidla mají radši pick, který nenastal, než pick dobře napravený."
+      },
+      "rules": ["18.3.3", "18.3.3.1", "18.3.1"],
+      "signals": [10],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "Your clearing route would cut straight across a defender chasing your team-mate. What do the rules ask?",
+            "cs": "Tvoje uvolňovací trasa by vedla přímo přes obránce, který honí tvého spoluhráče. Co po tobě pravidla chtějí?"
+          },
+          "rules": ["18.3.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Take reasonable efforts to avoid causing a pick",
+                "cs": "Rozumně se snažit, abys pick nezpůsobil"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.3 puts the duty on ALL players, not just on the defence to call them.",
+                "cs": "18.3.3 dává povinnost VŠEM hráčům, ne jen obraně, aby picky volala."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — picks are the defence’s problem",
+                "cs": "Nic — picky jsou problém obrany"
+              },
+              "why": {
+                "en": "18.3.3 says all players should avoid them occurring.",
+                "cs": "18.3.3 říká, že jim mají předcházet všichni hráči."
+              }
+            },
+            {
+              "t": {
+                "en": "Run the shortest route — the pick call fixes it",
+                "cs": "Běžet nejkratší trasou — pick call to vyřeší"
+              },
+              "why": {
+                "en": "A remedy is not permission; the rule prefers the pick not to happen (18.3.3).",
+                "cs": "Náprava není povolení; pravidlo preferuje, aby pick vůbec nenastal (18.3.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "A pick is brewing while play is stopped. Anything you can do?",
+            "cs": "Během zastavení se chystá pick. Dá se s tím něco dělat?"
+          },
+          "rules": ["18.3.3.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Opposing players may agree to slightly adjust their positions",
+                "cs": "Soupeři se mohou dohodnout na mírné úpravě pozic"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.3.1 — a small, mutual adjustment specifically to prevent one.",
+                "cs": "18.3.3.1 — malá, oboustranná úprava právě proto, aby k němu nedošlo."
+              }
+            },
+            {
+              "t": {
+                "en": "No — 10.2.3 freezes everyone",
+                "cs": "Ne — 10.2.3 všechny zmrazí"
+              },
+              "why": {
+                "en": "10.2.3 is the default and 18.3.3.1 is the exception to it.",
+                "cs": "10.2.3 je výchozí stav a 18.3.3.1 je z něj výjimka."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, and you may reposition wherever you like",
+                "cs": "Ano, a můžeš se přestavit, kam chceš"
+              },
+              "why": {
+                "en": "“Slightly”, and by agreement (18.3.3.1).",
+                "cs": "„Mírně“ a po dohodě (18.3.3.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "If it happens anyway, who may call it?",
+            "cs": "Když k němu i tak dojde, kdo ho může volat?"
+          },
+          "rules": ["18.3.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Only the obstructed defender",
+                "cs": "Jen zablokovaný obránce"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.3.1 — the call belongs to the player prevented from moving with their opponent.",
+                "cs": "18.3.1 — call patří hráči, kterému bylo zabráněno jít se svým soupeřem."
+              }
+            },
+            {
+              "t": {
+                "en": "Any defensive player",
+                "cs": "Kterýkoli obránce"
+              },
+              "why": {
+                "en": "That is the travel exception (15.5.1), not the pick (18.3.1).",
+                "cs": "To je výjimka pro travel (15.5.1), ne pro pick (18.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "The offence, to be sporting",
+                "cs": "Útok, ze sportovní slušnosti"
+              },
+              "why": {
+                "en": "Only the obstructed player may call it (18.3.1) — but you can certainly acknowledge it.",
+                "cs": "Volat ho může jen zablokovaný hráč (18.3.1) — přiznat ho ale klidně můžeš."
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

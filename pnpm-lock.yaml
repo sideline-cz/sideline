@@ -388,6 +388,18 @@ importers:
         version: 4.0.0-beta.40(patch_hash=ee0ff28ed343eec4a8c512b00cc9c23ddebb05f97ba14c903ee927b2baf3d005)
     publishDirectory: dist
 
+  packages/rules:
+    devDependencies:
+      tsc-alias:
+        specifier: '*'
+        version: 1.9.0
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/ui@4.1.10)(jsdom@29.1.1)(vite@8.2.2(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
+
   packages/template-renderer:
     devDependencies:
       tsc-alias:

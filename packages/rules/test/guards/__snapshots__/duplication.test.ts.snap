@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`G14 — no scenario retreads another scenario’s whole chain > real content: empty pair list at the 0.4 WARN threshold 1`] = `[]`;

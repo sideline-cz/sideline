@@ -51,6 +51,8 @@ There are two categories:
 | `packages/migrations/AGENTS.md` | New migration patterns |
 | `packages/effect-lib/AGENTS.md` | New Effect utilities or shared patterns |
 | `packages/i18n/AGENTS.md` | New i18n patterns |
+| `packages/rules/AGENTS.md` | New rules-trainer patterns (scenario content, engine functions, subpath exports, content authoring workflow) |
+| `packages/template-renderer/AGENTS.md` | New welcome-template rendering patterns (placeholders, sanitization) |
 
 **B. `.claude/` configuration** — Agent and skill definitions.
 
