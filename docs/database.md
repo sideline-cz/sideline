@@ -1863,6 +1863,51 @@ Per-team configuration for the balanced training team generator. One row per tea
 
 ---
 
+### 18. Rules Trainer
+
+Per-user progress for the Ultimate Rules Trainer (`docs/plans/rules-trainer.md` Phase 2). Deliberately **user-scoped, not team-scoped** — there is no `team_id` column, because a nullable `team_id` already means "global/built-in row, immutable from the API" for the team-scoped-with-global-rows tables elsewhere in this schema (see "Key Design Patterns" below and `applications/server/AGENTS.md`), and attempts must survive a user joining or leaving a team. A future team leaderboard joins `team_members` on `(team_id, user_id) AND tm.active = true` at read time. Mastery is computed on read from these rows (`packages/rules/src/engine/mastery.ts`) — there is no materialised score column and no cron.
+
+#### `rules_attempts`
+
+One row per submitted practice or exam attempt. `score`/`total` are computed server-side by `scoreAttempt` from `@sideline/rules` (Phase 2 follow-up) — see `packages/rules/AGENTS.md` ("scoring is shared logic, NOT a trust boundary").
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `user_id` | UUID | NOT NULL, FK → `users(id)` ON DELETE CASCADE | — |
+| `mode` | TEXT | NOT NULL, CHECK (`'practice'` or `'exam'`) | — |
+| `packages` | INT[] | NOT NULL | — |
+| `started_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `finished_at` | TIMESTAMPTZ | — | — |
+| `score` | INT | NOT NULL, CHECK (`>= 0`) | `0` |
+| `total` | INT | NOT NULL, CHECK (`>= 0`) | `0` |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Indexes**: `idx_rules_attempts_user` on `(user_id, finished_at DESC, id DESC)` — the `id DESC` tiebreaker is required by `applications/server/AGENTS.md` for any `ORDER BY` on a timestamp.
+
+**Notes**: Added in migration `1790400000_create_rules_progress`. `packages` holds the `Level` values (`1`–`9`) selected for the attempt as a plain `INT[]`, not JSONB — `applications/server/AGENTS.md` forbids reading individual fields out of an opaque JSONB payload, and an `INT[]` keeps package filtering queryable. `mode`'s CHECK constraint is named `rules_attempts_mode_check` by Postgres's default convention; adding a third mode is a two-release rolling-deploy-safe widening (see `1790300016_rename_rsvp_maybe_to_coming_later` for the pattern).
+
+---
+
+#### `rules_scenario_results`
+
+One row per scenario within an attempt, holding the per-step verdicts. This is what makes "you have mastered 7 of 9 packages" answerable without replaying every attempt: mastery is `MAX(finished_at)` per correct `scenario_id`, fed into the exponential half-life decay in `packages/rules/src/engine/mastery.ts`.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `attempt_id` | UUID | NOT NULL, FK → `rules_attempts(id)` ON DELETE CASCADE, PK (composite) | — |
+| `scenario_id` | TEXT | NOT NULL, PK (composite) | — |
+| `correct` | BOOLEAN | NOT NULL | — |
+| `steps` | JSONB | NOT NULL | — |
+
+**Primary key**: `(attempt_id, scenario_id)`
+
+**Indexes**: none beyond the composite primary key, deliberately. The mastery read drives off `rules_attempts.user_id` (`idx_rules_attempts_user`) and then reaches results by `attempt_id`, which the `(attempt_id, scenario_id)` PK already covers — including for the Phase 3 team leaderboard, which is the same aggregation run once per member. A partial index on `(scenario_id) WHERE correct` was considered and dropped: it serves per-scenario stats *across* users ("which situations does everyone get wrong"), and no such query exists yet. Add it alongside the query that needs it, having measured first; adding an index is a purely additive migration.
+
+**Notes**: Added in migration `1790400000_create_rules_progress`. `steps` is a JSONB array mirroring `StepPick[]` from `@sideline/rules`'s `engine/state.ts` (`{ pick: number | null, ok: boolean }` per chain step) — node-pg decodes it back to JS on read, so the domain schema (`packages/domain/src/models/RulesProgress.ts`'s `RulesScenarioResult`) does not wrap it in `Schema.parseJson`.
+
+---
+
 ## Migration History
 
 All 109 migration files in `packages/migrations/src/before/` plus 1 after-migration.
@@ -1975,6 +2020,7 @@ All 109 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1790300012 | `create_sudo_sessions` | Creates `sudo_sessions` (PK id, team_id FK CASCADE, discord_user_id TEXT, system_channel_id TEXT, audit_message_id TEXT, started_at TIMESTAMPTZ; UNIQUE (team_id, discord_user_id)). Tracks a team admin's active `/sudo` session so the audit message can be closed and its duration reported when the session ends. |
 | 1790300013 | `add_event_channel_moved_event_type` | Drops and re-adds the `event_sync_events.event_type` CHECK constraint to include `'event_channel_moved'`. Emitted by `updateTeamSettings` when `discord_events_channel_id` changes; reuses `discord_target_channel_id` (new channel) and `discord_role_id` (old channel); `event_id` is set to the nil UUID sentinel. |
 | 1790300016 | `rename_rsvp_maybe_to_coming_later` | Drops and re-adds the `event_rsvps.response` CHECK constraint to permit both `'maybe'` and the new `'coming_later'` value. Historical `'maybe'` rows are left untouched this release; converting them and dropping `'maybe'` from the constraint is deferred to a follow-up. |
+| 1790400000 | `create_rules_progress` | Creates `rules_attempts` (id PK, user_id FK → users CASCADE, mode TEXT CHECK `'practice'/'exam'`, packages INT[], started_at, finished_at nullable, score/total INT CHECK ≥ 0, created_at); index `idx_rules_attempts_user` on `(user_id, finished_at DESC, id DESC)`. Creates `rules_scenario_results` (attempt_id FK → rules_attempts CASCADE, scenario_id TEXT, correct BOOLEAN, steps JSONB; PK (attempt_id, scenario_id)) with no additional index — the PK covers the mastery read's `attempt_id` lookup. |
 
 ### After Migrations (seed data)
 

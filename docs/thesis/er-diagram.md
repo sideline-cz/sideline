@@ -24,6 +24,7 @@ erDiagram
     users ||--o{ pending_teams : "founded"
     users ||--o{ notifications : "receives"
     users ||--o{ team_onboarding_tokens : "completes"
+    users ||--o{ rules_attempts : "attempts"
 
     teams ||--o{ team_members : "has"
     teams ||--o{ team_invites : "issues"
@@ -115,6 +116,8 @@ erDiagram
     team_members ||--o{ training_game_participants : "participates in"
 
     teams ||--o| team_generation_config : "configures"
+
+    rules_attempts ||--o{ rules_scenario_results : "records"
 
     team_invites ||--o{ invite_acceptances : "tracks"
 
@@ -1345,6 +1348,35 @@ erDiagram
     teams ||--o| team_generation_config : "configures"
 ```
 
+### Rules Trainer Progress
+
+`rules_attempts` is deliberately **user-scoped, not team-scoped** — there is no `team_id` column, because a nullable `team_id` already means "global/built-in row" for the team-scoped-with-global-rows tables elsewhere in this schema, and an attempt must survive its user joining or leaving a team. `rules_scenario_results` holds one row per scenario attempted, from which mastery is computed on read (exponential half-life decay in `packages/rules/src/engine/mastery.ts`) rather than materialised.
+
+```mermaid
+erDiagram
+    rules_attempts {
+        UUID id PK
+        UUID user_id FK
+        TEXT mode
+        INT[] packages
+        TIMESTAMPTZ started_at
+        TIMESTAMPTZ finished_at "nullable"
+        INT score
+        INT total
+        TIMESTAMPTZ created_at
+    }
+
+    rules_scenario_results {
+        UUID attempt_id PK, FK
+        TEXT scenario_id PK
+        BOOLEAN correct
+        JSONB steps
+    }
+
+    users ||--o{ rules_attempts : "attempts"
+    rules_attempts ||--o{ rules_scenario_results : "records"
+```
+
 ---
 
 ## Entity Summary
@@ -1421,4 +1453,6 @@ erDiagram
 | `player_rating_history` | Append-only rating-change log. One row per game result per member; tracks before/after rating, delta, result kind, the submitting member, and a `game_id` linking the row to `training_games.id` when logged via `logTrainingGame`. |
 | `training_games` | One row per logged training-game round for an event. Unique on `(event_id, round)`. Outcome is `teamA`, `teamB`, or `draw`. The row ID is used as `game_id` in the corresponding `player_rating_history` rows. |
 | `training_game_participants` | Junction table recording which team members participated in a training game round and their side (A or B). Unique on `(training_game_id, team_member_id)`. |
+| `rules_attempts` | One row per submitted Rules Trainer practice/exam attempt. User-scoped (no `team_id`); `score`/`total` are computed server-side by `scoreAttempt` from `@sideline/rules`. |
+| `rules_scenario_results` | One row per scenario attempted within a `rules_attempts` row. Composite PK `(attempt_id, scenario_id)`; `steps` is a JSONB array mirroring `@sideline/rules`'s `StepPick[]`. Feeds the on-read mastery computation. |
 | `team_generation_config` | One-to-one extension of `teams` holding the balancing weights (`weight_elo`, `weight_size`, `weight_gender`) and defaults (`default_team_count`, `max_iterations`) for the training team generator. Created lazily on the first write. |

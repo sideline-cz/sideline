@@ -64,6 +64,8 @@ export * as RoleApi from './api/RoleApi.js';
 
 export * as Roster from './api/Roster.js';
 
+export * as RulesTrainerApi from './api/RulesTrainerApi.js';
+
 export * as TeamApi from './api/TeamApi.js';
 
 export * as TeamChallengeApi from './api/TeamChallengeApi.js';
@@ -183,6 +185,8 @@ export * as RoleSyncEvent from './models/RoleSyncEvent.js';
 export * as RosterMemberModel from './models/RosterMemberModel.js';
 
 export * as RosterModel from './models/RosterModel.js';
+
+export * as RulesProgress from './models/RulesProgress.js';
 
 export * as Session from './models/Session.js';
 
