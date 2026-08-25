@@ -35,7 +35,7 @@ Confirmed with the user before planning:
 | Progress? | **Per-user progress plus team leaderboards** |
 | Authoring repo? | **`frisbee-rules` is retired** — content, the WFDF source PDFs and the authoring docs all move into `packages/rules` |
 | Leaderboard visibility? | **Self and captains only** — a member sees their own standing; captains see the team |
-| Public discovery? | **SSR + per-locale routes** (`/en/rules`, `/cs/rules`) so both languages are indexable |
+| Public discovery? | ⚠️ **Revised in Phase 1: per-locale routes, client-rendered, NOT indexable.** See below |
 | Czech content? | **Proofread gates the public launch** — see Phase 1 |
 
 ### Decision: a `@sideline/rules` package, not code inside `web`
@@ -84,6 +84,35 @@ stretching | training`) that does not want a fifth member.
 
 Instead: a dedicated rules leaderboard ranked on **mastery** (packages mastered, accuracy),
 which is the thing worth competing on.
+
+### Decision: the trainer is client-rendered — the SSR/indexability goal is dropped
+
+⚠️ **Reverses this plan's original "SSR + per-locale routes so both languages are indexable".**
+That was not achievable by adding a route, and the reason is structural rather than incidental:
+
+- `applications/web/src/routes/__root.tsx` sets `ssr: false` on the **root** route, and
+  `src/router.tsx` declares `defaultSsr: false` at the type level. `vite.config.ts` additionally
+  sets `prerender: { enabled: false }`.
+- The cause is documented in `router.tsx`: Effect's `Option` uses branded phantom types containing
+  function signatures, which fail TanStack's compile-time serialization check. The root
+  `beforeLoad` returns `userOption: Option<User>`, which poisons every descendant route.
+- A child route cannot re-enable SSR above a non-SSR parent, so `ssr: true` on `/en/rules` alone
+  does nothing. The e2e suite already encodes the consequence: *"the raw HTML shell never contains
+  a `<header>`"*.
+
+**Decided: accept client rendering and drop the SEO goal.** Consequences to hold onto:
+
+- **Per-locale routes are still right**, just for different reasons — an explicit, shareable
+  language choice and a clean split for the Czech review gate. They are no longer an SEO measure,
+  so do not justify future work by appealing to indexability.
+- **This weakens the Czech gate's own rationale.** The gate was written against an *SSR-indexed,
+  Sideline-branded* `/cs/rules`; un-indexed, the exposure is much closer to today's
+  rules.sideline.cz. The gate is kept anyway (it costs nothing and in-app exposure is still real),
+  but it is no longer urgent. `packages/rules/authoring/czech-review-checklist.md` is the
+  clearing mechanism.
+- The genuine fix, if indexability ever matters, is registering `serializationAdapters` for
+  Effect's `Option` so the whole app can server-render. That benefits every route and is its own
+  project — not something to smuggle into a feature PR.
 
 ### Decision: the leaderboard is an honour system — and cannot be anything else
 
@@ -169,9 +198,22 @@ tests. Notes on what changed versus this plan's original text:
 already live in Czech at rules.sideline.cz, but a Sideline-branded, SSR-indexed page teaching
 rules to Czech players is a higher bar than a side-project subdomain.
 
-4. Routes under `applications/web/src/routes/`, outside `(authenticated)`, **server-rendered and
-   per-locale**: `/en/rules` and `/cs/rules` (+ a package-level route), so both languages are
-   independently indexable. Decide the redirect for a bare `/rules`.
+4. Routes under `applications/web/src/routes/`, outside `(authenticated)`, **per-locale and
+   client-rendered** (see the SSR decision above — `ssr: false` is mandatory, and indexability is
+   not on the table): `/en/rules` and `/cs/rules`, plus `/rules` redirecting to the negotiated
+   locale.
+
+   Use **explicit route files** (`en.rules.tsx`, `cs.rules.tsx`), not a `$lang` param: a
+   top-level dynamic segment competes greedily with the existing `/invite/$code`,
+   `/onboarding/$token` and `(authenticated)` routes. Two locales, two two-line files.
+
+   Locale must be threaded from the route as an explicit prop, **not** read from Paraglide.
+   `getLocale()` resolves via `localStorage → cookie → preferredLanguage → baseLocale` with no
+   `url` strategy, so on `/cs/rules` it will happily return `en` and the URL will silently
+   disagree with the rendered language. `tr()` takes an explicit locale as its third argument
+   (`src/lib/translations.ts`); content uses `text(localized, locale)` from `@sideline/rules`.
+   Adding a `url` strategy would change locale resolution for every existing route and for the
+   bot and server too — out of scope.
 5. `components/organisms/RulesTrainer/` — per Atomic Design, since it owns significant local
    state. The SVG field + animation runtime becomes a component driven by a
    `requestAnimationFrame` hook; the chain/exam/summary views become shadcn.
@@ -306,4 +348,6 @@ The five questions this plan opened with are now decided (see Decisions taken). 
 3. **After Phase 4, does `rules.sideline.cz` redirect or retire?** A redirect preserves any
    accumulated links and the portfolio entry; retiring is cleaner. The subdomain currently has
    its own identity ("Ultimate Rules Trainer") that the in-app version will not.
-4. **Bare `/rules`** — redirect to the negotiated locale, or serve a locale-picking landing page?
+4. ~~**Bare `/rules`**~~ — **decided: redirect to the negotiated locale** (via the existing
+   `getLocale()`). A locale-picking landing page adds a hop for no benefit, and with the SEO goal
+   dropped there is nothing to gain from a third URL.

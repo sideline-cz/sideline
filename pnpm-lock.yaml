@@ -205,6 +205,9 @@ importers:
       '@sideline/i18n':
         specifier: workspace:^
         version: link:../../packages/i18n/dist
+      '@sideline/rules':
+        specifier: workspace:^
+        version: link:../../packages/rules
       '@sideline/template-renderer':
         specifier: workspace:^
         version: link:../../packages/template-renderer

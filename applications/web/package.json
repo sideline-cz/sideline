@@ -17,6 +17,7 @@
     "@hookform/resolvers": "^5.4.0",
     "@sideline/domain": "workspace:^",
     "@sideline/i18n": "workspace:^",
+    "@sideline/rules": "workspace:^",
     "@sideline/template-renderer": "workspace:^",
     "@t3-oss/env-core": "0.13.11",
     "@tailwindcss/vite": "4.3.2",

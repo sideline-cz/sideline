@@ -23,7 +23,8 @@
     "./reference": {
       "import": "./dist/reference.js",
       "types": "./dist/reference.d.ts"
-    }
+    },
+    "./packages/*": "./dist/content/packages/*"
   },
   "scripts": {
     "build": "tsc -b tsconfig.build.json && tsc-alias -p tsconfig.build.json",
