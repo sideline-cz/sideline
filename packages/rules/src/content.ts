@@ -17,6 +17,15 @@ import type { RulesPackage } from './types.js';
  * `noRestrictedImports` override in `biome.json` and `packages/rules/AGENTS.md`.
  * Use `PACKAGE_LOADERS` from `@sideline/rules` instead when only one level is
  * needed at a time.
+ *
+ * The `as unknown as RulesPackage` casts below are **load-bearing** — unlike the
+ * redundant ones removed from `reference.ts`, they cannot be replaced by a type
+ * annotation. `resolveJsonModule` infers the widest type for every literal, so
+ * the JSON's inferred shape is genuinely not assignable to `RulesPackage`:
+ * `level: number` vs the `Level` union (`TS2322`), `view: number[]` vs a
+ * 4-tuple, `roleTeam: string` and `team: string` vs their literal unions. TS
+ * cannot verify these narrowings from a JSON file; the `test/guards/` suite is
+ * what actually validates the content shape, in CI rather than at runtime.
  */
 export const ALL_PACKAGES: readonly RulesPackage[] = [
   pkg01 as unknown as RulesPackage,

@@ -11,6 +11,12 @@ import type { Level, RulesPackage } from '../types.js';
  * JSON's inferred literal type to `RulesPackage` via `as unknown as
  * RulesPackage` (see the Phase 0 plan, decision D2).
  *
+ * That cast is load-bearing and cannot become a type annotation:
+ * `resolveJsonModule` infers `level: number` (not the `Level` union),
+ * `view: number[]` (not a 4-tuple) and `roleTeam`/`team` as `string` (not their
+ * literal unions), so the inferred shape genuinely fails to satisfy
+ * `RulesPackage` with `TS2322`. `test/guards/` validates the real shape in CI.
+ *
  * Importing this module (or `@sideline/rules`, the `.` entry point that
  * re-exports it) pulls in **no** package JSON — `import()` calls are only
  * evaluated when actually invoked.

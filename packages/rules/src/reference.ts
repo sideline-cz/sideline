@@ -7,11 +7,7 @@ import type { RuleEntry, SignalEntry } from './types.js';
  * `@sideline/rules/reference` — small (20 KB gz) and needed by web to render
  * a `§` chip, so it is kept out of the eager `@sideline/rules/content` entry.
  */
-export const RULES: Readonly<Record<string, RuleEntry>> = rules as unknown as Readonly<
-  Record<string, RuleEntry>
->;
+export const RULES: Readonly<Record<string, RuleEntry>> = rules;
 
 /** Hand-signal descriptions, keyed by signal id (e.g. `'7'`). */
-export const SIGNALS: Readonly<Record<string, SignalEntry>> = signals as unknown as Readonly<
-  Record<string, SignalEntry>
->;
+export const SIGNALS: Readonly<Record<string, SignalEntry>> = signals;
