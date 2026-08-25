@@ -5,7 +5,7 @@
  * string is 3158 EN/CS pairs, so this narrows where to look. It does NOT certify the Czech.
  *
  * Three mechanical checks (numbers, rule citations, suspicious brevity) and one judgement aid
- * (terminology consistency). Run: `node scripts/cz-audit.mjs`
+ * (terminology consistency). Run: `node authoring/cz-audit.mjs` from packages/rules
  *
  * ON FALSE POSITIVES — read before acting on output. When this was first run over 109 situations
  * it produced 18 numeric flags and every one was a false positive:
@@ -21,7 +21,7 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 
-const dir = new URL('../src/content/', import.meta.url);
+const dir = new URL('../src/content/packages/', import.meta.url);
 const files = readdirSync(dir)
   .filter((f) => /^\d\d-/.test(f))
   .sort();
