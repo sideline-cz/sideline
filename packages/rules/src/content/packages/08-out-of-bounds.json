@@ -1,0 +1,2736 @@
+{
+  "level": 8,
+  "name": "Level 8 · Out of bounds",
+  "scenarios": [
+    {
+      "id": "ob1",
+      "level": 8,
+      "topic": {
+        "en": "Out of bounds",
+        "cs": "Aut"
+      },
+      "title": {
+        "en": "You catch it, but land out",
+        "cs": "Chytíš to, ale dopadneš v autu"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the receiver on the sideline",
+        "cs": "receiver u sidelinu"
+      },
+      "view": [56, -6, 48, 48],
+      "dur": 6.8,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 62, 20], [6.8, 62, 20]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 63.5, 20.6], [6.8, 63.5, 20.6]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 82, 8], [2.6, 88, 3.2], [3.4, 89, 2.2], [4.6, 88, 4], [6.8, 86, 6]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "you": true,
+          "kf": [[0, 80, 7], [2.4, 89, 1.6], [3.4, 90, -0.8], [4.4, 90.5, -1.6], [6.8, 90.5, -1.6]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 19.4], [2.4, 80, 4], [3.2, 89.4, 1], [6.8, 89.4, 1]],
+        "downAt": 4.4
+      },
+      "fx": [
+        {
+          "t": 3.1,
+          "type": "mark",
+          "x": 89.6,
+          "y": 0,
+          "kind": "x",
+          "label": {
+            "en": "first contact: out",
+            "cs": "první dotek: aut"
+          },
+          "labelAbove": true
+        },
+        {
+          "t": 4.2,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "D2",
+          "text": {
+            "en": "out!",
+            "cs": "aut!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5,
+          "type": "mark",
+          "x": 88,
+          "y": 0,
+          "kind": "target",
+          "label": {
+            "en": "restart on the line here",
+            "cs": "rozehrání na čáře tady"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You catch a floaty pass cleanly in the air near the sideline — but your momentum is carrying you out, and your first contact with the ground is a foot on the sideline. Nobody touched you: no contact, no call.",
+        "cs": "Plachtící přihrávku chytíš čistě ve vzduchu u sidelinu — ale setrvačnost tě nese ven a první dotek se zemí je noha na sidelinu. Nikdo se tě nedotkl: žádný kontakt, žádný call."
+      },
+      "question": {
+        "en": "Is that a catch?",
+        "cs": "Je to chycení?"
+      },
+      "explain": {
+        "en": "No. Establishing possession needs the catch AND ground contact in-bounds; your first point of contact after the catch was out of bounds, so the pass is incomplete (11.4.2) and it is a turnover. Note that the perimeter line itself is out — a foot on the line is out, not in. The other team brings the disc to the nearest location in the central zone (13.8) — the central zone includes the goal lines but excludes the end zones and the perimeter lines, so a disc that leaves the field beside an end zone comes all the way in to the goal line. No check is needed, because nothing stopped play.",
+        "cs": "Není. Získání držení vyžaduje chycení A dotek země v hřišti; tvůj první dotek po chycení byl v autu, takže je přihrávka nedokončená (11.4.2) a je to turnover. Pozor, samotná obvodová čára je aut — noha na čáře znamená venku, ne uvnitř. Druhý tým donese disk na nejbližší místo centrální zóny (13.8) — ta zahrnuje brankovou čáru, ale ne endzóny ani obvodové čáry, takže disk, který opustí hřiště u endzóny, se vrací až na brankovou čáru. Check není potřeba, protože se hra nezastavila."
+      },
+      "note": {
+        "en": "This is exactly the play the force-out foul rescues — if a defender’s contact is what carried you out, an accepted force-out judges the landing as if the foul had not happened (17.5.1). Without contact there is nothing to rescue.",
+        "cs": "Přesně tuhle akci zachraňuje force-out foul — pokud tě ven vynesl kontakt obránce, uznaný force-out posuzuje dopad, jako by k faulu nedošlo (17.5.1). Bez kontaktu není co zachraňovat."
+      },
+      "rules": ["11.4.2", "13.8", "17.5.1"],
+      "signals": [7, 13],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You catch it in the air and your first ground contact is a foot on the sideline, with no contact from anyone. Is it a catch?",
+            "cs": "Chytíš disk ve vzduchu a první dotek se zemí je noha na sidelinu, bez kontaktu od kohokoli. Je to chycení?"
+          },
+          "rules": ["11.4.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — possession needs ground contact in-bounds, so the pass is incomplete",
+                "cs": "Ne — držení vyžaduje dotek země v hřišti, takže je přihrávka nedokončená"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.4.2 — catching it is not enough; your first point of contact after the catch must be in-bounds.",
+                "cs": "11.4.2 — chytit nestačí; první dotek po chycení musí být v hřišti."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — you caught it while airborne and in-bounds",
+                "cs": "Ano — chytil jsi ve vzduchu a v hřišti"
+              },
+              "why": {
+                "en": "Airborne status protects a THROW made before landing, not a landing (11.4.2).",
+                "cs": "Status ve vzduchu chrání HOD před dopadem, ne dopad (11.4.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, if the disc itself never crossed the line",
+                "cs": "Ano, pokud disk sám čáru nepřekročil"
+              },
+              "why": {
+                "en": "It is the player’s contact that decides possession here, not the disc’s path (11.4.2).",
+                "cs": "O držení tady rozhoduje dotek hráče, ne trajektorie disku (11.4.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "No — and it is a foul on the defender for crowding the line",
+                "cs": "Ne — a je to faul obránce za tlačení u čáry"
+              },
+              "why": {
+                "en": "Nobody touched you; without contact there is no foul (17.2.1).",
+                "cs": "Nikdo se tě nedotkl; bez kontaktu není faul (17.2.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Who has the disc?",
+            "cs": "Kdo má disk?"
+          },
+          "rules": ["13.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "The defence — an incomplete pass is a turnover",
+                "cs": "Obrana — nedokončená přihrávka je turnover"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.7 — the pass was never completed, so the disc changes hands.",
+                "cs": "13.7 — přihrávka nebyla dokončená, takže disk mění držitele."
+              }
+            },
+            {
+              "t": {
+                "en": "You — you touched it first",
+                "cs": "Ty — dotkl jsi se ho první"
+              },
+              "why": {
+                "en": "Touching without establishing possession in-bounds gains nothing (11.4.2).",
+                "cs": "Dotek bez získání držení v hřišti nic nepřináší (11.4.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "The thrower, for a replay",
+                "cs": "Házeč, na zopakování"
+              },
+              "why": {
+                "en": "Replays follow contested calls (17.2.2); nothing was called here.",
+                "cs": "Opakování následuje po contestovaných callech (17.2.2); tady nic nezaznělo."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Where do they put it into play?",
+            "cs": "Odkud rozehrávají?"
+          },
+          "rules": ["13.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "At the nearest location in the central zone to where it went out",
+                "cs": "Na nejbližším místě centrální zóny k bodu, kde disk opustil hřiště"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.8 — the pivot goes to the nearest location in the CENTRAL ZONE, which excludes both end zones and the lines themselves; you never play from outside the field.",
+                "cs": "13.8 — pivot patří na nejbližší místo CENTRÁLNÍ ZÓNY, která nezahrnuje endzóny ani samotné čáry; z venku se nikdy nehraje."
+              }
+            },
+            {
+              "t": {
+                "en": "Exactly where you landed, outside the line",
+                "cs": "Přesně tam, kde jsi dopadl, za čárou"
+              },
+              "why": {
+                "en": "Nobody establishes a pivot out of bounds (13.7).",
+                "cs": "Nikdo nestaví pivot v autu (13.7)."
+              }
+            },
+            {
+              "t": {
+                "en": "Back where the pass was thrown from",
+                "cs": "Tam, odkud byla přihrávka hozená"
+              },
+              "why": {
+                "en": "That is a remedy for calls that affected a throw (16.2.4.2.1), not a plain turnover.",
+                "cs": "To je náprava pro cally, které ovlivnily hod (16.2.4.2.1), ne obyčejný turnover."
+              }
+            },
+            {
+              "t": {
+                "en": "At the nearest brick mark",
+                "cs": "Na nejbližší brick značce"
+              },
+              "why": {
+                "en": "Bricks exist only for pulls (7.12).",
+                "cs": "Brick existuje jen pro pully (7.12)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "Is there a check?",
+            "cs": "Je check?"
+          },
+          "rules": ["13.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — nothing was called, so they bring it in and play on",
+                "cs": "Ne — nic nezaznělo, takže disk donesou a hraje se dál"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.7 — an uncontested turnover never stopped play, so no check is needed; the count starts fresh once a marker sets up.",
+                "cs": "13.7 — nesporný turnover hru nezastavil, takže check není potřeba; počítání začne, až se postaví marker."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — check, then the count resumes at max 6",
+                "cs": "Ano — check a počítání od max 6"
+              },
+              "why": {
+                "en": "Max 6 resumes an interrupted count after a call (9.5.5); there was no call.",
+                "cs": "Max 6 obnovuje přerušené počítání po callu (9.5.5); tady žádný call nebyl."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — check, then “stalling 1”",
+                "cs": "Ano — check a „stalling 1“"
+              },
+              "why": {
+                "en": "That is an accepted defensive breach (9.5.1), not an out-of-bounds catch.",
+                "cs": "To je uznaný prohřešek obrany (9.5.1), ne chycení v autu."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ob2",
+      "level": 8,
+      "topic": {
+        "en": "Out of bounds",
+        "cs": "Aut"
+      },
+      "title": {
+        "en": "The disc is yours, deep in your own end zone",
+        "cs": "Disk je tvůj, hluboko ve vlastní endzóně"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the player picking the disc up",
+        "cs": "hráč, který disk zvedá"
+      },
+      "view": [-2, -4.5, 60, 46],
+      "dur": 6.6,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 22, 14], [3.4, 20, 9], [6.6, 20, 9.5]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 26, 24], [3.4, 22, 22], [6.6, 22, 22]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 14, 24], [3.4, 20, 26], [6.6, 24, 26]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 10, 16], [2.6, 7.5, 13.6], [3.4, 7.5, 13.4], [4.8, 18, 13.4], [6.6, 18, 13.4]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 7, 13], [2.6, 7, 13], [3.4, 7, 13], [4.8, 17.6, 13.4], [6.6, 17.6, 13.4]],
+        "downAt": 0.1
+      },
+      "fx": [
+        {
+          "t": 2.9,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "O1",
+          "text": {
+            "en": "my disc",
+            "cs": "můj disk"
+          },
+          "style": "count"
+        },
+        {
+          "t": 4.4,
+          "type": "arrow",
+          "x1": 8.5,
+          "y1": 13.4,
+          "x2": 17,
+          "y2": 13.4
+        },
+        {
+          "t": 5,
+          "type": "mark",
+          "x": 18,
+          "y": 13.4,
+          "kind": "target",
+          "label": {
+            "en": "pivot on the goal line",
+            "cs": "pivot na brankové čáře"
+          }
+        }
+      ],
+      "situation": {
+        "en": "Their throw into your end zone is dropped and the disc comes to rest four metres deep inside the end zone you are defending. It is your team’s disc now, and you are the one going to pick it up.",
+        "cs": "Jejich přihrávka do tvé endzóny spadne a disk zastaví čtyři metry hluboko v endzóně, kterou brániš. Disk teď patří tvému týmu a zvedáš ho ty."
+      },
+      "question": {
+        "en": "Do you have to play it from where it lies?",
+        "cs": "Musíš hrát z místa, kde disk leží?"
+      },
+      "explain": {
+        "en": "No — this is the defending-end-zone option (13.11). Gaining possession in the end zone you defend gives you a choice: put the disc into play right where it is, or carry it to the nearest point on the goal line and establish the pivot there. You take the spot by acting: staying put or faking a pass fixes it at the turnover location (13.11.1); moving off it takes the goal line (13.11.2), which you may also announce before picking the disc up by fully extending one arm above your head (13.11.2.1). Either way the choice CANNOT be reversed once made (13.11.3), and you must move at walking pace or faster (8.5).",
+        "cs": "Ne — tohle je volba v bráněné endzóně (13.11). Když získáš držení v endzóně, kterou brániš, máš volbu: rozehrát přesně tam, kde disk je, nebo ho donést na nejbližší bod brankové čáry a postavit pivot tam. Místo si bereš tím, co uděláš: zůstat stát nebo naznačit hod ho fixuje na místě turnoveru (13.11.1); odejít z něj znamená vzít si brankovou čáru (13.11.2), což můžeš před zvednutím disku i ohlásit napnutím jedné paže nad hlavu (13.11.2.1). Volba se v obou případech NEDÁ vzít zpět (13.11.3) a musíš jít chůzí nebo rychleji (8.5)."
+      },
+      "note": {
+        "en": "The choice is yours, not the defence’s, and it is not automatic — you have to take it. Playing from deep in your own end zone is legal, just tactically grim: any turnover there is a goal against you.",
+        "cs": "Volba je tvoje, ne obrany, a není automatická — musíš si ji vzít. Rozehrát hluboko z vlastní endzóny je legální, jen takticky bídné: každý turnover tam je gól proti tobě."
+      },
+      "rules": ["13.11", "13.11.3", "8.5"],
+      "signals": [13],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You gain possession four metres deep inside the end zone you are DEFENDING. What are your options?",
+            "cs": "Získáš držení čtyři metry hluboko v endzóně, kterou BRÁNÍŠ. Jaké máš možnosti?"
+          },
+          "rules": ["13.11"],
+          "opts": [
+            {
+              "t": {
+                "en": "Play it where it lies, or take it to the nearest point on the goal line",
+                "cs": "Hrát z místa, kde leží, nebo si ho vzít na nejbližší bod brankové čáry"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.11 — gaining possession in your defending end zone gives you that choice.",
+                "cs": "13.11 — získání držení ve tvé bráněné endzóně ti dává tuhle volbu."
+              }
+            },
+            {
+              "t": {
+                "en": "You must play it exactly where it lies",
+                "cs": "Musíš hrát přesně tam, kde leží"
+              },
+              "why": {
+                "en": "That is true anywhere else on the field, but the defending end zone has its own option (13.11).",
+                "cs": "To platí všude jinde na hřišti, ale bráněná endzóna má vlastní volbu (13.11)."
+              }
+            },
+            {
+              "t": {
+                "en": "You must take it to the goal line — playing from the end zone is illegal",
+                "cs": "Musíš ho vzít na brankovou čáru — hrát z endzóny je nelegální"
+              },
+              "why": {
+                "en": "Playing from deep is perfectly legal, just risky; the line is an option, not an obligation (13.11).",
+                "cs": "Hrát z hloubky je úplně legální, jen riskantní; čára je možnost, ne povinnost (13.11)."
+              }
+            },
+            {
+              "t": {
+                "en": "You may take it anywhere along the goal line you like",
+                "cs": "Můžeš si ho vzít kamkoli na brankovou čáru"
+              },
+              "why": {
+                "en": "The nearest point, not a free choice (13.11).",
+                "cs": "Nejbližší bod, ne volný výběr (13.11)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "how",
+          "q": {
+            "en": "You want the goal line. What do you have to do?",
+            "cs": "Chceš brankovou čáru. Co pro to musíš udělat?"
+          },
+          "rules": ["13.11", "8.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Signal the choice and carry it there at walking pace or faster",
+                "cs": "Signalizovat volbu a donést disk chůzí nebo rychleji"
+              },
+              "ok": true,
+              "why": {
+                "en": "The defence has to know which spot you are taking (the goal-line option signal, 13.11.2.1), and 8.5 forbids dawdling on the way.",
+                "cs": "Obrana musí vědět, které místo si bereš (signál volby brankové čáry, 13.11.2.1), a 8.5 zakazuje loudání se na cestě."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — just walk up and set the pivot",
+                "cs": "Nic — jen dojít a postavit pivot"
+              },
+              "why": {
+                "en": "Without the signal the defence cannot set up honestly against your choice (13.11).",
+                "cs": "Bez signálu se obrana nemůže poctivě postavit proti tvé volbě (13.11)."
+              }
+            },
+            {
+              "t": {
+                "en": "Ask the defence to agree to the move",
+                "cs": "Požádat obranu o souhlas s přesunem"
+              },
+              "why": {
+                "en": "The choice is yours alone (13.11).",
+                "cs": "Volba je jen tvoje (13.11)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Where exactly is the pivot then?",
+            "cs": "Kde přesně pak bude pivot?"
+          },
+          "rules": ["13.11"],
+          "opts": [
+            {
+              "t": {
+                "en": "The nearest point on your goal line to where the disc lay",
+                "cs": "Nejbližší bod tvé brankové čáry k místu, kde disk ležel"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.11 — nearest point, so the option straightens you out without gaining you lateral ground.",
+                "cs": "13.11 — nejbližší bod, takže tě volba vytáhne z hloubky, ale nezíská ti nic do strany."
+              }
+            },
+            {
+              "t": {
+                "en": "The middle of your goal line",
+                "cs": "Střed tvé brankové čáry"
+              },
+              "why": {
+                "en": "Nothing centres the disc; that is a brick-style idea (7.12).",
+                "cs": "Nic disk necentruje; to je myšlenka od bricku (7.12)."
+              }
+            },
+            {
+              "t": {
+                "en": "The nearest brick mark",
+                "cs": "Nejbližší brick mark"
+              },
+              "why": {
+                "en": "Bricks belong to pulls only (7.12).",
+                "cs": "Brick patří jen k pullům (7.12)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "Can the marker start counting while you walk it out?",
+            "cs": "Může marker začít počítat, když disk vynášíš?"
+          },
+          "rules": ["13.11", "8.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — not until you have established the pivot at the spot you chose",
+                "cs": "Ne — dokud nepostavíš pivot na zvoleném místě"
+              },
+              "ok": true,
+              "why": {
+                "en": "No pivot, no count; and 8.5 already obliges you to move promptly, so the rules do not need the stall to hurry you.",
+                "cs": "Bez pivotu není počítání; a 8.5 tě už zavazuje jít bez zdržování, takže pravidla stall na spěch nepotřebují."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — from the moment you pick the disc up",
+                "cs": "Ano — od chvíle, kdy disk zvedneš"
+              },
+              "why": {
+                "en": "A count needs an established pivot to count against.",
+                "cs": "Počítání potřebuje postavený pivot, proti kterému běží."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, but only up to “stalling 5”",
+                "cs": "Ano, ale jen do „stalling 5“"
+              },
+              "why": {
+                "en": "There is no partial count in the rules for a player walking the disc in.",
+                "cs": "Pravidla žádné částečné počítání pro hráče nesoucího disk neznají."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ob3",
+      "level": 8,
+      "topic": {
+        "en": "Out of bounds",
+        "cs": "Aut"
+      },
+      "title": {
+        "en": "The greatest",
+        "cs": "The greatest"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the defender watching it happen",
+        "cs": "obránce, který to sleduje"
+      },
+      "view": [56, -6, 48, 48],
+      "dur": 7,
+      "qAt": 4.2,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 62, 20], [7, 62, 20]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 76, 27], [4.2, 86, 22], [7, 89.6, 19.6]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 80, 8], [2.2, 88, 2.5], [3, 91, -1.2], [3.8, 91.5, -2.4], [7, 91.5, -2.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 78, 11], [2.4, 85, 6], [3.4, 86, 4], [4.6, 84.5, 6.5], [7, 84.5, 6.5]]
+        }
+      ],
+      "disc": {
+        "kf": [
+          [0, 62.4, 19.4],
+          [2.2, 80, 4],
+          [3, 90.6, -1],
+          [4.2, 89, 9],
+          [5.4, 89.6, 19.4],
+          [7, 89.6, 19.4]
+        ]
+      },
+      "fx": [
+        {
+          "t": 2.8,
+          "type": "mark",
+          "x": 90.6,
+          "y": -1,
+          "kind": "x",
+          "label": {
+            "en": "caught airborne, past the line",
+            "cs": "chyceno ve vzduchu, za čárou"
+          }
+        },
+        {
+          "t": 3.5,
+          "type": "arrow",
+          "x1": 90,
+          "y1": 0.5,
+          "x2": 89,
+          "y2": 8
+        },
+        {
+          "t": 4.8,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "O3",
+          "text": {
+            "en": "caught!",
+            "cs": "chyceno!"
+          },
+          "style": "count"
+        },
+        {
+          "t": 5.8,
+          "type": "mark",
+          "x": 89.6,
+          "y": 19.6,
+          "kind": "target",
+          "label": {
+            "en": "completion stands",
+            "cs": "spojka platí"
+          }
+        }
+      ],
+      "situation": {
+        "en": "Their receiver sprints to the sideline, launches from in-bounds, catches the disc in the air already beyond the line — and while still airborne throws it back in to a team-mate, who catches it cleanly. Only then does the jumper land, out of bounds.",
+        "cs": "Jejich receiver vyběhne k sidelinu, odrazí se z hřiště, chytí disk ve vzduchu už za čárou — a ještě ve výskoku ho hodí zpátky do hřiště spoluhráči, který ho čistě chytí. Teprve pak dopadne, v autu."
+      },
+      "question": {
+        "en": "Does any of that count?",
+        "cs": "Platí z toho něco?"
+      },
+      "explain": {
+        "en": "Yes — all of it. A player who leaves the ground from in-bounds keeps their in-bounds status for as long as they are airborne, so the catch is good and the throw made before landing is good too. The team-mate’s catch is a completed pass and play simply continues; the jumper landing out of bounds afterwards changes nothing, because they no longer have the disc. This is the “greatest”.",
+        "cs": "Ano — všechno. Hráč, který se odrazí ze hřiště, si po celou dobu ve vzduchu drží status „v hřišti“, takže chycení platí a hod ještě před dopadem platí taky. Chycení spoluhráčem je dokončená přihrávka a hraje se dál; to, že skokan pak dopadne v autu, nic nemění, protože už disk nemá. Tomuhle se říká „greatest“."
+      },
+      "note": {
+        "en": "The mirror image is the previous kind of play: catch it airborne and then LAND out of bounds while still holding it, and the pass is incomplete (11.4.2). Airborne status protects the throw, not the landing.",
+        "cs": "Zrcadlový případ je druhý typ akce: chytit disk ve vzduchu a pak s ním DOPADNOUT v autu — přihrávka je nedokončená (11.4.2). Status ve vzduchu chrání hod, ne dopad."
+      },
+      "rules": ["11.3.1", "11.7", "11.4.2"],
+      "signals": [7],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "Their player jumps from in-bounds, catches it in the air already beyond the line, and throws it back in before landing. Does the catch count?",
+            "cs": "Jejich hráč se odrazí ze hřiště, chytí disk ve vzduchu už za čárou a před dopadem ho hodí zpátky do hřiště. Platí chycení?"
+          },
+          "rules": ["11.4.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — a player who leaves the ground in-bounds keeps in-bounds status while airborne",
+                "cs": "Ano — hráč, který se odrazí ze hřiště, si ve vzduchu drží status „v hřišti“"
+              },
+              "ok": true,
+              "why": {
+                "en": "That airborne status is exactly what makes the greatest legal; landing out only matters if you are still holding the disc (11.4.2).",
+                "cs": "Právě status ve vzduchu dělá „greatest“ legálním; dopad v autu hraje roli jen tehdy, když disk pořád držíš (11.4.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "No — the disc was beyond the line when they touched it",
+                "cs": "Ne — disk byl za čárou, když se ho dotkl"
+              },
+              "why": {
+                "en": "The disc’s position in the air is irrelevant; what counts is the player’s status (11.4.2).",
+                "cs": "Pozice disku ve vzduchu nehraje roli; rozhoduje status hráče (11.4.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "No — they landed out of bounds",
+                "cs": "Ne — dopadl v autu"
+              },
+              "why": {
+                "en": "They landed without the disc; the out-of-bounds landing rule bites only when you still hold it (11.4.2).",
+                "cs": "Dopadl bez disku; pravidlo o dopadu v autu platí jen když ho pořád držíš (11.4.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if a team-mate catches the follow-up pass",
+                "cs": "Jen pokud spoluhráč chytí následnou přihrávku"
+              },
+              "why": {
+                "en": "Their catch decides the NEXT pass, not whether this one was legal (11.4.2).",
+                "cs": "Jeho chycení rozhoduje o DALŠÍ přihrávce, ne o legálnosti téhle (11.4.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "And the throw they made while still airborne, before landing out?",
+            "cs": "A hod, který udělal ještě ve vzduchu, před dopadem v autu?"
+          },
+          "rules": ["11.4.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Legal — thrown while still in-bounds by status",
+                "cs": "Legální — hozený, když byl statusem pořád v hřišti"
+              },
+              "ok": true,
+              "why": {
+                "en": "The airborne player is in-bounds until they land, so the release is a legal pass (11.4.2).",
+                "cs": "Hráč ve vzduchu je v hřišti, dokud nedopadne, takže vypuštění je legální přihrávka (11.4.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Illegal — you cannot throw from out of bounds",
+                "cs": "Nelegální — z autu nemůžeš hodit"
+              },
+              "why": {
+                "en": "They were not out of bounds yet; status changes on landing (11.4.2).",
+                "cs": "Ještě v autu nebyl; status se mění dopadem (11.4.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Legal, but the receiver must catch it in the end zone",
+                "cs": "Legální, ale receiver ho musí chytit v endzóně"
+              },
+              "why": {
+                "en": "Nothing restricts where the follow-up pass may be caught (11.4.2).",
+                "cs": "Nic neomezuje, kde se následná přihrávka smí chytit (11.4.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Their team-mate catches that pass in-bounds. Who has the disc?",
+            "cs": "Spoluhráč tu přihrávku chytí v hřišti. Kdo má disk?"
+          },
+          "rules": ["13.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "Their offence — it is a completed pass and play continues",
+                "cs": "Jejich útok — je to dokončená přihrávka a hraje se dál"
+              },
+              "ok": true,
+              "why": {
+                "en": "Two legal actions in a row make an ordinary completion; nothing stops play (13.7).",
+                "cs": "Dvě legální akce za sebou dělají běžnou spojku; nic hru nezastavuje (13.7)."
+              }
+            },
+            {
+              "t": {
+                "en": "Your defence — the jumper ended up out of bounds",
+                "cs": "Tvoje obrana — skokan skončil v autu"
+              },
+              "why": {
+                "en": "Where a player without the disc lands never causes a turnover (11.4.2).",
+                "cs": "Kde dopadne hráč bez disku, turnover nikdy nezpůsobí (11.4.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nobody — play restarts on the line",
+                "cs": "Nikdo — hra se restartuje na čáře"
+              },
+              "why": {
+                "en": "Line restarts follow out-of-bounds turnovers (13.7); there was no turnover.",
+                "cs": "Rozehrání z čáry následuje po turnoverech v autu (13.7); tady turnover nebyl."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "What is your honest move as the defender who watched it?",
+            "cs": "Co je tvůj poctivý krok jako obránce, který to viděl?"
+          },
+          "rules": ["13.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "Play on — and mark up on the new thrower",
+                "cs": "Hrát dál — a postavit se novému házeči"
+              },
+              "ok": true,
+              "why": {
+                "en": "No call exists for a legal greatest; the only mistake available to you is stopping play for it.",
+                "cs": "Na legální greatest žádný call není; jediná chyba, kterou můžeš udělat, je zastavit kvůli tomu hru."
+              }
+            },
+            {
+              "t": {
+                "en": "Call “out” and stop play to discuss it",
+                "cs": "Zavolat „aut“ a zastavit hru na debatu"
+              },
+              "why": {
+                "en": "A call you know is wrong costs your team the positions reset and hands the offence a free reset.",
+                "cs": "Call, o kterém víš, že je špatný, tvůj tým stojí srovnání pozic a útoku dá volný reset."
+              }
+            },
+            {
+              "t": {
+                "en": "Ask for a spirit stoppage",
+                "cs": "Vyžádat si spirit stoppage"
+              },
+              "why": {
+                "en": "Spirit stoppages are for conduct, not for a rule you simply do not like.",
+                "cs": "Spirit stoppage je na chování, ne na pravidlo, které se ti nelíbí."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ob4",
+      "level": 8,
+      "topic": {
+        "en": "Out of bounds",
+        "cs": "Aut"
+      },
+      "title": {
+        "en": "You land in, then get carried out",
+        "cs": "Dopadneš v hřišti a vyneseš se ven"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the receiver on the sideline",
+        "cs": "receiver u sidelinu"
+      },
+      "view": [56, -6, 48, 48],
+      "dur": 7,
+      "qAt": 3.8,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 62, 20], [7, 62, 20]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 63.5, 20.6], [7, 63.5, 20.6]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 80, 10], [3, 86, 4.6], [3.8, 87, 3.6], [7, 85, 6]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "you": true,
+          "kf": [
+            [0, 78, 9],
+            [2.6, 86, 3.2],
+            [3.2, 88, 1.6],
+            [3.8, 89.4, 0.2],
+            [4.6, 90.6, -2],
+            [7, 90.6, -2]
+          ]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 19.4], [2.6, 84, 4], [3.2, 88, 1.6], [4.6, 90.4, -1.8], [7, 90.4, -1.8]]
+      },
+      "fx": [
+        {
+          "t": 3.1,
+          "type": "mark",
+          "x": 88,
+          "y": 1.6,
+          "kind": "target",
+          "label": {
+            "en": "caught, feet down IN",
+            "cs": "chyceno, nohy dole V HŘIŠTI"
+          }
+        },
+        {
+          "t": 4.4,
+          "type": "mark",
+          "x": 89.8,
+          "y": 0,
+          "kind": "x",
+          "label": {
+            "en": "crossed the line here",
+            "cs": "čáru protnul tady"
+          }
+        },
+        {
+          "t": 5.4,
+          "type": "mark",
+          "x": 89.8,
+          "y": 0.6,
+          "kind": "zone",
+          "r": 2.4,
+          "label": {
+            "en": "pivot at the crossing point",
+            "cs": "pivot v místě protnutí"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You take the disc at full speed, land clearly in-bounds with both feet, hold on to it — and your momentum then carries you over the sideline. You never lost the catch.",
+        "cs": "Disk bereš v plné rychlosti, dopadneš jasně v hřišti oběma nohama, udržíš ho — a setrvačnost tě pak vynese přes postranní čáru. Chycení jsi nikdy neztratil."
+      },
+      "question": {
+        "en": "In or out?",
+        "cs": "V hřišti, nebo v autu?"
+      },
+      "explain": {
+        "en": "In. A player who has caught the disc, contacts the playing field and only then contacts an out-of-bounds area is still considered in-bounds, as long as they maintain the catch until possession is established (11.3.2). It is a completed pass. Because you left the field, you establish the pivot at the location on the playing field where you crossed the perimeter line (11.3.2.1).",
+        "cs": "V hřišti. Hráč, který disk chytil, dotkne se hřiště a teprve pak autového území, se pořád považuje za hráče v hřišti, pokud chycení udrží až do získání držení (11.3.2). Je to dokončená přihrávka. Protože jsi hřiště opustil, pivot stavíš na místě, kde jsi protnul obvodovou čáru (11.3.2.1)."
+      },
+      "note": {
+        "en": "Contrast the airborne version: catch it in the air and let your FIRST contact be out of bounds while still holding it, and there is no catch at all (11.4.2). Ground first means in; air-to-out means turnover.",
+        "cs": "Srovnej to s verzí ve vzduchu: chytit ve vzduchu a nechat PRVNÍ dotek dopadnout v autu s diskem v ruce znamená, že chycení vůbec nebylo (11.4.2). Nejdřív země = v hřišti; ze vzduchu rovnou ven = turnover."
+      },
+      "rules": ["11.3.2", "11.4.2", "13.8"],
+      "signals": [7],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You catch it, land in-bounds with both feet, hold on, and momentum then carries you over the line. Is it a catch?",
+            "cs": "Chytíš, dopadneš oběma nohama v hřišti, disk udržíš a setrvačnost tě pak vynese za čáru. Je to chycení?"
+          },
+          "rules": ["11.3.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — you are still considered in-bounds",
+                "cs": "Ano — pořád se považuješ za hráče v hřišti"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.3.2 — contacting the playing field first and then an out-of-bounds area keeps you in-bounds, as long as you maintain the catch until possession is established.",
+                "cs": "11.3.2 — dotek hřiště jako první a teprve pak autového území tě drží v hřišti, pokud chycení udržíš až do získání držení."
+              }
+            },
+            {
+              "t": {
+                "en": "No — you ended up out of bounds with the disc",
+                "cs": "Ne — skončil jsi s diskem v autu"
+              },
+              "why": {
+                "en": "Where you end up does not matter once possession was established in-bounds (11.3.2).",
+                "cs": "Kde skončíš, nehraje roli, jakmile bylo držení získáno v hřišti (11.3.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if you got both feet down before the line",
+                "cs": "Jen pokud jsi stihl obě nohy před čárou"
+              },
+              "why": {
+                "en": "Ultimate has no two-feet requirement; any contact with the playing field does it (11.3.2).",
+                "cs": "Ultimate žádný požadavek na dvě nohy nemá; stačí jakýkoli dotek hřiště (11.3.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if a defender did not touch you",
+                "cs": "Jen pokud se tě nedotkl obránce"
+              },
+              "why": {
+                "en": "Contact would raise a foul question, not change the in-bounds status (11.3.2).",
+                "cs": "Kontakt by otevřel otázku faulu, status „v hřišti“ nemění (11.3.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "You are now standing outside the field. Where is your pivot?",
+            "cs": "Teď stojíš za hřištěm. Kde bude tvůj pivot?"
+          },
+          "rules": ["11.3.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "At the point on the playing field where you crossed the perimeter line",
+                "cs": "Na místě hřiště, kde jsi protnul obvodovou čáru"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.3.2.1 — you come back to the crossing point, not to where you stopped.",
+                "cs": "11.3.2.1 — vracíš se do místa protnutí, ne tam, kde jsi zastavil."
+              }
+            },
+            {
+              "t": {
+                "en": "Where you finally came to a stop, brought straight in",
+                "cs": "Tam, kde jsi zastavil, kolmo doneseno dovnitř"
+              },
+              "why": {
+                "en": "That is not the rule — the crossing point is (11.3.2.1).",
+                "cs": "To pravidlo neříká — rozhoduje místo protnutí (11.3.2.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "At the nearest location in the central zone",
+                "cs": "Na nejbližším místě centrální zóny"
+              },
+              "why": {
+                "en": "That is the out-of-bounds TURNOVER spot (13.8); here there was no turnover.",
+                "cs": "To je místo TURNOVERU v autu (13.8); tady žádný turnover nebyl."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "What would have made it a turnover instead?",
+            "cs": "Co by z toho místo toho udělalo turnover?"
+          },
+          "rules": ["11.4.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Catching it airborne and having your FIRST contact be out of bounds",
+                "cs": "Chytit ve vzduchu a mít PRVNÍ dotek v autu"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.4.2 — an out-of-bounds turnover, and no catch is deemed to have occurred.",
+                "cs": "11.4.2 — turnover v autu a chycení se považuje za neuskutečněné."
+              }
+            },
+            {
+              "t": {
+                "en": "Stepping out at any point after the catch",
+                "cs": "Vystoupit ven kdykoli po chycení"
+              },
+              "why": {
+                "en": "11.3.2 explicitly protects exactly that sequence.",
+                "cs": "11.3.2 přesně tuhle sekvenci výslovně chrání."
+              }
+            },
+            {
+              "t": {
+                "en": "Being touched by a defender while out of bounds",
+                "cs": "Být venku tečován obráncem"
+              },
+              "why": {
+                "en": "Contact between players does not confer in/out status (11.3.4).",
+                "cs": "Kontakt mezi hráči status „v hřišti/v autu“ nepředává (11.3.4)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ob5",
+      "level": 8,
+      "topic": {
+        "en": "Out of bounds",
+        "cs": "Aut"
+      },
+      "title": {
+        "en": "Your foot is over the line",
+        "cs": "Máš nohu za čárou"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower pivoting on the line",
+        "cs": "házeč pivotující u čáry"
+      },
+      "view": [56, -6, 48, 48],
+      "dur": 6.6,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 76, 22], [3.4, 84, 18], [6.6, 88, 16]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 78, 23], [3.4, 85.4, 19.4], [6.6, 88, 17.6]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 68.4, 3], [6.6, 68.4, 3]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 67, 2.6], [2.2, 67, 1.2], [3.4, 67, 0.6], [6.6, 67, 0.6]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 67.4, 2], [3.4, 67.4, 0.4], [4.4, 78, 10], [5.4, 87.6, 15.6], [6.6, 87.6, 15.6]]
+      },
+      "fx": [
+        {
+          "t": 2.8,
+          "type": "mark",
+          "x": 67,
+          "y": 0,
+          "kind": "x",
+          "label": {
+            "en": "pivot foot on the line",
+            "cs": "pivotová noha na čáře"
+          }
+        },
+        {
+          "t": 4.8,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "D1",
+          "text": {
+            "en": "still in-bounds",
+            "cs": "pořád v hřišti"
+          },
+          "style": "count"
+        },
+        {
+          "t": 5.6,
+          "type": "mark",
+          "x": 87.6,
+          "y": 15.6,
+          "kind": "target",
+          "label": {
+            "en": "completion stands",
+            "cs": "spojka platí"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You are throwing from right on the sideline. Reaching around the mark, your non-pivot foot lands clearly in the out-of-bounds area while the pivot stays on the line, and you release the pass from there. It is caught.",
+        "cs": "Házíš přímo od sidelinu. Při obcházení markera ti nepivotová noha dopadne jasně do autu, zatímco pivot zůstává na čáře, a odtud přihrávku vypustíš. Je chycená."
+      },
+      "question": {
+        "en": "Does the pass count?",
+        "cs": "Platí přihrávka?"
+      },
+      "explain": {
+        "en": "Yes. A thrower who contacts an out-of-bounds area is considered in-bounds until they make a pass (11.3.3), so nothing about that foot invalidates the throw — the completion stands and play continues. Note that the perimeter line itself is out-of-bounds (11.1); it is only the thrower exemption that saves this.",
+        "cs": "Ano. Házeč, který se dotkne autového území, se považuje za hráče v hřišti, dokud nehodí (11.3.3), takže ta noha na hodu nic nemění — dokončená přihrávka platí a hraje se dál. Pozor, samotná obvodová čára je aut (11.1); zachraňuje to jen výjimka pro házeče."
+      },
+      "note": {
+        "en": "The exemption is for the thrower only. A RECEIVER with any part of themselves out-of-bounds when they contact the disc has not caught it — that is an out-of-bounds turnover (11.4.1).",
+        "cs": "Výjimka platí jen pro házeče. RECEIVER, který má při doteku disku jakoukoli část sebe v autu, disk nechytil — to je turnover v autu (11.4.1)."
+      },
+      "rules": ["11.3.3", "11.1", "11.4.1"],
+      "signals": [7],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "Your non-pivot foot is in the out-of-bounds area as you release the pass. Legal?",
+            "cs": "Nepivotová noha je při vypuštění přihrávky v autu. Legální?"
+          },
+          "rules": ["11.3.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — a thrower touching out-of-bounds is considered in-bounds until they make a pass",
+                "cs": "Ano — házeč, který se dotýká autu, se považuje za hráče v hřišti, dokud nehodí"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.3.3 — the throw is made while you still count as in-bounds.",
+                "cs": "11.3.3 — hod se koná, dokud se pořád počítáš jako v hřišti."
+              }
+            },
+            {
+              "t": {
+                "en": "No — you cannot throw with a foot out of bounds",
+                "cs": "Ne — s nohou v autu hodit nemůžeš"
+              },
+              "why": {
+                "en": "That is precisely the exemption 11.3.3 grants the thrower.",
+                "cs": "To je přesně výjimka, kterou 11.3.3 házeči dává."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if your pivot stays on the field",
+                "cs": "Jen pokud pivot zůstane v hřišti"
+              },
+              "why": {
+                "en": "The pivot must of course stay at its spot (18.2), but the exemption itself is about your status, not the pivot (11.3.3).",
+                "cs": "Pivot musí samozřejmě zůstat na místě (18.2), ale samotná výjimka je o tvém statusu, ne o pivotu (11.3.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "The perimeter line itself — in or out?",
+            "cs": "Samotná obvodová čára — v hřišti, nebo v autu?"
+          },
+          "rules": ["11.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Out — the lines are not part of the playing field",
+                "cs": "Aut — čáry nejsou součástí hřiště"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.1 — the entire playing field is in-bounds, and the perimeter lines are out-of-bounds.",
+                "cs": "11.1 — celé hřiště je v hřišti a obvodové čáry jsou aut."
+              }
+            },
+            {
+              "t": {
+                "en": "In — a foot on the line is a foot in the field",
+                "cs": "V hřišti — noha na čáře je noha v hřišti"
+              },
+              "why": {
+                "en": "The opposite of 11.1; this is the single most commonly misremembered line in the rulebook.",
+                "cs": "Opak 11.1; tohle je nejčastěji špatně zapamatovaná věta v pravidlech."
+              }
+            },
+            {
+              "t": {
+                "en": "In for the thrower, out for receivers",
+                "cs": "V hřišti pro házeče, aut pro receivery"
+              },
+              "why": {
+                "en": "The line is out for everyone; only the thrower gets a status exemption (11.1, 11.3.3).",
+                "cs": "Čára je aut pro všechny; výjimku ve statusu má jen házeč (11.1, 11.3.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "A receiver catches it with one toe touching the line. What is that?",
+            "cs": "Receiver chytí disk s jedním prstem na čáře. Co to je?"
+          },
+          "rules": ["11.4.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "An out-of-bounds turnover — no catch occurred",
+                "cs": "Turnover v autu — chycení se nekonalo"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.4.1 — any part of an offensive receiver being out-of-bounds when they contact the disc, and the line is out (11.1).",
+                "cs": "11.4.1 — jakákoli část receivera je při doteku disku v autu, a čára je aut (11.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "A good catch — the toe was still on the field",
+                "cs": "Platné chycení — prst byl ještě na hřišti"
+              },
+              "why": {
+                "en": "The line is not part of the field (11.1).",
+                "cs": "Čára není součástí hřiště (11.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "A good catch if the rest of them was in-bounds",
+                "cs": "Platné chycení, pokud byl zbytek v hřišti"
+              },
+              "why": {
+                "en": "“Any part” is the test (11.4.1).",
+                "cs": "Testuje se „jakákoli část“ (11.4.1)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ob6",
+      "level": 8,
+      "topic": {
+        "en": "Out of bounds",
+        "cs": "Aut"
+      },
+      "title": {
+        "en": "It curves out and comes back",
+        "cs": "Zatočí ven a vrátí se"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the defender who called “out”",
+        "cs": "obránce, který volal „aut“"
+      },
+      "view": [56, -6, 48, 48],
+      "dur": 7.2,
+      "qAt": 4.4,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 60, 20], [7.2, 60, 20]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 72, 10], [4.4, 80, 10], [7.2, 84, 11]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 8], [4.4, 84, 9], [7.2, 88, 10.6]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 24], [4.4, 82, 22], [7.2, 82, 22]]
+        }
+      ],
+      "disc": {
+        "kf": [
+          [0, 60.4, 19.4],
+          [1.8, 70, 8],
+          [2.8, 78, -1.6],
+          [3.8, 84, -1.2],
+          [4.8, 87, 4],
+          [5.6, 88, 9.8],
+          [7.2, 88, 9.8]
+        ]
+      },
+      "fx": [
+        {
+          "t": 2.9,
+          "type": "mark",
+          "x": 81,
+          "y": -3.2,
+          "kind": "zone",
+          "r": 3,
+          "label": {
+            "en": "over the out-of-bounds area — untouched",
+            "cs": "nad autem — bez doteku"
+          }
+        },
+        {
+          "t": 4.2,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "D1",
+          "text": {
+            "en": "OUT!",
+            "cs": "AUT!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5.8,
+          "type": "mark",
+          "x": 88,
+          "y": 9.8,
+          "kind": "target",
+          "label": {
+            "en": "completion stands",
+            "cs": "spojka platí"
+          }
+        }
+      ],
+      "situation": {
+        "en": "A big outside-in flick sails over the sideline, hangs out beyond the line for a good ten metres, then curves back onto the field where their cutter catches it. The disc never touched anything out there. You shout “out”.",
+        "cs": "Velký outside-in flick vyletí přes postranní čáru, deset metrů plachtí za čárou a pak se stočí zpátky do hřiště, kde ho jejich nabíhač chytí. Disku se venku nic nedotklo. Ty křičíš „aut“."
+      },
+      "question": {
+        "en": "Was the disc out of bounds?",
+        "cs": "Byl disk v autu?"
+      },
+      "explain": {
+        "en": "No. The disc may fly outside a perimeter line and return to the playing field (11.7); it only becomes out-of-bounds when it first CONTACTS the out-of-bounds area or an out-of-bounds offensive player (11.6). Airspace is not out — the completion stands, and your call was wrong.",
+        "cs": "Ne. Disk může vyletět za obvodovou čáru a vrátit se do hřiště (11.7); do autu se dostane, teprve když se DOTKNE autového území nebo hráče útoku v autu (11.6). Vzdušný prostor aut není — dokončená přihrávka platí a tvůj call byl špatný."
+      },
+      "note": {
+        "en": "And if it had come down out there, the spot is where the disc was most recently partly or wholly over the playing field, or last touched by an in-bounds player (11.8) — not where it landed.",
+        "cs": "A kdyby venku dopadl, místem je bod, kde byl disk naposledy zčásti nebo celý nad hřištěm, nebo kde se ho naposledy dotkl hráč v hřišti (11.8) — ne kde přistál."
+      },
+      "rules": ["11.7", "11.6", "11.8"],
+      "signals": [7, 23],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The disc flies well outside the sideline, touches nothing, and curves back in. Was it out?",
+            "cs": "Disk vyletí daleko za postranní čáru, ničeho se nedotkne a stočí se zpátky. Byl v autu?"
+          },
+          "rules": ["11.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — a disc may fly outside a perimeter line and return",
+                "cs": "Ne — disk může vyletět za obvodovou čáru a vrátit se"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.7 says so directly; airspace beyond the line is not out-of-bounds.",
+                "cs": "11.7 to říká napřímo; vzdušný prostor za čárou aut není."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — crossing the line makes it out",
+                "cs": "Ano — překročením čáry je v autu"
+              },
+              "why": {
+                "en": "Only CONTACT makes a disc out-of-bounds (11.6).",
+                "cs": "Disk je v autu, teprve když se něčeho DOTKNE (11.6)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, unless a player brings it back in",
+                "cs": "Ano, ledaže ho hráč vrátí do hřiště"
+              },
+              "why": {
+                "en": "The disc needed no help; it never went out (11.7).",
+                "cs": "Disk žádnou pomoc nepotřeboval; v autu nikdy nebyl (11.7)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "What actually makes a disc out-of-bounds?",
+            "cs": "Co disk vlastně dostane do autu?"
+          },
+          "rules": ["11.6"],
+          "opts": [
+            {
+              "t": {
+                "en": "Contacting an out-of-bounds area, or an out-of-bounds offensive player",
+                "cs": "Dotek autového území, nebo hráče útoku v autu"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.6 — and a caught disc takes the in/out status of the player holding it.",
+                "cs": "11.6 — a chycený disk přebírá status hráče, který ho drží."
+              }
+            },
+            {
+              "t": {
+                "en": "Being fully beyond the plane of the line",
+                "cs": "Být celý za rovinou čáry"
+              },
+              "why": {
+                "en": "There is no plane rule for the disc in flight (11.6, 11.7).",
+                "cs": "Pro letící disk žádné pravidlo o rovině neexistuje (11.6, 11.7)."
+              }
+            },
+            {
+              "t": {
+                "en": "Being touched by any player standing out of bounds",
+                "cs": "Dotek jakéhokoli hráče stojícího v autu"
+              },
+              "why": {
+                "en": "Defensive players are always considered in-bounds (11.2).",
+                "cs": "Obránci se vždy považují za hráče v hřišti (11.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Had it come down out there, where would the restart spot be?",
+            "cs": "Kdyby venku dopadl, kde by bylo místo rozehrání?"
+          },
+          "rules": ["11.8", "13.8"],
+          "opts": [
+            {
+              "t": {
+                "en": "Where the disc was last partly or wholly over the field, or last touched by an in-bounds player",
+                "cs": "Tam, kde byl disk naposledy zčásti nebo celý nad hřištěm, nebo kde se ho naposledy dotkl hráč v hřišti"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.8 defines the place it went out; 13.8 then brings the pivot to the nearest central-zone location.",
+                "cs": "11.8 definuje místo, kde disk opustil hřiště; 13.8 pak posune pivot na nejbližší místo centrální zóny."
+              }
+            },
+            {
+              "t": {
+                "en": "Where it physically landed out of bounds",
+                "cs": "Tam, kde fyzicky dopadl v autu"
+              },
+              "why": {
+                "en": "The landing spot is irrelevant (11.8).",
+                "cs": "Místo dopadu nehraje roli (11.8)."
+              }
+            },
+            {
+              "t": {
+                "en": "Where the thrower released it",
+                "cs": "Tam, odkud ho házeč vypustil"
+              },
+              "why": {
+                "en": "That is a foul remedy (16.2.4.2.1), not an out-of-bounds spot.",
+                "cs": "To je náprava po faulu (16.2.4.2.1), ne místo pro aut."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ob7",
+      "level": 8,
+      "topic": {
+        "en": "Out of bounds",
+        "cs": "Aut"
+      },
+      "title": {
+        "en": "A defender blocks it from out of bounds",
+        "cs": "Obránce blokuje z autu"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower who tried the sideline",
+        "cs": "házeč, který to zkusil po postranní čáře"
+      },
+      "view": [56, -6, 48, 48],
+      "dur": 6.8,
+      "qAt": 3.8,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 62, 20], [6.8, 62, 20]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 63.6, 20.6], [6.8, 63.6, 20.6]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 80, 10], [3.8, 88, 6], [6.8, 90, 5]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 84, -2], [2.6, 84.4, -1.4], [3.4, 84.6, -0.6], [3.8, 84.6, -0.4], [6.8, 85, 1]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 19.4], [3.2, 82, 2], [3.8, 84.6, 0.2], [4.6, 84, 3], [6.8, 84, 3]],
+        "downAt": 4.6
+      },
+      "fx": [
+        {
+          "t": 2.2,
+          "type": "mark",
+          "x": 84.4,
+          "y": -2,
+          "kind": "x",
+          "label": {
+            "en": "standing out of bounds",
+            "cs": "stojí v autu"
+          }
+        },
+        {
+          "t": 3.6,
+          "type": "flash",
+          "x": 84.6,
+          "y": 0
+        },
+        {
+          "t": 4.6,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "D1",
+          "text": {
+            "en": "legal block",
+            "cs": "legální blok"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5.6,
+          "type": "mark",
+          "x": 84,
+          "y": 3,
+          "kind": "target",
+          "label": {
+            "en": "turnover",
+            "cs": "turnover"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You go for a tight sideline throw. Their defender is standing entirely in the out-of-bounds area beside the line, reaches in, and knocks the disc down. It falls out of bounds.",
+        "cs": "Zkusíš těsnou přihrávku podél sidelinu. Jejich obránce stojí celý v autu vedle čáry, natáhne se a disk srazí. Ten dopadne v autu."
+      },
+      "question": {
+        "en": "Can a defender make a play from out of bounds?",
+        "cs": "Může obránce zahrát disk z autu?"
+      },
+      "explain": {
+        "en": "Yes. The out-of-bounds area consists of the ground that is not in-bounds and everything in contact with it — EXCEPT defensive players, who are always considered “in-bounds” (11.2). A defender standing beyond the line is still an in-bounds player for every purpose, so the block is perfectly legal and this is simply a turnover.",
+        "cs": "Ano. Autové území tvoří země, která není hřištěm, a všechno, co se jí dotýká — KROMĚ obránců, kteří se vždy považují za hráče „v hřišti“ (11.2). Obránce stojící za čárou je pro všechny účely pořád hráč v hřišti, takže blok je naprosto legální a je z toho prostě turnover."
+      },
+      "note": {
+        "en": "The asymmetry is deliberate, and it is the whole point of 11.2: an offensive receiver out of bounds cannot catch it (11.4.1), while a defender out there can do whatever they like. Your sideline throws have no safe corridor.",
+        "cs": "Ta asymetrie je záměrná a je celým smyslem 11.2: receiver útoku v autu chytit nemůže (11.4.1), zatímco obránce tam může cokoli. Tvoje přihrávky podél čáry žádný bezpečný koridor nemají."
+      },
+      "rules": ["11.2", "11.4.1", "13.8"],
+      "signals": [7, 13],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "A defender standing entirely out of bounds knocks your pass down. Legal?",
+            "cs": "Obránce stojící celý v autu srazí tvou přihrávku. Legální?"
+          },
+          "rules": ["11.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — defensive players are always considered in-bounds",
+                "cs": "Ano — obránci se vždy považují za hráče v hřišti"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.2 — the out-of-bounds area is everything not in-bounds, EXCEPT defensive players.",
+                "cs": "11.2 — autové území je všechno, co není hřiště, KROMĚ obránců."
+              }
+            },
+            {
+              "t": {
+                "en": "No — you cannot make a play from out of bounds",
+                "cs": "Ne — z autu se hrát nedá"
+              },
+              "why": {
+                "en": "That restriction applies to offensive receivers (11.4.1), not defenders (11.2).",
+                "cs": "Tohle omezení platí pro receivery útoku (11.4.1), ne pro obránce (11.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if they had a foot in-bounds",
+                "cs": "Jen kdyby měl nohu v hřišti"
+              },
+              "why": {
+                "en": "Their status does not depend on where they stand at all (11.2).",
+                "cs": "Jejich status vůbec nezávisí na tom, kde stojí (11.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Legal, but it does not count as a block",
+                "cs": "Legální, ale neplatí to jako blok"
+              },
+              "why": {
+                "en": "It is an ordinary play on the disc, so it is an ordinary turnover (11.2).",
+                "cs": "Je to běžná hra o disk, takže běžný turnover (11.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "Would an offensive receiver be able to do the same?",
+            "cs": "Mohl by totéž udělat receiver útoku?"
+          },
+          "rules": ["11.4.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — any part of a receiver out-of-bounds when they contact the disc is a turnover",
+                "cs": "Ne — jakákoli část receivera v autu při doteku disku znamená turnover"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.4.1 — and no catch is deemed to have occurred. The asymmetry with 11.2 is deliberate.",
+                "cs": "11.4.1 — a chycení se považuje za neuskutečněné. Asymetrie vůči 11.2 je záměrná."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — the rules treat both teams the same out there",
+                "cs": "Ano — pravidla tam s oběma týmy zacházejí stejně"
+              },
+              "why": {
+                "en": "They explicitly do not (11.2 vs 11.4.1).",
+                "cs": "Výslovně ne (11.2 vs 11.4.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, if they land back in-bounds",
+                "cs": "Ano, pokud dopadnou zpátky v hřišti"
+              },
+              "why": {
+                "en": "The test is their position when they CONTACT the disc (11.4.1).",
+                "cs": "Testuje se pozice ve chvíli DOTEKU disku (11.4.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "The disc lands out of bounds. Where does their offence restart?",
+            "cs": "Disk dopadne v autu. Odkud jejich útok rozehrává?"
+          },
+          "rules": ["13.8"],
+          "opts": [
+            {
+              "t": {
+                "en": "At the nearest location in the central zone to where the disc went out",
+                "cs": "Na nejbližším místě centrální zóny k bodu, kde disk opustil hřiště"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.8 — and 11.8 defines the “went out” point as where it was last over the field or last touched in-bounds.",
+                "cs": "13.8 — a 11.8 definuje bod „opuštění hřiště“ jako místo, kde byl naposledy nad hřištěm nebo kde se ho naposledy dotkl hráč v hřišti."
+              }
+            },
+            {
+              "t": {
+                "en": "Where the defender was standing when they blocked it",
+                "cs": "Tam, kde stál obránce, když ho zblokoval"
+              },
+              "why": {
+                "en": "The blocker’s position never sets the restart spot (13.8).",
+                "cs": "Pozice blokujícího místo rozehrání nikdy neurčuje (13.8)."
+              }
+            },
+            {
+              "t": {
+                "en": "Where the disc physically landed",
+                "cs": "Tam, kde disk fyzicky dopadl"
+              },
+              "why": {
+                "en": "Out-of-bounds landing spots are irrelevant (11.8, 13.8).",
+                "cs": "Místa dopadu v autu nehrají roli (11.8, 13.8)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gl1",
+      "level": 8,
+      "topic": {
+        "en": "Out of bounds",
+        "cs": "Aut"
+      },
+      "title": {
+        "en": "A foot on the goal line",
+        "cs": "Noha na brankové čáře"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the receiver reaching the end zone",
+        "cs": "receiver dobíhající endzónu"
+      },
+      "view": [56, -6, 48, 48],
+      "dur": 7,
+      "qAt": 4.2,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 60, 20], [7, 60, 20]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 74, 28], [4.2, 80, 26], [7, 80, 26]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 78, 14], [3.6, 81, 15.6], [4.2, 81.6, 16], [7, 80.6, 17.4]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "you": true,
+          "kf": [[0, 74, 17], [3.6, 81, 14.6], [4.2, 82, 14.4], [7, 82, 14.4]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 60.4, 19.4], [3.8, 80, 14.6], [4.2, 82, 14.4], [7, 82, 14.4]]
+      },
+      "fx": [
+        {
+          "t": 4,
+          "type": "mark",
+          "x": 82,
+          "y": 14.4,
+          "kind": "x",
+          "label": {
+            "en": "one foot ON the line",
+            "cs": "jedna noha NA čáře"
+          }
+        },
+        {
+          "t": 5.2,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "D1",
+          "text": {
+            "en": "no goal",
+            "cs": "gól ne"
+          },
+          "style": "call"
+        },
+        {
+          "t": 6,
+          "type": "mark",
+          "x": 82,
+          "y": 14.4,
+          "kind": "target",
+          "label": {
+            "en": "pivot on the goal line",
+            "cs": "pivot na brankové čáře"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You catch the score on the run: one foot lands clearly inside the end zone, the other comes down squarely on the goal line itself. You hold the catch, upright, and start celebrating.",
+        "cs": "Chytíš to v běhu: jedna noha dopadne jasně v endzóně, druhá přesně na brankové čáře. Chycení udržíš, stojíš — a začneš slavit."
+      },
+      "question": {
+        "en": "Is that a goal?",
+        "cs": "Je to gól?"
+      },
+      "explain": {
+        "en": "No. A goal requires ALL the player’s ground contacts to be entirely within their attacking end zone (14.1.1) — and the goal line belongs to the central zone, not the end zone. With one foot on the line, not every contact was inside. Instead 14.3 applies: you are in possession in the end zone you attack without having scored, so you establish a pivot at the nearest location on the goal line.",
+        "cs": "Ne. Gól vyžaduje, aby VŠECHNY doteky hráče se zemí byly celé v jeho útočné endzóně (14.1.1) — a branková čára patří do centrální zóny, ne do endzóny. S jednou nohou na čáře nebyl každý dotek uvnitř. Místo toho platí 14.3: máš držení v útočné endzóně, aniž bys skóroval, takže stavíš pivot na nejbližším místě brankové čáry."
+      },
+      "note": {
+        "en": "For an airborne catch the test is all of your FIRST simultaneous points of ground contact after the catch (14.1.1) — land with one foot in and one on the line at the same time and it is still no goal.",
+        "cs": "U chycení ve vzduchu se testují všechny tvoje PRVNÍ současné doteky se zemí po chycení (14.1.1) — dopadneš-li jednou nohou uvnitř a druhou na čáře zároveň, gól to pořád není."
+      },
+      "rules": ["14.1", "14.3", "11.1"],
+      "signals": [3],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "One foot lands inside the end zone, the other on the goal line. Goal?",
+            "cs": "Jedna noha dopadne v endzóně, druhá na brankové čáře. Gól?"
+          },
+          "rules": ["14.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — ALL ground contacts must be entirely within the end zone",
+                "cs": "Ne — VŠECHNY doteky se zemí musí být celé v endzóně"
+              },
+              "ok": true,
+              "why": {
+                "en": "14.1.1, and the goal line belongs to the central zone, not the end zone.",
+                "cs": "14.1.1, a branková čára patří do centrální zóny, ne do endzóny."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — one foot in is enough",
+                "cs": "Ano — jedna noha uvnitř stačí"
+              },
+              "why": {
+                "en": "That is the other-sport instinct; 14.1.1 requires all of them.",
+                "cs": "To je instinkt z jiného sportu; 14.1.1 vyžaduje všechny."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — the goal line counts as part of the end zone",
+                "cs": "Ano — branková čára je součástí endzóny"
+              },
+              "why": {
+                "en": "The central zone includes the goal lines; the end zones exclude them.",
+                "cs": "Centrální zóna brankovou čáru zahrnuje; endzóny ne."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if you were airborne when you caught it",
+                "cs": "Jen když jsi chytil ve vzduchu"
+              },
+              "why": {
+                "en": "Airborne has its own test — all FIRST simultaneous contacts inside (14.1.1) — and a foot on the line still fails it.",
+                "cs": "Pro výskok platí vlastní test — všechny PRVNÍ současné doteky uvnitř (14.1.1) — a noha na čáře ho stejně nesplní."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "So you are standing in the end zone with the disc and no goal. Where is your pivot?",
+            "cs": "Stojíš tedy s diskem v endzóně a gól není. Kde bude pivot?"
+          },
+          "rules": ["14.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "At the nearest location on the goal line",
+                "cs": "Na nejbližším místě brankové čáry"
+              },
+              "ok": true,
+              "why": {
+                "en": "14.3 — possession in your attacking end zone without a goal sends the pivot to the line.",
+                "cs": "14.3 — držení v útočné endzóně bez gólu posílá pivot na čáru."
+              }
+            },
+            {
+              "t": {
+                "en": "Exactly where you caught it",
+                "cs": "Přesně tam, kde jsi chytil"
+              },
+              "why": {
+                "en": "That applies in your DEFENDING end zone, where you get a choice (13.11).",
+                "cs": "To platí ve tvé BRÁNĚNÉ endzóně, kde máš volbu (13.11)."
+              }
+            },
+            {
+              "t": {
+                "en": "Anywhere on the goal line you choose",
+                "cs": "Kdekoli na brankové čáře podle tvé volby"
+              },
+              "why": {
+                "en": "Nearest location, not free choice (14.3).",
+                "cs": "Nejbližší místo, ne volný výběr (14.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "When can the marker start counting?",
+            "cs": "Odkdy může marker počítat?"
+          },
+          "rules": ["9.3.1", "14.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Once you have established the pivot on the goal line",
+                "cs": "Až postavíš pivot na brankové čáře"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.3.1 needs an established pivot; 14.3 says where it goes.",
+                "cs": "9.3.1 vyžaduje postavený pivot; 14.3 říká, kam patří."
+              }
+            },
+            {
+              "t": {
+                "en": "Immediately, from where you caught it",
+                "cs": "Hned, z místa, kde jsi chytil"
+              },
+              "why": {
+                "en": "No pivot yet, so no count (9.3.1).",
+                "cs": "Zatím není pivot, tedy ani count (9.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only after a check",
+                "cs": "Až po checku"
+              },
+              "why": {
+                "en": "Nothing stopped play — no goal was called (14.2).",
+                "cs": "Nic hru nezastavilo — gól nikdo nevolal (14.2)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gl2",
+      "level": 8,
+      "topic": {
+        "en": "Out of bounds",
+        "cs": "Aut"
+      },
+      "title": {
+        "en": "They contest your goal",
+        "cs": "Contestují ti gól"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the receiver who thinks they scored",
+        "cs": "receiver, který myslí, že skóroval"
+      },
+      "view": [56, -6, 48, 48],
+      "dur": 7.2,
+      "qAt": 4.4,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 60, 20], [7.2, 60, 20]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 74, 28], [4.4, 80, 26], [7.2, 80, 26]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 80, 14], [3.8, 84, 15.4], [4.4, 84.6, 15.8], [7.2, 84, 17]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "you": true,
+          "kf": [[0, 76, 17], [3.8, 84, 14.4], [4.4, 85, 14.2], [7.2, 85, 14.2]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 60.4, 19.4], [4, 83, 14.6], [4.4, 85, 14.2], [7.2, 85, 14.2]]
+      },
+      "fx": [
+        {
+          "t": 4.6,
+          "type": "bubble",
+          "dur": 1.1,
+          "actor": "O2",
+          "text": {
+            "en": "GOAL!",
+            "cs": "GÓL!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5.4,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "D1",
+          "text": {
+            "en": "CONTEST!",
+            "cs": "CONTEST!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 6.2,
+          "type": "mark",
+          "x": 85,
+          "y": 14.2,
+          "kind": "target",
+          "label": {
+            "en": "check it in here",
+            "cs": "checkne se tady"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You catch it a stride past the line and call “goal”. Their deep defender was behind you and did not see the line clearly; they contest. After talking it through, nobody can convince anybody.",
+        "cs": "Chytíš to krok za čárou a voláš „gól“. Jejich hluboký obránce byl za tebou, čáru neviděl jasně, a contestuje. Po debatě nikdo nikoho nepřesvědčí."
+      },
+      "question": {
+        "en": "What happens after a contested goal call?",
+        "cs": "Co se stane po contestovaném gólovém callu?"
+      },
+      "explain": {
+        "en": "Play restarts with a check, and the call is deemed to have been made when the player established possession (14.2). So you do not lose the disc for calling it — you keep possession where you are and check it back in. The time a goal is deemed scored is also when possession was established (14.4), which is what makes the “was I in?” argument answerable at all.",
+        "cs": "Hra se restartuje checkem a call se považuje za vyslovený v okamžiku, kdy hráč získal držení (14.2). O disk tedy voláním gólu nepřijdeš — držení si necháváš tam, kde jsi, a disk se checkne. I okamžik, kdy je gól považován za vstřelený, je moment získání držení (14.4), což je právě to, co dělá spor „byl jsem uvnitř?“ řešitelným."
+      },
+      "note": {
+        "en": "The same applies to a retracted goal call (14.2). And if you were in fact short of the line, 14.3 sends your pivot to the nearest point on the goal line rather than leaving you deep in the end zone.",
+        "cs": "Totéž platí pro odvolaný gólový call (14.2). A pokud jsi ve skutečnosti čáru nepřešel, 14.3 pošle tvůj pivot na nejbližší bod brankové čáry, místo aby tě nechalo hluboko v endzóně."
+      },
+      "rules": ["14.2", "14.4", "14.3"],
+      "signals": [3, 4],
+      "steps": [
+        {
+          "k": "flow",
+          "q": {
+            "en": "You call “goal” and they contest. What happens?",
+            "cs": "Zavoláš „gól“ a oni contestují. Co se stane?"
+          },
+          "rules": ["14.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Play restarts with a check, and the call counts as made when you established possession",
+                "cs": "Hra se restartuje checkem a call se počítá k okamžiku, kdy jsi získal držení"
+              },
+              "ok": true,
+              "why": {
+                "en": "14.2 — that timing is what makes “was I in?” answerable.",
+                "cs": "14.2 — právě tohle načasování dělá spor „byl jsem uvnitř?“ řešitelným."
+              }
+            },
+            {
+              "t": {
+                "en": "The disc goes back to the thrower",
+                "cs": "Disk se vrací házeči"
+              },
+              "why": {
+                "en": "A contested goal does not undo your possession (14.2).",
+                "cs": "Contestovaný gól tvoje držení neruší (14.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "The goal stands until the defence proves otherwise",
+                "cs": "Gól platí, dokud obrana nedokáže opak"
+              },
+              "why": {
+                "en": "A contested call is resolved by the rules, not by burden of proof (14.2).",
+                "cs": "Contestovaný call řeší pravidla, ne důkazní břemeno (14.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Who keeps the disc?",
+            "cs": "Kdo si nechá disk?"
+          },
+          "rules": ["14.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "You do — you check it in where you are",
+                "cs": "Ty — checkneš ho tam, kde jsi"
+              },
+              "ok": true,
+              "why": {
+                "en": "14.2 restarts play with a check; nothing transfers possession.",
+                "cs": "14.2 restartuje hru checkem; nic držení nepředává."
+              }
+            },
+            {
+              "t": {
+                "en": "The defence, since the goal was not agreed",
+                "cs": "Obrana, protože gól nebyl uznaný"
+              },
+              "why": {
+                "en": "Contesting never wins possession (14.2).",
+                "cs": "Contest držení nikdy nezíská (14.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nobody — the point is replayed",
+                "cs": "Nikdo — bod se hraje znovu"
+              },
+              "why": {
+                "en": "Nothing replays a point over a goal call (14.2).",
+                "cs": "Kvůli gólovému callu se bod neopakuje (14.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "When is a goal deemed to have been scored?",
+            "cs": "Kdy je gól považován za vstřelený?"
+          },
+          "rules": ["14.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "When the player established possession",
+                "cs": "Ve chvíli, kdy hráč získal držení"
+              },
+              "ok": true,
+              "why": {
+                "en": "14.4 — not when it was called, and not when anyone agreed.",
+                "cs": "14.4 — ne když zazněl call a ne když se na tom někdo shodl."
+              }
+            },
+            {
+              "t": {
+                "en": "When the call was made",
+                "cs": "Když zazněl call"
+              },
+              "why": {
+                "en": "14.4 fixes it at possession; 14.2 does the same for the call itself.",
+                "cs": "14.4 to váže k držení; 14.2 dělá totéž pro samotný call."
+              }
+            },
+            {
+              "t": {
+                "en": "When both teams agree",
+                "cs": "Když se oba týmy shodnou"
+              },
+              "why": {
+                "en": "Agreement resolves the dispute; it does not set the time (14.4).",
+                "cs": "Shoda vyřeší spor; čas neurčuje (14.4)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ob8",
+      "level": 8,
+      "topic": {
+        "en": "Out of bounds",
+        "cs": "Aut"
+      },
+      "title": {
+        "en": "They touch you from out of bounds",
+        "cs": "Dotkne se tě z autu"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the receiver on the line",
+        "cs": "receiver u čáry"
+      },
+      "view": [56, -6, 48, 48],
+      "dur": 7,
+      "qAt": 4.2,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 60, 20], [7, 60, 20]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 74, 24], [4.2, 80, 22], [7, 80, 22]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 84, -2.4], [3.4, 84.6, -1.6], [4.2, 85, -1.2], [7, 85, -1.2]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "you": true,
+          "kf": [[0, 78, 10], [3.4, 84, 4], [4.2, 85, 2.4], [7, 85, 2.4]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 60.4, 19.4], [3.6, 80, 6], [4.2, 85, 2.2], [7, 85, 2.2]]
+      },
+      "fx": [
+        {
+          "t": 3.8,
+          "type": "mark",
+          "x": 85,
+          "y": 0,
+          "kind": "x",
+          "label": {
+            "en": "you are still in-bounds",
+            "cs": "pořád jsi v hřišti"
+          }
+        },
+        {
+          "t": 4.6,
+          "type": "flash",
+          "x": 85,
+          "y": 1
+        },
+        {
+          "t": 5.4,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "O2",
+          "text": {
+            "en": "catch stands",
+            "cs": "chycení platí"
+          },
+          "style": "call"
+        }
+      ],
+      "situation": {
+        "en": "You catch it just inside the sideline with both feet clearly in-bounds. As you land, their defender — standing out of bounds — brushes against your shoulder. They claim that makes you out.",
+        "cs": "Chytíš to těsně uvnitř sidelinu, obě nohy jasně v hřišti. Při dopadu se do tvého ramene otře jejich obránce, který stojí v autu. Tvrdí, že tím jsi venku."
+      },
+      "question": {
+        "en": "Does their touch put you out of bounds?",
+        "cs": "Dostane tě jeho dotek do autu?"
+      },
+      "explain": {
+        "en": "No. Contact between players does not confer the state of being in- or out-of-bounds from one to another (11.3.4). Your own contacts are all in-bounds, so the catch stands. In any case defensive players are always considered in-bounds themselves (11.2), so there is no out-of-bounds status to catch from them.",
+        "cs": "Ne. Kontakt mezi hráči nepřenáší stav „v hřišti / v autu“ z jednoho na druhého (11.3.4). Tvoje vlastní doteky jsou všechny v hřišti, takže chycení platí. A ostatně obránci se sami vždy považují za hráče v hřišti (11.2), takže není co od nich chytit."
+      },
+      "note": {
+        "en": "The same clause protects you the other way: brushing a team-mate who is standing out of bounds does not drag you out either (11.3.4). Only YOUR contact with the ground decides your status.",
+        "cs": "Stejná klauzule tě chrání i opačně: otřít se o spoluhráče stojícího v autu tě ven taky nevytáhne (11.3.4). O tvém statusu rozhoduje jen TVŮJ dotek se zemí."
+      },
+      "rules": ["11.3.4", "11.2", "11.4.1"],
+      "signals": [7, 5],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "A defender standing out of bounds brushes you as you catch it in-bounds. Are you out?",
+            "cs": "Obránce stojící v autu se tě dotkne, když chytáš v hřišti. Jsi venku?"
+          },
+          "rules": ["11.3.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — contact between players does not confer in- or out-of-bounds status",
+                "cs": "Ne — kontakt mezi hráči nepřenáší status „v hřišti / v autu“"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.3.4 — only your own contact with the ground decides your status.",
+                "cs": "11.3.4 — o tvém statusu rozhoduje jen tvůj vlastní dotek se zemí."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — touching an out-of-bounds player puts you out",
+                "cs": "Ano — dotek hráče v autu tě dostane ven"
+              },
+              "why": {
+                "en": "11.3.4 says the opposite, in one sentence.",
+                "cs": "11.3.4 říká jednou větou opak."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, if you were airborne at the time",
+                "cs": "Ano, pokud jsi byl ve vzduchu"
+              },
+              "why": {
+                "en": "Airborne status follows your last ground contact (11.3.1), not their touch.",
+                "cs": "Status ve vzduchu plyne z tvého posledního doteku se zemí (11.3.1), ne z jeho doteku."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "And their own status, standing out there?",
+            "cs": "A jeho vlastní status, když tam stojí?"
+          },
+          "rules": ["11.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Defensive players are always considered in-bounds anyway",
+                "cs": "Obránci se stejně vždy považují za hráče v hřišti"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.2 — so there is no out-of-bounds status for them to pass on in the first place.",
+                "cs": "11.2 — takže žádný „autový“ status, který by mohl předat, vůbec nemají."
+              }
+            },
+            {
+              "t": {
+                "en": "They are out of bounds and may not make a play",
+                "cs": "Je v autu a nesmí zahrát disk"
+              },
+              "why": {
+                "en": "11.2 makes them in-bounds for every purpose.",
+                "cs": "11.2 z něj pro všechny účely dělá hráče v hřišti."
+              }
+            },
+            {
+              "t": {
+                "en": "They are out until they step back in",
+                "cs": "Je venku, dokud se nevrátí"
+              },
+              "why": {
+                "en": "Not for defenders (11.2).",
+                "cs": "Pro obránce ne (11.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "What WOULD have made your catch invalid?",
+            "cs": "Co by tvoje chycení zneplatnilo?"
+          },
+          "rules": ["11.4.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Any part of you being out of bounds when you contacted the disc",
+                "cs": "Kdyby jakákoli tvoje část byla při doteku disku v autu"
+              },
+              "ok": true,
+              "why": {
+                "en": "11.4.1 — and remember the perimeter line itself is out (11.1).",
+                "cs": "11.4.1 — a pamatuj, že samotná obvodová čára je aut (11.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "A defender touching the disc first",
+                "cs": "Kdyby se disku dotkl první obránce"
+              },
+              "why": {
+                "en": "A deflection does not invalidate a catch (11.4.1).",
+                "cs": "Teč chycení nezneplatní (11.4.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Landing out of bounds after establishing possession",
+                "cs": "Dopad v autu po získání držení"
+              },
+              "why": {
+                "en": "Ground first, then out, keeps you in-bounds (11.3.2).",
+                "cs": "Nejdřív země, pak ven — zůstáváš v hřišti (11.3.2)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ob9",
+      "level": 8,
+      "topic": {
+        "en": "Out of bounds",
+        "cs": "Aut"
+      },
+      "title": {
+        "en": "A bag two metres off the line",
+        "cs": "Taška dva metry za čárou"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower pinned near the sideline",
+        "cs": "házeč přitisknutý k postranní čáře"
+      },
+      "view": [30, -4.5, 48, 44],
+      "dur": 7.6,
+      "qAt": 4.0,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 48, 2.5], [7.6, 48, 2.5]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 50, 4], [3.0, 49.4, 3.4], [7.6, 49.4, 3.4]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 40, 14], [7.6, 44, 16]]
+        },
+        {
+          "id": "X1",
+          "team": "def",
+          "label": "?",
+          "kf": [[0, 50, -2], [7.6, 50, -2]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 48.4, 2], [7.6, 48.4, 2]]
+      },
+      "fx": [
+        {
+          "t": 1.4,
+          "type": "mark",
+          "x": 50,
+          "y": -2,
+          "kind": "x",
+          "label": {
+            "en": "spectator + bag, ~2 m off the line",
+            "cs": "divák a taška, ~2 m za čárou"
+          }
+        },
+        {
+          "t": 2.8,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "O1",
+          "text": {
+            "en": "no room to pivot",
+            "cs": "není kam pivotovat"
+          },
+          "style": "count"
+        },
+        {
+          "t": 5.2,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "O1",
+          "text": {
+            "en": "VIOLATION",
+            "cs": "VIOLATION"
+          },
+          "style": "call"
+        }
+      ],
+      "situation": {
+        "en": "You are trapped on the sideline with the disc. A spectator and their kit bag are standing roughly two metres outside the line, exactly where you need to step back and pivot.",
+        "cs": "Jsi s diskem přitisknutý k postranní čáře. Divák a jeho taška stojí asi dva metry za čárou, přesně tam, kam potřebuješ ustoupit a pivotovat."
+      },
+      "question": {
+        "en": "Do the rules give you anything here?",
+        "cs": "Dávají ti tu pravidla něco?"
+      },
+      "explain": {
+        "en": "Yes — call “Violation”. 2.7 requires the immediate surroundings of the field to be kept clear of movable objects, and if play is obstructed by non-players or objects within three metres of the perimeter line, any obstructed player or the thrower in possession may call a violation. This is not a technical stoppage: those are for conditions that endanger players or a severely damaged disc (19.2.1, 19.2.2).",
+        "cs": "Ano — zvolej „Violation“. 2.7 vyžaduje, aby bezprostřední okolí hřiště bylo bez pohyblivých předmětů, a pokud hru omezují nehráči nebo předměty do tří metrů od obvodové čáry, může kterýkoli omezený hráč nebo házeč v držbě zvolat violation. Není to technical stoppage: ta je na podmínky ohrožující hráče nebo silně poškozený disk (19.2.1, 19.2.2)."
+      },
+      "rules": ["2.7"],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "A non-player and their bag are standing about two metres outside the sideline, obstructing your play with the disc. What is available to you?",
+            "cs": "Nehráč a jeho taška stojí asi dva metry za postranní čárou a omezují tvou hru s diskem. Co máš k dispozici?"
+          },
+          "rules": ["2.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "Call “Violation”",
+                "cs": "Zvolat „Violation“"
+              },
+              "ok": true,
+              "why": {
+                "en": "2.7 — an obstructed player or thrower in possession may call a violation for non-players or objects within three metres of the line.",
+                "cs": "2.7 — omezený hráč nebo házeč v držbě může zvolat violation kvůli nehráčům nebo předmětům do tří metrů od čáry."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — what happens outside the lines is not covered",
+                "cs": "Nic — co se děje za čárami, pravidla neřeší"
+              },
+              "why": {
+                "en": "2.7 covers exactly this: the surroundings must be kept clear, and obstruction within three metres is callable.",
+                "cs": "2.7 řeší přesně tohle: okolí musí být volné a omezení do tří metrů lze zvolat."
+              }
+            },
+            {
+              "t": {
+                "en": "Call a technical stoppage",
+                "cs": "Zvolat technical stoppage"
+              },
+              "why": {
+                "en": "Technicals are for conditions that endanger players or a severely damaged disc (19.2.1, 19.2.2). This is a violation under 2.7.",
+                "cs": "Technical je na podmínky ohrožující hráče nebo silně poškozený disk (19.2.1, 19.2.2). Tohle je violation podle 2.7."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "An object just outside the sideline is obstructing play. Who is entitled to make the call about it?",
+            "cs": "Předmět hned za postranní čárou omezuje hru. Kdo je oprávněn to zvolat?"
+          },
+          "rules": ["2.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "Any obstructed player, or the thrower in possession",
+                "cs": "Kterýkoli omezený hráč nebo házeč v držbě"
+              },
+              "ok": true,
+              "why": {
+                "en": "2.7 names exactly those two.",
+                "cs": "2.7 jmenuje přesně tyto dva."
+              }
+            },
+            {
+              "t": {
+                "en": "Only the thrower holding the disc",
+                "cs": "Jen házeč, který drží disk"
+              },
+              "why": {
+                "en": "2.7 also covers any obstructed player, not just the thrower.",
+                "cs": "2.7 zahrnuje i kteréhokoli omezeného hráče, ne jen házeče."
+              }
+            },
+            {
+              "t": {
+                "en": "Only your captain, from the sideline",
+                "cs": "Jen tvůj kapitán z postranní čáry"
+              },
+              "why": {
+                "en": "Players on the field make the calls (1.11); 2.7 gives it to the obstructed player or thrower.",
+                "cs": "Cally dělají hráči na hřišti (1.11); 2.7 to dává omezenému hráči nebo házeči."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "How close to the field does an object or non-player have to be for that rule to bite?",
+            "cs": "Jak blízko hřiště musí předmět nebo nehráč být, aby se to pravidlo použilo?"
+          },
+          "rules": ["2.7"],
+          "opts": [
+            {
+              "t": {
+                "en": "Within three metres of the perimeter line",
+                "cs": "Do tří metrů od obvodové čáry"
+              },
+              "ok": true,
+              "why": {
+                "en": "2.7 — the three-metre band around the field.",
+                "cs": "2.7 — třímetrový pás okolo hřiště."
+              }
+            },
+            {
+              "t": {
+                "en": "Within one metre of the perimeter line",
+                "cs": "Do jednoho metru od obvodové čáry"
+              },
+              "why": {
+                "en": "2.7 sets three metres, not one.",
+                "cs": "2.7 stanoví tři metry, ne jeden."
+              }
+            },
+            {
+              "t": {
+                "en": "Anywhere off the field, at any distance",
+                "cs": "Kdekoli mimo hřiště, v jakékoli vzdálenosti"
+              },
+              "why": {
+                "en": "The rule is bounded at three metres (2.7).",
+                "cs": "Pravidlo je omezeno třemi metry (2.7)."
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -73,7 +73,7 @@ describe("FeatureName", () => {
 ```
 
 **Rules:**
-- Use `it.effect` from `@effect/vitest`, not raw `it` with async
+- Use `it.effect` from `@effect/vitest`, not raw `it` with async — **except** in the two Effect-free packages, `packages/rules` and `packages/template-renderer`, where you must use plain `vitest` (`import { describe, expect, it } from 'vitest'`) with synchronous assertions. These packages have no `effect` dependency; importing `@effect/vitest` there fails to resolve. See the "Effect-free Packages" section of the root `AGENTS.md`.
 - Use `Effect.Do.pipe` pattern, not generators
 - Test both success and error paths
 - Test edge cases identified by the hater

@@ -1,0 +1,221 @@
+                                                                 Pull:
+                                                             Disc touched
+                                                            while in the air
+                                                              by Offence
+                                                   Yes                                       No
+
+                             Caught by                                                                     Disc lands
+                              Offence                                                                      in-bounds
+
+                       Yes            No                                                     Yes                         No
+
+
+                   Caught                 Turnover                        Disc stays
+                                                                                                                               Brick called
+                 in-bounds                   7.8                          in-bounds
+
+           Yes               No                                     Yes                No                                Yes                  No
+
+Play from where               Play from playing           Play from                    Disc touched               Play from                   Play from where
+   it is caught                field nearest to          where it stops                  by offence               brick mark                  disc crossed the
+        7.9                  where it was caught             7.10                       before going                 7.12                     perimiter line, or
+                                    7.9                                                out-of-bounds                                              goal line
+                                                                                                                                                     7.12
+                                                                                Yes                No
+
+                                                                   Play from where                  Play from where
+                                                                   disc first crossed               disc first crossed
+                                                                  the perimiter line               the perimiter line,
+                                                                        7.11.1                         or goal line
+                                                                                                           7.11
+                                                               Foul called by a
+                                                                  Receiver
+                                                                     17.2
+
+
+
+                                      Against                                                 Against
+                                      Offence                                                 Defence
+
+
+
+
+                 Pass                                        Pass                   Pass                        Pass
+               Completed                                  Incomplete              Completed                  Incomplete
+
+
+
+
+                Did Foul                                                                                      Did Foul
+                                                           Play on                 Play on
+                 affect                                                                                        affect
+                                                           16.2.4.1                16.2.4.1
+               possession                                                                                    possession
+       No                    Yes                                                                        No                 Yes
+
+Play on with                                                                                  Play on with
+  a check                        Contested                                                      a check                        Contested
+  16.2.4.2                                                                                      16.2.4.2
+                            No                Yes                                                                         No               Yes
+
+            Defence gains                    Back to Thrower                                                  Offence gains                  Back to
+             possession at                     Stall max 6                                                    possession at                 Thrower
+            point of breach                       9.5.4                                                      point of breach               Stall max 6
+                 17.2.2                                                                                          17.2.2                       9.5.4
+                                         Foul by Marker
+                                         Pass Attempted
+                                              17.6
+              Called before the throw                     Called during/after the throw
+
+              Did the foul                                               Pass results in
+              or call affect                                              a Turnover
+                the play
+       No                      Yes                                  No                     Yes
+
+Turnover or                   Disc back to                                                    Did Foul
+                                                              Play on
+completion                     the Thrower                                                     Affect
+                                                              16.2.4.1
+  stands                           16.1                                                      Possession
+   16.3                  Cont.          Accept.                                       No                   Yes
+
+
+                 Stall max 6              Stalling 1                         Play on with                   Disc back to
+                    9.5.4                   9.5.1                              a check                       the Thrower
+                                                                               16.2.4.2                       16.2.4.2.1
+                                                                                                       Cont.           Accept.
+
+
+                                                                                                 Stall max 6             Stalling 1
+                                                                                                    9.5.4                  9.5.1
+                              Foul by Marker
+                                 No Pass
+                                Attempted
+                                   17.6
+
+
+
+       “Contact” called
+                                                    “Foul” called
+           by Thrower
+                                                     by Thrower
+            17.6.1.3
+     Cont.          Accept.
+
+Play stops.         No stoppage.
+Stall max 6          Resume at                         Play stops
+   9.5.4             Stalling 1
+                      17.6.1.3
+                                               Cont.          Accept.
+
+
+                                      Stall max 6                   Stalling 1
+                                         9.5.4                        9.5.1
+                                        Foul by Thrower
+                                              17.7
+
+
+
+
+               No Pass                                                    Pass
+              Attempted                                                Attempted
+
+      Cont.          Accept.                                Turnover               Completed
+
+                                                                                           Did Foul
+Stall max 6               Stall max 9                     Play on
+                                                                                            Affect
+   9.5.4                     9.5.2                        16.2.4.1
+                                                                                          Possession
+                                                                                   No                  Yes
+
+                                                                           Play on with                Disc back to
+                                                                             a check                    the Thrower
+                                                                             16.2.4.2                    16.2.4.2.1
+                                                                                                  Cont.           Accept.
+
+
+                                                                                            Stall max 6            Stall max 9
+                                                                                               9.5.4                  9.5.2
+                                     Marking Infraction
+                                         Occurs.
+                                      No pass made
+                                           18.1
+
+
+
+              Thrower calls                                       Thrower calls
+            name of infraction                                     ‘Violation’
+                 18.1.1                                              18.1.5
+
+         Cont.             Accept.                        Cont.               Accept.
+
+ Play stops.              No Stoppage.            Play stops.                     Play stops.
+ Stall max 6                Remedy                Stall max 6                     Stalling 1
+18.1.2 / 9.5.4             infraction                9.5.4                           9.5.1
+
+                          Minus 1 from
+                           stall count
+                             18.1.3
+                                                    Travel Called
+
+                           Thrower still has disc                               Disc thrown
+
+
+             Contested                                                                           Completed
+
+       Yes           No                                                                    Yes               No
+
+  Stoppage.            No Stoppage.                                          Stoppage.
+                                                                                                                  Turnover
+ Stall Max 6         Pause Stall Count                                      Disc back to
+                                                                                                                   18.2.8
+18.2.9, 9.5.4             18.2.6                                              thrower
+                                                                               18.2.7
+                                                                    Contested          Accepted
+                     Pivot established at
+                    correct spot, quickly
+                    and before throwing                       Stall max 6                  Stall max 9
+                     Yes           No                            9.5.4                        9.5.2
+
+
+           Play on.                     Stoppage
+    Stall count resumes                 18.2.6.1
+            18.2.6                        15.3
+                                                                   Pick Called
+                                                                      18.3
+
+                                     Disc Not Thrown                                         Disc Thrown
+
+
+                          Stoppage                                                                             Completed
+
+                Cont.            Accept.                                                          Yes                        No
+
+Players return to where                 Defense                              Pick affected                                         Pick Called
+  they were when the                  catches up.                             possession                                           After Throw
+    call was made.                    Stall max 6
+      Stall max 6                    18.3.2, 9.5.4                          Yes         No                                   Yes                     No
+     10.2.1, 9.5.4
+                                                                                               Catch up/                                               Pick call
+                                                             Disc back to                                              Turnover
+                                                                                                 Goal                                                  affected
+                                                             the thrower                                               16.2.4.1
+                                                                                               16.2.4.2                                               possession
+                                                              16.2.4.2.1
+                                                                                                 16.3
+                                                                                                                                               Yes             No
+                                                     Cont.            Accept.
+
+                               Players return to where                    Defense                                               Disc back to                        Turnover
+                                 they were when the                     catches up.                                             the thrower                           16.3
+                                   call was made.                       Stall max 6                                              16.2.4.2.1
+                                     Stall max 6                       18.3.2, 9.5.4                                    Cont.            Accept.
+                                   10.2.2.1, 9.5.4
+
+                                                                                                        Players return to where              Defense
+                                                                                                          they were when the               catches up.
+                                                                                                            call was made.                 Stall max 6
+                                                                                                              Stall max 6                 18.3.2, 9.5.4
+                                                                                                            10.2.2.1, 9.5.4
+

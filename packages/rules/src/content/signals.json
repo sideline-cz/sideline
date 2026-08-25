@@ -1,0 +1,98 @@
+{
+  "1": {
+    "en": "Foul",
+    "cs": "Faul"
+  },
+  "2": {
+    "en": "Violation",
+    "cs": "Violation"
+  },
+  "3": {
+    "en": "Goal",
+    "cs": "Gól"
+  },
+  "4": {
+    "en": "Contest",
+    "cs": "Contest"
+  },
+  "5": {
+    "en": "Accepted",
+    "cs": "Uznáno"
+  },
+  "6": {
+    "en": "Retracted",
+    "cs": "Odvoláno"
+  },
+  "7": {
+    "en": "In / Out-of-bounds",
+    "cs": "In / Aut"
+  },
+  "8": {
+    "en": "Disc Down",
+    "cs": "Disk na zemi"
+  },
+  "9": {
+    "en": "Disc Up",
+    "cs": "Disk chycen"
+  },
+  "10": {
+    "en": "Pick",
+    "cs": "Pick"
+  },
+  "11": {
+    "en": "Travel",
+    "cs": "Travel"
+  },
+  "12": {
+    "en": "Marking Infraction",
+    "cs": "Marking infraction"
+  },
+  "13": {
+    "en": "Turnover",
+    "cs": "Ztráta"
+  },
+  "14": {
+    "en": "Timing Violation",
+    "cs": "Timing violation"
+  },
+  "15": {
+    "en": "Offside / False Start",
+    "cs": "Offside / předčasný start"
+  },
+  "16": {
+    "en": "Time-out",
+    "cs": "Time-out"
+  },
+  "17": {
+    "en": "Spirit Stoppage",
+    "cs": "Spirit stoppage"
+  },
+  "18": {
+    "en": "Stoppage",
+    "cs": "Přerušení"
+  },
+  "19": {
+    "en": "Gender Ratio: Male",
+    "cs": "Gender ratio: muži"
+  },
+  "20": {
+    "en": "Gender Ratio: Female",
+    "cs": "Gender ratio: ženy"
+  },
+  "21": {
+    "en": "Play Has Stopped",
+    "cs": "Hra je zastavena"
+  },
+  "22": {
+    "en": "Who Made the Call",
+    "cs": "Kdo hlásil"
+  },
+  "23": {
+    "en": "Did Not Affect the Play",
+    "cs": "Neovlivnilo hru"
+  },
+  "24": {
+    "en": "Match Point",
+    "cs": "Mečbol"
+  }
+}

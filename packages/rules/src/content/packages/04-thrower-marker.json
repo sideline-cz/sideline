@@ -1,0 +1,2419 @@
+{
+  "level": 4,
+  "name": "Level 4 · Thrower & marker fouls",
+  "scenarios": [
+    {
+      "id": "s8",
+      "level": 4,
+      "topic": {
+        "en": "Thrower & marker fouls",
+        "cs": "Fauly házeče a markera"
+      },
+      "title": {
+        "en": "Hacked on the release",
+        "cs": "Seknutý přes ruku při hodu"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower being fouled",
+        "cs": "faulovaný házeč"
+      },
+      "view": [44, 0, 52, 38],
+      "dur": 6.5,
+      "qAt": 5,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 56, 19]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 57.8, 21.5], [1.6, 56.9, 20.1], [2.6, 57.6, 21.2], [6.5, 57.6, 21.2]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 72, 12], [2.5, 77, 16], [6.5, 78, 18]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 73, 14], [2.5, 78, 18], [6.5, 79, 20]]
+        }
+      ],
+      "disc": {
+        "kf": [
+          [0, 55.4, 18.3],
+          [1.7, 55.4, 18.3],
+          [2.2, 60, 20],
+          [2.9, 65.5, 23],
+          [3.5, 69.5, 25.5]
+        ],
+        "downAt": 3.5
+      },
+      "fx": [
+        {
+          "t": 1.75,
+          "type": "flash",
+          "x": 55.8,
+          "y": 18.6
+        },
+        {
+          "t": 2.1,
+          "type": "bubble",
+          "dur": 1.7,
+          "actor": "O1",
+          "text": {
+            "en": "FOUL!",
+            "cs": "Faul!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.3,
+          "type": "bubble",
+          "dur": 1.5,
+          "actor": "D1",
+          "text": {
+            "en": "accepted ✋",
+            "cs": "uznávám ✋"
+          },
+          "style": "count"
+        },
+        {
+          "t": 5.1,
+          "type": "arrow",
+          "x1": 69.5,
+          "y1": 25.5,
+          "x2": 56.8,
+          "y2": 19.3
+        },
+        {
+          "t": 5.3,
+          "type": "mark",
+          "x": 56,
+          "y": 19,
+          "kind": "target",
+          "label": {
+            "en": "disc back to you · stalling 1",
+            "cs": "disk zpět k tobě · stalling 1"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You throw a flick; the marker’s hand slaps your throwing hand during the throwing motion. You call “Foul” immediately, but the wobbling disc is already in the air — and lands incomplete. The marker accepts the foul.",
+        "cs": "Házíš forhend; markerova ruka tě během hodu sekne přes házející ruku. Okamžitě voláš „Foul“, ale rozklepaný disk už letí — a padá na zem. Marker faul uznává."
+      },
+      "question": {
+        "en": "The disc hit the ground. What is the outcome?",
+        "cs": "Disk skončil na zemi. Jaký je výsledek?"
+      },
+      "explain": {
+        "en": "Contact with your throwing hand during the throwing motion is never “minor” (definitions) — a defensive throwing foul (17.6.1.2). Because the call happened around the throw, play continued until the disc was down (16.2). Your team called it and did not retain possession, and the foul clearly affected the throw → the disc returns to you (16.2.4.2.1) for a check. Accepted defensive breach → stall resumes at “stalling 1” (9.5.1).",
+        "cs": "Kontakt s házející rukou během hodu není nikdy „minor“ (definice) — jde o faul obrany na házeče (17.6.1.2). Protože hláška padla kolem hodu, hrálo se dál, dokud disk nespadl (16.2). Tvůj tým hlásil a neudržel disk, a faul hod jasně ovlivnil → disk se vrací tobě (16.2.4.2.1) a hraje se po checku. Uznaný prohřešek obrany → stall od „stalling 1“ (9.5.1)."
+      },
+      "note": {
+        "en": "If the fouled pass had been COMPLETED, you would just play on (16.2.4.1). If both of you agree the contact did not affect the throw, the turnover stands (16.3). Contested version: disc still back, but stall resumes at max 6 (9.5.5).",
+        "cs": "Kdyby faulovaná přihrávka DOŠLA, prostě se hraje dál (16.2.4.1). Pokud se shodnete, že kontakt hod neovlivnil, ztráta platí (16.3). Při kontestu: disk se vrací také, ale stall pokračuje na max 6 (9.5.5)."
+      },
+      "rules": ["17.6.1.2", "16.2", "16.2.4.2.1", "9.5.1", "16.3"],
+      "signals": [1, 5, 21],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The marker hit your throwing hand during the throwing motion and the disc hit the ground. What is it?",
+            "cs": "Marker ti zasáhl ruku během hodu a disk skončil na zemi. Co to je?"
+          },
+          "rules": ["17.6.1.2", "16.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "A defensive throwing foul — and play ran on until the disc was down",
+                "cs": "Throwing foul obrany — a hra běžela, dokud disk nebyl na zemi"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.6.1.2 — contact with the throwing hand during the motion is never minor. A call around the throw lets play continue until possession is decided (16.2).",
+                "cs": "17.6.1.2 — kontakt s hodovou rukou během hodu není nikdy zanedbatelný. Call u hodu nechá hru běžet, dokud se nerozhodne o držení (16.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "A “Contact” infraction — play never stopped",
+                "cs": "Infraction „Contact“ — hra se nikdy nezastavila"
+              },
+              "why": {
+                "en": "“Contact” covers contact OUTSIDE the throwing motion (17.6.1.3); inside the motion it is a foul.",
+                "cs": "„Contact“ pokrývá kontakt MIMO hodový pohyb (17.6.1.3); během hodu je to faul."
+              }
+            },
+            {
+              "t": {
+                "en": "A marking infraction — disc space",
+                "cs": "Marking infraction — disc space"
+              },
+              "why": {
+                "en": "Disc space is about position without contact (18.1.1.3); your hand was hit.",
+                "cs": "Disc space je o pozici bez kontaktu (18.1.1.3); tebe zasáhli do ruky."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — the throw was already gone",
+                "cs": "Nic — hod už byl venku"
+              },
+              "why": {
+                "en": "Contact after the release during the follow-through is not a basis for a foul (17.7.2) — but this was during the motion.",
+                "cs": "Kontakt po vypuštění během dohmatu není důvod k faulu (17.7.2) — tenhle byl ale během hodu."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Your team called it and did not retain the disc; the foul clearly affected the throw. Who gets it?",
+            "cs": "Tvůj tým to zavolal a disk neudržel; faul hod jasně ovlivnil. Kdo disk dostane?"
+          },
+          "rules": ["16.2.4.2.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "You — the disc returns to you at your pivot",
+                "cs": "Ty — disk se ti vrací na tvůj pivot"
+              },
+              "ok": true,
+              "why": {
+                "en": "16.2.4.2.1 — a call by the team that lost possession, where the breach affected the outcome, returns the disc to the thrower.",
+                "cs": "16.2.4.2.1 — call týmu, který přišel o držení, a prohřešek ovlivnil výsledek → disk se vrací házeči."
+              }
+            },
+            {
+              "t": {
+                "en": "The defence, where the disc stopped",
+                "cs": "Obrana, tam kde disk zastavil"
+              },
+              "why": {
+                "en": "That stands only if you all agree the foul did not affect the throw (16.3).",
+                "cs": "To platí jen tehdy, když se shodnete, že faul hod neovlivnil (16.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "The intended receiver, at the spot of the drop",
+                "cs": "Zamýšlený receiver, na místě dopadu"
+              },
+              "why": {
+                "en": "No remedy hands the disc to an uninvolved receiver; throwing fouls go back to the thrower (16.2.4.2.1).",
+                "cs": "Žádná náprava nedává disk nezúčastněnému receiverovi; throwing fouls se vracejí házeči (16.2.4.2.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "The disc comes back to you and play restarts with a check. Where does the count resume?",
+            "cs": "Disk se ti vrací a hra se restartuje checkem. Od kolika se obnoví počítání?"
+          },
+          "rules": ["9.5.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "“Stalling 1”",
+                "cs": "„Stalling 1“"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.5.1 — accepted defensive breach. The marker who hacked you gets no reward for it.",
+                "cs": "9.5.1 — uznaný prohřešek obrany. Marker, který tě sekl, z toho nic nemá."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 6",
+                "cs": "Max 6"
+              },
+              "why": {
+                "en": "That is the CONTESTED version of this same foul (9.5.5) — the disc still comes back, but the count is harsher.",
+                "cs": "To je CONTESTOVANÁ verze téhož faulu (9.5.5) — disk se stejně vrací, ale počítání je tvrdší."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 9",
+                "cs": "Max 9"
+              },
+              "why": {
+                "en": "Max 9 punishes an accepted OFFENSIVE breach (9.5.2).",
+                "cs": "Max 9 trestá uznaný prohřešek ÚTOKU (9.5.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Wherever the count was when you threw",
+                "cs": "Tam, kde počítání bylo, když jsi hodil"
+              },
+              "why": {
+                "en": "Stoppages use the 9.5 resumption table, never the raw number (9.5.1).",
+                "cs": "Zastavení používají tabulku obnovení 9.5, nikdy původní číslo (9.5.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "Same hack on the release, but the pass is COMPLETED. What then?",
+            "cs": "Stejné seknutí při hodu, ale přihrávka je DOKONČENÁ. Co pak?"
+          },
+          "rules": ["16.2.4.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Play on — the completion stands",
+                "cs": "Hraje se dál — dokončená přihrávka platí"
+              },
+              "ok": true,
+              "why": {
+                "en": "16.2.4.1 — if the team that called it retained possession, the result stands and play continues.",
+                "cs": "16.2.4.1 — když si tým, který call volal, držení udržel, výsledek platí a hra pokračuje."
+              }
+            },
+            {
+              "t": {
+                "en": "Disc still comes back to you for a check",
+                "cs": "Disk se ti stejně vrací na check"
+              },
+              "why": {
+                "en": "Returning the disc is only for the team that LOST possession (16.2.4.2.1).",
+                "cs": "Vrácení disku platí jen pro tým, který o držení PŘIŠEL (16.2.4.2.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "The receiver must give the disc back to the defence",
+                "cs": "Receiver musí disk vrátit obraně"
+              },
+              "why": {
+                "en": "Nothing rewards the fouling team with possession (16.2.4.1).",
+                "cs": "Nic neodmění faulující tým držením disku (16.2.4.1)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "s9",
+      "level": 4,
+      "topic": {
+        "en": "Thrower & marker fouls",
+        "cs": "Fauly házeče a markera"
+      },
+      "title": {
+        "en": "Bumped — but you want to keep playing",
+        "cs": "Drcnutí — ale ty chceš hrát dál"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower (no throw attempted)",
+        "cs": "házeč (hod nepadl)"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6,
+      "qAt": 2,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 60, 19], [1.2, 60.4, 19.2], [1.6, 60, 19], [6, 60, 19]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 62.4, 21.6], [1.5, 60.9, 19.8], [2.6, 62, 21.2], [6, 62, 21.2]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 10], [2.5, 70, 18], [6, 74, 24]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 73, 12], [2.5, 69, 19.5], [6, 72.5, 25.5]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 59.2, 18.2]]
+      },
+      "fx": [
+        {
+          "t": 1.55,
+          "type": "flash",
+          "x": 60.6,
+          "y": 19.4
+        },
+        {
+          "t": 2.2,
+          "type": "bubble",
+          "dur": 1.7,
+          "actor": "O1",
+          "text": {
+            "en": "CONTACT!",
+            "cs": "CONTACT!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.4,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 1…",
+            "cs": "…stalling 1…"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "While you fake, the marker lunges and bumps your arm — non-minor contact, but you keep the disc and your team has a great flow going. You would rather not stop the game. You have not started any throwing motion.",
+        "cs": "Při fake si marker skočí do tebe a drcne tě do ruky — výrazný kontakt, ale disk držíš a váš útok má výbornou dynamiku. Nechceš hru zastavovat. Žádný hod jsi nezačal."
+      },
+      "question": {
+        "en": "Which call keeps play running — and what does it do?",
+        "cs": "Jaká hláška nechá hru běžet — a co udělá?"
+      },
+      "explain": {
+        "en": "When a marker fouls you before the release and outside your throwing motion, rule 17.6.1.3 gives you a choice: call “Foul” (play stops, check, stall at 1) or call “Contact” — play never stops and the marker resumes the count at “stalling 1”. With your offence in rhythm, “Contact” is the smart call. If the marker contests the contact call, play stops and the count resumes at max 6.",
+        "cs": "Když tě marker fauluje před vypuštěním disku a mimo samotný hod, pravidlo 17.6.1.3 ti dává volbu: zavolat „Foul“ (hra se staví, check, stall od 1), nebo „Contact“ — hra se vůbec nezastaví a marker pokračuje od „stalling 1“. Když má útok tempo, „Contact“ je chytrá volba. Pokud marker contact kontestuje, hra se staví a count pokračuje na max 6."
+      },
+      "note": {
+        "en": "“Contact” is a verbal call — there is no dedicated hand signal on the WFDF sheet. If the contact happens during your throwing motion, “Contact” is not available: that is a foul (17.6.1.2/.3).",
+        "cs": "„Contact“ je slovní hláška — na přehledu signálů WFDF pro ni samostatný signál není. Pokud ke kontaktu dojde během hodu, „Contact“ použít nejde: to je faul (17.6.1.2/.3)."
+      },
+      "rules": ["17.6.1.3", "17.6.1.2", "9.5.1"],
+      "signals": [],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The marker bumps you before the release, outside your throwing motion, and your offence is flowing. Which call keeps play running?",
+            "cs": "Marker do tebe vrazí před vypuštěním, mimo hodový pohyb, a útok ti jede. Který call nechá hru běžet?"
+          },
+          "rules": ["17.6.1.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "“Contact” — play does not stop at all",
+                "cs": "„Contact“ — hra se vůbec nezastaví"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.6.1.3 — an uncontested contact call keeps play running and simply resets the count.",
+                "cs": "17.6.1.3 — neconstestovaný contact call nechá hru běžet a jen resetuje počítání."
+              }
+            },
+            {
+              "t": {
+                "en": "“Foul” — the safer, stronger call",
+                "cs": "„Foul“ — bezpečnější, silnější call"
+              },
+              "why": {
+                "en": "Also available here (17.6.1.3), but a foul stops play and kills your flow.",
+                "cs": "Taky je tady možný (17.6.1.3), ale faul zastaví hru a zabije ti tempo."
+              }
+            },
+            {
+              "t": {
+                "en": "“Violation”",
+                "cs": "„Violation“"
+              },
+              "why": {
+                "en": "Violations cover non-contact breaches; contact on the thrower is foul/contact territory (17.6.1.2/.3).",
+                "cs": "Violations pokrývají prohřešky bez kontaktu; kontakt na házeče je území faul/contact (17.6.1.2/.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Say nothing and throw",
+                "cs": "Nic neříkat a hodit"
+              },
+              "why": {
+                "en": "Legal, but you lose the count reset the rules owe you (17.6.1.3).",
+                "cs": "Legální, ale přicházíš o reset počítání, který ti pravidla dávají (17.6.1.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "The marker accepts your “Contact”. What happens to the count?",
+            "cs": "Marker tvůj „Contact“ uzná. Co se stane s počítáním?"
+          },
+          "rules": ["17.6.1.3", "9.5.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "The marker resumes at “stalling 1” — while play carries on",
+                "cs": "Marker pokračuje od „stalling 1“ — a hra běží dál"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.6.1.3 — uncontested contact: no stoppage, count back to 1. The best of both worlds.",
+                "cs": "17.6.1.3 — neconstestovaný contact: bez zastavení, počítání zpátky na 1. Nejlepší z obou světů."
+              }
+            },
+            {
+              "t": {
+                "en": "The count drops by one, like a marking infraction",
+                "cs": "Počítání jde o jedno dolů, jako u marking infraction"
+              },
+              "why": {
+                "en": "Minus-one is the marking-infraction mechanic (18.1.3); contact resets to 1.",
+                "cs": "Minus jedna je mechanika marking infractions (18.1.3); contact resetuje na 1."
+              }
+            },
+            {
+              "t": {
+                "en": "The count pauses until you have thrown",
+                "cs": "Počítání se pozastaví, dokud nehodíš"
+              },
+              "why": {
+                "en": "Pausing belongs to an accepted travel (18.2.5).",
+                "cs": "Pozastavení patří k uznanému travelu (18.2.5)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "The marker contests the “Contact” call. What happens?",
+            "cs": "Marker call „Contact“ contestuje. Co se stane?"
+          },
+          "rules": ["17.6.1.3", "9.5.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Play stops, disc is checked in, count resumes at max 6",
+                "cs": "Hra se zastaví, disk se checkne, počítání od max 6"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.6.1.3 is stoppage-free only while uncontested; a contest makes it an ordinary stoppage at max 6 (9.5.5).",
+                "cs": "17.6.1.3 je bez zastavení jen dokud není contestovaný; contest z něj dělá běžné zastavení na max 6 (9.5.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "Play continues and the count still goes to 1",
+                "cs": "Hra běží dál a počítání jde stejně na 1"
+              },
+              "why": {
+                "en": "The reset to 1 is the reward for an ACCEPTED contact call (17.6.1.3).",
+                "cs": "Reset na 1 je odměna za UZNANÝ contact call (17.6.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "It becomes a turnover",
+                "cs": "Stává se z toho turnover"
+              },
+              "why": {
+                "en": "Contesting a call never turns the disc over (17.6.1.3).",
+                "cs": "Contestování callu nikdy nezpůsobí turnover (17.6.1.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "When is “Contact” NOT available to you?",
+            "cs": "Kdy „Contact“ použít nemůžeš?"
+          },
+          "rules": ["17.6.1.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "When the contact happens during your throwing motion — that is a foul",
+                "cs": "Když kontakt nastane během tvého hodového pohybu — to je faul"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.6.1.2 — inside the throwing motion the rules give you a foul, not the stoppage-free contact call.",
+                "cs": "17.6.1.2 — během hodového pohybu ti pravidla dávají faul, ne contact call bez zastavení."
+              }
+            },
+            {
+              "t": {
+                "en": "When the count is above 5",
+                "cs": "Když je počítání nad 5"
+              },
+              "why": {
+                "en": "The stall number is irrelevant to which call is available (17.6.1.3).",
+                "cs": "Číslo stallu s dostupností callu nemá nic společného (17.6.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "When you have already called contact once this possession",
+                "cs": "Když jsi contact v téhle držbě už jednou volal"
+              },
+              "why": {
+                "en": "There is no per-possession limit (17.6.1.3).",
+                "cs": "Žádný limit na držbu neexistuje (17.6.1.3)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "f4",
+      "level": 4,
+      "topic": {
+        "en": "Thrower & marker fouls",
+        "cs": "Fauly házeče a markera"
+      },
+      "title": {
+        "en": "“Contact” — but you never touched them",
+        "cs": "„Contact“ — ale tys ho netkl"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the marker who disagrees",
+        "cs": "marker, který nesouhlasí"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.6,
+      "qAt": 2.6,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 60, 19], [1.2, 60.4, 19.2], [1.6, 60, 19], [6.6, 60, 19]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 62.4, 21.6], [1.5, 61, 19.9], [2.6, 61.9, 21], [6.6, 61.9, 21]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 10], [2.5, 70, 18], [6.6, 74, 24]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 73, 12], [2.5, 69, 19.5], [6.6, 72.5, 25.5]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 59.2, 18.2]]
+      },
+      "fx": [
+        {
+          "t": 1.5,
+          "type": "flash",
+          "x": 60.6,
+          "y": 19.4
+        },
+        {
+          "t": 1.9,
+          "type": "bubble",
+          "dur": 1.5,
+          "actor": "O1",
+          "text": {
+            "en": "CONTACT!",
+            "cs": "CONTACT!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 3.2,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "D1",
+          "text": {
+            "en": "CONTEST!",
+            "cs": "CONTEST!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5,
+          "type": "bubble",
+          "dur": 1.5,
+          "actor": "D1",
+          "text": {
+            "en": "play stops · check · max 6",
+            "cs": "hra se staví · check · max 6"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "You are marking a thrower at “stalling 4”. From your point of view there was a jersey brush at most — nothing that moved anyone. The thrower calls “Contact”. You honestly disagree that any non-minor contact happened.",
+        "cs": "Markuješ házeče na „stalling 4“. Z tvého pohledu šlo maximálně o škrtnutí o dres — nic, co by s kýmkoli hnulo. Házeč volá „Contact“. Upřímně nesouhlasíš, že k výraznému kontaktu došlo."
+      },
+      "question": {
+        "en": "What happens when you contest the “Contact” call?",
+        "cs": "Co se stane, když „Contact“ kontestuješ?"
+      },
+      "explain": {
+        "en": "“Contact” is stoppage-free only while it is uncontested: 17.6.1.3 says that after a contact infraction that is NOT contested, play does not stop and the count resumes at 1. The moment you contest it, play stops like any disputed call: players return to their positions at the call (10.2.1), the disc is checked in, and the count resumes at max 6 (9.5.5) — with “stalling 4” last uttered, that means “stalling 5”.",
+        "cs": "„Contact“ je bez přerušení jen do chvíle, než ho někdo kontestuje: 17.6.1.3 říká, že po NEkontestovaném contactu se hra nestaví a count jede od 1. Jakmile kontestuješ, hra se staví jako u každé sporné hlášky: hráči se vrátí na místa při hlášce (10.2.1), disk projde checkem a count pokračuje na max 6 (9.5.5) — po „stalling 4“ to znamená „stalling 5“."
+      },
+      "note": {
+        "en": "Talk first (1.3): describe what you felt, listen to the thrower. If you realise they are right, accept — count to 1 and play flows. If neither of you budges, the contest costs the offence nothing worse than max 6 — the system is built so honest disagreement stays cheap.",
+        "cs": "Nejdřív mluvte (1.3): popiš, co jsi cítil, a vyslechni házeče. Když zjistíš, že má pravdu, uznej — count na 1 a hraje se. Když se neshodnete, kontest útok nestojí nic horšího než max 6 — systém je stavěný tak, aby poctivý nesouhlas byl levný."
+      },
+      "rules": ["17.6.1.3", "9.5.5", "10.2.1"],
+      "signals": [4, 21, 22],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You are the marker, you contest the “Contact” call. What does contesting do?",
+            "cs": "Jsi marker a call „Contact“ contestuješ. Co contest způsobí?"
+          },
+          "rules": ["17.6.1.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "It turns a stoppage-free call into a genuine stoppage",
+                "cs": "Změní call bez zastavení na skutečné zastavení hry"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.6.1.3 — “play does not stop” holds only while the contact call is uncontested.",
+                "cs": "17.6.1.3 — „hra se nezastaví“ platí jen dokud contact call není contestovaný."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — contact calls never stop play",
+                "cs": "Nic — contact cally hru nikdy nezastaví"
+              },
+              "why": {
+                "en": "That is the uncontested branch only (17.6.1.3).",
+                "cs": "To je jen větev bez contestu (17.6.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "It turns the call into a turnover against the thrower",
+                "cs": "Změní call na turnover proti házeči"
+              },
+              "why": {
+                "en": "Contesting never wins possession (17.6.1.3).",
+                "cs": "Contestování nikdy nezíská držení (17.6.1.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Where do the players and the disc end up?",
+            "cs": "Kde skončí hráči a disk?"
+          },
+          "rules": ["10.2.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Everyone back to their positions at the call; disc stays with the thrower at the pivot",
+                "cs": "Všichni na pozice v momentě callu; disk zůstává házeči na pivotu"
+              },
+              "ok": true,
+              "why": {
+                "en": "10.2.1 — a stoppage where the disc does not change hands resets positions to the moment of the call.",
+                "cs": "10.2.1 — při zastavení, kdy disk nemění držitele, se pozice vracejí k momentu callu."
+              }
+            },
+            {
+              "t": {
+                "en": "Everyone back to their positions when the pass was released",
+                "cs": "Všichni na pozice ve chvíli vypuštění přihrávky"
+              },
+              "why": {
+                "en": "That is 10.2.2.1, for when the disc returns to a thrower after a pass. No pass was thrown here.",
+                "cs": "To je 10.2.2.1, když se disk po přihrávce vrací házeči. Tady se nehodilo."
+              }
+            },
+            {
+              "t": {
+                "en": "Nobody moves at all",
+                "cs": "Nikdo se nehýbe"
+              },
+              "why": {
+                "en": "Every stoppage resets positions; the question is only to which moment (10.2.1).",
+                "cs": "Každé zastavení vrací pozice; otázkou je jen k jakému momentu (10.2.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "You contest, so play stops. You had fully said “stalling 4” — where does the count resume?",
+            "cs": "Contestuješ, takže se hra zastaví. Plně jsi vyřkl „stalling 4“ — od kolika se počítá dál?"
+          },
+          "rules": ["9.5.5", "9.6.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "“Stalling 5” — max 6 means the lower of last+1 and 6",
+                "cs": "„Stalling 5“ — max 6 znamená menší z (poslední+1) a 6"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.6.1 — “max n” resumes at the lower of the last agreed number plus one, and n. Here 4+1 = 5.",
+                "cs": "9.6.1 — „max n“ obnovuje na menší z (poslední dohodnuté číslo plus jedna) a n. Tady 4+1 = 5."
+              }
+            },
+            {
+              "t": {
+                "en": "“Stalling 6” — max 6 always means 6",
+                "cs": "„Stalling 6“ — max 6 vždycky znamená 6"
+              },
+              "why": {
+                "en": "Max is a ceiling, not a fixed value (9.6.1).",
+                "cs": "Max je strop, ne pevná hodnota (9.6.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "“Stalling 1”",
+                "cs": "„Stalling 1“"
+              },
+              "why": {
+                "en": "Stalling 1 is for an accepted defensive breach (9.5.1) — you contested, so 9.5.5 applies.",
+                "cs": "Stalling 1 je pro uznaný prohřešek obrany (9.5.1) — ty jsi contestoval, takže platí 9.5.5."
+              }
+            },
+            {
+              "t": {
+                "en": "“Stalling 3” — the marking minus-one",
+                "cs": "„Stalling 3“ — minus jedna jako u markingu"
+              },
+              "why": {
+                "en": "Minus-one belongs to corrected marking infractions (18.1.3), not to contested contact.",
+                "cs": "Minus jedna patří k napraveným marking infractions (18.1.3), ne k contestovanému contactu."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "Before you contest, what is the move the rules expect?",
+            "cs": "Co od tebe pravidla čekají, ještě než budeš contestovat?"
+          },
+          "rules": ["17.6.1.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Talk — say what you felt, listen to what they felt, then decide",
+                "cs": "Mluvit — říct, co jsi cítil, poslechnout si je a pak se rozhodnout"
+              },
+              "ok": true,
+              "why": {
+                "en": "Spirit of the Game first: if they are right, accept and the count goes to 1; honest disagreement costs the offence only max 6.",
+                "cs": "Nejdřív Spirit of the Game: když mají pravdu, uznej to a počítání jde na 1; poctivá neshoda stojí útok jen max 6."
+              }
+            },
+            {
+              "t": {
+                "en": "Contest immediately — hesitation weakens the call",
+                "cs": "Contestovat hned — váhání call oslabuje"
+              },
+              "why": {
+                "en": "Nothing rewards speed here; the contest stands whenever you make it (17.6.1.3).",
+                "cs": "Rychlost tady nic nepřináší; contest platí, kdykoli ho vysloví (17.6.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Ask a team-mate who was closer to decide",
+                "cs": "Nechat rozhodnout spoluhráče, který byl blíž"
+              },
+              "why": {
+                "en": "The contest belongs to the player the call was made against (17.6.1.3).",
+                "cs": "Contest patří hráči, proti kterému call zazněl (17.6.1.3)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "s10",
+      "level": 4,
+      "topic": {
+        "en": "Thrower & marker fouls",
+        "cs": "Fauly házeče a markera"
+      },
+      "title": {
+        "en": "The thrower ploughs into you",
+        "cs": "Házeč tě prostě sundá"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the marker, legally positioned",
+        "cs": "marker v legálním postavení"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 5.5,
+      "qAt": 2.1,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 60, 19], [1.4, 61.7, 20.7], [2, 61.2, 20.2], [5.5, 61.2, 20.2]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 62.3, 21.4], [1.5, 62.9, 22], [2.1, 62.4, 21.5], [5.5, 62.4, 21.5]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 10], [3, 70, 16], [5.5, 72, 20]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 73, 12], [3, 69, 17.5], [5.5, 71, 21.5]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 59.2, 18.2], [1.4, 60.9, 19.9], [2, 60.4, 19.4]]
+      },
+      "fx": [
+        {
+          "t": 1.45,
+          "type": "flash",
+          "x": 62,
+          "y": 21
+        },
+        {
+          "t": 2.3,
+          "type": "bubble",
+          "dur": 1.7,
+          "actor": "D1",
+          "text": {
+            "en": "FOUL!",
+            "cs": "Faul!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.2,
+          "type": "bubble",
+          "dur": 1.3,
+          "actor": "O1",
+          "text": {
+            "en": "accepted ✋",
+            "cs": "uznávám ✋"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "You are marking at a legal distance, standing still. The thrower drives a big pivot straight through your stationary body — clearly non-minor contact — with no throw. The thrower admits it.",
+        "cs": "Markuješ na legální vzdálenost a stojíš na místě. Házeč udělá razantní pivot přímo skrz tebe — jasně výrazný kontakt — a nehází. Sám uznává, že to byl on."
+      },
+      "question": {
+        "en": "What do you call, and what happens?",
+        "cs": "Co zavoláš a co se stane?"
+      },
+      "explain": {
+        "en": "A thrower solely responsible for non-minor contact with a legally positioned defender commits an offensive throwing foul (17.7.1). You are the fouled player, so you call “Foul” (15.4). No pass was attempted, so play stops, and the disc stays with the thrower — but because the offence committed the accepted breach, the stall count resumes at maximum 9 (9.5.2): with “stalling 4” last uttered it resumes at 5; if the count was already at 8 or 9, it resumes at 9 — one second from a stall-out.",
+        "cs": "Házeč výhradně odpovědný za výrazný kontakt s legálně postaveným obráncem se dopouští faulu házeče (17.7.1). Faulovaný jsi ty, takže voláš „Foul“ (15.4). Hod nepadl, hra se staví a disk zůstává házeči — ale protože uznané porušení pravidel spáchal útok, stall count pokračuje na maximálně 9 (9.5.2): po „stalling 4“ pokračuje na 5; kdyby už byl na 8 či 9, pokračuje na 9 — vteřinu od stall-outu."
+      },
+      "note": {
+        "en": "“Max n” mechanics (9.6.1): resume at the lower of (last agreed number + 1) and n. Contrast: contact during the thrower’s follow-through after release is not a basis for a foul (17.7.2). If the thrower contested, the count would resume at max 6 (9.5.5).",
+        "cs": "Mechanika „max n“ (9.6.1): pokračuje se na nižším z (poslední shodnuté číslo + 1) a n. Pro srovnání: kontakt při dotažení hodu po vypuštění disku faulem není (17.7.2). Kdyby házeč kontestoval, count by pokračoval na max 6 (9.5.5)."
+      },
+      "rules": ["17.7.1", "9.5.2", "9.6.1", "15.4"],
+      "signals": [1, 22],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The thrower initiates heavy contact with you, legally positioned, before any throw. What is it?",
+            "cs": "Házeč do tebe tvrdě narazí, stojíš legálně, ještě před hodem. Co to je?"
+          },
+          "rules": ["17.7.1", "15.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "An offensive throwing foul — and you, the fouled player, call it",
+                "cs": "Throwing foul útoku — a voláš ho ty, faulovaný hráč"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.7.1 — a thrower solely responsible for non-minor contact with a legally positioned defender fouls; only the fouled player calls it (15.4).",
+                "cs": "17.7.1 — házeč výhradně odpovědný za nezanedbatelný kontakt s legálně postaveným obráncem fauluje; volá jen faulovaný hráč (15.4)."
+              }
+            },
+            {
+              "t": {
+                "en": "A marking infraction against you",
+                "cs": "Marking infraction proti tobě"
+              },
+              "why": {
+                "en": "Marking infractions are about YOUR position (18.1.1.x); yours was legal.",
+                "cs": "Marking infractions jsou o TVOJÍ pozici (18.1.1.x); ta tvoje byla legální."
+              }
+            },
+            {
+              "t": {
+                "en": "Incidental contact — throwers may lean through the mark",
+                "cs": "Nahodilý kontakt — házeč se může do markera opřít"
+              },
+              "why": {
+                "en": "Only minor, non-affecting contact is incidental (12.8); ploughing through is not.",
+                "cs": "Nahodilý je jen zanedbatelný kontakt bez vlivu (12.8); projít skrz obránce takový není."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — contact during the follow-through is never a foul",
+                "cs": "Nic — kontakt během dohmatu nikdy faul není"
+              },
+              "why": {
+                "en": "True after the release (17.7.2) — but no pass was attempted here.",
+                "cs": "Po vypuštění ano (17.7.2) — tady se ale žádná přihrávka nekonala."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Who has the disc after the stoppage?",
+            "cs": "Kdo má po zastavení disk?"
+          },
+          "rules": ["17.7.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "The thrower keeps it — no pass was attempted",
+                "cs": "Házeč si ho nechává — žádná přihrávka nebyla"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.7.1 — an offensive throwing foul with no pass simply stops play; the disc does not change hands. The punishment is in the count.",
+                "cs": "17.7.1 — throwing foul útoku bez přihrávky jen zastaví hru; disk nemění držitele. Trest je v počítání."
+              }
+            },
+            {
+              "t": {
+                "en": "Your team — an offensive foul is a turnover",
+                "cs": "Tvůj tým — faul útoku je turnover"
+              },
+              "why": {
+                "en": "Fouls are not turnovers in ultimate; only completions/incompletions and specific remedies move the disc (17.7.1).",
+                "cs": "Fauly v ultimate nejsou turnovery; disk hýbou jen dokončené/nedokončené přihrávky a konkrétní nápravy (17.7.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nobody — the point is replayed",
+                "cs": "Nikdo — bod se hraje znovu"
+              },
+              "why": {
+                "en": "Nothing in the rules replays a point for a foul (17.7.1).",
+                "cs": "Nic v pravidlech kvůli faulu bod neopakuje (17.7.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "The thrower admits the foul, so play stops. You had said “stalling 4” — where does the count resume?",
+            "cs": "Házeč faul přiznává, takže se hra zastaví. Řekl jsi „stalling 4“ — od kolika se počítá dál?"
+          },
+          "rules": ["9.5.2", "9.6.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "“Stalling 5” — max 9, so the lower of 4+1 and 9",
+                "cs": "„Stalling 5“ — max 9, tedy menší z 4+1 a 9"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.5.2 — an accepted OFFENSIVE breach resumes at max 9; 9.6.1 does the arithmetic: 4+1 = 5.",
+                "cs": "9.5.2 — uznaný prohřešek ÚTOKU se obnovuje na max 9; 9.6.1 dělá výpočet: 4+1 = 5."
+              }
+            },
+            {
+              "t": {
+                "en": "“Stalling 9” — max 9 means 9",
+                "cs": "„Stalling 9“ — max 9 znamená 9"
+              },
+              "why": {
+                "en": "Only if the count was already at 8 or 9 does it land on 9 (9.6.1).",
+                "cs": "Na 9 se dostaneš jen tehdy, když počítání už bylo na 8 nebo 9 (9.6.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "“Stalling 1”",
+                "cs": "„Stalling 1“"
+              },
+              "why": {
+                "en": "Stalling 1 rewards the offence for a DEFENSIVE breach (9.5.1); this breach was the offence’s.",
+                "cs": "Stalling 1 odměňuje útok za prohřešek OBRANY (9.5.1); tenhle prohřešek byl útoku."
+              }
+            },
+            {
+              "t": {
+                "en": "“Stalling 5”, but capped at max 6",
+                "cs": "„Stalling 5“, ale se stropem max 6"
+              },
+              "why": {
+                "en": "Max 6 is for contested and other calls (9.5.5); an accepted offensive breach is max 9 (9.5.2).",
+                "cs": "Max 6 je pro contestované a ostatní cally (9.5.5); uznaný prohřešek útoku je max 9 (9.5.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "If the thrower contests the foul rather than admitting it, what changes?",
+            "cs": "Co se změní, když házeč faul místo přiznání contestuje?"
+          },
+          "rules": ["9.5.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "The count resumes at max 6 instead of max 9",
+                "cs": "Počítání se obnoví na max 6 místo max 9"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.5.5 — a contested call falls back to the generic max 6; the offence is better off contesting than admitting.",
+                "cs": "9.5.5 — contestovaný call spadne na obecné max 6; útok je na tom po contestu lépe než po přiznání."
+              }
+            },
+            {
+              "t": {
+                "en": "The disc goes to your team",
+                "cs": "Disk jde tvému týmu"
+              },
+              "why": {
+                "en": "Contests never transfer possession (9.5.5).",
+                "cs": "Contesty nikdy nepředávají držení (9.5.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — the count is still max 9",
+                "cs": "Nic — počítání je stále max 9"
+              },
+              "why": {
+                "en": "Max 9 requires the breach to be accepted (9.5.2).",
+                "cs": "Max 9 vyžaduje, aby byl prohřešek uznaný (9.5.2)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tf1",
+      "level": 4,
+      "topic": {
+        "en": "Thrower & marker fouls",
+        "cs": "Fauly házeče a markera"
+      },
+      "title": {
+        "en": "Your follow-through hits the marker",
+        "cs": "Trefíš markera dohmatem"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower who has just released",
+        "cs": "házeč, který právě vypustil disk"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.4,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 10], [3.4, 80, 8], [6.4, 83, 7]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 11], [3.4, 81.4, 9.4], [6.4, 84, 8.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 63.8, 18], [6.4, 63.8, 18]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 62, 18], [2, 62, 18], [2.8, 62.6, 17.4], [6.4, 62.6, 17.4]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 17.4], [2.4, 62.4, 17.4], [3.2, 70, 13], [4.2, 82, 7.6], [6.4, 82, 7.6]]
+      },
+      "fx": [
+        {
+          "t": 0.8,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 3…",
+            "cs": "…stalling 3…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 2.9,
+          "type": "flash",
+          "x": 63.4,
+          "y": 17.4
+        },
+        {
+          "t": 3.2,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "D1",
+          "text": {
+            "en": "FOUL!",
+            "cs": "Faul!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.6,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "O1",
+          "text": {
+            "en": "follow-through",
+            "cs": "dohmat"
+          },
+          "style": "count"
+        },
+        {
+          "t": 5.4,
+          "type": "mark",
+          "x": 82,
+          "y": 7.6,
+          "kind": "target",
+          "label": {
+            "en": "completion stands",
+            "cs": "spojka platí"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You release a big backhand. The disc is already gone when your trailing hand sweeps through and clips the marker’s shoulder. They call a foul on you. The pass is completed downfield.",
+        "cs": "Vypustíš velký backhand. Disk je už pryč, když tvoje dobíhající ruka projede a škrtne markera o rameno. Volá na tebe faul. Přihrávka je vepředu dokončená."
+      },
+      "question": {
+        "en": "Is that a foul on you?",
+        "cs": "Je to faul na tebe?"
+      },
+      "explain": {
+        "en": "No. Contact occurring during the thrower’s follow-through is not a sufficient basis for a foul (17.7.2) — the rule says it should be avoided, but it is not a foul, and the completion stands. An offensive throwing foul needs you to be solely responsible for initiating non-minor contact with a legally positioned defender (17.7.1), and a follow-through after the release is explicitly carved out of that.",
+        "cs": "Ne. Kontakt při dohmatu házeče není dostatečným důvodem k faulu (17.7.2) — pravidlo říká, že by se mu měl vyhnout, ale faul to není a dokončená přihrávka platí. Offensive throwing foul vyžaduje, abys byl výhradně odpovědný za vyvolání nezanedbatelného kontaktu s legálně postaveným obráncem (17.7.1), a dohmat po vypuštění je z toho výslovně vyjmutý."
+      },
+      "note": {
+        "en": "“Not a foul” is not “fair game”: 17.7.2 asks you to avoid it. And it protects only the follow-through — contact before the release, or during the throwing motion, is a live foul question (17.6.1.2, 17.7.1).",
+        "cs": "„Není foul“ neznamená „je to v pořádku“: 17.7.2 tě žádá, aby ses tomu vyhýbal. A chrání jen dohmat — kontakt před vypuštěním nebo během hodu je otázka faulu jako každá jiná (17.6.1.2, 17.7.1)."
+      },
+      "rules": ["17.7.2", "17.7.1", "16.3"],
+      "signals": [1, 23],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The disc is already gone when your follow-through clips the marker. Is that a foul?",
+            "cs": "Disk je už pryč, když tvůj dohmat škrtne markera. Je to faul?"
+          },
+          "rules": ["17.7.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — follow-through contact is not a sufficient basis for a foul",
+                "cs": "Ne — kontakt při dohmatu není dostatečný důvod k faulu"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.7.2 — it should be avoided, but it is explicitly not a foul.",
+                "cs": "17.7.2 — měl by ses mu vyhnout, ale výslovně to faul není."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — an offensive throwing foul",
+                "cs": "Ano — offensive throwing foul"
+              },
+              "why": {
+                "en": "That needs you to be solely responsible for contact BEFORE the release (17.7.1); 17.7.2 carves out the follow-through.",
+                "cs": "Ten vyžaduje, abys byl výhradně odpovědný za kontakt PŘED vypuštěním (17.7.1); 17.7.2 dohmat vyjímá."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — dangerous play, since they could not see it coming",
+                "cs": "Ano — dangerous play, protože to neviděl přicházet"
+              },
+              "why": {
+                "en": "Dangerous play needs reckless disregard or significant risk of injury (17.1.1); a normal follow-through is neither.",
+                "cs": "Dangerous play vyžaduje bezohlednost nebo výrazné riziko zranění (17.1.1); běžný dohmat není ani jedno."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if the pass was incomplete",
+                "cs": "Jen pokud byla přihrávka nedokončená"
+              },
+              "why": {
+                "en": "The outcome never decides whether contact was a foul (17.7.2).",
+                "cs": "Výsledek nikdy nerozhoduje o tom, jestli byl kontakt faul (17.7.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "So what happens to the completed pass?",
+            "cs": "Co se tedy stane s dokončenou přihrávkou?"
+          },
+          "rules": ["16.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "It stands — play simply continues",
+                "cs": "Platí — prostě se hraje dál"
+              },
+              "ok": true,
+              "why": {
+                "en": "No valid call means nothing to resolve (16.3).",
+                "cs": "Žádný platný call znamená, že není co řešit (16.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "It comes back — the marker called a foul",
+                "cs": "Vrací se — marker zavolal faul"
+              },
+              "why": {
+                "en": "A call that is not a breach has no consequences (17.7.2).",
+                "cs": "Call, který není prohřeškem, nemá důsledky (17.7.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "It stands, but the count restarts at max 9",
+                "cs": "Platí, ale počítání se obnoví na max 9"
+              },
+              "why": {
+                "en": "Max 9 needs an accepted offensive breach (9.5.2); there is none.",
+                "cs": "Max 9 vyžaduje uznaný prohřešek útoku (9.5.2); žádný tu není."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "Where is the line between this and a real thrower foul?",
+            "cs": "Kde je hranice mezi tímhle a skutečným faulem házeče?"
+          },
+          "rules": ["17.7.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Before or during the throwing motion it can be a foul; after the release the follow-through cannot",
+                "cs": "Před hodem nebo během něj to faul být může; po vypuštění dohmat ne"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.7.1 with 17.7.2 — the release is the boundary.",
+                "cs": "17.7.1 spolu s 17.7.2 — hranicí je vypuštění disku."
+              }
+            },
+            {
+              "t": {
+                "en": "Any contact with the marker is a foul if they call it first",
+                "cs": "Jakýkoli kontakt s markerem je faul, když ho zavolá první"
+              },
+              "why": {
+                "en": "Calling first decides nothing; the rules decide (17.7.1, 17.7.2).",
+                "cs": "Kdo volá první, nerozhoduje; rozhodují pravidla (17.7.1, 17.7.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "It depends on how hard the contact was",
+                "cs": "Záleží na tom, jak tvrdý kontakt byl"
+              },
+              "why": {
+                "en": "Severity decides whether contact is non-minor, not whether the follow-through is exempt (17.7.2).",
+                "cs": "Intenzita rozhoduje, jestli je kontakt nezanedbatelný, ne o výjimce pro dohmat (17.7.2)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tf2",
+      "level": 4,
+      "topic": {
+        "en": "Thrower & marker fouls",
+        "cs": "Fauly házeče a markera"
+      },
+      "title": {
+        "en": "You hit a marker who was too close",
+        "cs": "Narazíš do markera, který byl moc blízko"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower pivoting out",
+        "cs": "házeč, který se vypivotuje"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.6,
+      "qAt": 3.6,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 26], [3.6, 79, 24], [6.6, 79, 24]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 27], [3.6, 80.4, 25.4], [6.6, 80.4, 25.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 63, 18], [1.8, 62.9, 18], [3.6, 62.9, 18], [4.8, 64.6, 18], [6.6, 64.6, 18]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 62, 18], [2.4, 61.6, 17], [3.6, 61.6, 17], [6.6, 61.6, 17]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 17.4], [6.6, 62.2, 16.6]]
+      },
+      "fx": [
+        {
+          "t": 0.9,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 4…",
+            "cs": "…stalling 4…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 2.1,
+          "type": "mark",
+          "x": 62.5,
+          "y": 17.6,
+          "kind": "x",
+          "label": {
+            "en": "inside a disc diameter",
+            "cs": "blíž než průměr disku"
+          }
+        },
+        {
+          "t": 2.8,
+          "type": "flash",
+          "x": 62.6,
+          "y": 17.4
+        },
+        {
+          "t": 3.2,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "O1",
+          "text": {
+            "en": "FOUL!",
+            "cs": "Faul!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.8,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 1…",
+            "cs": "…stalling 1…"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "The marker has been inside a disc diameter of your torso for two counts — you never moved into them. As you pivot out to throw, your shoulder meets theirs: real, non-minor contact. They did not lunge; they were simply standing there, too close.",
+        "cs": "Marker je už dvě čísla blíž než průměr disku od tvého trupu — ty jsi do něj nevstoupil. Když se vypivotuješ na hod, střetnou se vaše ramena: skutečný, nezanedbatelný kontakt. Nevrhl se na tebe; jen tam takhle blízko stál."
+      },
+      "question": {
+        "en": "Whose foul is it?",
+        "cs": "Čí je to faul?"
+      },
+      "explain": {
+        "en": "Theirs. A defensive throwing foul occurs when there is non-minor contact between the thrower and an ILLEGALLY POSITIONED defender (17.6.1.1) — no lunge or initiation is required, their position alone does it. They were inside disc space (18.1.1.3), so the contact is on them. Accepted, play stops, you keep the disc at your pivot, and the count restarts at “stalling 1” (9.5.1).",
+        "cs": "Jeho. Defensive throwing foul nastane, když dojde k nezanedbatelnému kontaktu mezi házečem a NELEGÁLNĚ POSTAVENÝM obráncem (17.6.1.1) — není potřeba žádný výpad ani iniciace, stačí jeho pozice. Byl uvnitř disc space (18.1.1.3), takže kontakt jde za ním. Po uznání se hra zastaví, disk ti zůstává na pivotu a počítání začíná od „stalling 1“ (9.5.1)."
+      },
+      "note": {
+        "en": "Compare the mirror: if their position had been legal and you were solely responsible for the contact, it is an offensive throwing foul and the count resumes at max 9 (17.7.1, 9.5.2). The marker’s legality is what decides who pays.",
+        "cs": "Srovnej zrcadlo: kdyby jeho pozice byla legální a kontakt jsi vyvolal výhradně ty, jde o offensive throwing foul a počítání se obnoví na max 9 (17.7.1, 9.5.2). O tom, kdo platí, rozhoduje legálnost markera."
+      },
+      "rules": ["17.6.1.1", "18.1.1.3", "9.5.1"],
+      "signals": [1, 12],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You pivot into a marker who has been inside disc space for two counts. Whose foul?",
+            "cs": "Napivotuješ se do markera, který je už dvě čísla uvnitř disc space. Čí faul?"
+          },
+          "rules": ["17.6.1.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Theirs — a defensive throwing foul",
+                "cs": "Jeho — defensive throwing foul"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.6.1.1 — non-minor contact between the thrower and an ILLEGALLY positioned defender is their foul; no initiation needed.",
+                "cs": "17.6.1.1 — nezanedbatelný kontakt mezi házečem a NELEGÁLNĚ postaveným obráncem je jeho faul; iniciace není potřeba."
+              }
+            },
+            {
+              "t": {
+                "en": "Yours — you moved into them",
+                "cs": "Tvůj — vstoupil jsi do něj"
+              },
+              "why": {
+                "en": "An offensive throwing foul needs the defender to be in a LEGAL position (17.7.1); theirs was not.",
+                "cs": "Offensive throwing foul vyžaduje obránce v LEGÁLNÍ pozici (17.7.1); ta jeho nebyla."
+              }
+            },
+            {
+              "t": {
+                "en": "Nobody’s — it is incidental at the mark",
+                "cs": "Ničí — na marce je to nahodilé"
+              },
+              "why": {
+                "en": "Non-minor contact is never incidental (17.6.1.1).",
+                "cs": "Nezanedbatelný kontakt nikdy není nahodilý (17.6.1.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Offsetting — you both contributed",
+                "cs": "Offsetting — přispěli jste oba"
+              },
+              "why": {
+                "en": "Offsetting needs accepted fouls from both teams (17.9.1); the illegal position settles this one.",
+                "cs": "Offsetting vyžaduje uznané fauly obou týmů (17.9.1); tady to rozhoduje nelegální pozice."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Who has the disc after the stoppage?",
+            "cs": "Kdo má po zastavení disk?"
+          },
+          "rules": ["17.6.1.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "You, at your pivot — no pass was thrown",
+                "cs": "Ty, na svém pivotu — nic se nehodilo"
+              },
+              "ok": true,
+              "why": {
+                "en": "A thrower foul before any release simply stops play with the disc where it is (17.6.1.1).",
+                "cs": "Faul na házeče před hodem prostě zastaví hru s diskem tam, kde je (17.6.1.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "The defence — the contact was your fault",
+                "cs": "Obrana — kontakt byl tvoje vina"
+              },
+              "why": {
+                "en": "No foul on the thrower ever turns the disc over (17.6.1.1).",
+                "cs": "Žádný faul na házeče nikdy nezpůsobí turnover (17.6.1.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "You, but you must take the disc to the sideline",
+                "cs": "Ty, ale musíš s diskem na postranní čáru"
+              },
+              "why": {
+                "en": "Nothing moves the disc for a foul at the mark (10.2.1).",
+                "cs": "Nic disk kvůli faulu na marce nepřemisťuje (10.2.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "Where does the count restart?",
+            "cs": "Od kolika se počítání obnoví?"
+          },
+          "rules": ["9.5.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "“Stalling 1” — an accepted defensive breach",
+                "cs": "„Stalling 1“ — uznaný prohřešek obrany"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.5.1 — the marker’s illegal position is the accepted breach, so the count goes back to one.",
+                "cs": "9.5.1 — nelegální pozice markera je uznaný prohřešek, takže počítání jde zpátky na jedna."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 9 — you initiated the contact",
+                "cs": "Max 9 — kontakt jsi vyvolal ty"
+              },
+              "why": {
+                "en": "Max 9 punishes an accepted OFFENSIVE breach (9.5.2); this breach was the defence’s.",
+                "cs": "Max 9 trestá uznaný prohřešek ÚTOKU (9.5.2); tenhle byl obrany."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 6",
+                "cs": "Max 6"
+              },
+              "why": {
+                "en": "Max 6 is for contested and other calls (9.5.5); this was accepted.",
+                "cs": "Max 6 je pro contestované a ostatní cally (9.5.5); tenhle byl uznaný."
+              }
+            },
+            {
+              "t": {
+                "en": "Down one, as with a marking infraction",
+                "cs": "O jedno dolů, jako u marking infraction"
+              },
+              "why": {
+                "en": "Minus-one belongs to infractions that never stop play (18.1.3); a foul does stop play.",
+                "cs": "Minus jedna patří k infractions, které hru nezastavují (18.1.3); faul ji zastaví."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tf3",
+      "level": 4,
+      "topic": {
+        "en": "Thrower & marker fouls",
+        "cs": "Fauly házeče a markera"
+      },
+      "title": {
+        "en": "You both go for the same gap",
+        "cs": "Oba jdete do stejné mezery"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower stepping through",
+        "cs": "házeč, který vykračuje"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.6,
+      "qAt": 3.6,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 10], [3.6, 79, 8], [6.6, 79, 8]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 11], [3.6, 80.4, 9.4], [6.6, 80.4, 9.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 64, 19], [2.6, 62.8, 16.8], [3.6, 62.6, 16.4], [4.8, 64, 18], [6.6, 64, 18]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 62, 18], [2.6, 61.8, 16.6], [3.6, 61.8, 16.2], [6.6, 61.8, 16.2]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 17.4], [6.6, 62.2, 15.8]]
+      },
+      "fx": [
+        {
+          "t": 0.9,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 2…",
+            "cs": "…stalling 2…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 2.4,
+          "type": "mark",
+          "x": 62.4,
+          "y": 16.2,
+          "kind": "zone",
+          "r": 2,
+          "label": {
+            "en": "unoccupied space",
+            "cs": "neobsazený prostor"
+          }
+        },
+        {
+          "t": 3.1,
+          "type": "flash",
+          "x": 62.4,
+          "y": 16.4
+        },
+        {
+          "t": 3.4,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "O1",
+          "text": {
+            "en": "FOUL!",
+            "cs": "Faul!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.8,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 1…",
+            "cs": "…stalling 1…"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "You step out to your break side; at the same instant the marker slides to cover it. Neither of you was there first — you both moved into the same empty patch of grass at the same time and collided, hard, before you could release.",
+        "cs": "Vykročíš na break stranu; ve stejný okamžik se marker přesouvá, aby ji zakryl. Ani jeden tam nebyl první — oba jste ve stejnou chvíli vstoupili do stejného prázdného místa a tvrdě se srazili, ještě než jsi stihl hodit."
+      },
+      "question": {
+        "en": "Nobody initiated it. Whose foul is it?",
+        "cs": "Nikdo to nevyvolal. Čí je to faul?"
+      },
+      "explain": {
+        "en": "Still the defence’s. 17.6.1.2 covers two cases: a defender initiating non-minor contact with the thrower, AND non-minor contact resulting from the thrower and the defender both vying for the same unoccupied position, before the release. Symmetrical contact in a free space is a defensive throwing foul by rule — so the disc stays with you and the count restarts at “stalling 1” (9.5.1).",
+        "cs": "Pořád obrany. 17.6.1.2 pokrývá dva případy: obránce vyvolá nezanedbatelný kontakt s házečem, A také nezanedbatelný kontakt vzniklý tím, že házeč i obránce míří do stejného neobsazeného místa, před vypuštěním disku. Symetrický kontakt ve volném prostoru je podle pravidla defensive throwing foul — disk tedy zůstává tobě a počítání začíná od „stalling 1“ (9.5.1)."
+      },
+      "note": {
+        "en": "That asymmetry is deliberate: the thrower is the player being counted on, so the rules put the cost of a 50/50 collision at the mark on the defence. Away from the disc, the same simultaneous contact would be offsetting fouls instead (17.9.2).",
+        "cs": "Ta asymetrie je záměrná: házeč je hráč, na kterého se počítá, takže pravidla dávají cenu za souboj 50/50 na marce obraně. Mimo disk by stejný současný kontakt byl offsetting fouls (17.9.2)."
+      },
+      "rules": ["17.6.1.2", "9.5.1", "17.9.2"],
+      "signals": [1],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You and the marker move into the same unoccupied space at the same instant and collide, before any release. Whose foul?",
+            "cs": "Ty i marker vstoupíte ve stejný okamžik do stejného neobsazeného prostoru a srazíte se, ještě před hodem. Čí faul?"
+          },
+          "rules": ["17.6.1.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "The defence’s — a defensive throwing foul",
+                "cs": "Obrany — defensive throwing foul"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.6.1.2 explicitly covers contact resulting from the thrower and defender both vying for the same unoccupied position before the release.",
+                "cs": "17.6.1.2 výslovně pokrývá kontakt vzniklý tím, že házeč i obránce míří do stejného neobsazeného místa před vypuštěním disku."
+              }
+            },
+            {
+              "t": {
+                "en": "Offsetting fouls — it was symmetrical",
+                "cs": "Offsetting fouls — bylo to symetrické"
+              },
+              "why": {
+                "en": "That is the rule away from the disc (17.9.2); at the mark 17.6.1.2 assigns it to the defence.",
+                "cs": "To je pravidlo mimo disk (17.9.2); na marce ho 17.6.1.2 přiřazuje obraně."
+              }
+            },
+            {
+              "t": {
+                "en": "Yours — you moved first",
+                "cs": "Tvůj — hnul ses první"
+              },
+              "why": {
+                "en": "An offensive throwing foul needs you to be SOLELY responsible (17.7.1); you were not.",
+                "cs": "Offensive throwing foul vyžaduje, abys byl VÝHRADNĚ odpovědný (17.7.1); nebyl jsi."
+              }
+            },
+            {
+              "t": {
+                "en": "No foul — the space belonged to neither of you",
+                "cs": "Žádný faul — prostor nepatřil ani jednomu"
+              },
+              "why": {
+                "en": "Non-minor contact always resolves to somebody; here the rule names the defence (17.6.1.2).",
+                "cs": "Nezanedbatelný kontakt se vždy k někomu přiřadí; tady pravidlo jmenuje obranu (17.6.1.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "Where does the count restart?",
+            "cs": "Od kolika se počítání obnoví?"
+          },
+          "rules": ["9.5.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "“Stalling 1”",
+                "cs": "„Stalling 1“"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.5.1 — an accepted defensive breach, however symmetrical the collision felt.",
+                "cs": "9.5.1 — uznaný prohřešek obrany, ať srážka působila jakkoli symetricky."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 6, since neither of you really breached",
+                "cs": "Max 6, protože se vlastně neprohřešil ani jeden"
+              },
+              "why": {
+                "en": "The rule does assign the breach — to the defence (17.6.1.2), so 9.5.1 applies.",
+                "cs": "Pravidlo prohřešek přiřazuje — obraně (17.6.1.2), takže platí 9.5.1."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 9",
+                "cs": "Max 9"
+              },
+              "why": {
+                "en": "Max 9 is for accepted offensive breaches (9.5.2).",
+                "cs": "Max 9 je pro uznané prohřešky útoku (9.5.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "Same simultaneous collision, but between a receiver and a defender away from the mark. Now?",
+            "cs": "Stejná současná srážka, ale mezi receiverem a obráncem mimo marku. A teď?"
+          },
+          "rules": ["17.9.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "Offsetting fouls — the disc goes back to the thrower",
+                "cs": "Offsetting fouls — disk se vrací házeči"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.9.2 — non-minor contact from two opponents moving to a single point simultaneously is offsetting.",
+                "cs": "17.9.2 — nezanedbatelný kontakt dvou soupeřů mířících současně do jednoho bodu je offsetting."
+              }
+            },
+            {
+              "t": {
+                "en": "Still a defensive foul",
+                "cs": "Pořád faul obrany"
+              },
+              "why": {
+                "en": "17.6.1.2 is specific to the thrower; away from the disc, 17.9.2 governs.",
+                "cs": "17.6.1.2 se týká konkrétně házeče; mimo disk platí 17.9.2."
+              }
+            },
+            {
+              "t": {
+                "en": "No foul at all",
+                "cs": "Žádný faul"
+              },
+              "why": {
+                "en": "That is only true for MINOR simultaneous contact (12.8).",
+                "cs": "To platí jen pro DROBNÝ současný kontakt (12.8)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tf4",
+      "level": 4,
+      "topic": {
+        "en": "Thrower & marker fouls",
+        "cs": "Fauly házeče a markera"
+      },
+      "title": {
+        "en": "A bid that endangers someone",
+        "cs": "Zákrok, který někoho ohrozí"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower about to release",
+        "cs": "házeč těsně před hodem"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.6,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 26], [3.4, 79, 24], [6.6, 79, 24]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 27], [3.4, 80.4, 25.4], [6.6, 80.4, 25.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 68, 22], [2.2, 64, 19.4], [3, 62.8, 18.2], [4.4, 63.6, 19.6], [6.6, 64.2, 20]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 62, 18], [6.6, 62, 18]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 17.4], [6.6, 62.4, 17.4]]
+      },
+      "fx": [
+        {
+          "t": 2.6,
+          "type": "mark",
+          "x": 63,
+          "y": 18.4,
+          "kind": "x",
+          "label": {
+            "en": "flying, uncontrolled",
+            "cs": "letí, bez kontroly"
+          }
+        },
+        {
+          "t": 3,
+          "type": "flash",
+          "x": 62.8,
+          "y": 18
+        },
+        {
+          "t": 3.2,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "O1",
+          "text": {
+            "en": "DANGEROUS!",
+            "cs": "DANGEROUS!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.8,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 1…",
+            "cs": "…stalling 1…"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "A poaching defender launches himself at your throwing arm from your blind side, fully airborne and out of control. He arrives late and clatters into you at speed. You are shaken but unhurt, and the disc never left your hand.",
+        "cs": "Poachující obránce se ti z mrtvého úhlu vrhne po hodové ruce, celý ve vzduchu a bez kontroly. Dorazí pozdě a v rychlosti do tebe napálí. Jsi otřesený, ale nezraněný, a disk ti ruku neopustil."
+      },
+      "question": {
+        "en": "What is the strongest call here?",
+        "cs": "Jaký je tady nejsilnější call?"
+      },
+      "explain": {
+        "en": "Dangerous play (17.1.1). Actions showing reckless disregard for the safety of other players, or posing significant risk of injury, must be treated as a foul REGARDLESS of whether or when contact occurs — and this rule is not superseded by any other foul rule. Accepted, it is treated as the most relevant foul from Section 17: here a defensive throwing foul, so you keep the disc and the count restarts at “stalling 1” (9.5.1).",
+        "cs": "Dangerous play (17.1.1). Jednání, které ukazuje bezohlednost vůči bezpečí ostatních hráčů nebo vytváří výrazné riziko zranění, se musí posoudit jako faul BEZ OHLEDU na to, jestli a kdy dojde ke kontaktu — a tohle pravidlo nepřebíjí žádné jiné pravidlo o faulech. Po uznání se řeší jako nejrelevantnější faul z oddílu 17: tady defensive throwing foul, takže disk zůstává tobě a počítání začíná od „stalling 1“ (9.5.1)."
+      },
+      "note": {
+        "en": "The two words that matter: “regardless of whether or when contact occurs”. A bid that would have been catastrophic is dangerous play even if it misses you entirely — you do not have to be hit, and you certainly do not have to be hurt.",
+        "cs": "Dvě slova, na kterých záleží: „bez ohledu na to, jestli a kdy“ dojde ke kontaktu. Zákrok, který mohl skončit katastrofou, je dangerous play, i když tě vůbec mine — nemusíš být zasažený a rozhodně nemusíš být zraněný."
+      },
+      "rules": ["17.1.1", "17.6.1.2", "9.5.1"],
+      "signals": [1, 17],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "A defender flies in out of control at your throwing arm. What is the call?",
+            "cs": "Obránce ti bez kontroly vlétne po hodové ruce. Jaký je call?"
+          },
+          "rules": ["17.1.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Dangerous play",
+                "cs": "Dangerous play"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.1.1 — reckless disregard for safety or significant risk of injury must be treated as a foul, and this rule is not superseded by any other foul rule.",
+                "cs": "17.1.1 — bezohlednost vůči bezpečí nebo výrazné riziko zranění se musí posoudit jako faul a tohle pravidlo nepřebíjí žádné jiné."
+              }
+            },
+            {
+              "t": {
+                "en": "A marking infraction — they were badly positioned",
+                "cs": "Marking infraction — byl špatně postavený"
+              },
+              "why": {
+                "en": "Infractions are about position without contact (18.1.1); this was a dangerous, contacting bid.",
+                "cs": "Infractions jsou o pozici bez kontaktu (18.1.1); tohle byl nebezpečný zákrok s kontaktem."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — you were not hurt",
+                "cs": "Nic — nezranil ses"
+              },
+              "why": {
+                "en": "Injury is not required; 17.1.1 applies regardless of whether or when contact occurs.",
+                "cs": "Zranění se nevyžaduje; 17.1.1 platí bez ohledu na to, jestli a kdy dojde ke kontaktu."
+              }
+            },
+            {
+              "t": {
+                "en": "A contact infraction — call “Contact” and play on",
+                "cs": "Contact infraction — zavolat „Contact“ a hrát dál"
+              },
+              "why": {
+                "en": "“Contact” is the stoppage-free option for ordinary marker contact (17.6.1.3); dangerous play is not ordinary.",
+                "cs": "„Contact“ je volba bez zastavení pro běžný kontakt markera (17.6.1.3); dangerous play běžný není."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "What if the bid had missed you completely?",
+            "cs": "Co kdyby tě ten zákrok úplně minul?"
+          },
+          "rules": ["17.1.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Still dangerous play — contact is not required",
+                "cs": "Pořád dangerous play — kontakt se nevyžaduje"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.1.1 says “regardless of whether or when contact occurs” — the risk itself is the breach.",
+                "cs": "17.1.1 říká „bez ohledu na to, jestli a kdy“ dojde ke kontaktu — prohřeškem je samo riziko."
+              }
+            },
+            {
+              "t": {
+                "en": "No call — no contact, no foul",
+                "cs": "Žádný call — bez kontaktu není faul"
+              },
+              "why": {
+                "en": "True for every other foul in Section 17, and explicitly untrue for this one (17.1.1).",
+                "cs": "Platí pro každý jiný faul v oddílu 17 a pro tenhle výslovně neplatí (17.1.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "A violation instead of a foul",
+                "cs": "Místo faulu violation"
+              },
+              "why": {
+                "en": "17.1.1 says it must be treated as a foul — the most relevant one from Section 17.",
+                "cs": "17.1.1 říká, že se musí posoudit jako faul — ten nejrelevantnější z oddílu 17."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "Accepted. How is it resolved?",
+            "cs": "Uznaný. Jak se vyřeší?"
+          },
+          "rules": ["17.1.1", "9.5.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "As the most relevant foul from Section 17 — here a defensive throwing foul: you keep the disc, count at “stalling 1”",
+                "cs": "Jako nejrelevantnější faul z oddílu 17 — tady defensive throwing foul: disk zůstává tobě, počítání na „stalling 1“"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.1.1 routes the remedy through the closest ordinary foul; with a defensive breach that is 9.5.1.",
+                "cs": "17.1.1 vede nápravu přes nejbližší běžný faul; u prohřešku obrany je to 9.5.1."
+              }
+            },
+            {
+              "t": {
+                "en": "An automatic turnover to your team",
+                "cs": "Automatický turnover pro tvůj tým"
+              },
+              "why": {
+                "en": "Dangerous play has no possession penalty of its own (17.1.1).",
+                "cs": "Dangerous play nemá vlastní postih v držení disku (17.1.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "The player must leave the field",
+                "cs": "Hráč musí opustit hřiště"
+              },
+              "why": {
+                "en": "Send-offs live in the tournament rules, not here (17.1.1).",
+                "cs": "Vyloučení řeší turnajová pravidla, ne tohle (17.1.1)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tf5",
+      "level": 4,
+      "topic": {
+        "en": "Thrower & marker fouls",
+        "cs": "Fauly házeče a markera"
+      },
+      "title": {
+        "en": "They move into your pivot",
+        "cs": "Vstoupí ti do pivotu"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the marker who moved late",
+        "cs": "marker, který se pozdě přesunul"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.4,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 10], [3.4, 79, 8], [6.4, 79, 8]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 11], [3.4, 80.4, 9.4], [6.4, 80.4, 9.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [
+            [0, 64.4, 19.6],
+            [2.4, 63, 17.8],
+            [3.4, 62.8, 17.4],
+            [4.6, 64.2, 19],
+            [6.4, 64.2, 19]
+          ]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 62, 18], [2.2, 61.6, 17.2], [3.4, 61.6, 17], [6.4, 61.6, 17]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 17.4], [6.4, 62.2, 16.6]]
+      },
+      "fx": [
+        {
+          "t": 0.8,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 5…",
+            "cs": "…stalling 5…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 2.9,
+          "type": "flash",
+          "x": 62.6,
+          "y": 17.4
+        },
+        {
+          "t": 3.2,
+          "type": "bubble",
+          "dur": 1.1,
+          "actor": "D1",
+          "text": {
+            "en": "FOUL on you!",
+            "cs": "Faul na tebe!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.8,
+          "type": "bubble",
+          "dur": 1.5,
+          "actor": "O1",
+          "text": {
+            "en": "you moved in",
+            "cs": "vstoupil jsi tam ty"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "You are marking. As the thrower steps into their pivot, you slide across late and your body arrives in the space they are already moving through. Contact — and you instinctively call a foul on them.",
+        "cs": "Markuješ. Ve chvíli, kdy házeč vykročí do pivotu, se pozdě přesuneš a tvoje tělo dorazí do prostoru, kterým se už pohybuje. Kontakt — a ty instinktivně voláš faul na něj."
+      },
+      "question": {
+        "en": "Is that an offensive throwing foul?",
+        "cs": "Je to offensive throwing foul?"
+      },
+      "explain": {
+        "en": "No. An offensive throwing foul needs the thrower to be SOLELY responsible for initiating non-minor contact with a defender in a LEGAL position (17.7.1). You moved into space they were already occupying or moving through, so neither condition holds — if anything, the contact is yours. Your call should be retracted; the thrower keeps the disc and the count carries on.",
+        "cs": "Ne. Offensive throwing foul vyžaduje, aby byl házeč VÝHRADNĚ odpovědný za vyvolání nezanedbatelného kontaktu s obráncem v LEGÁLNÍ pozici (17.7.1). Ty ses přesunul do prostoru, který už zaujímal nebo jím procházel, takže neplatí ani jedna podmínka — kontakt jde spíš za tebou. Call bys měl odvolat; házeč si disk nechává a počítání pokračuje."
+      },
+      "note": {
+        "en": "“Solely responsible” is the whole test, and it is a high bar. If both of you contributed, it is not an offensive foul; and at the mark, symmetrical contact in an unoccupied space is explicitly the defence’s foul (17.6.1.2).",
+        "cs": "„Výhradně odpovědný“ je celý test a je to vysoká laťka. Pokud jste přispěli oba, o offensive foul nejde; a na marce je symetrický kontakt v neobsazeném prostoru výslovně faul obrany (17.6.1.2)."
+      },
+      "rules": ["17.7.1", "17.6.1.2", "18.1.1.3"],
+      "signals": [1, 6],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You slid late into the space the thrower was already moving through, and called a foul on them. Does it stand?",
+            "cs": "Pozdě ses přesunul do prostoru, kterým se házeč už pohyboval, a zavolal jsi na něj faul. Platí?"
+          },
+          "rules": ["17.7.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — an offensive throwing foul needs them to be SOLELY responsible, against a defender in a LEGAL position",
+                "cs": "Ne — offensive throwing foul vyžaduje, aby byl VÝHRADNĚ odpovědný, vůči obránci v LEGÁLNÍ pozici"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.7.1 — both conditions fail here, so there is no offensive foul to call.",
+                "cs": "17.7.1 — obě podmínky tady padají, takže žádný offensive foul k volání není."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — they made contact with you",
+                "cs": "Ano — kontakt s tebou udělal on"
+              },
+              "why": {
+                "en": "Contact alone is not a foul; responsibility and legality decide (17.7.1).",
+                "cs": "Samotný kontakt faul není; rozhoduje odpovědnost a legálnost (17.7.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, but only if they had not thrown yet",
+                "cs": "Ano, ale jen pokud ještě nehodil"
+              },
+              "why": {
+                "en": "Timing matters for the follow-through exemption (17.7.2), not for the responsibility test.",
+                "cs": "Načasování hraje roli u výjimky pro dohmat (17.7.2), ne u testu odpovědnosti."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "So who is more likely to owe the call?",
+            "cs": "Kdo tedy spíš dluží call?"
+          },
+          "rules": ["17.6.1.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "You — moving into an occupied or contested space at the mark is the defence’s foul",
+                "cs": "Ty — vstup do obsazeného či sporného prostoru na marce je faul obrany"
+              },
+              "ok": true,
+              "why": {
+                "en": "17.6.1.2 — a defender initiating contact, or both vying for the same unoccupied position, is a defensive throwing foul.",
+                "cs": "17.6.1.2 — obránce, který vyvolá kontakt, nebo souboj o stejné neobsazené místo, je defensive throwing foul."
+              }
+            },
+            {
+              "t": {
+                "en": "Nobody — retract and play on",
+                "cs": "Nikdo — odvolat a hrát dál"
+              },
+              "why": {
+                "en": "Retracting is right if the contact really was minor; non-minor contact you caused is your foul (17.6.1.2).",
+                "cs": "Odvolat je správně, pokud byl kontakt opravdu drobný; nezanedbatelný kontakt, který jsi způsobil, je tvůj faul (17.6.1.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "The thrower still, for pivoting aggressively",
+                "cs": "Pořád házeč, za agresivní pivotování"
+              },
+              "why": {
+                "en": "Pivoting into space you have not legally taken is not a breach (17.7.1).",
+                "cs": "Napivotovat se do prostoru, který jsi legálně nezabral, prohřešek není (17.7.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "What is the right thing to do with your own call?",
+            "cs": "Co se svým vlastním callem správně udělat?"
+          },
+          "rules": ["17.7.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Retract it — and expect the count to carry on",
+                "cs": "Odvolat ho — a počítat s tím, že count poběží dál"
+              },
+              "ok": true,
+              "why": {
+                "en": "A retracted call leaves play as it was; the honest read of 17.7.1 is that there was no offensive foul.",
+                "cs": "Odvolaný call nechá hru, jak byla; poctivé čtení 17.7.1 říká, že žádný offensive foul nebyl."
+              }
+            },
+            {
+              "t": {
+                "en": "Stand by it and let them contest",
+                "cs": "Trvat na něm a nechat ho contestovat"
+              },
+              "why": {
+                "en": "Contesting costs the offence a max-6 restart (9.5.5) for a call you know is wrong.",
+                "cs": "Contest stojí útok restart na max 6 (9.5.5) kvůli callu, o kterém víš, že je špatný."
+              }
+            },
+            {
+              "t": {
+                "en": "Convert it into a marking infraction call",
+                "cs": "Změnit ho na call marking infraction"
+              },
+              "why": {
+                "en": "Infractions describe YOUR position, not theirs (18.1.1) — you cannot call one on the thrower.",
+                "cs": "Infractions popisují TVOJI pozici, ne jeho (18.1.1) — na házeče je zavolat nemůžeš."
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

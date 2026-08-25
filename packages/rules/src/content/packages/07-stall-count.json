@@ -1,0 +1,3366 @@
+{
+  "level": 7,
+  "name": "Level 7 · Stall count",
+  "scenarios": [
+    {
+      "id": "st1",
+      "level": 7,
+      "topic": {
+        "en": "Stall count",
+        "cs": "Stall count"
+      },
+      "title": {
+        "en": "The count runs out",
+        "cs": "Count dojde do konce"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower with no options",
+        "cs": "házeč bez možností"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.4,
+      "qAt": 3.6,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 10], [3.6, 79, 8], [6.4, 79, 8]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 11], [3.6, 80, 9], [6.4, 80, 9]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 63.6, 18], [3.6, 63.6, 18], [4.6, 62.6, 19.4], [6.4, 62.6, 19.4]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 62, 18], [3.6, 62, 18], [4.6, 58.4, 15.4], [6.4, 58, 15]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 17.4], [3.6, 62.4, 17.4], [4.6, 62.4, 18.8], [6.4, 62.4, 18.8]],
+        "downAt": 4.6
+      },
+      "fx": [
+        {
+          "t": 0.9,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 8…",
+            "cs": "…stalling 8…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 2,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "D1",
+          "text": {
+            "en": "…9…",
+            "cs": "…9…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 3,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "D1",
+          "text": {
+            "en": "STALLING 10!",
+            "cs": "STALLING 10!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4,
+          "type": "mark",
+          "x": 62.4,
+          "y": 17.4,
+          "kind": "x",
+          "label": {
+            "en": "stall-out here",
+            "cs": "stall-out tady"
+          }
+        },
+        {
+          "t": 4.8,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "D1",
+          "text": {
+            "en": "our disc",
+            "cs": "náš disk"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "You are trapped on the sideline with no open cutter. The marker counts up and begins the word “ten” while the disc is still in your hand. You accept the count — it was a fair, one-second cadence.",
+        "cs": "Jsi zavřený u sidelinu a nikdo se neuvolňuje. Marker dopočítá a začne slovo „ten“ ve chvíli, kdy máš disk ještě v ruce. Count uznáváš — byl v poctivém sekundovém tempu."
+      },
+      "question": {
+        "en": "What happens on an uncontested stall-out?",
+        "cs": "Co se stane při neconstestovaném stall-outu?"
+      },
+      "explain": {
+        "en": "Not releasing the pass before the marker first starts to say the word “ten” is a stall-out: a turnover (13.2.2). Play stops, so the disc does not travel — the defence takes possession exactly where your pivot was, everybody holds their position at the call (10.2.1), and play restarts with a check. The count on the new thrower starts fresh.",
+        "cs": "Nevypuštění přihrávky dřív, než marker začne říkat slovo „ten“, je stall-out: turnover (13.2.2). Hra se zastaví, takže disk nikam necestuje — obrana získává držení přesně tam, kde byl tvůj pivot, všichni zůstávají na pozicích z momentu callu (10.2.1) a hra se restartuje checkem. Počítání na novém házeči začíná znovu."
+      },
+      "note": {
+        "en": "The trigger is the START of the word “ten”, not the end of it (13.2.2) — a disc that leaves your hand during “ten” is already too late. And a stall-out you disagree with is contested, not accepted — that is a different branch, with a different resumption number.",
+        "cs": "Rozhoduje ZAČÁTEK slova „ten“, ne jeho konec (13.2.2) — disk, který opustí ruku během „ten“, je už pozdě. A stall-out, s kterým nesouhlasíš, se contestuje, ne uznává — to je jiná větev, s jiným číslem obnovení."
+      },
+      "rules": ["13.2.2", "13.7", "10.2.1"],
+      "signals": [13, 21],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The marker starts to say “ten” before you have released the pass. What is it?",
+            "cs": "Marker začne říkat „ten“, ještě než jsi vypustil přihrávku. Co to je?"
+          },
+          "rules": ["9.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "A stall-out — a turnover",
+                "cs": "Stall-out — turnover"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.2.2 — the thrower has not released the pass before the marker first starts to say “ten”.",
+                "cs": "13.2.2 — házeč nevypustil přihrávku dřív, než marker začal říkat „ten“."
+              }
+            },
+            {
+              "t": {
+                "en": "A violation — you get one more second to throw",
+                "cs": "Violation — máš ještě sekundu na hod"
+              },
+              "why": {
+                "en": "There is no grace second in the rules; ten fully uttered is the end (9.4).",
+                "cs": "Pravidla žádnou sekundu na dobrání neznají; plně vyslovená desítka je konec (9.4)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing yet — the marker must say “stall-out” as well",
+                "cs": "Zatím nic — marker musí ještě říct „stall-out“"
+              },
+              "why": {
+                "en": "The number itself does it; no extra word is required (9.4).",
+                "cs": "Stačí samotné číslo; žádné další slovo se nevyžaduje (9.4)."
+              }
+            },
+            {
+              "t": {
+                "en": "A marking infraction against the marker",
+                "cs": "Marking infraction proti markerovi"
+              },
+              "why": {
+                "en": "Only a fast or otherwise faulty count is an infraction; a fair count reaching ten is a stall-out (9.4).",
+                "cs": "Infraction je jen rychlé či jinak vadné počítání; poctivý count až do deseti je stall-out (9.4)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Who has the disc?",
+            "cs": "Kdo má disk?"
+          },
+          "rules": ["9.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "The defence",
+                "cs": "Obrana"
+              },
+              "ok": true,
+              "why": {
+                "en": "A stall-out is a turnover, so the marking team becomes the offence (9.4).",
+                "cs": "Stall-out je turnover, takže z markujícího týmu je útok (9.4)."
+              }
+            },
+            {
+              "t": {
+                "en": "You still — but the count restarts at 1",
+                "cs": "Pořád ty — jen počítání začne od 1"
+              },
+              "why": {
+                "en": "That is a contested stall-out’s neighbourhood, and even there the number is 8 (9.5.3). An accepted stall-out loses the disc.",
+                "cs": "To je blízko contestovanému stall-outu, a i tam je číslo 8 (9.5.3). Uznaný stall-out znamená ztrátu disku."
+              }
+            },
+            {
+              "t": {
+                "en": "Whichever team reaches the disc first",
+                "cs": "Tým, který se k disku dostane první"
+              },
+              "why": {
+                "en": "Play is stopped — nobody races for it (10.2.1).",
+                "cs": "Hra je zastavená — nikdo se o disk neběhá (10.2.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Where is it restarted?",
+            "cs": "Odkud se rozehrává?"
+          },
+          "rules": ["10.2.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Right where your pivot was — the disc does not travel",
+                "cs": "Přesně tam, kde byl tvůj pivot — disk nikam necestuje"
+              },
+              "ok": true,
+              "why": {
+                "en": "Play stopped on the call, so nothing moves; positions hold as they were at the call (10.2.1).",
+                "cs": "Hra se zastavila na callu, takže se nic nehýbe; pozice zůstávají jako v momentě callu (10.2.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Wherever you put the disc down",
+                "cs": "Tam, kde disk položíš"
+              },
+              "why": {
+                "en": "You cannot walk it anywhere — the spot is your pivot at the moment of the stall-out (10.2.1).",
+                "cs": "Nemůžeš s ním nikam jít — místem je tvůj pivot v momentě stall-outu (10.2.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "At the nearest point on the sideline",
+                "cs": "Na nejbližším bodě sidelinu"
+              },
+              "why": {
+                "en": "Sideline spots belong to out-of-bounds turnovers (11.4.2), not to a stall-out in the field.",
+                "cs": "Místa na sidelinu patří k turnoverům v autu (11.4.2), ne ke stall-outu v hřišti."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "How does play resume, and what does the count do?",
+            "cs": "Jak se pokračuje a co dělá počítání?"
+          },
+          "rules": ["10.2.1", "9.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "With a check, and the count starts fresh on the new thrower",
+                "cs": "Checkem, a na novém házeči začíná počítání od začátku"
+              },
+              "ok": true,
+              "why": {
+                "en": "A stall-out stops play, so the restart needs a check (10.2.1); the new thrower has never been counted on, so their marker starts at 1.",
+                "cs": "Stall-out hru zastaví, takže restart potřebuje check (10.2.1); na novém házeči ještě nikdo nepočítal, takže marker začíná od 1."
+              }
+            },
+            {
+              "t": {
+                "en": "No check — the defence just picks it up and plays",
+                "cs": "Bez checku — obrana disk prostě zvedne a hraje"
+              },
+              "why": {
+                "en": "That is an uncontested in-play turnover like a drop (13.7); a stall-out is a called stoppage.",
+                "cs": "To je nesporný turnover ve hře jako drop (13.7); stall-out je zastavení po callu."
+              }
+            },
+            {
+              "t": {
+                "en": "With a check, and the count resumes at max 6",
+                "cs": "Checkem, a počítání se obnoví na max 6"
+              },
+              "why": {
+                "en": "Max 6 resumes an interrupted count on the SAME thrower (9.5.5); here the disc changed hands.",
+                "cs": "Max 6 obnovuje přerušené počítání na TOMTÉŽ házeči (9.5.5); tady disk změnil držitele."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "st2",
+      "level": 7,
+      "topic": {
+        "en": "Stall count",
+        "cs": "Stall count"
+      },
+      "title": {
+        "en": "You contest the stall-out",
+        "cs": "Contestuješ stall-out"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower who still holds the disc",
+        "cs": "házeč, který disk pořád drží"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.6,
+      "qAt": 3.8,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 72, 9], [3.8, 78, 7.5], [6.6, 78, 7.5]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 74, 10], [3.8, 79, 8.5], [6.6, 79, 8.5]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 63.6, 18], [6.6, 63.6, 18]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 62, 18], [6.6, 62, 18]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 17.4], [6.6, 62.4, 17.4]]
+      },
+      "fx": [
+        {
+          "t": 0.7,
+          "type": "bubble",
+          "dur": 0.7,
+          "actor": "D1",
+          "text": {
+            "en": "…8…",
+            "cs": "…8…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 1.5,
+          "type": "bubble",
+          "dur": 0.7,
+          "actor": "D1",
+          "text": {
+            "en": "…9…",
+            "cs": "…9…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 2.3,
+          "type": "bubble",
+          "dur": 0.9,
+          "actor": "D1",
+          "text": {
+            "en": "STALLING 10!",
+            "cs": "STALLING 10!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 3.2,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "O1",
+          "text": {
+            "en": "CONTEST!",
+            "cs": "CONTEST!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.4,
+          "type": "mark",
+          "x": 62.4,
+          "y": 17.4,
+          "kind": "target",
+          "label": {
+            "en": "stays with you",
+            "cs": "zůstává tobě"
+          }
+        },
+        {
+          "t": 5.2,
+          "type": "bubble",
+          "dur": 1.3,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 8…",
+            "cs": "…stalling 8…"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "The marker rattles through “eight, nine, stalling ten” in barely a second and a half while you still hold the disc. That was nowhere near a one-second cadence, so you call it — but the marker stands by their count and does not accept that it was fast.",
+        "cs": "Marker vysype „eight, nine, stalling ten“ za necelou půldruhou sekundu, zatímco disk pořád držíš. Se sekundovým tempem to nemělo nic společného, takže to zavoláš — ale marker si za svým countem stojí a neuznává, že byl rychlý."
+      },
+      "question": {
+        "en": "What happens on a contested stall-out?",
+        "cs": "Co se stane při contestovaném stall-outu?"
+      },
+      "explain": {
+        "en": "A contested stall-out is not a turnover. Play stops, everyone returns to their positions at the call (10.2.1), the disc stays with you at your pivot, and after the check the count resumes at 8 (9.5.3) — the one resumption number in the rules that is neither “stalling 1” nor a “max n”.",
+        "cs": "Contestovaný stall-out není turnover. Hra se zastaví, všichni se vrátí na pozice z momentu callu (10.2.1), disk zůstává tobě na pivotu a po checku se počítání obnoví na 8 (9.5.3) — jediné číslo obnovení v pravidlech, které není ani „stalling 1“, ani „max n“."
+      },
+      "note": {
+        "en": "8 is deliberately harsh on neither side: you are not punished for a fast count, but you do not get a fresh count for stopping play either. And there is a second branch worth knowing: under 13.4.1, if you still hold the disc and a fast count denied you a reasonable opportunity to call it, the play is treated EITHER as an accepted defensive breach (“stalling 1”, 9.5.1) if the marker accepts it, OR as this contested stall-out (8, 9.5.3) if they do not.",
+        "cs": "Osmička není tvrdá ani na jednu stranu: za fast count nejsi potrestaný, ale za zastavení hry taky nedostaneš nové počítání. A je tu druhá větev, kterou je dobré znát: podle 13.4.1, když disk pořád držíš a fast count ti nedal rozumnou možnost ho zavolat, hra se posuzuje BUĎ jako uznaný prohřešek obrany („stalling 1“, 9.5.1), když to marker uzná, NEBO jako tenhle contestovaný stall-out (8, 9.5.3), když ne."
+      },
+      "rules": ["9.5.3", "13.4.1", "10.2.1"],
+      "signals": [4, 21],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You contest a stall-out because the count was far too fast. What happens to the disc?",
+            "cs": "Contestuješ stall-out, protože count byl mnohem rychlejší, než má být. Co se stane s diskem?"
+          },
+          "rules": ["9.5.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Nothing — a contested stall-out is not a turnover",
+                "cs": "Nic — contestovaný stall-out není turnover"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.5.3 — the contest keeps the disc with you; only the count pays for the stoppage.",
+                "cs": "9.5.3 — contest ti disk nechává; za zastavení platí jen počítání."
+              }
+            },
+            {
+              "t": {
+                "en": "It is still a turnover — contesting only changes the restart",
+                "cs": "Turnover to stejně je — contest mění jen rozehrání"
+              },
+              "why": {
+                "en": "That is the ACCEPTED stall-out (9.4). Contesting it keeps possession (9.5.3).",
+                "cs": "To je UZNANÝ stall-out (9.4). Contest drží držení (9.5.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "The marker is penalised and the count goes back to 1",
+                "cs": "Marker je potrestaný a počítání jde na 1"
+              },
+              "why": {
+                "en": "Nobody is penalised; the resumption is a fixed 8 (9.5.3).",
+                "cs": "Nikdo není trestaný; obnovení je fixní 8 (9.5.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "The point is replayed",
+                "cs": "Bod se hraje znovu"
+              },
+              "why": {
+                "en": "Nothing in the rules replays a point over a stall count (9.5.3).",
+                "cs": "Nic v pravidlech kvůli stall countu bod neopakuje (9.5.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "Does play stop?",
+            "cs": "Zastaví se hra?"
+          },
+          "rules": ["10.2.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — everyone holds, then the disc is checked back in",
+                "cs": "Ano — všichni zůstanou, pak se disk checkne"
+              },
+              "ok": true,
+              "why": {
+                "en": "A contested call is a stoppage: positions reset to the moment of the call (10.2.1) and the restart needs a check.",
+                "cs": "Contestovaný call je zastavení: pozice se vrátí k momentu callu (10.2.1) a restart potřebuje check."
+              }
+            },
+            {
+              "t": {
+                "en": "No — the count simply carries on",
+                "cs": "Ne — počítání prostě jede dál"
+              },
+              "why": {
+                "en": "Only an uncontested marking infraction or contact call keeps play running (18.1.3, 17.6.1.3).",
+                "cs": "Hru nechá běžet jen neconstestovaný marking infraction nebo contact call (18.1.3, 17.6.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, but no check is needed",
+                "cs": "Ano, ale check není potřeba"
+              },
+              "why": {
+                "en": "Every stoppage during play restarts with a check (10.2.1).",
+                "cs": "Každé zastavení během hry se restartuje checkem (10.2.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Where does the disc end up?",
+            "cs": "Kde disk skončí?"
+          },
+          "rules": ["10.2.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "With you, at the same pivot",
+                "cs": "U tebe, na stejném pivotu"
+              },
+              "ok": true,
+              "why": {
+                "en": "Nothing moves on a contested stall-out — the argument is about the count, not the position (10.2.1).",
+                "cs": "Při contestovaném stall-outu se nic nehýbe — spor je o počítání, ne o pozici (10.2.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "With you, but you must take it to the nearest sideline",
+                "cs": "U tebe, ale musíš s ním na nejbližší postranní čáru"
+              },
+              "why": {
+                "en": "No call sends a live disc to the sideline (10.2.1).",
+                "cs": "Žádný call neposílá živý disk na postranní čáru (10.2.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "With the marker, who checks it to you",
+                "cs": "U markera, který ti ho checkne"
+              },
+              "why": {
+                "en": "The marker touches the disc to check it in — that is not possession (10.2.1).",
+                "cs": "Marker se disku dotkne, aby checkoval — to není držení (10.2.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "Where does the count resume after the check?",
+            "cs": "Od kolika se počítání po checku obnoví?"
+          },
+          "rules": ["9.5.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "8",
+                "cs": "8"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.5.3 — a contested stall-out resumes at 8. It is a flat number, not a “max n”: you do not get 6 and you do not get 1.",
+                "cs": "9.5.3 — contestovaný stall-out se obnovuje na 8. Je to pevné číslo, ne „max n“: nedostaneš 6 ani 1."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 6",
+                "cs": "Max 6"
+              },
+              "why": {
+                "en": "Max 6 is the generic post-call number (9.5.5); the stall-out has its own, harsher entry (9.5.3).",
+                "cs": "Max 6 je obecné číslo po callu (9.5.5); stall-out má vlastní, tvrdší položku (9.5.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "“Stalling 1”",
+                "cs": "„Stalling 1“"
+              },
+              "why": {
+                "en": "That would reward contesting; 9.5.1 needs an accepted DEFENSIVE breach.",
+                "cs": "To by odměňovalo contestování; 9.5.1 vyžaduje uznaný prohřešek OBRANY."
+              }
+            },
+            {
+              "t": {
+                "en": "9",
+                "cs": "9"
+              },
+              "why": {
+                "en": "9 appears only as the ceiling for accepted offensive breaches (9.5.2).",
+                "cs": "Devítka je jen strop u uznaných prohřešků útoku (9.5.2)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "st3",
+      "level": 7,
+      "topic": {
+        "en": "Stall count",
+        "cs": "Stall count"
+      },
+      "title": {
+        "en": "The marker is counting too fast",
+        "cs": "Marker počítá moc rychle"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower being rushed",
+        "cs": "házeč, na kterého se spěchá"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.2,
+      "qAt": 3,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 26], [3, 78, 24], [6.2, 78, 24]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 27], [3, 79, 25], [6.2, 79, 25]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 63.4, 18], [6.2, 63.4, 18]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 62, 18], [6.2, 62, 18]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 17.4], [6.2, 62.4, 17.4]]
+      },
+      "fx": [
+        {
+          "t": 0.5,
+          "type": "bubble",
+          "dur": 0.5,
+          "actor": "D1",
+          "text": {
+            "en": "stalling 1",
+            "cs": "stalling 1"
+          },
+          "style": "count"
+        },
+        {
+          "t": 1,
+          "type": "bubble",
+          "dur": 0.5,
+          "actor": "D1",
+          "text": {
+            "en": "2",
+            "cs": "2"
+          },
+          "style": "count"
+        },
+        {
+          "t": 1.4,
+          "type": "bubble",
+          "dur": 0.5,
+          "actor": "D1",
+          "text": {
+            "en": "3",
+            "cs": "3"
+          },
+          "style": "count"
+        },
+        {
+          "t": 1.9,
+          "type": "bubble",
+          "dur": 0.5,
+          "actor": "D1",
+          "text": {
+            "en": "4",
+            "cs": "4"
+          },
+          "style": "count"
+        },
+        {
+          "t": 2.4,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "O1",
+          "text": {
+            "en": "FAST COUNT!",
+            "cs": "FAST COUNT!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.2,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 3…",
+            "cs": "…stalling 3…"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "The marker is firing the numbers out roughly twice a second — “stalling 1, 2, 3, 4” in about two seconds. You still hold the disc. You call “Fast count”.",
+        "cs": "Marker pálí čísla asi dvakrát za sekundu — „stalling 1, 2, 3, 4“ za dvě sekundy. Disk pořád držíš. Voláš „Fast count“."
+      },
+      "question": {
+        "en": "What does a fast count call do?",
+        "cs": "Co způsobí call „fast count“?"
+      },
+      "explain": {
+        "en": "A fast count is a marking infraction, so it behaves like every other one: play does not stop, the marker must fix the problem — here, slow down — and may then resume only at the last number fully uttered minus one, so “stalling 3” (18.1.3). Keep calling it if it keeps happening; each call costs the marker another number, and a marker who ignores you can be escalated to a marking violation, which does stop play (18.1.4).",
+        "cs": "Fast count je marking infraction, takže se chová jako každý jiný: hra se nezastaví, marker musí problém napravit — tady zpomalit — a pak může pokračovat jen od posledního plně vyřčeného čísla minus jedna, tedy „stalling 3“ (18.1.3). Když se to opakuje, volej znovu; každý call markera stojí další číslo, a markera, který tě ignoruje, můžeš eskalovat na marking violation, která hru zastaví (18.1.4)."
+      },
+      "note": {
+        "en": "The cadence the rules expect is at least one second per number. Counting in your face at double speed is the single most common marking infraction at club level — and the cheapest one to fix, because the count simply walks backwards each time you call it.",
+        "cs": "Pravidla čekají tempo aspoň sekundu na číslo. Počítání dvojnásobnou rychlostí je nejčastější marking infraction na klubové úrovni — a nejlevnější na nápravu, protože počítání ti po každém callu jde o číslo dolů."
+      },
+      "rules": ["18.1.1.1", "18.1.3", "18.1.4"],
+      "signals": [12, 14],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The marker is counting at roughly double speed. What is that?",
+            "cs": "Marker počítá přibližně dvojnásobnou rychlostí. Co to je?"
+          },
+          "rules": ["18.1.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "A marking infraction — a fast count",
+                "cs": "Marking infraction — fast count"
+              },
+              "ok": true,
+              "why": {
+                "en": "The count must run at no less than one second per number; going faster is a marking infraction like any other (18.1.3).",
+                "cs": "Počítání nesmí být rychlejší než sekunda na číslo; rychlejší tempo je marking infraction jako každý jiný (18.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "A violation that stops play immediately",
+                "cs": "Violation, která hru okamžitě zastaví"
+              },
+              "why": {
+                "en": "That is the escalation you can reach for if the marker will not fix it (18.1.4).",
+                "cs": "To je eskalace, po které můžeš sáhnout, když to marker neopraví (18.1.4)."
+              }
+            },
+            {
+              "t": {
+                "en": "A foul on the thrower",
+                "cs": "Faul na házeče"
+              },
+              "why": {
+                "en": "A foul needs non-minor contact; a fast count is purely about the cadence (18.1.3).",
+                "cs": "Faul vyžaduje nezanedbatelný kontakt; fast count je jen o tempu (18.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Legal — the marker sets the pace",
+                "cs": "Legální — tempo si určuje marker"
+              },
+              "why": {
+                "en": "The rules set the pace, not the marker (18.1.3).",
+                "cs": "Tempo určují pravidla, ne marker (18.1.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "Does play stop when you call it?",
+            "cs": "Zastaví se hra, když to zavoláš?"
+          },
+          "rules": ["18.1.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — the marker slows down and resumes counting",
+                "cs": "Ne — marker zpomalí a pokračuje v počítání"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.1.3 — like every marking infraction, the fix happens inside live play.",
+                "cs": "18.1.3 — jako u každého marking infraction se náprava děje v živé hře."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — play stops and the disc is checked in",
+                "cs": "Ano — hra se zastaví a disk se checkne"
+              },
+              "why": {
+                "en": "Only if the marker contests it (18.1.2) or you escalate to a violation (18.1.4).",
+                "cs": "Jen když to marker contestuje (18.1.2) nebo eskaluješ na violation (18.1.4)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — but only the count pauses",
+                "cs": "Ano — ale pozastaví se jen počítání"
+              },
+              "why": {
+                "en": "A pausing count with live play is the accepted-travel mechanic (18.2.5).",
+                "cs": "Pozastavené počítání za živé hry je mechanika uznaného travelu (18.2.5)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "The last number fully uttered was “4”. Where must the marker resume?",
+            "cs": "Poslední plně vyřčené číslo bylo „4“. Od kolika musí marker pokračovat?"
+          },
+          "rules": ["18.1.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "“Stalling 3”",
+                "cs": "„Stalling 3“"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.1.3 — last number fully uttered minus one, exactly as for disc space or a double team.",
+                "cs": "18.1.3 — poslední plně vyřčené číslo minus jedna, přesně jako u disc space nebo double teamu."
+              }
+            },
+            {
+              "t": {
+                "en": "“Stalling 4”",
+                "cs": "„Stalling 4“"
+              },
+              "why": {
+                "en": "Resuming at the same number ignores the minus-one every marking infraction carries (18.1.3).",
+                "cs": "Pokračovat stejným číslem ignoruje minus jedna, které nese každý marking infraction (18.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "“Stalling 1” — the whole count was invalid",
+                "cs": "„Stalling 1“ — celé počítání bylo neplatné"
+              },
+              "why": {
+                "en": "The count is not wiped, only walked back one (18.1.3).",
+                "cs": "Počítání se nemaže, jen jde o jedno zpátky (18.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 6",
+                "cs": "Max 6"
+              },
+              "why": {
+                "en": "Max 6 belongs to stoppages (9.5.5); nothing stopped here.",
+                "cs": "Max 6 patří k zastavením (9.5.5); tady se nic nezastavilo."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "The marker speeds up on the very next count too. What is available to you?",
+            "cs": "Marker zrychlí i při dalším počítání. Co máš k dispozici?"
+          },
+          "rules": ["18.1.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "Call it again — and escalate to a marking violation, which does stop play",
+                "cs": "Zavolat to znovu — a eskalovat na marking violation, která hru zastaví"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.1.4 — repeated or uncorrected marking infractions become a violation; each call also costs the marker another number (18.1.3).",
+                "cs": "18.1.4 — opakované či nenapravené marking infractions se stanou violation; každý call navíc markera stojí další číslo (18.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — one call per possession",
+                "cs": "Nic — jeden call na držbu"
+              },
+              "why": {
+                "en": "There is no limit on how often you may call a fast count (18.1.3).",
+                "cs": "Kolikrát můžeš fast count volat, není nijak omezeno (18.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Throw it away and call the infraction afterwards",
+                "cs": "Zbavit se disku a infraction zavolat potom"
+              },
+              "why": {
+                "en": "Throwing around your own marking call voids the call, and a turfed pass stands as a turnover (18.1.5).",
+                "cs": "Hod přes vlastní marking call ho ruší a spadlá přihrávka platí jako turnover (18.1.5)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sc4",
+      "level": 7,
+      "topic": {
+        "en": "Stall count",
+        "cs": "Stall count"
+      },
+      "title": {
+        "en": "The marker drifts off you",
+        "cs": "Marker se od tebe vzdálí"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower being counted on",
+        "cs": "házeč, na kterého se počítá"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.6,
+      "qAt": 3.6,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 26], [3.6, 79, 24], [6.6, 79, 24]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 27], [3.6, 80.4, 25.4], [6.6, 80.4, 25.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [
+            [0, 63.6, 18],
+            [1.6, 64.6, 17.4],
+            [3, 67.4, 16.4],
+            [3.6, 68.2, 16.2],
+            [6.6, 68.2, 16.2]
+          ]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 62, 18], [6.6, 62, 18]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 17.4], [6.6, 62.4, 17.4]]
+      },
+      "fx": [
+        {
+          "t": 0.8,
+          "type": "bubble",
+          "dur": 0.9,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 5…",
+            "cs": "…stalling 5…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 2.6,
+          "type": "mark",
+          "x": 65.4,
+          "y": 18,
+          "kind": "zone",
+          "r": 3.2,
+          "label": {
+            "en": "3 m radius",
+            "cs": "poloměr 3 m"
+          }
+        },
+        {
+          "t": 3.2,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "D1",
+          "text": {
+            "en": "…6…",
+            "cs": "…6…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 4.6,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "O1",
+          "text": {
+            "en": "restart at 1!",
+            "cs": "znovu od 1!"
+          },
+          "style": "call"
+        }
+      ],
+      "situation": {
+        "en": "Your marker peels off to help on a cutter, ending up a good five metres from your pivot — and keeps counting “…5… 6…” from over there.",
+        "cs": "Marker se odlepí, aby pomohl na nabíhače, skončí dobrých pět metrů od tvého pivotu — a odtamtud dál počítá „…5… 6…“."
+      },
+      "question": {
+        "en": "Can they keep counting from there?",
+        "cs": "Může odtamtud počítat dál?"
+      },
+      "explain": {
+        "en": "No. A marker may only count while within three metres of the thrower’s pivot (9.3.2), and if they move beyond that radius — or if a different player becomes the marker — the stall count must be restarted at “Stalling one (1)” (9.4). Not resumed, not reduced by one: restarted from the beginning.",
+        "cs": "Ne. Marker může počítat jen do tří metrů od pivotu házeče (9.3.2), a když ten poloměr opustí — nebo když se markerem stane jiný hráč — musí se stall count začít znovu od „Stalling one (1)“ (9.4). Ne obnovit, ne snížit o jedna: začít od začátku."
+      },
+      "note": {
+        "en": "Counting on from an illegal position is itself a fast count (18.1.1.1), so if they argue, you have the marking-infraction route as well. Switching markers is the same deal: the new marker starts at one, however high the old count was.",
+        "cs": "Počítat dál z nelegální pozice je samo fast count (18.1.1.1), takže když se bude hádat, máš i cestu přes marking infraction. Výměna markera je stejná: nový marker začíná od jedné, ať byl starý count jakkoli vysoko."
+      },
+      "rules": ["9.4", "9.3.2", "18.1.1.1"],
+      "signals": [12, 14],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "Your marker is now five metres away and still counting. Is that count legal?",
+            "cs": "Marker je teď pět metrů daleko a pořád počítá. Je ten count legální?"
+          },
+          "rules": ["9.3.2"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — a marker may only count within three metres of the pivot",
+                "cs": "Ne — marker smí počítat jen do tří metrů od pivotu"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.3.2 — the three-metre radius is a condition of counting at all.",
+                "cs": "9.3.2 — třímetrový poloměr je podmínkou toho, že vůbec smí počítat."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — distance only matters for a double team",
+                "cs": "Ano — vzdálenost hraje roli jen u double teamu"
+              },
+              "why": {
+                "en": "Three metres appears in both rules: as a limit for the marker (9.3.2) and for other defenders (18.1.1.5).",
+                "cs": "Tři metry jsou v obou pravidlech: jako limit pro markera (9.3.2) i pro ostatní obránce (18.1.1.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, as long as you can hear the numbers",
+                "cs": "Ano, pokud čísla slyšíš"
+              },
+              "why": {
+                "en": "Audibility is a separate requirement (9.2); the radius is its own condition (9.3.2).",
+                "cs": "Slyšitelnost je zvláštní požadavek (9.2); poloměr je vlastní podmínka (9.3.2)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "They come back into range. Where does the count restart?",
+            "cs": "Vrátí se do vzdálenosti. Od kolika se count rozjede?"
+          },
+          "rules": ["9.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "“Stalling one (1)” — restarted from the beginning",
+                "cs": "„Stalling one (1)“ — začíná se od začátku"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.4 — if the marker moves beyond the three-metre radius, the count must be RESTARTED at one.",
+                "cs": "9.4 — když marker opustí třímetrový poloměr, count se musí ZAČÍT ZNOVU od jedné."
+              }
+            },
+            {
+              "t": {
+                "en": "At the last number minus one",
+                "cs": "Od posledního čísla minus jedna"
+              },
+              "why": {
+                "en": "Minus-one is the marking-infraction remedy (18.1.3); this is a full restart (9.4).",
+                "cs": "Minus jedna je náprava u marking infraction (18.1.3); tohle je úplný restart (9.4)."
+              }
+            },
+            {
+              "t": {
+                "en": "Where it left off",
+                "cs": "Tam, kde skončil"
+              },
+              "why": {
+                "en": "That would make drifting off you free (9.4).",
+                "cs": "Tím by bylo vzdálení se od tebe zadarmo (9.4)."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 6",
+                "cs": "Max 6"
+              },
+              "why": {
+                "en": "Max 6 follows a stoppage (9.5.5); nothing stopped here.",
+                "cs": "Max 6 následuje po zastavení (9.5.5); tady se nic nezastavilo."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "A different defender takes over as marker mid-count. Now?",
+            "cs": "Uprostřed countu převezme marku jiný obránce. A teď?"
+          },
+          "rules": ["9.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "Also “Stalling one (1)” — a new marker starts from the beginning",
+                "cs": "Taky „Stalling one (1)“ — nový marker začíná od začátku"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.4 covers both cases in one sentence: out of radius, or a different player becoming the marker.",
+                "cs": "9.4 pokrývá oba případy jednou větou: mimo poloměr, nebo jiný hráč se stane markerem."
+              }
+            },
+            {
+              "t": {
+                "en": "They inherit the count where it stood",
+                "cs": "Zdědí count tam, kde byl"
+              },
+              "why": {
+                "en": "Only a substitute player inherits state, and that is an injury rule (19.3.1).",
+                "cs": "Stav dědí jen střídající hráč, a to je pravidlo o zranění (19.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "They must wait three seconds, then continue",
+                "cs": "Musí počkat tři sekundy a pak pokračovat"
+              },
+              "why": {
+                "en": "No such waiting rule exists (9.4).",
+                "cs": "Žádné takové pravidlo o čekání neexistuje (9.4)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sc5",
+      "level": 7,
+      "topic": {
+        "en": "Stall count",
+        "cs": "Stall count"
+      },
+      "title": {
+        "en": "A count that should not be running",
+        "cs": "Count, který by neměl běžet"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower under an illegal count",
+        "cs": "házeč pod nelegálním countem"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.6,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 24], [3.4, 78, 22], [6.6, 78, 22]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 72, 12], [1.8, 66, 15], [3.4, 64.4, 16.4], [4.8, 70, 13], [6.6, 72, 12]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 63.6, 18], [6.6, 63.6, 18]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 62, 18], [6.6, 62, 18]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 17.4], [6.6, 62.4, 17.4]]
+      },
+      "fx": [
+        {
+          "t": 0.7,
+          "type": "bubble",
+          "dur": 0.9,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 4…",
+            "cs": "…stalling 4…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 2.4,
+          "type": "mark",
+          "x": 62.4,
+          "y": 18,
+          "kind": "zone",
+          "r": 3.2,
+          "label": {
+            "en": "3 m — nobody else allowed",
+            "cs": "3 m — nikdo další sem nesmí"
+          }
+        },
+        {
+          "t": 2.9,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "O1",
+          "text": {
+            "en": "DOUBLE TEAM!",
+            "cs": "DOUBLE TEAM!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.8,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 3…",
+            "cs": "…stalling 3…"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "A second defender parks inside three metres of your pivot, guarding nobody, while your marker keeps counting “stalling 4”. The marker’s own position is perfectly legal.",
+        "cs": "Druhý obránce zaparkuje do tří metrů od tvého pivotu, nikoho nebrání, a marker mezitím počítá „stalling 4“. Pozice samotného markera je naprosto legální."
+      },
+      "question": {
+        "en": "The marker is legal. Is the count?",
+        "cs": "Marker je legální. Je legální i count?"
+      },
+      "explain": {
+        "en": "No — and that is the point. A marker may only start or continue a stall count while ALL defenders are legally positioned (9.3.3). The second defender inside three metres, guarding nobody, is a double team (18.1.1.5), so the count itself is illegal even though your marker is doing nothing wrong personally. Call the double team; the extra defender clears out and the count resumes at the last number fully uttered minus one — “stalling 3” (18.1.3).",
+        "cs": "Ne — a v tom je pointa. Marker smí začít nebo pokračovat v countu jen tehdy, když jsou VŠICHNI obránci postavení legálně (9.3.3). Druhý obránce do tří metrů, který nikoho nebrání, je double team (18.1.1.5), takže samotný count je nelegální, i když tvůj marker osobně nic špatně nedělá. Zavolej double team; přebývající obránce odejde a count pokračuje od posledního plně vyřčeného čísla minus jedna — „stalling 3“ (18.1.3)."
+      },
+      "note": {
+        "en": "Any offensive player may make this call, not just the thrower (15.5.1) — you often see it from the sideline-side handler who has the angle. And merely running through that area is not a double team (18.1.1.5.2): the defender has to settle there.",
+        "cs": "Tenhle call může vyslovit kterýkoli hráč útoku, nejen házeč (15.5.1) — často ho vidíš od handlera, který má úhel. A pouhý průběh tím prostorem double team není (18.1.1.5.2): obránce se tam musí usadit."
+      },
+      "rules": ["9.3.3", "18.1.1.5", "18.1.3", "15.5.1"],
+      "signals": [12],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "A second defender settles inside three metres of your pivot, guarding nobody. What is it?",
+            "cs": "Druhý obránce se usadí do tří metrů od tvého pivotu a nikoho nebrání. Co to je?"
+          },
+          "rules": ["18.1.1.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "A double team",
+                "cs": "Double team"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.1.1.5 — a defender other than the marker within three metres of the pivot without guarding another offensive player.",
+                "cs": "18.1.1.5 — jiný obránce než marker do tří metrů od pivotu, aniž by bránil jiného hráče útoku."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing, as long as the marker stays legal",
+                "cs": "Nic, dokud je marker legální"
+              },
+              "why": {
+                "en": "Their position is a marking infraction in its own right (18.1.1.5).",
+                "cs": "Jeho pozice je marking infraction sama o sobě (18.1.1.5)."
+              }
+            },
+            {
+              "t": {
+                "en": "A foul on you",
+                "cs": "Faul na tebe"
+              },
+              "why": {
+                "en": "No contact is involved (18.1.1.5).",
+                "cs": "Žádný kontakt v tom není (18.1.1.5)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "Your marker’s own position is perfect. Is their count still legal?",
+            "cs": "Pozice tvého markera je bezchybná. Je jeho count pořád legální?"
+          },
+          "rules": ["9.3.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — a count may only run while ALL defenders are legally positioned",
+                "cs": "Ne — count smí běžet jen když jsou VŠICHNI obránci postavení legálně"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.3.3 — one illegal team-mate makes the marker’s count illegal too, however clean the marker is.",
+                "cs": "9.3.3 — jeden nelegálně postavený spoluhráč dělá nelegálním i markerův count, ať je marker sebečistší."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — each defender answers only for themselves",
+                "cs": "Ano — každý obránce odpovídá jen za sebe"
+              },
+              "why": {
+                "en": "9.3.3 ties the count to the whole defence’s positioning.",
+                "cs": "9.3.3 váže count na postavení celé obrany."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, but only up to “stalling 5”",
+                "cs": "Ano, ale jen do „stalling 5“"
+              },
+              "why": {
+                "en": "There is no partial legality in the rule (9.3.3).",
+                "cs": "Pravidlo žádnou částečnou legálnost nezná (9.3.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "You are not the thrower. May you call it?",
+            "cs": "Nejsi házeč. Můžeš to zavolat?"
+          },
+          "rules": ["15.5.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — any offensive player may call a double team",
+                "cs": "Ano — double team může zavolat kterýkoli hráč útoku"
+              },
+              "ok": true,
+              "why": {
+                "en": "15.5.1 — the rare call not reserved to the player it happens to.",
+                "cs": "15.5.1 — vzácný call, který není vyhrazený hráči, jemuž se to děje."
+              }
+            },
+            {
+              "t": {
+                "en": "No — marking calls belong to the thrower alone",
+                "cs": "Ne — marking cally patří jen házeči"
+              },
+              "why": {
+                "en": "True for most, but the double team is explicitly open to any offensive player (15.5.1).",
+                "cs": "U většiny ano, ale double team je výslovně otevřený každému hráči útoku (15.5.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if you are the nearest offensive player",
+                "cs": "Jen pokud jsi nejbližší hráč útoku"
+              },
+              "why": {
+                "en": "Proximity is irrelevant (15.5.1).",
+                "cs": "Vzdálenost nehraje roli (15.5.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "The marker had fully said “stalling 4”. Where do they resume?",
+            "cs": "Marker plně vyslovil „stalling 4“. Od kolika pokračuje?"
+          },
+          "rules": ["18.1.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "“Stalling 3”, once the extra defender clears out",
+                "cs": "„Stalling 3“, jakmile přebývající obránce odejde"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.1.3 — correction first, then last number fully uttered minus one.",
+                "cs": "18.1.3 — nejdřív náprava, pak poslední plně vyřčené číslo minus jedna."
+              }
+            },
+            {
+              "t": {
+                "en": "“Stalling one (1)” — the count was illegal all along",
+                "cs": "„Stalling one (1)“ — count byl celou dobu nelegální"
+              },
+              "why": {
+                "en": "A full restart to one belongs to 9.4 (marker out of radius or switched), not to a corrected infraction.",
+                "cs": "Úplný restart na jedničku patří k 9.4 (marker mimo poloměr nebo výměna), ne k napravenému infraction."
+              }
+            },
+            {
+              "t": {
+                "en": "Max 6 after a check",
+                "cs": "Max 6 po checku"
+              },
+              "why": {
+                "en": "Nothing stopped play; max 6 follows a stoppage (9.5.5).",
+                "cs": "Nic hru nezastavilo; max 6 následuje po zastavení (9.5.5)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sc6",
+      "level": 7,
+      "topic": {
+        "en": "Stall count",
+        "cs": "Stall count"
+      },
+      "title": {
+        "en": "A count you cannot hear",
+        "cs": "Count, který neslyšíš"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower in the noise",
+        "cs": "házeč v hluku"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.4,
+      "qAt": 3.2,
+      "actors": [
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 74, 26], [3.2, 79, 24], [6.4, 79, 24]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 27], [3.2, 80.4, 25.4], [6.4, 80.4, 25.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 63.8, 18], [6.4, 63.8, 18]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 62, 18], [6.4, 62, 18]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 17.4], [6.4, 62.4, 17.4]]
+      },
+      "fx": [
+        {
+          "t": 0.8,
+          "type": "bubble",
+          "dur": 0.8,
+          "actor": "D1",
+          "text": {
+            "en": "…mumble…",
+            "cs": "…mumlání…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 1.8,
+          "type": "bubble",
+          "dur": 0.8,
+          "actor": "D1",
+          "text": {
+            "en": "…mumble…",
+            "cs": "…mumlání…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 2.6,
+          "type": "bubble",
+          "dur": 1,
+          "actor": "D1",
+          "text": {
+            "en": "STALLING 7!",
+            "cs": "STALLING 7!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 4.4,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "O1",
+          "text": {
+            "en": "FAST COUNT!",
+            "cs": "FAST COUNT!"
+          },
+          "style": "call"
+        }
+      ],
+      "situation": {
+        "en": "Your marker has been counting somewhere under their breath, inaudible to you over the sideline noise — and then suddenly announces “stalling 7” at full volume. You have heard exactly one number all possession.",
+        "cs": "Marker si počítá někde pod vousy, přes hluk ze sidelinu ho neslyšíš — a najednou nahlas vyhlásí „stalling 7“. Za celou držbu jsi slyšel přesně jedno číslo."
+      },
+      "question": {
+        "en": "Do you have a call?",
+        "cs": "Máš na to call?"
+      },
+      "explain": {
+        "en": "Yes. The stall count must be clearly communicated to the thrower (9.2), and a marker who starts or continues a count illegally, or does not start it with the word “Stalling”, commits a fast count (18.1.1.1). Call it: play does not stop, they must count properly, and they resume at the last number FULLY UTTERED minus one — and numbers you could not hear were not fully uttered to you.",
+        "cs": "Ano. Stall count musí být házeči jasně sdělován (9.2) a marker, který počítá nelegálně nebo nezačne slovem „Stalling“, se dopouští fast countu (18.1.1.1). Zavolej to: hra se nezastaví, marker musí počítat pořádně a pokračuje od posledního PLNĚ VYŘČENÉHO čísla minus jedna — a čísla, která jsi neslyšel, ti plně vyřčena nebyla."
+      },
+      "note": {
+        "en": "Fast count is a wider rule than its name suggests: 18.1.1.1 covers counting too quickly, skipping “Stalling”, failing to reduce or reset the count when required, and starting from the wrong number.",
+        "cs": "Fast count je širší pravidlo, než napovídá název: 18.1.1.1 pokrývá příliš rychlé počítání, vynechání „Stalling“, nesnížení nebo neresetování countu, když se má, i start od špatného čísla."
+      },
+      "rules": ["9.2", "18.1.1.1", "18.1.3"],
+      "signals": [12, 14],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The marker counts inaudibly and then announces “stalling 7”. What is that?",
+            "cs": "Marker počítá neslyšně a pak vyhlásí „stalling 7“. Co to je?"
+          },
+          "rules": ["9.2", "18.1.1.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "A fast count — the count must be clearly communicated to the thrower",
+                "cs": "Fast count — count musí být házeči jasně sdělován"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.2 requires clear communication; a count that breaches the rules is a fast count under 18.1.1.1.",
+                "cs": "9.2 vyžaduje jasné sdělování; count, který porušuje pravidla, je fast count podle 18.1.1.1."
+              }
+            },
+            {
+              "t": {
+                "en": "Legal — nothing says how loud a count must be",
+                "cs": "Legální — nikde není, jak nahlas se má počítat"
+              },
+              "why": {
+                "en": "9.2 says it must be clearly communicated to the thrower.",
+                "cs": "9.2 říká, že musí být házeči jasně sdělován."
+              }
+            },
+            {
+              "t": {
+                "en": "A violation that stops play",
+                "cs": "Violation, která zastaví hru"
+              },
+              "why": {
+                "en": "Only if you escalate an uncorrected marking infraction (18.1.4).",
+                "cs": "Jen když eskaluješ nenapravený marking infraction (18.1.4)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "You could not hear anything before “7”. Where should the count resume?",
+            "cs": "Před „7“ jsi nic neslyšel. Od kolika by se mělo počítat dál?"
+          },
+          "rules": ["18.1.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "From the last number FULLY UTTERED to you, minus one",
+                "cs": "Od posledního čísla, které ti bylo PLNĚ VYŘČENO, minus jedna"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.1.3 — and numbers you could not hear were not fully uttered to you (9.2).",
+                "cs": "18.1.3 — a čísla, která jsi neslyšel, ti plně vyřčena nebyla (9.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "From 6 — seven minus one, whatever you heard",
+                "cs": "Od 6 — sedm minus jedna, ať jsi slyšel cokoli"
+              },
+              "why": {
+                "en": "That rewards the inaudible counting; 9.2 is what makes those numbers not count.",
+                "cs": "To odměňuje neslyšné počítání; právě 9.2 dělá ta čísla neplatnými."
+              }
+            },
+            {
+              "t": {
+                "en": "From max 6 after a check",
+                "cs": "Od max 6 po checku"
+              },
+              "why": {
+                "en": "Nothing stopped play; max 6 follows a stoppage (9.5.5).",
+                "cs": "Nic hru nezastavilo; max 6 následuje po zastavení (9.5.5)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "What else counts as a fast count, despite the name?",
+            "cs": "Co dalšího je fast count, navzdory názvu?"
+          },
+          "rules": ["18.1.1.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Skipping “Stalling”, not reducing or resetting the count when required, or starting from the wrong number",
+                "cs": "Vynechání „Stalling“, nesnížení či neresetování countu, když se má, nebo start od špatného čísla"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.1.1.1 lists all of these under the same heading, alongside counting too quickly.",
+                "cs": "18.1.1.1 vypisuje všechno tohle pod stejnou hlavičkou, vedle příliš rychlého počítání."
+              }
+            },
+            {
+              "t": {
+                "en": "Only counting in less than one-second intervals",
+                "cs": "Jen počítání v intervalech kratších než sekunda"
+              },
+              "why": {
+                "en": "That is one of five cases in 18.1.1.1.",
+                "cs": "To je jeden z pěti případů v 18.1.1.1."
+              }
+            },
+            {
+              "t": {
+                "en": "Counting while the thrower is not looking",
+                "cs": "Počítání, když se házeč nedívá"
+              },
+              "why": {
+                "en": "Not a rule; the requirement is clear communication (9.2).",
+                "cs": "Žádné takové pravidlo; požadavkem je jasné sdělování (9.2)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sc7",
+      "level": 7,
+      "topic": {
+        "en": "Stall count",
+        "cs": "Stall count"
+      },
+      "title": {
+        "en": "Counting before you even have the disc",
+        "cs": "Počítání dřív, než disk vůbec máš"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the player walking to the disc",
+        "cs": "hráč jdoucí k disku"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 6.8,
+      "qAt": 3.6,
+      "actors": [
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 58, 26], [3.6, 62, 24], [6.8, 62, 24]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 60, 27], [3.6, 63.4, 25.4], [6.8, 63.4, 25.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 76, 20], [2.6, 72, 18.6], [3.6, 70.6, 18.2], [5, 69.4, 18], [6.8, 69.4, 18]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 62, 14], [2.6, 66, 16.4], [3.6, 67.4, 17.2], [5, 68, 17.6], [6.8, 68, 17.6]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 68.4, 18], [6.8, 68.4, 18]],
+        "downAt": 0.1
+      },
+      "fx": [
+        {
+          "t": 1.2,
+          "type": "mark",
+          "x": 68.4,
+          "y": 18,
+          "kind": "target",
+          "label": {
+            "en": "the disc, on the ground",
+            "cs": "disk, na zemi"
+          }
+        },
+        {
+          "t": 2,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 3…",
+            "cs": "…stalling 3…"
+          },
+          "style": "count"
+        },
+        {
+          "t": 4.2,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "O1",
+          "text": {
+            "en": "no pivot yet!",
+            "cs": "ještě není pivot!"
+          },
+          "style": "call"
+        }
+      ],
+      "situation": {
+        "en": "Their throw was blocked and the disc is lying on the grass. You are jogging over to pick it up — five metres away, nobody has touched it — and their defender is already counting “stalling 3” at you.",
+        "cs": "Jejich přihrávka byla zblokovaná a disk leží na trávě. Doběhneš si pro něj — pět metrů daleko, nikdo se ho nedotkl — a jejich obránce už na tebe počítá „stalling 3“."
+      },
+      "question": {
+        "en": "Can they count while you walk to the disc?",
+        "cs": "Může na tebe počítat, když jdeš k disku?"
+      },
+      "explain": {
+        "en": "No. A marker may only start and continue a stall count when play is live, or once a pivot point is established after a turnover (9.3.1). After a turnover there is no count until you have the disc and a pivot down — so their “stalling 3” is a count that should not exist, which makes it a fast count (18.1.1.1) and gets corrected the usual way.",
+        "cs": "Ne. Marker smí začít a pokračovat ve stall countu jen když je hra živá, nebo jakmile je po turnoveru postavený pivot (9.3.1). Po turnoveru žádný count neběží, dokud nemáš disk a nestojí pivot — takže jeho „stalling 3“ je count, který by neměl existovat, což je fast count (18.1.1.1) a napravuje se obvyklou cestou."
+      },
+      "note": {
+        "en": "What DOES limit you on the way to the disc is 8.5: you must move to the correct spot at walking pace or faster. The rules do not need the stall count to make you hurry — they already have a rule for it.",
+        "cs": "Co tě cestou k disku opravdu omezuje, je 8.5: na správné místo se musíš přesunout chůzí nebo rychleji. Pravidla nepotřebují stall count, aby tě popohnala — mají na to vlastní pravidlo."
+      },
+      "rules": ["9.3.1", "18.1.1.1", "8.5"],
+      "signals": [12, 14],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "The disc is on the ground after a turnover and you are five metres away. Can they count?",
+            "cs": "Disk leží po turnoveru na zemi a ty jsi pět metrů daleko. Můžou počítat?"
+          },
+          "rules": ["9.3.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — after a turnover there is no count until a pivot point is established",
+                "cs": "Ne — po turnoveru žádný count neběží, dokud nestojí pivot"
+              },
+              "ok": true,
+              "why": {
+                "en": "9.3.1 — the marker may only count when play is live, or once a pivot is established after a turnover.",
+                "cs": "9.3.1 — marker smí počítat jen když je hra živá, nebo jakmile je po turnoveru postavený pivot."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — the disc is live the moment it lands",
+                "cs": "Ano — disk je živý ve chvíli, kdy dopadne"
+              },
+              "why": {
+                "en": "Live play and a countable pivot are not the same thing (9.3.1).",
+                "cs": "Živá hra a pivot, na který se dá počítat, nejsou totéž (9.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, but only up to five",
+                "cs": "Ano, ale jen do pěti"
+              },
+              "why": {
+                "en": "There is no partial count in the rules (9.3.1).",
+                "cs": "Pravidla žádný částečný count neznají (9.3.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "They keep counting anyway. What is that call?",
+            "cs": "Přesto počítají dál. Jaký je to call?"
+          },
+          "rules": ["18.1.1.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Fast count — starting or continuing a count illegally",
+                "cs": "Fast count — nelegální začátek nebo pokračování countu"
+              },
+              "ok": true,
+              "why": {
+                "en": "18.1.1.1 covers a count that should not be running at all.",
+                "cs": "18.1.1.1 pokrývá i count, který by vůbec neměl běžet."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — you just ignore it",
+                "cs": "Nic — prostě to ignoruješ"
+              },
+              "why": {
+                "en": "Ignoring it means playing under a count that does not exist (18.1.1.1).",
+                "cs": "Ignorovat to znamená hrát pod countem, který neexistuje (18.1.1.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "A violation, so play stops",
+                "cs": "Violation, takže se hra zastaví"
+              },
+              "why": {
+                "en": "Only if you escalate (18.1.4).",
+                "cs": "Jen když eskaluješ (18.1.4)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "how",
+          "q": {
+            "en": "What actually governs how fast you must get to the disc?",
+            "cs": "Co vlastně určuje, jak rychle se musíš k disku dostat?"
+          },
+          "rules": ["8.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "8.5 — you must move to the correct spot at walking pace or faster",
+                "cs": "8.5 — na správné místo se musíš přesunout chůzí nebo rychleji"
+              },
+              "ok": true,
+              "why": {
+                "en": "The rules already have a hurry-up mechanism; the stall count is not it (8.5, 9.3.1).",
+                "cs": "Pravidla mechanismus na popohnání mají; stall count to není (8.5, 9.3.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Nothing — you may take as long as you like",
+                "cs": "Nic — můžeš si dát načas"
+              },
+              "why": {
+                "en": "8.5 explicitly forbids dawdling.",
+                "cs": "8.5 loudání výslovně zakazuje."
+              }
+            },
+            {
+              "t": {
+                "en": "A ten-second limit",
+                "cs": "Desetisekundový limit"
+              },
+              "why": {
+                "en": "No such clock exists in the rules (8.5).",
+                "cs": "Žádný takový časový limit v pravidlech není (8.5)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sp2",
+      "level": 7,
+      "topic": {
+        "en": "Stall count",
+        "cs": "Stall count"
+      },
+      "title": {
+        "en": "You stop the disc rolling away",
+        "cs": "Zastavíš odkutálející se disk"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the defender chasing it down",
+        "cs": "obránce, který ho dobíhá"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 6.8,
+      "qAt": 3.6,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 56, 20], [3.6, 62, 20], [6.8, 66, 19.6]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 52, 12], [6.8, 56, 12]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 58, 26], [6.8, 62, 25]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 72, 16], [2.6, 70, 17.4], [3.6, 69.4, 17.8], [6.8, 69, 18]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 64, 18], [1.6, 67, 18], [2.8, 69.6, 18.2], [3.4, 70.4, 18.2], [6.8, 70.4, 18.2]],
+        "downAt": 0.1
+      },
+      "fx": [
+        {
+          "t": 1.4,
+          "type": "mark",
+          "x": 64,
+          "y": 18,
+          "kind": "x",
+          "label": {
+            "en": "where it landed",
+            "cs": "kde dopadl"
+          }
+        },
+        {
+          "t": 3,
+          "type": "flash",
+          "x": 70,
+          "y": 18.2
+        },
+        {
+          "t": 4.6,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "O1",
+          "text": {
+            "en": "pivot where you touched it",
+            "cs": "pivot tam, kdes ho zastavil"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5.6,
+          "type": "mark",
+          "x": 70.4,
+          "y": 18.2,
+          "kind": "target",
+          "label": {
+            "en": "their choice",
+            "cs": "jejich volba"
+          }
+        }
+      ],
+      "situation": {
+        "en": "Their throw is blocked and the disc skids along the grass towards your sideline. You jog after it and stop it with your foot — but your foot pushes it another three metres further from where it would have stopped.",
+        "cs": "Jejich přihrávka je zblokovaná a disk klouže po trávě k tvému sidelinu. Doběhneš ho a zastavíš nohou — jenže ho tím posuneš o další tři metry dál, než kde by sám zastavil."
+      },
+      "question": {
+        "en": "Were you allowed to touch it, and where does play restart?",
+        "cs": "Směl ses ho dotknout a odkud se rozehrává?"
+      },
+      "explain": {
+        "en": "Touching it is fine — any player may attempt to stop a disc from rolling or sliding after it has hit the ground (8.4). But because you significantly altered its position, the opposition may request that the pivot point be established where you contacted it (8.4.1). That is their choice, not yours, and here it costs your team three metres.",
+        "cs": "Dotek je v pořádku — kterýkoli hráč se může pokusit zastavit disk, který se po dopadu kutálí nebo klouže (8.4). Protože jsi ale jeho pozici výrazně změnil, může soupeř požádat, aby se pivot postavil tam, kde ses ho dotkl (8.4.1). Je to jejich volba, ne tvoje, a tady to tvůj tým stojí tři metry."
+      },
+      "note": {
+        "en": "So stopping a rolling disc is a courtesy that can backfire: stop it cleanly and nobody minds, boot it and you may have handed them the yards. If you do not touch it, the spot is simply where it comes to rest (13.7).",
+        "cs": "Zastavit kutálející se disk je tedy laskavost, která se může vymstít: zastav ho čistě a nikomu to nevadí, kopni do něj a možná jsi jim daroval metry. Když se ho nedotkneš, místem je prostě to, kde zastaví (13.7)."
+      },
+      "rules": ["8.4", "8.4.1", "13.7"],
+      "signals": [13],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "May you stop a disc that is rolling along the ground?",
+            "cs": "Smíš zastavit disk, který se kutálí po zemi?"
+          },
+          "rules": ["8.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — any player may attempt to stop a disc rolling or sliding after it has hit the ground",
+                "cs": "Ano — kterýkoli hráč se může pokusit zastavit disk, který se po dopadu kutálí nebo klouže"
+              },
+              "ok": true,
+              "why": {
+                "en": "8.4 — it is explicitly allowed, for either team.",
+                "cs": "8.4 — je to výslovně dovolené, pro oba týmy."
+              }
+            },
+            {
+              "t": {
+                "en": "No — only the receiving team may touch it",
+                "cs": "Ne — dotknout se ho smí jen přijímající tým"
+              },
+              "why": {
+                "en": "8.4 says any player.",
+                "cs": "8.4 říká kterýkoli hráč."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if it is heading out of bounds",
+                "cs": "Jen pokud míří do autu"
+              },
+              "why": {
+                "en": "No such condition (8.4).",
+                "cs": "Žádná taková podmínka (8.4)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "where",
+          "q": {
+            "en": "Your foot shoved it three metres further. Where can play restart from?",
+            "cs": "Nohou jsi ho posunul o tři metry dál. Odkud se může rozehrávat?"
+          },
+          "rules": ["8.4.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "The opposition may request the pivot where you contacted it",
+                "cs": "Soupeř může požádat o pivot v místě, kde ses ho dotkl"
+              },
+              "ok": true,
+              "why": {
+                "en": "8.4.1 — significantly altering the disc’s position hands them that choice.",
+                "cs": "8.4.1 — výrazná změna pozice disku jim dává tuhle volbu."
+              }
+            },
+            {
+              "t": {
+                "en": "Where the disc finally stopped, always",
+                "cs": "Vždy tam, kde disk nakonec zastavil"
+              },
+              "why": {
+                "en": "That is the default (13.7), but 8.4.1 lets them override it.",
+                "cs": "To je výchozí stav (13.7), ale 8.4.1 jim dovolí ho přebít."
+              }
+            },
+            {
+              "t": {
+                "en": "Where the disc first hit the ground",
+                "cs": "Tam, kde disk poprvé dopadl"
+              },
+              "why": {
+                "en": "Landing points matter for pulls (7.10/7.11), not for a blocked pass.",
+                "cs": "Místa dopadu hrají roli u pullů (7.10/7.11), ne u zblokované přihrávky."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Whose choice is it?",
+            "cs": "Čí je to volba?"
+          },
+          "rules": ["8.4.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "Theirs — the opposition may request it",
+                "cs": "Jejich — může o to požádat soupeř"
+              },
+              "ok": true,
+              "why": {
+                "en": "8.4.1 gives the option to the team disadvantaged by your touch, not to you.",
+                "cs": "8.4.1 dává možnost týmu, který tvůj dotek poškodil, ne tobě."
+              }
+            },
+            {
+              "t": {
+                "en": "Yours — you touched it",
+                "cs": "Tvoje — dotkl ses ho ty"
+              },
+              "why": {
+                "en": "That would reward the interference (8.4.1).",
+                "cs": "To by zásah odměnilo (8.4.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Neither — the rule is automatic",
+                "cs": "Ničí — pravidlo platí automaticky"
+              },
+              "why": {
+                "en": "It is a request, so it only happens if they ask (8.4.1).",
+                "cs": "Je to žádost, takže nastane, jen když o ni požádají (8.4.1)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sp3",
+      "level": 7,
+      "topic": {
+        "en": "Stall count",
+        "cs": "Stall count"
+      },
+      "title": {
+        "en": "Handing it to a team-mate",
+        "cs": "Předání disku spoluhráči"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the thrower after a stoppage",
+        "cs": "házeč po zastavení"
+      },
+      "view": [46, 3.5, 40, 30],
+      "dur": 6.6,
+      "qAt": 3.4,
+      "actors": [
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 74, 26], [6.6, 74, 26]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 27], [6.6, 76, 27]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 63.8, 18], [6.6, 63.8, 18]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 60, 20], [2.4, 61.4, 18.8], [3.4, 61.6, 18.6], [6.6, 61.6, 18.6]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "you": true,
+          "kf": [[0, 62, 18], [6.6, 62, 18]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 62.4, 17.4], [2.8, 62, 18.2], [3.4, 61.8, 18.4], [6.6, 61.8, 18.4]]
+      },
+      "fx": [
+        {
+          "t": 0.8,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "D1",
+          "text": {
+            "en": "play has stopped",
+            "cs": "hra je zastavená"
+          },
+          "style": "count"
+        },
+        {
+          "t": 2.6,
+          "type": "mark",
+          "x": 62,
+          "y": 18.4,
+          "kind": "x",
+          "label": {
+            "en": "handed it over",
+            "cs": "předal disk"
+          }
+        },
+        {
+          "t": 4.4,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "D1",
+          "text": {
+            "en": "not allowed",
+            "cs": "to nejde"
+          },
+          "style": "call"
+        }
+      ],
+      "situation": {
+        "en": "Play is stopped for a foul call. Your handler jogs over and you hand them the disc so they can restart with the better angle. Nothing has been checked in yet.",
+        "cs": "Hra je zastavená kvůli faulu. Přiběhne k tobě handler a ty mu disk předáš, aby rozehrál z lepšího úhlu. Nic ještě není checknuté."
+      },
+      "question": {
+        "en": "Can you pass the disc off during the stoppage?",
+        "cs": "Můžeš disk během zastavení předat?"
+      },
+      "explain": {
+        "en": "No. The thrower may not transfer possession of the disc during dead play to another player (8.3), and play is dead after a call until the disc is checked in (8.1.3). You have to restart it yourself, from your own pivot.",
+        "cs": "Ne. Házeč nesmí během mrtvé hry předat držení disku jinému hráči (8.3) a hra je po callu mrtvá až do checku (8.1.3). Musíš rozehrát sám, ze svého pivotu."
+      },
+      "note": {
+        "en": "The same idea covers a turnover: if the player who picks it up then deliberately drops it, puts it down or hands it on, they must re-establish possession and restart with a check (13.6). Dead play is not a chance to reshuffle who has the disc.",
+        "cs": "Stejná myšlenka platí u turnoveru: pokud ho hráč zvedne a pak ho záměrně upustí, položí nebo předá, musí držení znovu získat a rozehrát checkem (13.6). Mrtvá hra není příležitost přeskládat, kdo má disk."
+      },
+      "rules": ["8.3", "8.1.3", "13.6"],
+      "signals": [21],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "Play is stopped and you hand the disc to a team-mate before the check. Allowed?",
+            "cs": "Hra je zastavená a ty před checkem předáš disk spoluhráči. Smíš?"
+          },
+          "rules": ["8.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — the thrower may not transfer possession during dead play",
+                "cs": "Ne — házeč nesmí během mrtvé hry předat držení"
+              },
+              "ok": true,
+              "why": {
+                "en": "8.3, and play is dead after a call until the disc is checked in (8.1.3).",
+                "cs": "8.3, a hra je po callu mrtvá až do checku (8.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — any team-mate may restart play",
+                "cs": "Ano — rozehrát může kterýkoli spoluhráč"
+              },
+              "why": {
+                "en": "Not during dead play (8.3); the thrower restarts it.",
+                "cs": "Během mrtvé hry ne (8.3); rozehrává házeč."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, provided you have not moved the disc from the pivot",
+                "cs": "Ano, pokud jsi diskem nepohnul z pivotu"
+              },
+              "why": {
+                "en": "The prohibition is on transferring possession, wherever you stand (8.3).",
+                "cs": "Zákaz se týká předání držení, ať stojíš kdekoli (8.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "When exactly is play dead here?",
+            "cs": "Kdy přesně je tady hra mrtvá?"
+          },
+          "rules": ["8.1.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "From the call until the disc is checked in",
+                "cs": "Od callu do checku"
+              },
+              "ok": true,
+              "why": {
+                "en": "8.1.3 — that whole window is dead play.",
+                "cs": "8.1.3 — celé tohle okno je mrtvá hra."
+              }
+            },
+            {
+              "t": {
+                "en": "Only while players are still moving to their positions",
+                "cs": "Jen dokud se hráči přesouvají na pozice"
+              },
+              "why": {
+                "en": "It runs all the way to the check (8.1.3).",
+                "cs": "Trvá až do checku (8.1.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "It is not dead — a foul call does not stop play",
+                "cs": "Mrtvá není — faul hru nezastavuje"
+              },
+              "why": {
+                "en": "A call stops play immediately (16.1).",
+                "cs": "Call hru okamžitě zastaví (16.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "After a turnover, the picker-up deliberately puts the disc down for a team-mate. Now?",
+            "cs": "Po turnoveru ten, kdo disk zvedl, ho záměrně položí pro spoluhráče. Co teď?"
+          },
+          "rules": ["13.6"],
+          "opts": [
+            {
+              "t": {
+                "en": "They must re-establish possession themselves and restart with a check",
+                "cs": "Musí sám znovu získat držení a rozehrát checkem"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.6 — intentionally dropping, placing or transferring the disc after a turnover costs you a check.",
+                "cs": "13.6 — záměrné upuštění, položení nebo předání disku po turnoveru tě stojí check."
+              }
+            },
+            {
+              "t": {
+                "en": "The team-mate may simply pick it up and play",
+                "cs": "Spoluhráč ho prostě zvedne a hraje"
+              },
+              "why": {
+                "en": "13.6 blocks exactly that shortcut.",
+                "cs": "13.6 přesně tuhle zkratku blokuje."
+              }
+            },
+            {
+              "t": {
+                "en": "It is a turnover back to the other team",
+                "cs": "Je to turnover zpátky druhému týmu"
+              },
+              "why": {
+                "en": "The remedy is a check, not a change of possession (13.6).",
+                "cs": "Nápravou je check, ne změna držení (13.6)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sp4",
+      "level": 7,
+      "topic": {
+        "en": "Stall count",
+        "cs": "Stall count"
+      },
+      "title": {
+        "en": "What “dead” actually means",
+        "cs": "Co vlastně znamená „mrtvá hra“"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the defender eyeing the loose disc",
+        "cs": "obránce sledující volný disk"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 6.8,
+      "qAt": 3.6,
+      "actors": [
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 56, 12], [3.6, 60, 12], [6.8, 62, 12]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 58, 26], [3.6, 62, 24], [6.8, 64, 23]]
+        },
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 60, 22], [2.6, 66, 19.4], [3.6, 67.6, 18.6], [6.8, 68, 18.4]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 72, 15], [2.6, 70, 17], [3.6, 69.6, 17.4], [6.8, 69.6, 17.4]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 68.4, 18], [6.8, 68.4, 18]],
+        "downAt": 0.1
+      },
+      "fx": [
+        {
+          "t": 1.4,
+          "type": "mark",
+          "x": 68.4,
+          "y": 18,
+          "kind": "target",
+          "label": {
+            "en": "nobody has possession yet",
+            "cs": "držení zatím nikdo nemá"
+          }
+        },
+        {
+          "t": 2.6,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "D1",
+          "text": {
+            "en": "can I grab it?",
+            "cs": "můžu ho sebrat?"
+          },
+          "style": "count"
+        },
+        {
+          "t": 4.6,
+          "type": "bubble",
+          "dur": 1.6,
+          "actor": "O1",
+          "text": {
+            "en": "dead play — it is ours",
+            "cs": "mrtvá hra — je náš"
+          },
+          "style": "call"
+        }
+      ],
+      "situation": {
+        "en": "Their pass was blocked and the disc is lying still on the grass. Their player is walking over to pick it up. You are closer to it than they are, and for a moment you wonder whether you can simply take it.",
+        "cs": "Jejich přihrávka byla zblokovaná a disk leží na trávě. Jejich hráč si pro něj jde. Ty jsi blíž než on a na chvíli tě napadne, jestli si ho prostě nemůžeš vzít."
+      },
+      "question": {
+        "en": "Can you?",
+        "cs": "Můžeš?"
+      },
+      "explain": {
+        "en": "No. Play is dead — and no turnover is possible — after a disc hits the ground, until possession is established by the appropriate team (8.1.4). The block already decided whose disc it is; picking it up first would change nothing. Players are, however, allowed to move during dead play (8.1.5), so getting set on your mark is exactly what you should be doing.",
+        "cs": "Ne. Hra je mrtvá — a žádný turnover není možný — poté, co disk dopadne na zem, dokud držení nezíská příslušný tým (8.1.4). Blok už rozhodl, čí disk je; sebrat ho první by nic nezměnilo. Během mrtvé hry se ale hráči pohybovat mohou (8.1.5), takže postavit se na marku je přesně to, co bys měl dělat."
+      },
+      "note": {
+        "en": "Dead play also covers the start of a point until the pull is released (8.1.1), carrying the disc to a pivot location (8.1.2), and everything after a call until the check (8.1.3). In all of them, no turnover is possible.",
+        "cs": "Mrtvá hra pokrývá i začátek bodu do vypuštění pullu (8.1.1), přenášení disku na místo pivotu (8.1.2) a všechno po callu až do checku (8.1.3). Ve všech těchto případech není turnover možný."
+      },
+      "rules": ["8.1.4", "8.1.5", "8.1.3"],
+      "signals": [21],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "A blocked disc is lying on the ground and their player is walking to it. Can you take it?",
+            "cs": "Zblokovaný disk leží na zemi a jejich hráč si pro něj jde. Můžeš si ho vzít?"
+          },
+          "rules": ["8.1.4"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — play is dead after the disc hits the ground until the appropriate team establishes possession",
+                "cs": "Ne — po dopadu disku je hra mrtvá, dokud držení nezíská příslušný tým"
+              },
+              "ok": true,
+              "why": {
+                "en": "8.1.4 — and during dead play no turnover is possible.",
+                "cs": "8.1.4 — a během mrtvé hry není turnover možný."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — first to the disc gets it",
+                "cs": "Ano — kdo dřív přijde, ten má disk"
+              },
+              "why": {
+                "en": "The block already decided possession (8.1.4).",
+                "cs": "O držení rozhodl už blok (8.1.4)."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes, if they are dawdling",
+                "cs": "Ano, pokud se loudá"
+              },
+              "why": {
+                "en": "Dawdling has its own remedy in 8.5, and it is not letting you take the disc.",
+                "cs": "Loudání má vlastní nápravu v 8.5, a tou není, že si disk vezmeš."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "Can you move during dead play?",
+            "cs": "Můžeš se během mrtvé hry pohybovat?"
+          },
+          "rules": ["8.1.5"],
+          "opts": [
+            {
+              "t": {
+                "en": "Yes — players are allowed to move during dead play, unless a rule says otherwise",
+                "cs": "Ano — během mrtvé hry se hráči pohybovat mohou, pokud pravidlo neříká jinak"
+              },
+              "ok": true,
+              "why": {
+                "en": "8.1.5 — which is why you should be setting your mark, not standing still.",
+                "cs": "8.1.5 — proto by ses měl stavět na marku, ne stát."
+              }
+            },
+            {
+              "t": {
+                "en": "No — everyone is frozen until the disc is live",
+                "cs": "Ne — všichni stojí, dokud není disk živý"
+              },
+              "why": {
+                "en": "That applies specifically after a call, until the check (10.2.3).",
+                "cs": "To platí konkrétně po callu, až do checku (10.2.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "Only the team in possession may move",
+                "cs": "Pohybovat se smí jen tým s diskem"
+              },
+              "why": {
+                "en": "8.1.5 applies to players generally.",
+                "cs": "8.1.5 platí pro hráče obecně."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "Which other moments are dead play?",
+            "cs": "Které další momenty jsou mrtvá hra?"
+          },
+          "rules": ["8.1.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "The start of a point until the pull is released, carrying the disc to a pivot spot, and after any call until the check",
+                "cs": "Začátek bodu do vypuštění pullu, přenášení disku na místo pivotu a po každém callu až do checku"
+              },
+              "ok": true,
+              "why": {
+                "en": "8.1.1, 8.1.2 and 8.1.3 — in all of them no turnover is possible.",
+                "cs": "8.1.1, 8.1.2 a 8.1.3 — ve všech není turnover možný."
+              }
+            },
+            {
+              "t": {
+                "en": "Only the moments between points",
+                "cs": "Jen chvíle mezi body"
+              },
+              "why": {
+                "en": "Dead play happens inside points constantly (8.1).",
+                "cs": "Mrtvá hra nastává uvnitř bodů neustále (8.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "Any time the stall count is paused",
+                "cs": "Kdykoli je pozastavený stall count"
+              },
+              "why": {
+                "en": "An accepted travel pauses the count with play still LIVE (18.2.5).",
+                "cs": "Uznaný travel pozastaví count, ale hra zůstává ŽIVÁ (18.2.5)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tu1",
+      "level": 7,
+      "topic": {
+        "en": "Stall count",
+        "cs": "Stall count"
+      },
+      "title": {
+        "en": "Trapped against the grass",
+        "cs": "Přiskřípnutý o trávu"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the diving receiver",
+        "cs": "receiver ve skluzu"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 7.2,
+      "qAt": 4.4,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 50, 18], [7.2, 50, 18]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 26], [4.4, 80, 24], [7.2, 80, 24]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 76, 14], [3.6, 79.6, 15.6], [4.4, 80.4, 16], [7.2, 79.4, 17.4]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "you": true,
+          "kf": [[0, 72, 20], [3.4, 78, 17.4], [4.2, 79.4, 17], [4.4, 79.6, 17], [7.2, 79.6, 17]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 50.4, 17.4], [4, 78.6, 16.6], [4.4, 79.6, 16.8], [7.2, 79.6, 16.8]],
+        "downAt": 4.4
+      },
+      "fx": [
+        {
+          "t": 4.2,
+          "type": "mark",
+          "x": 79.6,
+          "y": 17,
+          "kind": "target",
+          "label": {
+            "en": "caught before the ground",
+            "cs": "chyceno dřív než země"
+          }
+        },
+        {
+          "t": 5.4,
+          "type": "bubble",
+          "dur": 1.4,
+          "actor": "O2",
+          "text": {
+            "en": "not a down",
+            "cs": "není to „down“"
+          },
+          "style": "call"
+        },
+        {
+          "t": 6.2,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "D1",
+          "text": {
+            "en": "…stalling 1…",
+            "cs": "…stalling 1…"
+          },
+          "style": "count"
+        }
+      ],
+      "situation": {
+        "en": "You dive and get both hands on the disc a fraction before it reaches the grass. It touches the ground while you are holding it, and you keep hold of it all the way through the slide.",
+        "cs": "Skočíš a máš na disku obě ruce zlomek vteřiny předtím, než dosáhne trávy. Disk se země dotkne, zatímco ho držíš, a ty ho udržíš po celý skluz."
+      },
+      "question": {
+        "en": "Is that a turnover?",
+        "cs": "Je to turnover?"
+      },
+      "explain": {
+        "en": "No. A turnover occurs when the disc contacts the ground while it is NOT in the possession of an offensive player (13.1.1) — but it is explicitly not “down” if a receiver catches the pass before the disc contacts the ground and maintains the catch while it is in contact with the ground (13.1.1.1). You caught it first and never let go, so it is a completed pass.",
+        "cs": "Ne. Turnover nastane, když se disk dotkne země, aniž by ho držel hráč útoku (13.1.1) — ale výslovně to není „down“, pokud receiver přihrávku chytí dřív, než se disk dotkne země, a chycení udrží i během doteku se zemí (13.1.1.1). Chytil jsi první a nepustil, takže je to dokončená přihrávka."
+      },
+      "note": {
+        "en": "The other three turnovers in 13.1 are worth reciting: an interception (13.1.2), the disc becoming out-of-bounds (13.1.3), and the dropped pull (13.1.4). Everything else that transfers the disc comes with a stoppage and lives in 13.2.",
+        "cs": "Zbylé tři turnovery v 13.1 stojí za odříkání: interception (13.1.2), disk v autu (13.1.3) a dropped pull (13.1.4). Všechno ostatní, co disk předává, se pojí se zastavením a bydlí v 13.2."
+      },
+      "rules": ["13.1.1.1", "13.1.1", "12.1.1"],
+      "signals": [8, 5],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "You catch it before it reaches the grass and hold on while the disc touches the ground. Turnover?",
+            "cs": "Chytíš ho dřív, než dosáhne trávy, a udržíš ho, i když se disk dotkne země. Turnover?"
+          },
+          "rules": ["13.1.1.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "No — it is not “down” if you caught it first and maintained the catch",
+                "cs": "Ne — není to „down“, když jsi chytil první a chycení udržel"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.1.1.1 is the explicit exception to the down rule in 13.1.1.",
+                "cs": "13.1.1.1 je výslovná výjimka z pravidla o „down“ v 13.1.1."
+              }
+            },
+            {
+              "t": {
+                "en": "Yes — the disc touched the ground",
+                "cs": "Ano — disk se dotkl země"
+              },
+              "why": {
+                "en": "13.1.1 requires it to touch the ground while NOT in an offensive player’s possession.",
+                "cs": "13.1.1 vyžaduje dotek země, když disk NEDRŽÍ hráč útoku."
+              }
+            },
+            {
+              "t": {
+                "en": "Only if a defender also touched it",
+                "cs": "Jen pokud se ho dotkl i obránce"
+              },
+              "why": {
+                "en": "A deflection does not change the catch test (13.1.1.1).",
+                "cs": "Teč test chycení nemění (13.1.1.1)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "Which turnovers does 13.1 list?",
+            "cs": "Které turnovery 13.1 vyjmenovává?"
+          },
+          "rules": ["13.1.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "A down, an interception, the disc going out-of-bounds, and a dropped pull",
+                "cs": "Down, interception, disk v autu a dropped pull"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.1.1 to 13.1.4 — the four that transfer the disc without stopping play.",
+                "cs": "13.1.1 až 13.1.4 — čtyři, které disk předají bez zastavení hry."
+              }
+            },
+            {
+              "t": {
+                "en": "Only a down and an interception",
+                "cs": "Jen down a interception"
+              },
+              "why": {
+                "en": "Out-of-bounds (13.1.3) and the dropped pull (13.1.4) are on the same list.",
+                "cs": "Aut (13.1.3) a dropped pull (13.1.4) jsou na stejném seznamu."
+              }
+            },
+            {
+              "t": {
+                "en": "Everything, including stall-outs",
+                "cs": "Všechno, včetně stall-outů"
+              },
+              "why": {
+                "en": "A stall-out transfers the disc AND stops play, so it lives in 13.2.",
+                "cs": "Stall-out disk předá A zastaví hru, takže bydlí v 13.2."
+              }
+            }
+          ]
+        },
+        {
+          "k": "stall",
+          "q": {
+            "en": "It was a catch. What happens next?",
+            "cs": "Bylo to chycení. Co bude dál?"
+          },
+          "rules": ["12.1.1"],
+          "opts": [
+            {
+              "t": {
+                "en": "You are the thrower — establish a pivot and the count starts",
+                "cs": "Jsi házeč — postav pivot a začne počítání"
+              },
+              "ok": true,
+              "why": {
+                "en": "Maintaining the catch through ground contact makes it possession (12.1.1), and possession makes you the thrower (12.2).",
+                "cs": "Udržení chycení přes dotek země znamená držení (12.1.1) a držení z tebe dělá házeče (12.2)."
+              }
+            },
+            {
+              "t": {
+                "en": "Play stops for a check first",
+                "cs": "Nejdřív se hra zastaví na check"
+              },
+              "why": {
+                "en": "No call was made; play never stopped (16.1).",
+                "cs": "Žádný call nezazněl; hra se nezastavila (16.1)."
+              }
+            },
+            {
+              "t": {
+                "en": "The count resumes at max 6",
+                "cs": "Počítání se obnoví na max 6"
+              },
+              "why": {
+                "en": "That follows a stoppage (9.5.5); this is a fresh possession.",
+                "cs": "To následuje po zastavení (9.5.5); tohle je nová držba."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tu2",
+      "level": 7,
+      "topic": {
+        "en": "Stall count",
+        "cs": "Stall count"
+      },
+      "title": {
+        "en": "Nobody can agree if it was down",
+        "cs": "Nikdo se neshodne, jestli spadl"
+      },
+      "roleTeam": "off",
+      "role": {
+        "en": "the receiver who says he caught it",
+        "cs": "receiver, který tvrdí, že chytil"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 7.4,
+      "qAt": 4.6,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 50, 18], [7.4, 50, 18]]
+        },
+        {
+          "id": "D2",
+          "team": "def",
+          "label": "D2",
+          "kf": [[0, 76, 26], [4.6, 80, 24], [7.4, 80, 24]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "kf": [[0, 76, 14], [3.8, 79.6, 15.6], [4.6, 80.4, 16.2], [7.4, 79.6, 17.6]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "you": true,
+          "kf": [[0, 72, 20], [3.6, 78.2, 17.4], [4.4, 79.4, 17], [4.6, 79.6, 17], [7.4, 79.6, 17]]
+        }
+      ],
+      "disc": {
+        "kf": [[0, 50.4, 17.4], [4.2, 79, 16.8], [4.6, 79.6, 16.9], [7.4, 79.6, 16.9]],
+        "downAt": 4.6
+      },
+      "fx": [
+        {
+          "t": 4.4,
+          "type": "flash",
+          "x": 79.4,
+          "y": 16.9
+        },
+        {
+          "t": 5,
+          "type": "bubble",
+          "dur": 1.1,
+          "actor": "D1",
+          "text": {
+            "en": "DOWN!",
+            "cs": "DOWN!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 5.8,
+          "type": "bubble",
+          "dur": 1.1,
+          "actor": "O2",
+          "text": {
+            "en": "CONTEST!",
+            "cs": "CONTEST!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 6.6,
+          "type": "mark",
+          "x": 50.4,
+          "y": 17.4,
+          "kind": "target",
+          "label": {
+            "en": "back to the last thrower",
+            "cs": "zpět k poslednímu házeči"
+          }
+        }
+      ],
+      "situation": {
+        "en": "You slide for a low pass. From your angle you had it before the grass; from theirs the disc clearly bounced. They call “down”, you contest, and after an honest discussion neither of you can say for certain what happened.",
+        "cs": "Kloužeš po nízké přihrávce. Z tvého úhlu jsi ji měl dřív než tráva; z jejich disk jasně odskočil. Volají „down“, ty contestuješ, a po poctivé debatě ani jeden nedokáže s jistotou říct, co se stalo."
+      },
+      "question": {
+        "en": "Nobody knows. What do the rules do?",
+        "cs": "Nikdo to neví. Co říkají pravidla?"
+      },
+      "explain": {
+        "en": "The disc goes back to the last non-disputed thrower. If a player determines a turnover has occurred they must call it immediately; if the opposition disagrees they may call “contest” and play stops — and if, after discussion, players cannot agree or it is unclear what occurred, the disc must be returned to the last non-disputed thrower (13.3).",
+        "cs": "Disk se vrací poslednímu nespornému házeči. Když hráč usoudí, že nastal turnover, musí to zavolat okamžitě; když soupeř nesouhlasí, může zavolat „contest“ a hra se zastaví — a pokud se po debatě hráči neshodnou nebo není jasné, co se stalo, disk se musí vrátit poslednímu nespornému házeči (13.3)."
+      },
+      "note": {
+        "en": "That is the same principle as 1.12, and it is the honest default whenever the truth is genuinely unavailable: nobody is rewarded for being louder, and the game rewinds to the last thing everyone agreed on.",
+        "cs": "Je to stejný princip jako 1.12 a je to poctivé východisko vždy, když pravdu nelze zjistit: nikdo není odměněn za to, že křičí víc, a hra se vrátí k poslednímu, na čem se všichni shodli."
+      },
+      "rules": ["13.3", "1.12", "13.1.1"],
+      "signals": [4, 13],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "They call “down”, you contest, and nobody can establish what happened. What do the rules say?",
+            "cs": "Volají „down“, ty contestuješ a nikdo nedokáže určit, co se stalo. Co říkají pravidla?"
+          },
+          "rules": ["13.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "The disc returns to the last non-disputed thrower",
+                "cs": "Disk se vrací poslednímu nespornému házeči"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.3 — if players cannot agree, or it is unclear what occurred, that is the resolution.",
+                "cs": "13.3 — pokud se hráči neshodnou nebo není jasné, co se stalo, tohle je řešení."
+              }
+            },
+            {
+              "t": {
+                "en": "The turnover stands — the caller saw it best",
+                "cs": "Turnover platí — volající to viděl nejlíp"
+              },
+              "why": {
+                "en": "A contest is not overruled by the caller’s confidence (13.3).",
+                "cs": "Contest nepřebije jistota toho, kdo call vyslovil (13.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "You keep it — the contest wins",
+                "cs": "Necháváš si ho — contest vyhrává"
+              },
+              "why": {
+                "en": "Contesting does not win possession either (13.3).",
+                "cs": "Contest držení taky nezíská (13.3)."
+              }
+            },
+            {
+              "t": {
+                "en": "The point is replayed",
+                "cs": "Bod se hraje znovu"
+              },
+              "why": {
+                "en": "Never a remedy in these rules (13.3).",
+                "cs": "V těchhle pravidlech to nikdy není náprava (13.3)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "When must a turnover call be made?",
+            "cs": "Kdy musí call na turnover zaznít?"
+          },
+          "rules": ["13.3"],
+          "opts": [
+            {
+              "t": {
+                "en": "Immediately, as soon as the player determines it occurred",
+                "cs": "Okamžitě, jakmile hráč usoudí, že nastal"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.3, which matches the general rule that calls are immediate (15.8).",
+                "cs": "13.3, což odpovídá obecnému pravidlu, že cally jsou okamžité (15.8)."
+              }
+            },
+            {
+              "t": {
+                "en": "Before the next pass is thrown",
+                "cs": "Než se hodí další přihrávka"
+              },
+              "why": {
+                "en": "That is already too late; 13.12 then has to unwind it.",
+                "cs": "To už je pozdě; 13.12 to pak musí rozmotávat."
+              }
+            },
+            {
+              "t": {
+                "en": "Any time before the point ends",
+                "cs": "Kdykoli před koncem bodu"
+              },
+              "why": {
+                "en": "Far too late (13.3, 15.8).",
+                "cs": "Mnohem pozdě (13.3, 15.8)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "what",
+          "q": {
+            "en": "Which broader principle is that the same as?",
+            "cs": "S jakým obecnějším principem je to shodné?"
+          },
+          "rules": ["1.12"],
+          "opts": [
+            {
+              "t": {
+                "en": "When players cannot agree, the disc goes back to the last non-disputed thrower",
+                "cs": "Když se hráči neshodnou, disk se vrací poslednímu nespornému házeči"
+              },
+              "ok": true,
+              "why": {
+                "en": "1.12 — the same default runs through the whole rulebook.",
+                "cs": "1.12 — stejné východisko prostupuje celými pravidly."
+              }
+            },
+            {
+              "t": {
+                "en": "The benefit of the doubt goes to the defence",
+                "cs": "V pochybnostech rozhoduje ve prospěch obrany"
+              },
+              "why": {
+                "en": "No such principle exists (1.12).",
+                "cs": "Žádný takový princip neexistuje (1.12)."
+              }
+            },
+            {
+              "t": {
+                "en": "The captains decide",
+                "cs": "Rozhodnou kapitáni"
+              },
+              "why": {
+                "en": "The rule decides, without anyone having to win the argument (1.12).",
+                "cs": "Rozhoduje pravidlo, aniž by někdo musel hádku vyhrát (1.12)."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tu3",
+      "level": 7,
+      "topic": {
+        "en": "Stall count",
+        "cs": "Stall count"
+      },
+      "title": {
+        "en": "Nobody noticed the turnover",
+        "cs": "Turnoveru si nikdo nevšiml"
+      },
+      "roleTeam": "def",
+      "role": {
+        "en": "the defender who saw it land",
+        "cs": "obránce, který viděl dopad"
+      },
+      "view": [40, -3.5, 62, 44],
+      "dur": 7.4,
+      "qAt": 4.6,
+      "actors": [
+        {
+          "id": "O1",
+          "team": "off",
+          "label": "O1",
+          "kf": [[0, 50, 18], [3, 50, 18], [4.6, 52, 18], [7.4, 54, 18]]
+        },
+        {
+          "id": "O3",
+          "team": "off",
+          "label": "O3",
+          "kf": [[0, 72, 24], [4.6, 80, 22], [7.4, 84, 21]]
+        },
+        {
+          "id": "O2",
+          "team": "off",
+          "label": "O2",
+          "kf": [[0, 68, 14], [2.6, 70, 14.6], [4.6, 72, 15], [7.4, 72, 15]]
+        },
+        {
+          "id": "D1",
+          "team": "def",
+          "label": "D1",
+          "you": true,
+          "kf": [[0, 66, 17], [2.6, 68.4, 16], [4.6, 70, 15.8], [7.4, 70, 15.8]]
+        }
+      ],
+      "disc": {
+        "kf": [
+          [0, 50.4, 17.4],
+          [2.2, 66, 15.4],
+          [2.8, 68, 15.6],
+          [3.6, 68.6, 17.6],
+          [4.6, 72.4, 14],
+          [5.6, 83, 20.6],
+          [7.4, 83, 20.6]
+        ],
+        "downAt": 3.6
+      },
+      "fx": [
+        {
+          "t": 3.4,
+          "type": "mark",
+          "x": 68.6,
+          "y": 17.8,
+          "kind": "x",
+          "label": {
+            "en": "it touched the ground here",
+            "cs": "tady se dotkl země"
+          }
+        },
+        {
+          "t": 5.2,
+          "type": "bubble",
+          "dur": 1.2,
+          "actor": "D1",
+          "text": {
+            "en": "that was down!",
+            "cs": "to byl down!"
+          },
+          "style": "call"
+        },
+        {
+          "t": 6.2,
+          "type": "mark",
+          "x": 68.6,
+          "y": 17.6,
+          "kind": "target",
+          "label": {
+            "en": "back to the turnover spot",
+            "cs": "zpět na místo turnoveru"
+          }
+        }
+      ],
+      "situation": {
+        "en": "The pass grazes the grass before their receiver scoops it up — a turnover nobody registers. Play carries on for several seconds and they complete another pass downfield before you get everyone’s attention.",
+        "cs": "Přihrávka škrtne o trávu, než ji jejich receiver sebere — turnover, kterého si nikdo nevšimne. Hra pokračuje několik sekund a stihnou dokončit další přihrávku, než si tě všichni všimnou."
+      },
+      "question": {
+        "en": "It was accepted once you pointed it out. What now?",
+        "cs": "Jakmile jsi na to upozornil, uznali to. Co teď?"
+      },
+      "explain": {
+        "en": "Everything since the turnover is undone. If, after an accepted turnover, play has continued unknowingly, play stops and the disc is returned to the turnover location, players resume the positions they held when the turnover occurred, and play restarts with a check (13.12). The extra pass simply never happened.",
+        "cs": "Všechno od turnoveru se ruší. Pokud se po uznaném turnoveru pokračovalo, aniž by si toho někdo všiml, hra se zastaví, disk se vrátí na místo turnoveru, hráči zaujmou pozice z okamžiku turnoveru a rozehrává se checkem (13.12). Ta další přihrávka se prostě nestala."
+      },
+      "note": {
+        "en": "This is why calling it immediately matters (15.8): the longer play runs on, the more everyone has to reconstruct. Note the disc goes to the turnover LOCATION and to the team that gained it — not back to the original thrower.",
+        "cs": "Právě proto je důležité volat hned (15.8): čím déle se hraje dál, tím víc toho musí všichni rekonstruovat. Pozor, disk jde na MÍSTO turnoveru a týmu, který ho získal — ne zpátky původnímu házeči."
+      },
+      "rules": ["13.12", "15.8", "13.1.1"],
+      "signals": [13, 21],
+      "steps": [
+        {
+          "k": "what",
+          "q": {
+            "en": "An accepted turnover went unnoticed and play carried on for two more passes. What happens?",
+            "cs": "Uznaného turnoveru si nikdo nevšiml a hra pokračovala další dvě přihrávky. Co se stane?"
+          },
+          "rules": ["13.12"],
+          "opts": [
+            {
+              "t": {
+                "en": "Play stops and everything since the turnover is undone",
+                "cs": "Hra se zastaví a všechno od turnoveru se ruší"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.12 — the disc returns to the turnover location and players resume their positions from that moment.",
+                "cs": "13.12 — disk se vrací na místo turnoveru a hráči zaujmou pozice z toho okamžiku."
+              }
+            },
+            {
+              "t": {
+                "en": "Play carries on — it is too late to fix",
+                "cs": "Hraje se dál — na nápravu je pozdě"
+              },
+              "why": {
+                "en": "13.12 exists precisely to fix it.",
+                "cs": "13.12 existuje právě proto, aby to napravila."
+              }
+            },
+            {
+              "t": {
+                "en": "Only the last pass is undone",
+                "cs": "Ruší se jen poslední přihrávka"
+              },
+              "why": {
+                "en": "Everything returns to the turnover location and moment (13.12).",
+                "cs": "Všechno se vrací na místo a do okamžiku turnoveru (13.12)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "who",
+          "q": {
+            "en": "Who ends up with the disc?",
+            "cs": "Kdo skončí s diskem?"
+          },
+          "rules": ["13.12"],
+          "opts": [
+            {
+              "t": {
+                "en": "The team that gained it at the turnover, at the turnover location",
+                "cs": "Tým, který ho turnoverem získal, na místě turnoveru"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.12 — the turnover itself stands; only what came after it is unwound.",
+                "cs": "13.12 — samotný turnover platí; ruší se jen to, co po něm následovalo."
+              }
+            },
+            {
+              "t": {
+                "en": "The original thrower, since the pass was void",
+                "cs": "Původní házeč, protože přihrávka byla neplatná"
+              },
+              "why": {
+                "en": "The turnover was accepted; the disc changed hands (13.12).",
+                "cs": "Turnover byl uznaný; disk změnil držitele (13.12)."
+              }
+            },
+            {
+              "t": {
+                "en": "Whoever holds it now",
+                "cs": "Ten, kdo ho drží teď"
+              },
+              "why": {
+                "en": "That rewards the unnoticed continuation (13.12).",
+                "cs": "To by odměnilo nepovšimnuté pokračování (13.12)."
+              }
+            }
+          ]
+        },
+        {
+          "k": "flow",
+          "q": {
+            "en": "How does play restart?",
+            "cs": "Jak se rozehrává?"
+          },
+          "rules": ["13.12"],
+          "opts": [
+            {
+              "t": {
+                "en": "With a check, after everyone resumes their positions from the turnover",
+                "cs": "Checkem, poté co všichni zaujmou pozice z okamžiku turnoveru"
+              },
+              "ok": true,
+              "why": {
+                "en": "13.12 spells out all three: location, positions, check.",
+                "cs": "13.12 vypisuje všechny tři věci: místo, pozice, check."
+              }
+            },
+            {
+              "t": {
+                "en": "No check — a turnover never needs one",
+                "cs": "Bez checku — turnover ho nikdy nepotřebuje"
+              },
+              "why": {
+                "en": "An uncontested in-play turnover does not (13.7), but this one stopped play (13.12).",
+                "cs": "Nesporný turnover ve hře ne (13.7), ale tenhle hru zastavil (13.12)."
+              }
+            },
+            {
+              "t": {
+                "en": "With a check, but positions stay as they are now",
+                "cs": "Checkem, ale pozice zůstanou tak, jak jsou teď"
+              },
+              "why": {
+                "en": "Positions rewind to the turnover moment (13.12).",
+                "cs": "Pozice se vrací k okamžiku turnoveru (13.12)."
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

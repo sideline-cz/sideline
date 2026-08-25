@@ -16,7 +16,7 @@ It ships today as one self-contained HTML file built from source:
 
 | Piece | Size | Ports to Sideline? |
 |---|---|---|
-| `src/content/*.json` — situations, rule quotes, UI strings | ~740 KB | **Yes, verbatim.** Already pure bilingual data. |
+| `src/content/*.json` — situations, rule quotes, UI strings | 1.10 MiB | **Yes, verbatim.** Already pure bilingual data. |
 | `src/engine/app.js` — the whole program | 34 KB / 658 lines | **Partly.** See the split below. |
 | `src/styles.css` | 185 lines | No — replaced by Tailwind + shadcn. |
 | `build.mjs` + `test/{independence,duplication,chains,mobile}.mjs` | — | Guards port to vitest; `chains` becomes a Playwright e2e. |
@@ -44,9 +44,10 @@ Content and scoring logic go in a new workspace package `packages/rules/`, becau
 consumers need them:
 
 - `web` — renders the trainer.
-- `server` — **scores submitted attempts**. The client must not report its own score, or the
-  team leaderboard is trivially faked. The server needs the answer key, so the answer key has to
-  live somewhere both can import.
+- `server` — **scores submitted attempts** with shared logic, so scoring lives in one place
+  rather than being reimplemented per consumer. ⚠ **Corrected during Phase 0:** an earlier
+  draft justified this as "the client must not report its own score, or the team leaderboard is
+  trivially faked". That is not achievable and never was — see the honour-system decision below.
 - `bot` — plausible follow-up (a Discord rules quiz); the Discord-first architecture makes this
   likely enough to not paint ourselves into a corner.
 
@@ -84,6 +85,33 @@ stretching | training`) that does not want a fifth member.
 Instead: a dedicated rules leaderboard ranked on **mastery** (packages mastered, accuracy),
 which is the thing worth competing on.
 
+### Decision: the leaderboard is an honour system — and cannot be anything else
+
+Settled in Phase 0, after the "server-scored so it can't be faked" rationale turned out to be
+unachievable.
+
+Two requirements in this plan are mutually exclusive for the same 109 scenarios:
+
+- Phase 1 ships an **offline-capable public PWA** with instant verdicts and rule explanations
+  ("a rules argument at a tournament happens where there is no signal"). That requires the answer
+  key on the device.
+- Exam integrity requires the answer key **not** to be on the device.
+
+Measured facts that close the argument: `ok:true` sits at option index **0 in all 367 steps**, and
+picks are original option indices, so a client posting `[0,0,0]` scores 100% on every scenario.
+Even randomising authoring order would not help, because the `ok` flags ship inside the content
+chunk that offline practice depends on. Serving exam questions from the server changes nothing —
+they are drawn from the same scenarios the user already downloaded.
+
+**Therefore:** `scoreAttempt` in `@sideline/rules` is *shared scoring logic, not a trust
+boundary*, and the rules leaderboard is social rather than competitive. It must never gate
+anything that matters. Documented in `packages/rules/AGENTS.md` so it is not mistaken for
+security later.
+
+The genuinely secure alternative — a server-only exam pool never shipped to the client — needs
+content that does not exist and is not costed in any phase here. If the leaderboard ever needs to
+mean something, that is the work, and it is a content project, not an API change.
+
 ### Decision: reuse the Achievement system for milestones
 
 `Achievement` is a code-defined catalogue (`ACHIEVEMENTS`, threshold-based, evaluated from
@@ -99,13 +127,38 @@ This does mean extending `AchievementSlug` and the evaluation input (which curre
 
 Each phase is independently shippable. Phase 1 delivers user-visible value with no schema work.
 
-### Phase 0 — `@sideline/rules` (no UI)
+### Phase 0 — `@sideline/rules` (no UI) — ✅ DONE
+
+Delivered: the package (three subpath exports — `.`, `/content`, `/reference`), the content, the
+pure engine (`state` `anim` `answer` `chain` `exam` `perms` `pool` `score` `locale`), and 123
+tests. Notes on what changed versus this plan's original text:
+
+- **Guards use plain `vitest`, no Effect anywhere** — `packages/template-renderer`'s precedent,
+  because the engine is called from React render and from `requestAnimationFrame` at 60 fps.
+- **`chainView` was pulled forward from Phase 1.** The "locked steps leaked their key labels"
+  regression lives in the old `chainHTML`, so the decision logic is now a pure, table-tested
+  function and Phase 1's component is a dumb map over it.
+- **Four content defects fixed**, each verified zero-visual-change or a genuine bug:
+  - 6 fx authored `type:"zone"` rendered nothing (`buildFx` only branches on
+    `bubble|flash|mark|arrow`); deleted, reauthoring filed in `authoring/content-backlog.md`
+  - 23 scenarios carried a dead pre-chain `options` array (51 KB), read by nothing; deleted
+  - 57 dead `r` values on `x`/`target`/`dot` marks (`f.r` is read only in the `zone` branch)
+  - **the exam could never draw from level 9** — 11 topic strings for 9 packages meant
+    `slice(0, EXAM_N)` dropped the last bucket and the fill path was dead. Topics normalised to
+    one per level, and `startExam` now buckets by `level`, shuffles before slicing, and
+    round-robins the fill.
+- **A guard that silently checked English only** — `HARDCODED_COUNT`'s Czech alternatives could
+  never match, because JavaScript's `\b` is ASCII-only and "situací" ends in "í". Fixed with a
+  Unicode-aware lookahead. It mattered because Czech is the unreviewed half of the content.
+- `ui.json` lives in `authoring/`, not `src/` — it is the **input** to Phase 1's i18n catalogue
+  migration, not a runtime dependency, so the trainer does not grow a second translation
+  mechanism alongside `tr()`.
 
 1. Create the package; move `src/content/*.json` across as the single source of truth.
 2. Port the pure logic out of `app.js`: `pool` `score` `answeredCount` `currentAnswer`
    `answerStep` `startExam` `examAnswer` `advanceExam` `permsFor` `shuffle` `animLimit`
    `pathTangents` `ipos`. These are already side-effect-free or trivially made so.
-3. Port the content guards to `@effect/vitest`: the **build guards** (every scenario has
+3. Port the content guards to plain `vitest` — **not** `@effect/vitest`: the **build guards** (every scenario has
    `qAt < dur`, exactly one `ok:true` per step, every `§` chip resolves, both languages on every
    field, nothing positioned outside its own `view`), **independence**, and **duplication**.
    These have each caught real defects and must not be dropped in the move.
@@ -141,6 +194,33 @@ rules to Czech players is a higher bar than a side-project subdomain.
 
    This must ship **in the same change as the route**, or the homepage links to a 404.
 
+**Phase 1 acceptance criteria** (carried over from Phase 0, which could not verify them without a
+real web consumer):
+
+- ~~**Verify the chunk split for real.**~~ ✅ **Already verified during Phase 0**, so this is no
+  longer a Phase 1 unknown. Through Vite/Rollup, `import { pool } from '@sideline/rules'` pulls
+  **1203 bytes and zero JSON chunks**, and `PACKAGE_LOADERS` splits into **nine separate chunks**
+  (83–172 KB raw / 21–40 KB gz). Vite also rewrites
+  `import('./01-pull.json', { with: { type: 'json' } })` into `import('./01-pull-<hash>.mjs')`,
+  correctly dropping the attribute because the target is no longer JSON — so the
+  `ERR_IMPORT_ATTRIBUTE_MISSING` concern does not apply on the web side. Still worth a spot-check
+  once a real route exists, but the design is proven, not hoped for.
+  (Note: esbuild with `--splitting` emits dead async chunks here even though the entry itself
+  tree-shakes to 859 B. That is an esbuild artifact; Vite is what `web` uses.)
+- **Port the Playwright suite** — `chains.mjs` (drives all 109 situations through the spoiler
+  gate) and `mobile.mjs` — into `e2e/`. Until this lands, the only thing guarding the spoiler gate
+  is `animLimit`'s and `chainView`'s unit tests. The Risks section already names dropping this
+  suite as how the port regresses silently.
+- **Reauthor the 6 deleted zone fx** as `type:"mark", kind:"zone"` and review them visually. This
+  changes rendered output for 5 scenarios, so capture the Playwright baseline *first*. A
+  zone-*extent* guard belongs with this work: `ob6`'s existing `mark/zone` already pokes 0.2 units
+  outside its view, which the current point-only check cannot see.
+- **Migrate `authoring/ui.json`'s 84 keys** into the `@sideline/i18n` catalogue. Note 6 of the 84
+  are not `{en, cs}` pairs — `levels`, `pkgDesc` and `cheatStallH` are `string[]`, and
+  `cheatStallRows`/`cheatWhoRows`/`cheatGoldRows` are `string[][]`.
+- Animation pacing constants to reuse rather than reinvent: 450 ms after a completed exam chain,
+  350 ms between steps (recorded in `packages/rules/AGENTS.md`).
+
 ### Phase 2 — per-user progress (server-scored)
 
 9. `packages/domain`: `models/RulesProgress.ts`, `api/RulesTrainerApi.ts` (`HttpApiGroup`
@@ -157,7 +237,8 @@ rules to Czech players is a higher bar than a side-project subdomain.
     Per-scenario rows are what make "you have mastered 7 of 9 packages" answerable without
     replaying every attempt.
 11. Server handler + repository: client submits `{scenarioId, stepPicks[]}`, **server** computes
-    correctness from `@sideline/rules`. Never trust a client-reported score.
+    correctness from `@sideline/rules` — so scoring is defined once, not reimplemented per
+    consumer. This is *not* an anti-cheat measure; see the honour-system decision.
 12. Anonymous → logged-in: on login, offer to import `localStorage` progress.
 
 ### Phase 3 — team leaderboard + achievements
@@ -188,8 +269,12 @@ rules to Czech players is a higher bar than a side-project subdomain.
 - **Motion quality.** Movement uses monotone cubic Hermite interpolation specifically because
   Catmull-Rom overshoots and would let a landed disc drift past its spot. Port `pathTangents` /
   `ipos` as-is; do not substitute a generic easing library.
-- **Bundle size.** 740 KB of content today, ~1.4 MB at 200 situations. Phase 1 step 7 is not
-  optional.
+- **Bundle size — measured, and smaller than feared.** 1.10 MiB of content on disk, but what
+  matters is transfer: **257 KB gzipped total**, in per-package chunks of **21–40 KB gz**
+  (largest `09-stoppages` 40 KB, smallest `02-marking` 21 KB), plus 20 KB gz for `rules.json`.
+  Earlier drafts of this plan put the alarm ~4.5× too high. Phase 1 step 7 is still right — a
+  visitor practising one package should not pay for nine — but it is an optimisation, not a
+  crisis, and it should not be allowed to distort the Phase 1 design.
 - **Content authoring must not fork.** Once content lives in `packages/rules`, the
   `frisbee-rules` repo stops being a source of truth and is retired.
 - **The Czech is AI-written and unreviewed** beyond the first 23 situations — that is 86 situations
@@ -214,9 +299,10 @@ The five questions this plan opened with are now decided (see Decisions taken). 
    defines what the leaderboard ranks. Candidates: every situation in the package answered
    correctly at least once; correct in a single clean exam run; or a decaying score so mastery
    lapses and invites re-practice. The third is the best teaching design and the most work.
-2. **Does anonymous progress import into the account on login?** Phase 2 step 12 assumes yes. It
-   is friendly but needs a trust boundary — imported local progress is self-reported, so it must
-   not feed the leaderboard the way server-scored attempts do.
+2. **Does anonymous progress import into the account on login?** Phase 2 step 12 assumes yes.
+   Simpler than it looked: the honour-system decision dissolves the trust question, because
+   server-scored attempts are no more trustworthy than imported local ones. So the only remaining
+   question is UX — merge, replace, or ask — not integrity.
 3. **After Phase 4, does `rules.sideline.cz` redirect or retire?** A redirect preserves any
    accumulated links and the portfolio entry; retiring is cleaner. The subdomain currently has
    its own identity ("Ultimate Rules Trainer") that the in-app version will not.

@@ -1,0 +1,41 @@
+{
+  "private": true,
+  "name": "@sideline/rules",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "WFDF Rules of Ultimate trainer content and pure engine (no Effect runtime)",
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maxa-ondrej/sideline.git",
+    "directory": "packages/rules"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./content": {
+      "import": "./dist/content.js",
+      "types": "./dist/content.d.ts"
+    },
+    "./reference": {
+      "import": "./dist/reference.js",
+      "types": "./dist/reference.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+    "postbuild": "node scripts/assert-dist.mjs",
+    "dev": "tsc-watch -b tsconfig.build.json --onSuccess \"tsc-alias -p tsconfig.build.json\"",
+    "check": "tsc -b tsconfig.json",
+    "test": "vitest",
+    "coverage": "vitest --coverage"
+  },
+  "devDependencies": {
+    "tsc-alias": "*",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}
