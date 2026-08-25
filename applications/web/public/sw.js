@@ -7,12 +7,22 @@ try {
 
 const OFFLINE_CACHE = 'offline-fallback';
 const STATIC_CACHE = 'static-assets';
+// The rules trainer's nine content packages get their OWN cache rather than
+// sharing STATIC_CACHE, because STATIC_CACHE is already oversubscribed: the app
+// ships ~192 hashed JS chunks against ExpirationPlugin's maxEntries of 100, so
+// its LRU eviction already churns. Sharing would mean practising rules evicts
+// app-shell chunks and browsing the app evicts the rules content — which
+// defeats the entire point of caching it (a rules argument at a tournament,
+// with no signal). A separate cache with a small, sufficient maxEntries makes
+// the nine packages evict only each other.
+const RULES_CACHE = 'rules-content';
 const OFFLINE_URL = '/offline.html';
 
 // Caches this service worker owns. Anything else (e.g. a stale `pages` shell
 // from a previous version) is deleted on activate so returning users stop
-// running an old, cached app shell.
-const EXPECTED_CACHES = [OFFLINE_CACHE, STATIC_CACHE];
+// running an old, cached app shell. A new cache name MUST be added here or it
+// is purged on every activate — i.e. silently never caches anything.
+const EXPECTED_CACHES = [OFFLINE_CACHE, STATIC_CACHE, RULES_CACHE];
 
 // Pure helper (kept inline since this file is not an importable module): returns
 // true when a cache name does not belong to the current SW and should be purged.
@@ -48,6 +58,31 @@ if (typeof workbox !== 'undefined') {
   const { ExpirationPlugin } = workbox.expiration;
   const { CacheableResponsePlugin } = workbox.cacheableResponse;
 
+  // Rules trainer content packages, in their own cache — see RULES_CACHE.
+  //
+  // MUST be registered BEFORE the generic static-asset route below: Workbox
+  // matches in registration order, and these chunks are `destination: 'script'`,
+  // so the static route would otherwise claim them and put them back into the
+  // oversubscribed shared cache.
+  //
+  // Matched by filename rather than `destination` because that is the only thing
+  // that distinguishes them. Vite emits each content package as a hashed JS
+  // chunk named after its source file (`01-pull-DCQUq6ss.js`), and the
+  // `0N-` prefix is unique to the rules packages — no app module starts with a
+  // digit pair. maxEntries is 12 for nine packages plus headroom; maxAge is a
+  // year because the content changes only when the rulebook does, and the
+  // filename hash makes a real change a cache miss anyway.
+  registerRoute(
+    ({ url }) => /\/assets\/0[1-9]-[a-z-]+-[\w-]+\.js$/.test(url.pathname),
+    new CacheFirst({
+      cacheName: RULES_CACHE,
+      plugins: [
+        new ExpirationPlugin({ maxEntries: 12, maxAgeSeconds: 365 * 24 * 60 * 60 }),
+        new CacheableResponsePlugin({ statuses: [0, 200] }),
+      ],
+    }),
+  );
+
   // Cache static assets (JS, CSS, images, fonts) with CacheFirst. These are
   // content-hashed and immutable, so a new deploy ships new filenames that miss
   // the cache and are fetched fresh — old entries simply age out.
@@ -70,6 +105,17 @@ if (typeof workbox !== 'undefined') {
   // ALWAYS come from the network so a freshly deployed shell (and the new hashed
   // bundles it references) reaches returning users. Never serve a cached shell;
   // fall back to offline.html only when the network is genuinely unavailable.
+  //
+  // CONSEQUENCE, measured — read this before promising offline support. Caching
+  // an asset (including the rules content above) only helps once the app shell
+  // is already running:
+  //   - page already open, then signal lost  → keeps working
+  //   - COLD START with no signal            → offline.html, not the app
+  // So the rules trainer is *not* usable from a cold start at a field with no
+  // signal, which is the scenario docs/plans/rules-trainer.md cites. Fixing
+  // that means serving a cached shell for navigations, which trades away the
+  // guarantee above (returning users always get the newest deploy) and needs
+  // its own decision — not a change to smuggle into a feature branch.
   registerRoute(
     ({ request }) => request.mode === 'navigate',
     new NetworkOnly({

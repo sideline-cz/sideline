@@ -237,7 +237,27 @@ rules to Czech players is a higher bar than a side-project subdomain.
      matched on the content chunk URL pattern) rather than letting it compete in `STATIC_CACHE`,
      and remember a new cache name must be added to `EXPECTED_CACHES` or it is purged on every
      activate. Raising `STATIC_CACHE`'s own limit is a separate, app-wide fix worth doing on its
-     own merits.
+     own merits. ✅ **Done** — `RULES_CACHE`, registered *before* the generic static route because
+     Workbox matches in registration order and these chunks are `destination: 'script'`. Verified
+     in a browser: all nine land in `rules-content`, none leak into `static-assets`.
+
+   ⚠️ **But the motivating scenario does NOT work, and this step cannot deliver it.** Measured:
+
+   | | Result |
+   |---|---|
+   | Page already open, then signal lost | trainer keeps working ✅ |
+   | **Cold start with no signal** | `offline.html` — "📵 You're offline" ❌ |
+
+   `sw.js` serves navigations `NetworkOnly` with an `offline.html` fallback, deliberately, so a
+   returning user always gets the newest deployed shell. That means **no amount of asset caching
+   makes a cold start work offline** — and a cold start is exactly "a rules argument at a
+   tournament happens where there is no signal", the sentence this step was written to satisfy.
+
+   So caching content is still worth having (it makes the warm case reliable and immune to
+   app-shell churn), but the tournament promise is unmet. Delivering it requires serving a cached
+   shell for navigations, which trades away the always-newest-deploy guarantee and has its own
+   staleness and cross-user implications. That is an app-wide service-worker policy decision, not
+   a rules-trainer task — **do not claim offline support for the trainer until it is made.**
 9. **Surface it on the sideline.cz homepage.** `HomePage.tsx` is a hero (headline, subheadline,
    Discord CTA, three `hero_feature_*` badges) over a demo bento grid (`DemoStats`,
    `DemoUpcomingEvents`, `DemoLeaderboard`, `DemoRsvpBanner`, `DemoFinance`,

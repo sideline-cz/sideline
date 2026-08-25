@@ -470,4 +470,25 @@ test.describe('Rules trainer', () => {
     await page.goto('/rules');
     await expect(page).toHaveURL(/\/en\/rules$/);
   });
+
+  test('the homepage card reaches a working trainer, not a 404', async ({ page }) => {
+    // The plan requires the homepage surface and the route to ship together,
+    // "or the homepage links to a 404". This is that assertion: follow the card
+    // the way a visitor would, and confirm the trainer actually starts — the
+    // card is the only real link in a grid of static demos, so a broken href
+    // would look exactly like its inert siblings.
+    await page.goto('/');
+    await page.waitForFunction(() => !document.body.textContent?.includes('Loading...'), {
+      timeout: 30000,
+    });
+
+    const card = page.getByRole('link', { name: /rules trainer/i });
+    await expect(card).toBeVisible();
+    await card.click();
+
+    await expect(page).toHaveURL(/\/(en|cs)\/rules$/);
+    await expect(page.getByRole('button', { name: START_BUTTON.en })).toBeVisible({
+      timeout: 30000,
+    });
+  });
 });
