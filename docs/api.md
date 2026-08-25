@@ -43,6 +43,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Global Admin](#32-global-admin)
    - [Player Rating](#33-player-rating)
    - [Team Generation](#34-team-generation)
+   - [Rules Trainer](#35-rules-trainer)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -6620,6 +6621,87 @@ Posts a set of generated teams to the event's configured Discord channel. The se
 | `TeamGenerationRosterChanged` | 409 | The RSVP roster has changed since teams were generated — regenerate before posting |
 | `TeamGenerationPostPending` | 409 | A previous `post-teams-to-discord` request is still being processed |
 | `TeamGenerationDiscordPostFailed` | 502 | The Discord REST call succeeded at the server but the bot returned an error |
+
+---
+
+### 35. Rules Trainer
+
+**Source:** `packages/domain/src/api/RulesTrainerApi.ts`
+
+Per-user progress for the Ultimate Rules Trainer (see `docs/plans/rules-trainer.md` Phase 2). Both endpoints are caller-scoped — there is no team parameter and no cross-user lookup — so neither declares a custom error beyond the standard 401 from `AuthMiddleware`. `score`/`total` on a submitted attempt are always computed server-side; the client never supplies them. Mastery is computed on read from stored per-scenario results — there is no cached/materialised mastery value.
+
+**Note:** This PR ships the schema and domain contracts only. The server handler, repository, and route registration land in a follow-up PR — until then these endpoints are not yet live.
+
+---
+
+#### `POST /rules/attempts`
+
+Submits a completed (or partially completed) practice/exam attempt. The server scores it with `scoreAttempt` from `@sideline/rules` and persists both the attempt row and its per-scenario results.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Request Body:** `SubmitAttemptRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `mode` | `"practice" \| "exam"` | Yes | Which trainer mode produced this attempt |
+| `packages` | `integer[]` (1–9 each) | Yes | The package levels selected for this attempt |
+| `results` | `SubmitAttemptResultInput[]` | Yes | One entry per attempted scenario |
+
+`SubmitAttemptResultInput`:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `scenario_id` | `string` | Yes | The scenario's id (matches `@sideline/rules`' `ScenarioId`) |
+| `steps` | `(integer \| null)[]` | Yes | The client's picked option index per chain step, in order; `null` for a step left unanswered |
+
+**Response:** `201 Created` — `RulesAttempt`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | `RulesAttemptId` | No | Attempt id |
+| `user_id` | `UserId` | No | The submitting user |
+| `mode` | `"practice" \| "exam"` | No | Echoes the request |
+| `packages` | `integer[]` | No | Echoes the request |
+| `started_at` | `string` (ISO datetime) | No | When the attempt started |
+| `finished_at` | `string` (ISO datetime) | Yes | When the attempt finished, or absent if still in progress |
+| `score` | `integer` | No | Server-computed count of correct scenarios |
+| `total` | `integer` | No | Server-computed count of attempted scenarios |
+| `created_at` | `string` (ISO datetime) | No | Row creation timestamp |
+
+---
+
+#### `GET /rules/progress`
+
+Returns the authenticated user's current mastery summary, computed on read from their stored `rules_scenario_results` (exponential half-life decay — see `packages/rules/src/engine/mastery.ts`). Always scoped to the caller; there is no way to request another user's progress through this endpoint.
+
+**Auth:** Bearer token (AuthMiddleware)
+
+**Response:** `200 OK` — `RulesMasterySummary`
+
+| Field | Type | Description |
+|---|---|---|
+| `packages` | `RulesPackageMastery[]` | Per-package mastery breakdown |
+| `overall` | `RulesOverallMastery` | Mastery aggregated across every package, weighted by package size |
+
+`RulesPackageMastery`:
+
+| Field | Type | Description |
+|---|---|---|
+| `level` | `integer` (1–9) | The package level |
+| `strength` | `number` | Mean scenario strength in `[0, 1]` |
+| `mastered` | `boolean` | `strength >= MASTERED_THRESHOLD` (0.8) |
+| `freshCount` | `integer` | Scenarios whose strength is still at least half (within one half-life) |
+| `everCorrectCount` | `integer` | Scenarios ever answered correctly, however long ago |
+| `total` | `integer` | Scenarios in the package |
+
+`RulesOverallMastery`:
+
+| Field | Type | Description |
+|---|---|---|
+| `strength` | `number` | Mean strength across every scenario, weighted by package size |
+| `masteredCount` | `integer` | Number of packages with `mastered: true` |
+| `totalScenarios` | `integer` | Total scenario count across all packages |
 
 ---
 
