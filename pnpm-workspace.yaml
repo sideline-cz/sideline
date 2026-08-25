@@ -1,3 +1,33 @@
 packages:
   - applications/*
   - packages/*
+
+# Moved here from the "pnpm" field in package.json. pnpm 10.28 no longer reads
+# overrides / patchedDependencies / peerDependencyRules from package.json and
+# silently ignored them, so the effect patch and the typescript override only
+# survived because the lockfile already carried the resolution.
+overrides:
+  '@effect/platform-node-shared': '4.0.0-beta.40'
+  'typescript': '5.9.3'
+
+patchedDependencies:
+  'effect@4.0.0-beta.40': patches/effect@4.0.0-beta.40.patch
+
+peerDependencyRules:
+  ignoreMissing:
+    - '@opentelemetry/api'
+    - '@opentelemetry/sdk-logs'
+    - '@opentelemetry/resources'
+    - '@opentelemetry/sdk-metrics'
+    - '@opentelemetry/sdk-trace-web'
+    - '@opentelemetry/sdk-trace-base'
+    - '@opentelemetry/sdk-trace-node'
+    - '@opentelemetry/semantic-conventions'
+
+ignoredBuiltDependencies:
+  - '@parcel/watcher'
+  - cpu-features
+  - esbuild
+  - msgpackr-extract
+  - protobufjs
+  - ssh2
