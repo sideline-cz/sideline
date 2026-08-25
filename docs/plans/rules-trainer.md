@@ -221,9 +221,23 @@ rules to Czech players is a higher bar than a side-project subdomain.
 7. **Lazy-load content per package.** At 740 KB (and growing toward 200 situations) the content
    must not sit in the main bundle — this was an optional win as a standalone site and is a
    requirement inside the app shell.
-8. Add the content chunks to the service worker's `STATIC_CACHE` so the installed PWA works
-   offline. This is the "app" half of "web and app", and it is genuinely useful — a rules
-   argument at a tournament happens where there is no signal.
+8. Make the installed PWA work offline. This is the "app" half of "web and app", and it is
+   genuinely useful — a rules argument at a tournament happens where there is no signal.
+
+   Two corrections from measuring the actual build:
+   - **The content chunks are already cached.** Vite rewrites the JSON imports into `.js` chunks,
+     so `request.destination === 'script'` and `sw.js`'s existing `CacheFirst` route picks them up
+     with no change. An earlier worry that a `.json` fetch has `destination === ''` and would be
+     skipped does not apply — there are no `.json` requests at runtime.
+   - **The real problem is cache capacity, and it predates the trainer.** `applications/web` ships
+     **192 JS chunks** against `ExpirationPlugin`'s `maxEntries: 100`. LRU eviction therefore
+     already churns the app shell, and adding nine content chunks means practising rules can evict
+     app chunks and vice versa — so "works offline" is unreliable *today*, before the trainer.
+     Give rules content its **own** cache (its own `maxEntries` and a longer `maxAgeSeconds`,
+     matched on the content chunk URL pattern) rather than letting it compete in `STATIC_CACHE`,
+     and remember a new cache name must be added to `EXPECTED_CACHES` or it is purged on every
+     activate. Raising `STATIC_CACHE`'s own limit is a separate, app-wide fix worth doing on its
+     own merits.
 9. **Surface it on the sideline.cz homepage.** `HomePage.tsx` is a hero (headline, subheadline,
    Discord CTA, three `hero_feature_*` badges) over a demo bento grid (`DemoStats`,
    `DemoUpcomingEvents`, `DemoLeaderboard`, `DemoRsvpBanner`, `DemoFinance`,
@@ -249,17 +263,42 @@ real web consumer):
   once a real route exists, but the design is proven, not hoped for.
   (Note: esbuild with `--splitting` emits dead async chunks here even though the entry itself
   tree-shakes to 859 B. That is an esbuild artifact; Vite is what `web` uses.)
-- **Port the Playwright suite** — `chains.mjs` (drives all 109 situations through the spoiler
-  gate) and `mobile.mjs` — into `e2e/`. Until this lands, the only thing guarding the spoiler gate
-  is `animLimit`'s and `chainView`'s unit tests. The Risks section already names dropping this
-  suite as how the port regresses silently.
+- ~~**Port the Playwright suite**~~ ✅ **DONE** (`e2e/tests/rules-trainer.spec.ts` +
+  `rules-trainer-mobile.spec.ts`). It covers all 109 situations on **every PR**, split into nine
+  per-level tests so the existing 8-way sharding distributes it (3.5 min at 4 workers, vs 10.6
+  min as one serial sweep).
+
+  Two things worth carrying forward:
+  - The port could not transliterate the prototype. It asserted through globals (`anim.t`,
+    `anim.fx`, `state`, `currentAnswer()`, `SCENARIOS`) which do not exist in React with
+    component-local state. The freeze is now observed by polling the disc's SVG `transform` until
+    it settles and asserting it stays put; the correct option is derived by importing the content
+    as an **answer key** and matching on option *text*, which works through the shuffle rather
+    than around it. That is why `@sideline/rules` is a root devDependency — `e2e/` has no
+    `package.json` of its own.
+  - **A gate-behind-a-flag version was written first and rejected.** At 10.6 min serial it would
+    never have run in CI, and coverage that only runs when someone sets an env var is a soft
+    version of the dropped-suite risk this plan warns about. If the sweep ever needs to shrink,
+    shrink it by sharding further — not by flagging it off.
 - **Reauthor the 6 deleted zone fx** as `type:"mark", kind:"zone"` and review them visually. This
   changes rendered output for 5 scenarios, so capture the Playwright baseline *first*. A
   zone-*extent* guard belongs with this work: `ob6`'s existing `mark/zone` already pokes 0.2 units
   outside its view, which the current point-only check cannot see.
-- **Migrate `authoring/ui.json`'s 84 keys** into the `@sideline/i18n` catalogue. Note 6 of the 84
-  are not `{en, cs}` pairs — `levels`, `pkgDesc` and `cheatStallH` are `string[]`, and
-  `cheatStallRows`/`cheatWhoRows`/`cheatGoldRows` are `string[][]`.
+- ~~**Migrate `authoring/ui.json`'s 84 keys**~~ ✅ **DONE**, and the awkward 6 resolved by
+  splitting them along the content/chrome line this plan already draws:
+  - **78 simple `{en, cs}` keys** → the catalogue as `rules_*`, plus `levels` and `pkgDesc`
+    expanded into `rules_level_N_name` / `rules_level_N_desc` (96 keys total).
+  - **The four cheat-sheet tables are CONTENT, not chrome**, so they did NOT go into the
+    catalogue. Every row carries a rulebook citation (`9.5.1`, `15.4`, `16.2`) — this plan's own
+    test for content is "versioned alongside the rulebook citations they encode". They live in
+    `packages/rules/src/content/cheatsheet.json`, ship via `@sideline/rules/reference`, and
+    render through `text()`. Flattening three tables into ~45 catalogue keys would have been the
+    wrong shape as well as the wrong category.
+  - Each table is localised **whole** (`Localized<string[][]>`) because a row's cells are one
+    authored unit. That introduces an alignment risk no other content file has — a dropped or
+    merged row leaves both languages present and non-empty, so the both-languages guard stays
+    green while the Czech table shows different rows with citations on the wrong entries. Guard
+    **G19** compares row and column counts for exactly this.
 - Animation pacing constants to reuse rather than reinvent: 450 ms after a completed exam chain,
   350 ms between steps (recorded in `packages/rules/AGENTS.md`).
 

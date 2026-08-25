@@ -151,3 +151,24 @@ export type RuleEntry = Localized<string>;
 
 /** A hand-signal description, keyed by signal id (e.g. `'7'`) — see `SIGNALS` in `reference.ts`. */
 export type SignalEntry = Localized<string>;
+
+/**
+ * The cheat-sheet tables — see `CHEAT_SHEET` in `reference.ts`.
+ *
+ * Each table is localised as a WHOLE (`Localized<readonly string[][]>`) rather
+ * than cell by cell, because a row's cells are one authored unit: the Czech
+ * rendering of "Accepted breach by the defence / “Stalling 1” / 9.5.1" has to
+ * line up as a row, and a per-cell shape invites the two languages drifting
+ * out of alignment. The guard asserts both languages have identical row and
+ * column counts.
+ */
+export type CheatSheet = {
+  /** Column headers for the stall-count table (3 columns). */
+  readonly cheatStallH: Localized<readonly string[]>;
+  /** Stall-count restart table: [after what, resumes at, citation]. */
+  readonly cheatStallRows: Localized<readonly (readonly string[])[]>;
+  /** Who may make which call: [call, who]. */
+  readonly cheatWhoRows: Localized<readonly (readonly string[])[]>;
+  /** "Golden rules": [headline, explanation]. */
+  readonly cheatGoldRows: Localized<readonly (readonly string[])[]>;
+};
