@@ -16,6 +16,7 @@
  * `engine/mastery.ts` field-for-field so the server (follow-up PR) can map
  * the pure computation onto the wire DTO 1:1, with no renaming in between.
  */
+import * as Schemas from '@sideline/effect-lib/Schemas';
 import { Schema } from 'effect';
 import { UserId } from '~/models/User.js';
 
@@ -60,11 +61,11 @@ export class RulesAttempt extends Schema.Class<RulesAttempt>('RulesAttempt')({
   user_id: UserId,
   mode: RulesAttemptMode,
   packages: Schema.Array(Level),
-  started_at: Schema.String,
-  finished_at: Schema.OptionFromNullOr(Schema.String),
+  started_at: Schemas.DateTimeFromDate,
+  finished_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
   score: Schema.Int,
   total: Schema.Int,
-  created_at: Schema.String,
+  created_at: Schemas.DateTimeFromDate,
 }) {}
 
 /** Mirrors `PackageMastery` in `@sideline/rules`'s `engine/mastery.ts`. */

@@ -56,6 +56,7 @@ import { MockEmailLayers } from '../mocks/emailMocks.js';
 import { MockEventRosterLayers } from '../mocks/eventRosterMocks.js';
 import { MockFinanceLayers } from '../mocks/financeMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from '../mocks/onboardingMocks.js';
+import { MockRulesAttemptsRepositoryLayer } from '../mocks/rulesTrainerMocks.js';
 import { MockTeamChallengeRepositoryLayer } from '../mocks/teamChallengeMocks.js';
 import { MockTranslationsLayers } from '../mocks/translationMocks.js';
 
@@ -914,6 +915,7 @@ const buildTestLayer = (playerRatingsLayer: Layer.Layer<PlayerRatingsRepository>
     .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
     .pipe(Layer.provide(playerRatingsLayer))
     .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
+    .pipe(Layer.provide(MockRulesAttemptsRepositoryLayer))
     .pipe(Layer.provide(MockChannelManagementLayers))
     .pipe(Layer.provide(MockEmailLayers))
     .pipe(Layer.provide(MockLlmClientLayer))
@@ -2035,6 +2037,7 @@ const buildTgTestLayer = () =>
     .pipe(Layer.provide(makeControlledPlayerRatingsLayer()))
     .pipe(Layer.provide(makeTgTrainingGamesRepositoryLayer()))
     .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
+    .pipe(Layer.provide(MockRulesAttemptsRepositoryLayer))
     .pipe(Layer.provide(MockChannelManagementLayers))
     .pipe(Layer.provide(MockEmailLayers))
     .pipe(Layer.provide(MockLlmClientLayer))

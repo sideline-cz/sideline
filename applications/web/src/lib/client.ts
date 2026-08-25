@@ -25,6 +25,7 @@ import {
   PlayerRatingApi,
   RoleApi,
   Roster,
+  RulesTrainerApi,
   TeamApi,
   TeamChallengeApi,
   TeamGenerationApi,
@@ -81,7 +82,8 @@ class ClientApi extends HttpApi.make('api')
   .add(EventRosterApi.EventRosterApiGroup)
   .add(GlobalAdminApi.GlobalAdminApiGroup)
   .add(PlayerRatingApi.PlayerRatingApiGroup)
-  .add(TeamGenerationApi.TeamGenerationApiGroup) {}
+  .add(TeamGenerationApi.TeamGenerationApiGroup)
+  .add(RulesTrainerApi.RulesTrainerApiGroup) {}
 
 export const client = ClientConfig.asEffect().pipe(
   Effect.flatMap(({ baseUrl }) =>

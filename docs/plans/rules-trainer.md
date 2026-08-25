@@ -349,7 +349,34 @@ real web consumer):
     UI can reuse existing components.
 14. Member route `(authenticated)/teams/$teamId/rules` — the same trainer organism plus a
     progress panel and the leaderboard.
-15. Wire the new achievement slugs + optional Discord role.
+15. Wire the new achievement slugs + optional Discord role. **Bigger than this line suggests** —
+    four things surfaced while building Phase 2:
+
+    - **`AchievementEvaluator.evaluate` takes a `TeamMemberId`, but rules attempts are
+      team-less.** That is a direct consequence of the (deliberate) decision to give
+      `rules_attempts` no `team_id` so progress survives joining and leaving a team. So the
+      submit handler has no membership context to evaluate with, and Phase 2 wires **no**
+      achievement hook at all. Phase 3 must add a user-scoped evaluation path, or resolve the
+      caller's memberships at evaluation time and fan out. This is new work, not a one-liner.
+    - **`AchievementEvaluationInput` must gain a rules field**, and both construction sites
+      (`AchievementEvaluator.ts`, and `AchievementPreview.ts` **twice**) must populate it. That
+      gives `AchievementEvaluator` a new repository dependency, which re-triggers the
+      mock-layer cascade across all 41 `ApiLive` test files.
+    - **`BUILT_IN_RULE_KINDS` is an exhaustive record over `CustomRuleKind`**, which is
+      `'total_activities' | 'longest_streak' | 'total_duration' | 'activity_type_count'` —
+      **none of which describes a rules milestone**. Either add a literal (no migration needed;
+      `custom_achievements.rule_kind` is plain `TEXT` with no CHECK) or decide rules
+      achievements do not belong in this catalogue. Omitting an entry is a compile error, which
+      is the good outcome.
+    - **`packages/domain/test/Achievement.test.ts` asserts exactly 5 role-granting
+      achievements.** Any new `grantsDiscordRole: true` slug breaks it, and that count must be
+      updated deliberately rather than reflexively.
+
+    Also worth knowing: `grantsDiscordRole` is metadata consumed on the read side, not the
+    trigger. The actual grant path is evaluate → `earned.insertIfMissing` → emit to the
+    `achievement_sync_events` outbox → the bot polls it and reads the role id from the
+    per-team `achievement_role_mappings` table. So the flag means "eligible for a
+    captain-configured role", not "grants a role".
 
 ### Phase 4 — cutover
 

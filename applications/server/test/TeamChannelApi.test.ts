@@ -67,6 +67,7 @@ import { MockEmailLayers } from './mocks/emailMocks.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from './mocks/onboardingMocks.js';
 import { MockPlayerRatingsRepositoryLayer } from './mocks/playerRatingMocks.js';
+import { MockRulesAttemptsRepositoryLayer } from './mocks/rulesTrainerMocks.js';
 import { MockTeamChallengeRepositoryLayer } from './mocks/teamChallengeMocks.js';
 import { MockTranslationsLayers } from './mocks/translationMocks.js';
 
@@ -950,6 +951,7 @@ const buildLayer = (overrides?: {
     .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
     .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
     .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
+    .pipe(Layer.provide(MockRulesAttemptsRepositoryLayer))
     .pipe(Layer.provide(overrides?.channelsLayer ?? MockTeamChannelsRepositoryLayer))
     .pipe(Layer.provide(MockTeamChannelAccessRepositoryLayer))
     .pipe(Layer.provide(MockSqlClientLayer))
