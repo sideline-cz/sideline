@@ -25,6 +25,7 @@ import {
   PlayerRatingApi,
   RoleApi,
   Roster,
+  RulesTrainerApi,
   TeamApi,
   TeamChallengeApi,
   TeamGenerationApi,
@@ -65,6 +66,7 @@ export const Api = HttpApi.make('api')
   .add(
     PlayerRatingApi.PlayerRatingApiGroup,
     RoleApi.RoleApiGroup,
+    RulesTrainerApi.RulesTrainerApiGroup,
     TeamApi.TeamApiGroup,
     TeamChallengeApi.TeamChallengeApiGroup,
     TeamGenerationApi.TeamGenerationApiGroup,

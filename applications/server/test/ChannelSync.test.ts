@@ -59,6 +59,7 @@ import { MockEventRosterLayers } from './mocks/eventRosterMocks.js';
 import { MockFinanceLayers } from './mocks/financeMocks.js';
 import { MockTeamOnboardingTokensRepositoryLayer } from './mocks/onboardingMocks.js';
 import { MockPlayerRatingsRepositoryLayer } from './mocks/playerRatingMocks.js';
+import { MockRulesAttemptsRepositoryLayer } from './mocks/rulesTrainerMocks.js';
 import { MockTeamChallengeRepositoryLayer } from './mocks/teamChallengeMocks.js';
 import { MockTranslationsLayers } from './mocks/translationMocks.js';
 
@@ -845,6 +846,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
   .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
   .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
+  .pipe(Layer.provide(MockRulesAttemptsRepositoryLayer))
   .pipe(Layer.provide(MockChannelManagementLayers))
   .pipe(Layer.provide(MockEmailLayers))
   .pipe(Layer.provide(MockEventRosterLayers))
@@ -965,6 +967,7 @@ const buildTestLayer = (settingsLayer: Layer.Layer<TeamSettingsRepository>) =>
     .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
     .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
     .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
+    .pipe(Layer.provide(MockRulesAttemptsRepositoryLayer))
     .pipe(Layer.provide(MockChannelManagementLayers))
     .pipe(Layer.provide(MockEmailLayers))
     .pipe(Layer.provide(MockEventRosterLayers))
