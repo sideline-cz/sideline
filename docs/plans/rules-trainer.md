@@ -396,10 +396,29 @@ real web consumer):
 
 The five questions this plan opened with are now decided (see Decisions taken). What remains:
 
-1. **What counts as "mastering" a package?** Needed before Phase 2's schema is fixed, because it
-   defines what the leaderboard ranks. Candidates: every situation in the package answered
-   correctly at least once; correct in a single clean exam run; or a decaying score so mastery
-   lapses and invites re-practice. The third is the best teaching design and the most work.
+1. ~~**What counts as "mastering" a package?**~~ **DECIDED: a decaying score — mastery lapses.**
+   Implemented as pure logic in `packages/rules/src/engine/mastery.ts` ahead of the schema, since
+   it is the thing the schema has to support.
+
+   - **Exponential half-life decay**, 45 days (`MASTERY_HALF_LIFE_DAYS`), per scenario from its
+     last fully-correct answer. Exponential rather than linear because it is the standard
+     spaced-repetition shape and never quite reaches zero, so a situation you once knew never
+     reads as *never* known.
+   - **A package is mastered at mean strength ≥ 0.8** (`MASTERED_THRESHOLD`). Below 1 deliberately:
+     requiring every situation to be simultaneously fresh would make the 20-situation package
+     nearly unmasterable and would flicker off the moment one situation aged.
+   - **Unanswered scenarios count as 0**, so mastery cannot be reached by drilling one situation.
+   - **Overall mastery is weighted by package size**, which makes it identical to "mean strength
+     across every situation". An unweighted mean of the nine packages would let a player out-rank
+     someone who knows strictly more situations by farming the small packages.
+   - **Computed on read, not materialised.** Strength derives from one `lastCorrectAt` timestamp
+     per scenario, so there is no score to keep fresh: no cron, no staleness window, and no way
+     for the leaderboard and the progress panel to disagree because one was recomputed and the
+     other was not. This is what keeps Phase 2's schema to the two tables already sketched.
+
+   It lives in `@sideline/rules` rather than the server because three consumers must agree on it —
+   the server ranks with it, web renders progress with it, and a Discord bot would answer "how am
+   I doing?" with it. One definition, one set of tests, no drift.
 2. **Does anonymous progress import into the account on login?** Phase 2 step 12 assumes yes.
    Simpler than it looked: the honour-system decision dissolves the trust question, because
    server-scored attempts are no more trustworthy than imported local ones. So the only remaining

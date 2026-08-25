@@ -19,6 +19,14 @@ export type { ChainEntry, ChainStepState } from './engine/chain.js';
 export { chainView } from './engine/chain.js';
 export { startExam } from './engine/exam.js';
 export { text } from './engine/locale.js';
+export type { PackageMastery, ScenarioOutcome } from './engine/mastery.js';
+export {
+  MASTERED_THRESHOLD,
+  MASTERY_HALF_LIFE_DAYS,
+  overallMastery,
+  packageMastery,
+  scenarioStrength,
+} from './engine/mastery.js';
 export { buildPerms, buildRunPerms, shuffle } from './engine/perms.js';
 export { countLevel, pool, poolLen, posOf } from './engine/pool.js';
 export { answeredCount, examScore, score, scoreAttempt } from './engine/score.js';
