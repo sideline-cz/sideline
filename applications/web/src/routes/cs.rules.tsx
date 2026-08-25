@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
+import { Option } from 'effect';
 import { RulesTrainerPage } from '~/components/pages/RulesTrainerPage';
 import { tr } from '~/lib/translations.js';
 
@@ -23,5 +24,13 @@ export const Route = createFileRoute('/cs/rules')({
 });
 
 function CsRulesRoute() {
-  return <RulesTrainerPage locale='cs' showTranslationReviewNotice />;
+  // See `en.rules.tsx` for why `userOption` is read here rather than in `beforeLoad`.
+  const { userOption } = Route.useRouteContext();
+  return (
+    <RulesTrainerPage
+      locale='cs'
+      showTranslationReviewNotice
+      isSignedIn={Option.isSome(userOption)}
+    />
+  );
 }

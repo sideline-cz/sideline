@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
+import { Option } from 'effect';
 import { RulesTrainerPage } from '~/components/pages/RulesTrainerPage';
 import { tr } from '~/lib/translations.js';
 
@@ -18,5 +19,11 @@ export const Route = createFileRoute('/en/rules')({
 });
 
 function EnRulesRoute() {
-  return <RulesTrainerPage locale='en' />;
+  // `userOption` comes from the root route's `beforeLoad` (see
+  // `__root.tsx`); reading it here — rather than in `beforeLoad` — mirrors
+  // `invite.$code.tsx`, since this route needs nothing else from the
+  // context. Only a plain boolean crosses into the (router-hook-free) page
+  // component — see `RulesTrainerPage`'s "no TanStack Router imports" rule.
+  const { userOption } = Route.useRouteContext();
+  return <RulesTrainerPage locale='en' isSignedIn={Option.isSome(userOption)} />;
 }

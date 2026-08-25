@@ -101,6 +101,37 @@ describe('progress', () => {
     expect(loadProgress()).toEqual({ version: 1, answers: {}, sel: [] });
   });
 
+  it('still loads a payload carrying `importedAt` (additive field, not rejected)', async () => {
+    const { loadProgress } = await import('~/lib/rules/progress.js');
+    localStorage.setItem(
+      'sideline.rules.progress.v1',
+      JSON.stringify({
+        version: 1,
+        answers: { [sid('s1')]: makeAnswer() },
+        sel: [1],
+        importedAt: 1_700_000_000_000,
+      }),
+    );
+    expect(loadProgress()).toEqual({
+      version: 1,
+      answers: { [sid('s1')]: makeAnswer() },
+      sel: [1],
+      importedAt: 1_700_000_000_000,
+    });
+  });
+
+  it('round-trips `importedAt` through `saveProgress`/`loadProgress`', async () => {
+    const { saveProgress, loadProgress } = await import('~/lib/rules/progress.js');
+    const progress = {
+      version: 1 as const,
+      answers: { [sid('s1')]: makeAnswer() },
+      sel: [1] as const,
+      importedAt: 1_700_000_000_000,
+    };
+    saveProgress(progress);
+    expect(loadProgress()).toEqual(progress);
+  });
+
   it('never throws when localStorage is unavailable', async () => {
     Object.defineProperty(globalThis, 'localStorage', {
       get() {
