@@ -1,6 +1,8 @@
+import { LEVEL_META, LEVELS } from '@sideline/rules';
 import { Option, Record } from 'effect';
 import {
   Award,
+  BookOpen,
   Calendar,
   CheckCircle2,
   Clock,
@@ -381,6 +383,44 @@ function DemoAchievements() {
   );
 }
 
+/**
+ * The rules trainer card — the only card in the bento grid that is a real,
+ * working link rather than a static demo of the signed-in app.
+ *
+ * The situation count is INTERPOLATED from `LEVEL_META`, never written into the
+ * copy. `packages/rules`' independence guard exists because the standalone
+ * app's hero once claimed "23 game situations" long after there were 33, and a
+ * hard-coded number here would go stale in exactly the same way — the copy
+ * lives in the i18n catalogue where no content guard can see it. `LEVEL_META`
+ * comes from `@sideline/rules`'s content-free entry point, so this costs a few
+ * hundred bytes and pulls in no scenario JSON.
+ */
+function DemoRulesTrainer() {
+  const situations = LEVELS.reduce((n, level) => n + LEVEL_META[level].scenarioCount, 0);
+
+  return (
+    <Card className='shadow-lg border-primary/30 bg-primary/[0.03]'>
+      <CardHeader className='pb-2'>
+        <CardTitle className='flex items-center gap-2 text-sm font-medium text-muted-foreground'>
+          <BookOpen className='size-4' />
+          {tr('hero_demo_rules')}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className='flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between'>
+        <p className='text-sm text-muted-foreground max-w-2xl'>
+          {tr('hero_demo_rules_desc', { count: situations })}
+        </p>
+        <Button asChild className='shrink-0'>
+          <a href='/rules'>
+            {tr('hero_demo_rules_cta')}
+            <Zap className='size-4' />
+          </a>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 // -- Main component --
 
 export function HomePage({ loginUrl, error, reason }: HomePageProps) {
@@ -431,6 +471,15 @@ export function HomePage({ loginUrl, error, reason }: HomePageProps) {
                   <Dumbbell className='size-3' />
                   {tr('hero_feature_workout')}
                 </Badge>
+                {/* Fourth badge appears one breakpoint later than the third:
+                    four badges plus their icons crowd the hero at `sm`. */}
+                <Badge
+                  variant='secondary'
+                  className='gap-1.5 px-3 py-1 text-xs hidden md:inline-flex'
+                >
+                  <BookOpen className='size-3' />
+                  {tr('hero_feature_rules')}
+                </Badge>
               </div>
               <h1 className='text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl max-w-3xl bg-gradient-to-br from-foreground via-foreground to-muted-foreground/70 bg-clip-text text-transparent'>
                 {tr('hero_headline')}
@@ -477,11 +526,22 @@ export function HomePage({ loginUrl, error, reason }: HomePageProps) {
                 <div className='sm:col-span-1 lg:col-span-1 transition-transform hover:scale-[1.02] duration-200 -rotate-1'>
                   <DemoAchievements />
                 </div>
+
+                {/* Rules trainer — the one card here that is NOT a demo.
+                    Every sibling is inert markup showing what the app looks
+                    like once you sign in; this is a real link to something a
+                    visitor can use right now, so it gets the full width of the
+                    grid's last row and no decorative tilt, rather than
+                    pretending to be a seventh screenshot. */}
+                <div className='sm:col-span-2 lg:col-span-3'>
+                  <DemoRulesTrainer />
+                </div>
               </div>
             </div>
 
             {/* Feature descriptions below */}
-            <div className='grid grid-cols-1 gap-6 sm:grid-cols-3 w-full max-w-4xl mt-16'>
+            {/* Four features now, so 2×2 at `sm` rather than a cramped 1×4 row. */}
+            <div className='grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 w-full max-w-4xl mt-16'>
               {[
                 {
                   icon: Calendar,
@@ -497,6 +557,11 @@ export function HomePage({ loginUrl, error, reason }: HomePageProps) {
                   icon: Users,
                   title: tr('hero_feature_team'),
                   desc: tr('hero_feature_team_desc'),
+                },
+                {
+                  icon: BookOpen,
+                  title: tr('hero_feature_rules'),
+                  desc: tr('hero_feature_rules_desc'),
                 },
               ].map((feature) => (
                 <div
