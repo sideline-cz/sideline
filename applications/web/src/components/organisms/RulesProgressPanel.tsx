@@ -23,6 +23,7 @@ import React from 'react';
 import { Badge } from '~/components/ui/badge';
 import { Card, CardContent } from '~/components/ui/card';
 import { isLevel } from '~/lib/rules/level.js';
+import { strengthPercent } from '~/lib/rules/strength.js';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
@@ -37,7 +38,7 @@ interface RulesProgressPanelProps {
 /** A plain styled div bar — there is no `progress` shadcn primitive
  * installed, and the generator must not be run for this feature. */
 function StrengthBar({ label, strength }: { readonly label: string; readonly strength: number }) {
-  const pct = Math.max(0, Math.min(100, Math.round(strength * 100)));
+  const pct = strengthPercent(strength);
   return (
     <div
       role='progressbar'
