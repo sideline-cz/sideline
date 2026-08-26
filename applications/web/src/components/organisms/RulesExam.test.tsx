@@ -106,7 +106,11 @@ describe('RulesExamResults', () => {
 
     expect(screen.getByText('Scenario A')).not.toBeNull();
     expect(screen.getByText('Scenario B')).not.toBeNull();
-    expect(screen.getByText('1 / 2')).not.toBeNull();
+    // The score is split across two spans so the achieved half can carry the
+    // band colour and the total stays muted — match on the whole readout.
+    expect(
+      screen.getByText((_, el) => el?.textContent === '1 / 2' && el.tagName === 'DIV'),
+    ).not.toBeNull();
 
     fireEvent.click(screen.getByText('Scenario B'));
     expect(onReview).toHaveBeenCalledWith(1);

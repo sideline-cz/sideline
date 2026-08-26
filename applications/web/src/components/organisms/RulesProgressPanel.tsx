@@ -23,9 +23,11 @@ import React from 'react';
 import { Badge } from '~/components/ui/badge';
 import { Card, CardContent } from '~/components/ui/card';
 import { isLevel } from '~/lib/rules/level.js';
+import { LEVEL_ACCENT, VERDICT } from '~/lib/rules/palette.js';
 import { strengthPercent } from '~/lib/rules/strength.js';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
+import { cn } from '~/lib/utils';
 
 interface RulesProgressPanelProps {
   readonly locale: Lang;
@@ -36,8 +38,22 @@ interface RulesProgressPanelProps {
 }
 
 /** A plain styled div bar — there is no `progress` shadcn primitive
- * installed, and the generator must not be run for this feature. */
-function StrengthBar({ label, strength }: { readonly label: string; readonly strength: number }) {
+ * installed, and the generator must not be run for this feature.
+ *
+ * `barClass` carries the package's own accent (see `~/lib/rules/palette.ts`)
+ * so a row's bar, its picker card and its badge on the practice screen are
+ * all one colour. It was `bg-primary`, which is near-black in light mode and
+ * near-white in dark — nine identical monochrome bars.
+ */
+function StrengthBar({
+  label,
+  strength,
+  barClass,
+}: {
+  readonly label: string;
+  readonly strength: number;
+  readonly barClass: string;
+}) {
   const pct = strengthPercent(strength);
   return (
     <div
@@ -48,7 +64,10 @@ function StrengthBar({ label, strength }: { readonly label: string; readonly str
       aria-valuemax={100}
       className='h-2 w-full overflow-hidden rounded-full bg-muted'
     >
-      <div className='h-full rounded-full bg-primary' style={{ width: `${pct}%` }} />
+      <div
+        className={cn('h-full rounded-full transition-[width]', barClass)}
+        style={{ width: `${pct}%` }}
+      />
     </div>
   );
 }
@@ -129,13 +148,24 @@ export function RulesProgressPanel({
                   // never needs a cast.
                   if (!isLevel(p.level)) return null;
                   const name = text(LEVEL_META[p.level].name, locale);
+                  const accent = LEVEL_ACCENT[p.level];
                   return (
                     <div key={p.level} className='flex flex-col gap-1'>
                       <div className='flex flex-wrap items-center justify-between gap-2 text-sm'>
-                        <span className='font-medium'>{name}</span>
+                        <span className='flex items-center gap-2 font-medium'>
+                          <span
+                            className={cn(
+                              'flex size-5 shrink-0 items-center justify-center rounded text-[10px] font-bold',
+                              accent.soft,
+                            )}
+                          >
+                            {p.level}
+                          </span>
+                          {name}
+                        </span>
                         <div className='flex items-center gap-2'>
                           {p.mastered && (
-                            <Badge variant='secondary'>
+                            <Badge className={VERDICT.correctSolid}>
                               {tr('rules_progressMastered', undefined, { locale })}
                             </Badge>
                           )}
@@ -148,7 +178,7 @@ export function RulesProgressPanel({
                           </span>
                         </div>
                       </div>
-                      <StrengthBar label={name} strength={p.strength} />
+                      <StrengthBar label={name} strength={p.strength} barClass={accent.bar} />
                     </div>
                   );
                 })}
@@ -170,6 +200,7 @@ export function RulesProgressPanel({
               <StrengthBar
                 label={tr('rules_progressOverall', undefined, { locale })}
                 strength={summary.overall.strength}
+                barClass='bg-blue-600 dark:bg-blue-500'
               />
             </div>
 
