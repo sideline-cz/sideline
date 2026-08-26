@@ -26,6 +26,7 @@ import {
   text,
 } from '@sideline/rules';
 import { RULES } from '@sideline/rules/reference';
+import { Effect, Option } from 'effect';
 import { Check, Lock, X } from 'lucide-react';
 import React from 'react';
 import { FeedbackPanel, Legend, StepChain } from '~/components/organisms/RulesChain.js';
@@ -36,6 +37,8 @@ import {
   RulesReview,
 } from '~/components/organisms/RulesExam.js';
 import { RulesFieldSvg } from '~/components/organisms/RulesFieldSvg.js';
+import { RulesProgressPanel } from '~/components/organisms/RulesProgressPanel.js';
+import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent } from '~/components/ui/card';
@@ -52,11 +55,37 @@ import { useAnimationFrame } from '~/hooks/useAnimationFrame.js';
 import { isLevel } from '~/lib/rules/level.js';
 import { WEB_PACKAGE_LOADERS } from '~/lib/rules/loaders.js';
 import { loadProgress, saveProgress } from '~/lib/rules/progress.js';
+import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
 interface RulesTrainerProps {
   readonly locale: Lang;
+  /** Plain boolean, never the `User` object (see `RulesTrainerPage`) — drives
+   * whether the progress panel/submit/import wiring below is reachable at
+   * all. Defaults to `false` so every existing direct-render test of this
+   * organism keeps behaving exactly as before. */
+  readonly isSignedIn?: boolean;
 }
+
+/** One scenario's submitted picks, in chain order — shared by the
+ * practice-completion, exam-completion and import submit paths below. Never
+ * casts `id` to `ScenarioId`: `SubmitAttemptRequest.results[].scenario_id`
+ * (see `RulesTrainerApi`) decodes as a plain `Schema.String`, precisely so
+ * callers never need a runtime `ScenarioId` constructor (there isn't one).
+ */
+function attemptResults(
+  entries: ReadonlyArray<readonly [string, Answer | undefined]>,
+): ReadonlyArray<{
+  readonly scenario_id: string;
+  readonly steps: ReadonlyArray<Option.Option<number>>;
+}> {
+  return entries.map(([scenario_id, answer]) => ({
+    scenario_id,
+    steps: (answer?.steps ?? []).map((s) => Option.fromNullOr(s.pick)),
+  }));
+}
+
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'failed';
 
 type Screen =
   | 'intro'
@@ -235,7 +264,8 @@ function IntroScreen({
 // Main organism
 // ---------------------------------------------------------------------------
 
-export function RulesTrainer({ locale }: RulesTrainerProps) {
+export function RulesTrainer({ locale, isSignedIn = false }: RulesTrainerProps) {
+  const run = useRun();
   const [hydrated, setHydrated] = React.useState(false);
   const [sel, setSel] = React.useState<readonly Level[]>(LEVELS);
   const [answers, setAnswers] = React.useState<AnswersById>({});
@@ -245,6 +275,21 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
   const [currentId, setCurrentId] = React.useState<ScenarioId | null>(null);
   const [openRule, setOpenRule] = React.useState<string | null>(null);
   const [cheatOpen, setCheatOpen] = React.useState(false);
+
+  // Server-side progress (Phase 2 step 12) — `importedAt` mirrors the
+  // additive `RulesProgress.importedAt` field (see `~/lib/rules/progress.js`)
+  // and is read back on hydration below so a save mid-session never wipes it.
+  const [importedAt, setImportedAt] = React.useState<number | undefined>(undefined);
+  const [saveStatus, setSaveStatus] = React.useState<SaveStatus>('idle');
+  const [importStatus, setImportStatus] = React.useState<SaveStatus>('idle');
+  // Bumped after a successful submit/import so `RulesProgressPanel` refetches
+  // — it otherwise only fetches once per `isSignedIn` transition.
+  const [progressRefreshToken, setProgressRefreshToken] = React.useState(0);
+  // Guards "submit once per completed run" (not per render, and not again on
+  // a re-visit of an already-submitted summary/results screen) — reset
+  // wherever a NEW practice run or exam sitting starts.
+  const practiceSubmittedRef = React.useRef(false);
+  const examSubmittedRef = React.useRef(false);
 
   // Exam/review — a single sitting, never persisted (see `AGENTS.md`'s "no
   // I/O" note and the plan's explicit "do not persist exam state").
@@ -280,16 +325,20 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
     const progress = loadProgress();
     setAnswers(progress.answers);
     if (progress.sel.length > 0) setSel(progress.sel);
+    setImportedAt(progress.importedAt);
     setHydrated(true);
   }, []);
 
   // Persist progress whenever it changes, once the initial load has landed
   // (otherwise this would immediately overwrite a saved run with the
-  // pre-hydration defaults).
+  // pre-hydration defaults). `importedAt` is spread in only when set —
+  // `exactOptionalPropertyTypes` (see `tsconfig.base.json`) rejects an
+  // explicit `importedAt: undefined`, and omitting the key entirely is also
+  // what keeps a never-imported payload identical to before this feature.
   React.useEffect(() => {
     if (!hydrated) return;
-    saveProgress({ version: 1, answers, sel });
-  }, [hydrated, answers, sel]);
+    saveProgress({ version: 1, answers, sel, ...(importedAt === undefined ? {} : { importedAt }) });
+  }, [hydrated, answers, sel, importedAt]);
 
   const scenarios = React.useMemo(
     () => sel.flatMap((l) => packages[l]?.scenarios ?? []),
@@ -470,7 +519,105 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
     setCurrentId(null);
     setExamState(null);
     setExamPendingPick(null);
+    practiceSubmittedRef.current = false;
+    examSubmittedRef.current = false;
+    setSaveStatus('idle');
     setScreen('intro');
+  };
+
+  const handleStartPractice = () => {
+    practiceSubmittedRef.current = false;
+    setSaveStatus('idle');
+    setScreen('loadingPractice');
+  };
+
+  /**
+   * POSTs one attempt (Phase 2 step 12, `docs/plans/rules-trainer.md`) for
+   * `mode: 'practice'` or `'exam'` — shared by the two auto-submit effects
+   * below. Guarded by `isSignedIn` at every call site, never here, so a
+   * missing guard at a call site fails loudly (a stray call while signed
+   * out would 401) rather than silently no-op.
+   */
+  const submitAttempt = async (
+    mode: 'practice' | 'exam',
+    results: ReadonlyArray<{
+      readonly scenario_id: string;
+      readonly steps: ReadonlyArray<Option.Option<number>>;
+    }>,
+  ) => {
+    setSaveStatus('saving');
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.rulesTrainer.submitAttempt({ payload: { mode, packages: sel, results } }),
+      ),
+      Effect.mapError(() =>
+        ClientError.make(tr('rules_progressSaveFailed', undefined, { locale })),
+      ),
+      run({}),
+    );
+    // A failed submit must not touch local progress — `answers`/`sel` (the
+    // device's own source of truth) are never read from `result`, only the
+    // status shown to the player changes.
+    setSaveStatus(Option.isSome(result) ? 'saved' : 'failed');
+    if (Option.isSome(result)) setProgressRefreshToken((t) => t + 1);
+  };
+
+  // Submit exactly once when a practice run reaches its summary screen —
+  // guarded by the ref (not state) so a re-render never re-fires it, and
+  // reset at every new-run entry point (`handleStartPractice`/`handleRestart`).
+  // Deliberately scoped to `[screen, isSignedIn]` only: `poolIds`/`answers`/
+  // `submitAttempt` are read once, at the moment `summary` is entered, not
+  // tracked for changes — this must fire once per run, not on every answer.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: submit-once-on-entry is the design
+  React.useEffect(() => {
+    if (!isSignedIn) return;
+    if (screen !== 'summary') return;
+    if (practiceSubmittedRef.current) return;
+    practiceSubmittedRef.current = true;
+    void submitAttempt('practice', attemptResults(poolIds.map((id) => [id, answers[id]] as const)));
+  }, [screen, isSignedIn]);
+
+  // Same idea for the exam, at `examResults` — `examState` carries its own
+  // `qs`/`answers` (index-parallel, not id-keyed; see `engine/state.ts`).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: submit-once-on-entry is the design
+  React.useEffect(() => {
+    if (!isSignedIn) return;
+    if (screen !== 'examResults') return;
+    if (examSubmittedRef.current) return;
+    if (!examState) return;
+    examSubmittedRef.current = true;
+    void submitAttempt(
+      'exam',
+      attemptResults(examState.qs.map((id, i) => [id, examState.answers[i]] as const)),
+    );
+  }, [screen, isSignedIn, examState]);
+
+  const unimportedAnswerCount = Object.keys(answers).length;
+  const showImportPrompt = isSignedIn && importedAt === undefined && unimportedAnswerCount > 0;
+
+  const handleImportLocalProgress = async () => {
+    setImportStatus('saving');
+    const results = attemptResults(Object.entries(answers));
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) =>
+        api.rulesTrainer.submitAttempt({
+          payload: { mode: 'practice', packages: sel.length > 0 ? sel : LEVELS, results },
+        }),
+      ),
+      Effect.mapError(() =>
+        ClientError.make(tr('rules_progressSaveFailed', undefined, { locale })),
+      ),
+      run({}),
+    );
+    if (Option.isSome(result)) {
+      setImportedAt(Date.now());
+      setImportStatus('saved');
+      setProgressRefreshToken((t) => t + 1);
+    } else {
+      // Import failing leaves `importedAt` unset and every local answer in
+      // place — the prompt simply stays offered for a retry.
+      setImportStatus('failed');
+    }
   };
 
   const runStateForScore = currentId
@@ -504,6 +651,8 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
 
   const handleStartExam = () => {
     if (sel.length === 0) return;
+    examSubmittedRef.current = false;
+    setSaveStatus('idle');
     setScreen('loadingExam');
   };
 
@@ -557,6 +706,8 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
   const handleExamAgain = () => {
     const ex = startExam(scenarios, sel);
     if (ex.qs.length === 0) return;
+    examSubmittedRef.current = false;
+    setSaveStatus('idle');
     setExamState(ex);
     setReviewQ(0);
     setExamPendingPick(null);
@@ -577,16 +728,45 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
   return (
     <div className='flex flex-col gap-4'>
       {screen === 'intro' && (
-        <IntroScreen
-          locale={locale}
-          sel={sel}
-          onToggleLevel={handleToggleLevels}
-          onSelectAll={() => setSel(LEVELS)}
-          onSelectNone={() => setSel([])}
-          onStart={() => setScreen('loadingPractice')}
-          onStartExam={handleStartExam}
-          onOpenCheat={() => setCheatOpen(true)}
-        />
+        <>
+          {showImportPrompt && (
+            <Alert>
+              <AlertTitle>{tr('rules_importTitle', undefined, { locale })}</AlertTitle>
+              <AlertDescription>
+                <p>{tr('rules_importBody', { count: unimportedAnswerCount }, { locale })}</p>
+                <div className='flex items-center gap-2'>
+                  <Button type='button' size='sm' onClick={() => void handleImportLocalProgress()}>
+                    {importStatus === 'saving'
+                      ? tr('rules_progressSaving', undefined, { locale })
+                      : tr('rules_importCta', undefined, { locale })}
+                  </Button>
+                  {importStatus === 'failed' && (
+                    <span className='text-xs text-destructive'>
+                      {tr('rules_progressSaveFailed', undefined, { locale })}
+                    </span>
+                  )}
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <RulesProgressPanel
+            locale={locale}
+            isSignedIn={isSignedIn}
+            refreshToken={progressRefreshToken}
+          />
+
+          <IntroScreen
+            locale={locale}
+            sel={sel}
+            onToggleLevel={handleToggleLevels}
+            onSelectAll={() => setSel(LEVELS)}
+            onSelectNone={() => setSel([])}
+            onStart={handleStartPractice}
+            onStartExam={handleStartExam}
+            onOpenCheat={() => setCheatOpen(true)}
+          />
+        </>
       )}
 
       {(screen === 'loadingPractice' || screen === 'loadingExam') && (
@@ -739,6 +919,19 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
             <div className='text-3xl font-bold'>
               {currentScore} / {poolIds.length}
             </div>
+            {isSignedIn && saveStatus !== 'idle' && (
+              <p
+                className={
+                  saveStatus === 'failed'
+                    ? 'text-sm text-destructive'
+                    : 'text-sm text-muted-foreground'
+                }
+              >
+                {saveStatus === 'saving' && tr('rules_progressSaving', undefined, { locale })}
+                {saveStatus === 'saved' && tr('rules_progressSaved', undefined, { locale })}
+                {saveStatus === 'failed' && tr('rules_progressSaveFailed', undefined, { locale })}
+              </p>
+            )}
             <p className='text-sm text-muted-foreground'>
               {tr('rules_reviewHint', undefined, { locale })}
             </p>
@@ -801,15 +994,30 @@ export function RulesTrainer({ locale }: RulesTrainerProps) {
       )}
 
       {screen === 'examResults' && examState && (
-        <RulesExamResults
-          locale={locale}
-          examState={examState}
-          score={examResultsScore}
-          scenariosById={scenariosById}
-          onReview={handleOpenReview}
-          onExamAgain={handleExamAgain}
-          onToPractice={handleExamToPractice}
-        />
+        <>
+          {isSignedIn && saveStatus !== 'idle' && (
+            <p
+              className={
+                saveStatus === 'failed'
+                  ? 'text-sm text-destructive'
+                  : 'text-sm text-muted-foreground'
+              }
+            >
+              {saveStatus === 'saving' && tr('rules_progressSaving', undefined, { locale })}
+              {saveStatus === 'saved' && tr('rules_progressSaved', undefined, { locale })}
+              {saveStatus === 'failed' && tr('rules_progressSaveFailed', undefined, { locale })}
+            </p>
+          )}
+          <RulesExamResults
+            locale={locale}
+            examState={examState}
+            score={examResultsScore}
+            scenariosById={scenariosById}
+            onReview={handleOpenReview}
+            onExamAgain={handleExamAgain}
+            onToPractice={handleExamToPractice}
+          />
+        </>
       )}
 
       {screen === 'review' && examState && reviewScenario && (

@@ -4,8 +4,10 @@
 // must report the ORIGINAL option index (not its display position), and the
 // demo must never play past `animLimit` before the chain is answered.
 
+import { RulesProgress } from '@sideline/domain';
 import type { RulesPackage, Scenario, ScenarioId } from '@sideline/rules';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { Effect, Option } from 'effect';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -17,6 +19,30 @@ vi.mock('~/lib/translations.js', () => ({
   // keeps assertions readable without maintaining a full copy map here.
   tr: (key: string) => key,
   setTranslationOverrides: vi.fn(),
+}));
+
+const { mockSubmitAttempt, mockMyProgress } = vi.hoisted(() => ({
+  mockSubmitAttempt: vi.fn(),
+  mockMyProgress: vi.fn(),
+}));
+
+// A single, STABLE `run` reference (see `RulesProgressPanel.test.tsx` for
+// why identity matters), that really executes the piped Effect via
+// `Effect.option` — mirroring `runPromiseClient`'s own shape minus the toast
+// side effects — so `Effect.mapError` in `RulesTrainer`'s submit/import
+// paths behaves for real rather than being a pass-through stub.
+const mockRun = () => (effect: Effect.Effect<unknown, unknown>) =>
+  Effect.runPromise(Effect.option(effect));
+
+vi.mock('~/lib/runtime', () => ({
+  ApiClient: {
+    asEffect: () =>
+      Effect.succeed({
+        rulesTrainer: { submitAttempt: mockSubmitAttempt, myProgress: mockMyProgress },
+      }),
+  },
+  ClientError: { make: (message: string) => ({ _tag: 'ClientError', message }) },
+  useRun: () => mockRun,
 }));
 
 // No runtime constructor exists for `ScenarioId` (see `packages/rules`'s
@@ -206,8 +232,8 @@ async function selectOnlyLevel1() {
   fireEvent.click(await screen.findByRole('button', { name: /rules_level_2_name/ }));
 }
 
-async function startPractice() {
-  render(<RulesTrainer locale='en' />);
+async function startPractice(isSignedIn = false) {
+  render(<RulesTrainer locale='en' isSignedIn={isSignedIn} />);
   await selectOnlyLevel1();
   // Anchored + `\b` so this never also matches the "🎓 rules_startExam (…)"
   // button the exam entry point added alongside it.
@@ -235,8 +261,54 @@ function currentExamOptionButtons(): HTMLElement[] {
     .filter((b) => !/^(rules_play|rules_replay|rules_slow)$/.test(b.textContent ?? ''));
 }
 
+// `test/setup.ts` stubs `localStorage` as `vi.fn(() => null)`, not a real
+// store — mirrors the idiom in `~/lib/rules/progress.test.ts`. Needed here
+// (only) by the "server-side progress" tests below, which round-trip local
+// practice progress through `~/lib/rules/progress.js`'s real
+// `loadProgress`/`saveProgress`.
+let localStorageStore: Record<string, string> = {};
+
+function setupLocalStorage() {
+  localStorageStore = {};
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: {
+      getItem: vi.fn((key: string) => localStorageStore[key] ?? null),
+      setItem: vi.fn((key: string, value: string) => {
+        localStorageStore[key] = value;
+      }),
+      removeItem: vi.fn((key: string) => {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete localStorageStore[key];
+      }),
+      clear: vi.fn(() => {
+        localStorageStore = {};
+      }),
+    },
+    writable: true,
+    configurable: true,
+  });
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
+  setupLocalStorage();
+  mockSubmitAttempt.mockReset();
+  mockMyProgress.mockReset();
+  // Signed-in tests below always render `RulesProgressPanel` (on the intro
+  // screen) alongside whatever else they exercise — give `myProgress` a
+  // harmless default so those tests don't have to configure it themselves.
+  mockMyProgress.mockReturnValue(
+    Effect.succeed(
+      new RulesProgress.RulesMasterySummary({
+        packages: [],
+        overall: new RulesProgress.RulesOverallMastery({
+          strength: 0,
+          masteredCount: 0,
+          totalScenarios: 0,
+        }),
+      }),
+    ),
+  );
 });
 
 describe('RulesTrainer', () => {
@@ -516,5 +588,119 @@ describe('RulesTrainer — exam mode', () => {
 
     expect(screen.queryByRole('button', { name: 'rules_cheat' })).toBeNull();
     expect(screen.queryByText('rules_cheatTitle')).toBeNull();
+  });
+
+  describe('server-side progress (signed in)', () => {
+    /** Renders (with the given `isSignedIn`) and completes the
+     * single-scenario (`fix1`) practice run, picking `firstPick`/
+     * `secondPick` for steps 1/2, all the way to the summary screen. */
+    async function completePracticeRun(firstPick: RegExp, secondPick: RegExp, isSignedIn = true) {
+      await startPractice(isSignedIn);
+      fireEvent.click(screen.getByRole('button', { name: firstPick }));
+      await screen.findByText('Step2?');
+      fireEvent.click(screen.getByRole('button', { name: secondPick }));
+      // `fix1` is the only (so also the LAST) scenario in the pool — once
+      // its second step is answered, a "finish" button appears and must be
+      // clicked to actually leave `practice` for `summary`.
+      fireEvent.click(await screen.findByRole('button', { name: 'rules_finish' }));
+      await screen.findByText('rules_sumTitle');
+    }
+
+    it('submits exactly once on reaching the summary, with steps as ORIGINAL option indices in chain order', async () => {
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+      // The component only ever checks `Option.isSome`/`Option.isNone` on
+      // the submit result (see "a failed submit must not touch local
+      // progress" above `submitAttempt` in `RulesTrainer.tsx`) — it never
+      // reads a field off the resolved `RulesAttempt`, so a placeholder
+      // success value is enough here.
+      mockSubmitAttempt.mockReturnValue(Effect.succeed('ok'));
+
+      // Right1 is display-first (Math.random stubbed to 0 — see the first
+      // test in this file), Right0 is display-first for step 2 too (it is
+      // already index 0, an unshuffled correct pick).
+      await completePracticeRun(/Right1/, /Right0/);
+
+      await waitFor(() => expect(mockSubmitAttempt).toHaveBeenCalledTimes(1));
+      expect(mockSubmitAttempt).toHaveBeenCalledWith({
+        payload: {
+          mode: 'practice',
+          packages: [1],
+          results: [
+            {
+              scenario_id: 'fix1',
+              // Original indices: `Right1` is `opts[1]`, `Right0` is `opts[0]`.
+              steps: [Option.some(1), Option.some(0)],
+            },
+          ],
+        },
+      });
+      expect(await screen.findByText('rules_progressSaved')).not.toBeNull();
+
+      randomSpy.mockRestore();
+    });
+
+    it('a failed submit shows the failure message and leaves local progress on the device intact', async () => {
+      mockSubmitAttempt.mockReturnValue(Effect.fail(new Error('network down')));
+
+      await completePracticeRun(/Right1/, /Right0/);
+
+      await screen.findByText('rules_progressSaveFailed');
+
+      const { loadProgress } = await import('~/lib/rules/progress.js');
+      const stored = loadProgress();
+      expect(stored.answers[sid('fix1')]?.done).toBe(true);
+      expect(stored.answers[sid('fix1')]?.ok).toBe(true);
+    });
+
+    it('never calls `submitAttempt`/`myProgress` while signed out, and shows the sign-in hint instead', async () => {
+      // Any single option per step is enough — correctness of the picks
+      // doesn't matter for this test, only that no network call is ever
+      // made while signed out.
+      await completePracticeRun(/Wrong0/, /Right0/, false);
+
+      expect(mockSubmitAttempt).not.toHaveBeenCalled();
+      expect(mockMyProgress).not.toHaveBeenCalled();
+    });
+
+    it('shows the sign-in hint on the intro screen while signed out', async () => {
+      render(<RulesTrainer locale='en' isSignedIn={false} />);
+      expect(await screen.findByText('rules_signInToSave')).not.toBeNull();
+    });
+
+    it('offers to import un-imported local answers once signed in, and hides the prompt after a successful import', async () => {
+      // Seed local progress as if it had been answered while signed out.
+      const { saveProgress } = await import('~/lib/rules/progress.js');
+      saveProgress({
+        version: 1,
+        answers: { [sid('fix1')]: { steps: [{ pick: 1, ok: true }], done: true, ok: true } },
+        sel: [1],
+      });
+      mockSubmitAttempt.mockReturnValue(Effect.succeed('ok'));
+
+      render(<RulesTrainer locale='en' isSignedIn />);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'rules_importCta' }));
+
+      await waitFor(() => expect(mockSubmitAttempt).toHaveBeenCalledTimes(1));
+      expect(mockSubmitAttempt).toHaveBeenCalledWith({
+        payload: {
+          mode: 'practice',
+          packages: [1],
+          results: [{ scenario_id: 'fix1', steps: [Option.some(1)] }],
+        },
+      });
+
+      await waitFor(() => expect(screen.queryByText('rules_importTitle')).toBeNull());
+
+      const { loadProgress } = await import('~/lib/rules/progress.js');
+      expect(typeof loadProgress().importedAt).toBe('number');
+    });
+
+    it('does not offer to import when there is nothing local to import', async () => {
+      render(<RulesTrainer locale='en' isSignedIn />);
+      await screen.findByText('rules_progressTitle');
+
+      expect(screen.queryByText('rules_importTitle')).toBeNull();
+    });
   });
 });

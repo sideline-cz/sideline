@@ -17,6 +17,16 @@ export interface RulesProgress {
   readonly version: typeof CURRENT_VERSION;
   readonly answers: Readonly<Record<ScenarioId, Answer>>;
   readonly sel: readonly Level[];
+  /**
+   * Epoch milliseconds of the last successful import into a signed-in
+   * account (Phase 2 step 12, `docs/plans/rules-trainer.md`), or absent if
+   * these local answers have never been imported. Additive on purpose:
+   * `isRulesProgress` below checks only the required fields and does not
+   * reject extra keys, so a payload written by an older build (without this
+   * field) still loads, and a payload written by a newer build (with it)
+   * still loads on a build that has not seen this field yet.
+   */
+  readonly importedAt?: number;
 }
 
 export function emptyProgress(sel: readonly Level[] = []): RulesProgress {
