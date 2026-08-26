@@ -365,6 +365,25 @@ export * as RoleRpcEvents from './rpc/role/RoleRpcEvents.js';
 export * as RoleRpcGroup from './rpc/role/RoleRpcGroup.js';
 export * as RoleRpcModels from './rpc/role/RoleRpcModels.js';
 export * as RoleProvisionRpcGroup from './rpc/roleProvision/RoleProvisionRpcGroup.js';
+/**
+ * The bot's user-scoped write path into the rules trainer.
+ *
+ * The web trainer submits over HTTP, authenticated by the caller's session
+ * (`RulesTrainerApi`'s `AuthMiddleware`). The bot has no user session — it
+ * authenticates as itself — so it cannot use that endpoint at all. It
+ * instead passes the acting participant's `discord_user_id` and the server
+ * resolves it to a `users` row, exactly as `Carpool/LeaveCarpool` does.
+ *
+ * That resolution is the whole security boundary here: a Discord snowflake
+ * arrives from an interaction Discord itself signed, and only ever maps to
+ * the one account that has linked it.
+ *
+ * ⚠️ Scoring is **not** a trust boundary on either path — the honour-system
+ * decision in `docs/plans/rules-trainer.md` applies identically. Picks are
+ * re-scored server-side against the real chain because that keeps ONE
+ * definition of a score, not because the client is distrusted.
+ */
+export * as RulesRpcGroup from './rpc/rules/RulesRpcGroup.js';
 export * as SyncRpcs from './rpc/SyncRpcs.js';
 
 export * as SummarizeRpcGroup from './rpc/summarize/SummarizeRpcGroup.js';

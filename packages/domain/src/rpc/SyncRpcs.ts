@@ -13,6 +13,7 @@ import { PersonalEventsRpcGroup } from './personalEvents/PersonalEventsRpcGroup.
 import { PollRpcGroup } from './poll/PollRpcGroup.js';
 import { RoleRpcGroup } from './role/RoleRpcGroup.js';
 import { RoleProvisionRpcGroup } from './roleProvision/RoleProvisionRpcGroup.js';
+import { RulesRpcGroup } from './rules/RulesRpcGroup.js';
 import { SummarizeRpcGroup } from './summarize/SummarizeRpcGroup.js';
 import { TeamChallengeSyncEventsRpcGroup } from './teamChallenge/TeamChallengeSyncEvents.js';
 import { WeeklySummaryRpcGroup } from './weeklySummary/WeeklySummaryRpcGroup.js';
@@ -35,4 +36,5 @@ export class SyncRpcs extends RpcGroup.make().merge(
   SummarizeRpcGroup,
   PollRpcGroup,
   PersonalEventsRpcGroup,
+  RulesRpcGroup,
 ) {}

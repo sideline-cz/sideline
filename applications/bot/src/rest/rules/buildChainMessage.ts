@@ -99,6 +99,10 @@ export const buildChainMessage = (
   answer: Answer,
   perms: readonly (readonly number[])[],
   locale: Locale,
+  /** Appended as a final field once the chain is done — whether the attempt
+   * reached the server. Never guessed: the caller passes it only after the
+   * submit has actually resolved, so a failed save is never shown as saved. */
+  saveNote?: string,
 ): {
   embeds: ReadonlyArray<Discord.RichEmbed>;
   components: ReadonlyArray<Discord.ActionRowComponentForMessageRequest>;
@@ -163,6 +167,9 @@ export const buildChainMessage = (
         name: m.rules_refs({}, { locale }),
         value: truncate(scenario.rules.map((r) => `§ ${r}`).join(' · '), FIELD_VALUE_MAX),
       });
+    }
+    if (saveNote !== undefined) {
+      fields.push({ name: '​', value: truncate(saveNote, FIELD_VALUE_MAX) });
     }
   }
 
