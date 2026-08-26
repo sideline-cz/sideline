@@ -1,0 +1,141 @@
+/**
+ * The Discord rules quiz's interaction handlers.
+ *
+ * Shape (owner's design, recorded in `docs/plans/rules-trainer.md`): the
+ * `/rules` command posts **one public message** carrying the situation and a
+ * single button; pressing that button opens the presser's **own ephemeral
+ * chain**. The public message never changes and never shows an answer, so a
+ * channel of people can work the same situation simultaneously without
+ * seeing each other's picks — the failure mode Sideline has been bitten by
+ * before, and the reason `applications/bot/AGENTS.md` carries the "per-user
+ * actions on a shared board message" rule.
+ *
+ * Neither handler defers. The whole quiz is pure computation over content
+ * already in memory (`pickScenario.ts`), so there is no I/O to race the
+ * 3-second ack — and therefore no `forkDetach`, and no deferred reply that
+ * could be left hanging by a defect.
+ *
+ * Both handlers reply in the **user** locale, not the guild's: an ephemeral
+ * message has exactly one reader.
+ */
+import * as m from '@sideline/i18n/messages';
+import * as Ix from 'dfx/Interactions/index';
+import { Interaction } from 'dfx/Interactions/index';
+import * as DiscordTypes from 'dfx/types';
+import { Effect, Metric, Option } from 'effect';
+import { userLocale } from '~/locale.js';
+import { discordInteractionsTotal } from '~/metrics.js';
+import { asRecord } from '~/rest/recordProbe.js';
+import { buildChainMessage } from '~/rest/rules/buildChainMessage.js';
+import { quizPerms } from '~/rest/rules/perms.js';
+import { scenarioById } from '~/rest/rules/pickScenario.js';
+import {
+  decodeStartId,
+  decodeStepId,
+  QUIZ_START_PREFIX,
+  QUIZ_STEP_PREFIX,
+  replayAnswer,
+} from '~/rest/rules/quizState.js';
+import { interactionUserId } from '~/schemas.js';
+
+const customIdOf = (interaction: DiscordTypes.APIInteraction): string => {
+  const value = asRecord(interaction.data)?.custom_id;
+  return typeof value === 'string' ? value : '';
+};
+
+const countInteraction = Metric.update(
+  Metric.withAttributes(discordInteractionsTotal, { interaction_type: 'component' }),
+  1,
+);
+
+/** A stale or hand-crafted `custom_id` — reply ephemerally rather than
+ * failing the interaction, which would show Discord's generic red error. */
+const staleReply = (interaction: DiscordTypes.APIInteraction) =>
+  Ix.response({
+    type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+    data: {
+      content: m.bot_rules_stale({}, { locale: userLocale(interaction) }),
+      flags: DiscordTypes.MessageFlags.Ephemeral,
+    },
+  });
+
+/**
+ * `rules-start:<scenarioId>` — opens the presser's private chain.
+ *
+ * Responds with a NEW ephemeral message rather than updating the public one,
+ * which is the whole point: the shared message is left untouched for
+ * everyone else still thinking.
+ */
+export const RulesStartButton = Interaction.asEffect().pipe(
+  Effect.tap(() => countInteraction),
+  Effect.map((interaction) => {
+    const scenarioId = decodeStartId(customIdOf(interaction));
+    const scenario = scenarioId === undefined ? undefined : scenarioById(scenarioId);
+    const userId = interactionUserId(interaction);
+    if (!scenario || Option.isNone(userId)) return staleReply(interaction);
+
+    const perms = quizPerms(scenario, userId.value);
+    const answer = replayAnswer(scenario, []);
+    const { embeds, components } = buildChainMessage(
+      scenario,
+      answer,
+      perms,
+      userLocale(interaction),
+    );
+
+    return Ix.response({
+      type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        embeds: [...embeds],
+        components: [...components],
+        flags: DiscordTypes.MessageFlags.Ephemeral,
+      },
+    });
+  }),
+);
+
+export const RulesStartButtonReg = Ix.messageComponent(
+  Ix.idStartsWith(QUIZ_START_PREFIX),
+  RulesStartButton,
+);
+
+/**
+ * `rules-step:<scenarioId>:<picks>` — one option press.
+ *
+ * `picks` already includes the pick this button represents (see
+ * `quizState.ts`), so the handler is a pure render of the resulting state:
+ * decode, replay, re-render. `UPDATE_MESSAGE` edits the presser's own
+ * ephemeral in place, so a chain stays one message rather than a stack.
+ *
+ * The permutation is re-derived from `(scenario, userId)` rather than
+ * stored, so it is identical on every press of the same chain — see
+ * `perms.ts` for why that matters.
+ */
+export const RulesStepButton = Interaction.asEffect().pipe(
+  Effect.tap(() => countInteraction),
+  Effect.map((interaction) => {
+    const decoded = decodeStepId(customIdOf(interaction));
+    const scenario = decoded === undefined ? undefined : scenarioById(decoded.scenarioId);
+    const userId = interactionUserId(interaction);
+    if (!decoded || !scenario || Option.isNone(userId)) return staleReply(interaction);
+
+    const perms = quizPerms(scenario, userId.value);
+    const answer = replayAnswer(scenario, decoded.picks);
+    const { embeds, components } = buildChainMessage(
+      scenario,
+      answer,
+      perms,
+      userLocale(interaction),
+    );
+
+    return Ix.response({
+      type: DiscordTypes.InteractionCallbackTypes.UPDATE_MESSAGE,
+      data: { embeds: [...embeds], components: [...components] },
+    });
+  }),
+);
+
+export const RulesStepButtonReg = Ix.messageComponent(
+  Ix.idStartsWith(QUIZ_STEP_PREFIX),
+  RulesStepButton,
+);
