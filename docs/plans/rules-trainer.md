@@ -493,16 +493,60 @@ release.** That earlier hash was an intermediate, untagged manifest from the sam
 tag re-push (see the dashboard-cut release note under Risks) produced a different one. Read the
 digest back from the `ops` repo or the GHCR version list, never from release notes.
 
-Step 17's ordering is still the whole risk, and it is unchanged by any of the above: two apps must
-never claim the same host. The promote itself is a MajNet dashboard action authorised via Tailscale
-identity and cannot be done from this repo; merging the resulting `env/production` render PR is the
-deploy trigger and *can* be done via GitHub.
+#### The redirect is a Cloudflare edge rule, which dissolves step 17's ordering risk
 
-16. Point `rules.sideline.cz` at the new route (redirect) or retire the subdomain.
-17. **The risky step, and it has a known failure mode:** two apps must never claim the same host.
-    Remove `ingress.host` from the majksa-projects `rules` app and merge that render PR
-    **before** the new host goes live; verify a 200 after each step.
+**Owner's call (2026-08-26).** `rules.sideline.cz` is Cloudflare-proxied (every response carries a
+`cf-ray`), so the redirect happens at the edge and the request never reaches an origin at all.
+
+⚠️ **This rule lives in the Cloudflare dashboard, in neither repo.** That is the one real cost of
+choosing it, and it is why the exact configuration is written out here — someone grepping either
+repo for `rules.sideline.cz` in six months will otherwise find only the majksa-projects app config
+that no longer serves it, and conclude the subdomain is dead.
+
+```
+Cloudflare → Rules → Redirect Rules
+
+  When incoming requests match:  Hostname equals rules.sideline.cz
+  Then:                          Type   Static
+                                 URL    https://sideline.cz/rules
+                                 Status 301
+                                 Preserve query string: off
+```
+
+`/rules` rather than `/en/rules`: the bare route negotiates locale (localStorage → cookie →
+`navigator.languages` → English). **Verified against production**, not assumed — a browser at
+`en-US` lands on `/en/rules` ("Learn the calls by living them"), one at `cs-CZ` lands on
+`/cs/rules` ("Nauč se pravidla tím, že je zažiješ"), both rendering all nine packages. So a Czech
+player's old bookmark reaches the Czech trainer. Hard-coding `/en/rules` would silently send every
+Czech visitor to English.
+
+Path is deliberately **not** preserved. The standalone site is a single self-contained HTML file,
+so every path under `rules.sideline.cz` is the same page; forwarding `$request_uri` would only
+manufacture 404s on the new host.
+
+**Why this matters beyond convenience:** it removes step 17's failure mode entirely rather than
+sequencing around it. That step exists because two apps must never claim the same host — implying a
+window where the old app has released `rules.sideline.cz` and the new one has not yet taken it. An
+edge redirect never routes the host to an origin, so releasing it in majksa-projects and enabling
+the rule are **independent**; there is no ordering to get right and no dead window. The rejected
+alternative (add `rules.sideline.cz` to `sideline-proxy`'s `ingress.domains` — the schema does
+support a `domains` list, see `portfolio` / `space-alert` / `zpevnik-*` in `majksa-projects/ops` —
+plus an nginx `server_name` block beside the existing `/docs` redirect) is version-controlled and
+reviewable, but costs a proxy release, an ops PR, and keeps that window.
+
+Note that `ingress.domains` **alone** would not have worked: it makes the host an alias, so
+`rules.sideline.cz/` would serve the Sideline homepage rather than the trainer. It needs a redirect
+in front of it either way.
+
+16. Add the Cloudflare Redirect Rule above. Verify `curl -I https://rules.sideline.cz` returns
+    **301** to `https://sideline.cz/rules`, and that following it renders the trainer.
+17. Remove `ingress.host` from the majksa-projects `rules` app and merge that render PR. No longer
+    order-sensitive against step 16 (see above), but still verify `rules.sideline.cz` after it.
 18. Archive the old `rules` app and delete `rules/` from `majksa-projects/static`.
+
+The production promote itself is a MajNet dashboard action authorised via Tailscale identity and
+cannot be done from this repo; merging the resulting `env/production` render PR is the deploy
+trigger and *can* be done via GitHub.
 
 ## Risks
 
@@ -750,9 +794,12 @@ The five questions this plan opened with are now decided (see Decisions taken). 
    Simpler than it looked: the honour-system decision dissolves the trust question, because
    server-scored attempts are no more trustworthy than imported local ones. So the only remaining
    question is UX — merge, replace, or ask — not integrity.
-3. **After Phase 4, does `rules.sideline.cz` redirect or retire?** A redirect preserves any
-   accumulated links and the portfolio entry; retiring is cleaner. The subdomain currently has
-   its own identity ("Ultimate Rules Trainer") that the in-app version will not.
+3. ~~**After Phase 4, does `rules.sideline.cz` redirect or retire?**~~ **DECIDED: redirect**, as a
+   Cloudflare edge Redirect Rule to `https://sideline.cz/rules` — see Phase 4 for the exact rule,
+   which is recorded there precisely because it lives in neither repo. Retiring was rejected: the
+   subdomain has been live since 2026-08-24 and shared, so every existing bookmark would break
+   with no signpost. The one thing genuinely lost is the subdomain's own identity ("Ultimate Rules
+   Trainer"), which the in-app version does not carry.
 4. ~~**Bare `/rules`**~~ — **decided: redirect to the negotiated locale** (via the existing
    `getLocale()`). A locale-picking landing page adds a hop for no benefit, and with the SEO goal
    dropped there is nothing to gain from a third URL.
