@@ -5,6 +5,7 @@ import {
   ACHIEVEMENTS,
   ACHIEVEMENTS_BY_SLUG,
   AchievementSlug,
+  builtInRuleKind,
   i18nDescriptionKey,
   i18nTitleKey,
 } from '~/models/Achievement.js';
@@ -23,12 +24,23 @@ const makeStats = (overrides: Partial<StatsResult> = {}): StatsResult => ({
   ...overrides,
 });
 
+const makeRulesStats = (
+  overrides: Partial<AchievementEvaluationInput['rules']> = {},
+): AchievementEvaluationInput['rules'] => ({
+  examsCompleted: 0,
+  perfectExams: 0,
+  packagesMastered: 0,
+  ...overrides,
+});
+
 const makeInput = (
   statsOverrides: Partial<StatsResult> = {},
   countsBySlug: ReadonlyMap<string, number> = new Map(),
+  rulesOverrides: Partial<AchievementEvaluationInput['rules']> = {},
 ): AchievementEvaluationInput => ({
   stats: makeStats(statsOverrides),
   countsBySlug,
+  rules: makeRulesStats(rulesOverrides),
 });
 
 // ---------------------------------------------------------------------------
@@ -232,6 +244,86 @@ describe('Achievement: running_25', () => {
 });
 
 // ---------------------------------------------------------------------------
+// rules_first_exam — uses rules.examsCompleted
+// ---------------------------------------------------------------------------
+
+describe('Achievement: rules_first_exam', () => {
+  const entry = ACHIEVEMENTS_BY_SLUG.get('rules_first_exam')!;
+
+  it('isEarned returns true at boundary examsCompleted=1', () => {
+    expect(
+      entry.isEarned(makeInput({}, new Map(), { examsCompleted: 1 }), entry.defaultThreshold),
+    ).toBe(true);
+  });
+
+  it('isEarned returns false at examsCompleted=0', () => {
+    expect(
+      entry.isEarned(makeInput({}, new Map(), { examsCompleted: 0 }), entry.defaultThreshold),
+    ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rules_perfect_exam — uses rules.perfectExams
+// ---------------------------------------------------------------------------
+
+describe('Achievement: rules_perfect_exam', () => {
+  const entry = ACHIEVEMENTS_BY_SLUG.get('rules_perfect_exam')!;
+
+  it('isEarned returns true at boundary perfectExams=1', () => {
+    expect(
+      entry.isEarned(makeInput({}, new Map(), { perfectExams: 1 }), entry.defaultThreshold),
+    ).toBe(true);
+  });
+
+  it('isEarned returns false at perfectExams=0', () => {
+    expect(
+      entry.isEarned(makeInput({}, new Map(), { perfectExams: 0 }), entry.defaultThreshold),
+    ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rules_package_mastered — uses rules.packagesMastered, threshold=1
+// ---------------------------------------------------------------------------
+
+describe('Achievement: rules_package_mastered', () => {
+  const entry = ACHIEVEMENTS_BY_SLUG.get('rules_package_mastered')!;
+
+  it('isEarned returns true at boundary packagesMastered=1', () => {
+    expect(
+      entry.isEarned(makeInput({}, new Map(), { packagesMastered: 1 }), entry.defaultThreshold),
+    ).toBe(true);
+  });
+
+  it('isEarned returns false at packagesMastered=0', () => {
+    expect(
+      entry.isEarned(makeInput({}, new Map(), { packagesMastered: 0 }), entry.defaultThreshold),
+    ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rules_all_packages — uses rules.packagesMastered, threshold=9
+// ---------------------------------------------------------------------------
+
+describe('Achievement: rules_all_packages', () => {
+  const entry = ACHIEVEMENTS_BY_SLUG.get('rules_all_packages')!;
+
+  it('isEarned returns true at boundary packagesMastered=9', () => {
+    expect(
+      entry.isEarned(makeInput({}, new Map(), { packagesMastered: 9 }), entry.defaultThreshold),
+    ).toBe(true);
+  });
+
+  it('isEarned returns false at packagesMastered=8', () => {
+    expect(
+      entry.isEarned(makeInput({}, new Map(), { packagesMastered: 8 }), entry.defaultThreshold),
+    ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // i18n key helpers
 // ---------------------------------------------------------------------------
 
@@ -252,8 +344,11 @@ describe('i18nDescriptionKey', () => {
 // ---------------------------------------------------------------------------
 
 describe('ACHIEVEMENTS_BY_SLUG', () => {
-  it('has all 11 entries', () => {
-    expect(ACHIEVEMENTS_BY_SLUG.size).toBe(11);
+  // 11 pre-existing + 4 rules-trainer milestones (Phase 3b of
+  // docs/plans/rules-trainer.md's step 15): rules_first_exam,
+  // rules_perfect_exam, rules_package_mastered, rules_all_packages.
+  it('has all 15 entries', () => {
+    expect(ACHIEVEMENTS_BY_SLUG.size).toBe(15);
   });
 
   it('contains every slug from ACHIEVEMENTS array', () => {
@@ -268,9 +363,29 @@ describe('ACHIEVEMENTS_BY_SLUG', () => {
 // ---------------------------------------------------------------------------
 
 describe('grantsDiscordRole', () => {
-  it('exactly 5 entries have grantsDiscordRole=true', () => {
+  // Was 5 before Phase 3b of docs/plans/rules-trainer.md's step 15 added
+  // `rules_all_packages` — the plan's "knows the rules" role, deliberately
+  // the ONLY rules-trainer slug that grants a role (the other three rules
+  // milestones do not). That makes 6, not a reflexive bump.
+  it('exactly 6 entries have grantsDiscordRole=true', () => {
     const roleGranters = ACHIEVEMENTS.filter((a) => a.grantsDiscordRole);
-    expect(roleGranters).toHaveLength(5);
+    expect(roleGranters).toHaveLength(6);
+  });
+
+  it('rules_all_packages grants discord role', () => {
+    expect(ACHIEVEMENTS_BY_SLUG.get('rules_all_packages')?.grantsDiscordRole).toBe(true);
+  });
+
+  it('rules_first_exam does NOT grant discord role', () => {
+    expect(ACHIEVEMENTS_BY_SLUG.get('rules_first_exam')?.grantsDiscordRole).toBe(false);
+  });
+
+  it('rules_perfect_exam does NOT grant discord role', () => {
+    expect(ACHIEVEMENTS_BY_SLUG.get('rules_perfect_exam')?.grantsDiscordRole).toBe(false);
+  });
+
+  it('rules_package_mastered does NOT grant discord role', () => {
+    expect(ACHIEVEMENTS_BY_SLUG.get('rules_package_mastered')?.grantsDiscordRole).toBe(false);
   });
 
   it('fifty_activities grants discord role', () => {
@@ -307,6 +422,28 @@ describe('grantsDiscordRole', () => {
 
   it('running_25 does NOT grant discord role', () => {
     expect(ACHIEVEMENTS_BY_SLUG.get('running_25')?.grantsDiscordRole).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// builtInRuleKind — rules-trainer slugs (Phase 3b of docs/plans/rules-trainer.md)
+// ---------------------------------------------------------------------------
+
+describe('builtInRuleKind — rules-trainer slugs', () => {
+  it("maps rules_first_exam to 'rules_exams_completed'", () => {
+    expect(builtInRuleKind('rules_first_exam')).toBe('rules_exams_completed');
+  });
+
+  it("maps rules_perfect_exam to 'rules_perfect_exams'", () => {
+    expect(builtInRuleKind('rules_perfect_exam')).toBe('rules_perfect_exams');
+  });
+
+  it("maps rules_package_mastered to 'rules_packages_mastered'", () => {
+    expect(builtInRuleKind('rules_package_mastered')).toBe('rules_packages_mastered');
+  });
+
+  it("maps rules_all_packages to 'rules_packages_mastered'", () => {
+    expect(builtInRuleKind('rules_all_packages')).toBe('rules_packages_mastered');
   });
 });
 

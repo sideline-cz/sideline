@@ -105,6 +105,13 @@ export * as VersionApi from './api/VersionApi.js';
 
 export * as WeeklySummaryApi from './api/WeeklySummaryApi.js';
 
+/**
+ * The code-defined achievement catalogue: `AchievementSlug`, `ACHIEVEMENTS`
+ * (threshold-based, evaluated from `AchievementEvaluationInput`), and the
+ * exhaustive `BUILT_IN_ENGLISH_NAMES`/`BUILT_IN_RULE_KINDS` records every
+ * slug must appear in — omitting an entry is a compile error, which is the
+ * point (see `docs/plans/rules-trainer.md`'s Phase 3 step 15).
+ */
 export * as Achievement from './models/Achievement.js';
 
 export * as AchievementSyncEvent from './models/AchievementSyncEvent.js';

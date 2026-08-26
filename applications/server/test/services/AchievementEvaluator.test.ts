@@ -18,6 +18,7 @@ import { EarnedAchievementsRepository } from '~/repositories/EarnedAchievementsR
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 // These imports will fail until implementations exist:
 import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
+import { MockRulesAttemptsRepositoryLayer } from '../mocks/rulesTrainerMocks.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -156,6 +157,7 @@ const makeTestLayer = () =>
     makeAchievementSyncEventsRepositoryLayer(),
     makeTeamMembersRepositoryLayer(),
     makeAchievementSettingsRepositoryLayer(),
+    MockRulesAttemptsRepositoryLayer,
     AchievementEvaluator.Default,
   );
 
@@ -284,6 +286,7 @@ describe('AchievementEvaluator.evaluate', () => {
         makeAchievementSyncEventsRepositoryLayer(),
         makeTeamMembersRepositoryLayer(),
         makeAchievementSettingsRepositoryLayer(),
+        MockRulesAttemptsRepositoryLayer,
         AchievementEvaluator.Default,
       );
 

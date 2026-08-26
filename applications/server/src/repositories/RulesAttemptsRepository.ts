@@ -45,6 +45,18 @@ class LastCorrectRow extends Schema.Class<LastCorrectRow>('LastCorrectRow')({
  * data), unlike `lastCorrectByScenario` above which produces zero rows for
  * such a user.
  */
+/**
+ * Exam-mode counts for one user, used by `AchievementEvaluator` for the
+ * `rules_first_exam`/`rules_perfect_exam` milestones (Phase 3b of
+ * `docs/plans/rules-trainer.md`). `total > 0` in the `perfect_exams` filter
+ * matters: a zero-question attempt would otherwise satisfy `score = total`
+ * and hand out a perfect-exam achievement for nothing.
+ */
+class ExamStatsRow extends Schema.Class<ExamStatsRow>('ExamStatsRow')({
+  exams_completed: Schema.Int,
+  perfect_exams: Schema.Int,
+}) {}
+
 class LastCorrectForTeamRow extends Schema.Class<LastCorrectForTeamRow>('LastCorrectForTeamRow')({
   team_member_id: TeamMember.TeamMemberId,
   user_id: User.UserId,
@@ -139,6 +151,35 @@ const make = Effect.gen(function* () {
   const lastCorrectByScenario = (userId: User.UserId) =>
     lastCorrectByScenarioQuery(userId).pipe(catchSqlErrors);
 
+  const examStatsQuery = SqlSchema.findOne({
+    Request: User.UserId,
+    Result: ExamStatsRow,
+    execute: (userId) => sql`
+      SELECT
+        COUNT(*) FILTER (WHERE mode = 'exam' AND finished_at IS NOT NULL)::int AS exams_completed,
+        COUNT(*) FILTER (
+          WHERE mode = 'exam' AND finished_at IS NOT NULL AND score = total AND total > 0
+        )::int AS perfect_exams
+      FROM rules_attempts
+      WHERE user_id = ${userId}
+    `,
+  });
+
+  /**
+   * Exam-mode counts for `AchievementEvaluator`'s `rules_first_exam` /
+   * `rules_perfect_exam` milestones. A bare `COUNT(*)` with no `GROUP BY`
+   * always yields exactly one row (zero counts included when the user has
+   * no exam attempts), so `NoSuchElementError` is impossible here — never a
+   * real user-facing case.
+   */
+  const getExamStats = (userId: User.UserId) =>
+    examStatsQuery(userId).pipe(
+      catchSqlErrors,
+      Effect.catchTag('NoSuchElementError', () =>
+        LogicError.die('Rules exam stats query returned no row'),
+      ),
+    );
+
   const lastCorrectByScenarioForTeamQuery = SqlSchema.findAll({
     Request: Team.TeamId,
     Result: LastCorrectForTeamRow,
@@ -189,6 +230,7 @@ const make = Effect.gen(function* () {
     insertResults,
     lastCorrectByScenario,
     lastCorrectByScenarioForTeam,
+    getExamStats,
   };
 });
 

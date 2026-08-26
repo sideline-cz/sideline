@@ -18,6 +18,7 @@ import type { InsertableScenarioResult } from '~/repositories/RulesAttemptsRepos
 import { RulesAttemptsRepository } from '~/repositories/RulesAttemptsRepository.js';
 import type { MembershipWithRole } from '~/repositories/TeamMembersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
 
 /**
  * `@sideline/rules/content` is an eager import of all nine packages — fine
@@ -75,14 +76,16 @@ const scoreSubmittedResults = (
   });
 
 /**
- * Shared step behind both `myProgress` and `getRulesLeaderboard`: builds
- * per-package mastery (`@sideline/rules`'s `engine/mastery.ts`) from a
- * `scenario_id -> lastCorrectAt` (epoch ms) map. Every package is derived
- * from its FULL scenario roster (`ALL_PACKAGES`), not just the scenarios
- * present in the map — an unanswered scenario must still count as `0`,
- * never be silently absent from the mean.
+ * Shared step behind `myProgress`, `getRulesLeaderboard`, AND
+ * `AchievementEvaluator` (Phase 3b of `docs/plans/rules-trainer.md` —
+ * `packagesMastered` is computed on read from `lastCorrectByScenario`, not
+ * in SQL): builds per-package mastery (`@sideline/rules`'s
+ * `engine/mastery.ts`) from a `scenario_id -> lastCorrectAt` (epoch ms) map.
+ * Every package is derived from its FULL scenario roster (`ALL_PACKAGES`),
+ * not just the scenarios present in the map — an unanswered scenario must
+ * still count as `0`, never be silently absent from the mean.
  */
-const packageMasteriesFromLastCorrect = (
+export const packageMasteriesFromLastCorrect = (
   lastCorrectAtByScenario: ReadonlyMap<string, number>,
   now: number,
 ) =>
@@ -261,7 +264,8 @@ export const RulesTrainerApiLive = HttpApiBuilder.group(Api, 'rulesTrainer', (ha
   Effect.Do.pipe(
     Effect.bind('rulesAttempts', () => RulesAttemptsRepository.asEffect()),
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
-    Effect.map(({ rulesAttempts, members }) =>
+    Effect.bind('evaluatorOpt', () => Effect.serviceOption(AchievementEvaluator)),
+    Effect.map(({ rulesAttempts, members, evaluatorOpt }) =>
       handlers
         .handle('submitAttempt', ({ payload }) =>
           Effect.Do.pipe(
@@ -278,6 +282,32 @@ export const RulesTrainerApiLive = HttpApiBuilder.group(Api, 'rulesTrainer', (ha
             ),
             Effect.tap(({ attempt, scoring }) =>
               rulesAttempts.insertResults(attempt.id, scoring.scored),
+            ),
+            // Best-effort achievement evaluation (Phase 3b of
+            // `docs/plans/rules-trainer.md`) — `rules_attempts` has no
+            // `team_id`, so the submit handler resolves the caller's ACTIVE
+            // memberships and evaluates once per team, fanning milestones
+            // out to every team the caller currently belongs to. Mirrors
+            // `activity-logs.ts`'s hook shape exactly: a failed evaluation
+            // must never fail the submit.
+            Effect.tap(({ currentUser }) =>
+              Option.match(evaluatorOpt, {
+                onNone: () => Effect.void,
+                onSome: (evaluator) =>
+                  members.findByUser(currentUser.id).pipe(
+                    Effect.flatMap((memberships) =>
+                      Effect.forEach(
+                        memberships,
+                        (membership) => evaluator.evaluate(membership.id),
+                        { concurrency: 1 },
+                      ),
+                    ),
+                    Effect.asVoid,
+                    Effect.catchCause((cause) =>
+                      Effect.logWarning('Achievement evaluation failed', cause),
+                    ),
+                  ),
+              }),
             ),
             Effect.map(({ attempt }) => attempt),
           ),

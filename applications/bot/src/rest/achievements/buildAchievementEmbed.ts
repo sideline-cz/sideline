@@ -18,6 +18,10 @@ const ACHIEVEMENT_EMOJIS: Record<Achievement.AchievementSlug, string> = {
   duration_3000: '🏆',
   gym_25: '💪',
   running_25: '🏃',
+  rules_first_exam: '📜',
+  rules_perfect_exam: '✅',
+  rules_package_mastered: '📘',
+  rules_all_packages: '🧑‍⚖️',
 };
 
 const TITLE_MESSAGES: Record<Achievement.AchievementSlug, (locale: Locale) => string> = {
@@ -32,6 +36,10 @@ const TITLE_MESSAGES: Record<Achievement.AchievementSlug, (locale: Locale) => st
   duration_3000: (locale) => m.achievement_duration_3000_title({}, { locale }),
   gym_25: (locale) => m.achievement_gym_25_title({}, { locale }),
   running_25: (locale) => m.achievement_running_25_title({}, { locale }),
+  rules_first_exam: (locale) => m.achievement_rules_first_exam_title({}, { locale }),
+  rules_perfect_exam: (locale) => m.achievement_rules_perfect_exam_title({}, { locale }),
+  rules_package_mastered: (locale) => m.achievement_rules_package_mastered_title({}, { locale }),
+  rules_all_packages: (locale) => m.achievement_rules_all_packages_title({}, { locale }),
 };
 
 const DESCRIPTION_MESSAGES: Record<Achievement.AchievementSlug, (locale: Locale) => string> = {
@@ -46,6 +54,11 @@ const DESCRIPTION_MESSAGES: Record<Achievement.AchievementSlug, (locale: Locale)
   duration_3000: (locale) => m.achievement_duration_3000_description({}, { locale }),
   gym_25: (locale) => m.achievement_gym_25_description({}, { locale }),
   running_25: (locale) => m.achievement_running_25_description({}, { locale }),
+  rules_first_exam: (locale) => m.achievement_rules_first_exam_description({}, { locale }),
+  rules_perfect_exam: (locale) => m.achievement_rules_perfect_exam_description({}, { locale }),
+  rules_package_mastered: (locale) =>
+    m.achievement_rules_package_mastered_description({}, { locale }),
+  rules_all_packages: (locale) => m.achievement_rules_all_packages_description({}, { locale }),
 };
 
 export const buildAchievementEmbed = (opts: {

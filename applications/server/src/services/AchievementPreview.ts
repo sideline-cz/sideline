@@ -7,8 +7,10 @@ import {
 } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import { Effect, Layer, Option, ServiceMap } from 'effect';
+import { packageMasteriesFromLastCorrect } from '~/api/rules-trainer.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { EarnedAchievementsRepository } from '~/repositories/EarnedAchievementsRepository.js';
+import { RulesAttemptsRepository } from '~/repositories/RulesAttemptsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 
@@ -26,7 +28,8 @@ const make = Effect.Do.pipe(
   Effect.bind('earned', () => EarnedAchievementsRepository.asEffect()),
   Effect.bind('teamMembers', () => TeamMembersRepository.asEffect()),
   Effect.bind('users', () => UsersRepository.asEffect()),
-  Effect.map(({ activityLogs, earned, teamMembers, users }) => {
+  Effect.bind('rulesAttempts', () => RulesAttemptsRepository.asEffect()),
+  Effect.map(({ activityLogs, earned, teamMembers, users, rulesAttempts }) => {
     const preview = (
       teamId: Team.TeamId,
       slug: Achievement.AchievementSlug,
@@ -54,7 +57,35 @@ const make = Effect.Do.pipe(
                   'countsBySlug',
                   ({ countsRows }) => new Map(countsRows.map((r) => [r.slug, r.count])),
                 ),
-                Effect.map(({ stats, countsBySlug }) => ({ member, stats, countsBySlug })),
+                // Rules-trainer milestone stats, scoped by `member.user_id`
+                // (not `member.id`) for the same reason as `AchievementEvaluator`
+                // — `rules_attempts` has no `team_id`.
+                Effect.bind('examStats', () => rulesAttempts.getExamStats(member.user_id)),
+                Effect.bind('lastCorrectRows', () =>
+                  rulesAttempts.lastCorrectByScenario(member.user_id),
+                ),
+                Effect.let('rules', ({ examStats, lastCorrectRows }) => {
+                  const lastCorrectAtByScenario = new Map(
+                    lastCorrectRows.map(
+                      (row) => [row.scenario_id, row.last_correct_at.epochMilliseconds] as const,
+                    ),
+                  );
+                  const packagesMastered = packageMasteriesFromLastCorrect(
+                    lastCorrectAtByScenario,
+                    Date.now(),
+                  ).filter((m) => m.mastered).length;
+                  return {
+                    examsCompleted: examStats.exams_completed,
+                    perfectExams: examStats.perfect_exams,
+                    packagesMastered,
+                  };
+                }),
+                Effect.map(({ stats, countsBySlug, rules }) => ({
+                  member,
+                  stats,
+                  countsBySlug,
+                  rules,
+                })),
               ),
             { concurrency: 5 },
           ),
@@ -62,8 +93,8 @@ const make = Effect.Do.pipe(
         Effect.let(
           'qualifyingCount',
           ({ memberStats, catalogEntry }) =>
-            memberStats.filter(({ stats, countsBySlug }) =>
-              catalogEntry.isEarned({ stats, countsBySlug }, candidateThreshold),
+            memberStats.filter(({ stats, countsBySlug, rules }) =>
+              catalogEntry.isEarned({ stats, countsBySlug, rules }, candidateThreshold),
             ).length,
         ),
         Effect.bind('removedMembers', ({ memberStats, catalogEntry }) =>
@@ -87,9 +118,9 @@ const make = Effect.Do.pipe(
             Effect.let('removedMembersRaw', ({ currentlyEarnedMemberIds }) =>
               memberStats
                 .filter(
-                  ({ member, stats, countsBySlug }) =>
+                  ({ member, stats, countsBySlug, rules }) =>
                     currentlyEarnedMemberIds.has(member.id) &&
-                    !catalogEntry.isEarned({ stats, countsBySlug }, candidateThreshold),
+                    !catalogEntry.isEarned({ stats, countsBySlug, rules }, candidateThreshold),
                 )
                 .slice(0, 100),
             ),
