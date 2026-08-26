@@ -8,9 +8,7 @@ try {
 const OFFLINE_CACHE = 'offline-fallback';
 const STATIC_CACHE = 'static-assets';
 // The rules trainer's nine content packages get their OWN cache rather than
-// sharing STATIC_CACHE, because STATIC_CACHE is already oversubscribed: the app
-// ships ~192 hashed JS chunks against ExpirationPlugin's maxEntries of 100, so
-// its LRU eviction already churns. Sharing would mean practising rules evicts
+// sharing STATIC_CACHE. Sharing would mean practising rules evicts
 // app-shell chunks and browsing the app evicts the rules content — which
 // defeats the entire point of caching it (a rules argument at a tournament,
 // with no signal). A separate cache with a small, sufficient maxEntries makes
@@ -86,12 +84,19 @@ if (typeof workbox !== 'undefined') {
   // Cache static assets (JS, CSS, images, fonts) with CacheFirst. These are
   // content-hashed and immutable, so a new deploy ships new filenames that miss
   // the cache and are fetched fresh — old entries simply age out.
+  //
+  // `maxEntries` must EXCEED the app's hashed-chunk count or this route silently
+  // does nothing useful: it was 100 against ~192 chunks, so LRU eviction thrashed
+  // and the cache reported "assets are cached" while holding roughly half of one
+  // page load. 250 covers the current bundle with headroom; the 30-day `maxAge`
+  // still bounds growth. If the bundle ever passes ~250, raise this — the failure
+  // is silent, not an error.
   registerRoute(
     ({ request }) => ['script', 'style', 'image', 'font'].includes(request.destination),
     new CacheFirst({
       cacheName: STATIC_CACHE,
       plugins: [
-        new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 30 * 24 * 60 * 60 }),
+        new ExpirationPlugin({ maxEntries: 250, maxAgeSeconds: 30 * 24 * 60 * 60 }),
         new CacheableResponsePlugin({ statuses: [0, 200] }),
       ],
     }),
@@ -112,10 +117,15 @@ if (typeof workbox !== 'undefined') {
   //   - page already open, then signal lost  → keeps working
   //   - COLD START with no signal            → offline.html, not the app
   // So the rules trainer is *not* usable from a cold start at a field with no
-  // signal, which is the scenario docs/plans/rules-trainer.md cites. Fixing
-  // that means serving a cached shell for navigations, which trades away the
-  // guarantee above (returning users always get the newest deploy) and needs
-  // its own decision — not a change to smuggle into a feature branch.
+  // signal, which is the scenario docs/plans/rules-trainer.md cites.
+  //
+  // DECIDED (2026-08-26, owner): leave it. Serving a cached shell for
+  // navigations would trade away the guarantee above — returning users always
+  // get the newest deploy — and it applies app-wide, including to authenticated
+  // pages, where a shell can outlive the API contract it was built against. The
+  // cold-start-offline scenario is therefore knowingly unmet rather than
+  // half-supported. Do not "fix" this incidentally in a feature branch; it is a
+  // deliberate trade, and the honest version of it is this comment.
   registerRoute(
     ({ request }) => request.mode === 'navigate',
     new NetworkOnly({

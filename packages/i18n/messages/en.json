@@ -1880,8 +1880,6 @@
   "rules_cheatWho": "Who may call what?",
   "rules_close": "Close",
   "rules_correct": "Correct!",
-  "rules_csReviewNotice": "Czech translation under review",
-  "rules_csReviewNoticeBody": "The Czech rulings are machine-translated and have not been fully proofread yet. If a call matters, check the English version or the WFDF rulebook.",
   "rules_examAgain": "🎓 New test",
   "rules_examDesc": "Final test: up to 10 random situations drawn from the packages you selected, each resolved step by step, shuffled answers, no time limit — no cheat sheet, no feedback until the results. A situation counts only if every step is right.",
   "rules_examLow": "The diagrams want one more practice lap — replay each miss below with the full explanation.",

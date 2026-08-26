@@ -1880,8 +1880,6 @@
   "rules_cheatWho": "Kdo smí co hlásit?",
   "rules_close": "Zavřít",
   "rules_correct": "Správně!",
-  "rules_csReviewNotice": "Český překlad se kontroluje",
-  "rules_csReviewNoticeBody": "České výklady jsou strojově přeložené a ještě nejsou plně zkontrolované. Pokud na výkladu záleží, ověř si ho v anglické verzi nebo v pravidlech WFDF.",
   "rules_examAgain": "🎓 Nový test",
   "rules_examDesc": "Závěrečný test: až 10 náhodných situací z vybraných balíčků, každá se řeší krok za krokem, zamíchané odpovědi, bez časového limitu — bez taháku a bez zpětné vazby až do výsledků. Situace se počítá, jen když sedí všechny kroky.",
   "rules_examLow": "Diagramy chtějí ještě jedno tréninkové kolo — přehraj si každou chybu níž i s vysvětlením.",

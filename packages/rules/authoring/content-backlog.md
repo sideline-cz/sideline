@@ -104,14 +104,16 @@ an actor circle plus its ring — so only slivers of dashes are visible. The lab
 nothing false is taught; the annotation just is not there.
 
 That radius was never visually validated, because this fx never rendered in the source app either.
-So the fix is a content judgement, not a restoration, and it is left open deliberately:
 
-- **enlarge `r`** (roughly 4.5–5) so the dashed ring reads around the player cluster rather than
-  under it — but that changes what the circle encircles, and "their lane" may be meant tightly; or
-- **drop the annotation** and let the situation text carry "their lane"; or
-- **move it** off the players, if the lane it means is beside them rather than on them.
+**DECIDED (2026-08-26, owner): dropped.** The annotation stays gone and `sp5`'s situation text
+carries "their lane" on its own. The alternatives were to enlarge `r` to ~4.5–5 so the ring read
+around the player cluster, or to move it off them — but both are guesses at what the author meant
+by "their lane", and enlarging it changes what the circle encircles. Since nothing false is
+currently taught (the label reads fine; only the circle is missing), inventing a radius to make an
+unvalidated annotation visible would have been the riskier option.
 
-Whoever picks needs to look at the play, not just the numbers.
+**No content change was required** — the fx was deleted in #562 and never restored, so `sp5` is
+already correct. This entry exists so the question is not reopened from the deletion alone.
 
 ### The extent guard that came with this
 
