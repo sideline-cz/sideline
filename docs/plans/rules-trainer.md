@@ -510,26 +510,94 @@ A slash command that runs a situation or a short test in Discord, without openin
 This is the reason `@sideline/rules` was built Effect-free with a `/content` subpath the bot can
 import eagerly — the groundwork exists and nothing needs restructuring.
 
-What is genuinely different, and should shape expectations before anyone starts:
+**Owner steer (2026-08-26), which changes the shape of this from what was written here before:**
+ship the animation as **precomputed GIFs**, and make the quiz a public question message that opens
+a private chain per participant. Both are recorded below. The earlier version of this entry
+concluded the animation "cannot come with it" and floated a still image at `qAt` as consolation —
+that is superseded.
 
-- **The animation cannot come with it.** The trainer teaches by freezing an animated play at `qAt`
-  and only revealing the resolution once the chain is answered — that *is* the pedagogy, and the
-  `animLimit` spoiler gate exists to protect it. A Discord version is text-only: situation, then
-  the chain as buttons. That is a different (thinner) teaching mechanism, not a port. Worth
-  deciding whether a still image of the field at `qAt` is worth rendering server-side to recover
-  some of it.
-- **The spoiler gate still has to hold**, differently. In Discord the risk is not a demo playing
-  too far but a later step's key label or a `why` arriving in the same message. `chainView` already
-  computes exactly this decision (`state`, `showVerdict`, `showKeyLabel`) and is pure, so the bot
-  should drive it rather than reimplement the reveal rules.
-- **Per-user state in a shared channel is the trap.** Sideline has already been bitten by rendering
-  per-user state into a shared message; a rules quiz in a channel must use an ephemeral private
-  view per participant, or everyone sees the first person's answers.
+#### The animation comes with it, as two GIFs per scenario, built ahead of time
+
+The animation is already a pure function of `(scenario, t)`. `RulesFieldSvg` takes
+`{ scenario, t, locale }` and returns SVG; its only hook is a `React.useMemo`, with no DOM and no
+`window` access, so `renderToStaticMarkup` yields a frame at any `t` with no refactor.
+
+The 109 scenarios are **static content that never changes at runtime**. So do not put a rasteriser
+and an encoder in the bot image and render per interaction — precompute in CI and ship the files.
+That removes per-interaction latency entirely, which matters because a slash command must ack
+within 3 seconds.
+
+`animLimit` (`packages/rules/src/engine/anim.ts`) already proves there are exactly **two** states to
+encode, not a continuum: `qAt` before the chain is answered, `dur` after. So render `0 → dur` once
+as a single frame sequence and cut two clips from those same frames:
+
+| Clip | Range | Where it goes |
+|------|-------|---------------|
+| setup | `[0, qAt]` | the public question message |
+| resolution | `[0, dur]` | the ephemeral follow-up, per user, once **that** user's chain is done |
+
+109 × 2 = **218 files**. Regenerate only when content changes — a separate workflow, not something
+that runs on every PR.
+
+**The reason this is worth doing beyond fidelity:** in Discord the spoiler gate stops being a UI
+promise and becomes a property of the artefact. On web the gate is enforced by the client capping
+`t` — the later frames exist, something merely declines to draw them. In a precomputed setup clip
+the frames past `qAt` are *not in the file the viewer has*. Nobody can scrub past what was never
+encoded.
+
+**GIF, not MP4** (owner's call, and the right one): Discord autoplays GIFs inline, while a video
+attachment renders as a poster frame plus a play button. For a five-second teaching loop that
+autoplays by default, the worse compression is the correct trade — and this content is flat vector
+art with a small palette, which is close to the best case for GIF anyway.
+
+#### The resolution clip must be ephemeral, never posted to the channel
+
+If the resolution lands publicly the moment the first person answers, it spoils the scenario for
+everyone still working through it. The public message stays on the setup clip permanently; the
+resolution clip is delivered to each participant individually as they finish. This is the single
+easiest thing to get wrong here, because posting it publicly is the more obvious implementation.
+
+#### Quiz shape: one public message, one private chain per user
+
+Not a fully-ephemeral quiz. The public message carries the question, the setup GIF and **one**
+button; clicking it opens that user's own ephemeral chain. This gives the quiz a shared,
+channel-visible presence without ever rendering one participant's state where another can see it.
+
+It is also already the house pattern — see "Per-user actions on a shared board message: one button
+keyed by entity id, resolved server-side" in `applications/bot/AGENTS.md`, and
+`CarpoolLeaveMineButton` as the reference implementation. The rules that carry over unchanged:
+
+- The button's `custom_id` encodes **only** the shared entity id (the scenario or quiz-session id),
+  never anything per-user. The acting user is resolved server-side from the interaction.
+- Every per-user reply is ephemeral (`ephemeralDeferred` + `replyWebhook`).
+- **Per-user state in a shared channel is the trap.** Sideline has been bitten by rendering
+  per-user state into a shared message before; that is what this shape exists to prevent.
+
+#### Constraints that carry over unchanged
+
+- **The spoiler gate still has to hold on the text side too.** Beyond the GIF, the risk is a later
+  step's key label or a `why` arriving in the same message. `chainView` already computes exactly
+  that decision (`state`, `showVerdict`, `showKeyLabel`) and is pure — the bot must drive it rather
+  than reimplement the reveal rules.
 - **Command and option descriptions must stay ≤100 characters in every locale.** An over-length
   description makes Discord reject the *entire* command registration with a 400 and crash-loops the
   bot, with no error surfacing in logs. There is a guard test for this — keep it passing.
 - `scoreAttempt` is shared logic and already tolerates hostile input, so the bot can submit
   attempts through the same path as web.
+
+#### Open questions to settle before costing this
+
+1. **Bot attachment size ceiling.** It varies with the guild's boost tier. Flat vector art should
+   land in the low hundreds of KB per clip, but measure against the real limit rather than assume —
+   and note the limit applies to the smallest guild the bot serves, not the largest.
+2. **Where the 218 files live at send time.** They cannot be referenced by URL: bots cannot set
+   `embed.video`, the web app has SSR and prerender disabled so there are no OG tags for Discord to
+   unfurl, and Discord CDN URLs are signed and expire — so "upload once, reuse the link" does not
+   work either. That leaves uploading bytes per message, from either the bot image (which grows it)
+   or a cached fetch of web static.
+3. **Does the ephemeral view re-render per step, or only deliver the resolution GIF at the end?**
+4. **Frame rate and dimensions**, which set both file size and CI build time. ~180 frames per
+   scenario at 30fps over a typical `dur`, × 109, is the whole render budget.
 
 ### A daily rule, with streaks
 
