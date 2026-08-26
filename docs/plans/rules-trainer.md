@@ -261,7 +261,15 @@ tests. Notes on what changed versus this plan's original text:
    field, nothing positioned outside its own `view`), **independence**, and **duplication**.
    These have each caught real defects and must not be dropped in the move.
 
-### Phase 1 — public `/rules`, native React, local-only progress
+### Phase 1 — public `/rules`, native React, local-only progress — ✅ DONE
+
+Shipped across #565 (routes + practice flow), #567 (e2e), #568 (exam, review, cheat sheet) and
+#569 (homepage + content cache). Two of this phase's original assumptions did not survive and are
+corrected in the decisions above: **SSR/indexability was dropped** (the app is client-rendered and
+cannot re-enable SSR per route), and **the PWA cold-start promise is unmet** — an already-open page
+survives losing signal, but a cold start with no signal serves `offline.html`, so the "rules
+argument at a tournament" scenario still does not work. That needs an app-wide service-worker
+decision, not more trainer work.
 
 **Gate: the Czech proofread must land before this ships publicly** (see Risks). The trainer is
 already live in Czech at rules.sideline.cz, but a Sideline-branded, SSR-indexed page teaching
@@ -391,7 +399,12 @@ real web consumer):
 - Animation pacing constants to reuse rather than reinvent: 450 ms after a completed exam chain,
   350 ms between steps (recorded in `packages/rules/AGENTS.md`).
 
-### Phase 2 — per-user progress (server-scored)
+### Phase 2 — per-user progress (server-scored) — ✅ DONE
+
+Shipped across #570 (decaying mastery), #571 (migration + contracts), #572 (repository, handler,
+API wiring) and #573 (progress panel, attempt submission, local import). Note the phase title is
+now slightly misleading: scoring *is* server-side, but that is for a single definition rather than
+for trust — see the honour-system decision.
 
 9. `packages/domain`: `models/RulesProgress.ts`, `api/RulesTrainerApi.ts` (`HttpApiGroup`
    `'rulesTrainer'`, `AuthMiddleware`). HTTP, not RPC — web-facing feature pages use the HTTP
@@ -411,7 +424,11 @@ real web consumer):
     consumer. This is *not* an anti-cheat measure; see the honour-system decision.
 12. Anonymous → logged-in: on login, offer to import `localStorage` progress.
 
-### Phase 3 — team leaderboard + achievements
+### Phase 3 — team leaderboard + achievements — ✅ DONE
+
+Shipped across #574 (leaderboard API, self-and-captains visibility), #576 (member route) and #578
+(achievements, evaluated per active membership). Step 15 turned out to be much larger than its one
+line suggested — see the notes on it below, which are kept because they explain why.
 
 13. Rules leaderboard endpoint scoped to a team, ranked on mastery/accuracy, mirroring
     `LeaderboardApi`'s shape (rank, displayName resolution, `Forbidden` on non-membership) so the
@@ -450,13 +467,86 @@ real web consumer):
     per-team `achievement_role_mappings` table. So the flag means "eligible for a
     captain-configured role", not "grants a role".
 
-### Phase 4 — cutover
+### Phase 4 — cutover — ▶ UNBLOCKED, not started
 
-16. Point `rules.sideline.cz` at the new route (redirect) or retire the subdomain.
-17. **The risky step, and it has a known failure mode:** two apps must never claim the same host.
-    Remove `ingress.host` from the majksa-projects `rules` app and merge that render PR
-    **before** the new host goes live; verify a 200 after each step.
+The precondition is met as of **2026-08-26**: production serves the trainer, so there is now
+something for `rules.sideline.cz` to point at. Verified rather than assumed —
+`sideline.cz/en/rules`, `/cs/rules` and `/rules` all return **200**, and `sideline-cz/ops`
+`env/production` pins:
+
+| App | Digest | Tag |
+|-----|--------|-----|
+| server | `sha256:5e9a5ead…` | `v0.44.0` |
+| web | `sha256:23d5f30e…` | `v0.32.0` |
+| bot | `sha256:19c180b7…` | `v0.35.0` |
+
+The bot promote (ops PR #511, `render(production): from main@1d6d3864`) matters beyond tidiness:
+production briefly ran the new server and web against **July's bot**, whose exhaustive
+`Record<AchievementSlug, …>` maps in `applications/bot/src/rest/achievements/buildAchievementEmbed.ts`
+predate the four rules slugs. `TITLE_MESSAGES[slug](locale)` on an unknown slug is `undefined(...)`
+— a TypeError, not a missing emoji — so the first person to earn a rules achievement would have
+failed that sync event permanently. Any future release that adds an `AchievementSlug` has the same
+skew; promote the bot with the server.
+
+⚠️ **The `v0.35.0` digest is `sha256:19c180b7…`, not the `sha256:6a3711e0…` recorded during the
+release.** That earlier hash was an intermediate, untagged manifest from the same build round; the
+tag re-push (see the dashboard-cut release note under Risks) produced a different one. Read the
+digest back from the `ops` repo or the GHCR version list, never from release notes.
+
+#### The redirect is a Cloudflare edge rule, which dissolves step 17's ordering risk
+
+**Owner's call (2026-08-26).** `rules.sideline.cz` is Cloudflare-proxied (every response carries a
+`cf-ray`), so the redirect happens at the edge and the request never reaches an origin at all.
+
+⚠️ **This rule lives in the Cloudflare dashboard, in neither repo.** That is the one real cost of
+choosing it, and it is why the exact configuration is written out here — someone grepping either
+repo for `rules.sideline.cz` in six months will otherwise find only the majksa-projects app config
+that no longer serves it, and conclude the subdomain is dead.
+
+```
+Cloudflare → Rules → Redirect Rules
+
+  When incoming requests match:  Hostname equals rules.sideline.cz
+  Then:                          Type   Static
+                                 URL    https://sideline.cz/rules
+                                 Status 301
+                                 Preserve query string: off
+```
+
+`/rules` rather than `/en/rules`: the bare route negotiates locale (localStorage → cookie →
+`navigator.languages` → English). **Verified against production**, not assumed — a browser at
+`en-US` lands on `/en/rules` ("Learn the calls by living them"), one at `cs-CZ` lands on
+`/cs/rules` ("Nauč se pravidla tím, že je zažiješ"), both rendering all nine packages. So a Czech
+player's old bookmark reaches the Czech trainer. Hard-coding `/en/rules` would silently send every
+Czech visitor to English.
+
+Path is deliberately **not** preserved. The standalone site is a single self-contained HTML file,
+so every path under `rules.sideline.cz` is the same page; forwarding `$request_uri` would only
+manufacture 404s on the new host.
+
+**Why this matters beyond convenience:** it removes step 17's failure mode entirely rather than
+sequencing around it. That step exists because two apps must never claim the same host — implying a
+window where the old app has released `rules.sideline.cz` and the new one has not yet taken it. An
+edge redirect never routes the host to an origin, so releasing it in majksa-projects and enabling
+the rule are **independent**; there is no ordering to get right and no dead window. The rejected
+alternative (add `rules.sideline.cz` to `sideline-proxy`'s `ingress.domains` — the schema does
+support a `domains` list, see `portfolio` / `space-alert` / `zpevnik-*` in `majksa-projects/ops` —
+plus an nginx `server_name` block beside the existing `/docs` redirect) is version-controlled and
+reviewable, but costs a proxy release, an ops PR, and keeps that window.
+
+Note that `ingress.domains` **alone** would not have worked: it makes the host an alias, so
+`rules.sideline.cz/` would serve the Sideline homepage rather than the trainer. It needs a redirect
+in front of it either way.
+
+16. Add the Cloudflare Redirect Rule above. Verify `curl -I https://rules.sideline.cz` returns
+    **301** to `https://sideline.cz/rules`, and that following it renders the trainer.
+17. Remove `ingress.host` from the majksa-projects `rules` app and merge that render PR. No longer
+    order-sensitive against step 16 (see above), but still verify `rules.sideline.cz` after it.
 18. Archive the old `rules` app and delete `rules/` from `majksa-projects/static`.
+
+The production promote itself is a MajNet dashboard action authorised via Tailscale identity and
+cannot be done from this repo; merging the resulting `env/production` render PR is the deploy
+trigger and *can* be done via GitHub.
 
 ## Risks
 
@@ -477,6 +567,23 @@ real web consumer):
   crisis, and it should not be allowed to distort the Phase 1 design.
 - **Content authoring must not fork.** Once content lives in `packages/rules`, the
   `frisbee-rules` repo stops being a source of truth and is retired.
+- **A dashboard-cut release tag may fire no workflow at all — silently.** Observed on
+  `@sideline/bot@v0.35.0`: MajNet's dashboard created the tag at `da7244fd` and **no `release.yaml`
+  run started**. Deleting the remote tag and re-pushing the byte-identical tag with a developer's
+  own credentials fired it immediately. Token-based workflow-loop prevention is the obvious suspect
+  — this repo already carries a `GH_PAT` workaround elsewhere for exactly that class of problem —
+  but **this is unproven**, and nothing here fixes it.
+
+  Two consequences worth holding onto, because neither is specific to this plan:
+
+  - **The failure mode is silence, not an error.** There is no failed run to notice; the release
+    simply does not happen. After any dashboard-cut release, confirm a run actually started —
+    `gh api repos/{owner}/{repo}/actions/runs?event=push` is more reliable than `gh run list`,
+    which lags indexing badly enough to have twice produced a false "not fired" here.
+  - **The re-push changes the image digest.** The re-run builds a fresh image, so the digest
+    recorded when the tag was first cut is stale. Always read the digest back from
+    `sideline-cz/ops` or the GHCR version list, never from notes written at release time — see the
+    `v0.35.0` warning under Phase 4.
 - **The Czech is AI-written and unreviewed** beyond the first 23 situations — that is 86 situations
   of unreviewed rules translation. It is already live that way at rules.sideline.cz, so this is
   about *exposure*, not a new defect: a Sideline-branded `/cs/rules` teaching a mistranslated
@@ -687,9 +794,12 @@ The five questions this plan opened with are now decided (see Decisions taken). 
    Simpler than it looked: the honour-system decision dissolves the trust question, because
    server-scored attempts are no more trustworthy than imported local ones. So the only remaining
    question is UX — merge, replace, or ask — not integrity.
-3. **After Phase 4, does `rules.sideline.cz` redirect or retire?** A redirect preserves any
-   accumulated links and the portfolio entry; retiring is cleaner. The subdomain currently has
-   its own identity ("Ultimate Rules Trainer") that the in-app version will not.
+3. ~~**After Phase 4, does `rules.sideline.cz` redirect or retire?**~~ **DECIDED: redirect**, as a
+   Cloudflare edge Redirect Rule to `https://sideline.cz/rules` — see Phase 4 for the exact rule,
+   which is recorded there precisely because it lives in neither repo. Retiring was rejected: the
+   subdomain has been live since 2026-08-24 and shared, so every existing bookmark would break
+   with no signpost. The one thing genuinely lost is the subdomain's own identity ("Ultimate Rules
+   Trainer"), which the in-app version does not carry.
 4. ~~**Bare `/rules`**~~ — **decided: redirect to the negotiated locale** (via the existing
    `getLocale()`). A locale-picking landing page adds a hop for no benefit, and with the SEO goal
    dropped there is nothing to gain from a third URL.
