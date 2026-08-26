@@ -467,16 +467,36 @@ line suggested — see the notes on it below, which are kept because they explai
     per-team `achievement_role_mappings` table. So the flag means "eligible for a
     captain-configured role", not "grants a role".
 
-### Phase 4 — cutover — ⏸ BLOCKED on the production promote
+### Phase 4 — cutover — ▶ UNBLOCKED, not started
 
-Not startable yet, and not for want of code. Step 17's ordering is the whole risk: the new host
-must be serving before `rules.sideline.cz` is repointed, or the subdomain lands on a 404. As of the
-last check, `v0.44.0`/`v0.32.0` is released and tracking to stable, but **production is still on
-July's digests** and `sideline.cz/en/rules` returns 404 — so there is nothing to point at.
+The precondition is met as of **2026-08-26**: production serves the trainer, so there is now
+something for `rules.sideline.cz` to point at. Verified rather than assumed —
+`sideline.cz/en/rules`, `/cs/rules` and `/rules` all return **200**, and `sideline-cz/ops`
+`env/production` pins:
 
-The promote itself is a MajNet dashboard action authorised via Tailscale identity; it cannot be
-done from this repo. Merging the resulting `env/production` render PR is the deploy trigger and
-*can* be done via GitHub.
+| App | Digest | Tag |
+|-----|--------|-----|
+| server | `sha256:5e9a5ead…` | `v0.44.0` |
+| web | `sha256:23d5f30e…` | `v0.32.0` |
+| bot | `sha256:19c180b7…` | `v0.35.0` |
+
+The bot promote (ops PR #511, `render(production): from main@1d6d3864`) matters beyond tidiness:
+production briefly ran the new server and web against **July's bot**, whose exhaustive
+`Record<AchievementSlug, …>` maps in `applications/bot/src/rest/achievements/buildAchievementEmbed.ts`
+predate the four rules slugs. `TITLE_MESSAGES[slug](locale)` on an unknown slug is `undefined(...)`
+— a TypeError, not a missing emoji — so the first person to earn a rules achievement would have
+failed that sync event permanently. Any future release that adds an `AchievementSlug` has the same
+skew; promote the bot with the server.
+
+⚠️ **The `v0.35.0` digest is `sha256:19c180b7…`, not the `sha256:6a3711e0…` recorded during the
+release.** That earlier hash was an intermediate, untagged manifest from the same build round; the
+tag re-push (see the dashboard-cut release note under Risks) produced a different one. Read the
+digest back from the `ops` repo or the GHCR version list, never from release notes.
+
+Step 17's ordering is still the whole risk, and it is unchanged by any of the above: two apps must
+never claim the same host. The promote itself is a MajNet dashboard action authorised via Tailscale
+identity and cannot be done from this repo; merging the resulting `env/production` render PR is the
+deploy trigger and *can* be done via GitHub.
 
 16. Point `rules.sideline.cz` at the new route (redirect) or retire the subdomain.
 17. **The risky step, and it has a known failure mode:** two apps must never claim the same host.
@@ -503,6 +523,23 @@ done from this repo. Merging the resulting `env/production` render PR is the dep
   crisis, and it should not be allowed to distort the Phase 1 design.
 - **Content authoring must not fork.** Once content lives in `packages/rules`, the
   `frisbee-rules` repo stops being a source of truth and is retired.
+- **A dashboard-cut release tag may fire no workflow at all — silently.** Observed on
+  `@sideline/bot@v0.35.0`: MajNet's dashboard created the tag at `da7244fd` and **no `release.yaml`
+  run started**. Deleting the remote tag and re-pushing the byte-identical tag with a developer's
+  own credentials fired it immediately. Token-based workflow-loop prevention is the obvious suspect
+  — this repo already carries a `GH_PAT` workaround elsewhere for exactly that class of problem —
+  but **this is unproven**, and nothing here fixes it.
+
+  Two consequences worth holding onto, because neither is specific to this plan:
+
+  - **The failure mode is silence, not an error.** There is no failed run to notice; the release
+    simply does not happen. After any dashboard-cut release, confirm a run actually started —
+    `gh api repos/{owner}/{repo}/actions/runs?event=push` is more reliable than `gh run list`,
+    which lags indexing badly enough to have twice produced a false "not fired" here.
+  - **The re-push changes the image digest.** The re-run builds a fresh image, so the digest
+    recorded when the tag was first cut is stale. Always read the digest back from
+    `sideline-cz/ops` or the GHCR version list, never from notes written at release time — see the
+    `v0.35.0` warning under Phase 4.
 - **The Czech is AI-written and unreviewed** beyond the first 23 situations — that is 86 situations
   of unreviewed rules translation. It is already live that way at rules.sideline.cz, so this is
   about *exposure*, not a new defect: a Sideline-branded `/cs/rules` teaching a mistranslated
