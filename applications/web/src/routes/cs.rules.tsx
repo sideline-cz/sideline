@@ -5,16 +5,16 @@ import { tr } from '~/lib/translations.js';
 
 // See `en.rules.tsx` for why this is a flat route rather than `/$lang/rules`.
 //
-// The Czech review gate is lifted (owner sign-off), so this route is now
-// symmetrical with `en.rules.tsx`: no `noindex`, no in-page review notice.
+// The Czech review gate is CLOSED, not merely lifted (owner decision,
+// 2026-08-26), so this route is fully symmetrical with `en.rules.tsx`.
 //
-// If a later read of the content turns up a mistranslated ruling, re-gating is
-// two lines — add `{ name: 'robots', content: 'noindex' }` back to `meta` and
-// pass `showTranslationReviewNotice` to the page. The
-// `rules_csReviewNotice` / `rules_csReviewNoticeBody` keys are kept in the
-// catalogue for exactly that reason, and
-// `packages/rules/authoring/czech-review-checklist.md` still holds the
-// per-package breakdown for anyone doing the deeper pass.
+// The banner, its two i18n keys and the per-package checklist have all been
+// deleted rather than left dormant: a retained artifact reads as planned work,
+// and this review is not planned. 86 of the 109 situations remain AI-written
+// and unreviewed, which is accepted exposure — the same content has been live
+// in Czech at rules.sideline.cz since before Sideline carried it. See the
+// Risks section of `docs/plans/rules-trainer.md` for what that risk actually
+// is. If a mistranslated ruling ever surfaces, fix that ruling.
 export const Route = createFileRoute('/cs/rules')({
   ssr: false, // Effect `Option` in route context fails TanStack's serializability check.
   component: CsRulesRoute,

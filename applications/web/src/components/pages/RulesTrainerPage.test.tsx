@@ -25,13 +25,7 @@ describe('RulesTrainerPage', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('shows the translation-review notice only when explicitly requested', () => {
-    render(<RulesTrainerPage locale='cs' showTranslationReviewNotice />);
-    expect(screen.getByTestId('rules-trainer')).toHaveProperty('textContent', 'cs/false');
-    expect(screen.getByRole('alert')).not.toBeNull();
-  });
-
-  it('threads `isSignedIn` through to the organism, unrelated to the translation notice', () => {
+  it('threads `isSignedIn` through to the organism', () => {
     render(<RulesTrainerPage locale='en' isSignedIn />);
     expect(screen.getByTestId('rules-trainer')).toHaveProperty('textContent', 'en/true');
   });

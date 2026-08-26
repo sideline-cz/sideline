@@ -105,11 +105,9 @@ That was not achievable by adding a route, and the reason is structural rather t
 - **Per-locale routes are still right**, just for different reasons — an explicit, shareable
   language choice and a clean split for the Czech review gate. They are no longer an SEO measure,
   so do not justify future work by appealing to indexability.
-- **This weakens the Czech gate's own rationale.** The gate was written against an *SSR-indexed,
-  Sideline-branded* `/cs/rules`; un-indexed, the exposure is much closer to today's
-  rules.sideline.cz. The gate is kept anyway (it costs nothing and in-app exposure is still real),
-  but it is no longer urgent. `packages/rules/authoring/czech-review-checklist.md` is the
-  clearing mechanism.
+- **This weakened the Czech gate's own rationale, and the gate is now closed.** The gate was
+  written against an *SSR-indexed, Sideline-branded* `/cs/rules`; un-indexed, the exposure is much
+  closer to today's rules.sideline.cz. See Risks for the decision.
 - The genuine fix, if indexability ever matters, is registering `serializationAdapters` for
   Effect's `Option` so the whole app can server-render. That benefits every route and is its own
   project — not something to smuggle into a feature PR.
@@ -600,12 +598,18 @@ trigger and *can* be done via GitHub.
     client-rendered, so the page was never going to be meaningfully indexed. What actually changed
     for users is the notice disappearing.
 
-  `packages/rules/authoring/czech-review-checklist.md` is unchanged and still splits the content
-  into nine independently clearable packages, ordered by stakes (the `ok:true` option first, then
-  the `why` on *wrong* options). Re-gating is cheap and deliberately left cheap: pass
-  `showTranslationReviewNotice` from `cs.rules.tsx` again and restore its `noindex` meta — the
-  banner UI and its i18n keys are kept for that purpose, and an e2e test now asserts the notice is
-  *absent* so it cannot reappear silently.
+  **CLOSED (2026-08-26, owner): the review is not planned, and the risk is accepted.** The banner,
+  its `rules_csReviewNotice` / `rules_csReviewNoticeBody` keys, the `showTranslationReviewNotice`
+  prop and `authoring/czech-review-checklist.md` are all **deleted**, not left dormant — a retained
+  artifact reads as scheduled work, and this is not scheduled. The e2e test asserting the notice is
+  *absent* stays, so it cannot reappear silently.
+
+  What is being accepted, stated plainly so nobody re-derives it: 86 of 109 situations are
+  AI-written Czech that no rules-literate Czech speaker has read. The specific failure is a dropped
+  or inverted negation in a *wrong* option's `why`, which reads as fluent Czech and is invisible to
+  both a glance and `cz-audit.mjs`. The same content has been live in Czech at rules.sideline.cz
+  since before Sideline carried it, so this is exposure that already existed rather than a new
+  defect. If a mistranslated ruling ever surfaces, fix that ruling — do not rebuild the gate.
 
 ## Backlog — beyond Phase 4
 
@@ -800,6 +804,23 @@ The five questions this plan opened with are now decided (see Decisions taken). 
    subdomain has been live since 2026-08-24 and shared, so every existing bookmark would break
    with no signpost. The one thing genuinely lost is the subdomain's own identity ("Ultimate Rules
    Trainer"), which the in-app version does not carry.
-4. ~~**Bare `/rules`**~~ — **decided: redirect to the negotiated locale** (via the existing
+4. ~~**`sp5`'s zone annotation**~~ — **DECIDED: dropped.** Its `r=2.6` "their lane" circle rendered
+   almost entirely under the actor markers, and the radius was never visually validated because the
+   fx never rendered in the source app either. Rather than guess a new radius and risk encircling
+   something the author did not mean, the annotation is gone and the situation text carries "their
+   lane". No content change was needed — the fx was deleted in #562 and never restored. The five
+   zones that *were* restored (`pl7`, `rf3`, `ob2`, `gl1`, `gl2`) are unaffected.
+5. ~~**PWA cold-start offline**~~ — **DECIDED: left unmet, deliberately.** Navigations stay
+   `NetworkOnly`. A page already open survives losing signal; a cold start with no signal serves
+   `offline.html`. Serving a cached shell would trade away "returning users always get the newest
+   deploy" **app-wide**, including authenticated pages where a shell can outlive the API contract it
+   was built against. So the plan's "rules argument at a tournament" scenario is knowingly
+   unsupported rather than half-supported. `public/sw.js` carries the same note, because that is
+   where someone would otherwise "fix" it incidentally.
+6. ~~**`STATIC_CACHE` `maxEntries`**~~ — **DECIDED: raised 100 → 250.** The app ships ~192 hashed
+   JS chunks, so at 100 the LRU thrashed and the cache reported "assets are cached" while holding
+   roughly half of one page load. Note this failure is **silent** — if the bundle ever passes ~250,
+   raise it again; nothing will error.
+7. ~~**Bare `/rules`**~~ — **decided: redirect to the negotiated locale** (via the existing
    `getLocale()`). A locale-picking landing page adds a hop for no benefit, and with the SEO goal
    dropped there is nothing to gain from a third URL.
