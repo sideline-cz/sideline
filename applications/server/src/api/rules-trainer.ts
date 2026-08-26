@@ -7,73 +7,17 @@ import {
   type TeamMember,
   type User,
 } from '@sideline/domain';
-import type { Scenario } from '@sideline/rules';
-import { overallMastery, packageMastery, scoreAttempt } from '@sideline/rules';
+import { overallMastery, packageMastery } from '@sideline/rules';
 import { ALL_PACKAGES } from '@sideline/rules/content';
 import { type DateTime, Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { hasPermission, requireMembership } from '~/api/permissions.js';
-import type { InsertableScenarioResult } from '~/repositories/RulesAttemptsRepository.js';
 import { RulesAttemptsRepository } from '~/repositories/RulesAttemptsRepository.js';
 import type { MembershipWithRole } from '~/repositories/TeamMembersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { submitRulesAttempt } from '~/rules/submitAttempt.js';
 import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
-
-/**
- * `@sideline/rules/content` is an eager import of all nine packages — fine
- * here (server, not `applications/web`; see `packages/rules/AGENTS.md`'s
- * "the one web must never use"). Built once at module load, not per request:
- * a scenario lookup by id, and the full per-level scenario roster `myProgress`
- * needs so unanswered scenarios still count as `0` (see `engine/mastery.ts`'s
- * `packageMastery` doc — passing only touched scenarios would make mastery
- * trivially reachable).
- *
- * Keyed by plain `string`, not `ScenarioId` — `ScenarioId` is a bare TS brand
- * with no `Schema` and no smart constructor (see `RulesProgress.ts`'s module
- * doc), so a wire-decoded `scenario_id: string` can look it up directly
- * without a cast.
- */
-const scenarioById = new Map<string, Scenario>(
-  ALL_PACKAGES.flatMap((pkg) => pkg.scenarios.map((scenario) => [scenario.id, scenario] as const)),
-);
-
-/**
- * Scores every submitted scenario against its real chain. `scoreAttempt`
- * (`@sideline/rules`) is pure — this is the call site that lifts its result
- * into `Effect`, per `packages/domain/AGENTS.md` ("never wrap a pure
- * function's result in Effect inside the pure module itself").
- *
- * An unknown `scenario_id` (stale client content, a typo, a scenario removed
- * since the client last synced) is scored as incorrect with no steps rather
- * than failing the request — `scoreAttempt` needs a real chain to score
- * against, and `packageMastery` ignores outcomes outside a package's roster
- * anyway, so a junk id is inert at read time (see `RulesTrainerApi.ts`'s
- * module doc).
- */
-const scoreSubmittedResults = (
-  results: ReadonlyArray<RulesTrainerApi.SubmitAttemptResultInput>,
-): Effect.Effect<{
-  readonly scored: ReadonlyArray<InsertableScenarioResult>;
-  readonly score: number;
-  readonly total: number;
-}> =>
-  Effect.sync(() => {
-    const scored = results.map((result): InsertableScenarioResult => {
-      const scenario = scenarioById.get(result.scenario_id);
-      if (scenario === undefined) {
-        return { scenario_id: result.scenario_id, correct: false, steps: [] };
-      }
-      const picks = result.steps.map((pick) => Option.getOrElse(pick, () => -1));
-      const answer = scoreAttempt(scenario.steps, picks);
-      return { scenario_id: result.scenario_id, correct: answer.ok, steps: answer.steps };
-    });
-    return {
-      scored,
-      score: scored.filter((r) => r.correct).length,
-      total: scored.length,
-    };
-  });
 
 /**
  * Shared step behind `myProgress`, `getRulesLeaderboard`, AND
@@ -268,48 +212,8 @@ export const RulesTrainerApiLive = HttpApiBuilder.group(Api, 'rulesTrainer', (ha
     Effect.map(({ rulesAttempts, members, evaluatorOpt }) =>
       handlers
         .handle('submitAttempt', ({ payload }) =>
-          Effect.Do.pipe(
-            Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
-            Effect.bind('scoring', () => scoreSubmittedResults(payload.results)),
-            Effect.bind('attempt', ({ currentUser, scoring }) =>
-              rulesAttempts.insertAttempt(
-                currentUser.id,
-                payload.mode,
-                payload.packages,
-                scoring.score,
-                scoring.total,
-              ),
-            ),
-            Effect.tap(({ attempt, scoring }) =>
-              rulesAttempts.insertResults(attempt.id, scoring.scored),
-            ),
-            // Best-effort achievement evaluation (Phase 3b of
-            // `docs/plans/rules-trainer.md`) — `rules_attempts` has no
-            // `team_id`, so the submit handler resolves the caller's ACTIVE
-            // memberships and evaluates once per team, fanning milestones
-            // out to every team the caller currently belongs to. Mirrors
-            // `activity-logs.ts`'s hook shape exactly: a failed evaluation
-            // must never fail the submit.
-            Effect.tap(({ currentUser }) =>
-              Option.match(evaluatorOpt, {
-                onNone: () => Effect.void,
-                onSome: (evaluator) =>
-                  members.findByUser(currentUser.id).pipe(
-                    Effect.flatMap((memberships) =>
-                      Effect.forEach(
-                        memberships,
-                        (membership) => evaluator.evaluate(membership.id),
-                        { concurrency: 1 },
-                      ),
-                    ),
-                    Effect.asVoid,
-                    Effect.catchCause((cause) =>
-                      Effect.logWarning('Achievement evaluation failed', cause),
-                    ),
-                  ),
-              }),
-            ),
-            Effect.map(({ attempt }) => attempt),
+          Auth.CurrentUserContext.asEffect().pipe(
+            Effect.flatMap((currentUser) => submitRulesAttempt(currentUser.id, payload)),
           ),
         )
         .handle('myProgress', () =>
