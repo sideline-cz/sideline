@@ -261,7 +261,15 @@ tests. Notes on what changed versus this plan's original text:
    field, nothing positioned outside its own `view`), **independence**, and **duplication**.
    These have each caught real defects and must not be dropped in the move.
 
-### Phase 1 — public `/rules`, native React, local-only progress
+### Phase 1 — public `/rules`, native React, local-only progress — ✅ DONE
+
+Shipped across #565 (routes + practice flow), #567 (e2e), #568 (exam, review, cheat sheet) and
+#569 (homepage + content cache). Two of this phase's original assumptions did not survive and are
+corrected in the decisions above: **SSR/indexability was dropped** (the app is client-rendered and
+cannot re-enable SSR per route), and **the PWA cold-start promise is unmet** — an already-open page
+survives losing signal, but a cold start with no signal serves `offline.html`, so the "rules
+argument at a tournament" scenario still does not work. That needs an app-wide service-worker
+decision, not more trainer work.
 
 **Gate: the Czech proofread must land before this ships publicly** (see Risks). The trainer is
 already live in Czech at rules.sideline.cz, but a Sideline-branded, SSR-indexed page teaching
@@ -391,7 +399,12 @@ real web consumer):
 - Animation pacing constants to reuse rather than reinvent: 450 ms after a completed exam chain,
   350 ms between steps (recorded in `packages/rules/AGENTS.md`).
 
-### Phase 2 — per-user progress (server-scored)
+### Phase 2 — per-user progress (server-scored) — ✅ DONE
+
+Shipped across #570 (decaying mastery), #571 (migration + contracts), #572 (repository, handler,
+API wiring) and #573 (progress panel, attempt submission, local import). Note the phase title is
+now slightly misleading: scoring *is* server-side, but that is for a single definition rather than
+for trust — see the honour-system decision.
 
 9. `packages/domain`: `models/RulesProgress.ts`, `api/RulesTrainerApi.ts` (`HttpApiGroup`
    `'rulesTrainer'`, `AuthMiddleware`). HTTP, not RPC — web-facing feature pages use the HTTP
@@ -411,7 +424,11 @@ real web consumer):
     consumer. This is *not* an anti-cheat measure; see the honour-system decision.
 12. Anonymous → logged-in: on login, offer to import `localStorage` progress.
 
-### Phase 3 — team leaderboard + achievements
+### Phase 3 — team leaderboard + achievements — ✅ DONE
+
+Shipped across #574 (leaderboard API, self-and-captains visibility), #576 (member route) and #578
+(achievements, evaluated per active membership). Step 15 turned out to be much larger than its one
+line suggested — see the notes on it below, which are kept because they explain why.
 
 13. Rules leaderboard endpoint scoped to a team, ranked on mastery/accuracy, mirroring
     `LeaderboardApi`'s shape (rank, displayName resolution, `Forbidden` on non-membership) so the
@@ -450,7 +467,16 @@ real web consumer):
     per-team `achievement_role_mappings` table. So the flag means "eligible for a
     captain-configured role", not "grants a role".
 
-### Phase 4 — cutover
+### Phase 4 — cutover — ⏸ BLOCKED on the production promote
+
+Not startable yet, and not for want of code. Step 17's ordering is the whole risk: the new host
+must be serving before `rules.sideline.cz` is repointed, or the subdomain lands on a 404. As of the
+last check, `v0.44.0`/`v0.32.0` is released and tracking to stable, but **production is still on
+July's digests** and `sideline.cz/en/rules` returns 404 — so there is nothing to point at.
+
+The promote itself is a MajNet dashboard action authorised via Tailscale identity; it cannot be
+done from this repo. Merging the resulting `env/production` render PR is the deploy trigger and
+*can* be done via GitHub.
 
 16. Point `rules.sideline.cz` at the new route (redirect) or retire the subdomain.
 17. **The risky step, and it has a known failure mode:** two apps must never claim the same host.
