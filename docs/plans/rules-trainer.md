@@ -411,6 +411,86 @@ real web consumer):
   mistranslated ruling to Czech players is a different proposition. **Decided: the proofread gates
   the public launch.** A per-package review checklist is the deliverable that unblocks it.
 
+## Backlog — beyond Phase 4
+
+Not planned or costed; recorded so the design constraints are not rediscovered later.
+
+### Learn the rules / take the test from inside Discord
+
+A slash command that runs a situation or a short test in Discord, without opening the web app.
+This is the reason `@sideline/rules` was built Effect-free with a `/content` subpath the bot can
+import eagerly — the groundwork exists and nothing needs restructuring.
+
+What is genuinely different, and should shape expectations before anyone starts:
+
+- **The animation cannot come with it.** The trainer teaches by freezing an animated play at `qAt`
+  and only revealing the resolution once the chain is answered — that *is* the pedagogy, and the
+  `animLimit` spoiler gate exists to protect it. A Discord version is text-only: situation, then
+  the chain as buttons. That is a different (thinner) teaching mechanism, not a port. Worth
+  deciding whether a still image of the field at `qAt` is worth rendering server-side to recover
+  some of it.
+- **The spoiler gate still has to hold**, differently. In Discord the risk is not a demo playing
+  too far but a later step's key label or a `why` arriving in the same message. `chainView` already
+  computes exactly this decision (`state`, `showVerdict`, `showKeyLabel`) and is pure, so the bot
+  should drive it rather than reimplement the reveal rules.
+- **Per-user state in a shared channel is the trap.** Sideline has already been bitten by rendering
+  per-user state into a shared message; a rules quiz in a channel must use an ephemeral private
+  view per participant, or everyone sees the first person's answers.
+- **Command and option descriptions must stay ≤100 characters in every locale.** An over-length
+  description makes Discord reject the *entire* command registration with a 400 and crash-loops the
+  bot, with no error surfacing in logs. There is a guard test for this — keep it passing.
+- `scoreAttempt` is shared logic and already tolerates hostile input, so the bot can submit
+  attempts through the same path as web.
+
+### A daily rule, with streaks
+
+One deterministic situation per day that everyone gets, completable for a streak.
+
+- **Determinism is the point.** Everyone must get the *same* situation on the same day, or people
+  cannot discuss it — which is most of the appeal. That is a pure function of the date, so it
+  belongs in `@sideline/rules` next to `mastery.ts` (`dailyScenario(date)`), seeded by the date
+  rather than by `Math.random`, and unit-testable without a clock.
+- **Streaks cannot reuse the activity streak.** This plan already rejected putting rules practice
+  into `ActivityLog`, so `currentStreak`/`longestStreak` on `LeaderboardEntry` are about physical
+  training volume and must not absorb rules activity. A rules streak needs its own consecutive-day
+  tracking.
+- **It is a different mechanic from decaying mastery, not a variant of it.** Mastery answers "how
+  well do you know this now" and decays continuously; a streak answers "did you show up today" and
+  breaks discretely. Both are legitimate, but conflating them would make either meaningless —
+  keep them separate columns and separate UI.
+- Pairs naturally with the Discord command above: a daily post in a channel is the obvious delivery
+  mechanism, and it gives the bot work a reason to exist beyond convenience.
+
+**Delivery: a per-team channel, configurable in team settings.**
+
+- Follow the **welcome channel** pattern — an explicitly configured, member-visible channel stored
+  on team settings — not the channel-by-type targeting that was **deliberately removed** (columns
+  dropped, transitional RPC field gone, shipped in web v0.28.1 / server v0.40.3). Do not
+  resurrect that mechanism for this.
+- It is member-visible, unlike the system channel (a hidden captain join log), so treat it as
+  content players read rather than an audit surface.
+- **The shared post makes the spoiler problem worse, not better.** One public message that everyone
+  reads means the first person to answer in-channel spoils the day for everyone who hasn't played
+  yet. So the post itself carries only the situation and the question; every answer interaction must
+  be an **ephemeral per-user view**, and results/verdicts must never render into the shared message.
+  This is the same rule as the Discord command above, but here it is load-bearing rather than
+  merely tidy.
+- **Timezone is already solved — do not invent anything.** `team_settings.timezone` exists
+  (`TEXT NOT NULL DEFAULT 'Europe/Prague'`, a valid IANA string, added in `1745800000`), so
+  "daily" means daily in the team's own timezone and a single UTC cron hour is never the answer.
+  Two precedents to copy rather than re-derive:
+  - `rsvp_reminder_time` (`TIME NOT NULL`) is a time-of-day **interpreted in the team's
+    `timezone`**, with the cron matching within a 5-minute window. That is exactly the shape a
+    `daily_rule_time` wants.
+  - `weekly_summary_channel_id` is a **nullable** channel column where `NULL` means the cron
+    **skips the team** — the bot posts the weekly summary each Sunday at 20:00 local team time
+    only when it is set. That is precisely the "unset means feature off, cleanly" behaviour this
+    needs: no posts, no errors, no daily log noise about a missing channel. Copy it.
+
+  So the settings work is a nullable `daily_rule_channel_id` plus optionally a
+  `daily_rule_time`, both alongside the existing weekly-summary and reminder fields, and the cron
+  is a sibling of the weekly-summary cron rather than new machinery.
+
 ## Elsewhere (outside this repo)
 
 - **Portfolio** — the trainer is listed on majksa.cz as project 03, tagged `tool`
