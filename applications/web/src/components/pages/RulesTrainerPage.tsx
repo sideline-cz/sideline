@@ -6,9 +6,20 @@ import { tr } from '~/lib/translations.js';
 
 interface RulesTrainerPageProps {
   readonly locale: Lang;
-  /** True only for `/cs/rules` — the Czech content is AI-written and
-   * unreviewed beyond ~23 of 109 situations (see
-   * `packages/rules/authoring/czech-review-checklist.md`). */
+  /**
+   * Renders a "translation under review" banner. **Currently no route passes
+   * it** — the Czech gate was lifted by owner sign-off — so this is dormant
+   * rather than dead, and deliberately so.
+   *
+   * Kept because the sign-off was a page-level judgement, not a read of all
+   * 1182 options: the failure this gate guards against is a dropped or
+   * inverted negation in a *wrong* option's `why`, which reads as fluent
+   * Czech and is invisible to both a glance and `cz-audit.mjs`. If such a
+   * ruling turns up, re-gating is passing this prop again from
+   * `cs.rules.tsx` plus restoring its `noindex` meta — no UI to rebuild.
+   * `packages/rules/authoring/czech-review-checklist.md` holds the
+   * per-package breakdown for a deeper pass.
+   */
   readonly showTranslationReviewNotice?: boolean;
   /**
    * Whether the visitor is signed in — a plain boolean derived from the

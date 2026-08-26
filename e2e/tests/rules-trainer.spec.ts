@@ -452,12 +452,15 @@ test.describe('Rules trainer', () => {
     await expect(page.getByText(`1 / ${ALL_SCENARIOS.length}`)).toBeVisible();
   });
 
-  test('/cs/rules is noindex, shows the Czech review notice, and renders Czech chrome', async ({
+  test('/cs/rules renders Czech chrome and is no longer gated behind a review notice', async ({
     page,
   }) => {
+    // The Czech review gate was lifted by owner sign-off, so this route is now
+    // symmetrical with /en/rules. Asserting the notice is ABSENT (rather than
+    // just dropping the old assertion) is what stops it silently reappearing.
     await page.goto('/cs/rules');
-    await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex');
-    await expect(page.getByText('Český překlad se kontroluje')).toBeVisible();
+    await expect(page.locator('meta[name="robots"]')).toHaveCount(0);
+    await expect(page.getByText('Český překlad se kontroluje')).toHaveCount(0);
     await expect(page.getByRole('button', { name: START_BUTTON.cs })).toBeVisible();
   });
 

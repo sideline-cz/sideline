@@ -1,9 +1,20 @@
-# Czech review checklist — gates the public `/cs/rules` launch
+# Czech review checklist
 
-`docs/plans/rules-trainer.md` makes a proofread of the Czech content the gate on shipping
-`/cs/rules` publicly. This is the deliverable that unblocks it: it splits ~3,800 EN/CS pairs into
-nine independently clearable units, so `/cs/rules` can come out of `noindex` **one package at a
-time** rather than waiting on a single 109-situation review.
+> **Status: the launch gate is lifted.** `/cs/rules` shipped ungated by owner sign-off — no
+> `noindex`, no review notice. This checklist is **no longer blocking anything**, and is kept
+> because the sign-off was a page-level judgement rather than a read of all 1182 options.
+>
+> It remains the tool for the deeper pass, and the risk it describes is unchanged: a dropped or
+> inverted negation in a *wrong* option's `why` reads as fluent Czech and is invisible both to a
+> glance and to `cz-audit.mjs`. Anyone working through a package should still tick its row.
+>
+> If a mistranslated ruling does turn up, re-gating is two lines in
+> `applications/web/src/routes/cs.rules.tsx` — the banner and its i18n keys were kept for exactly
+> that, and an e2e test asserts the notice is currently absent so it cannot creep back unnoticed.
+
+Originally the deliverable that unblocked the gate: it splits ~3,800 EN/CS pairs into nine
+independently clearable units, so the content could be cleared **one package at a time** rather
+than waiting on a single 109-situation review.
 
 ## Why this gate exists
 
