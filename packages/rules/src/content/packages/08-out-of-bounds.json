@@ -345,6 +345,18 @@
       },
       "fx": [
         {
+          "t": 0.6,
+          "type": "mark",
+          "kind": "zone",
+          "x": 9,
+          "y": 18.5,
+          "r": 9,
+          "label": {
+            "en": "your defending end zone",
+            "cs": "tvoje bráněná endzóna"
+          }
+        },
+        {
           "t": 2.9,
           "type": "bubble",
           "dur": 1.2,
@@ -1402,7 +1414,7 @@
           "x": 81,
           "y": -3.2,
           "kind": "zone",
-          "r": 3,
+          "r": 2.8,
           "label": {
             "en": "over the out-of-bounds area — untouched",
             "cs": "nad autem — bez doteku"
@@ -1871,6 +1883,18 @@
       },
       "fx": [
         {
+          "t": 2,
+          "type": "mark",
+          "kind": "zone",
+          "x": 91,
+          "y": 18.5,
+          "r": 8,
+          "label": {
+            "en": "attacking end zone",
+            "cs": "útočná endzóna"
+          }
+        },
+        {
           "t": 4,
           "type": "mark",
           "x": 82,
@@ -2108,6 +2132,18 @@
         "kf": [[0, 60.4, 19.4], [4, 83, 14.6], [4.4, 85, 14.2], [7.2, 85, 14.2]]
       },
       "fx": [
+        {
+          "t": 2,
+          "type": "mark",
+          "kind": "zone",
+          "x": 91,
+          "y": 18.5,
+          "r": 8,
+          "label": {
+            "en": "attacking end zone",
+            "cs": "útočná endzóna"
+          }
+        },
         {
           "t": 4.6,
           "type": "bubble",

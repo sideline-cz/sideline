@@ -1820,6 +1820,18 @@
       },
       "fx": [
         {
+          "t": 0.8,
+          "type": "mark",
+          "kind": "zone",
+          "x": 9,
+          "y": 18.5,
+          "r": 8.6,
+          "label": {
+            "en": "your defending end zone",
+            "cs": "tvoje bráněná endzóna"
+          }
+        },
+        {
           "t": 3.4,
           "type": "bubble",
           "dur": 1.1,
