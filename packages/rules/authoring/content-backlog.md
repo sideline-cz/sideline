@@ -83,25 +83,45 @@ Checked against the citation index and grepped for the lesson, so these should b
   brick marks at `x=36` / `x=64`, `y=18.5`.
 - Czech stays AI-written and unreviewed — a standing caveat the user still needs to proofread.
 
-## Phase 0 → Phase 1 carry-over: the 6 deleted zone fx
+## Zone fx: 5 restored, 1 held back (sp5)
 
-Phase 0 deleted 6 `fx` objects authored with a top-level `"type": "zone"` from `pl7`, `rf3`,
-`sp5`, `ob2`, `gl1`, `gl2`. They rendered nothing in the source `app.js` — `buildFx` only ever
-branched on `bubble | flash | mark | arrow` — so the deletion is zero-visual-change and provably
-so; it was not a content judgement call.
+Phase 0 deleted 6 `fx` objects authored with a top-level `"type": "zone"` — they rendered nothing,
+because `buildFx` only ever branched on `bubble | flash | mark | arrow`. Five have now been
+restored as `{ "type": "mark", "kind": "zone", ... }` with their original `t`, coordinates, radii
+and bilingual labels taken verbatim from the retired `frisbee-rules` repo, and each was rendered
+in a browser and looked at:
 
-**Reauthor them in Phase 1** as `{ "type": "mark", "kind": "zone", ... }` instead, once there is a
-Playwright baseline to review the result against (a dashed zone circle will render for the first
-time). Carry over the original coordinates:
+- `pl7` — `x:9, y:18.5, r:8.6` ("your defending end zone") — good
+- `rf3` — `x:91, y:18.5, r:8` ("your attacking end zone") — good
+- `ob2` — `x:9, y:18.5, r:9` ("your defending end zone") — good; the circle's right edge lands
+  exactly on the goal line at `x=18`, tangent to it, which is clearly what the author intended
+- `gl1` — `x:91, y:18.5, r:8` ("attacking end zone") — good
+- `gl2` — `x:91, y:18.5, r:8` ("attacking end zone") — good
 
-- `pl7` — `x:9, y:18.5, r:8.6` ("your defending end zone")
-- `rf3` — `x:91, y:18.5, r:8` ("your attacking end zone")
-- `sp5` — `x:71.6, y:22.4, r:2.6` ("their lane")
-- `ob2` — `x:9, y:18.5, r:9` ("your defending end zone")
-- `gl1` — `x:91, y:18.5, r:8` ("attacking end zone")
-- `gl2` — `x:91, y:18.5, r:8` ("attacking end zone")
+**`sp5` (`x:71.6, y:22.4, r:2.6`, "their lane") is NOT restored.** Rendered, its `r=2.6` circle is
+almost entirely occluded by the actor markers sitting on top of it — `r=2.6` is about the size of
+an actor circle plus its ring — so only slivers of dashes are visible. The label reads fine, so
+nothing false is taught; the annotation just is not there.
 
-While doing that: `ob6` already has a `mark`/`zone` fx at `x:81, y:-3.2, r:3` inside view
-`[56,-6,48,48]` that pokes ~0.2 units outside its own view. The current G10 view-bounds guard only
-checks the mark's centre point, so it does not catch this. A zone-*extent* guard (centre ± `r`
-inside `view`, not just the centre) belongs together with this reauthoring work.
+That radius was never visually validated, because this fx never rendered in the source app either.
+So the fix is a content judgement, not a restoration, and it is left open deliberately:
+
+- **enlarge `r`** (roughly 4.5–5) so the dashed ring reads around the player cluster rather than
+  under it — but that changes what the circle encircles, and "their lane" may be meant tightly; or
+- **drop the annotation** and let the situation text carry "their lane"; or
+- **move it** off the players, if the lane it means is beside them rather than on them.
+
+Whoever picks needs to look at the play, not just the numbers.
+
+### The extent guard that came with this
+
+`ob6` had a `mark`/`zone` at `x:81, y:-3.2, r:3` in view `[56,-6,48,48]`, overflowing the top edge
+by 0.20 units. **Guard G20** (`findZoneExtentViolations`) now checks centre ± `r` against the view
+rather than only the centre, which is what G10 does — a zone is the only fx with an authored
+extent, so its centre can sit comfortably in view while the circle is clipped.
+
+G20 is strict rather than tolerant on purpose: a tolerance is a number nobody can later justify,
+whereas "the whole annotation is visible" is a rule an author can hold in their head. `ob6` was
+fixed by shrinking `r` 3 → 2.8, not by moving the circle — the centre is what the annotation points
+at, the radius is decoration. It also assumes the renderer's `f.r || 3` default when `r` is absent,
+or it would under-check.

@@ -877,3 +877,50 @@ export function findCheatSheetShapeViolations(sheet: CheatSheet): string[] {
 
   return problems;
 }
+
+/* --------------------------------------------------------------- G20 ---- */
+/**
+ * A `mark`/`zone` fx fits **entirely** inside its scenario's own `view`.
+ *
+ * G10 already checks every fx's centre point, which catches the real
+ * invisibility bug the original guard was written for (an annotation rendered
+ * wholly off-screen). A zone is different: it is the only fx whose *extent* is
+ * authored, via `r`, so its centre can sit comfortably in view while the
+ * circle is clipped by the viewBox edge.
+ *
+ * That is a weaker failure than G10's — a clipped circle is cosmetic, not
+ * invisible — so this guard is strict on purpose rather than carrying a
+ * tolerance: a tolerance is a number nobody can later justify, and "the whole
+ * annotation is visible" is a rule an author can hold in their head.
+ *
+ * It found exactly one violation when introduced: `ob6`'s zone overflowed its
+ * view's top edge by 0.20 units. Fixed by shrinking `r` 3 → 2.8 rather than
+ * moving the circle, because the centre is what the annotation points AT and
+ * the radius is decoration.
+ */
+export function findZoneExtentViolations(packages: readonly RulesPackage[]): string[] {
+  const problems: string[] = [];
+  for (const pkg of packages) {
+    for (const sc of pkg.scenarios) {
+      const [vx, vy, vw, vh] = sc.view;
+      for (const fx of sc.fx) {
+        if (fx.type !== 'mark' || fx.kind !== 'zone') continue;
+        // `r` defaults to 3 in the renderer when absent (`buildFx`'s
+        // `f.r || 3`), so the guard must assume the same default or it would
+        // pass a zone the renderer draws larger than checked.
+        const r = fx.r ?? 3;
+        const over: string[] = [];
+        if (fx.x - r < vx) over.push(`left by ${(vx - (fx.x - r)).toFixed(2)}`);
+        if (fx.x + r > vx + vw) over.push(`right by ${(fx.x + r - (vx + vw)).toFixed(2)}`);
+        if (fx.y - r < vy) over.push(`top by ${(vy - (fx.y - r)).toFixed(2)}`);
+        if (fx.y + r > vy + vh) over.push(`bottom by ${(fx.y + r - (vy + vh)).toFixed(2)}`);
+        if (over.length > 0) {
+          problems.push(
+            `${sc.id}: zone at (${fx.x},${fx.y}) r=${r} overflows view [${sc.view}] — ${over.join(', ')}`,
+          );
+        }
+      }
+    }
+  }
+  return problems;
+}
