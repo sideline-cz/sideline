@@ -2,6 +2,7 @@ import type { Auth, Role } from '@sideline/domain';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 import {
   Activity,
+  BookOpen,
   Calendar,
   CreditCard,
   Dumbbell,
@@ -88,6 +89,15 @@ function getTeamNavGroups(
           title: tr('sidebar_makanicko'),
           icon: Trophy,
           to: '/teams/$teamId/workout',
+          params: { teamId },
+        },
+        {
+          // No `requiredPermission` — every member may open this. The server
+          // (`getRulesLeaderboard`) decides team-vs-self scope; gating the
+          // nav entry here would wrongly hide it from ordinary members.
+          title: tr('rules_navTitle'),
+          icon: BookOpen,
+          to: '/teams/$teamId/rules',
           params: { teamId },
         },
       ],
