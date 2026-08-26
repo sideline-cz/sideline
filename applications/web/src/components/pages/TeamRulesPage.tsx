@@ -1,12 +1,13 @@
 import type { RulesTrainerApi } from '@sideline/domain';
 import { getLocale } from '@sideline/i18n/runtime';
 import { LEVELS } from '@sideline/rules';
-import { BookOpen } from 'lucide-react';
-import { RulesProgressPanel } from '~/components/organisms/RulesProgressPanel.js';
-import { Button } from '~/components/ui/button';
+import { RulesTrainer } from '~/components/organisms/RulesTrainer.js';
+import { Badge } from '~/components/ui/badge';
 import { Card, CardContent } from '~/components/ui/card';
+import { VERDICT } from '~/lib/rules/palette.js';
 import { strengthPercent } from '~/lib/rules/strength.js';
 import { tr } from '~/lib/translations.js';
+import { cn } from '~/lib/utils';
 
 interface TeamRulesPageProps {
   readonly leaderboard: RulesTrainerApi.RulesLeaderboardResponse;
@@ -23,9 +24,27 @@ function formatStrength(strength: number): string {
   return `${pct}%`;
 }
 
+/**
+ * Medal colours for the top three, muted for everyone else — the same
+ * treatment (and the same literal Tailwind classes) as the activity
+ * leaderboard's `RankBadge` in `LeaderboardPage.tsx`, so the two
+ * leaderboards in this app do not rank people in two different visual
+ * languages.
+ */
 function RankBadge({ rank, label }: { readonly rank: number; readonly label: string }) {
+  const medal =
+    rank === 1
+      ? 'bg-yellow-400 text-yellow-900 font-bold dark:bg-yellow-500 dark:text-yellow-950'
+      : rank === 2
+        ? 'bg-slate-300 text-slate-700 font-bold dark:bg-slate-400 dark:text-slate-900'
+        : rank === 3
+          ? 'bg-amber-600 text-amber-50 font-bold dark:bg-amber-700'
+          : 'bg-muted text-muted-foreground font-medium';
+
   return (
-    <div className='flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground font-medium text-sm'>
+    <div
+      className={cn('flex size-8 shrink-0 items-center justify-center rounded-full text-sm', medal)}
+    >
       <span className='sr-only'>{label}</span>
       {rank}
     </div>
@@ -33,37 +52,42 @@ function RankBadge({ rank, label }: { readonly rank: number; readonly label: str
 }
 
 /**
- * Member route surfacing the rules-trainer leaderboard (Phase 3 step 14 of
- * `docs/plans/rules-trainer.md`) — this is `getRulesLeaderboard`'s first
- * caller. No TanStack Router imports on purpose (Atomic Design boundary):
- * the route file supplies `leaderboard` as a prop, already fetched.
+ * The team's Rules Trainer page — the trainer itself, plus this team's
+ * leaderboard (Phase 3 step 14 of `docs/plans/rules-trainer.md`, the first
+ * caller of `getRulesLeaderboard`).
  *
- * The caller is always signed in here (this page lives under
- * `(authenticated)`), so `RulesProgressPanel` is mounted unconditionally
- * with `isSignedIn`.
+ * The trainer is mounted here, not just linked to: this route lives inside
+ * the authenticated app shell (sidebar, team context, no `/en`/`/cs` path
+ * segment), which is where a signed-in member should be practising. The
+ * public `/en/rules` + `/cs/rules` routes still exist and still render the
+ * same organism — they are the free, indexable, signed-out entry point and
+ * the redirect target for `rules.sideline.cz`.
+ *
+ * `locale` comes from `getLocale()` rather than a path segment. That is the
+ * opposite of the public routes, which must thread their locale explicitly
+ * (Paraglide has no `url` strategy, so `getLocale()` would contradict
+ * `/cs/rules`); inside `(authenticated)` there is no path locale to
+ * contradict, so `getLocale()` IS the truth. See `applications/web/AGENTS.md`.
+ *
+ * No `RulesProgressPanel` of its own — `RulesTrainer` already renders one on
+ * its intro screen for a signed-in player, and the caller here is always
+ * signed in. Mounting a second would show the same mastery rows twice.
  *
  * `leaderboard.scope` — not `entries.length` — decides whether the
  * "you only see yourself" note renders: a genuinely one-member team would
  * make an entry-count check ambiguous (see `RulesLeaderboardResponse` in
  * `RulesTrainerApi.ts`).
+ *
+ * No TanStack Router imports on purpose (Atomic Design boundary): the route
+ * file supplies `leaderboard` as a prop, already fetched.
  */
 export function TeamRulesPage({ leaderboard }: TeamRulesPageProps) {
   const locale = getLocale();
   const { entries, scope } = leaderboard;
 
   return (
-    <div className='mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8'>
-      <header className='flex flex-wrap items-center justify-between gap-3'>
-        <h1 className='text-2xl font-bold'>{tr('rules_navTitle')}</h1>
-        <Button asChild variant='outline'>
-          <a href='/rules'>
-            <BookOpen className='size-4' />
-            {tr('rules_openTrainer')}
-          </a>
-        </Button>
-      </header>
-
-      <RulesProgressPanel locale={locale} isSignedIn />
+    <div className='mx-auto flex max-w-4xl flex-col gap-6'>
+      <RulesTrainer locale={locale} isSignedIn />
 
       <Card>
         <CardContent className='flex flex-col gap-3'>
@@ -90,11 +114,20 @@ export function TeamRulesPage({ leaderboard }: TeamRulesPageProps) {
                       {LEVELS.length}
                     </p>
                   </div>
-                  <div className='shrink-0 text-right'>
-                    <p className='text-sm font-medium'>{formatStrength(entry.strength)}</p>
-                    <p className='text-xs text-muted-foreground'>
-                      {tr('rules_leaderboardMastery')}
-                    </p>
+                  <div className='flex shrink-0 items-center gap-2'>
+                    {entry.masteredCount === LEVELS.length && (
+                      <Badge className={VERDICT.correctSolid}>
+                        {entry.masteredCount}/{LEVELS.length}
+                      </Badge>
+                    )}
+                    <div className='text-right'>
+                      <p className='text-sm font-semibold text-blue-600 dark:text-blue-400'>
+                        {formatStrength(entry.strength)}
+                      </p>
+                      <p className='text-xs text-muted-foreground'>
+                        {tr('rules_leaderboardMastery')}
+                      </p>
+                    </div>
                   </div>
                 </div>
               ))}

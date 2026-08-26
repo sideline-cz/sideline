@@ -311,6 +311,46 @@ beforeEach(() => {
   );
 });
 
+describe('RulesTrainer — package picker', () => {
+  /** The picker's cards are the only `aria-pressed` buttons on the intro
+   * screen — see `PackageCard`. */
+  function packageCards(): HTMLElement[] {
+    return screen.getAllByRole('button').filter((b) => b.hasAttribute('aria-pressed'));
+  }
+
+  it('exposes selection as `aria-pressed`, and toggles only the card clicked', async () => {
+    render(<RulesTrainer locale='en' />);
+    const level2 = await screen.findByRole('button', { name: /rules_level_2_name/ });
+    const level1 = await screen.findByRole('button', { name: /rules_level_1_name/ });
+
+    // Every package starts selected (`sel` defaults to `LEVELS`).
+    expect(packageCards().every((c) => c.getAttribute('aria-pressed') === 'true')).toBe(true);
+
+    fireEvent.click(level2);
+    expect(level2.getAttribute('aria-pressed')).toBe('false');
+    expect(level1.getAttribute('aria-pressed')).toBe('true');
+
+    // Toggling back is what makes this a checkbox-like control rather than a
+    // radio: re-clicking must restore it, not clear the rest.
+    fireEvent.click(level2);
+    expect(level2.getAttribute('aria-pressed')).toBe('true');
+    expect(level1.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('clears and restores the whole selection via select-all / clear', async () => {
+    render(<RulesTrainer locale='en' />);
+    fireEvent.click(await screen.findByRole('button', { name: 'rules_pkgNone' }));
+    expect(packageCards().every((c) => c.getAttribute('aria-pressed') === 'false')).toBe(true);
+    // Nothing selected means nothing to practise.
+    expect(
+      (screen.getByRole('button', { name: /^rules_start\b/ }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'rules_pkgAll' }));
+    expect(packageCards().every((c) => c.getAttribute('aria-pressed') === 'true')).toBe(true);
+  });
+});
+
 describe('RulesTrainer', () => {
   it('renders the correct option first, in reversed order, and reports the ORIGINAL index on click', async () => {
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);

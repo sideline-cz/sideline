@@ -141,6 +141,75 @@ The genuinely secure alternative — a server-only exam pool never shipped to th
 content that does not exist and is not costed in any phase here. If the leaderboard ever needs to
 mean something, that is the work, and it is a content project, not an API change.
 
+### Decision: the trainer is mounted in the app layout, and the public routes stay
+
+Owner feedback after Phase 3 shipped: *"place the rules inside the app layout.
+`/teams/{uuid}/rules`. without language and inside the layout. do we need the public one? the rules
+'intro/showing' will be visible on sideline homepage"*.
+
+The first half is unambiguous and done: `RulesTrainer` now mounts on
+`(authenticated)/teams/$teamId/rules`, which already lives inside the sidebar shell and already has
+a nav entry. That route previously rendered only the leaderboard and a link out to `/rules` — a
+standings page for a trainer somewhere else.
+
+The second half was a question, and the answer is **keep the public routes**. Removing
+`/en/rules` + `/cs/rules` would have cost:
+
+- The **e2e suite**, which is the trainer's only real regression guard. `rules-trainer.spec.ts`
+  drives all 109 situations through the spoiler gate on **every PR**, and it is cheap precisely
+  because it is signed-out — the `e2e/` harness has **no authentication at all**, for any test.
+  Repointing the sweep at an authenticated route means building sign-in into Playwright first.
+- The `rules.sideline.cz` **redirect target** (Phase 4 step 16): with no public route, that
+  subdomain can only be retired, breaking every existing link to it.
+- The free public trainer, which was a stated goal of this plan from the start, and the Czech
+  review work that only matters for an indexable public page.
+
+So both entry points render the same organism. They differ in exactly one thing, and it is the
+thing that is easy to get backwards:
+
+- **Public routes thread the locale explicitly** — `tr(key, params, { locale })` — because
+  Paraglide has no `url` strategy, so `getLocale()` would contradict the `/cs` in the path.
+- **Inside `(authenticated)` the page reads `getLocale()`**, because there is no path locale to
+  contradict. `TeamRulesPage` passes that straight into the organism's `locale` prop.
+
+`TeamRulesPage` deliberately does **not** render its own `RulesProgressPanel`: the organism already
+shows one on its intro screen for a signed-in player, and the caller here is always signed in.
+
+### Decision: nine package colours, not nine shades of grey
+
+Same feedback round: *"the selection is not clear. click and hover are same. + everything is really
+graish. use more colors"*.
+
+Both halves had one root cause. The picker was a shadcn `ToggleGroup`, which is a **segmented
+control**: every item carries `data-[spacing=0]:rounded-none` and
+`data-[variant=outline]:border-l-0`, and only the first and last item keep a rounded edge. Laid out
+as the gapped 3-column grid nine packages need, that produced square, border-less cards whose `on`
+state was the same faint `bg-accent` as their hover state. It is now a plain
+`<button aria-pressed>` grid, with selection carried on four axes at once (accent border, accent
+surface, filled number pill, filled check mark) so it survives colour-blindness and touch devices,
+where hover never lifts.
+
+The colours themselves live in `applications/web/src/lib/rules/palette.ts`:
+
+- **`LEVEL_ACCENT`** — one hue per package, ramping emerald → teal → cyan → sky → blue → indigo →
+  violet → fuchsia → rose with the difficulty. The same accent follows a package from the picker to
+  the practice screen's level badge to its progress bar.
+- **`RULES_ACCENT`** — the trainer's own blue, matching the `#2f6df6` the pitch SVG already paints
+  the offence in. `RULES_ACCENT.cta` is the one place the trainer overrides the app's monochrome
+  `primary`, for the two buttons that drive the flow (start a run, replay the demo).
+- **`VERDICT`** — right/wrong. Explicit emerald/red rather than the `--success` / `--destructive`
+  tokens, because in dark mode `--success` is `oklch(0.35 0.1 150)` (a near-black green) and the
+  correct option is a `disabled` button, so the shared `disabled:opacity-50` made the single most
+  important thing in an answered step the least legible one.
+
+Two constraints on anyone editing this:
+
+- **Every class string in `palette.ts` must be a complete literal.** Tailwind scans source text, so
+  an interpolated `bg-${hue}-500` produces no CSS at all.
+- **Do not build package identity on `--chart-1…5`.** Those swap hue between light and dark
+  (`--chart-1` is orange in light, blue in dark), so a package would change colour on a theme
+  toggle.
+
 ### Decision: reuse the Achievement system for milestones
 
 `Achievement` is a code-defined catalogue (`ACHIEVEMENTS`, threshold-based, evaluated from
@@ -348,7 +417,10 @@ real web consumer):
     `LeaderboardApi`'s shape (rank, displayName resolution, `Forbidden` on non-membership) so the
     UI can reuse existing components.
 14. Member route `(authenticated)/teams/$teamId/rules` — the same trainer organism plus a
-    progress panel and the leaderboard.
+    progress panel and the leaderboard. **Landed in two passes:** the leaderboard first (#576),
+    then the trainer organism itself, after owner feedback that the route showed standings for a
+    trainer it did not contain. See "Decision: the trainer is mounted in the app layout, and the
+    public routes stay" below.
 15. Wire the new achievement slugs + optional Discord role. **Bigger than this line suggests** —
     four things surfaced while building Phase 2:
 

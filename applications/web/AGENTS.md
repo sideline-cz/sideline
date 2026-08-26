@@ -926,6 +926,31 @@ Reusable label maps and option builders live in `src/lib/`. Always import from t
 | `src/lib/discord.ts` | `DISCORD_CHANNEL_TYPE_TEXT`, `DISCORD_CHANNEL_TYPE_CATEGORY` | Any page with Discord channel selects |
 | `src/lib/clipboard.ts` | `copyToClipboard(text): Promise<boolean>` | Any "copy to clipboard" button (invite links, minted onboarding URLs, calendar subscription URLs) |
 | `src/lib/finance/` | `formatMoney`, `parseAmount`, `sortAssignments`, `computeKpis`, `pickDominantCurrency` | Finance pages, payment dialogs, "My Payments" page, dashboard banner, balance dashboard |
+| `src/lib/rules/palette.ts` | `LEVEL_ACCENT`, `RULES_ACCENT`, `VERDICT` | Every `Rules*` organism, `TeamRulesPage` — see "Rules Trainer Colours" below |
+
+### Rules Trainer Colours — `palette.ts` Only
+
+The Rules Trainer is the one feature in this app with its own colour system, because it has nine
+sibling packages that must be told apart at a glance and a right/wrong verdict that must survive
+dark mode. All of it lives in `src/lib/rules/palette.ts`; never hand-write a colour class in a
+`Rules*` component.
+
+1. **Every class string in `palette.ts` must be a complete literal.** Tailwind scans source text, so
+   an interpolated `bg-${hue}-500` emits no CSS at all. That is why the file is a written-out
+   record of nine accents rather than a hue name plus template strings. Same convention as
+   `LeaderboardPage.tsx`'s medal badges.
+2. **Do not build per-package identity on the `--chart-1…5` theme tokens.** They swap hue between
+   light and dark (`--chart-1` is orange in light, blue in dark), so a package would change colour
+   on a theme toggle.
+3. **`VERDICT` deliberately does not use `--success` / `--destructive`.** In dark mode `--success`
+   is `oklch(0.35 0.1 150)` — a near-black green — and an answered step's correct option is a
+   `disabled` button, so the shared `disabled:opacity-50` made the most important thing on screen
+   the least legible. `VERDICT.correctOption` / `.wrongOption` therefore carry
+   `disabled:opacity-100`; untouched options stay faded, which is the point. Keep using the theme
+   tokens everywhere else in the app.
+4. **`RULES_ACCENT.cta` is the only sanctioned override of the app's monochrome `primary`,** and
+   only for the two buttons that drive the flow forward (start a run, replay/next). "Select all",
+   "clear", the cheat sheet and the exam entry point stay on the shared variants.
 
 ### Clipboard Copies — `copyToClipboard` Only
 

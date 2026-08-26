@@ -15,8 +15,12 @@ vi.mock('@sideline/i18n/runtime', () => ({
   getLocale: () => 'en',
 }));
 
-vi.mock('~/components/organisms/RulesProgressPanel.js', () => ({
-  RulesProgressPanel: () => <div data-testid='rules-progress-panel' />,
+// The trainer organism is mounted by this page (it is the in-app home of the
+// trainer, not just a link to it) but is not what these tests are about — it
+// loads content packages, reads localStorage and fetches server progress, all
+// of which `RulesTrainer.test.tsx` covers directly.
+vi.mock('~/components/organisms/RulesTrainer.js', () => ({
+  RulesTrainer: () => <div data-testid='rules-trainer' />,
 }));
 
 const { TeamRulesPage } = await import('~/components/pages/TeamRulesPage.js');
@@ -105,15 +109,13 @@ describe('TeamRulesPage', () => {
     expect(screen.getByText('rules_leaderboardEmpty')).not.toBeNull();
   });
 
-  it('links to the public trainer at `/rules`', () => {
+  it('mounts the trainer itself, rather than linking out to the public route', () => {
     render(
       <TeamRulesPage
         leaderboard={new RulesTrainerApi.RulesLeaderboardResponse({ scope: 'team', entries: [] })}
       />,
     );
-    expect(screen.getByRole('link', { name: /rules_openTrainer/ })).toHaveProperty(
-      'href',
-      expect.stringContaining('/rules'),
-    );
+    expect(screen.getByTestId('rules-trainer')).not.toBeNull();
+    expect(screen.queryByRole('link')).toBeNull();
   });
 });

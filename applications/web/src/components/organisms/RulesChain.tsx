@@ -4,7 +4,9 @@ import { SIGNALS } from '@sideline/rules/reference';
 import { Check, Lock, X } from 'lucide-react';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
+import { RULES_ACCENT, VERDICT } from '~/lib/rules/palette.js';
 import { tr } from '~/lib/translations.js';
+import { cn } from '~/lib/utils';
 
 // ---------------------------------------------------------------------------
 // Shared building blocks for RulesTrainer.tsx / RulesExam.tsx — split out so
@@ -53,7 +55,16 @@ export function RuleChip({
   readonly onOpen: (rule: string) => void;
 }) {
   return (
-    <Button variant='outline' size='sm' type='button' onClick={() => onOpen(rule)}>
+    <Button
+      variant='outline'
+      size='sm'
+      type='button'
+      // Rulebook citations get the trainer's accent so they read as
+      // "tappable reference", not as another neutral outline button in a
+      // panel already full of them.
+      className={cn('font-mono', RULES_ACCENT.border, RULES_ACCENT.text)}
+      onClick={() => onOpen(rule)}
+    >
       § {rule}
     </Button>
   );
@@ -128,9 +139,21 @@ export function StepChain({
         const isPendingStep = mode === 'exam' && entry.state === 'current' && pendingPick !== null;
 
         return (
+          // `rounded-md border p-3` are load-bearing beyond styling: the e2e
+          // suite locates a step container by exactly that class triple
+          // (`stepContainer` in `e2e/tests/rules-trainer.spec.ts`). Tint and
+          // recolour freely; do not swap `border` for `border-2`, `p-3` for
+          // `p-4`, or `rounded-md` for another radius.
           <div
             key={entry.index}
-            className={`rounded-md border p-3 ${entry.state === 'answered' ? (rec?.ok ? 'border-success' : 'border-destructive') : ''}`}
+            className={cn(
+              'rounded-md border p-3 transition-colors',
+              entry.state === 'answered'
+                ? rec?.ok
+                  ? VERDICT.correctStep
+                  : VERDICT.wrongStep
+                : 'border-blue-500/50 bg-blue-50/50 dark:border-blue-400/40 dark:bg-blue-500/5',
+            )}
           >
             <div className='mb-2 flex items-center gap-2 text-sm font-medium'>
               <span>
@@ -139,9 +162,9 @@ export function StepChain({
               </span>
               {entry.showVerdict &&
                 (rec?.ok ? (
-                  <Check className='size-4 text-success' aria-hidden='true' />
+                  <Check className={cn('size-4', VERDICT.correctText)} aria-hidden='true' />
                 ) : (
-                  <X className='size-4 text-destructive' aria-hidden='true' />
+                  <X className={cn('size-4', VERDICT.wrongText)} aria-hidden='true' />
                 ))}
             </div>
             <p className='mb-3 text-sm'>{text(step.q, locale)}</p>
@@ -161,16 +184,19 @@ export function StepChain({
                   <div key={originalIndex} className='flex flex-col gap-1'>
                     <Button
                       type='button'
-                      variant={
-                        correct
-                          ? 'default'
-                          : wrong
-                            ? 'destructive'
-                            : pendingSelected
-                              ? 'secondary'
-                              : 'outline'
-                      }
-                      className='h-auto justify-start whitespace-normal text-left'
+                      variant={pendingSelected ? 'secondary' : 'outline'}
+                      className={cn(
+                        'h-auto justify-start whitespace-normal text-left',
+                        // The correct option was `variant='default'` — which
+                        // is near-black in light mode and near-white in dark,
+                        // i.e. it read as "emphasised", not as "right". Green
+                        // is the verdict colour everywhere else in the
+                        // trainer (`FeedbackPanel`, the step border above,
+                        // the practice pips), so use it here too. See
+                        // `VERDICT` for why these are not the theme tokens.
+                        correct && VERDICT.correctOption,
+                        wrong && VERDICT.wrongOption,
+                      )}
                       disabled={answered || entry.state !== 'current' || isPendingStep}
                       onClick={() => onAnswer(originalIndex)}
                     >
@@ -223,7 +249,7 @@ export function FeedbackPanel({
 
   return (
     <div
-      className={`rounded-md border p-4 ${answer.ok ? 'border-success bg-success/10' : 'border-destructive bg-destructive/10'}`}
+      className={cn('rounded-md border p-4', answer.ok ? VERDICT.correctStep : VERDICT.wrongStep)}
     >
       <p className='font-semibold'>{verdict}</p>
       <p className='mt-1 text-sm'>{text(scenario.explain, locale)}</p>

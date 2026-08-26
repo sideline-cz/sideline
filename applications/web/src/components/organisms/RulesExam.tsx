@@ -6,7 +6,9 @@ import { RulesFieldSvg } from '~/components/organisms/RulesFieldSvg.js';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent } from '~/components/ui/card';
+import { RULES_ACCENT, VERDICT } from '~/lib/rules/palette.js';
 import { tr } from '~/lib/translations.js';
+import { cn } from '~/lib/utils';
 
 // ---------------------------------------------------------------------------
 // Exam question — the untimed, single-sitting final test. Renders exactly
@@ -49,11 +51,13 @@ export function RulesExamQuestion({
     <Card>
       <CardContent className='flex flex-col gap-4'>
         <div className='flex flex-wrap items-center gap-2'>
-          <Badge variant='outline'>
+          <Badge className={cn('border-transparent', RULES_ACCENT.soft)}>
             🎓 {tr('rules_examQ', undefined, { locale })} {questionIndex + 1} / {questionCount}
           </Badge>
           <Badge variant='outline'>{text(scenario.topic, locale)}</Badge>
-          <Badge className='ml-auto'>
+          {/* Amber, matching the ring the pitch SVG draws around "you" — same
+              treatment as the practice screen's role badge. */}
+          <Badge className='ml-auto border-transparent bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200'>
             {tr('rules_yourRole', undefined, { locale })}: {text(scenario.role, locale)}
           </Badge>
         </div>
@@ -63,7 +67,7 @@ export function RulesExamQuestion({
         <RulesFieldSvg scenario={scenario} t={animT} locale={locale} />
 
         <div className='flex flex-wrap items-center gap-3'>
-          <Button type='button' onClick={onPlay}>
+          <Button type='button' className={RULES_ACCENT.cta} onClick={onPlay}>
             {animT > 0
               ? tr('rules_replay', undefined, { locale })
               : tr('rules_play', undefined, { locale })}
@@ -102,10 +106,15 @@ export function RulesExamQuestion({
 // review on click.
 // ---------------------------------------------------------------------------
 
-export function examBandKey(
-  score: number,
-  n: number,
-): 'rules_examTop' | 'rules_examMid' | 'rules_examLow' {
+const BAND_TEXT: Readonly<Record<ExamBandKey, string>> = {
+  rules_examTop: VERDICT.correctText,
+  rules_examMid: 'text-amber-600 dark:text-amber-400',
+  rules_examLow: VERDICT.wrongText,
+};
+
+type ExamBandKey = 'rules_examTop' | 'rules_examMid' | 'rules_examLow';
+
+export function examBandKey(score: number, n: number): ExamBandKey {
   if (n === 0) return 'rules_examLow';
   if (score >= Math.round(n * 0.8)) return 'rules_examTop';
   if (score >= Math.ceil(n / 2)) return 'rules_examMid';
@@ -140,10 +149,16 @@ export function RulesExamResults({
         <h2 className='text-xl font-semibold'>
           🎓 {tr('rules_examResTitle', undefined, { locale })}
         </h2>
+        {/* Banded colour, same three bands as the message below it — the
+            number was the only thing on this screen carrying the result, and
+            it carried it in plain black. */}
         <div className='text-3xl font-bold'>
-          {score} / {n}
+          <span className={BAND_TEXT[bandKey]}>{score}</span>
+          <span className='text-muted-foreground'> / {n}</span>
         </div>
-        <p className='text-sm'>{tr(bandKey, undefined, { locale })}</p>
+        <p className={cn('text-sm font-medium', BAND_TEXT[bandKey])}>
+          {tr(bandKey, undefined, { locale })}
+        </p>
         <p className='text-sm text-muted-foreground'>
           {tr('rules_reviewHintExam', undefined, { locale })}
         </p>
@@ -159,12 +174,15 @@ export function RulesExamResults({
                 key={id}
                 type='button'
                 onClick={() => onReview(k)}
-                className='flex items-center gap-2 rounded-md border p-2 text-left text-sm hover:bg-accent'
+                className={cn(
+                  'flex items-center gap-2 rounded-md border p-2 text-left text-sm transition-colors',
+                  a.ok ? VERDICT.correctRow : VERDICT.wrongRow,
+                )}
               >
                 {a.ok ? (
-                  <Check className='size-4 text-success' aria-hidden='true' />
+                  <Check className={cn('size-4', VERDICT.correctText)} aria-hidden='true' />
                 ) : (
-                  <X className='size-4 text-destructive' aria-hidden='true' />
+                  <X className={cn('size-4', VERDICT.wrongText)} aria-hidden='true' />
                 )}
                 <span className='font-medium'>{k + 1}.</span>
                 <span>{text(sc.title, locale)}</span>
@@ -179,7 +197,7 @@ export function RulesExamResults({
           })}
         </div>
         <div className='flex flex-wrap gap-2'>
-          <Button type='button' onClick={onExamAgain}>
+          <Button type='button' className={RULES_ACCENT.cta} onClick={onExamAgain}>
             {tr('rules_examAgain', undefined, { locale })}
           </Button>
           <Button type='button' variant='outline' onClick={onToPractice}>
@@ -237,11 +255,13 @@ export function RulesReview({
       <Card>
         <CardContent className='flex flex-col gap-4'>
           <div className='flex flex-wrap items-center gap-2'>
-            <Badge variant='outline'>
+            <Badge className={cn('border-transparent', RULES_ACCENT.soft)}>
               🎓 {tr('rules_examQ', undefined, { locale })} {questionIndex + 1} / {questionCount}
             </Badge>
             <Badge variant='outline'>{text(scenario.topic, locale)}</Badge>
-            <Badge className='ml-auto'>
+            {/* Amber, matching the ring the pitch SVG draws around "you" — same
+                treatment as the practice screen's role badge. */}
+            <Badge className='ml-auto border-transparent bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200'>
               {tr('rules_yourRole', undefined, { locale })}: {text(scenario.role, locale)}
             </Badge>
           </div>
@@ -251,7 +271,7 @@ export function RulesReview({
           <RulesFieldSvg scenario={scenario} t={animT} locale={locale} />
 
           <div className='flex flex-wrap items-center gap-3'>
-            <Button type='button' onClick={onPlay}>
+            <Button type='button' className={RULES_ACCENT.cta} onClick={onPlay}>
               {animT > 0
                 ? tr('rules_replay', undefined, { locale })
                 : tr('rules_play', undefined, { locale })}

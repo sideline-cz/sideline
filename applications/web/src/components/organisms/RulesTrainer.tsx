@@ -50,13 +50,13 @@ import {
   DialogTitle,
 } from '~/components/ui/dialog';
 import { Skeleton } from '~/components/ui/skeleton';
-import { ToggleGroup, ToggleGroupItem } from '~/components/ui/toggle-group';
 import { useAnimationFrame } from '~/hooks/useAnimationFrame.js';
-import { isLevel } from '~/lib/rules/level.js';
 import { WEB_PACKAGE_LOADERS } from '~/lib/rules/loaders.js';
+import { LEVEL_ACCENT, RULES_ACCENT, VERDICT } from '~/lib/rules/palette.js';
 import { loadProgress, saveProgress } from '~/lib/rules/progress.js';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
+import { cn } from '~/lib/utils';
 
 interface RulesTrainerProps {
   readonly locale: Lang;
@@ -106,6 +106,109 @@ type PermsById = Readonly<Record<ScenarioId, ReadonlyArray<ReadonlyArray<number>
 // Intro screen — package picker
 // ---------------------------------------------------------------------------
 
+/**
+ * One package in the picker.
+ *
+ * Deliberately a plain `<button aria-pressed>` rather than a
+ * `ToggleGroupItem`: the shadcn toggle group is a *segmented control*, so
+ * every item carries `data-[spacing=0]:rounded-none` and
+ * `data-[variant=outline]:border-l-0` and only the first/last item keeps a
+ * rounded edge. Laid out as a gapped grid — which is what nine packages
+ * need — that produced borderless, square-cornered cards whose `on` state
+ * was the same faint `bg-accent` as their hover state. That is the
+ * "click and hover are the same" report.
+ *
+ * The selected state now differs from hover on four axes at once — accent
+ * border, accent surface, filled number pill, and a filled check mark —
+ * so it survives both colour-blindness and a hover that never lifts on
+ * touch devices.
+ */
+function PackageCard({
+  level,
+  locale,
+  selected,
+  onToggle,
+}: {
+  readonly level: Level;
+  readonly locale: Lang;
+  readonly selected: boolean;
+  readonly onToggle: (level: Level) => void;
+}) {
+  const accent = LEVEL_ACCENT[level];
+
+  return (
+    <button
+      type='button'
+      aria-pressed={selected}
+      onClick={() => onToggle(level)}
+      className={cn(
+        'flex flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        selected ? accent.selected : cn('bg-card', accent.idle),
+      )}
+    >
+      <span className='flex w-full items-center gap-2'>
+        <span
+          className={cn(
+            'flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-bold',
+            selected ? accent.solid : accent.soft,
+          )}
+        >
+          {level}
+        </span>
+        <span className='min-w-0 flex-1 font-medium'>
+          {tr(`rules_level_${level}_name`, undefined, { locale })}
+        </span>
+        <span
+          className={cn(
+            'flex size-5 shrink-0 items-center justify-center rounded-full border',
+            selected ? cn('border-transparent', accent.solid) : 'border-muted-foreground/40',
+          )}
+          aria-hidden='true'
+        >
+          {selected && <Check className='size-3.5' strokeWidth={3} />}
+        </span>
+      </span>
+      <span className='text-xs text-muted-foreground'>
+        {tr(`rules_level_${level}_desc`, undefined, { locale })}
+      </span>
+      {/* `mt-auto` bottom-aligns the count across a row: grid items stretch to
+          the tallest card, and package descriptions run one to three lines. */}
+      <span className={cn('mt-auto text-xs font-semibold', accent.text)}>
+        {LEVEL_META[level].scenarioCount} {tr('rules_statSituations', undefined, { locale })}
+      </span>
+    </button>
+  );
+}
+
+/** One of the three "how it works" steps, with an accent-numbered marker. */
+function HowStep({
+  index,
+  title,
+  body,
+}: {
+  readonly index: number;
+  readonly title: string;
+  readonly body: string;
+}) {
+  return (
+    <div className='flex gap-3'>
+      <span
+        className={cn(
+          'flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-bold',
+          RULES_ACCENT.soft,
+        )}
+      >
+        {index}
+      </span>
+      <span className='flex flex-col gap-1'>
+        <span className='font-medium'>{title}</span>
+        <span className='text-sm text-muted-foreground'>{body}</span>
+      </span>
+    </div>
+  );
+}
+
 function IntroScreen({
   locale,
   sel,
@@ -118,7 +221,7 @@ function IntroScreen({
 }: {
   readonly locale: Lang;
   readonly sel: readonly Level[];
-  readonly onToggleLevel: (levels: readonly Level[]) => void;
+  readonly onToggleLevel: (level: Level) => void;
   readonly onSelectAll: () => void;
   readonly onSelectNone: () => void;
   readonly onStart: () => void;
@@ -132,20 +235,22 @@ function IntroScreen({
 
   return (
     <div className='flex flex-col gap-4'>
-      <Card>
-        <CardContent className='flex flex-col gap-4'>
+      <Card className={cn('overflow-hidden', RULES_ACCENT.border)}>
+        <CardContent className={cn('flex flex-col gap-4', RULES_ACCENT.surface)}>
           <h1 className='text-2xl font-semibold'>
             {tr('rules_introTitle', undefined, { locale })}
           </h1>
           <p className='text-muted-foreground'>{tr('rules_introLead', undefined, { locale })}</p>
-          <div className='flex flex-wrap gap-4 text-sm'>
-            <span>
+          <div className='flex flex-wrap gap-2 text-sm'>
+            <span className={cn('rounded-full px-3 py-1 font-medium', RULES_ACCENT.soft)}>
               <b>{totalSituations}</b> {tr('rules_statSituations', undefined, { locale })}
             </span>
-            <span>
+            <span className='rounded-full bg-violet-100 px-3 py-1 font-medium text-violet-700 dark:bg-violet-500/20 dark:text-violet-300'>
               <b>{LEVELS.length}</b> {tr('rules_statPackages', undefined, { locale })}
             </span>
-            <span>{tr('rules_statLangs', undefined, { locale })}</span>
+            <span className='rounded-full bg-emerald-100 px-3 py-1 font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300'>
+              {tr('rules_statLangs', undefined, { locale })}
+            </span>
           </div>
         </CardContent>
       </Card>
@@ -154,24 +259,21 @@ function IntroScreen({
         <CardContent className='flex flex-col gap-3'>
           <h2 className='text-lg font-semibold'>{tr('rules_howTitle', undefined, { locale })}</h2>
           <div className='grid gap-3 sm:grid-cols-3'>
-            <div className='flex flex-col gap-1'>
-              <span className='font-medium'>{tr('rules_introHow1', undefined, { locale })}</span>
-              <span className='text-sm text-muted-foreground'>
-                {tr('rules_introHow1t', undefined, { locale })}
-              </span>
-            </div>
-            <div className='flex flex-col gap-1'>
-              <span className='font-medium'>{tr('rules_introHow2', undefined, { locale })}</span>
-              <span className='text-sm text-muted-foreground'>
-                {tr('rules_introHow2t', undefined, { locale })}
-              </span>
-            </div>
-            <div className='flex flex-col gap-1'>
-              <span className='font-medium'>{tr('rules_introHow3', undefined, { locale })}</span>
-              <span className='text-sm text-muted-foreground'>
-                {tr('rules_introHow3t', undefined, { locale })}
-              </span>
-            </div>
+            <HowStep
+              index={1}
+              title={tr('rules_introHow1', undefined, { locale })}
+              body={tr('rules_introHow1t', undefined, { locale })}
+            />
+            <HowStep
+              index={2}
+              title={tr('rules_introHow2', undefined, { locale })}
+              body={tr('rules_introHow2t', undefined, { locale })}
+            />
+            <HowStep
+              index={3}
+              title={tr('rules_introHow3', undefined, { locale })}
+              body={tr('rules_introHow3t', undefined, { locale })}
+            />
           </div>
           <p className='text-sm text-muted-foreground'>
             {tr('rules_introPersp', undefined, { locale })}
@@ -199,37 +301,26 @@ function IntroScreen({
             </div>
           </div>
 
-          <ToggleGroup
-            type='multiple'
-            variant='outline'
-            className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3'
-            value={sel.map((l) => String(l))}
-            onValueChange={(values: string[]) => {
-              const levels = values.map((v) => Number(v)).filter(isLevel);
-              onToggleLevel(levels);
-            }}
-          >
+          <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3'>
             {LEVELS.map((level) => (
-              <ToggleGroupItem
+              <PackageCard
                 key={level}
-                value={String(level)}
-                className='h-auto flex-col items-start gap-1 whitespace-normal p-3 text-left'
-              >
-                <span className='text-xs font-semibold text-muted-foreground'>
-                  {LEVEL_META[level].scenarioCount}
-                </span>
-                <span className='font-medium'>
-                  {tr(`rules_level_${level}_name`, undefined, { locale })}
-                </span>
-                <span className='text-xs text-muted-foreground'>
-                  {tr(`rules_level_${level}_desc`, undefined, { locale })}
-                </span>
-              </ToggleGroupItem>
+                level={level}
+                locale={locale}
+                selected={sel.includes(level)}
+                onToggle={onToggleLevel}
+              />
             ))}
-          </ToggleGroup>
+          </div>
 
           <div className='flex flex-wrap items-center gap-3'>
-            <Button type='button' size='lg' disabled={!canStart} onClick={onStart}>
+            <Button
+              type='button'
+              size='lg'
+              className={RULES_ACCENT.cta}
+              disabled={!canStart}
+              onClick={onStart}
+            >
               {tr('rules_start', undefined, { locale })} ({pickedSituations})
             </Button>
             <Button
@@ -471,8 +562,15 @@ export function RulesTrainer({ locale, isSignedIn = false }: RulesTrainerProps) 
     if (animPlaying && animT >= limit) setAnimPlaying(false);
   }, [animPlaying, animT, limit]);
 
-  const handleToggleLevels = (levels: readonly Level[]) => {
-    setSel([...levels].sort((a, b) => a - b));
+  // Kept sorted ascending: `sel` is both the practice pool's order (see
+  // `pool`) and the `packages` array POSTed with an attempt, so a click order
+  // of 3-then-1 must not produce a different run from 1-then-3.
+  const handleToggleLevel = (level: Level) => {
+    setSel((prev) =>
+      prev.includes(level)
+        ? prev.filter((l) => l !== level)
+        : [...prev, level].sort((a, b) => a - b),
+    );
   };
 
   const handleAnswer = (scenario: Scenario, pick: number) => {
@@ -759,7 +857,7 @@ export function RulesTrainer({ locale, isSignedIn = false }: RulesTrainerProps) 
           <IntroScreen
             locale={locale}
             sel={sel}
-            onToggleLevel={handleToggleLevels}
+            onToggleLevel={handleToggleLevel}
             onSelectAll={() => setSel(LEVELS)}
             onSelectNone={() => setSel([])}
             onStart={handleStartPractice}
@@ -804,21 +902,29 @@ export function RulesTrainer({ locale, isSignedIn = false }: RulesTrainerProps) 
                   key={id}
                   type='button'
                   onClick={() => handleGoto(id)}
-                  className={`flex size-7 items-center justify-center rounded-full border text-xs ${
+                  className={cn(
+                    'flex size-7 items-center justify-center rounded-full border text-xs font-medium transition-colors',
                     isCurrent
-                      ? 'border-primary bg-primary text-primary-foreground'
+                      ? cn('border-transparent ring-2 ring-blue-500/40', RULES_ACCENT.solid)
                       : a?.done
                         ? a.ok
-                          ? 'border-success bg-success/20'
-                          : 'border-destructive bg-destructive/20'
-                        : 'border-muted-foreground/30'
-                  }`}
+                          ? 'border-emerald-500 bg-emerald-100 text-emerald-800 dark:border-emerald-400 dark:bg-emerald-400/25 dark:text-emerald-100'
+                          : 'border-red-500 bg-red-100 text-red-800 dark:border-red-400 dark:bg-red-400/25 dark:text-red-100'
+                        : 'border-border bg-muted/50 text-muted-foreground hover:bg-muted',
+                  )}
                 >
                   {pos + 1}
                 </button>
               );
             })}
-            <Badge variant='secondary' className='ml-auto'>
+            <Badge
+              className={cn(
+                'ml-auto border-transparent',
+                currentScore === poolIds.length && poolIds.length > 0
+                  ? VERDICT.correctSolid
+                  : RULES_ACCENT.soft,
+              )}
+            >
               {currentScore} / {poolIds.length}
             </Badge>
           </div>
@@ -826,9 +932,17 @@ export function RulesTrainer({ locale, isSignedIn = false }: RulesTrainerProps) 
           <Card>
             <CardContent className='flex flex-col gap-4'>
               <div className='flex flex-wrap items-center gap-2'>
-                <Badge variant='outline'>Level {currentScenario.level}</Badge>
+                {/* The package's own accent (see `~/lib/rules/palette.ts`) —
+                    the same colour this scenario's package carries on the
+                    picker and in the progress panel. */}
+                <Badge
+                  className={cn('border-transparent', LEVEL_ACCENT[currentScenario.level].soft)}
+                >
+                  Level {currentScenario.level}
+                </Badge>
                 <Badge variant='outline'>{text(currentScenario.topic, locale)}</Badge>
-                <Badge className='ml-auto'>
+                {/* Amber, matching the ring the pitch SVG draws around "you". */}
+                <Badge className='ml-auto border-transparent bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200'>
                   {tr('rules_yourRole', undefined, { locale })}:{' '}
                   {text(currentScenario.role, locale)}
                 </Badge>
@@ -843,6 +957,7 @@ export function RulesTrainer({ locale, isSignedIn = false }: RulesTrainerProps) 
               <div className='flex flex-wrap items-center gap-3'>
                 <Button
                   type='button'
+                  className={RULES_ACCENT.cta}
                   onClick={() => {
                     setAnimT(0);
                     setAnimPlaying(true);
@@ -900,7 +1015,7 @@ export function RulesTrainer({ locale, isSignedIn = false }: RulesTrainerProps) 
 
               {currentAnswer.done && (
                 <div>
-                  <Button type='button' onClick={handleNext}>
+                  <Button type='button' className={RULES_ACCENT.cta} onClick={handleNext}>
                     {currentIndex === poolIds.length - 1
                       ? tr('rules_finish', undefined, { locale })
                       : tr('rules_next', undefined, { locale })}
@@ -917,7 +1032,16 @@ export function RulesTrainer({ locale, isSignedIn = false }: RulesTrainerProps) 
           <CardContent className='flex flex-col gap-4'>
             <h2 className='text-xl font-semibold'>{tr('rules_sumTitle', undefined, { locale })}</h2>
             <div className='text-3xl font-bold'>
-              {currentScore} / {poolIds.length}
+              <span
+                className={
+                  currentScore === poolIds.length && poolIds.length > 0
+                    ? VERDICT.correctText
+                    : RULES_ACCENT.text
+                }
+              >
+                {currentScore}
+              </span>
+              <span className='text-muted-foreground'> / {poolIds.length}</span>
             </div>
             {isSignedIn && saveStatus !== 'idle' && (
               <p
@@ -945,12 +1069,15 @@ export function RulesTrainer({ locale, isSignedIn = false }: RulesTrainerProps) 
                     key={id}
                     type='button'
                     onClick={() => handleGoto(id)}
-                    className='flex items-center gap-2 rounded-md border p-2 text-left text-sm hover:bg-accent'
+                    className={cn(
+                      'flex items-center gap-2 rounded-md border p-2 text-left text-sm transition-colors',
+                      a?.ok ? VERDICT.correctRow : VERDICT.wrongRow,
+                    )}
                   >
                     {a?.ok ? (
-                      <Check className='size-4 text-success' aria-hidden='true' />
+                      <Check className={cn('size-4', VERDICT.correctText)} aria-hidden='true' />
                     ) : (
-                      <X className='size-4 text-destructive' aria-hidden='true' />
+                      <X className={cn('size-4', VERDICT.wrongText)} aria-hidden='true' />
                     )}
                     <span className='font-medium'>{pos + 1}.</span>
                     <span>{text(sc.title, locale)}</span>
