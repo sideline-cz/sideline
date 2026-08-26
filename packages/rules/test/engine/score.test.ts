@@ -92,17 +92,15 @@ describe('scoreAttempt', () => {
     );
   });
 
-  it.each([
-    -1,
-    99,
-    1.5,
-    Number.NaN,
-  ])('rejects an invalid pick (%p) rather than indexing blindly', (badPick) => {
-    const result = scoreAttempt(chain, [badPick, 1, 0]);
-    expect(result.steps[0]?.ok).toBe(false);
-    expect(result.ok).toBe(false);
-    expect(() => scoreAttempt(chain, [badPick, 1, 0])).not.toThrow();
-  });
+  it.each([-1, 99, 1.5, Number.NaN])(
+    'rejects an invalid pick (%p) rather than indexing blindly',
+    (badPick) => {
+      const result = scoreAttempt(chain, [badPick, 1, 0]);
+      expect(result.steps[0]?.ok).toBe(false);
+      expect(result.ok).toBe(false);
+      expect(() => scoreAttempt(chain, [badPick, 1, 0])).not.toThrow();
+    },
+  );
 
   it('a non-integer pick never gets treated as correct even if it rounds to the right index', () => {
     const result = scoreAttempt(chain, [0.0001, 1, 0]);
