@@ -3552,7 +3552,7 @@ Manages achievement settings for a team — lists built-in and custom achievemen
 
 #### `GET /teams/:teamId/achievements`
 
-Returns all achievements for the team: the 11 built-in achievements (with any per-team threshold overrides and Discord role mappings applied) followed by any custom achievements defined by the team.
+Returns all achievements for the team: the 15 built-in achievements (with any per-team threshold overrides and Discord role mappings applied) followed by any custom achievements defined by the team. Four of the 15 are rules-trainer milestones (`rules_first_exam`, `rules_perfect_exam`, `rules_package_mastered`, `rules_all_packages`); of the whole set, 6 carry `grantsDiscordRole`, `rules_all_packages` being the rules one.
 
 **Auth:** Bearer token (AuthMiddleware), `team:manage` required
 
@@ -3566,7 +3566,7 @@ Returns all achievements for the team: the 11 built-in achievements (with any pe
 | `titleKey` | `string \| null` | i18n key for the title (built-in only; `null` for custom). |
 | `descriptionKey` | `string \| null` | i18n key for the description (built-in only; `null` for custom). |
 | `kind` | `"built_in" \| "custom"` | Whether this is a system achievement or a team-defined custom one. |
-| `ruleKind` | `"total_activities" \| "longest_streak" \| "total_duration" \| "activity_type_count"` | The metric the achievement is based on. |
+| `ruleKind` | `"total_activities" \| "longest_streak" \| "total_duration" \| "activity_type_count" \| "rules_packages_mastered" \| "rules_exams_completed" \| "rules_perfect_exams"` | The metric the achievement is based on. The three `rules_*` kinds are selectable by captains for custom achievements too, not only by the built-ins. `rules_packages_mastered` counts packages whose *decaying* mastery is currently at or above threshold, so it can go down over time — see `packages/rules/src/engine/mastery.ts`. |
 | `effectiveThreshold` | `number` | The threshold in effect (override for built-in, stored threshold for custom). |
 | `defaultThreshold` | `number \| null` | The built-in default threshold (`null` for custom achievements). |
 | `discordRoleId` | `string \| null` | Discord role ID that is granted when the achievement is earned, or `null` if no role mapping is configured. |
@@ -6628,9 +6628,14 @@ Posts a set of generated teams to the event's configured Discord channel. The se
 
 **Source:** `packages/domain/src/api/RulesTrainerApi.ts`
 
-Per-user progress for the Ultimate Rules Trainer (see `docs/plans/rules-trainer.md` Phase 2). Both endpoints are caller-scoped — there is no team parameter and no cross-user lookup — so neither declares a custom error beyond the standard 401 from `AuthMiddleware`. `score`/`total` on a submitted attempt are always computed server-side; the client never supplies them. Mastery is computed on read from stored per-scenario results — there is no cached/materialised mastery value.
+Per-user progress and the team leaderboard for the Ultimate Rules Trainer (see `docs/plans/rules-trainer.md` Phases 2–3).
 
-**Note:** This PR ships the schema and domain contracts only. The server handler, repository, and route registration land in a follow-up PR — until then these endpoints are not yet live.
+The two `/rules/*` endpoints are **caller-scoped** — no team parameter, no cross-user lookup — so neither declares a custom error beyond the standard 401 from `AuthMiddleware`. `getRulesLeaderboard` is team-scoped and therefore does declare a 403.
+
+Two properties hold across all three:
+
+- **`score`/`total` are always computed server-side** with `scoreAttempt` from `@sideline/rules`; the client never supplies them. Note this is *shared scoring logic, not a trust boundary* — the answer key ships to the client so the trainer works offline, so a client can trivially submit a perfect attempt. The leaderboard is an accepted honour system; see the plan's honour-system decision.
+- **Mastery is computed on read**, derived from one `lastCorrectAt` per scenario. There is no cached or materialised mastery value, and none should be added — a stored copy is how a leaderboard and a progress panel start disagreeing. Mastery also **decays** (45-day half-life), so the same stored results yield a lower number over time.
 
 ---
 
@@ -6702,6 +6707,44 @@ Returns the authenticated user's current mastery summary, computed on read from 
 | `strength` | `number` | Mean strength across every scenario, weighted by package size |
 | `masteredCount` | `integer` | Number of packages with `mastered: true` |
 | `totalScenarios` | `integer` | Total scenario count across all packages |
+
+---
+
+#### `GET /teams/:teamId/rules-leaderboard`
+
+The team's rules leaderboard, ranked on decaying mastery.
+
+**Auth:** Bearer token (AuthMiddleware). Gated on team membership only — every active member may call it. There is deliberately **no permission requirement**, because what a caller sees is decided by the response, not by access.
+
+**Visibility — "self and captains only".** This differs from `GET /teams/:teamId/leaderboard` (the activity leaderboard), which shows every member the whole board:
+
+| Caller | Sees | `scope` |
+|---|---|---|
+| Has `member:edit`, or is a global admin | every entry | `"team"` |
+| Any other active member | only their own entry | `"self"` |
+
+**Ranks are computed over the whole team BEFORE the visibility filter**, so a member who sees a single row still gets their true team rank — not `1`. Consumers must branch on `scope` rather than inferring from `entries.length`, which is ambiguous for a one-member team.
+
+Members with no attempts are **included** at mastery `0`, unlike the activity leaderboard which excludes zero-activity members with a `HAVING` clause. With decaying mastery, "at zero" is meaningful — the member has not practised, or has lapsed — and that is what a captain opens this to see.
+
+**Params:** `teamId` — `TeamId`
+
+**Response:** `200 OK` — `RulesLeaderboardResponse`
+
+| Field | Type | Description |
+|---|---|---|
+| `entries` | `RulesLeaderboardEntry[]` | Ranked entries, filtered per the table above |
+| `scope` | `"team" \| "self"` | Which view this response represents |
+
+`RulesLeaderboardEntry` mirrors `LeaderboardEntry`'s identity fields so UI components can be reused — `rank`, `teamMemberId`, `userId`, `username`, `name`, `avatar`, `displayName` — plus `strength` (mean mastery, `0..1`), `masteredCount` and `totalScenarios`. `displayName` is resolved server-side via `DisplayName.pickDisplayName` with `username` as the fallback.
+
+Ties are broken by `masteredCount`, then `teamMemberId`, giving a deterministic total order. Ranks are distinct sequential integers; tied entries do **not** share a rank, matching the activity leaderboard.
+
+**Errors:**
+
+| Error | Status | When |
+|---|---|---|
+| `RulesLeaderboardForbidden` | 403 | The caller is not an active member of the team |
 
 ---
 
