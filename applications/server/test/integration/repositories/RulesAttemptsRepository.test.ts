@@ -393,6 +393,104 @@ describe('RulesAttemptsRepository — lastCorrectByScenario', () => {
 });
 
 // ---------------------------------------------------------------------------
+// getExamStats (Phase 3b of docs/plans/rules-trainer.md's step 15)
+// ---------------------------------------------------------------------------
+
+describe('RulesAttemptsRepository — getExamStats', () => {
+  it.effect(
+    'counts finished exam attempts, only perfect (score=total, total>0) exams as perfect, excludes practice mode, unfinished attempts, and other users',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userId', () => createUser('900000000000000020', 'exam-stats-user')),
+        Effect.bind('otherUserId', () => createUser('900000000000000021', 'exam-stats-other')),
+
+        // Finished exam, perfect score (3/3) — counts as both a completed AND a perfect exam.
+        Effect.bind('perfectExam', ({ userId }) =>
+          RulesAttemptsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.insertAttempt(userId, 'exam', [1], 3, 3)),
+          ),
+        ),
+
+        // Finished exam, imperfect score (2/3) — completed, but not perfect.
+        Effect.bind('imperfectExam', ({ userId }) =>
+          RulesAttemptsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.insertAttempt(userId, 'exam', [1], 2, 3)),
+          ),
+        ),
+
+        // Finished exam with total=0, score=0 — `score = total` is trivially
+        // true here, so the `total > 0` guard must exclude it from
+        // `perfect_exams` (a zero-question attempt is not a perfect exam).
+        Effect.bind('zeroQuestionExam', ({ userId }) =>
+          RulesAttemptsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.insertAttempt(userId, 'exam', [1], 0, 0)),
+          ),
+        ),
+
+        // Finished PRACTICE attempt, perfect score — must never count towards
+        // either exam stat (mode != 'exam').
+        Effect.tap(({ userId }) =>
+          RulesAttemptsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.insertAttempt(userId, 'practice', [1], 5, 5)),
+          ),
+        ),
+
+        // Unfinished exam attempt (finished_at cleared) — must be excluded
+        // from `exams_completed`, mirroring the `finished_at IS NOT NULL`
+        // guard on `lastCorrectByScenario` above.
+        Effect.bind('unfinishedExam', ({ userId }) =>
+          RulesAttemptsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.insertAttempt(userId, 'exam', [1], 4, 4)),
+          ),
+        ),
+        Effect.tap(({ unfinishedExam }) => clearFinishedAt(unfinishedExam.id)),
+
+        // Another user's perfect finished exam must never leak into this user's stats.
+        Effect.tap(({ otherUserId }) =>
+          RulesAttemptsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.insertAttempt(otherUserId, 'exam', [1], 1, 1)),
+          ),
+        ),
+
+        Effect.bind('stats', ({ userId }) =>
+          RulesAttemptsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.getExamStats(userId)),
+          ),
+        ),
+        Effect.tap(({ stats }) =>
+          Effect.sync(() => {
+            // 3 finished exams count: perfectExam, imperfectExam, zeroQuestionExam.
+            // practice and the unfinished exam are excluded.
+            expect(stats.exams_completed).toBe(3);
+            // Only perfectExam counts — zeroQuestionExam is excluded by the
+            // `total > 0` guard despite satisfying `score = total`.
+            expect(stats.perfect_exams).toBe(1);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect('returns zero counts for a user with no rules attempts at all', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('900000000000000022', 'exam-stats-none')),
+      Effect.bind('stats', ({ userId }) =>
+        RulesAttemptsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.getExamStats(userId)),
+        ),
+      ),
+      Effect.tap(({ stats }) =>
+        Effect.sync(() => {
+          expect(stats.exams_completed).toBe(0);
+          expect(stats.perfect_exams).toBe(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
 // lastCorrectByScenarioForTeam (Phase 3a of docs/plans/rules-trainer.md)
 // ---------------------------------------------------------------------------
 

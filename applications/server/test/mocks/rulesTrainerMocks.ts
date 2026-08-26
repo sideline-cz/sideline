@@ -12,4 +12,5 @@ export const MockRulesAttemptsRepositoryLayer = Layer.succeed(RulesAttemptsRepos
   insertResults: () => Effect.void,
   lastCorrectByScenario: () => Effect.succeed([]),
   lastCorrectByScenarioForTeam: () => Effect.succeed([]),
+  getExamStats: () => Effect.succeed({ exams_completed: 0, perfect_exams: 0 }),
 } as never);

@@ -60,6 +60,12 @@ function formatRule(ruleKind: string, threshold: number): string {
       return `≥ ${String(threshold)} ${tr('achievement_admin_rule_total_duration')}`;
     case 'activity_type_count':
       return `≥ ${String(threshold)} ${tr('achievement_admin_rule_activity_type_count')}`;
+    case 'rules_packages_mastered':
+      return `≥ ${String(threshold)} ${tr('achievement_rule_rules_packages_mastered')}`;
+    case 'rules_exams_completed':
+      return `≥ ${String(threshold)} ${tr('achievement_rule_rules_exams_completed')}`;
+    case 'rules_perfect_exams':
+      return `≥ ${String(threshold)} ${tr('achievement_rule_rules_perfect_exams')}`;
     default:
       return `≥ ${String(threshold)}`;
   }
@@ -728,6 +734,15 @@ export function CustomAchievementDialog({
                         </SelectItem>
                         <SelectItem value='activity_type_count'>
                           {tr('achievement_admin_rule_activity_type_count')}
+                        </SelectItem>
+                        <SelectItem value='rules_packages_mastered'>
+                          {tr('achievement_rule_rules_packages_mastered')}
+                        </SelectItem>
+                        <SelectItem value='rules_exams_completed'>
+                          {tr('achievement_rule_rules_exams_completed')}
+                        </SelectItem>
+                        <SelectItem value='rules_perfect_exams'>
+                          {tr('achievement_rule_rules_perfect_exams')}
                         </SelectItem>
                       </SelectContent>
                     </Select>

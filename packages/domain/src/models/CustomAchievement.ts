@@ -9,6 +9,9 @@ export const CustomRuleKind = Schema.Literals([
   'longest_streak',
   'total_duration',
   'activity_type_count',
+  'rules_packages_mastered',
+  'rules_exams_completed',
+  'rules_perfect_exams',
 ]);
 export type CustomRuleKind = typeof CustomRuleKind.Type;
 

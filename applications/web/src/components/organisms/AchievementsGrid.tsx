@@ -15,6 +15,10 @@ const SLUG_EMOJI: Record<Achievement.AchievementSlug, string> = {
   duration_3000: '⏰',
   gym_25: '🏋️',
   running_25: '🏃',
+  rules_first_exam: '📜',
+  rules_perfect_exam: '✅',
+  rules_package_mastered: '📘',
+  rules_all_packages: '🧑‍⚖️',
 };
 
 function getTitle(slug: Achievement.AchievementSlug): string {

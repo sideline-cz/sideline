@@ -1,3 +1,10 @@
+/**
+ * The code-defined achievement catalogue: `AchievementSlug`, `ACHIEVEMENTS`
+ * (threshold-based, evaluated from `AchievementEvaluationInput`), and the
+ * exhaustive `BUILT_IN_ENGLISH_NAMES`/`BUILT_IN_RULE_KINDS` records every
+ * slug must appear in — omitting an entry is a compile error, which is the
+ * point (see `docs/plans/rules-trainer.md`'s Phase 3 step 15).
+ */
 import { Schema } from 'effect';
 import type * as ActivityStats from './ActivityStats.js';
 import type { CustomRuleKind } from './CustomAchievement.js';
@@ -14,12 +21,28 @@ export const AchievementSlug = Schema.Literals([
   'duration_3000',
   'gym_25',
   'running_25',
+  'rules_first_exam',
+  'rules_perfect_exam',
+  'rules_package_mastered',
+  'rules_all_packages',
 ]);
 export type AchievementSlug = typeof AchievementSlug.Type;
 
 export interface AchievementEvaluationInput {
   readonly stats: ActivityStats.StatsResult;
   readonly countsBySlug: ReadonlyMap<string, number>;
+  // Rules-trainer milestone stats (Phase 3b of `docs/plans/rules-trainer.md`).
+  // A required field, not `Option`/a decoding default: every caller must
+  // positively decide what these numbers are. There are exactly three
+  // construction sites — `AchievementEvaluator.ts` and `AchievementPreview.ts`
+  // (twice) — and making the field required is what turns a missed one into
+  // a compile error instead of a silently-wrong "never earns a rules
+  // achievement" bug.
+  readonly rules: {
+    readonly examsCompleted: number;
+    readonly perfectExams: number;
+    readonly packagesMastered: number;
+  };
 }
 
 export interface AchievementCatalogEntry {
@@ -96,6 +119,33 @@ export const ACHIEVEMENTS: ReadonlyArray<AchievementCatalogEntry> = [
     defaultThreshold: 25,
     isEarned: ({ countsBySlug }, threshold) => (countsBySlug.get('running') ?? 0) >= threshold,
   },
+  {
+    slug: 'rules_first_exam',
+    grantsDiscordRole: false,
+    defaultThreshold: 1,
+    isEarned: ({ rules }, threshold) => rules.examsCompleted >= threshold,
+  },
+  {
+    slug: 'rules_perfect_exam',
+    grantsDiscordRole: false,
+    defaultThreshold: 1,
+    isEarned: ({ rules }, threshold) => rules.perfectExams >= threshold,
+  },
+  {
+    slug: 'rules_package_mastered',
+    grantsDiscordRole: false,
+    defaultThreshold: 1,
+    isEarned: ({ rules }, threshold) => rules.packagesMastered >= threshold,
+  },
+  // The only rules-trainer slug that grants a Discord role — the plan's
+  // "knows the rules" role, earned only once ALL nine packages are
+  // mastered at once (see docs/plans/rules-trainer.md's Phase 3 step 15).
+  {
+    slug: 'rules_all_packages',
+    grantsDiscordRole: true,
+    defaultThreshold: 9,
+    isEarned: ({ rules }, threshold) => rules.packagesMastered >= threshold,
+  },
 ];
 
 export const ACHIEVEMENTS_BY_SLUG: ReadonlyMap<AchievementSlug, AchievementCatalogEntry> = new Map(
@@ -129,6 +179,10 @@ export const BUILT_IN_ENGLISH_NAMES: Readonly<Record<AchievementSlug, string>> =
   duration_3000: '50-Hour Club',
   gym_25: 'Gym Rat',
   running_25: 'Road Runner',
+  rules_first_exam: 'Rules Rookie',
+  rules_perfect_exam: 'Flawless Call',
+  rules_package_mastered: 'Chapter Learned',
+  rules_all_packages: 'Rulebook Rat',
 };
 
 const BUILT_IN_RULE_KINDS: Readonly<Record<AchievementSlug, CustomRuleKind>> = {
@@ -143,6 +197,10 @@ const BUILT_IN_RULE_KINDS: Readonly<Record<AchievementSlug, CustomRuleKind>> = {
   duration_3000: 'total_duration',
   gym_25: 'activity_type_count',
   running_25: 'activity_type_count',
+  rules_first_exam: 'rules_exams_completed',
+  rules_perfect_exam: 'rules_perfect_exams',
+  rules_package_mastered: 'rules_packages_mastered',
+  rules_all_packages: 'rules_packages_mastered',
 };
 
 export const builtInRuleKind = (slug: AchievementSlug): CustomRuleKind => BUILT_IN_RULE_KINDS[slug];

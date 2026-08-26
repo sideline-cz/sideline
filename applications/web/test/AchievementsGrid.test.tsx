@@ -30,6 +30,14 @@ vi.mock('~/lib/translations.js', () => ({
       achievement_duration_3000_description: '3000 total minutes',
       achievement_gym_25_description: '25 gym sessions',
       achievement_running_25_description: '25 running sessions',
+      achievement_rules_first_exam_title: 'Rules Rookie',
+      achievement_rules_perfect_exam_title: 'Flawless Call',
+      achievement_rules_package_mastered_title: 'Chapter Learned',
+      achievement_rules_all_packages_title: 'Rulebook Rat',
+      achievement_rules_first_exam_description: 'Complete your first rules test',
+      achievement_rules_perfect_exam_description: 'Score a perfect rules test',
+      achievement_rules_package_mastered_description: 'Master a rules package',
+      achievement_rules_all_packages_description: 'Master every rules package',
     };
     return map[key] ?? key;
   },
@@ -49,7 +57,7 @@ function renderGrid(earnedAchievements: EarnedAchievement[] = []) {
 }
 
 describe('AchievementsGrid', () => {
-  it('renders all 11 achievement titles', () => {
+  it('renders all 15 achievement titles', () => {
     renderGrid();
     // All achievement titles should be visible (even if not yet earned)
     expect(screen.getByText('First Activity')).not.toBeNull();
@@ -63,6 +71,11 @@ describe('AchievementsGrid', () => {
     expect(screen.getByText('3000 Minutes')).not.toBeNull();
     expect(screen.getByText('25 Gym Sessions')).not.toBeNull();
     expect(screen.getByText('25 Runs')).not.toBeNull();
+    // Rules-trainer milestones (Phase 3b of docs/plans/rules-trainer.md's step 15).
+    expect(screen.getByText('Rules Rookie')).not.toBeNull();
+    expect(screen.getByText('Flawless Call')).not.toBeNull();
+    expect(screen.getByText('Chapter Learned')).not.toBeNull();
+    expect(screen.getByText('Rulebook Rat')).not.toBeNull();
   });
 
   it('renders earned achievements with a distinct visual state (aria-label or data attribute)', () => {
@@ -86,9 +99,11 @@ describe('AchievementsGrid', () => {
     expect(earnedElements.length).toBe(0);
   });
 
-  it('shows all 11 achievement cards', () => {
+  // 11 pre-existing + 4 rules-trainer milestones (Phase 3b of
+  // docs/plans/rules-trainer.md's step 15).
+  it('shows all 15 achievement cards', () => {
     renderGrid();
     const cards = document.querySelectorAll('[data-achievement]');
-    expect(cards.length).toBe(11);
+    expect(cards.length).toBe(15);
   });
 });
