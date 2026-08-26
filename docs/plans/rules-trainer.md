@@ -36,7 +36,7 @@ Confirmed with the user before planning:
 | Authoring repo? | **`frisbee-rules` is retired** — content, the WFDF source PDFs and the authoring docs all move into `packages/rules` |
 | Leaderboard visibility? | **Self and captains only** — a member sees their own standing; captains see the team |
 | Public discovery? | ⚠️ **Revised in Phase 1: per-locale routes, client-rendered, NOT indexable.** See below |
-| Czech content? | **Proofread gates the public launch** — see Phase 1 |
+| Czech content? | ⚠️ **Gate lifted by owner sign-off** — `/cs/rules` is ungated; see Risks |
 
 ### Decision: a `@sideline/rules` package, not code inside `web`
 
@@ -407,9 +407,26 @@ real web consumer):
   `frisbee-rules` repo stops being a source of truth and is retired.
 - **The Czech is AI-written and unreviewed** beyond the first 23 situations — that is 86 situations
   of unreviewed rules translation. It is already live that way at rules.sideline.cz, so this is
-  about *exposure*, not a new defect: an SSR-indexed, Sideline-branded `/cs/rules` teaching a
-  mistranslated ruling to Czech players is a different proposition. **Decided: the proofread gates
-  the public launch.** A per-package review checklist is the deliverable that unblocks it.
+  about *exposure*, not a new defect: a Sideline-branded `/cs/rules` teaching a mistranslated
+  ruling to Czech players is a different proposition.
+
+  **Gate lifted (owner sign-off), with the risk knowingly accepted.** `/cs/rules` no longer carries
+  `noindex` or the review notice. Two things stay true and are worth keeping in view:
+
+  - The sign-off was a **page-level judgement, not a read of all 1182 options**. The failure this
+    gate guarded against is a dropped or inverted negation in a *wrong* option's `why` — it reads
+    as fluent Czech, and it is invisible to both a glance and to `cz-audit.mjs` (which runs clean,
+    and by design cannot certify meaning). So this is accepted risk, not verified correctness.
+  - `noindex` was doing very little anyway once the SSR decision landed: the trainer is
+    client-rendered, so the page was never going to be meaningfully indexed. What actually changed
+    for users is the notice disappearing.
+
+  `packages/rules/authoring/czech-review-checklist.md` is unchanged and still splits the content
+  into nine independently clearable packages, ordered by stakes (the `ok:true` option first, then
+  the `why` on *wrong* options). Re-gating is cheap and deliberately left cheap: pass
+  `showTranslationReviewNotice` from `cs.rules.tsx` again and restore its `noindex` meta — the
+  banner UI and its i18n keys are kept for that purpose, and an e2e test now asserts the notice is
+  *absent* so it cannot reappear silently.
 
 ## Backlog — beyond Phase 4
 
