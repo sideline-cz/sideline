@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.35.0
+
+### 🚀 Features
+- rules achievements, evaluated per active membership (#578)
+
 ## 0.34.1
 
 ### 🐛 Fixes
