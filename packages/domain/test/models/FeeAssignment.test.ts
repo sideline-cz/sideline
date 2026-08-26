@@ -33,15 +33,12 @@ const validAssignmentRow = {
 // ---------------------------------------------------------------------------
 
 describe('FeeAssignmentStatus', () => {
-  it.each([
-    'pending',
-    'partial',
-    'paid',
-    'overdue',
-    'waived',
-  ] as const)("accepts status '%s'", (status) => {
-    expect(decodeSync(FeeAssignmentStatus)(status)).toBe(status);
-  });
+  it.each(['pending', 'partial', 'paid', 'overdue', 'waived'] as const)(
+    "accepts status '%s'",
+    (status) => {
+      expect(decodeSync(FeeAssignmentStatus)(status)).toBe(status);
+    },
+  );
 
   it('rejects an unknown status', () => {
     expect(() => decodeSync(FeeAssignmentStatus)('cancelled')).toThrow();

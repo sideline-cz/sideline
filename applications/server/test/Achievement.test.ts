@@ -984,25 +984,24 @@ describe('Permission check: non-admin (roster:view only) → 403 AchievementForb
     },
   ];
 
-  it.each(endpoints)('$method $path returns 403 for player with roster:view only', async ({
-    method,
-    path,
-    body,
-  }) => {
-    currentMembership = playerMembership;
-    const init: RequestInit = {
-      method,
-      headers: {
-        Authorization: 'Bearer player-token',
-        'Content-Type': 'application/json',
-      },
-    };
-    if (body !== undefined) init.body = body;
-    const response = await handler(new Request(path, init));
-    expect(response.status).toBe(403);
-    const json = await response.json();
-    expect(json._tag).toBe('AchievementForbidden');
-  });
+  it.each(endpoints)(
+    '$method $path returns 403 for player with roster:view only',
+    async ({ method, path, body }) => {
+      currentMembership = playerMembership;
+      const init: RequestInit = {
+        method,
+        headers: {
+          Authorization: 'Bearer player-token',
+          'Content-Type': 'application/json',
+        },
+      };
+      if (body !== undefined) init.body = body;
+      const response = await handler(new Request(path, init));
+      expect(response.status).toBe(403);
+      const json = await response.json();
+      expect(json._tag).toBe('AchievementForbidden');
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
