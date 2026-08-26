@@ -11,4 +11,5 @@ export const MockRulesAttemptsRepositoryLayer = Layer.succeed(RulesAttemptsRepos
     Effect.die(new Error('MockRulesAttemptsRepository.insertAttempt not implemented')),
   insertResults: () => Effect.void,
   lastCorrectByScenario: () => Effect.succeed([]),
+  lastCorrectByScenarioForTeam: () => Effect.succeed([]),
 } as never);

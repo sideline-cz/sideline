@@ -1,4 +1,4 @@
-import { RulesProgress, User } from '@sideline/domain';
+import { RulesProgress, Team, TeamMember, User } from '@sideline/domain';
 import { LogicError, Schemas } from '@sideline/effect-lib';
 import { Effect, Layer, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -35,6 +35,26 @@ const InsertAttemptInput = Schema.Struct({
 class LastCorrectRow extends Schema.Class<LastCorrectRow>('LastCorrectRow')({
   scenario_id: Schema.String,
   last_correct_at: Schemas.DateTimeFromDate,
+}) {}
+
+/**
+ * One `(member, scenario)` row for the team leaderboard (Phase 3a of
+ * `docs/plans/rules-trainer.md`). `scenario_id`/`last_correct_at` are
+ * `Option` — see `lastCorrectByScenarioForTeam`'s doc for why a member with
+ * no correct results still produces exactly one row here (null scenario
+ * data), unlike `lastCorrectByScenario` above which produces zero rows for
+ * such a user.
+ */
+class LastCorrectForTeamRow extends Schema.Class<LastCorrectForTeamRow>('LastCorrectForTeamRow')({
+  team_member_id: TeamMember.TeamMemberId,
+  user_id: User.UserId,
+  username: Schema.String,
+  name: Schema.OptionFromNullOr(Schema.String),
+  avatar: Schema.OptionFromNullOr(Schema.String),
+  discord_nickname: Schema.OptionFromNullOr(Schema.String),
+  discord_display_name: Schema.OptionFromNullOr(Schema.String),
+  scenario_id: Schema.OptionFromNullOr(Schema.String),
+  last_correct_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
 }) {}
 
 const make = Effect.gen(function* () {
@@ -119,10 +139,56 @@ const make = Effect.gen(function* () {
   const lastCorrectByScenario = (userId: User.UserId) =>
     lastCorrectByScenarioQuery(userId).pipe(catchSqlErrors);
 
+  const lastCorrectByScenarioForTeamQuery = SqlSchema.findAll({
+    Request: Team.TeamId,
+    Result: LastCorrectForTeamRow,
+    execute: (teamId) => sql`
+      SELECT
+        tm.id AS team_member_id,
+        u.id AS user_id,
+        u.username,
+        u.name,
+        u.avatar,
+        u.discord_nickname,
+        u.discord_display_name,
+        r.scenario_id,
+        MAX(a.finished_at) AS last_correct_at
+      FROM team_members tm
+      JOIN users u ON u.id = tm.user_id
+      LEFT JOIN rules_attempts a ON a.user_id = u.id AND a.finished_at IS NOT NULL
+      LEFT JOIN rules_scenario_results r ON r.attempt_id = a.id AND r.correct
+      WHERE tm.team_id = ${teamId} AND tm.active = true
+      GROUP BY tm.id, u.id, u.username, u.name, u.avatar, u.discord_nickname, u.discord_display_name, r.scenario_id
+    `,
+  });
+
+  /**
+   * One row per `(active team member, scenario ever answered correctly)`
+   * pair, for the whole team — the input the team leaderboard handler needs
+   * to compute every member's mastery in one query (`docs/plans/rules-trainer.md`
+   * Phase 3a).
+   *
+   * Deliberately **LEFT JOINs with no `HAVING`**, unlike `LeaderboardRepository.getLeaderboard`
+   * (which excludes zero-activity members with `HAVING COUNT(al.id) > 0`).
+   * That is a considered difference, not an oversight: mastery decays
+   * (`@sideline/rules`'s `engine/mastery.ts`), so a member who has never
+   * practised — or lapsed long enough to decay to strength `0` — is exactly
+   * the case a captain wants visible on the board, not silently dropped.
+   * The consequence is that a member with zero correct results still
+   * produces exactly ONE row here, with `scenario_id` and `last_correct_at`
+   * both `Option.none()` (GROUP BY collapses every NULL-`r.scenario_id` row
+   * for that member into one group) — callers building
+   * `ScenarioOutcome[]` per package MUST skip rows where `scenario_id` is
+   * `None` rather than treating it as a real (falsy) scenario id.
+   */
+  const lastCorrectByScenarioForTeam = (teamId: Team.TeamId) =>
+    lastCorrectByScenarioForTeamQuery(teamId).pipe(catchSqlErrors);
+
   return {
     insertAttempt,
     insertResults,
     lastCorrectByScenario,
+    lastCorrectByScenarioForTeam,
   };
 });
 

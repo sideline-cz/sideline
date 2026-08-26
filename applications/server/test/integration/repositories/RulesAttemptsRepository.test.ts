@@ -1,15 +1,21 @@
 import { describe, expect, it } from '@effect/vitest';
+import type { Discord, Team, TeamMember, User } from '@sideline/domain';
 import { RulesProgress } from '@sideline/domain';
 import { Effect, Layer, Option, Schema } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { RulesAttemptsRepository } from '~/repositories/RulesAttemptsRepository.js';
+import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
 
-const TestLayer = Layer.mergeAll(RulesAttemptsRepository.Default, UsersRepository.Default).pipe(
-  Layer.provideMerge(TestPgClient),
-);
+const TestLayer = Layer.mergeAll(
+  RulesAttemptsRepository.Default,
+  TeamMembersRepository.Default,
+  TeamsRepository.Default,
+  UsersRepository.Default,
+).pipe(Layer.provideMerge(TestPgClient));
 
 beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runPromise));
 
@@ -29,6 +35,93 @@ const createUser = (discordId: string, username: string) =>
       }),
     ),
     Effect.map((u) => u.id),
+  );
+
+const createTeam = (guildId: Discord.Snowflake, createdBy: User.UserId) =>
+  TeamsRepository.asEffect().pipe(
+    Effect.andThen((repo) =>
+      repo.insert({
+        name: 'Rules Leaderboard Test Team',
+        guild_id: guildId,
+        created_by: createdBy,
+        description: Option.none(),
+        sport: Option.none(),
+        logo_url: Option.none(),
+        created_at: undefined,
+        updated_at: undefined,
+        welcome_channel_id: Option.none(),
+        system_log_channel_id: Option.none(),
+        welcome_message_template: Option.none(),
+        rules_channel_id: Option.none(),
+        achievement_channel_id: Option.none(),
+        onboarding_rules_role_id: Option.none(),
+        onboarding_rules_prompt_id: Option.none(),
+        onboarding_locale: 'en',
+        onboarding_synced_at: Option.none(),
+        onboarding_sync_status: 'pending',
+        onboarding_sync_error: Option.none(),
+      }),
+    ),
+    Effect.map((t) => t.id),
+  );
+
+const addTeamMember = (teamId: Team.TeamId, userId: User.UserId) =>
+  TeamMembersRepository.asEffect().pipe(
+    Effect.andThen((repo) =>
+      repo.addMember({
+        team_id: teamId,
+        user_id: userId,
+        active: true,
+        joined_at: undefined,
+      }),
+    ),
+    Effect.map((m) => m.id),
+  );
+
+const deactivateTeamMember = (teamId: Team.TeamId, memberId: TeamMember.TeamMemberId) =>
+  TeamMembersRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.deactivateMemberByIds(teamId, memberId)),
+  );
+
+/**
+ * Inserts one finished attempt with its results in a single bindable step —
+ * keeps the `lastCorrectByScenarioForTeam` fixture's `Effect.Do.pipe` chain
+ * well under the ~20-argument `pipe` overload ceiling (see effect-lib
+ * conventions) by collapsing "insert attempt + insert results + optionally
+ * backdate/clear finished_at" into one `Effect.bind` per attempt instead of
+ * three or four.
+ */
+const insertFinishedAttempt = (
+  userId: User.UserId,
+  results: ReadonlyArray<{
+    readonly scenario_id: string;
+    readonly correct: boolean;
+    readonly steps: ReadonlyArray<{ readonly pick: number | null; readonly ok: boolean }>;
+  }>,
+  options?: { readonly backdateIso?: string; readonly clearFinishedAt?: boolean },
+) =>
+  RulesAttemptsRepository.asEffect().pipe(
+    Effect.andThen((repo) =>
+      repo
+        .insertAttempt(
+          userId,
+          'practice',
+          [1],
+          results.filter((r) => r.correct).length,
+          results.length,
+        )
+        .pipe(
+          Effect.tap((attempt) => repo.insertResults(attempt.id, results)),
+          Effect.tap((attempt) =>
+            options?.backdateIso !== undefined
+              ? backdateFinishedAt(attempt.id, options.backdateIso)
+              : Effect.void,
+          ),
+          Effect.tap((attempt) =>
+            options?.clearFinishedAt === true ? clearFinishedAt(attempt.id) : Effect.void,
+          ),
+        ),
+    ),
   );
 
 /**
@@ -292,6 +385,121 @@ describe('RulesAttemptsRepository — lastCorrectByScenario', () => {
               );
             }
             expect(rows).toHaveLength(1);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// lastCorrectByScenarioForTeam (Phase 3a of docs/plans/rules-trainer.md)
+// ---------------------------------------------------------------------------
+
+describe('RulesAttemptsRepository — lastCorrectByScenarioForTeam', () => {
+  it.effect(
+    'includes a no-attempt member with null scenario data, excludes inactive members and other teams, only correct+finished results count, MAX wins for a repeated scenario',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userA', () => createUser('900000000000000010', 'team-a-active')),
+        Effect.bind('userB', () => createUser('900000000000000011', 'team-a-no-attempts')),
+        Effect.bind('userC', () => createUser('900000000000000012', 'team-a-inactive')),
+        Effect.bind('userOther', () => createUser('900000000000000013', 'team-b-member')),
+
+        Effect.bind('teamA', ({ userA }) =>
+          createTeam('800000000000000001' as Discord.Snowflake, userA),
+        ),
+        Effect.bind('teamB', ({ userOther }) =>
+          createTeam('800000000000000002' as Discord.Snowflake, userOther),
+        ),
+
+        Effect.bind('memberA', ({ teamA, userA }) => addTeamMember(teamA, userA)),
+        Effect.bind('memberB', ({ teamA, userB }) => addTeamMember(teamA, userB)),
+        Effect.bind('memberC', ({ teamA, userC }) => addTeamMember(teamA, userC)),
+        Effect.bind('memberOther', ({ teamB, userOther }) => addTeamMember(teamB, userOther)),
+
+        // memberC is deactivated — must be excluded entirely from teamA's rows.
+        Effect.tap(({ teamA, memberC }) => deactivateTeamMember(teamA, memberC)),
+
+        // userA — attempt1 (finished, backdated): correct on 'x', INCORRECT on 'y'.
+        Effect.bind('attempt1', ({ userA }) =>
+          insertFinishedAttempt(
+            userA,
+            [
+              { scenario_id: 'x', correct: true, steps: [{ pick: 0, ok: true }] },
+              { scenario_id: 'y', correct: false, steps: [{ pick: 1, ok: false }] },
+            ],
+            { backdateIso: '2020-01-01T00:00:00Z' },
+          ),
+        ),
+
+        // userA — attempt2 (finished, LATER): correct on 'x' again — MAX(finished_at) must win.
+        Effect.bind('attempt2', ({ userA }) =>
+          insertFinishedAttempt(userA, [
+            { scenario_id: 'x', correct: true, steps: [{ pick: 0, ok: true }] },
+          ]),
+        ),
+
+        // userA — attempt3: correct on 'z', but the attempt itself is unfinished — must
+        // never surface (mirrors the finished_at guard in lastCorrectByScenario above).
+        Effect.bind('attempt3', ({ userA }) =>
+          insertFinishedAttempt(
+            userA,
+            [{ scenario_id: 'z', correct: true, steps: [{ pick: 0, ok: true }] }],
+            { clearFinishedAt: true },
+          ),
+        ),
+
+        // Another team's member has a correct result too — must never leak into teamA's rows.
+        Effect.bind('otherAttempt', ({ userOther }) =>
+          insertFinishedAttempt(userOther, [
+            { scenario_id: 'x', correct: true, steps: [{ pick: 0, ok: true }] },
+          ]),
+        ),
+
+        Effect.bind('rows', ({ teamA }) =>
+          RulesAttemptsRepository.asEffect().pipe(
+            Effect.andThen((repo) => repo.lastCorrectByScenarioForTeam(teamA)),
+          ),
+        ),
+        Effect.tap(({ rows, memberA, memberB, memberC, memberOther }) =>
+          Effect.sync(() => {
+            const memberIds = new Set(rows.map((r) => r.team_member_id));
+
+            // memberA: has real scenario data.
+            expect(memberIds.has(memberA)).toBe(true);
+            // memberB: never attempted anything — still present (LEFT JOIN, no HAVING),
+            // with null scenario data — this is the point of the LEFT JOIN decision.
+            expect(memberIds.has(memberB)).toBe(true);
+            // memberC: inactive — excluded entirely by `tm.active = true`.
+            expect(memberIds.has(memberC)).toBe(false);
+            // memberOther: different team — excluded entirely by `tm.team_id = teamId`.
+            expect(memberIds.has(memberOther)).toBe(false);
+
+            // No row anywhere carries an incorrect ('y') or unfinished-attempt ('z')
+            // scenario id — both must be invisible, not merely deprioritized.
+            const scenarioIds = new Set(
+              rows.flatMap((r) => (Option.isSome(r.scenario_id) ? [r.scenario_id.value] : [])),
+            );
+            expect(scenarioIds.has('y')).toBe(false);
+            expect(scenarioIds.has('z')).toBe(false);
+
+            const memberARows = rows.filter((r) => r.team_member_id === memberA);
+            expect(memberARows).toHaveLength(1);
+            expect(Option.getOrNull(memberARows[0].scenario_id)).toBe('x');
+            const memberALastCorrect = memberARows[0].last_correct_at;
+            expect(Option.isSome(memberALastCorrect)).toBe(true);
+            if (Option.isSome(memberALastCorrect)) {
+              // Reflects attempt2's LATER finish, not attempt1's backdated one.
+              expect(memberALastCorrect.value.epochMilliseconds).toBeGreaterThan(
+                new Date('2021-01-01').getTime(),
+              );
+            }
+
+            const memberBRows = rows.filter((r) => r.team_member_id === memberB);
+            expect(memberBRows).toHaveLength(1);
+            expect(Option.isNone(memberBRows[0].scenario_id)).toBe(true);
+            expect(Option.isNone(memberBRows[0].last_correct_at)).toBe(true);
           }),
         ),
         Effect.provide(TestLayer),

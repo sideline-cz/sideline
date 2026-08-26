@@ -66,15 +66,26 @@ export * as Roster from './api/Roster.js';
 
 /**
  * HTTP API for the Rules Trainer's per-user progress (Phase 2 of
- * `docs/plans/rules-trainer.md`). HTTP, not RPC, because this is a
- * web-facing feature — RPC groups in this package are bot-only.
+ * `docs/plans/rules-trainer.md`) and team leaderboard (Phase 3a).
+ * HTTP, not RPC, because this is a web-facing feature — RPC groups in this
+ * package are bot-only.
  *
- * Both endpoints are caller-scoped: there is no team parameter and no
- * cross-user lookup, so (like `ICalApiGroup`'s `/me/ical-token`) neither
- * endpoint declares a custom error beyond what `AuthMiddleware` already
- * provides (401 on missing/invalid token). `myProgress` is named per
- * "Caller-Scoped Reads" (`applications/server/AGENTS.md`) — the query is
- * always scoped to the authenticated user, never to a caller-supplied id.
+ * `submitAttempt` and `myProgress` are caller-scoped: there is no team
+ * parameter and no cross-user lookup, so (like `ICalApiGroup`'s
+ * `/me/ical-token`) neither endpoint declares a custom error beyond what
+ * `AuthMiddleware` already provides (401 on missing/invalid token).
+ * `myProgress` is named per "Caller-Scoped Reads"
+ * (`applications/server/AGENTS.md`) — the query is always scoped to the
+ * authenticated user, never to a caller-supplied id.
+ *
+ * `getRulesLeaderboard` is different: it is team-scoped (a `teamId` param,
+ * per `getLeaderboard` in `LeaderboardApi.ts`), not caller-scoped, so it is
+ * NOT named `my*` even though the plan decided visibility is "self and
+ * captains only" (see `RulesLeaderboardResponse.scope` below) — the query
+ * still ranks the whole team before filtering, it does not merely look up
+ * the caller. Because it is team-scoped, non-membership must 403, so —
+ * unlike the two caller-scoped endpoints above — it DOES declare a custom
+ * error (`RulesLeaderboardForbidden`).
  */
 export * as RulesTrainerApi from './api/RulesTrainerApi.js';
 
@@ -197,6 +208,32 @@ export * as RoleSyncEvent from './models/RoleSyncEvent.js';
 export * as RosterMemberModel from './models/RosterMemberModel.js';
 
 export * as RosterModel from './models/RosterModel.js';
+
+/**
+ * Rules Trainer team leaderboard ranking — pure algorithm module (no Effect).
+ *
+ * Mirrors `models/Leaderboard.ts`'s `rankLeaderboard` shape deliberately, so
+ * the web UI (a future slice) can reuse the same table/row components for
+ * both boards. It lives in `@sideline/domain`, not `@sideline/rules`,
+ * because it ranks domain DTOs (`teamMemberId`, `displayName`-adjacent
+ * fields) rather than rules content — `@sideline/rules` stays free of wire
+ * concerns (see `packages/rules/AGENTS.md`).
+ *
+ * Ranks by `strength` (decayed mastery, `@sideline/rules`'s
+ * `engine/mastery.ts`) descending, then `masteredCount` descending, then an
+ * explicit `teamMemberId` ascending tiebreaker — required by
+ * `packages/domain/AGENTS.md`'s Pure Algorithm Module rules so the output is
+ * a deterministic total order rather than dependent on input order (two
+ * members who have never practised both rank identically on
+ * strength/masteredCount, and without the id tiebreaker their relative
+ * order would depend on array insertion order, which itself depends on
+ * arbitrary SQL row order).
+ *
+ * Assigns `rank: index + 1` — distinct sequential ranks, matching
+ * `rankLeaderboard`; ties in strength/masteredCount do NOT share a rank,
+ * the id tiebreaker always produces a strict order.
+ */
+export * as RulesLeaderboard from './models/RulesLeaderboard.js';
 
 /**
  * Rows for the Rules Trainer's per-user progress (`rules_attempts` +
