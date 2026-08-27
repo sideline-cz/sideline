@@ -30,3 +30,6 @@ llms-full.txt
 
 # Local planning scratch files
 .plans/
+
+# Rendered rules GIFs (see applications/web/scripts/render-rules-gifs.ts)
+.rules-gifs/

@@ -696,6 +696,54 @@ keyed by entity id, resolved server-side" in `applications/bot/AGENTS.md`, and
 - `scoreAttempt` is shared logic and already tolerates hostile input, so the bot can submit
   attempts through the same path as web.
 
+#### MEASURED (2026-08-27) — the render is viable, and cheap
+
+`applications/web/scripts/render-rules-gifs.ts` renders every clip. Full run,
+not extrapolated:
+
+| | |
+|---|---|
+| clips | **218** (109 scenarios × setup/resolution) |
+| frames | 11,874 |
+| total size | **67 MiB** |
+| render time | **122 seconds** |
+| largest single clip | 572 KiB |
+
+At 480px / 10fps / 32 colours. **Per-file size was never the constraint** — the
+largest clip is 572 KiB, comfortably under any Discord attachment limit, so the
+open question about the ceiling is answered and was the wrong thing to worry
+about. Total asset weight is the real question.
+
+⚠️ **`loadSystemFonts` must stay `false` in resvg.** resvg-js rebuilds its font
+database per `Resvg` instance and the renderer constructs one per frame:
+measured **966 ms/frame** with system fonts against **2 ms** without. That single
+flag is the difference between a ~5 hour render and a ~2 minute one. Text still
+renders because `fontFiles` supplies exactly what is needed.
+
+⚠️ **Resolving no font is a hard failure, deliberately.** resvg silently omits
+text it has no font for, so the run would succeed, produce plausible-looking
+GIFs, and be missing every actor label and call-out. That is discovered only by
+opening one.
+
+Known gap: 10 of 460 fx strings (5 scenarios) contain `✋` U+270B, which a plain
+text font renders as tofu. Pass a font covering it via `--font`; nothing else in
+the content needs one.
+
+Settings were chosen by measurement, not taste:
+
+| settings | per clip | 109 scenarios | render |
+|---|---|---|---|
+| 640px 12fps 64col | 704 KiB | ~120 MiB | 5.5 min |
+| **480px 10fps 32col** | **340 KiB** | **~59 MiB** | **2.2 min** |
+| 400px 8fps 32col | 218 KiB | ~37 MiB | 2.3 min |
+
+#### Still open: where the 67 MiB lives at send time
+
+Unchanged and still the real question — the files cannot be referenced by URL
+(bots cannot set `embed.video`, web has no OG tags, Discord CDN URLs expire), so
+the bot must upload bytes. 122 seconds of render makes "generate during the bot
+image build" newly plausible, where before it looked prohibitive.
+
 #### Open questions to settle before costing this
 
 1. **Bot attachment size ceiling.** It varies with the guild's boost tier. Flat vector art should

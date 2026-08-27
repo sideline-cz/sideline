@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "codegen": "tsr generate"
+    "codegen": "tsr generate",
+    "render:gifs": "tsx scripts/render-rules-gifs.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -49,6 +50,7 @@
   },
   "devDependencies": {
     "@effect/platform-browser": "4.0.0-beta.40",
+    "@resvg/resvg-js": "^2.6.2",
     "@tanstack/devtools-vite": "0.8.5",
     "@tanstack/react-devtools": "0.10.12",
     "@tanstack/react-query-devtools": "5.101.4",
@@ -60,6 +62,7 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "6.1.0",
+    "gifenc": "^1.0.3",
     "jsdom": "30.0.1",
     "typescript": "5.9.3",
     "vite": "8.2.2",
