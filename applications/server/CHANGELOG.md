@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.46.0
+
+### 🚀 Features
+- private /rules, and a scheduled rules quiz per team (#588)
+
+### 🐛 Fixes
+- declare @sideline/rules so the pruned production image can start (#587)
+
 ## 0.45.0
 
 ### 🚀 Features

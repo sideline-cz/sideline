@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.37.1
+
+### 🐛 Fixes
+- rewrite the Czech scenario content that read as translation (#590)
+
+## 0.37.0
+
+### 🚀 Features
+- private /rules, and a scheduled rules quiz per team (#588)
+
+### 🐛 Fixes
+- declare @sideline/rules so the pruned production image can start (#587)
+
 ## 0.36.0
 
 ### 🚀 Features

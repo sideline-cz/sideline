@@ -1,5 +1,15 @@
 # @sideline/web
 
+## 0.34.1
+
+### 🐛 Fixes
+- rewrite the Czech scenario content that read as translation (#590)
+
+## 0.34.0
+
+### 🚀 Features
+- render every rules situation to GIFs, ahead of time (#589)
+
 ## 0.33.0
 
 ### 🚀 Features
