@@ -1055,7 +1055,7 @@
       },
       "note": {
         "en": "The one exception: a CONTESTED or retracted marking infraction followed by a COMPLETED pass is treated as an offensive violation and the disc goes back to you (18.1.2.1). Completed passes survive; turfed ones never do.",
-        "cs": "Jediná výjimka: KONTESTOVANÁ či odvolaná marking infraction následovaná ZKOMPLETOVANOU přihrávkou se řeší jako violation útoku a disk se vrací tobě (18.1.2.1). Zkompletované přihrávky přežijí; zahozené nikdy."
+        "cs": "Jediná výjimka: CONTESTOVANÁ či odvolaná marking infraction následovaná DOKONČENOU přihrávkou se řeší jako violation útoku a disk se vrací tobě (18.1.2.1). Dokončené přihrávky přežijí; zahozené nikdy."
       },
       "rules": ["18.1.5", "18.1.2", "16.2"],
       "signals": [12, 13],

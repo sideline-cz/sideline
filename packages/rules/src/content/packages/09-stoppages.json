@@ -1260,7 +1260,7 @@
               },
               "why": {
                 "en": "10.7.3/10.7.4 cover any opponent, not just the thrower.",
-                "cs": "10.7.3/10.7.4 se týkají kteréhokoli soupeře, ne jen házeče (10.7)."
+                "cs": "10.7.3/10.7.4 se týkají kteréhokoli soupeře, ne jen házeče."
               }
             },
             {
@@ -4138,7 +4138,7 @@
               },
               "why": {
                 "en": "The stall count is explicitly part of the inherited state (19.3.1). A restart at one is what an accepted DEFENSIVE breach gives you (9.5.1), which is not what happened here.",
-                "cs": "Stall count je výslovně součástí přebíraného stavu (19.3.1). Obnovení na jedné dává přijatý přestupek OBRANY (9.5.1), o což tady nejde."
+                "cs": "Stall count je výslovně součástí přebíraného stavu (19.3.1). Obnovení na jedné dává přijatý prohřeš OBRANY (9.5.1), což se tady nestalo."
               }
             },
             {
