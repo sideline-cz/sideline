@@ -108,6 +108,24 @@ export default defineConfig({
             { label: 'Roadmap', slug: 'about/roadmap' },
           ],
         },
+        // Legal pages exist (`src/content/docs/legal/`, EN + CS) but are
+        // `draft: true` until the operator's legal identity, contact address
+        // and the AI/email vendor names are filled in — publishing a privacy
+        // policy whose controller is a placeholder is worse than publishing
+        // none. Starlight drops drafts from production builds, so this group
+        // must stay commented out until then: an entry pointing at a dropped
+        // slug is a hard build error, not a silent omission.
+        //
+        // To publish: fill in every `TO BE FILLED IN` / `DOPLNIT`, delete the
+        // `draft: true` lines and the `:::caution` blocks, uncomment this, and
+        // link both pages from the web app's footers.
+        // {
+        //   label: 'Legal',
+        //   items: [
+        //     { label: 'Terms of Service', slug: 'legal/terms' },
+        //     { label: 'Privacy Policy', slug: 'legal/privacy' },
+        //   ],
+        // },
       ],
     }),
   ],

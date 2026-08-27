@@ -15,7 +15,9 @@ Partially. The web app works standalone, but you lose the best part of Sideline 
 
 ### What happens to my data?
 
-Your data stays yours. Sideline stores what's needed for the product to work: your Discord profile, team membership, roster entries, events, and RSVPs. You can export or delete your data from **Profile → Settings** at any time.
+Your data stays yours. Sideline stores what's needed for the product to work: your Discord profile, team membership, roster entries, events, and RSVPs.
+
+To get a copy of your data or have it deleted, contact us — there is no self-service button for it yet, so these requests are handled by a person. Leaving a team deletes your team-scoped data.
 
 ## Troubleshooting
 
