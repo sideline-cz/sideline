@@ -33,3 +33,6 @@ llms-full.txt
 
 # Rendered rules GIFs (see applications/web/scripts/render-rules-gifs.ts)
 .rules-gifs/
+
+# Local Czech-review progress (packages/rules/authoring/review-server.mjs)
+review-state.json

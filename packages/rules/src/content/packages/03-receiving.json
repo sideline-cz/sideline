@@ -120,7 +120,7 @@
       ],
       "situation": {
         "en": "You cut deep, the huck goes up. Just as you are about to attack the disc, the trailing defender runs through your back — clearly non-minor contact — and the disc hits the ground. You call “Foul”; the defender says nothing (no contest).",
-        "cs": "Vyběhneš do hloubky, letí huck. Ve chvíli, kdy jdeš po disku, do tebe zezadu vrazí dobíhající obránce — jasně výrazný kontakt — a disk spadne na zem. Zavoláš „Foul“; obránce nic nenamítá (nekontestuje)."
+        "cs": "Vyběhneš do hloubky, letí huck. Ve chvíli, kdy jdeš po disku, do tebe zezadu vrazí dobíhající obránce — jasně nezanedbatelný kontakt — a disk spadne na zem. Zavoláš „Foul“; obránce nic nenamítá (nekontestuje)."
       },
       "question": {
         "en": "What is the outcome?",
@@ -357,7 +357,7 @@
       "roleTeam": "def",
       "role": {
         "en": "the defender who was called for the foul",
-        "cs": "obránce, na kterého je hlášen faul"
+        "cs": "obránce, na kterého zavolali faul"
       },
       "view": [40, -3.5, 62, 44],
       "dur": 7.6,
@@ -1451,7 +1451,7 @@
       ],
       "situation": {
         "en": "You are the defender. You read the in-cut perfectly and launch for the block — the receiver ploughs through your back, neither of you touches the disc, and it lands incomplete. You call “Foul”; the receiver accepts.",
-        "cs": "Jsi obránce. Perfektně přečteš náběh a jdeš do bloku — receiver ti projede zády, disku se nedotkne ani jeden z vás a přihrávka spadne. Voláš „Foul“; receiver uznává."
+        "cs": "Jsi obránce. Perfektně přečteš náběh a jdeš do bloku — receiver ti vrazí do zad, disku se nedotkne ani jeden z vás a přihrávka spadne. Voláš „Foul“; receiver uznává."
       },
       "question": {
         "en": "The pass was incomplete anyway. What does your accepted foul change?",
@@ -1743,7 +1743,7 @@
       ],
       "situation": {
         "en": "You and the defender arrive at the disc together and both of you barge in: you lean across their shoulder, they push through your arm — real contact from both sides at the same moment, and the disc falls. You call “Foul”; they immediately call a foul on you. Neither of you is willing to take the blame, and honestly you both caused it.",
-        "cs": "K disku dorazíte s obráncem současně a oba se do toho opřete: ty se natáhneš přes jeho rameno, on projede tvojí rukou — skutečný kontakt z obou stran ve stejném momentě a disk padá. Voláš „Foul“; on hned volá faul na tebe. Ani jeden nechce nést vinu, a po pravdě jste to způsobili oba."
+        "cs": "K disku dorazíte s obráncem současně a oba se do toho opřete: ty se natáhneš přes jeho rameno, on se opře do tvojí ruky — skutečný kontakt z obou stran ve stejném momentě a disk padá. Voláš „Foul“; on hned volá faul na tebe. Ani jeden nechce nést vinu, a po pravdě jste to způsobili oba."
       },
       "question": {
         "en": "Two fouls in one play. How does that resolve?",
@@ -1960,7 +1960,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the receiver who caught it",
-        "cs": "receiver, který chytil"
+        "cs": "receiver, který disk chytil"
       },
       "view": [40, -3.5, 62, 44],
       "dur": 7.2,
@@ -2056,7 +2056,7 @@
       ],
       "situation": {
         "en": "You catch the in-cut cleanly, both hands on the disc, feet down — possession established. Half a second later the trailing defender swipes through and knocks the disc out of your hands; it bounces away on the ground. You call “Strip”, and the defender accepts.",
-        "cs": "Náběh chytíš čistě, obě ruce na disku, nohy na zemi — držení máš. O půl sekundy později tě dobíhající obránce prosviští a vyrazí ti disk z rukou; ten odskočí po zemi. Voláš „Strip“ a obránce to uznává."
+        "cs": "Náběh chytíš čistě, obě ruce na disku, nohy na zemi — držení máš. O půl sekundy později dobíhající obránce sekne a vyrazí ti disk z rukou; ten odskočí po zemi. Voláš „Strip“ a obránce to uznává."
       },
       "question": {
         "en": "What happens after an accepted strip?",
@@ -2754,7 +2754,7 @@
       },
       "title": {
         "en": "Bumped down short of the line",
-        "cs": "Sražený krátce před čárou"
+        "cs": "Sražený těsně před čárou"
       },
       "roleTeam": "off",
       "role": {
@@ -3083,7 +3083,7 @@
       ],
       "situation": {
         "en": "You and the defender arrive together and both get two hands on the disc at the same instant. Neither of you rips it away; you come down clutching it between you, upright, both still holding on. No contact worth calling.",
-        "cs": "S obráncem dorazíte současně a oba máte ve stejný okamžik na disku obě ruce. Ani jeden ho nevytrhne; dopadnete a držíte ho mezi sebou, ve stoje, oba pořád drží. Kontakt, který by stál za call, žádný."
+        "cs": "S obráncem dorazíte současně a oba máte ve stejný okamžik na disku obě ruce. Ani jeden ho nevytrhne; dopadnete a držíte ho mezi sebou, ve stoje, oba ho pořád držíte. Kontakt, který by stál za call, žádný."
       },
       "question": {
         "en": "Who has it?",
@@ -3490,7 +3490,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the receiver with the inside track",
-        "cs": "receiver s lepší stopou"
+        "cs": "receiver s lepší dráhou"
       },
       "view": [40, -3.5, 62, 44],
       "dur": 7.4,
@@ -3562,7 +3562,7 @@
       ],
       "situation": {
         "en": "The disc is in the air and you have the better line to it. Their defender, who cannot get there first, slides sideways into the empty lane you were about to run — not to play the disc, just to stop you reaching it. You clatter into them.",
-        "cs": "Disk letí a ty máš k němu lepší stopu. Jejich obránce, který tam nemůže být první, se posune do prázdné dráhy, kterou ses chystal běžet — ne aby zahrál disk, jen aby ti zabránil se k němu dostat. Narazíš do něj."
+        "cs": "Disk letí a ty máš k němu lepší dráhu. Jejich obránce, který tam nemůže být první, se posune do prázdné dráhy, kterou ses chystal běžet — ne aby zahrál disk, jen aby ti zabránil se k němu dostat. Narazíš do něj."
       },
       "question": {
         "en": "They got to the space first. Is that legal?",

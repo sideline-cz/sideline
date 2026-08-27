@@ -399,7 +399,7 @@
       ],
       "situation": {
         "en": "Play was stopped for a foul call and everyone has taken their positions. You are the marker, still walking in, and you have not touched the disc to check it in — and the thrower fires a pass downfield anyway. Their cutter catches it.",
-        "cs": "Hra byla zastavená kvůli faulu a všichni zaujali pozice. Jsi marker, ještě docházíš a disku jsi se nedotkl, aby byl checknutý — a házeč přesto vypálí přihrávku dopředu. Jejich nabíhač ji chytí."
+        "cs": "Hra byla zastavená kvůli faulu a všichni zaujali pozice. Jsi marker, ještě docházíš a disku ses nedotkl, aby byl checknutý — a házeč přesto vypálí přihrávku dopředu. Jejich nabíhač ji chytí."
       },
       "question": {
         "en": "The pass was caught. Does it count?",
@@ -606,7 +606,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the thrower who pulls up injured",
-        "cs": "házeč, kterého to chytne"
+        "cs": "házeč, kterého chytne sval"
       },
       "view": [46, 3.5, 40, 30],
       "dur": 6.6,
@@ -1217,7 +1217,7 @@
       ],
       "situation": {
         "en": "Play stopped at “stalling 4” for a foul call, and everyone took their positions. As you reach in to touch the disc, their cutter is already breaking out of the stack — moving before the check, stealing a start.",
-        "cs": "Hra se zastavila na „stalling 4“ kvůli faulu a všichni zaujali pozice. Ve chvíli, kdy saháš po disku, jejich nabíhač už vybíhá ze stacku — v pohybu před checkem, kradený start."
+        "cs": "Hra se zastavila na „stalling 4“ kvůli faulu a všichni zaujali pozice. Ve chvíli, kdy saháš po disku, jejich nabíhač už vybíhá ze stacku — v pohybu před checkem, krade si start."
       },
       "question": {
         "en": "What can you do about it?",
@@ -1260,7 +1260,7 @@
               },
               "why": {
                 "en": "10.7.3/10.7.4 cover any opponent, not just the thrower.",
-                "cs": "10.7.3/10.7.4 se týkají kteréhokoli soupeře, ne jen házeče (10.7)."
+                "cs": "10.7.3/10.7.4 se týkají kteréhokoli soupeře, ne jen házeče."
               }
             },
             {
@@ -1507,7 +1507,7 @@
       ],
       "situation": {
         "en": "Trapped on the line at “stalling 7” with nothing open, you form the T and shout “time-out”. Your team used its last one two points ago — you had forgotten.",
-        "cs": "Zavřený u čáry na „stalling 7“, nikdo volný, složíš „T“ a křikneš „time-out“. Tvůj tým poslední spotřeboval před dvěma body — zapomněl jsi."
+        "cs": "Zavřený u čáry na „stalling 7“, nikdo volný, složíš „T“ a křikneš „time-out“. Tvůj tým ten poslední spotřeboval před dvěma body — zapomněl jsi."
       },
       "question": {
         "en": "What does that cost you?",
@@ -4031,37 +4031,37 @@
         "cs": "střídající hráč přicházející na hřiště"
       },
       "view": [40, -2, 48, 42],
-      "dur": 8.0,
+      "dur": 8,
       "qAt": 4.4,
       "actors": [
         {
           "id": "O1",
           "team": "off",
           "label": "O1",
-          "kf": [[0, 62, 18], [4.4, 62, 18], [6.0, 58, 30], [8.0, 54, 35]]
+          "kf": [[0, 62, 18], [4.4, 62, 18], [6, 58, 30], [8, 54, 35]]
         },
         {
           "id": "D1",
           "team": "def",
           "label": "D1",
-          "kf": [[0, 63.6, 19.2], [8.0, 63.6, 19.2]]
+          "kf": [[0, 63.6, 19.2], [8, 63.6, 19.2]]
         },
         {
           "id": "O9",
           "team": "off",
           "label": "O9",
           "you": true,
-          "kf": [[0, 56, 35], [4.4, 57, 34], [6.2, 60, 24], [8.0, 62, 18]]
+          "kf": [[0, 56, 35], [4.4, 57, 34], [6.2, 60, 24], [8, 62, 18]]
         },
         {
           "id": "O2",
           "team": "off",
           "label": "O2",
-          "kf": [[0, 72, 12], [8.0, 72, 12]]
+          "kf": [[0, 72, 12], [8, 72, 12]]
         }
       ],
       "disc": {
-        "kf": [[0, 62.4, 17.6], [6.0, 62.4, 17.6], [8.0, 62.4, 17.6]]
+        "kf": [[0, 62.4, 17.6], [6, 62.4, 17.6], [8, 62.4, 17.6]]
       },
       "fx": [
         {
@@ -4076,7 +4076,7 @@
           "style": "count"
         },
         {
-          "t": 3.0,
+          "t": 3,
           "type": "mark",
           "x": 62,
           "y": 18,
@@ -4138,7 +4138,7 @@
               },
               "why": {
                 "en": "The stall count is explicitly part of the inherited state (19.3.1). A restart at one is what an accepted DEFENSIVE breach gives you (9.5.1), which is not what happened here.",
-                "cs": "Stall count je výslovně součástí přebíraného stavu (19.3.1). Obnovení na jedné dává přijatý přestupek OBRANY (9.5.1), o což tady nejde."
+                "cs": "Stall count je výslovně součástí přebíraného stavu (19.3.1). Obnovení na jedné dává přijatý prohřeš OBRANY (9.5.1), což se tady nestalo."
               }
             },
             {
@@ -4251,11 +4251,11 @@
       "roleTeam": "off",
       "role": {
         "en": "the cutter whose shoe has gone",
-        "cs": "hráč, kterému se rozpadla obuv"
+        "cs": "nabíhač, kterému se rozpadla kopačka"
       },
       "view": [40, 2, 44, 33],
       "dur": 7.6,
-      "qAt": 4.0,
+      "qAt": 4,
       "actors": [
         {
           "id": "O1",
@@ -4268,7 +4268,7 @@
           "team": "off",
           "label": "O2",
           "you": true,
-          "kf": [[0, 66, 26], [2.6, 70, 22], [4.0, 71, 20.6], [7.6, 71.4, 20.2]]
+          "kf": [[0, 66, 26], [2.6, 70, 22], [4, 71, 20.6], [7.6, 71.4, 20.2]]
         },
         {
           "id": "D1",
@@ -4477,7 +4477,7 @@
         "cs": "hráč, o jehož callu se debatuje"
       },
       "view": [52, -4.5, 48, 44],
-      "dur": 8.0,
+      "dur": 8,
       "qAt": 4.2,
       "actors": [
         {
@@ -4485,29 +4485,29 @@
           "team": "off",
           "label": "O1",
           "you": true,
-          "kf": [[0, 60, 18], [8.0, 60, 18]]
+          "kf": [[0, 60, 18], [8, 60, 18]]
         },
         {
           "id": "D1",
           "team": "def",
           "label": "D1",
-          "kf": [[0, 61.6, 19.2], [8.0, 61.6, 19.2]]
+          "kf": [[0, 61.6, 19.2], [8, 61.6, 19.2]]
         },
         {
           "id": "O5",
           "team": "off",
           "label": "O5",
-          "kf": [[0, 78, 32], [8.0, 74, 30]]
+          "kf": [[0, 78, 32], [8, 74, 30]]
         },
         {
           "id": "X1",
           "team": "def",
           "label": "?",
-          "kf": [[0, 62, -2], [8.0, 62, -2]]
+          "kf": [[0, 62, -2], [8, 62, -2]]
         }
       ],
       "disc": {
-        "kf": [[0, 60.4, 17.6], [8.0, 60.4, 17.6]]
+        "kf": [[0, 60.4, 17.6], [8, 60.4, 17.6]]
       },
       "fx": [
         {
@@ -4557,7 +4557,7 @@
       ],
       "situation": {
         "en": "You call a foul against the marker. Instantly their substitutes start shouting from the sideline that there was no contact, and one of your own team-mates twenty metres upfield insists loudly that there definitely was.",
-        "cs": "Zvoláš faul na markera. Jejich střídající hráči okamžitě začnou z postranní čáry křičet, že žádný kontakt nebyl, a jeden tvůj spoluhráč dvacet metrů dál nahlas trvá na tom, že určitě byl."
+        "cs": "Zavoláš faul na markera. Jejich střídající hráči okamžitě začnou ze sidelinu křičet, že žádný kontakt nebyl, a jeden tvůj spoluhráč dvacet metrů dál nahlas trvá na tom, že určitě byl."
       },
       "question": {
         "en": "Whose conversation is this?",
@@ -4708,7 +4708,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the thrower being talked at",
-        "cs": "házeč, na kterého se pokřikuje"
+        "cs": "házeč, na kterého pokřikují"
       },
       "view": [40, 2, 44, 33],
       "dur": 7.8,
@@ -4731,7 +4731,7 @@
           "id": "D2",
           "team": "def",
           "label": "D2",
-          "kf": [[0, 72, 12], [3.0, 70, 14], [7.8, 70, 14]]
+          "kf": [[0, 72, 12], [3, 70, 14], [7.8, 70, 14]]
         },
         {
           "id": "O2",
@@ -4780,7 +4780,7 @@
       ],
       "situation": {
         "en": "You are looking upfield with the disc when a defender to your right starts waving and shouting “here! here!”, exactly as if they were one of your cutters. It is the third time this game.",
-        "cs": "Rozhlížíš se s diskem po hřišti, když obránce po tvé pravici začne mávat a křičet „sem! sem!“, přesně jako by byl jeden z vašich cutterů. Je to už potřetí za zápas."
+        "cs": "Rozhlížíš se s diskem po hřišti, když obránce po tvé pravici začne mávat a křičet „sem! sem!“, přesně jako by byl jeden z vašich nabíhačů. Je to už potřetí za zápas."
       },
       "question": {
         "en": "Is that within the rules?",

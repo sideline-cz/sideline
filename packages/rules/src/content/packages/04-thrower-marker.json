@@ -393,11 +393,11 @@
       ],
       "situation": {
         "en": "While you fake, the marker lunges and bumps your arm — non-minor contact, but you keep the disc and your team has a great flow going. You would rather not stop the game. You have not started any throwing motion.",
-        "cs": "Při fake si marker skočí do tebe a drcne tě do ruky — výrazný kontakt, ale disk držíš a váš útok má výbornou dynamiku. Nechceš hru zastavovat. Žádný hod jsi nezačal."
+        "cs": "Při fake si marker skočí do tebe a drcne tě do ruky — nezanedbatelný kontakt, ale disk držíš a váš útok má výbornou dynamiku. Nechceš hru zastavovat. Žádný hod jsi nezačal."
       },
       "question": {
         "en": "Which call keeps play running — and what does it do?",
-        "cs": "Jaká hláška nechá hru běžet — a co udělá?"
+        "cs": "Jaký call nechá hru běžet — a co udělá?"
       },
       "explain": {
         "en": "When a marker fouls you before the release and outside your throwing motion, rule 17.6.1.3 gives you a choice: call “Foul” (play stops, check, stall at 1) or call “Contact” — play never stops and the marker resumes the count at “stalling 1”. With your offence in rhythm, “Contact” is the smart call. If the marker contests the contact call, play stops and the count resumes at max 6.",
@@ -595,7 +595,7 @@
       },
       "title": {
         "en": "“Contact” — but you never touched them",
-        "cs": "„Contact“ — ale tys ho netkl"
+        "cs": "„Contact“ — ale tys se ho ani nedotkl"
       },
       "roleTeam": "def",
       "role": {
@@ -678,7 +678,7 @@
       ],
       "situation": {
         "en": "You are marking a thrower at “stalling 4”. From your point of view there was a jersey brush at most — nothing that moved anyone. The thrower calls “Contact”. You honestly disagree that any non-minor contact happened.",
-        "cs": "Markuješ házeče na „stalling 4“. Z tvého pohledu šlo maximálně o škrtnutí o dres — nic, co by s kýmkoli hnulo. Házeč volá „Contact“. Upřímně nesouhlasíš, že k výraznému kontaktu došlo."
+        "cs": "Markuješ házeče na „stalling 4“. Z tvého pohledu šlo maximálně o škrtnutí o dres — nic, co by s kýmkoli hnulo. Házeč volá „Contact“. Upřímně nesouhlasíš, že k nezanedbatelnému kontaktu došlo."
       },
       "question": {
         "en": "What happens when you contest the “Contact” call?",
@@ -880,7 +880,7 @@
       },
       "title": {
         "en": "The thrower ploughs into you",
-        "cs": "Házeč tě prostě sundá"
+        "cs": "Házeč do tebe naplno vrazí"
       },
       "roleTeam": "def",
       "role": {
@@ -952,7 +952,7 @@
       ],
       "situation": {
         "en": "You are marking at a legal distance, standing still. The thrower drives a big pivot straight through your stationary body — clearly non-minor contact — with no throw. The thrower admits it.",
-        "cs": "Markuješ na legální vzdálenost a stojíš na místě. Házeč udělá razantní pivot přímo skrz tebe — jasně výrazný kontakt — a nehází. Sám uznává, že to byl on."
+        "cs": "Markuješ na legální vzdálenost a stojíš na místě. Házeč udělá razantní pivot přímo skrz tebe — jasně nezanedbatelný kontakt — a nehází. Sám uznává, že to byl on."
       },
       "question": {
         "en": "What do you call, and what happens?",
@@ -1164,7 +1164,7 @@
       },
       "title": {
         "en": "Your follow-through hits the marker",
-        "cs": "Trefíš markera dohmatem"
+        "cs": "Trefíš markera při dotažení hodu"
       },
       "roleTeam": "off",
       "role": {
@@ -1258,7 +1258,7 @@
       ],
       "situation": {
         "en": "You release a big backhand. The disc is already gone when your trailing hand sweeps through and clips the marker’s shoulder. They call a foul on you. The pass is completed downfield.",
-        "cs": "Vypustíš velký backhand. Disk je už pryč, když tvoje dobíhající ruka projede a škrtne markera o rameno. Volá na tebe faul. Přihrávka je vepředu dokončená."
+        "cs": "Vypustíš velký backhand. Disk je už pryč, když tvoje ruka v dohmatu projede a škrtne markera o rameno. Volá na tebe faul. Přihrávka je vepředu dokončená."
       },
       "question": {
         "en": "Is that a foul on you?",
@@ -2023,7 +2023,7 @@
       ],
       "situation": {
         "en": "A poaching defender launches himself at your throwing arm from your blind side, fully airborne and out of control. He arrives late and clatters into you at speed. You are shaken but unhurt, and the disc never left your hand.",
-        "cs": "Poachující obránce se ti z mrtvého úhlu vrhne po hodové ruce, celý ve vzduchu a bez kontroly. Dorazí pozdě a v rychlosti do tebe napálí. Jsi otřesený, ale nezraněný, a disk ti ruku neopustil."
+        "cs": "Poachující obránce se ti z mrtvého úhlu vrhne po házející ruce, celý ve vzduchu a bez kontroly. Dorazí pozdě a v rychlosti do tebe napálí. Jsi otřesený, ale nezraněný, a disk ti ruku neopustil."
       },
       "question": {
         "en": "What is the strongest call here?",

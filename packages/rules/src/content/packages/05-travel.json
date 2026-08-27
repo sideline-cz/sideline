@@ -119,7 +119,7 @@
       ],
       "situation": {
         "en": "The receiver catches the disc on the run, slows — but then drifts two extra steps sideways to a better throwing angle before putting a pivot down. No throw yet. You saw it clearly.",
-        "cs": "Receiver chytí disk v běhu, zpomalí — ale pak si přešlápne dva kroky do strany za lepším úhlem, než si založí pivot. Zatím nehází. Viděl jsi to jasně."
+        "cs": "Receiver chytí disk v běhu, zpomalí — ale pak popojde dva kroky do strany za lepším úhlem, než si založí pivot. Zatím nehází. Viděl jsi to jasně."
       },
       "question": {
         "en": "You call “Travel”. What happens now?",
@@ -445,11 +445,11 @@
       ],
       "situation": {
         "en": "You called the travel; the stall is paused and the pivot is not fixed yet. Instead of correcting it, the thrower fires a huck — completed deep. What can you do?",
-        "cs": "Hlásil jsi travel; stall je pozastavený a pivot ještě není opravený. Místo opravy házeč pálí huck — a spojka dojde. Co s tím můžeš dělat?"
+        "cs": "Hlásil jsi travel; stall je pozastavený a pivot ještě není opravený. Místo opravy házeč pálí huck — a přihrávka dojde. Co s tím můžeš dělat?"
       },
       "question": {
         "en": "The pass after your travel call was completed. What now?",
-        "cs": "Přihrávka po tvém travelu byla zkompletovaná. Co teď?"
+        "cs": "Přihrávka po tvém travelu byla dokončená. Co teď?"
       },
       "explain": {
         "en": "If the thrower completes a pass after a travel infraction but before correcting the pivot, the defence may call a travel violation (18.2.6): play stops, the disc returns to the thrower, who returns to the location they occupied at the time of the infraction, and play restarts with a check. The accepted breach belongs to the offence, so the stall count resumes at maximum 9 (9.5.2).",
@@ -1878,7 +1878,7 @@
       },
       "question": {
         "en": "Can they wind up while walking back?",
-        "cs": "Může se nápřahovat cestou zpátky?"
+        "cs": "Může dělat nápřah cestou zpátky?"
       },
       "explain": {
         "en": "No. Whenever the thrower must move to a specified location, failing to establish a pivot point BEFORE a wind-up or throwing motion begins is itself a travel infraction (18.2.4.3). The sequence is fixed: get to the spot, put the pivot down, then start the throw. And 18.2.5.1 requires that relocation to happen without delay — from both of you.",
@@ -2025,7 +2025,7 @@
       },
       "title": {
         "en": "A very convenient bobble",
-        "cs": "Velmi šikovné žonglování"
+        "cs": "Velmi příhodné žonglování"
       },
       "roleTeam": "def",
       "role": {
@@ -2375,7 +2375,7 @@
       ],
       "situation": {
         "en": "The marker had reached “stalling 5” when they called a travel on you. You walk back to the spot they indicate and put the pivot down. They immediately say “…six”.",
-        "cs": "Marker byl na „stalling 5“, když na tebe zavolal travel. Vrátíš se na místo, které ukázal, a položíš pivot. On okamžitě řekne „…šest“."
+        "cs": "Marker byl na „stalling 5“, když na tebe zavolal travel. Vrátíš se na místo, které ukázal, a položíš pivot. On okamžitě řekne „…six“."
       },
       "question": {
         "en": "Should they have restarted with the word “Stalling”?",
