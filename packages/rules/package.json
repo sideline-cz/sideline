@@ -32,7 +32,8 @@
     "dev": "tsc-watch -b tsconfig.build.json --onSuccess \"tsc-alias -p tsconfig.build.json\"",
     "check": "tsc -b tsconfig.json",
     "test": "vitest",
-    "coverage": "vitest --coverage"
+    "coverage": "vitest --coverage",
+    "review:cs": "node authoring/review-server.mjs"
   },
   "devDependencies": {
     "tsc-alias": "*",
