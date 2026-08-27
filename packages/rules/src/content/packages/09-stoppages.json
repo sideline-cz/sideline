@@ -399,7 +399,7 @@
       ],
       "situation": {
         "en": "Play was stopped for a foul call and everyone has taken their positions. You are the marker, still walking in, and you have not touched the disc to check it in — and the thrower fires a pass downfield anyway. Their cutter catches it.",
-        "cs": "Hra byla zastavená kvůli faulu a všichni zaujali pozice. Jsi marker, ještě docházíš a disku jsi se nedotkl, aby byl checknutý — a házeč přesto vypálí přihrávku dopředu. Jejich nabíhač ji chytí."
+        "cs": "Hra byla zastavená kvůli faulu a všichni zaujali pozice. Jsi marker, ještě docházíš a disku ses nedotkl, aby byl checknutý — a házeč přesto vypálí přihrávku dopředu. Jejich nabíhač ji chytí."
       },
       "question": {
         "en": "The pass was caught. Does it count?",
@@ -606,7 +606,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the thrower who pulls up injured",
-        "cs": "házeč, kterého to chytne"
+        "cs": "házeč, kterého chytne sval"
       },
       "view": [46, 3.5, 40, 30],
       "dur": 6.6,
@@ -1217,7 +1217,7 @@
       ],
       "situation": {
         "en": "Play stopped at “stalling 4” for a foul call, and everyone took their positions. As you reach in to touch the disc, their cutter is already breaking out of the stack — moving before the check, stealing a start.",
-        "cs": "Hra se zastavila na „stalling 4“ kvůli faulu a všichni zaujali pozice. Ve chvíli, kdy saháš po disku, jejich nabíhač už vybíhá ze stacku — v pohybu před checkem, kradený start."
+        "cs": "Hra se zastavila na „stalling 4“ kvůli faulu a všichni zaujali pozice. Ve chvíli, kdy saháš po disku, jejich nabíhač už vybíhá ze stacku — v pohybu před checkem, krade si start."
       },
       "question": {
         "en": "What can you do about it?",
@@ -1507,7 +1507,7 @@
       ],
       "situation": {
         "en": "Trapped on the line at “stalling 7” with nothing open, you form the T and shout “time-out”. Your team used its last one two points ago — you had forgotten.",
-        "cs": "Zavřený u čáry na „stalling 7“, nikdo volný, složíš „T“ a křikneš „time-out“. Tvůj tým poslední spotřeboval před dvěma body — zapomněl jsi."
+        "cs": "Zavřený u čáry na „stalling 7“, nikdo volný, složíš „T“ a křikneš „time-out“. Tvůj tým ten poslední spotřeboval před dvěma body — zapomněl jsi."
       },
       "question": {
         "en": "What does that cost you?",
@@ -2213,7 +2213,7 @@
       ],
       "situation": {
         "en": "You called a foul on the mark at “stalling 4”, convinced they hit your arm. Talking it through, you realise it was your own follow-through you felt. You want to take it back.",
-        "cs": "Na „stalling 4“ jsi zavolal faul na marce, přesvědčený, že ti zasáhl ruku. Když si to proberete, dojde ti, že jsi cítil vlastní dohmat. Chceš to vzít zpět."
+        "cs": "Na „stalling 4“ jsi zavolal faul na marce, přesvědčený, že ti zasáhl ruku. Když si to proberete, dojde ti, že jsi cítil vlastní dotažení. Chceš to vzít zpět."
       },
       "question": {
         "en": "Can you retract it, and what does it cost?",
@@ -4251,7 +4251,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the cutter whose shoe has gone",
-        "cs": "hráč, kterému se rozpadla obuv"
+        "cs": "nabíhač, kterému se rozpadla kopačka"
       },
       "view": [40, 2, 44, 33],
       "dur": 7.6,
@@ -4557,7 +4557,7 @@
       ],
       "situation": {
         "en": "You call a foul against the marker. Instantly their substitutes start shouting from the sideline that there was no contact, and one of your own team-mates twenty metres upfield insists loudly that there definitely was.",
-        "cs": "Zvoláš faul na markera. Jejich střídající hráči okamžitě začnou z postranní čáry křičet, že žádný kontakt nebyl, a jeden tvůj spoluhráč dvacet metrů dál nahlas trvá na tom, že určitě byl."
+        "cs": "Zavoláš faul na markera. Jejich střídající hráči okamžitě začnou ze sidelinu křičet, že žádný kontakt nebyl, a jeden tvůj spoluhráč dvacet metrů dál nahlas trvá na tom, že určitě byl."
       },
       "question": {
         "en": "Whose conversation is this?",
@@ -4708,7 +4708,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the thrower being talked at",
-        "cs": "házeč, na kterého se pokřikuje"
+        "cs": "házeč, na kterého pokřikují"
       },
       "view": [40, 2, 44, 33],
       "dur": 7.8,
@@ -4780,7 +4780,7 @@
       ],
       "situation": {
         "en": "You are looking upfield with the disc when a defender to your right starts waving and shouting “here! here!”, exactly as if they were one of your cutters. It is the third time this game.",
-        "cs": "Rozhlížíš se s diskem po hřišti, když obránce po tvé pravici začne mávat a křičet „sem! sem!“, přesně jako by byl jeden z vašich cutterů. Je to už potřetí za zápas."
+        "cs": "Rozhlížíš se s diskem po hřišti, když obránce po tvé pravici začne mávat a křičet „sem! sem!“, přesně jako by byl jeden z vašich nabíhačů. Je to už potřetí za zápas."
       },
       "question": {
         "en": "Is that within the rules?",

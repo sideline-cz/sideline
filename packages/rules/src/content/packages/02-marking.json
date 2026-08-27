@@ -1043,7 +1043,7 @@
       ],
       "situation": {
         "en": "The marker is crowding you, closer than a disc diameter. Mid-windup you shout “disc space” — and release the throw anyway. The pass dies in the grass, incomplete.",
-        "cs": "Marker se na tebe lepí blíž než na průměr disku. Uprostřed nápřahu křikneš „disc space“ — a hod stejně vypustíš. Přihrávka umře v trávě, nedošla."
+        "cs": "Marker se na tebe lepí blíž než průměr disku. Uprostřed nápřahu křikneš „disc space“ — a hod stejně vypustíš. Přihrávka umře v trávě, nedošla."
       },
       "question": {
         "en": "You called the infraction AND threw. What is the outcome?",
@@ -1333,7 +1333,7 @@
       ],
       "situation": {
         "en": "The marker has planted one foot on each side of your pivot, boxing it in, and has just fully uttered “stalling 5”. You did not move into that position — they set up around you.",
-        "cs": "Marker si postavil jednu nohu po každé straně tvého pivotu, uzavřel ho, a právě plně vyslovil „stalling 5“. Do té pozice jsi nevstoupil ty — postavil se tak okolo tebe."
+        "cs": "Marker si postavil jednu nohu po každé straně tvého pivotu, uzavřel ho, a právě dořekl „stalling 5“. Do té pozice jsi nevstoupil ty — postavil se tak okolo tebe."
       },
       "question": {
         "en": "What do you call, and what does it cost them?",
@@ -1795,7 +1795,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the thrower being enveloped",
-        "cs": "házeč, kterého obemyká"
+        "cs": "házeč, kterého marker obemyká"
       },
       "view": [46, 3.5, 40, 30],
       "dur": 6.4,
@@ -1878,7 +1878,7 @@
       ],
       "situation": {
         "en": "The marker has both arms stretched around either side of you, forming a cage — no contact, but the line between their arms passes well inside a disc diameter of your torso. They have just said “stalling 6”. You did not move into it.",
-        "cs": "Marker má obě paže roztažené kolem tebe jako klec — bez kontaktu, ale spojnice mezi jeho pažemi vede hluboko uvnitř průměru disku od tvého trupu. Právě řekl „stalling 6“. Ty ses do toho nepohnul."
+        "cs": "Marker má obě paže roztažené kolem tebe jako klec — bez kontaktu, ale spojnice mezi jeho pažemi vede hluboko uvnitř průměru disku od tvého trupu. Právě řekl „stalling 6“. Ty jsi do toho nevstoupil."
       },
       "question": {
         "en": "What is that, and what does it cost them?",
@@ -2281,7 +2281,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the thrower being rushed",
-        "cs": "házeč, na kterého se spěchá"
+        "cs": "házeč, na kterého marker tlačí"
       },
       "view": [46, 3.5, 40, 30],
       "dur": 6.4,
@@ -2353,7 +2353,7 @@
       ],
       "situation": {
         "en": "A fresh marker arrives on you after a switch and opens with “…four!” — no “Stalling”, and picking up a number from the previous marker who had drifted away. You have only just received the disc from that switch.",
-        "cs": "Po přebrání na tebe doběhne nový marker a začne „…čtyři!“ — bez „Stalling“ a naváže číslem po předchozím markerovi, který se mezitím vzdálil. Disk jsi po tom přebrání zrovna dostal."
+        "cs": "Po přebrání na tebe doběhne nový marker a začne „…four!“ — bez „Stalling“ a naváže číslem po předchozím markerovi, který se mezitím vzdálil. Disk jsi po tom přebrání zrovna dostal."
       },
       "question": {
         "en": "How many things are wrong with that count?",

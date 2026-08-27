@@ -115,7 +115,7 @@
       },
       "question": {
         "en": "What happens on an uncontested stall-out?",
-        "cs": "Co se stane při neconstestovaném stall-outu?"
+        "cs": "Co se stane při necontestovaném stall-outu?"
       },
       "explain": {
         "en": "Not releasing the pass before the marker first starts to say the word “ten” is a stall-out: a turnover (13.2.2). Play stops, so the disc does not travel — the defence takes possession exactly where your pivot was, everybody holds their position at the call (10.2.1), and play restarts with a check. The count on the new thrower starts fresh.",
@@ -640,7 +640,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the thrower being rushed",
-        "cs": "házeč, na kterého se spěchá"
+        "cs": "házeč, na kterého marker tlačí"
       },
       "view": [46, 3.5, 40, 30],
       "dur": 6.2,
@@ -962,7 +962,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the thrower being counted on",
-        "cs": "házeč, na kterého se počítá"
+        "cs": "házeč, na kterého marker počítá"
       },
       "view": [46, 3.5, 40, 30],
       "dur": 6.6,
@@ -2973,7 +2973,7 @@
       ],
       "situation": {
         "en": "You slide for a low pass. From your angle you had it before the grass; from theirs the disc clearly bounced. They call “down”, you contest, and after an honest discussion neither of you can say for certain what happened.",
-        "cs": "Kloužeš po nízké přihrávce. Z tvého úhlu jsi ji měl dřív než tráva; z jejich disk jasně odskočil. Volají „down“, ty contestuješ, a po poctivé debatě ani jeden nedokáže s jistotou říct, co se stalo."
+        "cs": "Kloužeš po nízké přihrávce. Z tvého pohledu jsi ji měl dřív, než se dotkla trávy; z jejich disk jasně odskočil. Volají „down“, ty contestuješ, a po poctivé debatě ani jeden nedokáže s jistotou říct, co se stalo."
       },
       "question": {
         "en": "Nobody knows. What do the rules do?",

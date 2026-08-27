@@ -119,7 +119,7 @@
       },
       "question": {
         "en": "Where can you put the disc into play?",
-        "cs": "Kde můžeš zahájit hru s diskem?"
+        "cs": "Odkud můžeš uvést disk do hry?"
       },
       "explain": {
         "en": "A pull that lands out-of-bounds untouched gives the offence a choice (7.12): take the disc where it crossed the perimeter line, or play it from the brick mark closest to your defending end zone. The brick option is binding and must be signalled before picking the disc up — one arm fully extended overhead, calling “brick”.",
@@ -421,7 +421,7 @@
       ],
       "situation": {
         "en": "Your teammate attacks the pull in the air, gets fingers on it — and bobbles it to the ground. The other team starts jogging towards the disc.",
-        "cs": "Spoluhráč jde po pullu ve vzduchu, dostane na něj prsty — a upustí ho na zem. Soupeř se rozbíhá k disku."
+        "cs": "Spoluhráč jde po pullu ve vzduchu, dostane na něj prsty — a vypadne mu na zem. Soupeř se rozbíhá k disku."
       },
       "question": {
         "en": "What is the right ruling?",
@@ -628,7 +628,7 @@
       "roleTeam": "off",
       "role": {
         "en": "a receiver on the goal line",
-        "cs": "hráč útoku na brankové čáře"
+        "cs": "receiver na brankové čáře"
       },
       "view": [-2, -4.5, 104, 46],
       "dur": 8.2,
@@ -1038,7 +1038,7 @@
       ],
       "situation": {
         "en": "The pull lands in the central zone, then rolls untouched all the way back — through your defending end zone and out over the sideline there. Nobody touched it at any point.",
-        "cs": "Pull dopadne do centrální zóny a pak se nedotčený kutálí zpátky — přes vaši bráněnou endzónu a tam přes postranní čáru do autu. Nikdo se ho ani nedotkl."
+        "cs": "Pull dopadne do centrální zóny a pak se nedotčený kutálí zpátky — přes vaši vlastní endzónu a tam přes postranní čáru do autu. Nikdo se ho ani nedotkl."
       },
       "question": {
         "en": "Where do you establish the pivot?",
@@ -1576,7 +1576,7 @@
       ],
       "situation": {
         "en": "You are on the line about to pull. A receiver breaks forward off their goal line a clear half-second before the disc is released — an unfair head start. You call “false start” immediately.",
-        "cs": "Stojíš na čáře a chystáš se pullovat. Jeden z příjemců vyrazí ze své brankové čáry jasně půl sekundy před vypuštěním disku — nefér start. Okamžitě voláš „false start“."
+        "cs": "Stojíš na čáře a chystáš se pullovat. Jeden z receiverů vyrazí ze své brankové čáry jasně půl sekundy před vypuštěním disku — nefér náskok. Okamžitě voláš „false start“."
       },
       "question": {
         "en": "What does the false start call get you?",
@@ -1783,7 +1783,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the receiver who caught it",
-        "cs": "receiver, který chytil"
+        "cs": "receiver, který ho chytil"
       },
       "view": [-2, -4.5, 104, 46],
       "dur": 7,
@@ -1867,7 +1867,7 @@
       ],
       "situation": {
         "en": "The pull hangs up and drops short. You run back and catch it cleanly, eight metres deep inside the end zone you are defending, and establish possession there.",
-        "cs": "Pull se zastaví ve vzduchu a padá krátce. Doběhneš zpátky, čistě ho chytíš osm metrů hluboko v endzóně, kterou brániš, a získáš tam držení."
+        "cs": "Pull se zastaví ve vzduchu a je krátký. Doběhneš zpátky, čistě ho chytíš osm metrů hluboko v endzóně, kterou brániš, a získáš tam držení."
       },
       "question": {
         "en": "Where do you have to play it from?",
@@ -2033,7 +2033,7 @@
       "roleTeam": "off",
       "role": {
         "en": "a receiver on the line",
-        "cs": "příjemce na čáře"
+        "cs": "receiver na čáře"
       },
       "view": [-2, -4.5, 104, 46],
       "dur": 6.8,
@@ -2273,7 +2273,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the receiver waiting under it",
-        "cs": "příjemce čekající pod ním"
+        "cs": "receiver čekající pod ním"
       },
       "view": [-2, -4.5, 104, 46],
       "dur": 7,
@@ -2352,7 +2352,7 @@
       ],
       "situation": {
         "en": "You are camped under the pull waiting to catch it when their trailing defender reaches in and taps it away from you. It falls to the ground a few metres on. Nobody on your team ever touched it.",
-        "cs": "Stojíš pod pullem a čekáš, až ho chytíš, když do něj dobíhající obránce sáhne a srazí ti ho. Disk dopadne pár metrů dál. Nikdo z tvého týmu se ho nedotkl."
+        "cs": "Stojíš pod pullem a čekáš na něj, když do něj dobíhající obránce sáhne a srazí ti ho. Disk dopadne pár metrů dál. Nikdo z tvého týmu se ho nedotkl."
       },
       "question": {
         "en": "Was the defender allowed to do that?",
@@ -2792,7 +2792,7 @@
       ],
       "situation": {
         "en": "A goal has just been scored and the next point is about to start. Your team wants to change several players, and nobody on your team has raised a hand to signal readiness for the pull yet.",
-        "cs": "Právě padl bod a chystá se další. Tvůj tým chce vyměnit několik hráčů a nikdo z tvého týmu ještě nezvedl ruku na signál připravenosti k pullu."
+        "cs": "Právě padl bod a chystá se další. Tvůj tým chce vyměnit několik hráčů a nikdo z tvého týmu ještě nezvedl ruku na znamení připravenosti k pullu."
       },
       "question": {
         "en": "How many players may you swap, and until when?",

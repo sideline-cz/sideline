@@ -397,7 +397,7 @@
       },
       "question": {
         "en": "Which call keeps play running — and what does it do?",
-        "cs": "Jaká hláška nechá hru běžet — a co udělá?"
+        "cs": "Jaký call nechá hru běžet — a co udělá?"
       },
       "explain": {
         "en": "When a marker fouls you before the release and outside your throwing motion, rule 17.6.1.3 gives you a choice: call “Foul” (play stops, check, stall at 1) or call “Contact” — play never stops and the marker resumes the count at “stalling 1”. With your offence in rhythm, “Contact” is the smart call. If the marker contests the contact call, play stops and the count resumes at max 6.",
@@ -1258,7 +1258,7 @@
       ],
       "situation": {
         "en": "You release a big backhand. The disc is already gone when your trailing hand sweeps through and clips the marker’s shoulder. They call a foul on you. The pass is completed downfield.",
-        "cs": "Vypustíš velký backhand. Disk je už pryč, když tvoje dobíhající ruka projede a škrtne markera o rameno. Volá na tebe faul. Přihrávka je vepředu dokončená."
+        "cs": "Vypustíš velký backhand. Disk je už pryč, když tvoje ruka v dotažení projede a škrtne markera o rameno. Volá na tebe faul. Přihrávka je vepředu dokončená."
       },
       "question": {
         "en": "Is that a foul on you?",
@@ -1513,7 +1513,7 @@
       ],
       "situation": {
         "en": "The marker has been inside a disc diameter of your torso for two counts — you never moved into them. As you pivot out to throw, your shoulder meets theirs: real, non-minor contact. They did not lunge; they were simply standing there, too close.",
-        "cs": "Marker je už dvě čísla blíž než průměr disku od tvého trupu — ty jsi do něj nevstoupil. Když se vypivotuješ na hod, střetnou se vaše ramena: skutečný, nezanedbatelný kontakt. Nevrhl se na tebe; jen tam takhle blízko stál."
+        "cs": "Marker je už dvě čísla blíž než průměr disku od tvého trupu — ty jsi do něj nevstoupil. Když se vypivotuješ na hod, střetnou se vaše ramena: skutečný, výrazný kontakt. Nevrhl se na tebe; jen tam takhle blízko stál."
       },
       "question": {
         "en": "Whose foul is it?",
@@ -2023,7 +2023,7 @@
       ],
       "situation": {
         "en": "A poaching defender launches himself at your throwing arm from your blind side, fully airborne and out of control. He arrives late and clatters into you at speed. You are shaken but unhurt, and the disc never left your hand.",
-        "cs": "Poachující obránce se ti z mrtvého úhlu vrhne po hodové ruce, celý ve vzduchu a bez kontroly. Dorazí pozdě a v rychlosti do tebe napálí. Jsi otřesený, ale nezraněný, a disk ti ruku neopustil."
+        "cs": "Poachující obránce se ti z mrtvého úhlu vrhne po házející ruce, celý ve vzduchu a bez kontroly. Dorazí pozdě a v rychlosti do tebe napálí. Jsi otřesený, ale nezraněný, a disk ti ruku neopustil."
       },
       "question": {
         "en": "What is the strongest call here?",

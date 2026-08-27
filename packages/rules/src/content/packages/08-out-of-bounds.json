@@ -1846,7 +1846,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the receiver reaching the end zone",
-        "cs": "receiver dobíhající endzónu"
+        "cs": "receiver dobíhající do endzóny"
       },
       "view": [56, -6, 48, 48],
       "dur": 7,
@@ -2096,7 +2096,7 @@
       "roleTeam": "off",
       "role": {
         "en": "the receiver who thinks they scored",
-        "cs": "receiver, který myslí, že skóroval"
+        "cs": "receiver, který si myslí, že skóroval"
       },
       "view": [56, -6, 48, 48],
       "dur": 7.2,

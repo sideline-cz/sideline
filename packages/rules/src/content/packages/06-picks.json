@@ -110,7 +110,7 @@
       ],
       "situation": {
         "en": "You chase your cutter through the stack. A stationary offensive player is suddenly in your running lane — you have to stop, and your cutter breaks free. Neither of them is making a play on the disc; the thrower still holds it.",
-        "cs": "Doprovázíš svého nabíhače skrz stack. V dráze ti najednou stojí jiný útočník — musíš zastavit a tvůj hráč se utrhne. Ani jeden z nich nehraje na disk; házeč ho pořád drží."
+        "cs": "Honíš svého nabíhače skrz stack. V dráze ti najednou stojí jiný útočník — musíš zastavit a tvůj hráč se utrhne. Ani jeden z nich nehraje na disk; házeč ho pořád drží."
       },
       "question": {
         "en": "What do you call, and how is it resolved?",
@@ -455,7 +455,7 @@
       ],
       "situation": {
         "en": "You are chasing your cutter through the stack when a stationary offensive player blocks your lane, and you call “Pick!” just as the throw goes up. The pass flies to the OTHER side of the field, nowhere near your cutter, and is caught cleanly. Everyone agrees the pick had nothing to do with it.",
-        "cs": "Běžíš za svým cutterem skrz stack, když ti stojící hráč útoku zablokuje dráhu, a ve chvíli, kdy jde přihrávka nahoru, voláš „Pick!“. Přihrávka letí na DRUHOU stranu hřiště, daleko od tvého hráče, a je čistě chycená. Všichni se shodnou, že pick s ní neměl nic společného."
+        "cs": "Běžíš za svým nabíhačem skrz stack, když ti stojící hráč útoku zablokuje dráhu, a ve chvíli, kdy jde přihrávka nahoru, voláš „Pick!“. Přihrávka letí na DRUHOU stranu hřiště, daleko od tvého hráče, a je čistě chycená. Všichni se shodnou, že pick s ní neměl nic společného."
       },
       "question": {
         "en": "What is the correct resolution?",
@@ -759,11 +759,11 @@
       ],
       "situation": {
         "en": "You launch a huck to your free cutter. Right around your release, their defender gets picked in the stack and calls it. Your cutter catches the disc cleanly downfield.",
-        "cs": "Pálíš huck na volného nabíhače. Zhruba ve chvíli vypuštění disku jeho obránce narazí na pick a hlásí ho. Tvůj hráč disk v pohodě chytá."
+        "cs": "Pálíš huck na volného nabíhače. Zhruba ve chvíli vypuštění disku jeho obránce dostane pick a hlásí ho. Tvůj hráč disk čistě chytá."
       },
       "question": {
         "en": "Does your completion stand?",
-        "cs": "Platí tvoje spojka?"
+        "cs": "Platí tvoje dokončená přihrávka?"
       },
       "explain": {
         "en": "A call while the disc is in the air lets play run until possession is decided (16.2). Then the branch: if the pick affected possession — typically, the picked defender would have made a play on the disc — the pass comes back to you (16.2.4.2.1) and players return to their release positions (10.2.2.1). If it did not affect the play, the completion stands (16.3). In both cases the picked defender may catch up (18.3.2) — and when the disc comes back to you, your stall count resumes at max 6 (9.5.5).",
@@ -976,7 +976,7 @@
       "roleTeam": "def",
       "role": {
         "en": "the defender who got blocked",
-        "cs": "obránce, kterému se to postavilo do cesty"
+        "cs": "obránce, kterému se někdo dostal do cesty"
       },
       "view": [40, -3.5, 62, 44],
       "dur": 7,
@@ -1547,7 +1547,7 @@
       ],
       "situation": {
         "en": "You call a pick and play stops. Your cutter had three metres on you by then, but they gained two of those before the obstruction and only one because of it. They want you to stay put; you want the whole three.",
-        "cs": "Zavoláš pick a hra se zastaví. Tvůj nabíhač měl v tu chvíli tříметrový náskok, ale dva metry z něj získal ještě před blokem a jen jeden kvůli němu. On chce, abys zůstal; ty chceš celé tři."
+        "cs": "Zavoláš pick a hra se zastaví. Tvůj nabíhač měl v tu chvíli třímetrový náskok, ale dva metry z něj získal ještě před blokem a jen jeden kvůli němu. On chce, abys zůstal; ty chceš celé tři."
       },
       "question": {
         "en": "How much ground do you get back?",
