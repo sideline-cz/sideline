@@ -595,7 +595,7 @@
       },
       "title": {
         "en": "“Contact” — but you never touched them",
-        "cs": "„Contact“ — ale tys ho netkl"
+        "cs": "„Contact“ — ale tys se ho ani nedotkl"
       },
       "roleTeam": "def",
       "role": {
@@ -880,7 +880,7 @@
       },
       "title": {
         "en": "The thrower ploughs into you",
-        "cs": "Házeč tě prostě sundá"
+        "cs": "Házeč do tebe naplno vrazí"
       },
       "roleTeam": "def",
       "role": {
@@ -1164,7 +1164,7 @@
       },
       "title": {
         "en": "Your follow-through hits the marker",
-        "cs": "Trefíš markera dohmatem"
+        "cs": "Trefíš markera při dotažení hodu"
       },
       "roleTeam": "off",
       "role": {
