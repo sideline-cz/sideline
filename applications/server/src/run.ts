@@ -25,6 +25,7 @@ import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepositor
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { PaymentReminderSyncEventsRepository } from '~/repositories/PaymentReminderSyncEventsRepository.js';
+import { RulesQuizSyncEventsRepository } from '~/repositories/RulesQuizSyncEventsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
@@ -44,6 +45,7 @@ import { ImapPoller } from '~/services/ImapPoller.js';
 import { LlmClient } from '~/services/LlmClient.js';
 import { PaymentReminderCron } from '~/services/PaymentReminderCron.js';
 import { RsvpReminderCron } from '~/services/RsvpReminderCron.js';
+import { RulesQuizCronEffect as RulesQuizCronBase } from '~/services/RulesQuizCron.js';
 import { TrainingAutoLogCron } from '~/services/TrainingAutoLogCron.js';
 import { TrainingClaimRequestCron } from '~/services/TrainingClaimRequestCron.js';
 import { WeeklySummaryCron } from '~/services/WeeklySummaryCron.js';
@@ -167,6 +169,18 @@ const WeeklySummaryCronEffect = WeeklySummaryCron.asEffect().pipe(
   ),
 );
 
+/** The scheduled rules quiz. Needs only team settings (for the per-team
+ * channel/interval/time) and its own outbox — the situation itself comes from
+ * `@sideline/rules/content`, already in memory. */
+const RulesQuizRepositoriesLive = Layer.mergeAll(
+  TeamSettingsRepository.Default,
+  RulesQuizSyncEventsRepository.Default,
+);
+
+const RulesQuizCronEffect = RulesQuizCronBase.pipe(
+  Effect.provide(RulesQuizRepositoriesLive.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg)))),
+);
+
 const PaymentReminderRepositoriesLive = Layer.mergeAll(
   FeeAssignmentsRepository.Default,
   PaymentReminderSyncEventsRepository.Default,
@@ -241,6 +255,7 @@ Effect.Do.pipe(
         AutoLogCron,
         StartCron,
         WeeklySummaryCronEffect,
+        RulesQuizCronEffect,
         PaymentReminderCronEffect,
         ClaimRequestCronEffect,
         CoachingStatusCronEffect,

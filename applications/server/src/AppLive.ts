@@ -59,6 +59,7 @@ import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepositor
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { RulesAttemptsRepository } from '~/repositories/RulesAttemptsRepository.js';
+import { RulesQuizSyncEventsRepository } from '~/repositories/RulesQuizSyncEventsRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { SudoSessionsRepository } from '~/repositories/SudoSessionsRepository.js';
 import { TeamChallengeRepository } from '~/repositories/TeamChallengeRepository.js';
@@ -162,6 +163,7 @@ const Repositories = Layer.mergeAll(
   CarpoolsRepository.Default,
   PollsRepository.Default,
   RulesAttemptsRepository.Default,
+  RulesQuizSyncEventsRepository.Default,
   TeamChannelsRepository.Default,
   TeamChannelAccessRepository.Default,
   PlayerRatingsRepository.Default,

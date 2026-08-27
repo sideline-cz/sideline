@@ -176,6 +176,14 @@ export function TeamSettingsPage({
   const [systemLogChannel, setSystemLogChannel] = React.useState(
     Option.getOrElse(teamInfo.systemLogChannelId, () => NONE_VALUE),
   );
+  const [rulesQuizChannel, setRulesQuizChannel] = React.useState(
+    Option.getOrElse(settings.rulesQuizChannelId, () => NONE_VALUE),
+  );
+  const [rulesQuizIntervalDays, setRulesQuizIntervalDays] = React.useState(
+    String(settings.rulesQuizIntervalDays),
+  );
+  const [rulesQuizTime, setRulesQuizTime] = React.useState(settings.rulesQuizTime);
+
   const [achievementChannel, setAchievementChannel] = React.useState(
     Option.getOrElse(teamInfo.achievementChannelId, () => NONE_VALUE),
   );
@@ -211,6 +219,9 @@ export function TeamSettingsPage({
     welcomeChannel !== Option.getOrElse(teamInfo.welcomeChannelId, () => NONE_VALUE) ||
     systemLogChannel !== Option.getOrElse(teamInfo.systemLogChannelId, () => NONE_VALUE) ||
     achievementChannel !== Option.getOrElse(teamInfo.achievementChannelId, () => NONE_VALUE) ||
+    rulesQuizChannel !== Option.getOrElse(settings.rulesQuizChannelId, () => NONE_VALUE) ||
+    rulesQuizIntervalDays !== String(settings.rulesQuizIntervalDays) ||
+    rulesQuizTime !== settings.rulesQuizTime ||
     welcomeTemplate !== Option.getOrElse(teamInfo.welcomeMessageTemplate, () => '');
 
   const welcomePreview = React.useMemo(() => {
@@ -331,6 +342,16 @@ export function TeamSettingsPage({
     )
       return;
     if (!isFormatValid(roleFormat) || !isFormatValid(channelFormat)) return;
+    // Bounds mirror the DTO check and the DB CHECK constraint; bailing here is
+    // what turns a rejected request into "nothing happens" rather than a toast.
+    const parsedRulesQuizIntervalDays = Number.parseInt(rulesQuizIntervalDays, 10);
+    if (
+      Number.isNaN(parsedRulesQuizIntervalDays) ||
+      parsedRulesQuizIntervalDays < 1 ||
+      parsedRulesQuizIntervalDays > 90
+    )
+      return;
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(rulesQuizTime)) return;
     setSavingSettings(true);
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
@@ -344,6 +365,9 @@ export function TeamSettingsPage({
             maxMissedRsvps: Option.some(parsedMaxMissedRsvps),
             claimRequestDaysBefore: Option.some(parsedClaimDaysBefore),
             rsvpReminderTime: Option.some(rsvpReminderTime),
+            rulesQuizChannelId: Option.some(channelToOption(rulesQuizChannel)),
+            rulesQuizIntervalDays: Option.some(parsedRulesQuizIntervalDays),
+            rulesQuizTime: Option.some(rulesQuizTime),
             timezone: Option.some(timezone),
             remindersChannelId: Option.some(channelToOption(remindersChannelId)),
             discordChannelLateRsvp: Option.some(channelToOption(channelLateRsvp)),
@@ -398,6 +422,9 @@ export function TeamSettingsPage({
     router,
     channelToOption,
     groupIdToOption,
+    rulesQuizTime,
+    rulesQuizIntervalDays,
+    rulesQuizChannel,
   ]);
 
   const handleSaveWelcome = React.useCallback(async () => {
@@ -677,6 +704,62 @@ export function TeamSettingsPage({
                   ]}
                 />
               </div>
+              <Separator />
+              {/* Scheduled rules quiz. Off unless a channel is picked — the
+                  channel IS the opt-in, so there is no separate toggle to get
+                  out of sync with it. */}
+              <div>
+                <label htmlFor='rules-quiz-channel' className='text-sm font-medium mb-1 block'>
+                  {tr('teamSettings_rulesQuizChannel')}
+                </label>
+                <p className='text-xs text-muted-foreground mb-2'>
+                  {tr('teamSettings_rulesQuizChannelHelp')}
+                </p>
+                <SearchableSelect
+                  id='rules-quiz-channel'
+                  value={rulesQuizChannel}
+                  onValueChange={setRulesQuizChannel}
+                  placeholder={tr('teamSettings_channelNone')}
+                  pinnedValues={[NONE_VALUE]}
+                  options={[
+                    { value: NONE_VALUE, label: tr('teamSettings_channelNone') },
+                    ...discordChannels
+                      .filter((ch) => ch.type === DISCORD_CHANNEL_TYPE_TEXT)
+                      .map((ch) => ({ value: ch.id, label: `# ${ch.name}` })),
+                  ]}
+                />
+              </div>
+              {rulesQuizChannel !== NONE_VALUE && (
+                <div className='grid gap-4 sm:grid-cols-2'>
+                  <div>
+                    <label htmlFor='rules-quiz-interval' className='text-sm font-medium mb-1 block'>
+                      {tr('teamSettings_rulesQuizInterval')}
+                    </label>
+                    <Input
+                      id='rules-quiz-interval'
+                      type='number'
+                      min={1}
+                      max={90}
+                      value={rulesQuizIntervalDays}
+                      onChange={(e) => setRulesQuizIntervalDays(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor='rules-quiz-time' className='text-sm font-medium mb-1 block'>
+                      {tr('teamSettings_rulesQuizTime')}
+                    </label>
+                    <Input
+                      id='rules-quiz-time'
+                      type='time'
+                      value={rulesQuizTime}
+                      onChange={(e) => setRulesQuizTime(e.target.value)}
+                    />
+                    <p className='text-xs text-muted-foreground mt-1'>
+                      {tr('teamSettings_rulesQuizTimeHelp')}
+                    </p>
+                  </div>
+                </div>
+              )}
               <Separator />
               <div className='flex items-center gap-2'>
                 <input

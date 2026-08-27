@@ -183,6 +183,9 @@ let teamSettingsStore: {
   reminders_channel_id: Option.Option<string>;
   timezone: string;
   max_missed_rsvps: number;
+  rules_quiz_channel_id: Option.Option<Discord.Snowflake>;
+  rules_quiz_interval_days: number;
+  rules_quiz_time: string;
   // Transitional (Release A): still threaded through the upsert full-row write so
   // PATCH never NULLs the stored column; removed in Release B with the column.
   discord_events_channel_id: Option.Option<string>;
@@ -200,6 +203,9 @@ const resetStores = () => {
     reminders_channel_id: Option.none(),
     timezone: 'Europe/Prague',
     max_missed_rsvps: 4,
+    rules_quiz_channel_id: Option.none(),
+    rules_quiz_interval_days: 7,
+    rules_quiz_time: '18:00',
     discord_events_channel_id: Option.none(),
   };
 };
@@ -542,6 +548,9 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
         timezone: teamSettingsStore.timezone,
         max_missed_rsvps: teamSettingsStore.max_missed_rsvps,
+        rules_quiz_channel_id: teamSettingsStore.rules_quiz_channel_id,
+        rules_quiz_interval_days: teamSettingsStore.rules_quiz_interval_days,
+        rules_quiz_time: teamSettingsStore.rules_quiz_time,
         discord_channel_late_rsvp: Option.none(),
         create_discord_channel_on_group: true,
         create_discord_channel_on_roster: true,
@@ -570,6 +579,9 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
         reminders_channel_id: teamSettingsStore.reminders_channel_id,
         timezone: teamSettingsStore.timezone,
         max_missed_rsvps: teamSettingsStore.max_missed_rsvps,
+        rules_quiz_channel_id: teamSettingsStore.rules_quiz_channel_id,
+        rules_quiz_interval_days: teamSettingsStore.rules_quiz_interval_days,
+        rules_quiz_time: teamSettingsStore.rules_quiz_time,
         discord_channel_late_rsvp: Option.none(),
         create_discord_channel_on_group: true,
         create_discord_channel_on_roster: true,
@@ -609,6 +621,9 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       reminders_channel_id: input.reminders_channel_id ?? teamSettingsStore.reminders_channel_id,
       timezone: input.timezone ?? teamSettingsStore.timezone,
       max_missed_rsvps: input.max_missed_rsvps ?? teamSettingsStore.max_missed_rsvps,
+      rules_quiz_channel_id: teamSettingsStore.rules_quiz_channel_id,
+      rules_quiz_interval_days: teamSettingsStore.rules_quiz_interval_days,
+      rules_quiz_time: teamSettingsStore.rules_quiz_time,
       discord_channel_late_rsvp: Option.none(),
       create_discord_channel_on_group: false,
       create_discord_channel_on_roster: true,
@@ -661,6 +676,9 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       reminders_channel_id: teamSettingsStore.reminders_channel_id,
       timezone: teamSettingsStore.timezone,
       max_missed_rsvps: teamSettingsStore.max_missed_rsvps,
+      rules_quiz_channel_id: teamSettingsStore.rules_quiz_channel_id,
+      rules_quiz_interval_days: teamSettingsStore.rules_quiz_interval_days,
+      rules_quiz_time: teamSettingsStore.rules_quiz_time,
       discord_channel_late_rsvp: Option.none(),
       create_discord_channel_on_group: false,
       create_discord_channel_on_roster: true,

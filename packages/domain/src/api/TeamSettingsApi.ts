@@ -61,6 +61,24 @@ export class TeamSettingsInfo extends Schema.Class<TeamSettingsInfo>('TeamSettin
   discordChannelCleanupOnRosterDeactivate: ChannelCleanupMode,
   discordRoleFormat: Schema.String,
   discordChannelFormat: Schema.String,
+  /**
+   * Scheduled rules quiz. `None` = off, which is every team until someone
+   * nominates a channel.
+   *
+   * All three decode TOLERANTLY (missing key → default) rather than as plain
+   * required fields, because web bundles a FROZEN copy of these schemas: a new
+   * bundle served against a server that predates these columns would otherwise
+   * fail to decode team settings entirely, taking the whole settings page down
+   * rather than just hiding one section. Same reasoning as
+   * `discordEventsChannelId` above.
+   *
+   * NOT `rulesChannelId` — `teams.rules_channel_id` is the onboarding
+   * code-of-conduct channel and is a different feature.
+   */
+  rulesQuizChannelId: Schema.OptionFromOptionalNullOr(Snowflake, { onNoneEncoding: null }),
+  rulesQuizIntervalDays: Schema.Int.pipe(Schema.withDecodingDefaultKey(() => 7)),
+  /** `HH:MM` in the team's own `timezone`. */
+  rulesQuizTime: Schema.String.pipe(Schema.withDecodingDefaultKey(() => '18:00')),
 }) {}
 
 export const UpdateTeamSettingsRequest = Schema.Struct({
@@ -116,6 +134,22 @@ export const UpdateTeamSettingsRequest = Schema.Struct({
   discordChannelCleanupOnRosterDeactivate: Schema.OptionFromOptional(ChannelCleanupMode),
   discordRoleFormat: Schema.OptionFromOptional(DiscordFormatString),
   discordChannelFormat: Schema.OptionFromOptional(DiscordFormatString),
+  rulesQuizChannelId: Schema.OptionFromOptional(Schema.OptionFromNullOr(Snowflake)),
+  // Bounds mirror the CHECK constraint in
+  // `1790500000_rules_quiz_schedule.ts` — the DB is the backstop, this is the
+  // message the user actually sees.
+  rulesQuizIntervalDays: Schema.OptionFromOptional(
+    Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 90 }))),
+  ),
+  rulesQuizTime: Schema.OptionFromOptional(
+    Schema.String.pipe(
+      Schema.check(
+        Schema.makeFilter<string>((v) =>
+          /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? true : 'Must be HH:MM',
+        ),
+      ),
+    ),
+  ),
 });
 export type UpdateTeamSettingsRequest = Schema.Schema.Type<typeof UpdateTeamSettingsRequest>;
 

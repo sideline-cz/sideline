@@ -16,6 +16,7 @@ export {
   PersonalEventsSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
+  RulesQuizSyncService,
   TeamChallengeSyncService,
   WeeklySummarySyncService,
 } from '~/rcp/index.js';

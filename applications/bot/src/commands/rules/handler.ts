@@ -4,12 +4,15 @@ import { LEVELS } from '@sideline/rules';
 import * as Ix from 'dfx/Interactions/index';
 import { Interaction } from 'dfx/Interactions/index';
 import * as DiscordTypes from 'dfx/types';
-import { Effect, Metric } from 'effect';
-import { guildLocale, userLocale } from '~/locale.js';
+import { Effect, Metric, Option } from 'effect';
+import { userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { asRecord } from '~/rest/recordProbe.js';
-import { buildQuizMessage } from '~/rest/rules/buildQuizMessage.js';
+import { buildChainMessage } from '~/rest/rules/buildChainMessage.js';
+import { quizPerms } from '~/rest/rules/perms.js';
 import { pickScenario } from '~/rest/rules/pickScenario.js';
+import { replayAnswer } from '~/rest/rules/quizState.js';
+import { interactionUserId } from '~/schemas.js';
 
 /** `@sideline/rules` has no runtime `Level` guard — `isLevel` lives in
  * `applications/web/src/lib/rules/level.ts` and is web-local. This is the
@@ -33,17 +36,22 @@ const packageOption = (interaction: DiscordTypes.APIInteraction): Level | undefi
 };
 
 /**
- * `/rules` — posts one situation to the channel as a shared quiz.
+ * `/rules` — one situation, **private to whoever ran it**, opening straight
+ * into their own chain.
  *
- * Answers synchronously with `CHANNEL_MESSAGE_WITH_SOURCE` and no fork: the
- * content is already in memory (see `pickScenario.ts`), so there is no I/O
- * racing the 3-second ack, and therefore no deferred reply and no
- * `forkDetach` backstop to get wrong.
+ * Ephemeral and single-step by design: the invoker already chose to
+ * practise, so a public card with a "start" button would put a wasted click
+ * in front of them and their picks in front of everyone else. The SHARED
+ * form of the quiz — public question, one button, per-participant private
+ * chains — is what the scheduled channel post produces (see
+ * `RulesQuizSyncService` in the bot and `RulesQuizCron` on the server); the
+ * two surfaces share `buildChainMessage`, so a chain answered from either
+ * behaves identically.
  *
- * Locale is deliberately split, per `applications/bot/AGENTS.md`: this
- * message is permanent and visible to the whole channel, so it renders in
- * the **guild** locale. The ephemeral chain each participant opens from it
- * renders in their own **user** locale — see `interactions/rules.ts`.
+ * Answers synchronously with no fork: content is already in memory (see
+ * `pickScenario.ts`), so there is no I/O racing the 3-second ack, and
+ * therefore no deferred reply and no `forkDetach` backstop to get wrong.
+ * Renders in the **user** locale — an ephemeral message has one reader.
  */
 export const rulesHandler = Interaction.asEffect().pipe(
   Effect.tap(() =>
@@ -53,25 +61,36 @@ export const rulesHandler = Interaction.asEffect().pipe(
     ),
   ),
   Effect.map((interaction) => {
+    const locale = userLocale(interaction);
     const scenario = pickScenario(packageOption(interaction));
+    const userId = interactionUserId(interaction);
 
-    if (!scenario) {
-      // Only reachable if the level filter matches nothing — surfaced rather
-      // than silently answering with a scenario from a different package.
+    if (!scenario || Option.isNone(userId)) {
+      // No scenario is only reachable if the level filter matches nothing —
+      // surfaced rather than silently answering from a different package.
       return Ix.response({
         type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
         data: {
-          content: m.bot_rules_none_found({}, { locale: userLocale(interaction) }),
+          content: m.bot_rules_none_found({}, { locale }),
           flags: DiscordTypes.MessageFlags.Ephemeral,
         },
       });
     }
 
-    const { embeds, components } = buildQuizMessage(scenario, guildLocale(interaction));
+    const { embeds, components } = buildChainMessage(
+      scenario,
+      replayAnswer(scenario, []),
+      quizPerms(scenario, userId.value),
+      locale,
+    );
 
     return Ix.response({
       type: DiscordTypes.InteractionCallbackTypes.CHANNEL_MESSAGE_WITH_SOURCE,
-      data: { embeds: [...embeds], components: [...components] },
+      data: {
+        embeds: [...embeds],
+        components: [...components],
+        flags: DiscordTypes.MessageFlags.Ephemeral,
+      },
     });
   }),
 );

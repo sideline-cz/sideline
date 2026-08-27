@@ -9,6 +9,7 @@ import { OnboardingSyncService } from './onboarding/index.js';
 import { PersonalEventsSyncService } from './personalEvents/index.js';
 import { RoleSyncService } from './role/index.js';
 import { RoleProvisionSyncService } from './roleProvision/index.js';
+import { RulesQuizSyncService } from './rulesQuiz/index.js';
 import { TeamChallengeSyncService } from './teamChallenge/index.js';
 import { WeeklySummarySyncService } from './weeklySummary/index.js';
 
@@ -25,6 +26,7 @@ export {
   PersonalEventsSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
+  RulesQuizSyncService,
   TeamChallengeSyncService,
   WeeklySummarySyncService,
 };

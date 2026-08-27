@@ -50,6 +50,9 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     discordChannelCleanupOnRosterDeactivate: 'delete',
                     discordRoleFormat: DEFAULT_ROLE_FORMAT,
                     discordChannelFormat: DEFAULT_CHANNEL_FORMAT,
+                    rulesQuizChannelId: Option.none(),
+                    rulesQuizIntervalDays: 7,
+                    rulesQuizTime: '18:00',
                     maxMissedRsvps: 4,
                     discordPersonalEventsCategoryId: Option.none(),
                     discordPersonalEventsGroupId: Option.none(),
@@ -77,6 +80,9 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                       s.discord_channel_cleanup_on_roster_deactivate,
                     discordRoleFormat: s.discord_role_format,
                     discordChannelFormat: s.discord_channel_format,
+                    rulesQuizChannelId: s.rules_quiz_channel_id,
+                    rulesQuizIntervalDays: s.rules_quiz_interval_days,
+                    rulesQuizTime: s.rules_quiz_time,
                     maxMissedRsvps: s.max_missed_rsvps,
                     discordPersonalEventsCategoryId: s.discord_personal_events_category_id,
                     discordPersonalEventsGroupId: s.discord_personal_events_group_id,
@@ -143,6 +149,9 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                       ? { discordChannelFormat: payload.discordChannelFormat.value }
                       : {}),
                     maxMissedRsvps: Option.getOrElse(payload.maxMissedRsvps, () => 4),
+                    rulesQuizChannelId: Option.flatten(payload.rulesQuizChannelId),
+                    rulesQuizIntervalDays: Option.getOrElse(payload.rulesQuizIntervalDays, () => 7),
+                    rulesQuizTime: Option.getOrElse(payload.rulesQuizTime, () => '18:00'),
                     discordPersonalEventsCategoryId: Option.flatten(
                       payload.discordPersonalEventsCategoryId,
                     ),
@@ -229,6 +238,15 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                       payload.maxMissedRsvps,
                       () => s.max_missed_rsvps,
                     ),
+                    rulesQuizChannelId: Option.match(payload.rulesQuizChannelId, {
+                      onNone: () => s.rules_quiz_channel_id,
+                      onSome: (v) => v,
+                    }),
+                    rulesQuizIntervalDays: Option.getOrElse(
+                      payload.rulesQuizIntervalDays,
+                      () => s.rules_quiz_interval_days,
+                    ),
+                    rulesQuizTime: Option.getOrElse(payload.rulesQuizTime, () => s.rules_quiz_time),
                     discordPersonalEventsCategoryId: Option.match(
                       payload.discordPersonalEventsCategoryId,
                       {
@@ -279,6 +297,9 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                     result.discord_channel_cleanup_on_roster_deactivate,
                   discordRoleFormat: result.discord_role_format,
                   discordChannelFormat: result.discord_channel_format,
+                  rulesQuizChannelId: result.rules_quiz_channel_id,
+                  rulesQuizIntervalDays: result.rules_quiz_interval_days,
+                  rulesQuizTime: result.rules_quiz_time,
                   maxMissedRsvps: result.max_missed_rsvps,
                   discordPersonalEventsCategoryId: result.discord_personal_events_category_id,
                   discordPersonalEventsGroupId: result.discord_personal_events_group_id,

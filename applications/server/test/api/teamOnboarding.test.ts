@@ -372,6 +372,9 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
             discord_role_format: '{role}',
             discord_channel_format: '{channel}',
             max_missed_rsvps: 4,
+            rules_quiz_channel_id: Option.none(),
+            rules_quiz_interval_days: 7,
+            rules_quiz_time: '18:00',
           }),
         )
       : Effect.succeed(Option.none()),
@@ -403,6 +406,9 @@ const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
       discord_role_format: input.discordRoleFormat ?? '{role}',
       discord_channel_format: input.discordChannelFormat ?? '{channel}',
       max_missed_rsvps: input.maxMissedRsvps ?? 4,
+      rules_quiz_channel_id: Option.none(),
+      rules_quiz_interval_days: 7,
+      rules_quiz_time: '18:00',
     });
   },
   getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),
