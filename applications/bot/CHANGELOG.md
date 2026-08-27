@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.36.0
+
+### 🚀 Features
+- a rules quiz in Discord — public question, private chain (#584)
+
 ## 0.35.0
 
 ### 🚀 Features

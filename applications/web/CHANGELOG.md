@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.33.0
+
+### 🚀 Features
+- mount the trainer in the app layout, and give it a palette (#581)
+
 ## 0.30.0
 
 ### 🚀 Features
