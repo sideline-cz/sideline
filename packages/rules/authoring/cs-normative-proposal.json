@@ -1,0 +1,128 @@
+[
+  {
+    "id": "s5",
+    "path": ["explain"],
+    "find": "iniciuje výrazný kontakt",
+    "repl": "iniciuje nezanedbatelný kontakt"
+  },
+  {
+    "id": "s10",
+    "path": ["explain"],
+    "find": "odpovědný za výrazný kontakt",
+    "repl": "odpovědný za nezanedbatelný kontakt"
+  },
+  {
+    "id": "s10",
+    "path": ["note"],
+    "find": "kontakt při dotažení hodu po vypuštění disku",
+    "repl": "kontakt při dohmatu po vypuštění disku"
+  },
+  {
+    "id": "pl6",
+    "path": ["steps", 0, "opts", 0, "why"],
+    "find": "který volají příjemci proti obraně",
+    "repl": "který volají receiveři proti obraně"
+  },
+  {
+    "id": "p3",
+    "path": ["explain"],
+    "find": "jako po hlášce brick",
+    "repl": "jako po callu brick"
+  },
+  {
+    "id": "p3",
+    "path": ["explain"],
+    "find": "hláška padá",
+    "repl": "call padá"
+  },
+  {
+    "id": "p3",
+    "path": ["note"],
+    "find": "Zrcadlová hláška patří obraně",
+    "repl": "Zrcadlový call patří obraně"
+  },
+  {
+    "id": "s4",
+    "path": ["note"],
+    "find": "pokud hodí před hláškou, během ní nebo těsně po ní, hláška nemá",
+    "repl": "pokud hodí před callem, během něj nebo těsně po něm, call nemá"
+  },
+  {
+    "id": "m3",
+    "path": ["note"],
+    "find": "pokud kolem tvé hlášky hodí, hláška nemá",
+    "repl": "pokud kolem tvého callu hodí, call nemá"
+  },
+  {
+    "id": "m4",
+    "path": ["explain"],
+    "find": "proti „hláškám pro jistotu“",
+    "repl": "proti „callům pro jistotu“"
+  },
+  {
+    "id": "m4",
+    "path": ["explain"],
+    "find": "zároveň před hláškou, během ní nebo po ní zkusíš přihrávku, hláška nemá",
+    "repl": "zároveň před callem, během něj nebo po něm zkusíš přihrávku, call nemá"
+  },
+  {
+    "id": "m4",
+    "path": ["explain"],
+    "find": "buď hláška, nebo hod",
+    "repl": "buď call, nebo hod"
+  },
+  {
+    "id": "s9",
+    "path": ["note"],
+    "find": "je slovní hláška",
+    "repl": "je slovní call"
+  },
+  {
+    "id": "f4",
+    "path": ["explain"],
+    "find": "jako u každé sporné hlášky",
+    "repl": "jako u každého sporného callu"
+  },
+  {
+    "id": "f4",
+    "path": ["explain"],
+    "find": "na místa při hlášce",
+    "repl": "na místa při callu"
+  },
+  {
+    "id": "s13",
+    "path": ["explain"],
+    "find": "v okamžiku hlášky",
+    "repl": "v okamžiku callu"
+  },
+  {
+    "id": "k3",
+    "path": ["explain"],
+    "find": "Oprávněná hláška pick",
+    "repl": "Oprávněný call pick"
+  },
+  {
+    "id": "s14",
+    "path": ["explain"],
+    "find": "Při hlášce s diskem ve vzduchu",
+    "repl": "Při callu s diskem ve vzduchu"
+  },
+  {
+    "id": "k3",
+    "path": ["explain"],
+    "find": "takže spojka platí",
+    "repl": "takže dokončená přihrávka platí"
+  },
+  {
+    "id": "s14",
+    "path": ["explain"],
+    "find": "spojka platí",
+    "repl": "dokončená přihrávka platí"
+  },
+  {
+    "id": "ob3",
+    "path": ["steps", 2, "opts", 0, "why"],
+    "find": "dělají běžnou spojku",
+    "repl": "dělají běžnou dokončenou přihrávku"
+  }
+]
