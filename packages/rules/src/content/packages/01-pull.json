@@ -115,7 +115,7 @@
       ],
       "situation": {
         "en": "The pull floats over the sideline and lands out-of-bounds without touching anyone or the playing field. You jog over to restart play.",
-        "cs": "Pull se snese za postranní čáru a dopadne do autu, aniž by se dotkl kohokoli nebo hřiště. Běžíš si pro disk, abys obnovil hru."
+        "cs": "Pull se snese za postranní čáru a dopadne do autu, aniž by se kohokoli dotkl nebo spadl do hřiště. Běžíš si pro disk, abys ho uvedl zpátky do hry."
       },
       "question": {
         "en": "Where can you put the disc into play?",
@@ -123,7 +123,7 @@
       },
       "explain": {
         "en": "A pull that lands out-of-bounds untouched gives the offence a choice (7.12): take the disc where it crossed the perimeter line, or play it from the brick mark closest to your defending end zone. The brick option is binding and must be signalled before picking the disc up — one arm fully extended overhead, calling “brick”.",
-        "cs": "Pull, který spadne do autu, aniž by se čehokoli dotkl, dává útoku volbu (7.12): vzít disk tam, kde přešel obvodovou čáru, nebo hrát z brick marku blíž k vlastní bráněné endzóně. Volba bricku je závazná a musí se signalizovat před zvednutím disku — plně natažená paže nad hlavou a zavolání „brick“."
+        "cs": "Pull, který spadne do autu, aniž by se čehokoli dotkl, dává útoku volbu (7.12): vzít disk tam, kde přešel obvodovou čáru, nebo hrát z brick marku blíž k vlastní (obranné) endzóně. Volba bricku je závazná a musí se signalizovat před zvednutím disku — plně natažená paže nad hlavou a zavolání „brick“."
       },
       "note": {
         "en": "If the pull first lands in the field and then rolls out, there is no brick: you take it where it crossed the line (7.11). And you must walk it in at walking pace or faster (8.5).",
@@ -158,7 +158,7 @@
               },
               "why": {
                 "en": "That is the rolled-out branch (7.11) — a disc that lands in and then rolls out. This one never landed in.",
-                "cs": "To je větev s dorolováním (7.11) — disk, který dopadne do hřiště a teprve pak vyjede. Tenhle v hřišti nikdy nebyl."
+                "cs": "To je varianta s vykutálením do autu (7.11) — disk, který dopadne do hřiště a teprve pak vyjede. Tenhle v hřišti nikdy nebyl."
               }
             },
             {
