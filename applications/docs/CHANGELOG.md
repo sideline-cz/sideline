@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.1
+
+### 🐛 Fixes
+- stop the FAQ promising a data export/delete button that does not exist (#592)
+
 ## 0.8.0
 
 ### 🚀 Features
