@@ -16,6 +16,7 @@ import {
   PersonalEventsSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
+  RulesQuizSyncService,
   TeamChallengeSyncService,
   WeeklySummarySyncService,
 } from '~/rcp/index.js';
@@ -56,6 +57,10 @@ const MockDiscordRESTLayer = Layer.succeed(
     },
   ) as never,
 );
+
+const MockRulesQuizSyncServiceLayer = Layer.succeed(RulesQuizSyncService, {
+  processTick: Effect.void,
+});
 
 const MockRoleSyncServiceLayer = Layer.succeed(RoleSyncService, {
   processTick: Effect.void,
@@ -149,6 +154,7 @@ describe('Bot', () => {
       MockInteractionsRegistryLayer,
       MockDiscordRESTLayer,
       MockRoleSyncServiceLayer,
+      MockRulesQuizSyncServiceLayer,
       MockChannelSyncServiceLayer,
       MockEventSyncServiceLayer,
       MockGuildJoinSyncServiceLayer,

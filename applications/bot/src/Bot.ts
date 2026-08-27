@@ -21,6 +21,7 @@ import {
   PersonalEventsSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
+  RulesQuizSyncService,
   TeamChallengeSyncService,
   WeeklySummarySyncService,
 } from './index.js';
@@ -116,6 +117,7 @@ export const program = Effect.Do.pipe(
   ),
   Effect.bind('events', () => eventHandlers),
   Effect.bind('roles', () => RoleSyncService.asEffect()),
+  Effect.bind('rulesQuiz', () => RulesQuizSyncService.asEffect()),
   Effect.bind('channels', () => ChannelSyncService.asEffect()),
   Effect.bind('eventSync', () => EventSyncService.asEffect()),
   Effect.bind('guildJoin', () => GuildJoinSyncService.asEffect()),
@@ -129,11 +131,18 @@ export const program = Effect.Do.pipe(
   Effect.bind('emailSync', () => EmailSyncService.asEffect()),
   Effect.bind('channelBackfill', () => ChannelBackfillService.asEffect()),
   Effect.bind('personalEvents', () => PersonalEventsSyncService.asEffect()),
+  // `pipe` overloads stop at 20 arguments and the service binds above now
+  // reach that ceiling, so the chain continues in a second `.pipe(...)`.
+  // Adding a 21st bind inline fails with a bare "Expected 0-20 arguments"
+  // pointing at the LAST line of the chain, which is a long way from the
+  // bind that actually caused it.
+).pipe(
   Effect.tap(() => Effect.logInfo('Bot connected to Discord')),
   Effect.andThen(
     ({
       events,
       roles,
+      rulesQuiz,
       channels,
       eventSync,
       guildJoin,
@@ -148,24 +157,37 @@ export const program = Effect.Do.pipe(
       channelBackfill,
       personalEvents,
     }) =>
+      // `Effect.all`'s tuple overloads stop at 20 elements, and the sync loops
+      // alone now exceed that. Nesting them in their own `Effect.all` keeps
+      // both calls small; `concurrency: 'unbounded'` on each means every loop
+      // still runs simultaneously, which is required — a bounded pool starves
+      // the tail, since none of these effects ever completes.
       Effect.all(
         [
           ixProgram,
           ...events,
-          pollLoop(roles.processTick),
-          pollLoop(channels.processTick),
-          pollLoop(eventSync.processTick),
-          pollLoop(guildJoin.processTick),
-          fastPollLoop(inviteGenerator.processTick),
-          pollLoop(onboarding.processTick),
-          pollLoop(achievements.processTick),
-          pollLoop(roleProvision.processTick),
-          pollLoop(teamChallenge.processTick),
-          pollLoop(weeklySummary.processTick),
-          pollLoop(finance.processTick),
-          pollLoop(emailSync.processTick),
-          slowPollLoop(channelBackfill.processTick),
-          pollLoop(personalEvents.processTick),
+          Effect.all(
+            [
+              pollLoop(roles.processTick),
+              // Scheduled quiz: the cron only enqueues on the minute, so a 5s
+              // drain is plenty and keeps it beside every other sync loop.
+              pollLoop(rulesQuiz.processTick),
+              pollLoop(channels.processTick),
+              pollLoop(eventSync.processTick),
+              pollLoop(guildJoin.processTick),
+              fastPollLoop(inviteGenerator.processTick),
+              pollLoop(onboarding.processTick),
+              pollLoop(achievements.processTick),
+              pollLoop(roleProvision.processTick),
+              pollLoop(teamChallenge.processTick),
+              pollLoop(weeklySummary.processTick),
+              pollLoop(finance.processTick),
+              pollLoop(emailSync.processTick),
+              slowPollLoop(channelBackfill.processTick),
+              pollLoop(personalEvents.processTick),
+            ],
+            { concurrency: 'unbounded' },
+          ),
         ],
         {
           concurrency: 'unbounded',
@@ -180,6 +202,7 @@ export const program = Effect.Do.pipe(
   | DiscordREST
   | SyncRpc
   | RoleSyncService
+  | RulesQuizSyncService
   | ChannelSyncService
   | ChannelBackfillService
   | EmailSyncService

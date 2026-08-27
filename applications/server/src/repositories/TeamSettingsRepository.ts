@@ -34,6 +34,30 @@ class TeamSettingsRow extends Schema.Class<TeamSettingsRow>('TeamSettingsRow')({
   weekly_summary_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   claim_request_days_before: Schema.Number,
   max_missed_rsvps: Schema.Number,
+  /** `None` disables the scheduled rules quiz. NOT `rules_channel_id` — that
+   * column exists on `teams` and means the onboarding code-of-conduct
+   * channel. See the migration for why the prefix differs. */
+  rules_quiz_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  rules_quiz_interval_days: Schema.Number,
+  /** `HH:MM` in the team's own `timezone`, same convention as
+   * `rsvp_reminder_time`. */
+  rules_quiz_time: Schema.String,
+}) {}
+
+/** One team with the scheduled rules quiz enabled, plus everything the cron
+ * needs to decide whether this minute is its moment: the team's own timezone
+ * (never the server's), its local `HH:MM`, its interval, and when the last
+ * quiz actually went out — `last_scheduled_for` is `MAX(scheduled_for)` from
+ * `rules_quiz_sync_events`, so the schedule has no separate mutable column
+ * that could drift from the audit trail. `None` means "never posted", which
+ * is what makes the first tick after enabling fire. */
+class RulesQuizTeamRow extends Schema.Class<RulesQuizTeamRow>('RulesQuizTeamRow')({
+  team_id: Team.TeamId,
+  timezone: Schema.String,
+  rules_quiz_channel_id: Discord.Snowflake,
+  rules_quiz_interval_days: Schema.Number,
+  rules_quiz_time: Schema.String,
+  last_scheduled_for: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
 }) {}
 
 class WeeklySummaryTeamRow extends Schema.Class<WeeklySummaryTeamRow>('WeeklySummaryTeamRow')({
@@ -67,6 +91,9 @@ const TeamSettingsUpsertInput = Schema.Struct({
   weekly_summary_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   claim_request_days_before: Schema.Number,
   max_missed_rsvps: Schema.Number,
+  rules_quiz_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  rules_quiz_interval_days: Schema.Number,
+  rules_quiz_time: Schema.String,
 });
 
 class EventNeedingClaimRequest extends Schema.Class<EventNeedingClaimRequest>(
@@ -142,7 +169,10 @@ const make = Effect.gen(function* () {
              discord_channel_format,
              weekly_summary_channel_id,
              claim_request_days_before,
-             max_missed_rsvps
+             max_missed_rsvps,
+             rules_quiz_channel_id,
+             rules_quiz_interval_days,
+             TO_CHAR(rules_quiz_time::time, 'HH24:MI') AS rules_quiz_time
       FROM team_settings
       WHERE team_id = ${teamId}
     `,
@@ -155,6 +185,23 @@ const make = Effect.gen(function* () {
       SELECT team_id, timezone, weekly_summary_channel_id
       FROM team_settings
       WHERE weekly_summary_channel_id IS NOT NULL
+    `,
+  });
+
+  const _findAllWithRulesQuizChannel = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: RulesQuizTeamRow,
+    execute: () => sql`
+      SELECT ts.team_id,
+             ts.timezone,
+             ts.rules_quiz_channel_id,
+             ts.rules_quiz_interval_days,
+             TO_CHAR(ts.rules_quiz_time::time, 'HH24:MI') AS rules_quiz_time,
+             (SELECT MAX(e.scheduled_for)
+                FROM rules_quiz_sync_events e
+               WHERE e.team_id = ts.team_id) AS last_scheduled_for
+      FROM team_settings ts
+      WHERE ts.rules_quiz_channel_id IS NOT NULL
     `,
   });
 
@@ -181,7 +228,10 @@ const make = Effect.gen(function* () {
                                  discord_channel_format,
                                  weekly_summary_channel_id,
                                  claim_request_days_before,
-                                 max_missed_rsvps)
+                                 max_missed_rsvps,
+                                 rules_quiz_channel_id,
+                                 rules_quiz_interval_days,
+                                 rules_quiz_time)
       VALUES (${input.team_id}, ${input.event_horizon_days},
               ${input.min_players_threshold},
               ${input.rsvp_reminders_enabled},
@@ -201,7 +251,10 @@ const make = Effect.gen(function* () {
               ${input.discord_channel_format},
               ${input.weekly_summary_channel_id},
               ${input.claim_request_days_before},
-              ${input.max_missed_rsvps})
+              ${input.max_missed_rsvps},
+              ${input.rules_quiz_channel_id},
+              ${input.rules_quiz_interval_days},
+              ${input.rules_quiz_time})
       ON CONFLICT (team_id) DO UPDATE SET
         event_horizon_days = ${input.event_horizon_days},
         min_players_threshold = ${input.min_players_threshold},
@@ -226,6 +279,9 @@ const make = Effect.gen(function* () {
         weekly_summary_channel_id = ${input.weekly_summary_channel_id},
         claim_request_days_before = ${input.claim_request_days_before},
         max_missed_rsvps = ${input.max_missed_rsvps},
+        rules_quiz_channel_id = ${input.rules_quiz_channel_id},
+        rules_quiz_interval_days = ${input.rules_quiz_interval_days},
+        rules_quiz_time = ${input.rules_quiz_time},
         updated_at = now()
       RETURNING team_id, event_horizon_days,
                 min_players_threshold,
@@ -246,7 +302,10 @@ const make = Effect.gen(function* () {
                 discord_channel_format,
                 weekly_summary_channel_id,
                 claim_request_days_before,
-                max_missed_rsvps
+                max_missed_rsvps,
+                rules_quiz_channel_id,
+                rules_quiz_interval_days,
+                TO_CHAR(rules_quiz_time::time, 'HH24:MI') AS rules_quiz_time
     `,
   });
 
@@ -357,6 +416,11 @@ const make = Effect.gen(function* () {
     weeklySummaryChannelId = Option.none<Discord.Snowflake>(),
     claimRequestDaysBefore = 3,
     maxMissedRsvps = 4,
+    // `None` keeps the scheduled rules quiz off, which is what every existing
+    // team gets — nominating a channel is the entire opt-in.
+    rulesQuizChannelId = Option.none<Discord.Snowflake>(),
+    rulesQuizIntervalDays = 7,
+    rulesQuizTime = '18:00',
   }: {
     teamId: Team.TeamId;
     eventHorizonDays: number;
@@ -382,6 +446,9 @@ const make = Effect.gen(function* () {
     weeklySummaryChannelId?: Option.Option<Discord.Snowflake>;
     claimRequestDaysBefore?: number;
     maxMissedRsvps?: number;
+    rulesQuizChannelId?: Option.Option<Discord.Snowflake>;
+    rulesQuizIntervalDays?: number;
+    rulesQuizTime?: string;
   }) =>
     _upsertSettings({
       team_id: teamId,
@@ -408,6 +475,9 @@ const make = Effect.gen(function* () {
       weekly_summary_channel_id: weeklySummaryChannelId,
       claim_request_days_before: claimRequestDaysBefore,
       max_missed_rsvps: maxMissedRsvps,
+      rules_quiz_channel_id: rulesQuizChannelId,
+      rules_quiz_interval_days: rulesQuizIntervalDays,
+      rules_quiz_time: rulesQuizTime,
     }).pipe(catchSqlErrors);
 
   const getHorizonDays = (teamId: Team.TeamId) =>
@@ -440,6 +510,9 @@ const make = Effect.gen(function* () {
   const findAllWithWeeklySummaryChannel = () =>
     _findAllWithWeeklySummaryChannel(undefined).pipe(catchSqlErrors);
 
+  const findAllWithRulesQuizChannel = () =>
+    _findAllWithRulesQuizChannel(undefined).pipe(catchSqlErrors);
+
   return {
     findByTeamId,
     upsert,
@@ -452,6 +525,7 @@ const make = Effect.gen(function* () {
     findEventsNeedingCoachingStatus,
     findEventsNeedingCoachingStatusAt,
     findAllWithWeeklySummaryChannel,
+    findAllWithRulesQuizChannel,
   };
 });
 

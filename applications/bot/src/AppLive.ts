@@ -15,6 +15,7 @@ import {
   PersonalEventsSyncService,
   RoleProvisionSyncService,
   RoleSyncService,
+  RulesQuizSyncService,
   TeamChallengeSyncService,
   WeeklySummarySyncService,
 } from '~/rcp/index.js';
@@ -25,6 +26,7 @@ import { SyncRpc } from '~/services/SyncRpc.js';
 const SyncLive = Layer.mergeAll(
   AchievementSyncService.Default,
   RoleSyncService.Default,
+  RulesQuizSyncService.Default,
   RoleProvisionSyncService.Default,
   ChannelSyncService.Default,
   ChannelBackfillService.Default,

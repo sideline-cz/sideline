@@ -95,6 +95,20 @@ export * as TeamChallengeApi from './api/TeamChallengeApi.js';
 
 export * as TeamGenerationApi from './api/TeamGenerationApi.js';
 
+/**
+ * Scheduled rules quiz. `None` = off, which is every team until someone
+ * nominates a channel.
+ *
+ * All three decode TOLERANTLY (missing key → default) rather than as plain
+ * required fields, because web bundles a FROZEN copy of these schemas: a new
+ * bundle served against a server that predates these columns would otherwise
+ * fail to decode team settings entirely, taking the whole settings page down
+ * rather than just hiding one section. Same reasoning as
+ * `discordEventsChannelId` above.
+ *
+ * NOT `rulesChannelId` — `teams.rules_channel_id` is the onboarding
+ * code-of-conduct channel and is a different feature.
+ */
 export * as TeamSettingsApi from './api/TeamSettingsApi.js';
 
 export * as TrainingTypeApi from './api/TrainingTypeApi.js';
@@ -384,6 +398,19 @@ export * as RoleProvisionRpcGroup from './rpc/roleProvision/RoleProvisionRpcGrou
  * definition of a score, not because the client is distrusted.
  */
 export * as RulesRpcGroup from './rpc/rules/RulesRpcGroup.js';
+/**
+ * The scheduled rules quiz outbox, drained by the bot.
+ *
+ * Same three-call shape as every other sync feed here — fetch pending, mark
+ * processed, mark failed — because the bot's `ProcessorService` pattern is
+ * built around exactly that and a fourth shape would earn nothing.
+ *
+ * `MarkFailed` deliberately does NOT consume the event: the row stays
+ * unprocessed so the next poll retries it. A Discord blip must not silently
+ * cost a team its quiz, and `attempts`/`last_error` are what make a
+ * permanently-broken event visible instead of invisible.
+ */
+export * as RulesQuizRpcGroup from './rpc/rulesQuiz/RulesQuizRpcGroup.js';
 export * as SyncRpcs from './rpc/SyncRpcs.js';
 
 export * as SummarizeRpcGroup from './rpc/summarize/SummarizeRpcGroup.js';
