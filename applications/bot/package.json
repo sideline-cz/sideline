@@ -27,6 +27,7 @@
     "@sideline/domain": "workspace:^",
     "@sideline/effect-lib": "workspace:^",
     "@sideline/i18n": "workspace:^",
+    "@sideline/rules": "workspace:^",
     "@t3-oss/env-core": "^0.13.11",
     "dfx": "1.0.11",
     "discord-api-types": "0.38.53",

@@ -98,6 +98,9 @@ importers:
       '@sideline/i18n':
         specifier: workspace:^
         version: link:../../packages/i18n/dist
+      '@sideline/rules':
+        specifier: workspace:^
+        version: link:../../packages/rules
       '@t3-oss/env-core':
         specifier: ^0.13.11
         version: 0.13.11(typescript@5.9.3)(zod@4.4.3)
@@ -158,6 +161,9 @@ importers:
       '@sideline/migrations':
         specifier: workspace:^
         version: link:../../packages/migrations/dist
+      '@sideline/rules':
+        specifier: workspace:^
+        version: link:../../packages/rules
       '@sideline/template-renderer':
         specifier: workspace:^
         version: link:../../packages/template-renderer
