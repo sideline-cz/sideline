@@ -18,7 +18,7 @@
 // repository produces it survives the RPC's own encoder.
 
 import { describe, expect, it } from '@effect/vitest';
-import { RulesQuizRpcGroup } from '@sideline/domain';
+import { type Discord, RulesQuizRpcGroup, type Team } from '@sideline/domain';
 import { Effect, Schema } from 'effect';
 import { RulesQuizSyncEventRow } from '~/repositories/RulesQuizSyncEventsRepository.js';
 
@@ -26,9 +26,9 @@ import { RulesQuizSyncEventRow } from '~/repositories/RulesQuizSyncEventsReposit
  * real ones from the incident. */
 const ROW_FIELDS = {
   id: '2f80dc81-8ede-485f-83b7-a0d54b0b5ec3',
-  team_id: 'e2686d09-6fd0-4e72-bd17-6f0f1fd4f7f0',
-  guild_id: '1080098077664350249',
-  channel_id: '1542510650516050002',
+  team_id: 'e2686d09-6fd0-4e72-bd17-6f0f1fd4f7f0' as Team.TeamId,
+  guild_id: '1080098077664350249' as Discord.Snowflake,
+  channel_id: '1542510650516050002' as Discord.Snowflake,
   scenario_id: 'eq1',
 } as const;
 
