@@ -12,7 +12,31 @@ const RpcProtocol = RpcClient.layerProtocolHttp({
 
 const MainLive = AppLive.pipe(
   Layer.provide(RpcProtocol),
-  Layer.provide(NodeHttpClient.layerUndici),
+  /**
+   * `layerFetch` for Discord, NOT `layerUndici` — because file uploads are
+   * multipart, and `layerUndici` does not send a multipart body at all.
+   *
+   * `NodeHttpClient` maps a `FormData` body straight onto undici's low-level
+   * `request()`, which — unlike `fetch` — does not accept `FormData`. The body
+   * is silently never written: the peer waits for bytes that never arrive and
+   * eventually gives up. Against a local server that surfaces as a 408; against
+   * Discord it is `SocketError: other side closed`, which reads like a network
+   * blip and is completely deterministic.
+   *
+   * Measured against a throwaway server in this image, 200 KB multipart:
+   *
+   *   layerUndici     FormData → 408, server received NOTHING
+   *   layerNodeHttp   FormData → delivered, but chunked with no Content-Length
+   *   layerFetch      FormData → delivered, Content-Length: 200302
+   *
+   * Only `layerFetch` sends it the way Discord expects. Plain JSON calls
+   * (`Uint8Array` bodies) work on all three, which is why every other Discord
+   * call the bot makes has always been fine and only the quiz attachment broke.
+   *
+   * The RPC protocol above deliberately stays on undici: it streams NDJSON from
+   * the server and is unaffected by any of this.
+   */
+  Layer.provide(NodeHttpClient.layerFetch),
   Layer.provide(NodeSocket.layerWebSocketConstructor),
   Layer.provide(
     DiscordConfig.layerConfig({
