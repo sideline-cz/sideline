@@ -24,6 +24,7 @@
  *
  * Run: `pnpm --filter @sideline/web render:gifs [-- --scenario s1] [--out DIR]`
  */
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -155,6 +156,11 @@ const encodeClip = (scenario: Scenario, clip: Clip, fontFiles: readonly string[]
  * that covers U+270B via `--font` to fix those; nothing else in the content
  * needs one.
  */
+/** Scenarios per child process. 10 keeps peak RSS near 1.5 GiB — comfortable
+ * on a 7.8 GiB Docker VM and a 16 GiB CI runner alike — while costing only
+ * ~11 process spawns across the whole render. */
+const DEFAULT_BATCH = 10;
+
 const FONT_CANDIDATES = [
   '/System/Library/Fonts/Supplemental/Arial.ttf',
   '/System/Library/Fonts/Helvetica.ttc',
@@ -203,14 +209,80 @@ const main = () => {
         ? outArg
         : resolve(process.cwd(), outArg);
   const only = argValue('--scenario');
+  const limit = argValue('--limit');
+  const offset = Number.parseInt(argValue('--offset') ?? '0', 10);
+  const batch = Number.parseInt(argValue('--batch') ?? String(DEFAULT_BATCH), 10);
   const fontFiles = resolveFonts(
     args.flatMap((a, i) => (a === '--font' ? [args[i + 1] ?? ''] : [])).filter((f) => f !== ''),
   );
   console.log(`fonts: ${fontFiles.join(', ')}`);
 
-  const scenarios = ALL_PACKAGES.flatMap((p) => p.scenarios).filter(
-    (s) => only === undefined || s.id === only,
-  );
+  // ── Batching ──────────────────────────────────────────────────────────────
+  //
+  // resvg-js leaks native memory on Linux that this process cannot reclaim.
+  // Measured in the bot's build container: RSS climbs ~100 MiB per scenario,
+  // 1.4 GiB by scenario 10 and 3.4 GiB by scenario 20, so the full 109 needs
+  // ~11 GiB and gets OOM-killed (exit 137) well before finishing.
+  //
+  // It is not a GC-timing problem, and it is worth recording what was ruled
+  // out so nobody re-runs these:
+  //
+  //   MALLOC_ARENA_MAX=2      3432 MiB   (glibc arena fragmentation)
+  //   --max-old-space-size    3401 MiB   (more frequent collection)
+  //   explicit global.gc()    3367 MiB   (--expose-gc, per clip)
+  //   baseline                3456 MiB
+  //
+  // All within noise of each other. `Resvg`/`RenderedImage` expose no free or
+  // dispose, so the memory is simply not reachable from JS. macOS does not
+  // show it, which is why a local render of all 109 succeeds in 115 s.
+  //
+  // So the parent renders nothing itself: it re-invokes this script once per
+  // batch and lets each child exit, which is the one thing guaranteed to
+  // return native memory to the OS. `--batch 0` opts out for a single-process
+  // run (useful when profiling, and what each child is invoked with).
+  if (batch > 0 && only === undefined && offset === 0) {
+    // `--limit` caps the whole run here, not each child — a child's slice size
+    // is `--batch`. Without this a `--limit 8` smoke test silently rendered all
+    // 109.
+    const all = ALL_PACKAGES.flatMap((p) => p.scenarios).length;
+    const total = limit === undefined ? all : Math.min(all, Number.parseInt(limit, 10));
+    mkdirSync(outDir, { recursive: true });
+    const started = Date.now();
+    for (let from = 0; from < total; from += batch) {
+      // `execArgv` carries tsx's loader hooks; dropping it would hand the
+      // child a .ts file bare node cannot parse.
+      const result = spawnSync(
+        process.execPath,
+        [
+          ...process.execArgv,
+          process.argv[1] ?? '',
+          '--out',
+          outDir,
+          '--offset',
+          String(from),
+          '--limit',
+          String(Math.min(batch, total - from)),
+          '--batch',
+          '0',
+          ...(fontFiles.length > 0 ? fontFiles.flatMap((f) => ['--font', f]) : []),
+        ],
+        { stdio: 'inherit' },
+      );
+      if (result.status !== 0) {
+        console.error(`batch at offset ${from} failed (status ${result.status})`);
+        process.exit(1);
+      }
+    }
+    console.log(
+      `\n${total} scenarios in ${Math.ceil(total / batch)} batches of ${batch}, ` +
+        `${((Date.now() - started) / 1000).toFixed(1)}s`,
+    );
+    return;
+  }
+
+  const scenarios = ALL_PACKAGES.flatMap((p) => p.scenarios)
+    .filter((s) => only === undefined || s.id === only)
+    .slice(offset, limit === undefined ? undefined : offset + Number.parseInt(limit, 10));
   if (scenarios.length === 0) {
     console.error(only === undefined ? 'no scenarios found' : `no scenario with id ${only}`);
     process.exit(1);
@@ -231,7 +303,8 @@ const main = () => {
       totalFrames += Math.max(2, Math.ceil(clip.until * FPS));
       console.log(
         `${file}  ${(bytes.length / 1024).toFixed(0)} KiB  ` +
-          `${Math.max(2, Math.ceil(clip.until * FPS))} frames  ${clip.until.toFixed(1)}s`,
+          `${Math.max(2, Math.ceil(clip.until * FPS))} frames  ${clip.until.toFixed(1)}s  ` +
+          `rss ${(process.memoryUsage().rss / 1024 / 1024).toFixed(0)} MiB`,
       );
     }
   }
