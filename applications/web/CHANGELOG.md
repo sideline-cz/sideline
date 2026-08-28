@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.35.2
+
+### 🐛 Fixes
+- settle the Czech scenario terminology, every competing rendering now at zero (#598)
+
 ## 0.35.1
 
 ### 🐛 Fixes

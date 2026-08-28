@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.37.3
+
+### 🐛 Fixes
+- settle the Czech scenario terminology (#598)
+- keep reporting the bot version, so /api/version stops reading "unknown" after a server restart (#598)
+
 ## 0.37.2
 
 ### 🐛 Fixes
