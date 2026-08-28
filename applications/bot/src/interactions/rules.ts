@@ -70,14 +70,19 @@ const replyWebhook = (
   rest: DiscordRestService,
   interaction: DiscordTypes.APIInteraction,
   payload: WebhookUpdatePayload,
-) =>
-  rest
+  /** The resolution clip, once this participant's chain is done. Empty until
+   * then, and empty whenever `RULES_GIF_DIR` is unset (dev, tests). */
+  files: ReadonlyArray<File> = [],
+) => {
+  const update = rest
     .updateOriginalWebhookMessage(interaction.application_id, interaction.token, { payload })
     .pipe(
       Effect.catchTag(['ErrorResponse', 'HttpClientError', 'RatelimitedResponse'], (e: RestError) =>
         Effect.logError('Failed to update rules chain message', e),
       ),
     );
+  return files.length === 0 ? update : rest.withFiles([...files])(update);
+};
 
 /** A stale or hand-crafted `custom_id` — reply ephemerally rather than
  * failing the interaction, which would show Discord's generic red error. */
@@ -199,11 +204,13 @@ export const RulesStepButton = Effect.Do.pipe(
         ),
       ),
       Effect.flatMap((saveNote) => {
-        const { embeds, components } = render(saveNote);
-        return replyWebhook(rest, interaction, {
-          embeds: [...embeds],
-          components: [...components],
-        });
+        const { embeds, components, files } = render(saveNote);
+        return replyWebhook(
+          rest,
+          interaction,
+          { embeds: [...embeds], components: [...components] },
+          files,
+        );
       }),
       // Terminal defect backstop for a detached fork resolving a deferred
       // reply (`applications/bot/AGENTS.md`): the tail above already handles
@@ -213,11 +220,13 @@ export const RulesStepButton = Effect.Do.pipe(
       Effect.catchDefect((defect) =>
         Effect.logError('Rules attempt submit defect', defect).pipe(
           Effect.flatMap(() => {
-            const { embeds, components } = render(m.bot_rules_save_failed({}, { locale }));
-            return replyWebhook(rest, interaction, {
-              embeds: [...embeds],
-              components: [...components],
-            });
+            const { embeds, components, files } = render(m.bot_rules_save_failed({}, { locale }));
+            return replyWebhook(
+              rest,
+              interaction,
+              { embeds: [...embeds], components: [...components] },
+              files,
+            );
           }),
         ),
       ),

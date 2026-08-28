@@ -647,8 +647,14 @@ as a single frame sequence and cut two clips from those same frames:
 | setup | `[0, qAt]` | the public question message |
 | resolution | `[0, dur]` | the ephemeral follow-up, per user, once **that** user's chain is done |
 
-109 × 2 = **218 files**. Regenerate only when content changes — a separate workflow, not something
-that runs on every PR.
+109 × 2 = **218 files**, measured at **67.2 MiB / 11,874 frames / ~115 s** for a full render.
+
+> **Superseded (2026-08-28):** this said "regenerate only when content changes — a separate
+> workflow, not something that runs on every PR." It now renders inside the bot image build, so it
+> runs on every bot *release* (not every PR). The ~2 min is worth paying to make it impossible for
+> the clips and the content to come from different commits; a separate workflow would have needed
+> an artefact store, a version handshake, and a way to notice when the two had drifted. See the
+> settled open questions at the end of this section.
 
 **The reason this is worth doing beyond fidelity:** in Discord the spoiler gate stops being a UI
 promise and becomes a property of the artefact. On web the gate is enforced by the client capping
@@ -746,17 +752,31 @@ image build" newly plausible, where before it looked prohibitive.
 
 #### Open questions to settle before costing this
 
-1. **Bot attachment size ceiling.** It varies with the guild's boost tier. Flat vector art should
-   land in the low hundreds of KB per clip, but measure against the real limit rather than assume —
-   and note the limit applies to the smallest guild the bot serves, not the largest.
-2. **Where the 218 files live at send time.** They cannot be referenced by URL: bots cannot set
-   `embed.video`, the web app has SSR and prerender disabled so there are no OG tags for Discord to
-   unfurl, and Discord CDN URLs are signed and expire — so "upload once, reuse the link" does not
-   work either. That leaves uploading bytes per message, from either the bot image (which grows it)
-   or a cached fetch of web static.
-3. **Does the ephemeral view re-render per step, or only deliver the resolution GIF at the end?**
-4. **Frame rate and dimensions**, which set both file size and CI build time. ~180 frames per
-   scenario at 30fps over a typical `dur`, × 109, is the whole render budget.
+**All four are now settled — measured, not estimated (2026-08-28).**
+
+1. ~~**Bot attachment size ceiling.**~~ **Settled: not a constraint.** A full render is 218 clips /
+   11,874 frames / **67.2 MiB**, and the *largest single clip* is **572 KiB** (`s7-resolution`)
+   against a 10 MiB floor at the lowest boost tier. Roughly 18× headroom on the worst case, so the
+   tier the smallest guild sits on never enters into it.
+2. ~~**Where the 218 files live at send time.**~~ **Settled: baked into the bot image**, by a `gifs`
+   stage in `applications/bot/Dockerfile` that renders during the build and copies only the `.gif`
+   files into the production stage. Costs ~2 min of build time and 67 MiB of image, and buys the
+   property that decides it: **the clips and the scenario content come out of one commit**, so a
+   content fix can never ship against clips still showing the old text. A cached fetch of web
+   static would have reintroduced exactly that skew, plus a runtime dependency during an
+   interaction that must ack in 3 seconds.
+3. ~~**Does the ephemeral view re-render per step?**~~ **Settled: it re-renders per step, but only
+   attaches a clip on the last one.** `buildChainMessage` gates the resolution clip on
+   `answer.done` and nothing else. Mid-chain presses stay pure in-memory renders with no I/O, which
+   is what keeps them inside the ack budget.
+4. ~~**Frame rate and dimensions.**~~ **Settled: 480px wide, 12fps, 32-colour palette.** 12fps was
+   chosen over 30 because this is flat vector art — a few discs and players gliding along smooth
+   paths — where the frame budget buys far less than it would for video, and GIF pays for every
+   frame twice, in palette table and in bytes.
+
+The one measurement that changed a decision: `loadSystemFonts` must stay `false`. resvg rebuilds
+its font database per instance and the renderer builds one per frame, which measured **966 ms/frame
+against 2 ms** — a ~5 hour render versus a 2 minute one.
 
 ### A daily rule, with streaks
 
