@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.35.1
+
+### 🐛 Fixes
+- save the rules-quiz settings from the button that owns them (#596)
+
 ## 0.35.0
 
 ### 🚀 Features
