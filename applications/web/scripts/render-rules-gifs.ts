@@ -25,7 +25,8 @@
  * Run: `pnpm --filter @sideline/web render:gifs [-- --scenario s1] [--out DIR]`
  */
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Resvg } from '@resvg/resvg-js';
 import type { Lang, Scenario } from '@sideline/rules';
 import { ALL_PACKAGES } from '@sideline/rules/content';
@@ -188,7 +189,19 @@ const main = () => {
     return i === -1 ? undefined : args[i + 1];
   };
 
-  const outDir = argValue('--out') ?? 'applications/web/.rules-gifs';
+  // Anchored to this file, not to `process.cwd()`. `pnpm --filter` runs the
+  // script with the CWD set to the package — so a repo-relative default wrote
+  // 218 files to `applications/web/applications/web/.rules-gifs`, which is
+  // exactly what the documented invocation above produces. A relative `--out`
+  // still resolves against the CWD, which is what someone typing one expects.
+  const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+  const outArg = argValue('--out');
+  const outDir =
+    outArg === undefined
+      ? join(REPO_ROOT, 'applications/web/.rules-gifs')
+      : isAbsolute(outArg)
+        ? outArg
+        : resolve(process.cwd(), outArg);
   const only = argValue('--scenario');
   const fontFiles = resolveFonts(
     args.flatMap((a, i) => (a === '--font' ? [args[i + 1] ?? ''] : [])).filter((f) => f !== ''),

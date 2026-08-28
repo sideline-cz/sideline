@@ -21,6 +21,7 @@ import { text } from '@sideline/rules';
 import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
 import type { Locale } from '~/locale.js';
+import { clipAttachment } from './clips.js';
 import { encodeStartId } from './quizState.js';
 
 /** Discord blurple, matching the poll board. */
@@ -38,7 +39,12 @@ export const buildQuizMessage = (
 ): {
   embeds: ReadonlyArray<Discord.RichEmbed>;
   components: ReadonlyArray<Discord.ActionRowComponentForMessageRequest>;
+  files: ReadonlyArray<File>;
 } => {
+  // Setup only — `[0, qAt]`. The resolution clip must never reach a shared
+  // message; see `clips.ts`.
+  const clip = clipAttachment(scenario.id, 'setup');
+
   const embed: Discord.RichEmbed = {
     title: truncate(`📜 ${text(scenario.title, locale)}`, EMBED_TITLE_MAX),
     color: COLOR_QUIZ,
@@ -59,6 +65,7 @@ export const buildQuizMessage = (
         value: m.bot_rules_quiz_prompt({}, { locale }),
       },
     ],
+    ...(clip === undefined ? {} : { image: { url: clip.url } }),
     footer: { text: m.bot_rules_quiz_footer({}, { locale }) },
   };
 
@@ -72,5 +79,5 @@ export const buildQuizMessage = (
     ]),
   ];
 
-  return { embeds: [embed], components };
+  return { embeds: [embed], components, files: clip === undefined ? [] : [clip.file] };
 };

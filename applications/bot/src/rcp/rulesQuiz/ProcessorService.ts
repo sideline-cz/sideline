@@ -16,11 +16,10 @@ import { handleQuizDue } from './handleQuizDue.js';
  * `UNIQUE (team_id, scheduled_for)` is what keeps that retry from becoming a
  * duplicate post if a failure happened AFTER the message went out.
  *
- * The guild locale is resolved server-side and is not carried on the event —
- * the bot has no per-team locale, so scheduled posts render in English. That
- * is a known gap, called out here rather than silently: teams running in Czech
- * get Czech content in the situation itself (the scenario text is bilingual
- * and rendered per locale) but English chrome.
+ * The locale is resolved by `handleQuizDue` from the guild's own
+ * `preferred_locale`, which is what every other permanent guild-visible
+ * message uses. It used to be hardcoded to English here, so a Czech team got
+ * a Czech situation wrapped in English chrome on every scheduled post.
  */
 const processEvent = Effect.Do.pipe(
   Effect.bind('rpc', () => SyncRpc.asEffect()),
@@ -28,7 +27,7 @@ const processEvent = Effect.Do.pipe(
   Effect.map(
     ({ rpc, discord }) =>
       (event: RulesQuizRpcGroup.RulesQuizPendingEvent) =>
-        handleQuizDue(event, 'en').pipe(
+        handleQuizDue(event).pipe(
           Effect.flatMap(() => rpc['RulesQuiz/MarkProcessed']({ id: event.id })),
           Effect.tap(() =>
             Metric.update(

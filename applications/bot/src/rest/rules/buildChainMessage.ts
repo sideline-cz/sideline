@@ -23,6 +23,7 @@ import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
 import type { Locale } from '~/locale.js';
 import { truncate } from './buildQuizMessage.js';
+import { clipAttachment } from './clips.js';
 import { encodeStepId } from './quizState.js';
 
 const COLOR_IN_PROGRESS = 0x5865f2; // blurple
@@ -106,6 +107,7 @@ export const buildChainMessage = (
 ): {
   embeds: ReadonlyArray<Discord.RichEmbed>;
   components: ReadonlyArray<Discord.ActionRowComponentForMessageRequest>;
+  files: ReadonlyArray<File>;
 } => {
   const entries = chainView(scenario, answer, 'learn', perms);
   const picksSoFar = answer.steps.flatMap((s) => (s.pick === null ? [] : [s.pick]));
@@ -173,10 +175,18 @@ export const buildChainMessage = (
     }
   }
 
+  // The resolution clip is gated on `answer.done` and nothing else. This
+  // message is ephemeral and `answer` is this participant's own replayed
+  // state, so "done" here means *this* user finished — never that someone
+  // else did. Mid-chain the animation stays where the public message left it,
+  // which is the point of encoding two clips rather than one.
+  const clip = answer.done ? clipAttachment(scenario.id, 'resolution') : undefined;
+
   const embed: Discord.RichEmbed = {
     title: truncate(text(scenario.title, locale), EMBED_TITLE_MAX),
     color: answer.done ? (answer.ok ? COLOR_CORRECT : COLOR_WRONG) : COLOR_IN_PROGRESS,
     fields,
+    ...(clip === undefined ? {} : { image: { url: clip.url } }),
   };
 
   const liveStep = liveEntry === undefined ? undefined : scenario.steps[liveEntry.index];
@@ -200,5 +210,5 @@ export const buildChainMessage = (
           ),
         ];
 
-  return { embeds: [embed], components };
+  return { embeds: [embed], components, files: clip === undefined ? [] : [clip.file] };
 };
