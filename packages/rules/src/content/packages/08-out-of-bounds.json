@@ -677,7 +677,7 @@
           "kind": "target",
           "label": {
             "en": "completion stands",
-            "cs": "spojka platí"
+            "cs": "přihrávka platí"
           }
         }
       ],
@@ -808,7 +808,7 @@
               "ok": true,
               "why": {
                 "en": "Two legal actions in a row make an ordinary completion; nothing stops play (13.7).",
-                "cs": "Dvě legální akce za sebou dělají běžnou spojku; nic hru nezastavuje (13.7)."
+                "cs": "Dvě legální akce za sebou dělají běžnou dokončenou přihrávku; nic hru nezastavuje (13.7)."
               }
             },
             {
@@ -1202,7 +1202,7 @@
           "kind": "target",
           "label": {
             "en": "completion stands",
-            "cs": "spojka platí"
+            "cs": "přihrávka platí"
           }
         }
       ],
@@ -1439,7 +1439,7 @@
           "kind": "target",
           "label": {
             "en": "completion stands",
-            "cs": "spojka platí"
+            "cs": "přihrávka platí"
           }
         }
       ],

@@ -412,7 +412,7 @@
       },
       "note": {
         "en": "Watch the thrower too: if they throw before/during/after calling a marking infraction, the call has no consequences — and an incomplete pass is a real turnover (18.1.5).",
-        "cs": "Sleduj i házeče: pokud hodí před hláškou, během ní nebo těsně po ní, hláška nemá žádné důsledky — a nepovedená přihrávka je normální ztráta (18.1.5)."
+        "cs": "Sleduj i házeče: pokud hodí před callem, během něj nebo těsně po něm, call nemá žádné důsledky — a nepovedená přihrávka je normální ztráta (18.1.5)."
       },
       "rules": ["18.1.3", "18.1.2", "18.1.5", "9.4"],
       "signals": [12],
@@ -742,7 +742,7 @@
       },
       "note": {
         "en": "A defender guarding another offensive player MAY stand there and even block passes — as long as they keep guarding that player (18.1.1.5.1). And watch the thrower: if they throw around your call, the call has no consequences (18.1.5).",
-        "cs": "Obránce, který brání jiného útočníka, tam stát SMÍ a klidně i blokovat přihrávky — dokud toho hráče opravdu brání (18.1.1.5.1). A sleduj házeče: pokud kolem tvé hlášky hodí, hláška nemá žádné důsledky (18.1.5)."
+        "cs": "Obránce, který brání jiného útočníka, tam stát SMÍ a klidně i blokovat přihrávky — dokud toho hráče opravdu brání (18.1.1.5.1). A sleduj házeče: pokud kolem tvého callu hodí, call nemá žádné důsledky (18.1.5)."
       },
       "rules": ["18.1.1.5", "15.5.1", "18.1.3"],
       "signals": [12],
@@ -1025,7 +1025,7 @@
           "actor": "D1",
           "text": {
             "en": "call + throw = no effect",
-            "cs": "hláška + hod = bez účinku"
+            "cs": "call + hod = bez účinku"
           },
           "style": "count"
         },
@@ -1051,7 +1051,7 @@
       },
       "explain": {
         "en": "Rule 18.1.5 exists to stop “insurance calls”: if you call a marking infraction (or marking violation) and also attempt a pass before, during or after the call, the call has no consequences — and an incomplete pass stands as a turnover. The lesson for throwers: make the call OR make the throw. If you want the crowding fixed, call it and hold the disc; the marker corrects and resumes one lower (18.1.3).",
-        "cs": "Pravidlo 18.1.5 existuje proti „hláškám pro jistotu“: pokud zavoláš marking infraction (či marking violation) a zároveň před hláškou, během ní nebo po ní zkusíš přihrávku, hláška nemá žádné důsledky — a nedošlá přihrávka platí jako ztráta. Lekce pro házeče: buď hláška, nebo hod. Jestli chceš lepení vyřešit, zavolej a disk podrž; marker se srovná a pokračuje o jedno níž (18.1.3)."
+        "cs": "Pravidlo 18.1.5 existuje proti „callům pro jistotu“: pokud zavoláš marking infraction (či marking violation) a zároveň před callem, během něj nebo po něm zkusíš přihrávku, call nemá žádné důsledky — a nedošlá přihrávka platí jako ztráta. Lekce pro házeče: buď call, nebo hod. Jestli chceš lepení vyřešit, zavolej a disk podrž; marker se srovná a pokračuje o jedno níž (18.1.3)."
       },
       "note": {
         "en": "The one exception: a CONTESTED or retracted marking infraction followed by a COMPLETED pass is treated as an offensive violation and the disc goes back to you (18.1.2.1). Completed passes survive; turfed ones never do.",

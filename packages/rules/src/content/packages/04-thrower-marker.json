@@ -117,7 +117,7 @@
       },
       "explain": {
         "en": "Contact with your throwing hand during the throwing motion is never “minor” (definitions) — a defensive throwing foul (17.6.1.2). Because the call happened around the throw, play continued until the disc was down (16.2). Your team called it and did not retain possession, and the foul clearly affected the throw → the disc returns to you (16.2.4.2.1) for a check. Accepted defensive breach → stall resumes at “stalling 1” (9.5.1).",
-        "cs": "Kontakt s házející rukou během hodu není nikdy „minor“ (definice) — jde o faul obrany na házeče (17.6.1.2). Protože hláška padla kolem hodu, hrálo se dál, dokud disk nespadl (16.2). Tvůj tým hlásil a neudržel disk, a faul hod jasně ovlivnil → disk se vrací tobě (16.2.4.2.1) a hraje se po checku. Uznaný prohřešek obrany → stall od „stalling 1“ (9.5.1)."
+        "cs": "Kontakt s házející rukou během hodu není nikdy „minor“ (definice) — jde o faul obrany na házeče (17.6.1.2). Protože call padl kolem hodu, hrálo se dál, dokud disk nespadl (16.2). Tvůj tým hlásil a neudržel disk, a faul hod jasně ovlivnil → disk se vrací tobě (16.2.4.2.1) a hraje se po checku. Uznaný prohřešek obrany → stall od „stalling 1“ (9.5.1)."
       },
       "note": {
         "en": "If the fouled pass had been COMPLETED, you would just play on (16.2.4.1). If both of you agree the contact did not affect the throw, the turnover stands (16.3). Contested version: disc still back, but stall resumes at max 6 (9.5.5).",
@@ -405,7 +405,7 @@
       },
       "note": {
         "en": "“Contact” is a verbal call — there is no dedicated hand signal on the WFDF sheet. If the contact happens during your throwing motion, “Contact” is not available: that is a foul (17.6.1.2/.3).",
-        "cs": "„Contact“ je slovní hláška — na přehledu signálů WFDF pro ni samostatný signál není. Pokud ke kontaktu dojde během hodu, „Contact“ použít nejde: to je faul (17.6.1.2/.3)."
+        "cs": "„Contact“ je slovní call — na přehledu signálů WFDF pro ni samostatný signál není. Pokud ke kontaktu dojde během hodu, „Contact“ použít nejde: to je faul (17.6.1.2/.3)."
       },
       "rules": ["17.6.1.3", "17.6.1.2", "9.5.1"],
       "signals": [],
@@ -686,7 +686,7 @@
       },
       "explain": {
         "en": "“Contact” is stoppage-free only while it is uncontested: 17.6.1.3 says that after a contact infraction that is NOT contested, play does not stop and the count resumes at 1. The moment you contest it, play stops like any disputed call: players return to their positions at the call (10.2.1), the disc is checked in, and the count resumes at max 6 (9.5.5) — with “stalling 4” last uttered, that means “stalling 5”.",
-        "cs": "„Contact“ je bez přerušení jen do chvíle, než ho někdo kontestuje: 17.6.1.3 říká, že po NEkontestovaném contactu se hra nestaví a count jede od 1. Jakmile kontestuješ, hra se staví jako u každé sporné hlášky: hráči se vrátí na místa při hlášce (10.2.1), disk projde checkem a count pokračuje na max 6 (9.5.5) — po „stalling 4“ to znamená „stalling 5“."
+        "cs": "„Contact“ je bez přerušení jen do chvíle, než ho někdo kontestuje: 17.6.1.3 říká, že po NEkontestovaném contactu se hra nestaví a count jede od 1. Jakmile kontestuješ, hra se staví jako u každého sporného callu: hráči se vrátí na místa při callu (10.2.1), disk projde checkem a count pokračuje na max 6 (9.5.5) — po „stalling 4“ to znamená „stalling 5“."
       },
       "note": {
         "en": "Talk first (1.3): describe what you felt, listen to the thrower. If you realise they are right, accept — count to 1 and play flows. If neither of you budges, the contest costs the offence nothing worse than max 6 — the system is built so honest disagreement stays cheap.",
@@ -960,11 +960,11 @@
       },
       "explain": {
         "en": "A thrower solely responsible for non-minor contact with a legally positioned defender commits an offensive throwing foul (17.7.1). You are the fouled player, so you call “Foul” (15.4). No pass was attempted, so play stops, and the disc stays with the thrower — but because the offence committed the accepted breach, the stall count resumes at maximum 9 (9.5.2): with “stalling 4” last uttered it resumes at 5; if the count was already at 8 or 9, it resumes at 9 — one second from a stall-out.",
-        "cs": "Házeč výhradně odpovědný za výrazný kontakt s legálně postaveným obráncem se dopouští faulu házeče (17.7.1). Faulovaný jsi ty, takže voláš „Foul“ (15.4). Hod nepadl, hra se staví a disk zůstává házeči — ale protože uznané porušení pravidel spáchal útok, stall count pokračuje na maximálně 9 (9.5.2): po „stalling 4“ pokračuje na 5; kdyby už byl na 8 či 9, pokračuje na 9 — vteřinu od stall-outu."
+        "cs": "Házeč výhradně odpovědný za nezanedbatelný kontakt s legálně postaveným obráncem se dopouští faulu házeče (17.7.1). Faulovaný jsi ty, takže voláš „Foul“ (15.4). Hod nepadl, hra se staví a disk zůstává házeči — ale protože uznané porušení pravidel spáchal útok, stall count pokračuje na maximálně 9 (9.5.2): po „stalling 4“ pokračuje na 5; kdyby už byl na 8 či 9, pokračuje na 9 — vteřinu od stall-outu."
       },
       "note": {
         "en": "“Max n” mechanics (9.6.1): resume at the lower of (last agreed number + 1) and n. Contrast: contact during the thrower’s follow-through after release is not a basis for a foul (17.7.2). If the thrower contested, the count would resume at max 6 (9.5.5).",
-        "cs": "Mechanika „max n“ (9.6.1): pokračuje se na nižším z (poslední shodnuté číslo + 1) a n. Pro srovnání: kontakt při dotažení hodu po vypuštění disku faulem není (17.7.2). Kdyby házeč kontestoval, count by pokračoval na max 6 (9.5.5)."
+        "cs": "Mechanika „max n“ (9.6.1): pokračuje se na nižším z (poslední shodnuté číslo + 1) a n. Pro srovnání: kontakt při dohmatu po vypuštění disku faulem není (17.7.2). Kdyby házeč kontestoval, count by pokračoval na max 6 (9.5.5)."
       },
       "rules": ["17.7.1", "9.5.2", "9.6.1", "15.4"],
       "signals": [1, 22],
@@ -1164,7 +1164,7 @@
       },
       "title": {
         "en": "Your follow-through hits the marker",
-        "cs": "Trefíš markera při dotažení hodu"
+        "cs": "Trefíš markera při dohmatu"
       },
       "roleTeam": "off",
       "role": {
@@ -1252,7 +1252,7 @@
           "kind": "target",
           "label": {
             "en": "completion stands",
-            "cs": "spojka platí"
+            "cs": "přihrávka platí"
           }
         }
       ],
