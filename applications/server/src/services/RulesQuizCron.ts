@@ -68,7 +68,26 @@ export const isDue = (args: {
   readonly lastScheduledForMs: number | undefined;
 }): boolean => {
   const local = localHhMm(args.nowMs, args.timezone);
-  if (local === undefined || local !== args.time) return false;
+  if (local === undefined) return false;
+  // At-or-past, NOT an exact match.
+  //
+  // An exact `local === time` check silently drops a post whenever no tick
+  // lands inside the configured minute — and ticks drift, because each cycle
+  // costs a database round trip. After a few hours of uptime the drift
+  // crosses a minute boundary, a tick lands at 22:34:5x and the next at
+  // 22:36:0x, and 22:35 is never observed at all. Nothing logs, because from
+  // the cron's point of view no team was ever due.
+  //
+  // Comparing lexicographically is safe: both sides are zero-padded `HH:MM`.
+  //
+  // The window this opens (due from the configured time until midnight local)
+  // is closed by the interval check below, which is what actually prevents a
+  // second post. The two conditions were never independent — the minute match
+  // was doing duplicate-suppression it was never reliable enough to do.
+  //
+  // It also means a post missed because the server was down goes out when the
+  // server comes back, rather than being skipped for the whole interval.
+  if (local < args.time) return false;
   if (args.lastScheduledForMs === undefined) return true;
   const elapsedDays = (args.nowMs - args.lastScheduledForMs) / (24 * 60 * 60 * 1000);
   // `- 0.5` tolerates the minute-granularity window and any DST shift, without
@@ -131,9 +150,17 @@ export const rulesQuizCronEffect = Effect.Do.pipe(
   Effect.asVoid,
 );
 
-/** Once a minute, matching the other schedule-driven crons — the `HH:MM`
- * check needs minute granularity to fire at all. */
+/**
+ * `fixed`, not `spaced`. `spaced` waits a minute AFTER each cycle finishes, so
+ * every database round trip pushes the next tick later and the schedule walks
+ * off wall-clock time over a day of uptime. `fixed` keeps ticks on the minute
+ * regardless of how long a cycle takes.
+ *
+ * `isDue` no longer depends on this — it compares at-or-past precisely so a
+ * missed minute cannot lose a post — but a cron that quietly stops matching
+ * the clock is worth not having either way.
+ */
 export const RulesQuizCronEffect = rulesQuizCronEffect.pipe(
   withCronMetrics('rules_quiz'),
-  Effect.repeat(Schedule.spaced('1 minute')),
+  Effect.repeat(Schedule.fixed('1 minute')),
 );
