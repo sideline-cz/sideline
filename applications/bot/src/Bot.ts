@@ -108,12 +108,37 @@ const slowPollLoop = <E, R>(processTick: Effect.Effect<void, E, R>) =>
 
 export const program = Effect.Do.pipe(
   Effect.bind('rpc', () => SyncRpc.asEffect()),
+  /**
+   * Re-reported on a schedule, not once at startup.
+   *
+   * The server holds this in an in-memory `Ref` (`BotInfoStore`), so a single
+   * report at boot survives exactly until the server next restarts — after
+   * which `/api/version` reads `"bot":"unknown"` indefinitely, however healthy
+   * the bot is. That was observed in production: a web-only promote restarted
+   * the server, and the bot version never came back.
+   *
+   * It matters because `/api/version` is what a deploy is verified against.
+   * A signal that silently decays to "unknown" is worse than no signal — this
+   * repo has already shipped a deploy that reported success while running a
+   * months-old image, and the lesson taken from it was to trust the running
+   * process over the ops digest. That only works if the process keeps saying
+   * so.
+   *
+   * `slowPollLoop` (5 min) rather than a faster one: this is one tiny RPC
+   * whose only consumer is a human running `curl`, so the freshness that
+   * matters is "minutes after a restart", not seconds.
+   */
   Effect.bind('reportVersion', ({ rpc }) =>
-    rpc['BotInfo/ReportBotInfo']({ version: APP_VERSION }).pipe(
-      Effect.timeout('5 seconds'),
-      Effect.catchCause((cause) => Effect.logWarning('Failed to report bot version', cause)),
-      Effect.forkDetach,
-    ),
+    slowPollLoop(
+      rpc['BotInfo/ReportBotInfo']({ version: APP_VERSION }).pipe(
+        Effect.timeout('5 seconds'),
+        // Handled here rather than left to `resilientTick`, which would log it
+        // as "Sync poll tick failed" — a message that sends whoever reads it
+        // looking for a broken outbox poller instead of a version report.
+        Effect.catchCause((cause) => Effect.logWarning('Failed to report bot version', cause)),
+        Effect.asVoid,
+      ),
+    ).pipe(Effect.forkDetach),
   ),
   Effect.bind('events', () => eventHandlers),
   Effect.bind('roles', () => RoleSyncService.asEffect()),
