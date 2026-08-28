@@ -219,9 +219,6 @@ export function TeamSettingsPage({
     welcomeChannel !== Option.getOrElse(teamInfo.welcomeChannelId, () => NONE_VALUE) ||
     systemLogChannel !== Option.getOrElse(teamInfo.systemLogChannelId, () => NONE_VALUE) ||
     achievementChannel !== Option.getOrElse(teamInfo.achievementChannelId, () => NONE_VALUE) ||
-    rulesQuizChannel !== Option.getOrElse(settings.rulesQuizChannelId, () => NONE_VALUE) ||
-    rulesQuizIntervalDays !== String(settings.rulesQuizIntervalDays) ||
-    rulesQuizTime !== settings.rulesQuizTime ||
     welcomeTemplate !== Option.getOrElse(teamInfo.welcomeMessageTemplate, () => '');
 
   const welcomePreview = React.useMemo(() => {
@@ -268,7 +265,16 @@ export function TeamSettingsPage({
     createDiscordChannelOnGroup !== settings.createDiscordChannelOnGroup ||
     createDiscordChannelOnRoster !== settings.createDiscordChannelOnRoster ||
     roleFormat !== settings.discordRoleFormat ||
-    channelFormat !== settings.discordChannelFormat;
+    channelFormat !== settings.discordChannelFormat ||
+    // These three sit in the reminders card, which `handleSaveSettings` saves.
+    // They were being compared in `hasWelcomeChanges` instead — so editing
+    // them enabled the WELCOME card's button (which posts a payload with no
+    // rules-quiz fields in it) while leaving this card's own button disabled.
+    // The result was a section you could edit but not save, with the only
+    // enabled button being one that silently discarded the edit.
+    rulesQuizChannel !== Option.getOrElse(settings.rulesQuizChannelId, () => NONE_VALUE) ||
+    rulesQuizIntervalDays !== String(settings.rulesQuizIntervalDays) ||
+    rulesQuizTime !== settings.rulesQuizTime;
 
   const channelToOption = React.useCallback(
     (value: string) =>
