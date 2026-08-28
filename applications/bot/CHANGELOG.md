@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.38.0
+
+### 🚀 Features
+- rules quizzes now show the play: 218 animated clips rendered into the image (#600)
+
 ## 0.37.3
 
 ### 🐛 Fixes
