@@ -118,7 +118,7 @@
       },
       "explain": {
         "en": "You were prevented from moving with the player you guard — that is a pick (18.3.1), and only you, the obstructed defender, may call it. You may wait up to 2 seconds to see whether it matters (18.3.1.1). Play stops (a pick is a violation), everyone returns to their positions at the time of the call (10.2.1), and you move to the position you would have reached without the block (18.3.2). Restart with a check; stall resumes at max 6 (9.5.5).",
-        "cs": "Něco ti zabránilo pohybovat se s hráčem, kterého bráníš — to je pick (18.3.1), a hlásit ho smíš jen ty, blokovaný obránce. Můžeš až 2 sekundy počkat, jestli to bude mít vliv (18.3.1.1). Hra se staví (pick je violation), všichni se vrátí na místa v okamžiku hlášky (10.2.1) a ty si dostoupíš tam, kde bys bez bloku byl (18.3.2). Hra se obnoví checkem; stall pokračuje na max 6 (9.5.5)."
+        "cs": "Něco ti zabránilo pohybovat se s hráčem, kterého bráníš — to je pick (18.3.1), a hlásit ho smíš jen ty, blokovaný obránce. Můžeš až 2 sekundy počkat, jestli to bude mít vliv (18.3.1.1). Hra se staví (pick je violation), všichni se vrátí na místa v okamžiku callu (10.2.1) a ty si dostoupíš tam, kde bys bez bloku byl (18.3.2). Hra se obnoví checkem; stall pokračuje na max 6 (9.5.5)."
       },
       "note": {
         "en": "Not a pick: when both your cutter and the obstructing player are making a play on the disc (18.3.1). Everyone should work to avoid picks — and during any stoppage players may slightly adjust positions to prevent the next one (18.3.3).",
@@ -448,7 +448,7 @@
           "actor": "D3",
           "text": {
             "en": "completion stands",
-            "cs": "spojka platí"
+            "cs": "přihrávka platí"
           },
           "style": "count"
         }
@@ -463,7 +463,7 @@
       },
       "explain": {
         "en": "A legitimate pick call does not need the disc to come to your cutter — it is about being blocked off the player you guard (18.3.1). But its EFFECT decides the outcome: this pass was caught far away, the pick did not affect possession, so the completion stands (16.3). Play still stops to sort positions: everyone returns to where they were when possession was established (10.2.2.2), you move up the ground you lost to the block (18.3.2), and the new thrower checks the disc in.",
-        "cs": "Oprávněná hláška pick nepotřebuje, aby disk letěl na tvého hráče — jde o zablokování cesty za hráčem, kterého bráníš (18.3.1). O výsledku ale rozhoduje VLIV: tahle přihrávka byla chycená daleko, pick držení neovlivnil, takže spojka platí (16.3). Hra se přesto staví kvůli srovnání pozic: všichni se vrátí tam, kde byli při získání držení (10.2.2.2), ty si dostoupíš, co ti blok vzal (18.3.2), a nový házeč rozehraje checkem."
+        "cs": "Oprávněný call pick nepotřebuje, aby disk letěl na tvého hráče — jde o zablokování cesty za hráčem, kterého bráníš (18.3.1). O výsledku ale rozhoduje VLIV: tahle přihrávka byla chycená daleko, pick držení neovlivnil, takže dokončená přihrávka platí (16.3). Hra se přesto staví kvůli srovnání pozic: všichni se vrátí tam, kde byli při získání držení (10.2.2.2), ty si dostoupíš, co ti blok vzal (18.3.2), a nový házeč rozehraje checkem."
       },
       "note": {
         "en": "Sequence for the field: call it immediately (or use your 2 seconds, 18.3.1.1), echo “play has stopped” once the catch is made, fix positions, check, go. The stall count on the NEW thrower simply starts fresh — the max-6 resumption applies when the disc returns to the original thrower.",
@@ -767,7 +767,7 @@
       },
       "explain": {
         "en": "A call while the disc is in the air lets play run until possession is decided (16.2). Then the branch: if the pick affected possession — typically, the picked defender would have made a play on the disc — the pass comes back to you (16.2.4.2.1) and players return to their release positions (10.2.2.1). If it did not affect the play, the completion stands (16.3). In both cases the picked defender may catch up (18.3.2) — and when the disc comes back to you, your stall count resumes at max 6 (9.5.5).",
-        "cs": "Při hlášce s diskem ve vzduchu se hraje, dokud se nerozhodne o držení (16.2). Pak přijde větvení: pokud pick ovlivnil držení — typicky by blokovaný obránce na disk zahrál — přihrávka se vrací tobě (16.2.4.2.1) a hráči se vrátí na místa při vypuštění (10.2.2.1). Pokud hru neovlivnil, spojka platí (16.3). V obou případech si obránce dostoupí (18.3.2) — a když se disk vrací tobě, tvůj stall count pokračuje na max 6 (9.5.5)."
+        "cs": "Při callu s diskem ve vzduchu se hraje, dokud se nerozhodne o držení (16.2). Pak přijde větvení: pokud pick ovlivnil držení — typicky by blokovaný obránce na disk zahrál — přihrávka se vrací tobě (16.2.4.2.1) a hráči se vrátí na místa při vypuštění (10.2.2.1). Pokud hru neovlivnil, dokončená přihrávka platí (16.3). V obou případech si obránce dostoupí (18.3.2) — a když se disk vrací tobě, tvůj stall count pokračuje na max 6 (9.5.5)."
       },
       "note": {
         "en": "If everyone agrees the pick changed nothing and the pass scored — the goal stands (16.3.1). The “did not affect” signal (#23, flat hands sweeping) is how you close these discussions gracefully.",
@@ -1049,7 +1049,7 @@
           "kind": "target",
           "label": {
             "en": "completion stands",
-            "cs": "spojka platí"
+            "cs": "přihrávka platí"
           }
         }
       ],
@@ -1298,7 +1298,7 @@
           "kind": "target",
           "label": {
             "en": "too late — completion stands",
-            "cs": "pozdě — spojka platí"
+            "cs": "pozdě — přihrávka platí"
           }
         }
       ],

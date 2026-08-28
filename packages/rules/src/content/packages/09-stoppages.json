@@ -965,7 +965,7 @@
           "kind": "target",
           "label": {
             "en": "completion stands, restart here",
-            "cs": "spojka platí, rozehrává se odtud"
+            "cs": "přihrávka platí, rozehrává se odtud"
           }
         }
       ],
@@ -3627,7 +3627,7 @@
           "kind": "target",
           "label": {
             "en": "completion stands",
-            "cs": "spojka platí"
+            "cs": "přihrávka platí"
           }
         }
       ],

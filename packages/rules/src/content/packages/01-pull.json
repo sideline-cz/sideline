@@ -733,15 +733,15 @@
       },
       "question": {
         "en": "What is the correct way to use the offside call?",
-        "cs": "Jak správně využít hlášku offside?"
+        "cs": "Jak správně využít call offside?"
       },
       "explain": {
         "en": "Offside (defenders’ feet not behind the vertical plane of their goal line until the release, 7.4) is the offence’s call — and it must be made before your team touches the disc (7.5). The remedy: let the pull land untouched, then resume play exactly as if a brick had been called — from the brick mark, no check required (7.5.2). Touch the disc first and the call is gone; a drop would even be a turnover (7.8).",
-        "cs": "Offside (chodidla obránců nejsou do vypuštění za svislou rovinou jejich brankové čáry, 7.4) hlásí útok — a musí to stihnout dřív, než se váš tým disku dotkne (7.5). Řešení: nech pull dopadnout bez teče a pak se hraje přesně jako po hlášce brick — z brick marku, bez checku (7.5.2). Jakmile se disku dotknete, hláška padá; upuštění by dokonce byla ztráta (7.8)."
+        "cs": "Offside (chodidla obránců nejsou do vypuštění za svislou rovinou jejich brankové čáry, 7.4) hlásí útok — a musí to stihnout dřív, než se váš tým disku dotkne (7.5). Řešení: nech pull dopadnout bez teče a pak se hraje přesně jako po callu brick — z brick marku, bez checku (7.5.2). Jakmile se disku dotknete, call padá; upuštění by dokonce byla ztráta (7.8)."
       },
       "note": {
         "en": "The mirror call belongs to the defence: a “false start” (offence changing position on the line before the release, 7.3) — there the thrower sets a pivot per 7.9–7.12 and play restarts like after a time-out (7.5.1). Signal offside/false start with #15.",
-        "cs": "Zrcadlová hláška patří obraně: „false start“ (útok před vypuštěním změní postavení na čáře, 7.3) — tam si házeč založí pivot podle 7.9–7.12 a hra se rozjede jako po time-outu (7.5.1). Offside/false start signalizuj #15."
+        "cs": "Zrcadlový call patří obraně: „false start“ (útok před vypuštěním změní postavení na čáře, 7.3) — tam si házeč založí pivot podle 7.9–7.12 a hra se rozjede jako po time-outu (7.5.1). Offside/false start signalizuj #15."
       },
       "rules": ["7.4", "7.5.2", "7.12"],
       "signals": [15],
@@ -1597,7 +1597,7 @@
           "k": "what",
           "q": {
             "en": "A receiver leaves their goal line before the pull is released. What is that, and whose call?",
-            "cs": "Příjemce opustí svou brankovou čáru dřív, než je pull vypuštěný. Co to je a čí je to call?"
+            "cs": "Receiver opustí svou brankovou čáru dřív, než je pull vypuštěný. Co to je a čí je to call?"
           },
           "rules": ["7.3", "7.4"],
           "opts": [
@@ -1609,7 +1609,7 @@
               "ok": true,
               "why": {
                 "en": "7.3 — the receiving team changing position on the line before the release; the mirror of offside (7.4), which is the receivers’ call against the defence.",
-                "cs": "7.3 — přijímající tým mění pozici na čáře před vypuštěním; zrcadlo offsidu (7.4), který volají příjemci proti obraně."
+                "cs": "7.3 — přijímající tým mění pozici na čáře před vypuštěním; zrcadlo offsidu (7.4), který volají receiveři proti obraně."
               }
             },
             {
@@ -1625,7 +1625,7 @@
             {
               "t": {
                 "en": "Nothing — receivers may move as soon as the puller starts the motion",
-                "cs": "Nic — příjemci se mohou hýbat, jakmile puller začne pohyb"
+                "cs": "Nic — receiveři se mohou hýbat, jakmile puller začne pohyb"
               },
               "why": {
                 "en": "The line holds until the disc is released, not until the wind-up (7.3).",
@@ -1635,7 +1635,7 @@
             {
               "t": {
                 "en": "A travel on the receiver",
-                "cs": "Travel na příjemce"
+                "cs": "Travel na receivera"
               },
               "why": {
                 "en": "Travel is about the thrower’s pivot (18.2); nobody has the disc yet.",
@@ -1717,7 +1717,7 @@
             {
               "t": {
                 "en": "Their receivers must return to the goal line and wait 10 seconds",
-                "cs": "Jejich příjemci se musí vrátit na brankovou čáru a čekat 10 sekund"
+                "cs": "Jejich receiveři se musí vrátit na brankovou čáru a čekat 10 sekund"
               },
               "why": {
                 "en": "There is no timed penalty anywhere in the rules (7.5.1).",

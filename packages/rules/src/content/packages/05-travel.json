@@ -457,7 +457,7 @@
       },
       "note": {
         "en": "The sneaky twin (18.2.7): if that huck had been INCOMPLETE, play just continues — the turnover stands. A travel call never rescues a bad throw.",
-        "cs": "Záludné dvojče (18.2.7): kdyby ten huck SPADL, hraje se prostě dál — ztráta platí. Hláška travel nikdy nezachrání špatnou přihrávku."
+        "cs": "Záludné dvojče (18.2.7): kdyby ten huck SPADL, hraje se prostě dál — ztráta platí. Call travel nikdy nezachrání špatnou přihrávku."
       },
       "rules": ["18.2.6", "18.2.7", "9.5.2"],
       "signals": [11, 2, 21],
@@ -1074,7 +1074,7 @@
           "kind": "target",
           "label": {
             "en": "completion stands",
-            "cs": "spojka platí"
+            "cs": "přihrávka platí"
           }
         }
       ],
