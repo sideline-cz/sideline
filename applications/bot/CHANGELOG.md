@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.38.1
+
+### 🐛 Fixes
+- a defect on one outbox event no longer pins the rules-quiz poll loop forever (#602)
+
 ## 0.38.0
 
 ### 🚀 Features
