@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0
+
+### 🚀 Features
+- Terms of Service and Privacy Policy, in English and Czech (#594)
+
 ## 0.8.1
 
 ### 🐛 Fixes

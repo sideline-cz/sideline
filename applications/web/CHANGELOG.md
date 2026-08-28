@@ -1,5 +1,13 @@
 # @sideline/web
 
+## 0.35.0
+
+### 🚀 Features
+- publish the Terms of Service and Privacy Policy, linked from both footers (#594)
+
+### 🐛 Fixes
+- say why team settings will not save instead of doing nothing (#594)
+
 ## 0.34.1
 
 ### 🐛 Fixes
