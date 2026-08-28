@@ -321,37 +321,69 @@ export function TeamSettingsPage({
 
   const handleSaveSettings = React.useCallback(async () => {
     const parsed = Number.parseInt(horizonDays, 10);
-    if (Number.isNaN(parsed) || parsed < 1 || parsed > 365) return;
     const parsedThreshold = Number.parseInt(minPlayersThreshold, 10);
-    if (Number.isNaN(parsedThreshold) || parsedThreshold < 0 || parsedThreshold > 100) return;
     const parsedReminderDaysBefore = Number.parseInt(rsvpReminderDaysBefore, 10);
-    if (
-      Number.isNaN(parsedReminderDaysBefore) ||
-      parsedReminderDaysBefore < 0 ||
-      parsedReminderDaysBefore > 14
-    )
-      return;
     const parsedMaxMissedRsvps = Number.parseInt(maxMissedRsvps, 10);
-    if (Number.isNaN(parsedMaxMissedRsvps) || parsedMaxMissedRsvps < 1 || parsedMaxMissedRsvps > 50)
-      return;
     const parsedClaimDaysBefore = Number(claimRequestDaysBefore);
-    if (
-      !Number.isInteger(parsedClaimDaysBefore) ||
-      parsedClaimDaysBefore < 0 ||
-      parsedClaimDaysBefore > 30
-    )
-      return;
-    if (!isFormatValid(roleFormat) || !isFormatValid(channelFormat)) return;
-    // Bounds mirror the DTO check and the DB CHECK constraint; bailing here is
-    // what turns a rejected request into "nothing happens" rather than a toast.
     const parsedRulesQuizIntervalDays = Number.parseInt(rulesQuizIntervalDays, 10);
-    if (
-      Number.isNaN(parsedRulesQuizIntervalDays) ||
-      parsedRulesQuizIntervalDays < 1 ||
-      parsedRulesQuizIntervalDays > 90
-    )
+    // `<input type="time">` yields `HH:MM:SS` in some browsers, so compare and
+    // send the first five characters rather than rejecting a valid time.
+    const normalisedQuizTime = rulesQuizTime.slice(0, 5);
+
+    /**
+     * Every one of these used to be a bare `return`, so a half-typed or
+     * out-of-range field made Save do **nothing at all** — no toast, no
+     * spinner, no request, no clue which field was at fault. The rules-quiz
+     * inputs made it easy to hit: clearing the number field to retype it
+     * leaves `''`, `parseInt` gives `NaN`, and the whole page stops saving,
+     * including every setting unrelated to the quiz.
+     *
+     * Bounds mirror the DTO checks and the DB CHECK constraints; those stay
+     * the real backstop. This exists so the person is told which field to
+     * look at.
+     */
+    const invalidField = (
+      [
+        [Number.isNaN(parsed) || parsed < 1 || parsed > 365, tr('teamSettings_horizonDays')],
+        [
+          Number.isNaN(parsedThreshold) || parsedThreshold < 0 || parsedThreshold > 100,
+          tr('teamSettings_minPlayersThreshold'),
+        ],
+        [
+          Number.isNaN(parsedReminderDaysBefore) ||
+            parsedReminderDaysBefore < 0 ||
+            parsedReminderDaysBefore > 14,
+          tr('teamSettings_rsvpReminderDaysBefore'),
+        ],
+        [
+          Number.isNaN(parsedMaxMissedRsvps) ||
+            parsedMaxMissedRsvps < 1 ||
+            parsedMaxMissedRsvps > 50,
+          tr('teamSettings_maxMissedRsvps'),
+        ],
+        [
+          !Number.isInteger(parsedClaimDaysBefore) ||
+            parsedClaimDaysBefore < 0 ||
+            parsedClaimDaysBefore > 30,
+          tr('teamSettings_claimRequestDaysBefore'),
+        ],
+        [!isFormatValid(roleFormat), tr('teamSettings_roleFormat')],
+        [!isFormatValid(channelFormat), tr('teamSettings_channelFormat')],
+        [
+          Number.isNaN(parsedRulesQuizIntervalDays) ||
+            parsedRulesQuizIntervalDays < 1 ||
+            parsedRulesQuizIntervalDays > 90,
+          tr('teamSettings_rulesQuizInterval'),
+        ],
+        [!/^([01]\d|2[0-3]):[0-5]\d$/.test(normalisedQuizTime), tr('teamSettings_rulesQuizTime')],
+      ] as ReadonlyArray<readonly [boolean, string]>
+    ).find(([bad]) => bad)?.[1];
+
+    if (invalidField !== undefined) {
+      toast.error(tr('teamSettings_fieldInvalid', { field: invalidField }));
       return;
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(rulesQuizTime)) return;
+    }
+
     setSavingSettings(true);
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
@@ -367,7 +399,7 @@ export function TeamSettingsPage({
             rsvpReminderTime: Option.some(rsvpReminderTime),
             rulesQuizChannelId: Option.some(channelToOption(rulesQuizChannel)),
             rulesQuizIntervalDays: Option.some(parsedRulesQuizIntervalDays),
-            rulesQuizTime: Option.some(rulesQuizTime),
+            rulesQuizTime: Option.some(normalisedQuizTime),
             timezone: Option.some(timezone),
             remindersChannelId: Option.some(channelToOption(remindersChannelId)),
             discordChannelLateRsvp: Option.some(channelToOption(channelLateRsvp)),

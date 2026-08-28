@@ -2105,6 +2105,7 @@
   "teamSettings_discordChannelsHelp": "Nastavení Discord kanálů pro notifikace událostí, skupiny a soupisky.",
   "teamSettings_eventsChannelsTitle": "Kanály událostí",
   "teamSettings_eventsNoSurfaceWarning": "Není nastavena kategorie osobních událostí. Členové neuvidí události v Discordu nikde. Nastavte ji pro zapnutí viditelnosti událostí.",
+  "teamSettings_fieldInvalid": "Nelze uložit — zkontroluj „{field}“.",
   "teamSettings_formatMustIncludeName": "Formát musí obsahovat {name}.",
   "teamSettings_formatPreview": "Náhled:",
   "teamSettings_formatResetDefault": "Obnovit výchozí",
