@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.36.0
+
+### 🚀 Features
+- render the rules clips into the image, batched around a native leak
+
 ## 0.35.2
 
 ### 🐛 Fixes
