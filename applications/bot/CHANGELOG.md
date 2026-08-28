@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.37.2
+
+### 🐛 Fixes
+- post scheduled rules quizzes in the team's language, not always English (#594)
+
 ## 0.37.1
 
 ### 🐛 Fixes
