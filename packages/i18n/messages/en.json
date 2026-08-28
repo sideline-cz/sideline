@@ -2105,6 +2105,7 @@
   "teamSettings_discordChannelsHelp": "Configure Discord channels for event notifications, groups, and rosters.",
   "teamSettings_eventsChannelsTitle": "Events channels",
   "teamSettings_eventsNoSurfaceWarning": "No personal events category is set. Members won't see events anywhere in Discord. Configure one to enable event visibility.",
+  "teamSettings_fieldInvalid": "Can’t save — check “{field}”.",
   "teamSettings_formatMustIncludeName": "Format must include {name}.",
   "teamSettings_formatPreview": "Preview:",
   "teamSettings_formatResetDefault": "Reset to default",
