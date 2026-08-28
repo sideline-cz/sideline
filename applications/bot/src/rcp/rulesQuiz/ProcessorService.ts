@@ -35,11 +35,25 @@ const processEvent = Effect.Do.pipe(
               1,
             ),
           ),
-          Effect.catch((error) =>
-            recordSyncFailure(rpc['RulesQuiz/MarkFailed']({ id: event.id, error: String(error) }), {
+          // `catchCause`, not `catch`: a DEFECT must mark the event failed too.
+          //
+          // With `catch` only typed failures reached `MarkFailed`, so a defect
+          // killed the tick before `attempts` was ever incremented — and since
+          // the row stayed unprocessed, the next poll five seconds later picked
+          // up the same event and died the same way. One bad event pinned the
+          // whole loop indefinitely, logging a generic "Sync poll tick failed"
+          // from `resilientTick` and nothing that named the event.
+          //
+          // That is exactly what happened the first time this outbox ever had a
+          // row in it: 320 identical failures in 27 minutes, `attempts` still 0,
+          // `last_error` still NULL — the two columns that exist to explain a
+          // stuck event, both empty because the path that writes them was
+          // unreachable.
+          Effect.catchCause((cause) =>
+            recordSyncFailure(rpc['RulesQuiz/MarkFailed']({ id: event.id, error: String(cause) }), {
               syncType: 'rules_quiz',
               message: `Failed to post scheduled rules quiz ${event.id}`,
-              error,
+              error: cause,
             }),
           ),
           Effect.provideService(SyncRpc, rpc),
