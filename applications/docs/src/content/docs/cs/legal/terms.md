@@ -1,14 +1,7 @@
 ---
 title: Podmínky užití
 description: Za jakých podmínek můžeš používat hostovanou instanci Sideline.
-draft: true
 ---
-
-:::caution[Zatím nepublikováno]
-Tato stránka je koncept. Než půjde ven, je potřeba doplnit právní identitu provozovatele — hledej `DOPLNIT` níže. Publikuje se odstraněním `draft: true` z frontmatteru.
-
-Text neprošel právní kontrolou.
-:::
 
 Poslední aktualizace: 27. srpna 2026
 
@@ -16,7 +9,7 @@ Poslední aktualizace: 27. srpna 2026
 
 Používáním Sideline — webové aplikace, Discord bota nebo obojího — souhlasíš s těmito podmínkami.
 
-Službu provozuje **DOPLNIT — jméno a sídlo**.
+Službu provozuje **Ondřej Maxa** jako fyzická osoba. Poštovní adresu na vyžádání sdělíme přes kontakty v bodu 11.
 
 Podmínky platí pro hostovanou instanci na [sideline.cz](https://sideline.cz). Zdrojový kód Sideline je samostatně dostupný pod licencí MIT; **pokud si ho hostuješ sám, tvoje užití kódu se řídí licencí MIT** a tyto podmínky se na tebe nevztahují.
 
