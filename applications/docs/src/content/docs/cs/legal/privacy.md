@@ -1,20 +1,13 @@
 ---
 title: Zásady ochrany osobních údajů
 description: Jaké osobní údaje Sideline sbírá, proč, komu je předává a jak je nechat smazat.
-draft: true
 ---
-
-:::caution[Zatím nepublikováno]
-Tato stránka je koncept. Než půjde ven, je potřeba doplnit tři věci — hledej `DOPLNIT` níže. Publikuje se odstraněním `draft: true` z frontmatteru.
-
-Text neprošel právní kontrolou.
-:::
 
 Poslední aktualizace: 27. srpna 2026
 
 ## 1. Kdo jsme
 
-Správcem tvých osobních údajů je **DOPLNIT — jméno, sídlo a IČO provozovatele hostované instance**.
+Správcem tvých osobních údajů je **Ondřej Maxa**, který hostovanou instanci provozuje jako fyzická osoba. Poštovní adresu na vyžádání sdělíme přes kontakty níže.
 
 Zastihneš nás přes [GitHub Discussions](https://github.com/maxa-ondrej/sideline/discussions) nebo přes odkaz **Nahlásit chybu** v uživatelském menu aplikace.
 
@@ -55,8 +48,8 @@ Pozor: e-mail poslaný do připojené týmové schránky může obsahovat osobn�
 ## 4. Komu je předáváme
 
 - **Discordu** — produkt na něm stojí. Členství, role, kanály, posty k událostem i soukromé zprávy jím procházejí a řídí se [zásadami ochrany osobních údajů Discordu](https://discord.com/privacy).
-- **Poskytovateli AI** (**DOPLNIT — kterému, pro hostovanou instanci**) — dostává obsah e-mailů ke shrnutí, jen u týmů, které si přeposílání zapnuly.
-- **Poskytovateli příchozí pošty** (**DOPLNIT — kterému, pro hostovanou instanci**) — doručuje nám e-maily tam, kde je to zapnuté.
+- **OpenAI** (`api.openai.com`, model `gpt-4.1`) — dostává obsah e-mailů ke shrnutí, jen u týmů, které si přeposílání zapnuly.
+- **Poskytovateli doručování příchozí pošty** — přijímá a předává nám e-maily poslané na připojenou týmovou schránku, tam kde je to zapnuté.
 - **Poskytovateli hostingu** — provozuje naše servery, databázi a monitoring.
 
 Tvoje údaje neprodáváme a nepoužíváme je k reklamě.

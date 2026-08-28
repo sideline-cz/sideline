@@ -1,20 +1,13 @@
 ---
 title: Privacy Policy
 description: What personal data Sideline collects, why, who it goes to, and how to get it removed.
-draft: true
 ---
-
-:::caution[Not yet published]
-This page is a draft. Three things must be filled in before it goes live — search for `TO BE FILLED IN` below. Remove `draft: true` from the frontmatter to publish.
-
-It has not been reviewed by a lawyer.
-:::
 
 Last updated: 27 August 2026
 
 ## 1. Who we are
 
-The controller of your personal data is **TO BE FILLED IN — legal name, registered address, and company/ID number of whoever operates the hosted instance**.
+The controller of your personal data is **Ondřej Maxa**, who operates the hosted instance as an individual. A postal address is available on request through the contacts below.
 
 You can reach us through [GitHub Discussions](https://github.com/maxa-ondrej/sideline/discussions), or by the **Report a bug** link in the app's user menu.
 
@@ -55,8 +48,8 @@ Please note that email sent to a connected team mailbox may contain personal dat
 ## 4. Who we share it with
 
 - **Discord** — the product is built on Discord. Your membership, roles, channels, event posts and direct messages pass through it and are covered by [Discord's privacy policy](https://discord.com/privacy).
-- **An AI provider** (**TO BE FILLED IN — which one, for the hosted instance**) — receives email content for summarisation, only where a team has enabled email forwarding.
-- **An inbound-email provider** (**TO BE FILLED IN — which one, for the hosted instance**) — delivers email to us, where enabled.
+- **OpenAI** (`api.openai.com`, model `gpt-4.1`) — receives email content for summarisation, only where a team has enabled email forwarding.
+- **An inbound-email delivery provider** — receives and forwards email addressed to a connected team mailbox, where enabled.
 - **Our hosting provider** — runs our servers, database and monitoring.
 
 We do not sell your data and we do not use it for advertising.

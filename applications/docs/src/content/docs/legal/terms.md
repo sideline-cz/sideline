@@ -1,14 +1,7 @@
 ---
 title: Terms of Service
 description: The terms under which you may use the hosted Sideline instance.
-draft: true
 ---
-
-:::caution[Not yet published]
-This page is a draft. The operator's legal identity must be filled in before it goes live — search for `TO BE FILLED IN` below. Remove `draft: true` from the frontmatter to publish.
-
-It has not been reviewed by a lawyer.
-:::
 
 Last updated: 27 August 2026
 
@@ -16,7 +9,7 @@ Last updated: 27 August 2026
 
 By using Sideline — the web app, the Discord bot, or both — you agree to these terms.
 
-The service is operated by **TO BE FILLED IN — legal name and registered address**.
+The service is operated by **Ondřej Maxa** as an individual. A postal address is available on request through the contacts in section 11.
 
 These terms cover the hosted instance at [sideline.cz](https://sideline.cz). Sideline's source code is separately available under the MIT licence; **if you self-host, the MIT licence governs your use of the code** and these terms do not apply to you.
 

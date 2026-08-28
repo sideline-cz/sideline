@@ -17,6 +17,7 @@ import {
   Wallet,
   Zap,
 } from 'lucide-react';
+import { LegalLinks } from '~/components/molecules/LegalLinks';
 import { LanguageSwitcher } from '~/components/organisms/LanguageSwitcher';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
@@ -491,6 +492,9 @@ export function HomePage({ loginUrl, error, reason }: HomePageProps) {
                   {tr('auth_signInDiscord')}
                 </a>
               </Button>
+              {/* Consent has to sit AT the sign-in action, not only in the
+                  footer — this is the moment the terms become binding. */}
+              <p className='text-xs text-muted-foreground max-w-md'>{tr('legal_signInConsent')}</p>
             </div>
 
             {/* Demo bento grid */}
@@ -588,8 +592,12 @@ export function HomePage({ loginUrl, error, reason }: HomePageProps) {
         )}
       </main>
 
-      <footer className='relative z-10 border-t px-6 py-4 text-center text-sm text-muted-foreground bg-background/80 backdrop-blur-sm'>
-        {tr('hero_footer')}
+      <footer className='relative z-10 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t px-6 py-4 text-center text-sm text-muted-foreground bg-background/80 backdrop-blur-sm'>
+        <span>{tr('hero_footer')}</span>
+        {/* Absolute paths, and the trailing slash is required: the docs site
+            is a separate container proxied at /docs/ (`proxy/nginx.conf`) and
+            builds with `trailingSlash: 'always'`. */}
+        <LegalLinks />
       </footer>
     </div>
   );
