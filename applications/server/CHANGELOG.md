@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.46.1
+
+### 🐛 Fixes
+- scheduled rules quizzes are actually delivered — the outbox rows never encoded (#602)
+- a quiz is no longer lost when no cron tick lands on the configured minute (#602)
+
 ## 0.46.0
 
 ### 🚀 Features
