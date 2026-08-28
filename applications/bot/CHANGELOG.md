@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.38.2
+
+### 🐛 Fixes
+- Discord file uploads are actually sent — `layerUndici` never wrote the multipart body (#604)
+
 ## 0.38.1
 
 ### 🐛 Fixes
