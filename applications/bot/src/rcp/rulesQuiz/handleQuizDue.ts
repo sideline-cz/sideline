@@ -11,6 +11,19 @@ import { retryPolicy } from '~/rest/utils.js';
 const THREAD_NAME_MAX = 100;
 
 /**
+ * `IS_SPOILER_CHANNEL` (`1 << 21`) — "users must opt in to view its contents".
+ *
+ * Set by hand because dfx 1.0.11 has no `ChannelFlags` enum; the bit is in
+ * Discord's channel documentation and matches `discord-api-types`'
+ * `ChannelFlags.IsSpoilerChannel = 2097152`.
+ *
+ * Discord refuses the flag on a channel whose NSFW setting is true, which a
+ * quiz channel will not be — and the update is non-fatal either way, so a
+ * guild that manages to hit that case loses the blur, not the quiz.
+ */
+const IS_SPOILER_CHANNEL = 1 << 21;
+
+/**
  * Posts one scheduled situation to a team's nominated channel and opens a
  * public thread on it.
  *
@@ -19,6 +32,11 @@ const THREAD_NAME_MAX = 100;
  * private chain — see `interactions/rules.ts`), so the thread is for arguing
  * about the ruling afterwards, which is the part worth keeping and the part
  * that would otherwise bury the channel.
+ *
+ * The thread is marked a **Spoiler Channel**, so Discord blurs it until a
+ * reader opts in — without that, a channel of people still working the
+ * situation get the ruling handed to them by the first reply that scrolls
+ * past.
  *
  * Thread creation is deliberately NOT fatal: if it fails — missing
  * `CreatePublicThreads`, a thread already there from a retry, an archived
@@ -82,6 +100,26 @@ export const handleQuizDue = (event: RulesQuizRpcGroup.RulesQuizPendingEvent) =>
           auto_archive_duration: 1440,
         })
         .pipe(
+          // The thread exists to argue about the ruling, so its contents are
+          // a spoiler by construction — marking it a Spoiler Channel makes
+          // Discord blur it until someone opts in, which is the same gate the
+          // ephemeral chain enforces for the answer itself.
+          //
+          // OR'd onto the flags the thread came back with, never assigned: a
+          // bare `flags: IS_SPOILER_CHANNEL` would clear every other bit
+          // Discord had already set on it.
+          Effect.flatMap((thread) =>
+            rest.updateChannel(thread.id, { flags: thread.flags | IS_SPOILER_CHANNEL }).pipe(
+              // A thread that is merely un-blurred is still a usable thread,
+              // and reposting the situation to retry would be far worse.
+              Effect.catchCause((cause) =>
+                Effect.logWarning(
+                  `RulesQuiz: opened a thread in ${event.channel_id} but could not mark it a spoiler channel`,
+                  cause,
+                ),
+              ),
+            ),
+          ),
           Effect.asVoid,
           // See the doc above: a missing thread must not cause the situation
           // to be posted twice.

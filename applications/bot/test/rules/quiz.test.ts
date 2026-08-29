@@ -199,6 +199,62 @@ describe('buildChainMessage — the spoiler gate', () => {
     expect(encoded).toEqual(perms[0]?.map((originalIndex) => [originalIndex]));
   });
 
+  it('lists the live step’s options in the embed, lettered to match the buttons', () => {
+    // The phone fix: Discord ellipsises a four-button row, so the option text
+    // has to be readable in the embed rather than only on the buttons.
+    const sc = multiStep();
+    const perms = quizPerms(sc, 'user-1');
+    const { embeds, components } = buildChainMessage(sc, replayAnswer(sc, []), perms, locale);
+    const rendered = allText(embeds);
+
+    const step0 = sc.steps[0];
+    if (!step0) throw new Error('no first step');
+    for (const opt of step0.opts) {
+      expect(rendered).toContain(text(opt.t, locale));
+    }
+
+    // Letter N in the embed must address button N — an off-by-one here would
+    // have people confidently pressing the wrong answer.
+    const buttons = (components[0] as { components: ReadonlyArray<{ label: string }> }).components;
+    const order = perms[0] ?? [];
+    buttons.forEach((button, displayPosition) => {
+      const letter = ['A', 'B', 'C', 'D'][displayPosition];
+      const originalIndex = order[displayPosition];
+      const optText = text(step0.opts[originalIndex as number]?.t ?? { en: '', cs: '' }, locale);
+      expect(button.label).toBe(letter);
+      expect(rendered).toContain(`**${letter}** · ${optText}`);
+    });
+  });
+
+  it('keeps button labels short enough that a phone cannot truncate them', () => {
+    // Every step of every scenario, both locales — the regression this
+    // replaces was content-dependent and only showed on a narrow screen.
+    for (const sc of ALL_SCENARIOS) {
+      for (const loc of ['en', 'cs'] as const) {
+        const perms = quizPerms(sc, 'user-1');
+        const { components } = buildChainMessage(sc, replayAnswer(sc, []), perms, loc);
+        const buttons = (components[0] as { components: ReadonlyArray<{ label: string }> })
+          .components;
+        for (const button of buttons) {
+          expect(button.label.length).toBeLessThanOrEqual(2);
+        }
+      }
+    }
+  });
+
+  it('still keeps every why off an unanswered step’s option list', () => {
+    // Listing options in the embed must not become a route for the ruling.
+    for (const sc of ALL_SCENARIOS) {
+      const perms = quizPerms(sc, 'user-1');
+      const rendered = allText(buildChainMessage(sc, replayAnswer(sc, []), perms, locale).embeds);
+      for (const step of sc.steps) {
+        for (const opt of step.opts) {
+          expect(rendered).not.toContain(text(opt.why, locale));
+        }
+      }
+    }
+  });
+
   it('reveals the explanation and citations only once the chain is done', () => {
     const sc = multiStep();
     const perms = quizPerms(sc, 'user-1');
