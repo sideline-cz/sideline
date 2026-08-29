@@ -72,3 +72,16 @@ export const clipAttachment = (
     url: `attachment://${filename}`,
   };
 };
+
+/**
+ * The `files` entry of an `Ix.response`, present only when there is something
+ * to send.
+ *
+ * dfx decides whether to build a multipart body with `"files" in response`
+ * (`Interactions/gateway.js`), not by measuring the array — so an empty array
+ * still routes the reply through `withFiles([])`. The key has to be ABSENT,
+ * not empty, which a bare `{ files }` would get wrong every time
+ * `RULES_GIF_DIR` is unset (dev, tests, and any non-container run).
+ */
+export const filesField = (files: ReadonlyArray<File>): { readonly files?: ReadonlyArray<File> } =>
+  files.length === 0 ? {} : { files };

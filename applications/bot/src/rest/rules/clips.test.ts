@@ -62,13 +62,30 @@ describe('rules clips', () => {
     expect(embeds[0]?.image?.url ?? '').not.toContain('resolution');
   });
 
-  it('withholds the resolution clip until this participant has finished', () => {
+  it('puts the SETUP clip on a chain that is still in progress', () => {
     const fresh = replayAnswer(SCENARIO, []);
     const { embeds, files } = buildChainMessage(SCENARIO, fresh, perms(), 'en');
 
     expect(fresh.done).toBe(false);
-    expect(files).toHaveLength(0);
-    expect(embeds[0]?.image).toBeUndefined();
+    // `/rules` opens straight into a chain with no public message to carry
+    // the animation, so the chain itself has to show the play.
+    expect(files).toHaveLength(1);
+    expect(files[0]?.name).toBe(`${SCENARIO.id}-setup.gif`);
+    expect(embeds[0]?.image?.url).toBe(`attachment://${SCENARIO.id}-setup.gif`);
+  });
+
+  it('withholds the resolution clip until this participant has finished', () => {
+    // The gate is `answer.done`, so the case that matters is the LAST press
+    // before the chain completes — not just a freshly-opened one.
+    const partial = replayAnswer(
+      SCENARIO,
+      SCENARIO.steps.slice(0, -1).map(() => 0),
+    );
+    const { embeds, files } = buildChainMessage(SCENARIO, partial, perms(), 'en');
+
+    expect(partial.done).toBe(false);
+    expect(files.map((f) => f.name)).not.toContain(`${SCENARIO.id}-resolution.gif`);
+    expect(embeds[0]?.image?.url ?? '').not.toContain('resolution');
   });
 
   it('attaches the resolution clip once the chain is done', () => {
@@ -92,6 +109,11 @@ describe('rules clips', () => {
     expect(quiz.embeds[0]?.fields?.length ?? 0).toBeGreaterThan(0);
     expect(chain.files).toHaveLength(0);
     expect(chain.embeds[0]?.image).toBeUndefined();
+
+    // The in-progress chain reads a clip too now, so it needs the same guard.
+    const midChain = buildChainMessage(SCENARIO, replayAnswer(SCENARIO, []), perms(), 'en');
+    expect(midChain.files).toHaveLength(0);
+    expect(midChain.embeds[0]?.image).toBeUndefined();
   });
 
   it('does not fail when a single scenario has no clip on disk', () => {

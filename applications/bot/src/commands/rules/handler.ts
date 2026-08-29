@@ -9,6 +9,7 @@ import { userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { asRecord } from '~/rest/recordProbe.js';
 import { buildChainMessage } from '~/rest/rules/buildChainMessage.js';
+import { filesField } from '~/rest/rules/clips.js';
 import { quizPerms } from '~/rest/rules/perms.js';
 import { pickScenario } from '~/rest/rules/pickScenario.js';
 import { replayAnswer } from '~/rest/rules/quizState.js';
@@ -77,7 +78,7 @@ export const rulesHandler = Interaction.asEffect().pipe(
       });
     }
 
-    const { embeds, components } = buildChainMessage(
+    const { embeds, components, files } = buildChainMessage(
       scenario,
       replayAnswer(scenario, []),
       quizPerms(scenario, userId.value),
@@ -91,6 +92,9 @@ export const rulesHandler = Interaction.asEffect().pipe(
         components: [...components],
         flags: DiscordTypes.MessageFlags.Ephemeral,
       },
+      // The setup clip. `/rules` has no public message to carry it, so
+      // without this the chain is the one surface that never shows the play.
+      ...filesField(files),
     });
   }),
 );

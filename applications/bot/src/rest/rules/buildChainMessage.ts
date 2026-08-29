@@ -33,7 +33,6 @@ const COLOR_WRONG = 0xe74c3c; // red
 const EMBED_TITLE_MAX = 256;
 const FIELD_NAME_MAX = 256;
 const FIELD_VALUE_MAX = 1024;
-const BUTTON_LABEL_MAX = 80;
 
 /** `A`/`B`/`C`/`D`, matching web's option letters. Content never authors
  * more than four options per step (`packages/rules/AGENTS.md`). */
@@ -86,6 +85,29 @@ const answeredValue = (
   }
   return truncate(lines.join('\n'), FIELD_VALUE_MAX);
 };
+
+/**
+ * The live step's options, lettered to match the buttons beneath them.
+ *
+ * **The option text lives here rather than on the buttons.** Discord lays a
+ * four-button row out edge-to-edge on a phone, so every label past the first
+ * few characters is ellipsised and the options become unreadable — the
+ * buttons carry only `A`/`B`/`C`/`D` and this field carries what each letter
+ * means.
+ *
+ * Renders `opt.t` and never `opt.why`: the `why` states the ruling, and
+ * showing it for an unanswered step is precisely the leak the verdict gate in
+ * `chainView` exists to prevent (see `answeredValue`, which is the only place
+ * a `why` may appear).
+ */
+const liveOptions = (step: Scenario['steps'][number], entry: ChainEntry, locale: Locale): string =>
+  entry.order
+    .flatMap((originalIndex, displayPosition) => {
+      const opt = step.opts[originalIndex];
+      if (!opt) return [];
+      return [`**${LETTERS[displayPosition] ?? displayPosition + 1}** · ${text(opt.t, locale)}`];
+    })
+    .join('\n');
 
 /**
  * One participant's ephemeral view of a chain.
@@ -141,11 +163,19 @@ export const buildChainMessage = (
       continue;
     }
 
-    // The live step: its question, with its options rendered as buttons below.
+    // The live step: its question, then its options lettered to match the
+    // buttons below. The question is truncated against the room the options
+    // leave rather than against the whole field, so a long question can never
+    // cost the reader option D.
     liveEntry = entry;
+    const options = liveOptions(step, entry, locale);
+    const question = truncate(
+      text(step.q, locale),
+      Math.max(0, FIELD_VALUE_MAX - options.length - 2),
+    );
     fields.push({
       name: stepHeading(scenario, entry, locale, '▶️'),
-      value: truncate(text(step.q, locale), FIELD_VALUE_MAX),
+      value: truncate(`${question}\n\n${options}`, FIELD_VALUE_MAX),
     });
   }
 
@@ -175,12 +205,19 @@ export const buildChainMessage = (
     }
   }
 
-  // The resolution clip is gated on `answer.done` and nothing else. This
-  // message is ephemeral and `answer` is this participant's own replayed
+  // Which clip is a spoiler decision, and `answer.done` is the whole gate.
+  // This message is ephemeral and `answer` is this participant's own replayed
   // state, so "done" here means *this* user finished — never that someone
-  // else did. Mid-chain the animation stays where the public message left it,
-  // which is the point of encoding two clips rather than one.
-  const clip = answer.done ? clipAttachment(scenario.id, 'resolution') : undefined;
+  // else did.
+  //
+  // Mid-chain the SETUP clip rides along. It used to be omitted on the
+  // grounds that the public quiz message already showed it, but `/rules` has
+  // no public message at all, so its chain ran with no animation whatsoever —
+  // the participant was asked to rule on a play they could only read about.
+  // Re-sending it on each press is deliberate: an `UPDATE_MESSAGE` that omits
+  // the attachment drops it, and the embed's `attachment://` URL would then
+  // resolve to nothing.
+  const clip = clipAttachment(scenario.id, answer.done ? 'resolution' : 'setup');
 
   const embed: Discord.RichEmbed = {
     title: truncate(text(scenario.title, locale), EMBED_TITLE_MAX),
@@ -198,11 +235,13 @@ export const buildChainMessage = (
             liveEntry.order.flatMap((originalIndex, displayPosition) => {
               const opt = liveStep.opts[originalIndex];
               if (!opt) return [];
-              const letter = LETTERS[displayPosition] ?? String(displayPosition + 1);
               return [
                 UI.button({
                   style: Discord.ButtonStyleTypes.SECONDARY,
-                  label: truncate(`${letter} · ${text(opt.t, locale)}`, BUTTON_LABEL_MAX),
+                  // Letter only — the text is in the embed field above. A
+                  // label long enough to be useful is a label Discord
+                  // truncates on a phone.
+                  label: LETTERS[displayPosition] ?? String(displayPosition + 1),
                   custom_id: encodeStepId(scenario.id, [...picksSoFar, originalIndex]),
                 }),
               ];

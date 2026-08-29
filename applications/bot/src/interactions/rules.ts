@@ -30,6 +30,7 @@ import { userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { asRecord } from '~/rest/recordProbe.js';
 import { buildChainMessage } from '~/rest/rules/buildChainMessage.js';
+import { filesField } from '~/rest/rules/clips.js';
 import { quizPerms } from '~/rest/rules/perms.js';
 import { scenarioById } from '~/rest/rules/pickScenario.js';
 import {
@@ -112,7 +113,7 @@ export const RulesStartButton = Interaction.asEffect().pipe(
 
     const perms = quizPerms(scenario, userId.value);
     const answer = replayAnswer(scenario, []);
-    const { embeds, components } = buildChainMessage(
+    const { embeds, components, files } = buildChainMessage(
       scenario,
       answer,
       perms,
@@ -126,6 +127,7 @@ export const RulesStartButton = Interaction.asEffect().pipe(
         components: [...components],
         flags: DiscordTypes.MessageFlags.Ephemeral,
       },
+      ...filesField(files),
     });
   }),
 );
@@ -169,11 +171,15 @@ export const RulesStepButton = Effect.Do.pipe(
     // Mid-chain: pure render, answered inline. Only the FINAL press has any
     // I/O, so the common case never pays for a deferred round trip.
     if (!answer.done) {
-      const { embeds, components } = render();
+      const { embeds, components, files } = render();
       return Effect.succeed(
         Ix.response({
           type: DiscordTypes.InteractionCallbackTypes.UPDATE_MESSAGE,
           data: { embeds: [...embeds], components: [...components] },
+          // Re-sent on every press: an UPDATE_MESSAGE that omits the
+          // attachment drops it, leaving the embed's `attachment://` URL
+          // pointing at nothing.
+          ...filesField(files),
         }),
       );
     }

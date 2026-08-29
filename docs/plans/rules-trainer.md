@@ -644,7 +644,7 @@ as a single frame sequence and cut two clips from those same frames:
 
 | Clip | Range | Where it goes |
 |------|-------|---------------|
-| setup | `[0, qAt]` | the public question message |
+| setup | `[0, qAt]` | the public question message, and the ephemeral chain until that user is done |
 | resolution | `[0, dur]` | the ephemeral follow-up, per user, once **that** user's chain is done |
 
 109 × 2 = **218 files**, measured at **67.2 MiB / 11,874 frames / ~115 s** for a full render.
@@ -673,6 +673,25 @@ If the resolution lands publicly the moment the first person answers, it spoils 
 everyone still working through it. The public message stays on the setup clip permanently; the
 resolution clip is delivered to each participant individually as they finish. This is the single
 easiest thing to get wrong here, because posting it publicly is the more obvious implementation.
+
+> **Superseded (2026-08-29):** the setup clip now rides along on the ephemeral chain too, not just
+> the public message. `/rules` opens straight into a chain with no public message to carry the
+> animation, so its participants were being asked to rule on a play they could only read about.
+> The gate is unchanged and still `answer.done` — resolution after, setup before — so nothing about
+> the paragraph above is weakened; there is simply no longer a surface with no clip at all. The
+> cost is that the clip is re-sent on every press, because an `UPDATE_MESSAGE` that omits the
+> attachment drops it and leaves the embed's `attachment://` URL pointing at nothing.
+>
+> **Also (2026-08-29):** the discussion thread opened on a scheduled quiz is now marked a Discord
+> **Spoiler Channel** (`IS_SPOILER_CHANNEL`, channel flag `1 << 21`), so Discord blurs it until a
+> reader opts in. The thread exists to argue about the ruling, which makes its contents a spoiler
+> by construction — without the flag the first reply that scrolls past hands the answer to everyone
+> still working the situation.
+>
+> **Also (2026-08-29):** the ephemeral chain's option buttons carry only `A`/`B`/`C`/`D`, with the
+> option text listed in the embed above them. Discord lays a four-button row out edge-to-edge on a
+> phone and ellipsises every label, which made the options unreadable on the surface most people
+> answer from.
 
 #### Quiz shape: one public message, one private chain per user
 
