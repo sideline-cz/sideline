@@ -1,4 +1,5 @@
 import { Discord, type Role, type Team } from '@sideline/domain';
+import { LogicError } from '@sideline/effect-lib';
 import { DiscordREST } from 'dfx/DiscordREST';
 import { Effect } from 'effect';
 import { SyncRpc } from '~/services/SyncRpc.js';
@@ -25,6 +26,16 @@ export const createGuildRole = (
         team_id: teamId,
         role_id: roleId,
         discord_role_id: Discord.Snowflake.makeUnsafe(role.id),
-      }).pipe(Effect.map(() => role.id)),
+        adopted: false,
+      }).pipe(
+        // A freshly-minted Discord role id colliding with an existing mapping for a different
+        // Sideline role is a Discord snowflake collision — never happens in production.
+        Effect.catchTag('DiscordRoleAlreadyMapped', () =>
+          LogicError.die(
+            `Freshly created Discord role ${role.id} unexpectedly collided with an existing mapping`,
+          ),
+        ),
+        Effect.map(() => role.id),
+      ),
     ),
   );

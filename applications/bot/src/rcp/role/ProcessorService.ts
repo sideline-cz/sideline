@@ -4,6 +4,7 @@ import { DiscordREST } from 'dfx/DiscordREST';
 import { Array, Effect, Match, Metric } from 'effect';
 import { syncEventsProcessedTotal } from '../../metrics.js';
 import { POLL_BATCH_SIZE } from '../../rest/utils.js';
+import { GuildRolesCache } from '../../services/GuildRolesCache.js';
 import { SyncRpc } from '../../services/SyncRpc.js';
 import { recordSyncFailure } from '../recordSyncFailure.js';
 import { handleMemberAdded } from './handleAssigned.js';
@@ -13,7 +14,7 @@ import { handleMemberRemoved } from './handleUnassigned.js';
 
 const action: (
   event: RoleRpcEvents.UnprocessedRoleEvent,
-) => Effect.Effect<void, unknown, SyncRpc | DiscordREST> =
+) => Effect.Effect<void, unknown, SyncRpc | DiscordREST | GuildRolesCache> =
   Match.type<RoleRpcEvents.UnprocessedRoleEvent>().pipe(
     Match.tag('role_created', handleCreated),
     Match.tag('role_deleted', handleDeleted),
@@ -66,12 +67,19 @@ export const ProcessorService = Effect.Do.pipe(
   ),
   Effect.tap(() => Effect.logInfo('RoleSyncService initialized')),
   Effect.let('processTick', ({ rpc, processEvent }) =>
-    rpc['Role/GetUnprocessedEvents']({ limit: POLL_BATCH_SIZE }).pipe(
-      Effect.tap((events) => Effect.logDebug(`Role sync poll: ${events.length} event(s)`)),
-      Effect.flatMap((events) =>
+    // A fresh `GuildRolesCache` per tick (never a shared `Layer`) — see its doc comment. Building
+    // it here means `Effect.repeat`'s re-execution of this whole Effect (`Bot.ts` `pollLoop`)
+    // allocates a new, empty cache every poll, so a permission change made between two ticks is
+    // observed on the very next one.
+    Effect.Do.pipe(
+      Effect.bind('rolesCache', () => GuildRolesCache.make),
+      Effect.bind('events', () => rpc['Role/GetUnprocessedEvents']({ limit: POLL_BATCH_SIZE })),
+      Effect.tap(({ events }) => Effect.logDebug(`Role sync poll: ${events.length} event(s)`)),
+      Effect.flatMap(({ events, rolesCache }) =>
         events.length === 0
           ? Effect.void
           : Effect.all(Array.map(events, processEvent), { concurrency: 1 }).pipe(
+              Effect.provideService(GuildRolesCache, rolesCache),
               Effect.tap(() => Effect.logInfo(`Processed ${events.length} role sync event(s)`)),
               Effect.asVoid,
             ),
