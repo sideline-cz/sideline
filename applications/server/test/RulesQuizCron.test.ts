@@ -102,15 +102,74 @@ describe('isDue', () => {
       expect(due({ lastScheduledForMs: AUG_2035_UTC - 6 * DAY })).toBe(false);
     });
 
-    it('tolerates a post that ran slightly late last time', () => {
-      // The half-day slack absorbs minute granularity and DST shifts without
-      // ever allowing two posts inside one interval.
-      expect(due({ lastScheduledForMs: AUG_2035_UTC - (7 * DAY - 3 * 60 * 60_000) })).toBe(true);
+    it('counts a post that ran past local midnight against THAT calendar day', () => {
+      // Previously true: the half-day slack let a post 6d21h old through on a
+      // weekly schedule. Counting calendar days makes this false — a post that
+      // landed at 01:35 consumed the 22nd, so the next one is seven days from
+      // the 22nd, not from the 21st it was aiming at.
+      //
+      // The trade is deliberate. That slack is exactly what produced the
+      // twice-a-day bug below, and it cannot be kept for weekly while being
+      // dropped for daily: it is one comparison. A schedule that walks a day
+      // after a late post is a far smaller problem than one that posts twice.
+      expect(due({ lastScheduledForMs: AUG_2035_UTC - (7 * DAY - 3 * 60 * 60_000) })).toBe(false);
+      expect(due({ lastScheduledForMs: AUG_2035_UTC - 7 * DAY })).toBe(true);
     });
 
     it('handles a daily schedule', () => {
       expect(due({ intervalDays: 1, lastScheduledForMs: AUG_2035_UTC - DAY })).toBe(true);
       expect(due({ intervalDays: 1, lastScheduledForMs: AUG_2035_UTC - 60_000 })).toBe(false);
+    });
+
+    it('does NOT post a second time twelve hours later', () => {
+      // The regression this whole comparison exists for. Reported in
+      // production: a quiz configured once a day at 10:00 arrived at 10:00
+      // AND 22:00, every day.
+      //
+      // The at-or-past time check is satisfied all evening, so the interval
+      // check is the only thing holding the day shut. Under
+      // `elapsedDays >= intervalDays - 0.5` it re-armed after twelve hours and
+      // let the evening tick through.
+      const tenPrague = Date.UTC(2026, 7, 28, 8, 0); // 10:00 CEST
+      const tenPmPrague = Date.UTC(2026, 7, 28, 20, 0); // 22:00 CEST, same local day
+
+      expect(
+        due({
+          nowMs: tenPmPrague,
+          time: '10:00',
+          intervalDays: 1,
+          lastScheduledForMs: tenPrague,
+        }),
+      ).toBe(false);
+
+      // ...and still fires the next day at the configured time.
+      expect(
+        due({
+          nowMs: tenPrague + DAY,
+          time: '10:00',
+          intervalDays: 1,
+          lastScheduledForMs: tenPrague,
+        }),
+      ).toBe(true);
+    });
+
+    it('does not double-post for an early-morning slot either', () => {
+      // The case that rules out simply shrinking the slack. The window runs
+      // from the configured time to local midnight, so a 00:30 slot leaves
+      // 23.5 hours of open window — nearly any tolerance at all re-opens the
+      // hole. Counting calendar days is indifferent to where in the day the
+      // slot sits.
+      const halfPastMidnight = Date.UTC(2026, 7, 27, 22, 30); // 00:30 CEST on the 28th
+      const lateEvening = Date.UTC(2026, 7, 28, 21, 0); // 23:00 CEST, same local day
+
+      expect(
+        due({
+          nowMs: lateEvening,
+          time: '00:30',
+          intervalDays: 1,
+          lastScheduledForMs: halfPastMidnight,
+        }),
+      ).toBe(false);
     });
 
     it('fires immediately the first time, rather than after a full interval', () => {
