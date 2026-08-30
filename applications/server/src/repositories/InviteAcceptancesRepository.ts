@@ -84,8 +84,10 @@ const make = SqlClient.SqlClient.asEffect().pipe(
         JOIN bot_guilds b    ON b.guild_id = t.guild_id
         WHERE ia.discord_code IS NULL
           AND ia.discord_code_error_code IS NULL
+          -- Temporary wire guard, not a business rule: it keeps welcome_channel_id non-null so the
+          -- encoded row stays byte-identical for bots running the pre-PR-2 schema. Removed in PR-3
+          -- once the tolerant schema is rolled out everywhere. Do not delete early.
           AND t.welcome_channel_id IS NOT NULL
-          AND b.is_community_enabled = true
         ORDER BY ia.created_at ASC
         LIMIT ${limit}
       `,
