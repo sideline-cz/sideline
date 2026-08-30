@@ -8,7 +8,7 @@ import { RulesProgress } from '@sideline/domain';
 import type { RulesPackage, Scenario, ScenarioId } from '@sideline/rules';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Effect, Option } from 'effect';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Module mocks — before any imports using them
@@ -289,6 +289,14 @@ function setupLocalStorage() {
   });
 }
 
+// `vi.restoreAllMocks()` restores spies but NOT timer mode, so a test that
+// fails inside a `useFakeTimers` block would otherwise hand frozen time to
+// every test after it — turning one failure into a file-wide cascade that
+// looks nothing like its cause.
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 beforeEach(() => {
   vi.restoreAllMocks();
   setupLocalStorage();
@@ -492,15 +500,36 @@ describe('RulesTrainer — exam mode', () => {
 
     // Answer step 2 — completes the whole chain. Even though `answer.done`
     // is now `true`, `animLimit` in exam mode ignores that entirely.
-    fireEvent.click(screen.getByRole('button', { name: /Right0/ }));
-    for (let i = 0; i < 50; i++) {
-      now += 10_000;
-      anim.tick(now);
+    //
+    // FAKE TIMERS from here, and the reason is the difference between this
+    // test passing and flaking. Completing the chain schedules a 450ms
+    // pacing delay (`RulesTrainer.tsx`, `done ? 450 : 350`), and the
+    // assertions below deliberately run INSIDE that window — the claim is
+    // that nothing leaks even while the finished step sits disabled waiting
+    // it out. Reaching them costs 50 `act()`-wrapped React renders, which is
+    // comfortably under 450ms on an idle machine and NOT under it when the
+    // full suite is running 300 files in parallel. When the timer won, the
+    // exam moved on and the assertions failed against a screen that had
+    // already advanced — a real flake, and one that looked like a spoiler
+    // regression rather than a timing artefact.
+    //
+    // Freezing the clock makes the window infinite: the timer cannot fire
+    // because nothing advances it, so "inside the pacing delay" is a state
+    // the test controls rather than a race it hopes to win.
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /Right0/ }));
+      for (let i = 0; i < 50; i++) {
+        now += 10_000;
+        anim.tick(now);
+      }
+      expect(discGroup().getAttribute('transform')).toBe(`translate(${qAtX} ${qAtY})`);
+      // No verdict text ever leaked either, even while the completed step
+      // sits disabled waiting out its pacing delay.
+      expect(screen.queryByText(/why0|why1/)).toBeNull();
+    } finally {
+      vi.useRealTimers();
     }
-    expect(discGroup().getAttribute('transform')).toBe(`translate(${qAtX} ${qAtY})`);
-    // No verdict text ever leaked either, even while the completed step
-    // sits disabled waiting out its pacing delay.
-    expect(screen.queryByText(/why0|why1/)).toBeNull();
 
     anim.restore();
     randomSpy.mockRestore();
