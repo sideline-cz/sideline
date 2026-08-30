@@ -672,6 +672,36 @@ const MockAchievementAdminLayers = Layer.mergeAll(
   } as any),
 );
 
+// ---------------------------------------------------------------------------
+// PR-4 (Discord onboarding fix) — `resolveOrCreateAcceptance` recorders.
+//
+// `acceptancesStore` tracks the newest acceptance created per (team_invite_id,
+// user_id) pair so `findOpenByUserAndInvite` / `findNewestByUserAndInvite` can
+// reflect it — this is what lets the "already a member" test below observe
+// CC-14's idempotent reuse instead of a hardcoded stub. `acceptancesCreateCalls`
+// and `pendingGuildJoinsEnqueueCalls` pin, respectively, "does resolveOrCreateAcceptance
+// avoid minting a second acceptance" (CC-14) and "does the enqueue tap actually fire"
+// (S4/step 6) — both silently true today only because `enqueue`/`create` are unconditional,
+// which is exactly the bug PR-4's test list (items 4, 5) exists to catch.
+// ---------------------------------------------------------------------------
+type AcceptanceRecord = {
+  id: string;
+  team_invite_id: string;
+  user_id: string;
+  discord_code: Option.Option<string>;
+  discord_code_error_code: Option.Option<string>;
+  discord_code_error_detail: Option.Option<string>;
+  created_at: DateTime.Utc;
+  generated_at: Option.Option<Date>;
+};
+
+const acceptancesStore = new Map<string, AcceptanceRecord>();
+const acceptancesCreateCalls: Array<{ team_invite_id: string; user_id: string }> = [];
+const pendingGuildJoinsEnqueueCalls: Array<{ userId: string; teamId: string }> = [];
+let acceptanceIdCounter = 0;
+
+const acceptanceKey = (teamInviteId: string, userId: string) => `${teamInviteId}:${userId}`;
+
 const TestLayer = ApiLive.pipe(
   Layer.provideMerge(AuthMiddlewareLive),
   Layer.provideMerge(HttpServer.layerServices),
@@ -698,7 +728,10 @@ const TestLayer = ApiLive.pipe(
       Layer.merge(
         Layer.succeed(PendingGuildJoinsRepository, {
           _tag: 'api/PendingGuildJoinsRepository',
-          enqueue: () => Effect.void,
+          enqueue: (userId: string, teamId: string) => {
+            pendingGuildJoinsEnqueueCalls.push({ userId, teamId });
+            return Effect.void;
+          },
           listPending: () => Effect.succeed([]),
           markDone: () => Effect.void,
           markFailed: () => Effect.void,
@@ -706,9 +739,10 @@ const TestLayer = ApiLive.pipe(
         } as never),
         Layer.succeed(InviteAcceptancesRepository, {
           _tag: 'api/InviteAcceptancesRepository',
-          create: ({ team_invite_id, user_id }: { team_invite_id: string; user_id: string }) =>
-            Effect.succeed({
-              id: `${team_invite_id}:${user_id}`,
+          create: ({ team_invite_id, user_id }: { team_invite_id: string; user_id: string }) => {
+            acceptanceIdCounter += 1;
+            const record: AcceptanceRecord = {
+              id: `acc-${acceptanceIdCounter}`,
               team_invite_id,
               user_id,
               discord_code: Option.none(),
@@ -716,8 +750,33 @@ const TestLayer = ApiLive.pipe(
               discord_code_error_detail: Option.none(),
               created_at: DateTime.nowUnsafe(),
               generated_at: Option.none(),
-            }),
-          findById: () => Effect.succeed(Option.none()),
+            };
+            acceptancesCreateCalls.push({ team_invite_id, user_id });
+            acceptancesStore.set(acceptanceKey(team_invite_id, user_id), record);
+            return Effect.succeed(record);
+          },
+          findById: (id: string) => {
+            for (const record of acceptancesStore.values()) {
+              if (record.id === id) return Effect.succeed(Option.some(record));
+            }
+            return Effect.succeed(Option.none());
+          },
+          // CC-14: "open" = an existing row with no terminal error code. Reads the
+          // same store `create` writes, so a returning member's second join
+          // observes the acceptance the first join created.
+          findOpenByUserAndInvite: (userId: string, teamInviteId: string) => {
+            const record = acceptancesStore.get(acceptanceKey(teamInviteId, userId));
+            return Effect.succeed(
+              record && Option.isNone(record.discord_code_error_code)
+                ? Option.some(record)
+                : Option.none(),
+            );
+          },
+          findNewestByUserAndInvite: (userId: string, teamInviteId: string) =>
+            Effect.succeed(
+              Option.fromNullishOr(acceptancesStore.get(acceptanceKey(teamInviteId, userId))),
+            ),
+          countRecentByUserAndInvite: () => Effect.succeed(0),
           findPending: () => Effect.succeed([]),
           setDiscordCode: () => Effect.void,
           markFailed: () => Effect.void,
@@ -795,6 +854,10 @@ afterAll(async () => {
 });
 
 describe('Invite API', () => {
+  // Set by the "valid token joins team" test below, consumed by the idempotent-rejoin test
+  // right after it (PR-4 / CC-14) — these two tests must run in this order.
+  let firstJoinAcceptanceId: string | undefined;
+
   it('GET /invite/:code returns team info for valid invite', async () => {
     const response = await handler(new Request('http://localhost/invite/valid-invite'));
     expect(response.status).toBe(200);
@@ -821,7 +884,13 @@ describe('Invite API', () => {
     expect(response.status).toBe(401);
   });
 
-  it('POST /invite/:code/join with valid token joins team', async () => {
+  // PR-4 test list item 1: `joinViaInvite enqueues a pending guild join when the user has
+  // guilds.join`. `MockOAuthConnectionsRepositoryLayer.getGrantedScopes` always returns
+  // 'identify guilds guilds.join' in this describe block, so requiresReauth is false here and
+  // `pendingGuildJoins.enqueue` must fire (step 6). FAILS before PR-4 — nothing calls `enqueue`
+  // in production today.
+  it('POST /invite/:code/join with valid token joins team, and enqueues a pending guild join', async () => {
+    const enqueueCallsBefore = pendingGuildJoinsEnqueueCalls.length;
     const response = await handler(
       new Request('http://localhost/invite/valid-invite/join', {
         method: 'POST',
@@ -833,16 +902,59 @@ describe('Invite API', () => {
     expect(body.teamId).toBe(TEST_TEAM_ID);
     expect(body.roleNames).toEqual(['Player']);
     expect(body.isProfileComplete).toBe(false);
+    firstJoinAcceptanceId = body.acceptanceId;
+    expect(firstJoinAcceptanceId).toBeTruthy();
+    expect(pendingGuildJoinsEnqueueCalls.length).toBe(enqueueCallsBefore + 1);
   });
 
-  it('POST /invite/:code/join when already a member returns 409', async () => {
+  // CC-14 inverts rev 2's "still returns 409" test: `Invite.AlreadyMember` is no longer raised.
+  // An active member re-clicking Join is the idempotent path — `resolveOrCreateAcceptance` finds
+  // the acceptance the previous test created (still "open": no error code) and reuses it.
+  // Combines PR-4 test list items 3 ("idempotent for an active member with an open acceptance"),
+  // 4 ("does not create a second acceptance"), and 5 ("the idempotent path DOES enqueue").
+  // FAILS before PR-4 — today this 409s via the unconditional `AlreadyMember` tap.
+  it('POST /invite/:code/join when already a member is idempotent — 200, reuses the open acceptance, does not create a second one, and still enqueues', async () => {
+    const createCallsBefore = acceptancesCreateCalls.length;
+    const enqueueCallsBefore = pendingGuildJoinsEnqueueCalls.length;
     const response = await handler(
       new Request('http://localhost/invite/valid-invite/join', {
         method: 'POST',
         headers: { Authorization: 'Bearer user-token' },
       }),
     );
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.acceptanceId).toBe(firstJoinAcceptanceId);
+    expect(acceptancesCreateCalls.length).toBe(createCallsBefore);
+    expect(pendingGuildJoinsEnqueueCalls.length).toBe(enqueueCallsBefore + 1);
+  });
+
+  // PR-4 test list item 10 — step 7's ownership check. Today `getJoinStatus` looks the
+  // acceptance up by id with no owner comparison at all, so any authenticated caller holding an
+  // acceptanceId gets a working Discord invite for a team they were never invited to.
+  // FAILS before PR-4 (returns 200 today).
+  it("GET /invite/acceptances/:acceptanceId returns 404 for another user's acceptance", async () => {
+    expect(firstJoinAcceptanceId).toBeTruthy();
+    const response = await handler(
+      new Request(`http://localhost/invite/acceptances/${firstJoinAcceptanceId}`, {
+        headers: { Authorization: 'Bearer admin-token' },
+      }),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  // PR-4 test list item 11 — the owner must still be able to read their own acceptance. Passes
+  // both before and after PR-4 (it's the regression guard for item 10's fix).
+  it('GET /invite/acceptances/:acceptanceId returns the acceptance for its owner', async () => {
+    expect(firstJoinAcceptanceId).toBeTruthy();
+    const response = await handler(
+      new Request(`http://localhost/invite/acceptances/${firstJoinAcceptanceId}`, {
+        headers: { Authorization: 'Bearer user-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.acceptanceId).toBe(firstJoinAcceptanceId);
   });
 
   it('POST /invite/:code/join with invalid code returns 404', async () => {
@@ -1056,7 +1168,10 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
   rejoinSessions.set('rejoin-token', REJOIN_USER_ID);
 
   // Mock members repo that has an inactive membership for the rejoin user
-  const makeRejoinMembersLayer = (existingMembership: Option.Option<MembershipWithRole>) =>
+  const makeRejoinMembersLayer = (
+    existingMembership: Option.Option<MembershipWithRole>,
+    playerRoleId: Option.Option<{ id: Role.RoleId }> = Option.some({ id: REJOIN_PLAYER_ROLE_ID }),
+  ) =>
     Layer.succeed(TeamMembersRepository, {
       _tag: 'api/TeamMembersRepository',
       addMember: (_input: any) => {
@@ -1102,7 +1217,7 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
       findRosterByTeam: () => Effect.succeed([]),
       findRosterMemberByIds: () => Effect.succeed(Option.none()),
       deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
-      getPlayerRoleId: () => Effect.succeed(Option.some({ id: REJOIN_PLAYER_ROLE_ID })),
+      getPlayerRoleId: () => Effect.succeed(playerRoleId),
       assignRole: () => Effect.void,
       unassignRole: () => Effect.void,
       setJerseyNumber: () => Effect.void,
@@ -1223,7 +1338,14 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
     findByGuildId: () => Effect.succeed(Option.none()),
   } as any);
 
-  const buildRejoinLayer = (existingMembership: Option.Option<MembershipWithRole>) =>
+  const buildRejoinLayer = (
+    existingMembership: Option.Option<MembershipWithRole>,
+    recorders: {
+      createCalls: Array<{ team_invite_id: string; user_id: string }>;
+      enqueueCalls: Array<{ userId: string; teamId: string }>;
+    } = { createCalls: [], enqueueCalls: [] },
+    playerRoleId: Option.Option<{ id: Role.RoleId }> = Option.some({ id: REJOIN_PLAYER_ROLE_ID }),
+  ) =>
     ApiLive.pipe(
       Layer.provideMerge(AuthMiddlewareLive),
       Layer.provideMerge(HttpServer.layerServices),
@@ -1231,7 +1353,7 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
       Layer.provide(RejoinUsersLayer),
       Layer.provide(RejoinSessionsLayer),
       Layer.provide(RejoinTeamsLayer),
-      Layer.provide(makeRejoinMembersLayer(existingMembership)),
+      Layer.provide(makeRejoinMembersLayer(existingMembership, playerRoleId)),
       Layer.provide(
         Layer.merge(
           Layer.merge(
@@ -1250,7 +1372,10 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
           Layer.merge(
             Layer.succeed(PendingGuildJoinsRepository, {
               _tag: 'api/PendingGuildJoinsRepository',
-              enqueue: () => Effect.void,
+              enqueue: (userId: string, teamId: string) => {
+                recorders.enqueueCalls.push({ userId, teamId });
+                return Effect.void;
+              },
               listPending: () => Effect.succeed([]),
               markDone: () => Effect.void,
               markFailed: () => Effect.void,
@@ -1258,8 +1383,15 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
             } as never),
             Layer.succeed(InviteAcceptancesRepository, {
               _tag: 'api/InviteAcceptancesRepository',
-              create: ({ team_invite_id, user_id }: { team_invite_id: string; user_id: string }) =>
-                Effect.succeed({
+              create: ({
+                team_invite_id,
+                user_id,
+              }: {
+                team_invite_id: string;
+                user_id: string;
+              }) => {
+                recorders.createCalls.push({ team_invite_id, user_id });
+                return Effect.succeed({
                   id: `${team_invite_id}:${user_id}`,
                   team_invite_id,
                   user_id,
@@ -1268,8 +1400,15 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
                   discord_code_error_detail: Option.none(),
                   created_at: DateTime.nowUnsafe(),
                   generated_at: Option.none(),
-                }),
+                });
+              },
               findById: () => Effect.succeed(Option.none()),
+              // No prior acceptance exists for any of these rejoin scenarios, so
+              // resolveOrCreateAcceptance's `open` lookup is always None here (CC-14) —
+              // every rejoin test that reaches this point creates exactly one acceptance.
+              findOpenByUserAndInvite: () => Effect.succeed(Option.none()),
+              findNewestByUserAndInvite: () => Effect.succeed(Option.none()),
+              countRecentByUserAndInvite: () => Effect.succeed(0),
               findPending: () => Effect.succeed([]),
               setDiscordCode: () => Effect.void,
               markFailed: () => Effect.void,
@@ -1361,16 +1500,24 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
     expect(addMemberCalled).toBe(false);
   });
 
-  it('already-active user gets AlreadyMember (409) — regression guard', async () => {
+  // CC-14 inverts this test (it used to assert 409 — see git history / rev 2). PR-4 test list
+  // item 7: "an active member with no acceptance at all gets a new acceptance" — the pre-feature
+  // cohort. `Invite.AlreadyMember` is no longer raised; an active member re-clicking Join with no
+  // prior acceptance gets a freshly created one instead of a permanent dead end.
+  // FAILS before PR-4 (this scenario 409s today).
+  it('already-active user with no prior acceptance gets a new acceptance — 200, not 409 (CC-14)', async () => {
     reactivateCalled = false;
     addMemberCalled = false;
+    const recorders = { createCalls: [], enqueueCalls: [] };
 
     const activeMembership2: MembershipWithRole = {
       ...inactiveMembership,
       active: true,
     };
 
-    const rejoinApp = HttpRouter.toWebHandler(buildRejoinLayer(Option.some(activeMembership2)));
+    const rejoinApp = HttpRouter.toWebHandler(
+      buildRejoinLayer(Option.some(activeMembership2), recorders),
+    );
     const rejoinHandler = rejoinApp.handler as (...args: any[]) => Promise<Response>;
 
     const response = await rejoinHandler(
@@ -1382,10 +1529,15 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
 
     await rejoinApp.dispose();
 
-    expect(response.status).toBe(409);
-    // Neither should be called — we fail before reaching the join logic
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.acceptanceId).toBeTruthy();
+    // Neither reactivateMember nor addMember runs for an already-active member — only the
+    // acceptance-resolution tail (resolveOrCreateAcceptance + enqueue) is new here.
     expect(reactivateCalled).toBe(false);
     expect(addMemberCalled).toBe(false);
+    expect(recorders.createCalls.length).toBe(1);
+    expect(recorders.enqueueCalls.length).toBe(1);
   });
 
   it('never-member user calls addMember + assignRole, returns JoinResult — regression guard', async () => {
@@ -1409,5 +1561,486 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
     expect(body.teamId).toBe(REJOIN_TEAM_ID);
     expect(addMemberCalled).toBe(true);
     expect(reactivateCalled).toBe(false);
+  });
+
+  // Should-fix 5 regression (third review of PR-4, invite.ts:83): `getPlayerRoleId` returning
+  // `Option.none()` (team renamed/deleted its "Player" role) must no longer fail the request
+  // for an already-active member re-joining — the assignRole tap is skipped entirely for that
+  // cohort, so a missing role has nothing to bite. Before the fix, `playerRole` was consumed
+  // unconditionally above the tap and 404'd every idempotent re-join for such a team.
+  // FAILS if the `getPlayerRoleId` change in invite.ts is reverted (404s InviteNotFound instead
+  // of returning the existing acceptance).
+  it('already-active member re-joins a team with no "Player" role — 200, returns existing acceptance', async () => {
+    reactivateCalled = false;
+    addMemberCalled = false;
+    const recorders = { createCalls: [], enqueueCalls: [] };
+
+    const activeMembershipNoRole: MembershipWithRole = {
+      ...inactiveMembership,
+      active: true,
+    };
+
+    const rejoinApp = HttpRouter.toWebHandler(
+      buildRejoinLayer(Option.some(activeMembershipNoRole), recorders, Option.none()),
+    );
+    const rejoinHandler = rejoinApp.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await rejoinHandler(
+      new Request('http://localhost/invite/rejoin-invite/join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer rejoin-token' },
+      }),
+    );
+
+    await rejoinApp.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.acceptanceId).toBeTruthy();
+    expect(reactivateCalled).toBe(false);
+    expect(addMemberCalled).toBe(false);
+    expect(recorders.createCalls.length).toBe(1);
+  });
+
+  // Should-fix 5 regression, other side of the guard (invite.ts:104-115): a new member (or a
+  // reactivated one — both take the `assignRole` tap) joining a team with no "Player" role must
+  // still fail `InviteNotFound`. The role is genuinely required here since `assignRole` is about
+  // to run, so this path must keep failing closed.
+  // Passes both before and after the invite.ts fix — this pins that the guard was not weakened.
+  it('new member joins a team with no "Player" role — still fails InviteNotFound', async () => {
+    reactivateCalled = false;
+    addMemberCalled = false;
+
+    const rejoinApp = HttpRouter.toWebHandler(
+      buildRejoinLayer(Option.none(), { createCalls: [], enqueueCalls: [] }, Option.none()),
+    );
+    const rejoinHandler = rejoinApp.handler as (...args: any[]) => Promise<Response>;
+
+    const response = await rejoinHandler(
+      new Request('http://localhost/invite/rejoin-invite/join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer rejoin-token' },
+      }),
+    );
+
+    await rejoinApp.dispose();
+
+    expect(response.status).toBe(404);
+    expect(addMemberCalled).toBe(true);
+    expect(reactivateCalled).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TDD for PR-4 (Discord onboarding fix) — `resolveOrCreateAcceptance` (CC-14) and
+// the requiresReauth / enqueue gating (S4/S5). See
+// `.work-plans/discord-onboarding-fix-plan.md`, PR-4 section, test list items 2, 6, 8, 9.
+//
+// This suite uses its own dedicated layer (mirroring the "removed-user re-join" suite
+// above) driven by a single mutable `scenario` object, so each test can independently
+// control:
+//   - whether the caller already has an open/newest/rate-limited acceptance
+//     (`resolveOrCreateAcceptance`'s three-way branch, CC-14)
+//   - whether the caller currently holds the `guilds.join` OAuth scope (requiresReauth,
+//     which gates the enqueue tap per S4/step 6)
+//
+// All tests here are expected to FAIL against current code: `resolveOrCreateAcceptance`
+// does not exist yet, `joinViaInvite` unconditionally calls `acceptances.create` (never
+// consults an "open" acceptance) and unconditionally raises `AlreadyMember` for any active
+// membership before ever reaching the acceptance/enqueue logic.
+// ---------------------------------------------------------------------------
+describe('Invite API — resolveOrCreateAcceptance / requiresReauth gating (TDD: PR-4 CC-14)', () => {
+  const PR4_TEAM_ID = '00000000-0000-0000-0000-000000000013' as Team.TeamId;
+  const PR4_ROLE_ID = '00000000-0000-0000-0000-000000000052' as Role.RoleId;
+  const PR4_MEMBER_ID = '00000000-0000-0000-0000-000000000022' as TeamMember.TeamMemberId;
+  const PR4_INVITE_ID = '00000000-0000-0000-0000-000000000036' as TeamInvite.TeamInviteId;
+  const PR4_INVITE_CODE = 'pr4-invite';
+
+  const pr4ActiveMembership: MembershipWithRole = {
+    id: PR4_MEMBER_ID,
+    team_id: PR4_TEAM_ID,
+    user_id: TEST_USER_ID,
+    active: true,
+    role_names: ['Player'],
+    permissions: [],
+  };
+
+  type Pr4AcceptanceRecord = {
+    id: string;
+    team_invite_id: string;
+    user_id: string;
+    discord_code: Option.Option<string>;
+    discord_code_error_code: Option.Option<string>;
+  };
+
+  // Mutated by each `it` before dispatching a request; read by the mock layer's closures.
+  let scenario: {
+    findOpen: Option.Option<Pr4AcceptanceRecord>;
+    findNewest: Option.Option<Pr4AcceptanceRecord>;
+    countRecent: number;
+    grantedScopes: Option.Option<string>;
+  };
+  let pr4CreateCalls: Array<{ team_invite_id: string; user_id: string }>;
+  let pr4EnqueueCalls: Array<{ userId: string; teamId: string }>;
+  let pr4AssignRoleCalls: Array<{ memberId: string; roleId: string }>;
+  let pr4CountRecentCalls: Array<{ userId: string; teamInviteId: string }>;
+  let pr4CreatedIdCounter: number;
+
+  const resetScenario = () => {
+    scenario = {
+      findOpen: Option.none(),
+      findNewest: Option.none(),
+      countRecent: 0,
+      grantedScopes: Option.some('identify guilds guilds.join'),
+    };
+    pr4CreateCalls = [];
+    pr4EnqueueCalls = [];
+    pr4AssignRoleCalls = [];
+    pr4CountRecentCalls = [];
+    pr4CreatedIdCounter = 0;
+  };
+  resetScenario();
+
+  const Pr4TeamMembersLayer = Layer.succeed(TeamMembersRepository, {
+    _tag: 'api/TeamMembersRepository',
+    findMembershipByIds: () => Effect.succeed(Option.some(pr4ActiveMembership)),
+    addMember: () => Effect.die(new Error('Not expected — caller is already an active member')),
+    reactivateMember: () =>
+      Effect.die(new Error('Not expected — caller is already an active member')),
+    findByTeam: () => Effect.succeed([]),
+    findByUser: () => Effect.succeed([]),
+    findRosterByTeam: () => Effect.succeed([]),
+    findRosterMemberByIds: () => Effect.succeed(Option.none()),
+    deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
+    getPlayerRoleId: () => Effect.succeed(Option.some({ id: PR4_ROLE_ID })),
+    assignRole: (memberId: string, roleId: string) => {
+      pr4AssignRoleCalls.push({ memberId, roleId });
+      return Effect.void;
+    },
+    unassignRole: () => Effect.void,
+    setJerseyNumber: () => Effect.void,
+  } as any);
+
+  const Pr4TeamInvitesLayer = Layer.succeed(TeamInvitesRepository, {
+    _tag: 'api/TeamInvitesRepository',
+    findByCode: (code: string) =>
+      code === PR4_INVITE_CODE
+        ? Effect.succeed(
+            Option.some({
+              id: PR4_INVITE_ID,
+              team_id: PR4_TEAM_ID,
+              code: PR4_INVITE_CODE,
+              active: true,
+              created_by: TEST_ADMIN_ID,
+              created_at: DateTime.nowUnsafe(),
+              expires_at: Option.none(),
+              group_id: Option.none(),
+            }),
+          )
+        : Effect.succeed(Option.none()),
+    findByCodeWithContext: () => Effect.succeed(Option.none()),
+    findByTeam: () => Effect.succeed([]),
+    listForTeam: () => Effect.succeed([]),
+    create: () => Effect.die(new Error('Not implemented')),
+    deactivateByTeam: () => Effect.void,
+    deactivateByTeamExcept: () => Effect.void,
+  } as any);
+
+  const Pr4PendingGuildJoinsLayer = Layer.succeed(PendingGuildJoinsRepository, {
+    _tag: 'api/PendingGuildJoinsRepository',
+    enqueue: (userId: string, teamId: string) => {
+      pr4EnqueueCalls.push({ userId, teamId });
+      return Effect.void;
+    },
+    listPending: () => Effect.succeed([]),
+    markDone: () => Effect.void,
+    markFailed: () => Effect.void,
+    requeueFailedForUser: () => Effect.void,
+  } as never);
+
+  const Pr4InviteAcceptancesLayer = Layer.succeed(InviteAcceptancesRepository, {
+    _tag: 'api/InviteAcceptancesRepository',
+    create: ({ team_invite_id, user_id }: { team_invite_id: string; user_id: string }) => {
+      pr4CreatedIdCounter += 1;
+      pr4CreateCalls.push({ team_invite_id, user_id });
+      return Effect.succeed({
+        id: `pr4-created-${pr4CreatedIdCounter}`,
+        team_invite_id,
+        user_id,
+        discord_code: Option.none(),
+        discord_code_error_code: Option.none(),
+        discord_code_error_detail: Option.none(),
+        created_at: DateTime.nowUnsafe(),
+        generated_at: Option.none(),
+      });
+    },
+    findById: () => Effect.succeed(Option.none()),
+    findOpenByUserAndInvite: () => Effect.succeed(scenario.findOpen),
+    findNewestByUserAndInvite: () => Effect.succeed(scenario.findNewest),
+    // BLOCKER 1 (third review of PR-4): records its arguments so tests can pin that
+    // `resolveOrCreateAcceptance` scopes the rate-limit lookup to THIS invite, not just the
+    // user — see the "does not count acceptances for other invites" test below.
+    countRecentByUserAndInvite: (userId: string, teamInviteId: string) => {
+      pr4CountRecentCalls.push({ userId, teamInviteId });
+      return Effect.succeed(scenario.countRecent);
+    },
+    findPending: () => Effect.succeed([]),
+    setDiscordCode: () => Effect.void,
+    markFailed: () => Effect.void,
+    findByDiscordCodeWithContext: () => Effect.succeed(Option.none()),
+  } as never);
+
+  const Pr4OAuthConnectionsLayer = Layer.succeed(OAuthConnectionsRepository, {
+    _tag: 'api/OAuthConnectionsRepository',
+    upsertConnection: () => Effect.succeed({} as never),
+    upsert: () => Effect.succeed({} as never),
+    findByUserAndProvider: () => Effect.succeed(Option.none()),
+    findByUser: () => Effect.succeed(Option.none()),
+    findAccessToken: () => Effect.succeed(Option.some({ access_token: 'mock-access-token' })),
+    getAccessToken: () => Effect.succeed('mock-access-token'),
+    getGrantedScopes: () => Effect.succeed(scenario.grantedScopes),
+  } as any);
+
+  const Pr4Layer = ApiLive.pipe(
+    Layer.provideMerge(AuthMiddlewareLive),
+    Layer.provideMerge(HttpServer.layerServices),
+    Layer.provide(MockDiscordOAuthLayer),
+    Layer.provide(MockUsersRepositoryLayer),
+    Layer.provide(MockSessionsRepositoryLayer),
+    Layer.provide(MockTeamsRepositoryLayer),
+    Layer.provide(Pr4TeamMembersLayer),
+    Layer.provide(
+      Layer.merge(
+        Layer.merge(
+          Layer.merge(MockRostersRepositoryLayer, MockActivityLogsRepositoryLayer),
+          MockActivityTypesRepositoryLayer,
+        ),
+        MockLeaderboardRepositoryLayer,
+      ),
+    ),
+    Layer.provide(MockRolesRepositoryLayer),
+    Layer.provide(MockGroupsRepositoryLayer),
+    Layer.provide(MockTrainingTypesRepositoryLayer),
+    Layer.provide(
+      Layer.merge(
+        Pr4TeamInvitesLayer,
+        Layer.merge(Pr4PendingGuildJoinsLayer, Pr4InviteAcceptancesLayer),
+      ),
+    ),
+    Layer.provide(MockHttpClientLayer),
+    Layer.provide(MockAgeCheckServiceLayer),
+    Layer.provide(MockAgeThresholdRepositoryLayer),
+    Layer.provide(Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer)),
+    Layer.provide(
+      Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
+    ),
+    Layer.provide(
+      Layer.merge(MockDiscordChannelMappingRepositoryLayer, MockICalTokensRepositoryLayer),
+    ),
+    Layer.provide(
+      Layer.merge(
+        Layer.merge(
+          Layer.merge(
+            Layer.merge(
+              Layer.merge(
+                Layer.merge(MockEventsRepositoryLayer, MockEventRsvpsRepositoryLayer),
+                MockBotGuildsRepositoryLayer,
+              ),
+              Layer.merge(MockDiscordChannelsRepositoryLayer, MockDiscordRolesRepositoryLayer),
+            ),
+            MockEventSeriesRepositoryLayer,
+          ),
+          Layer.succeed(TeamSettingsRepository, {
+            _tag: 'api/TeamSettingsRepository',
+            findByTeam: () => Effect.succeed(Option.none()),
+            findByTeamId: () => Effect.succeed(Option.none()),
+            upsertSettings: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+            upsert: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+            getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),
+            getHorizonDays: () => Effect.succeed(30),
+          } as any),
+        ),
+        Pr4OAuthConnectionsLayer,
+      ),
+    ),
+    Layer.provide(MockAchievementAdminLayers),
+  )
+    .pipe(Layer.provide(MockFinanceLayers))
+    .pipe(Layer.provide(MockTranslationsLayers))
+    .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+    .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
+    .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
+    .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
+    .pipe(Layer.provide(MockRulesAttemptsRepositoryLayer))
+    .pipe(Layer.provide(MockChannelManagementLayers))
+    .pipe(Layer.provide(MockEmailLayers))
+    .pipe(Layer.provide(MockEventRosterLayers))
+    .pipe(Layer.provide(BotInfoStore.Default))
+    .pipe(
+      Layer.provide(
+        Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),
+      ),
+    );
+
+  let pr4Handler: (...args: any[]) => Promise<Response>;
+  let pr4Dispose: () => Promise<void>;
+
+  beforeAll(() => {
+    const app = HttpRouter.toWebHandler(Pr4Layer);
+    pr4Handler = app.handler;
+    pr4Dispose = app.dispose;
+  });
+
+  afterAll(async () => {
+    await pr4Dispose();
+  });
+
+  const joinPr4Invite = () =>
+    pr4Handler(
+      new Request(`http://localhost/invite/${PR4_INVITE_CODE}/join`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer user-token' },
+      }),
+    );
+
+  // PR-4 test list item 2: "joinViaInvite does NOT enqueue when the user lacks guilds.join" —
+  // requiresReauth: true, enqueue recorder empty. FAILS before PR-4: today the handler
+  // unconditionally raises AlreadyMember for an active member before ever computing
+  // requiresReauth or touching the enqueue tap, so this never gets the chance to prove the
+  // *right* thing (recorder empty for the *right* reason) — it 409s instead of returning 200
+  // with requiresReauth: true.
+  it('does NOT enqueue when the user lacks guilds.join (requiresReauth: true)', async () => {
+    resetScenario();
+    scenario.grantedScopes = Option.none(); // no OAuth connection at all → requiresReauth true
+
+    const response = await joinPr4Invite();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.requiresReauth).toBe(true);
+    expect(pr4EnqueueCalls.length).toBe(0);
+  });
+
+  // Must-fix 7 (review of PR-4): `assignRole` now runs unconditionally, whereas the removed
+  // `AlreadyMember` tap previously short-circuited above it. A captain or coach without the
+  // Player role who re-opens their own team's invite link would silently gain it. `assignRole`
+  // must be skipped for a returning ACTIVE member — only a new member or a reactivated member
+  // should get the Player role assigned. FAILS before the fix (today's code always calls
+  // `assignRole`, so this test's `pr4AssignRoleCalls` recorder is non-empty).
+  it('does NOT assign the Player role to a returning active member', async () => {
+    resetScenario();
+
+    const response = await joinPr4Invite();
+
+    expect(response.status).toBe(200);
+    expect(pr4AssignRoleCalls.length).toBe(0);
+  });
+
+  // PR-4 test list item 6: "an active member whose newest acceptance is terminally failed gets
+  // a NEW acceptance" — this is the regenerate primitive, and it inverts rev 2's "still returns
+  // 409" test. FAILS before PR-4 (409s today; resolveOrCreateAcceptance doesn't exist).
+  it('an active member whose newest acceptance is terminally failed gets a NEW acceptance', async () => {
+    resetScenario();
+    scenario.findOpen = Option.none(); // the failed row is not "open"
+    scenario.findNewest = Option.some({
+      id: 'pr4-failed-1',
+      team_invite_id: PR4_INVITE_ID,
+      user_id: TEST_USER_ID,
+      discord_code: Option.none(),
+      discord_code_error_code: Option.some('bot_missing_perms' as never),
+    });
+    scenario.countRecent = 0;
+
+    const response = await joinPr4Invite();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(pr4CreateCalls.length).toBe(1);
+    expect(body.acceptanceId).toBe('pr4-created-1');
+    expect(body.acceptanceId).not.toBe('pr4-failed-1');
+  });
+
+  // PR-4 test list item 8: "the 4th regeneration within an hour reuses the newest row instead of
+  // creating" — CC-14's rate limit (≤3/hour/user). Exceeding it does not error; it silently
+  // returns the newest existing (failed/expired) row unchanged. FAILS before PR-4 (this rate
+  // limit does not exist yet — today's code always creates, and 409s here besides).
+  it('the 4th regeneration within an hour reuses the newest row instead of creating — no error', async () => {
+    resetScenario();
+    scenario.findOpen = Option.none();
+    scenario.findNewest = Option.some({
+      id: 'pr4-rate-limited-1',
+      team_invite_id: PR4_INVITE_ID,
+      user_id: TEST_USER_ID,
+      discord_code: Option.none(),
+      discord_code_error_code: Option.some('bot_missing_perms' as never),
+    });
+    scenario.countRecent = 3; // at the cap
+
+    const response = await joinPr4Invite();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(pr4CreateCalls.length).toBe(0);
+    expect(body.acceptanceId).toBe('pr4-rate-limited-1');
+  });
+
+  // BLOCKER 1 (third review of PR-4): pins the plumbing fix directly — the SQL semantics are
+  // covered by the repository-level regression test (four-squads scenario) in
+  // `test/integration/repositories/InviteAcceptancesRepository.test.ts`; this pins that
+  // `joinViaInvite` passes THIS invite's id through to the rate-limit lookup rather than, say,
+  // a user-only key. FAILS before the fix (the pre-fix helper never took an invite id at all).
+  it('scopes the rate-limit lookup to this invite (not just the user)', async () => {
+    resetScenario();
+
+    const response = await joinPr4Invite();
+
+    expect(response.status).toBe(200);
+    expect(pr4CountRecentCalls).toEqual([{ userId: TEST_USER_ID, teamInviteId: PR4_INVITE_ID }]);
+  });
+
+  // BLOCKER 1 (third review of PR-4): the OLD rate limit counted every acceptance the user
+  // created in the last hour across ALL invites, which is bypassable in the exact opposite
+  // direction of a real fix — a user who had recently joined three OTHER invites got failed
+  // CLOSED (no acceptance, no banner, no error — the reported production bug) on the very
+  // FIRST click of an invite they had never touched. The fix scopes both the count and the
+  // lookup to the same (user, invite) pair (see the repository-level regression test in
+  // `test/integration/repositories/InviteAcceptancesRepository.test.ts`), which makes hitting
+  // the cap for THIS invite PROVE a newest row already exists for it — `findNewestByUserAndInvite`
+  // returning `None` while `countRecentByUserAndInvite` says the cap is hit is therefore an
+  // invariant violation, not a legitimate state. `resolveOrCreateAcceptance` now surfaces that
+  // as a defect (`LogicError.die`) rather than silently returning a `JoinResult` with no
+  // acceptance, so this models the (unreachable in production) violation via the mock and pins
+  // that the request fails loudly instead of the pre-fix silent-nothing bug.
+  it('a rate-limit/lookup invariant violation surfaces as a defect, not a silently missing acceptance', async () => {
+    resetScenario();
+    scenario.findOpen = Option.none();
+    scenario.findNewest = Option.none(); // models an impossible state — see comment above
+    scenario.countRecent = 3; // at the cap
+
+    const response = await joinPr4Invite();
+
+    expect(response.status).toBeGreaterThanOrEqual(500);
+    expect(pr4CreateCalls.length).toBe(0);
+  });
+
+  // PR-4 test list item 9: "joinViaInvite reuses an acceptance that already has a discord_code"
+  // — the link is still usable; a row with a discord_code is still "open" (only a
+  // discord_code_error_code makes it terminal). FAILS before PR-4 (409s today).
+  it('reuses an acceptance that already has a discord_code — the link is still usable', async () => {
+    resetScenario();
+    scenario.findOpen = Option.some({
+      id: 'pr4-already-generated-1',
+      team_invite_id: PR4_INVITE_ID,
+      user_id: TEST_USER_ID,
+      discord_code: Option.some('already-generated-code'),
+      discord_code_error_code: Option.none(),
+    });
+
+    const response = await joinPr4Invite();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(pr4CreateCalls.length).toBe(0);
+    expect(body.acceptanceId).toBe('pr4-already-generated-1');
   });
 });

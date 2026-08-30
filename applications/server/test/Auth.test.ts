@@ -1510,3 +1510,210 @@ describe('Global admin read access', () => {
     expect(response.status).toBe(403);
   });
 });
+
+// ---------------------------------------------------------------------------
+// TDD for PR-4 (Discord onboarding fix), CC-6/S5 — `auth.ts`'s requeue condition is too
+// narrow. Today it gates `requeueFailedForUser` on `hasScopeNow && !hadScopeBefore` (a scope
+// *transition*). But the dominant auto-join failure is a 401 on an expired OAuth access
+// token (S2 — tokens are never refreshed, and expire in ~7 days while sessions last 30), and
+// that user already had `guilds.join` before this login — so the transition is false and the
+// requeue never fires on the exact login that just wrote a fresh token. PR-4 fixes this by
+// dropping the transition condition: requeue whenever `hasScopeNow` is true, unconditionally
+// on `hadScopeBefore`.
+//
+// `MockOAuthConnectionsRepositoryLayer.getGrantedScopes` (used by `TestLayer` above and
+// reused here) always returns 'identify guilds guilds.join' for BOTH the "previous" and
+// "current" scope reads, so `hasScopeNow === hadScopeBefore === true` — an unchanged-scope
+// login. This test MUST FAIL against current code: `hasScopeNow && !hadScopeBefore` is false,
+// so `requeueFailedForUser` is never called.
+// See `.work-plans/discord-onboarding-fix-plan.md`, PR-4 test list item 17.
+// ---------------------------------------------------------------------------
+describe('Auth API — requeueFailedForUser widening (TDD: PR-4 CC-6/S5)', () => {
+  let requeueCalls: Array<Auth.UserId>;
+  // BLOCKER 3 / should-fix 10: lets individual tests drive the two mocks that gate/guard the
+  // requeue tap without duplicating the whole layer stack per scenario.
+  let s5RequeueShouldDie: boolean;
+  let s5OAuthScope: string;
+
+  const S5DiscordOAuthLayer = Layer.succeed(DiscordOAuth, {
+    createAuthorizationURL: (_state: string) =>
+      Effect.succeed(new URL('https://discord.com/oauth2/authorize?client_id=test')),
+    validateAuthorizationCode: (code: string) =>
+      code === 'valid-code'
+        ? Effect.succeed(
+            new OAuth2Tokens({
+              access_token: 'mock-access-token',
+              refresh_token: 'mock-refresh-token',
+              scope: s5OAuthScope,
+            }),
+          )
+        : Effect.fail(new DiscordOAuthError({ cause: new Error('Invalid code') })),
+  });
+
+  const S5TestLayer = ApiLive.pipe(
+    Layer.provideMerge(AuthMiddlewareLive),
+    Layer.provideMerge(HttpServer.layerServices),
+    Layer.provide(S5DiscordOAuthLayer),
+    Layer.provide(MockUsersRepositoryLayer),
+    Layer.provide(MockSessionsRepositoryLayer),
+    Layer.provide(MockTeamsRepositoryLayer),
+    Layer.provide(MockTeamMembersRepositoryLayer),
+    Layer.provide(
+      Layer.merge(
+        Layer.merge(
+          Layer.merge(MockRostersRepositoryLayer, MockActivityLogsRepositoryLayer),
+          MockActivityTypesRepositoryLayer,
+        ),
+        MockLeaderboardRepositoryLayer,
+      ),
+    ),
+    Layer.provide(MockRolesRepositoryLayer),
+    Layer.provide(MockGroupsRepositoryLayer),
+    Layer.provide(MockTrainingTypesRepositoryLayer),
+    Layer.provide(
+      Layer.merge(
+        MockTeamInvitesRepositoryLayer,
+        Layer.merge(
+          Layer.succeed(PendingGuildJoinsRepository, {
+            _tag: 'api/PendingGuildJoinsRepository',
+            enqueue: () => Effect.void,
+            listPending: () => Effect.succeed([]),
+            markDone: () => Effect.void,
+            markFailed: () => Effect.void,
+            requeueFailedForUser: (userId: Auth.UserId) => {
+              requeueCalls.push(userId);
+              // BLOCKER 3: simulates `catchSqlErrors` turning a `SqlError` into a `LogicError`
+              // defect — exactly what a failing UPDATE looks like in production.
+              return s5RequeueShouldDie
+                ? Effect.die(new Error('simulated requeueFailedForUser failure'))
+                : Effect.void;
+            },
+          } as never),
+          Layer.succeed(InviteAcceptancesRepository, {
+            _tag: 'api/InviteAcceptancesRepository',
+          } as never),
+        ),
+      ),
+    ),
+    Layer.provide(MockHttpClientLayer),
+    Layer.provide(MockAgeCheckServiceLayer),
+    Layer.provide(MockAgeThresholdRepositoryLayer),
+    Layer.provide(Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer)),
+    Layer.provide(
+      Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
+    ),
+    Layer.provide(
+      Layer.merge(MockDiscordChannelMappingRepositoryLayer, MockICalTokensRepositoryLayer),
+    ),
+    Layer.provide(
+      Layer.merge(
+        Layer.merge(
+          Layer.merge(
+            Layer.merge(
+              Layer.merge(
+                Layer.merge(MockEventsRepositoryLayer, MockEventRsvpsRepositoryLayer),
+                MockBotGuildsRepositoryLayer,
+              ),
+              Layer.merge(MockDiscordChannelsRepositoryLayer, MockDiscordRolesRepositoryLayer),
+            ),
+            MockEventSeriesRepositoryLayer,
+          ),
+          Layer.succeed(TeamSettingsRepository, {
+            _tag: 'api/TeamSettingsRepository',
+            findByTeam: () => Effect.succeed(Option.none()),
+            findByTeamId: () => Effect.succeed(Option.none()),
+            upsertSettings: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+            upsert: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+            getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),
+            getHorizonDays: () => Effect.succeed(30),
+          } as any),
+        ),
+        MockOAuthConnectionsRepositoryLayer,
+      ),
+    ),
+    Layer.provide(MockAchievementAdminLayers),
+  )
+    .pipe(Layer.provide(MockFinanceLayers))
+    .pipe(Layer.provide(MockTranslationsLayers))
+    .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+    .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
+    .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
+    .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
+    .pipe(Layer.provide(MockRulesAttemptsRepositoryLayer))
+    .pipe(Layer.provide(MockChannelManagementLayers))
+    .pipe(Layer.provide(MockEmailLayers))
+    .pipe(Layer.provide(MockEventRosterLayers))
+    .pipe(Layer.provide(BotInfoStore.Default))
+    .pipe(
+      Layer.provide(
+        Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),
+      ),
+    );
+
+  let s5Handler: (...args: any[]) => Promise<Response>;
+  let s5Dispose: () => Promise<void>;
+
+  beforeAll(() => {
+    const app = HttpRouter.toWebHandler(S5TestLayer);
+    s5Handler = app.handler;
+    s5Dispose = app.dispose;
+  });
+
+  afterAll(async () => {
+    await s5Dispose();
+  });
+
+  it('a login with an unchanged guilds.join scope still requeues failed guild joins', async () => {
+    requeueCalls = [];
+    s5RequeueShouldDie = false;
+    s5OAuthScope = 'identify guilds guilds.join';
+
+    const response = await s5Handler(
+      new Request(
+        'http://localhost/auth/callback?code=valid-code&state=%7B%22id%22%3A%22d5760fa3-5440-4f87-8136-f5c1109aaea0%22%2C%20%22redirectUrl%22%3A%22http%3A%2F%2Flocalhost%3A5173%2Fredirect%22%7D',
+      ),
+    );
+
+    expect(response.status).toBe(302);
+    expect(requeueCalls.length).toBe(1);
+    expect(requeueCalls[0]).toBe(TEST_USER_ID);
+  });
+
+  // Should-fix 10: the negative case the tester flagged as missing — `requeueFailedForUser`
+  // must NOT be called at all when the OAuth response does not grant `guilds.join`.
+  it('does NOT call requeueFailedForUser when hasScopeNow is false', async () => {
+    requeueCalls = [];
+    s5RequeueShouldDie = false;
+    s5OAuthScope = 'identify guilds'; // no guilds.join
+
+    const response = await s5Handler(
+      new Request(
+        'http://localhost/auth/callback?code=valid-code&state=%7B%22id%22%3A%22d5760fa3-5440-4f87-8136-f5c1109aaea0%22%2C%20%22redirectUrl%22%3A%22http%3A%2F%2Flocalhost%3A5173%2Fredirect%22%7D',
+      ),
+    );
+
+    expect(response.status).toBe(302);
+    expect(requeueCalls.length).toBe(0);
+  });
+
+  // BLOCKER 3 (review of PR-4): the requeue tap sits in an `Effect.tap` BEFORE `sessions.create`,
+  // and `catchSqlErrors` converts a `SqlError` into a `LogicError` DEFECT, not a typed error — so
+  // any failure of this best-effort UPDATE kills the whole request and nobody logs in. This ran
+  // roughly once per user ever before CC-6/S5 widened the condition to fire on every login with
+  // `guilds.join`, so it is now a much larger blast radius. FAILS before the fix (the defect
+  // propagates and the response is a 500, not the 302 redirect a successful login produces).
+  it('a login still succeeds even when requeueFailedForUser fails', async () => {
+    requeueCalls = [];
+    s5RequeueShouldDie = true;
+    s5OAuthScope = 'identify guilds guilds.join';
+
+    const response = await s5Handler(
+      new Request(
+        'http://localhost/auth/callback?code=valid-code&state=%7B%22id%22%3A%22d5760fa3-5440-4f87-8136-f5c1109aaea0%22%2C%20%22redirectUrl%22%3A%22http%3A%2F%2Flocalhost%3A5173%2Fredirect%22%7D',
+      ),
+    );
+
+    expect(response.status).toBe(302);
+    expect(requeueCalls.length).toBe(1);
+  });
+});

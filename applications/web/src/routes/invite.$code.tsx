@@ -3,7 +3,8 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { Effect, Option } from 'effect';
 import React from 'react';
 import { InvitePage } from '~/components/pages/InvitePage';
-import { getLogin, setLastTeamId, setPendingDiscordJoin, setPendingInvite } from '~/lib/auth';
+import { getLogin, setPendingInvite } from '~/lib/auth';
+import { persistJoinResult } from '~/lib/auth/persistJoinResult.js';
 import { ApiClient, ClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
 
 export const Route = createFileRoute('/invite/$code')({
@@ -23,18 +24,15 @@ function InviteRoute() {
   const navigate = useNavigate();
   const run = useRun();
 
-  const handleJoined = React.useCallback(
-    (result: Invite.JoinResult) => {
-      Effect.runSync(setLastTeamId(result.teamId));
-      if (Option.isSome(result.acceptanceId)) {
-        Effect.runFork(
-          setPendingDiscordJoin({
-            acceptanceId: result.acceptanceId.value,
-            teamId: result.teamId,
-            ts: Date.now(),
-          }),
-        );
-      }
+  // BLOCKER 4 (review of PR-4): a single callback — see `InvitePage`'s `onJoinResult` prop doc
+  // for why this replaced the previous `onJoinPersisted` / `onJoinComplete` pair. Persistence
+  // always runs; navigation only runs when `meta.navigated` is true (i.e. `requiresReauth` was
+  // false), which used to be a second, separately-wired callback that could be swapped with this
+  // one at this exact call site without a type error.
+  const handleJoinResult = React.useCallback(
+    (result: Invite.JoinResult, meta: { readonly navigated: boolean }) => {
+      Effect.runSync(persistJoinResult(result));
+      if (!meta.navigated) return;
       if (result.isProfileComplete) {
         navigate({ to: '/teams/$teamId', params: { teamId: result.teamId } });
       } else {
@@ -64,7 +62,7 @@ function InviteRoute() {
       isAuthenticated={Option.isSome(userOption)}
       invite={invite}
       code={code}
-      onJoined={handleJoined}
+      onJoinResult={handleJoinResult}
       onSignIn={handleSignIn}
       onReauth={handleSignIn}
     />

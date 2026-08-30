@@ -12,7 +12,15 @@ interface InvitePageProps {
   isAuthenticated: boolean;
   invite: Invite.InviteInfo;
   code: string;
-  onJoined: (result: Invite.JoinResult) => void;
+  // BLOCKER 4 (review of PR-4): a single callback, called exactly once per join, rather than the
+  // previous `onJoinPersisted` / `onJoinComplete` pair. Both had the identical signature
+  // `(result: Invite.JoinResult) => void`, so swapping them at the call site compiled cleanly and
+  // silently reintroduced the bug this PR fixes (persistence being skipped for the
+  // `requiresReauth` cohort). With one prop there is nothing left to swap.
+  //
+  // `meta.navigated` is `true` iff `requiresReauth` is `false` — it tells the caller whether it
+  // should ALSO navigate away, on top of always persisting the result.
+  onJoinResult: (result: Invite.JoinResult, meta: { readonly navigated: boolean }) => void;
   onSignIn: () => void;
   onReauth: () => void;
 }
@@ -21,7 +29,7 @@ export function InvitePage({
   isAuthenticated,
   invite,
   code,
-  onJoined,
+  onJoinResult,
   onSignIn,
   onReauth,
 }: InvitePageProps) {
@@ -35,10 +43,9 @@ export function InvitePage({
       Effect.flatMap((api) => api.invite.joinViaInvite({ params: { code } })),
       Effect.tap((result) =>
         Effect.sync(() => {
+          onJoinResult(result, { navigated: !result.requiresReauth });
           if (result.requiresReauth) {
             setRequiresReauth(true);
-          } else {
-            onJoined(result);
           }
         }),
       ),
@@ -52,7 +59,7 @@ export function InvitePage({
       run({ success: tr('invite_teamJoined') }),
     );
     setJoining(false);
-  }, [code, run, onJoined]);
+  }, [code, run, onJoinResult]);
 
   return (
     <div className='flex min-h-screen flex-col'>

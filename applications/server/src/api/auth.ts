@@ -168,18 +168,36 @@ const completeDiscordLogin = ({
         grantedScopes,
         OAuthConnection.REQUIRED_DISCORD_SCOPE,
       );
-      return hasScopeNow && !hadScopeBefore
-        ? pendingGuildJoins
-            .requeueFailedForUser(dbUser.id)
-            .pipe(
-              Effect.tap(() =>
-                Effect.logInfo(
-                  '[auth/callback] guilds.join scope newly granted — requeued failed pending_guild_joins',
-                  { userId: dbUser.id },
-                ),
+      // CC-6/S5: the dominant auto-join failure is a 401 on an expired access token, and that
+      // user already had guilds.join — so gating on the scope *transition* alone means the
+      // requeue never fires on the exact login that just wrote a fresh token. Requeue whenever
+      // the scope is granted now, regardless of whether it was already granted before. This is
+      // a no-op when there is nothing to requeue (`WHERE ... status = 'failed'`). It does NOT by
+      // itself guarantee only wanted joins get revived — `PendingGuildJoinsRepository.
+      // requeueFailedForUser` (BLOCKER 2) additionally requires the row's team membership to
+      // still be active, which is what actually closes the loop for a user who left the guild
+      // deliberately between the failed auto-join and this login.
+      if (!hasScopeNow) return Effect.void;
+      // BLOCKER 3: this is a best-effort UPDATE running before `sessions.create` below, in an
+      // `Effect.tap`. `catchSqlErrors` turns a `SqlError` into a `LogicError` DEFECT, not a
+      // typed error, so an uncaught failure here would kill the whole login request. Never let
+      // it block login — log and move on.
+      return pendingGuildJoins.requeueFailedForUser(dbUser.id).pipe(
+        Effect.tap(() =>
+          hadScopeBefore
+            ? Effect.logInfo(
+                '[auth/callback] fresh access token written — requeued failed pending_guild_joins',
+                { userId: dbUser.id },
+              )
+            : Effect.logInfo(
+                '[auth/callback] guilds.join scope newly granted — requeued failed pending_guild_joins',
+                { userId: dbUser.id },
               ),
-            )
-        : Effect.void;
+        ),
+        Effect.catchCause((cause) =>
+          Effect.logError('[auth/callback] requeueFailedForUser failed — login proceeds', cause),
+        ),
+      );
     }),
     Effect.bind('session', ({ dbUser, sessionToken, expiresAt }) =>
       sessions.create({
