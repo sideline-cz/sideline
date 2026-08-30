@@ -49,12 +49,39 @@ export const localHhMm = (nowMs: number, timezone: string): string | undefined =
 };
 
 /**
+ * Local calendar date as `YYYY-MM-DD` for `nowMs` in `timezone`, or
+ * `undefined` if Intl does not know the zone. `en-CA` is the locale whose
+ * short date format IS ISO order, so no reassembly is needed.
+ */
+export const localYmd = (nowMs: number, timezone: string): string | undefined => {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(nowMs));
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Whole days between two `YYYY-MM-DD` dates. Both are parsed at UTC midnight,
+ * so this counts CALENDAR days and a DST transition between them cannot make
+ * the answer 6.958 instead of 7.
+ */
+const daysBetweenYmd = (from: string, to: string): number =>
+  (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / (24 * 60 * 60 * 1000);
+
+/**
  * Whether this team is due right now.
  *
- * Two independent conditions, both required: the team's LOCAL clock reads the
- * configured `HH:MM`, and enough days have passed since the last post. The
- * minute check is what keeps the cron's once-per-minute tick from posting all
- * day; the interval check is what makes it every N days rather than daily.
+ * Two conditions, both required: the team's LOCAL clock is at or past the
+ * configured `HH:MM`, and at least `intervalDays` LOCAL CALENDAR DAYS have
+ * turned over since the last post. The time check opens the day's window; the
+ * day-count check is the only thing that closes it, so it has to be exact —
+ * see the note on the comparison itself.
  *
  * Never posted before (`lastScheduledForMs` absent) is due immediately at the
  * next matching minute — enabling the feature should not mean waiting a full
@@ -89,10 +116,30 @@ export const isDue = (args: {
   // server comes back, rather than being skipped for the whole interval.
   if (local < args.time) return false;
   if (args.lastScheduledForMs === undefined) return true;
-  const elapsedDays = (args.nowMs - args.lastScheduledForMs) / (24 * 60 * 60 * 1000);
-  // `- 0.5` tolerates the minute-granularity window and any DST shift, without
-  // ever allowing two posts inside the same interval.
-  return elapsedDays >= args.intervalDays - 0.5;
+
+  // Whole LOCAL CALENDAR DAYS since the last post — not elapsed milliseconds.
+  //
+  // This used to be `elapsedDays >= intervalDays - 0.5`, and the half-day
+  // slack combined with the at-or-past window above to post TWICE A DAY on a
+  // daily schedule: a post at 10:00 satisfies the window all evening, and at
+  // 22:00 the elapsed check re-arms because 12h >= 1 - 0.5 days. Observed in
+  // production as 10:00 and 22:00 every day. The window and the slack are
+  // each defensible alone; together they left nothing enforcing the interval.
+  //
+  // Shrinking the slack does not fix it, it just moves it: the window runs
+  // from the configured time to local midnight, so any slack larger than
+  // (midnight - time) re-opens the same hole — and for an early-morning slot
+  // like 00:30 that window is 23.5h, so almost any slack at all does.
+  //
+  // Comparing calendar dates closes it by construction. A day can only be
+  // counted once, whatever time within it the post actually went out, so the
+  // "once a day" guarantee no longer depends on tick timing at all. It also
+  // cannot drift the way an elapsed-milliseconds comparison does, where each
+  // post is timed from the last one and jitter accumulates forward.
+  const lastDay = localYmd(args.lastScheduledForMs, args.timezone);
+  const nowDay = localYmd(args.nowMs, args.timezone);
+  if (lastDay === undefined || nowDay === undefined) return false;
+  return daysBetweenYmd(lastDay, nowDay) >= args.intervalDays;
 };
 
 /** `rng` is injectable so tests are deterministic, the same affordance
