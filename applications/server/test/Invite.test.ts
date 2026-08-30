@@ -957,6 +957,59 @@ describe('Invite API', () => {
     expect(body.acceptanceId).toBe(firstJoinAcceptanceId);
   });
 
+  // PR-2 test list item 10 — `projectInviteErrorToWire` (CC-3) applied at the `getJoinStatus`
+  // read boundary: the stored `'bot_not_in_guild'` (unreachable in production this release —
+  // nothing writes it until PR-3) must still project to the client-facing `'unknown'`.
+  it("getJoinStatus projects bot_not_in_guild to 'unknown'", async () => {
+    acceptanceIdCounter += 1;
+    const id = `acc-${acceptanceIdCounter}`;
+    acceptancesStore.set(acceptanceKey('pr2-bot-not-in-guild-invite', TEST_USER_ID), {
+      id,
+      team_invite_id: 'pr2-bot-not-in-guild-invite',
+      user_id: TEST_USER_ID,
+      discord_code: Option.none(),
+      discord_code_error_code: Option.some('bot_not_in_guild'),
+      discord_code_error_detail: Option.none(),
+      created_at: DateTime.nowUnsafe(),
+      generated_at: Option.none(),
+    });
+
+    const response = await handler(
+      new Request(`http://localhost/invite/acceptances/${id}`, {
+        headers: { Authorization: 'Bearer user-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.errorCode).toBe('unknown');
+  });
+
+  // PR-2 test list item 11 — `'expired'` collapses to `None` permanently (CC-3): an old browser
+  // with no `state` field must see `errorCode: null`, not an unrecognized literal.
+  it('getJoinStatus returns errorCode None for an expired row', async () => {
+    acceptanceIdCounter += 1;
+    const id = `acc-${acceptanceIdCounter}`;
+    acceptancesStore.set(acceptanceKey('pr2-expired-invite', TEST_USER_ID), {
+      id,
+      team_invite_id: 'pr2-expired-invite',
+      user_id: TEST_USER_ID,
+      discord_code: Option.none(),
+      discord_code_error_code: Option.some('expired'),
+      discord_code_error_detail: Option.none(),
+      created_at: DateTime.nowUnsafe(),
+      generated_at: Option.none(),
+    });
+
+    const response = await handler(
+      new Request(`http://localhost/invite/acceptances/${id}`, {
+        headers: { Authorization: 'Bearer user-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.errorCode).toBeNull();
+  });
+
   it('POST /invite/:code/join with invalid code returns 404', async () => {
     const response = await handler(
       new Request('http://localhost/invite/nonexistent/join', {
@@ -2044,3 +2097,33 @@ describe('Invite API — resolveOrCreateAcceptance / requiresReauth gating (TDD:
     expect(body.acceptanceId).toBe('pr4-already-generated-1');
   });
 });
+
+// ---------------------------------------------------------------------------
+// TDD for PR-5 (Discord onboarding fix) — durable link surface + the
+// regenerate endpoint. See `.work-plans/discord-onboarding-fix-plan.md`,
+// PR-5 test list items 1-15.
+//
+// NONE of the following exists yet, so every test below MUST FAIL against
+// current code:
+//   - `Invite.JoinStatus.state` (domain) — `getJoinStatus` only returns
+//     `discordInviteUrl` + `errorCode` today, never `state`.
+//   - `GET /teams/:teamId/me/discord-join` (`getMyPendingDiscordJoin`).
+//   - `POST /teams/:teamId/me/discord-join` (`regenerateMyDiscordInvite`).
+//   - `InviteAcceptancesRepository.findOpenByUserAndTeam`.
+//   - `applications/server/src/utils/joinStatusState.ts`.
+// The two new routes 404 today (nothing in `InviteApiGroup` declares them),
+// and the existing `getJoinStatus` response body never has a `state` key.
+//
+// SPEC GAP flagged for the architect: CC-3 puts `'expired'` / `'bot_not_in_guild'`
+// on the STORED `Onboarding.InviteGeneratorErrorCode` enum in PR-2, and CC-4's
+// derived-expiry window constants live in `inviteExpiry.ts`, created in PR-3.
+// Neither PR-2 nor PR-3 has merged in this checkout (only PR-4, `aa1ed611`,
+// has — see `git log -- applications/server/src/utils/resolveOrCreateAcceptance.ts`).
+// Tests 4 and 6 below are written to the PR-5 spec regardless: the mock
+// repository below stores `discord_code_error_code` as a plain `Option<string>`
+// with no schema validation, so seeding it with `'expired'` compiles and runs
+// fine here. A REAL implementation reading `invite_acceptances` through
+// `InviteAcceptance.InviteAcceptance` (a `SELECT *` decode against
+// `Onboarding.InviteGeneratorErrorCode`) cannot write or read an `'expired'`
+// row until that stored enum is widened — that widening is out of scope for
+// this test file and must land before or alongside PR-5's server code.

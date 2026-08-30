@@ -3,10 +3,30 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/ht
 import { AuthMiddleware } from '~/api/Auth.js';
 import { GroupId } from '~/models/GroupModel.js';
 import { InviteAcceptanceId } from '~/models/InviteAcceptance.js';
-import { InviteGeneratorErrorCode } from '~/models/Onboarding.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamInviteId } from '~/models/TeamInvite.js';
 import { UserId } from '~/models/User.js';
+
+/**
+ * The client-facing subset of `Onboarding.InviteGeneratorErrorCode`. `'expired'` is never here
+ * — `JoinStatus.state` carries it (CC-3). Name is permanent, not `LegacyInviteGeneratorErrorCode`:
+ * this is not a legacy artefact awaiting deletion, it is the permanent client contract (only
+ * `'bot_not_in_guild'` joins it later, in PR-9). See
+ * `applications/server/src/utils/inviteErrorWireProjection.ts` for the projection applied at the
+ * `getJoinStatus` read boundary. Model: `EventRsvpApi.ts` `LegacyRsvpResponse` /
+ * `rsvpWireProjection.ts`.
+ */
+export const JoinStatusErrorCode = Schema.Literals([
+  'welcome_channel_missing',
+  'welcome_channel_deleted',
+  'bot_missing_perms',
+  'community_not_enabled',
+  'rate_limited',
+  'discord_error',
+  'network_error',
+  'unknown',
+]);
+export type JoinStatusErrorCode = typeof JoinStatusErrorCode.Type;
 
 export class InviteInfo extends Schema.Class<InviteInfo>('InviteInfo')({
   teamName: Schema.String,
@@ -30,7 +50,7 @@ export class JoinResult extends Schema.Class<JoinResult>('JoinResult')({
 export class JoinStatus extends Schema.Class<JoinStatus>('JoinStatus')({
   acceptanceId: InviteAcceptanceId,
   discordInviteUrl: Schema.OptionFromNullOr(Schema.String),
-  errorCode: Schema.OptionFromNullOr(InviteGeneratorErrorCode),
+  errorCode: Schema.OptionFromNullOr(JoinStatusErrorCode),
 }) {}
 
 export class InviteCode extends Schema.Class<InviteCode>('InviteCode')({

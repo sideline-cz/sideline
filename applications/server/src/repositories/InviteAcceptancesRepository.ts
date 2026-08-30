@@ -11,10 +11,16 @@ import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 
+// PR-2 wire expand (CC-1): matches the widened `Invite/PendingAcceptances` success shape
+// (`PendingAcceptanceEntry`) so the row can be returned to the RPC handler as-is. `findPending`
+// still never selects a null `welcome_channel_id` this release — the `WHERE` clause's temporary
+// wire guard (below) keeps it non-null — but the column type is `Option` regardless because
+// that's what the widened wire schema now declares.
 class PendingAcceptanceRow extends Schema.Class<PendingAcceptanceRow>('PendingAcceptanceRow')({
   acceptance_id: InviteAcceptance.InviteAcceptanceId,
   guild_id: Discord.Snowflake,
-  welcome_channel_id: Discord.Snowflake,
+  welcome_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  bot_present: Schema.Boolean,
 }) {}
 
 class AcceptanceWithContextRow extends Schema.Class<AcceptanceWithContextRow>(
@@ -137,7 +143,8 @@ const make = SqlClient.SqlClient.asEffect().pipe(
         SELECT
           ia.id                AS acceptance_id,
           t.guild_id           AS guild_id,
-          t.welcome_channel_id AS welcome_channel_id
+          t.welcome_channel_id AS welcome_channel_id,
+          TRUE                 AS bot_present
         FROM invite_acceptances ia
         JOIN team_invites ti ON ti.id = ia.team_invite_id
         JOIN teams t         ON t.id = ti.team_id

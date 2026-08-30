@@ -10,6 +10,7 @@ import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepos
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { projectInviteErrorToWire } from '~/utils/inviteErrorWireProjection.js';
 import { resolveOrCreateAcceptance } from '~/utils/resolveOrCreateAcceptance.js';
 
 const INVITE_CODE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -204,7 +205,9 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                 new Invite.JoinStatus({
                   acceptanceId: acc.id,
                   discordInviteUrl: Option.map(acc.discord_code, (c) => `https://discord.gg/${c}`),
-                  errorCode: acc.discord_code_error_code,
+                  // CC-3: the projection returns an Option, so an 'expired' row yields None —
+                  // exactly what an old browser (with no `state` field) should see.
+                  errorCode: Option.flatMap(acc.discord_code_error_code, projectInviteErrorToWire),
                 }),
             ),
           ),
