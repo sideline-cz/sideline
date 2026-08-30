@@ -41,6 +41,15 @@ export * as GroupApi from './api/GroupApi.js';
 
 export * as ICalApi from './api/ICalApi.js';
 
+/**
+ * The client-facing subset of `Onboarding.InviteGeneratorErrorCode`. `'expired'` is never here
+ * — `JoinStatus.state` carries it (CC-3). Name is permanent, not `LegacyInviteGeneratorErrorCode`:
+ * this is not a legacy artefact awaiting deletion, it is the permanent client contract (only
+ * `'bot_not_in_guild'` joins it later, in PR-9). See
+ * `applications/server/src/utils/inviteErrorWireProjection.ts` for the projection applied at the
+ * `getJoinStatus` read boundary. Model: `EventRsvpApi.ts` `LegacyRsvpResponse` /
+ * `rsvpWireProjection.ts`.
+ */
 export * as Invite from './api/Invite.js';
 
 export * as LeaderboardApi from './api/LeaderboardApi.js';
@@ -371,6 +380,21 @@ export * as FinanceRpcGroup from './rpc/finance/FinanceRpcGroup.js';
 export * as FinanceRpcModels from './rpc/finance/FinanceRpcModels.js';
 export * as GuildRpcGroup from './rpc/guild/GuildRpcGroup.js';
 export * as GuildRpcModels from './rpc/guild/GuildRpcModels.js';
+/**
+ * PR-2 wire expand (CC-1: "the bot is the decoder"). Two additive, tolerant fields so an
+ * old bot bundling the pre-PR-2 schema keeps decoding this batch RPC's success payload:
+ *
+ * - `welcome_channel_id` tolerates both a missing key (an old server never sent it) and an
+ *   explicit `null` (a PR-3+ server, once the `welcome_channel_id IS NOT NULL` guard in
+ *   `findPending` is lifted) — both decode to `Option.none()`.
+ * - `bot_present` decodes a missing key (an old server never sent it) as `true`, the
+ *   behaviour-preserving default before PR-3 adds the real "is the bot actually in this
+ *   guild" gate.
+ *
+ * This release (PR-2) the server still only ever emits a non-null `welcome_channel_id` and
+ * never emits `bot_present: false` — see `InviteAcceptancesRepository.findPending`'s
+ * temporary wire guard. Nothing behaves differently yet; only the schema is widened.
+ */
 export * as InviteRpcGroup from './rpc/invite/InviteRpcGroup.js';
 export * as PersonalEventsRpcGroup from './rpc/personalEvents/PersonalEventsRpcGroup.js';
 export * as PollRpcGroup from './rpc/poll/PollRpcGroup.js';
