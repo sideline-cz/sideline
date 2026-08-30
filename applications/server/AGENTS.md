@@ -985,6 +985,23 @@ The first guard prevents re-emission after a successful delivery. The second gua
 4. **`emit` is called inside the cron's per-candidate loop with `Effect.exit` for per-item error isolation** (see "Per-Item Error Isolation" above) — one bad row never poisons the rest of the cycle.
 5. **Never write to `<resource>_sent` from the cron or from any server-side path.** It is exclusively bot-driven. A row in `<resource>_sent` is the only durable proof that Discord actually accepted the message; promoting the cron to write it would re-introduce the "we think we sent it but Discord never got it" bug class.
 
+## Pending-Work Selection Queries: State Filters Yes, Business Filters No
+
+Every query that hands rows to a worker (`InviteAcceptancesRepository.findPending`, cron candidate queries, outbox polls) has two kinds of `WHERE` predicate, and only one of them is safe:
+
+| Predicate kind | Examples | Verdict |
+|----------------|----------|---------|
+| **State filter** — the row is not ready yet, or is already handled | `ia.discord_code IS NULL`, `ia.discord_code_error_code IS NULL`, `processed_at IS NULL`, the two `NOT EXISTS` guards in "Candidate Query Contract" above | **Required.** |
+| **Business filter** — the row is ready, but processing it would not succeed | `AND b.is_community_enabled = true`, `AND t.welcome_channel_id IS NOT NULL` | **Forbidden.** Select the row anyway and let the worker call `markFailed(...)` with an explicit error code. |
+
+A row dropped by a business filter receives neither a success value nor an error code, so it is invisible to every failure report and every consumer that polls for "success or error" hangs indefinitely — `PendingDiscordJoinBanner` (`applications/web/src/components/organisms/PendingDiscordJoinBanner.tsx`) polls `getJoinStatus` every 2000ms with no attempt cap and no timeout, so a filtered-out acceptance spins forever. `findPending` carried `AND b.is_community_enabled = true` for exactly this reason.
+
+Rules:
+
+1. **Every literal in a `*ErrorCode` schema must be producible by some code path.** An unreachable literal is the signature of this bug — `'welcome_channel_missing'` in `Onboarding.InviteGeneratorErrorCode` (`packages/domain/src/models/Onboarding.ts`) could never be written because the SQL discarded the very rows it describes.
+2. **Put the business gate where it can be classified and recorded**: the bot's `classifyInviteGeneratorError` (`applications/bot/src/rcp/inviteGenerator/errorClassifier.ts`) for conditions Discord reports, or an explicit `markFailed(...)` short-circuit before the Discord call for conditions the selected row already proves.
+3. **Turning a business filter into a failure path requires widening the `Result` schema in the same change.** `findPending` decodes into `PendingAcceptanceRow`, whose `welcome_channel_id` is a non-nullable `Discord.Snowflake`; dropping `AND t.welcome_channel_id IS NOT NULL` without first making that field `Schema.OptionFromNullOr(Discord.Snowflake)` turns a silent skip into a decode defect, which is worse.
+
 ## iCal Feed Generation (`src/api/ical.ts`)
 
 The `getICalFeed` endpoint builds a single `VCALENDAR` containing both user events and payment-due VEVENTs. Every interpolated user-supplied string MUST pass through `escapeICalText` defined at the top of `src/api/ical.ts`:
