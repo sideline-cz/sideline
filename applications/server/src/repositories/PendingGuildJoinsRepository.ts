@@ -24,6 +24,7 @@ const make = Effect.gen(function* () {
         last_error = NULL,
         created_at = now(),
         processed_at = NULL
+      WHERE pending_guild_joins.status <> 'done'
     `,
   });
 
@@ -65,10 +66,34 @@ const make = Effect.gen(function* () {
 
   const _requeueFailedForUser = SqlSchema.void({
     Request: Schema.Struct({ user_id: User.UserId }),
+    // Blocker 2 (PR-4 review): only requeue rows whose team membership is still active. Without
+    // this predicate, a user who deliberately leaves a guild (which deactivates their
+    // `team_members` row via `Guild/RemoveMember`) gets silently re-added by the bot on every
+    // subsequent login, forever — a login is not evidence the user still wants to be in the
+    // guild, and intent may have reversed since the row was enqueued.
+    //
+    // Should-fix 4 (third review of PR-4): this does NOT close the loop unconditionally.
+    // `deactivateMemberAndCascade` (`applications/server/src/utils/deactivateMemberCascade.ts`)
+    // refuses to deactivate a member holding `team:manage` when they are the last one
+    // (`reason === 'last_admin'`, to avoid orphaning the team) — that member's `team_members`
+    // row stays `active`, so this `EXISTS` is still satisfied and their failed row is still
+    // requeued on every login even though they deliberately left the guild. Chosen fix: this
+    // comment, not the cascade — relaxing `deactivateMemberAndCascade`'s last-admin guard to let
+    // a captain fully leave would orphan team management, which is a separate, larger decision
+    // than this PR's scope (a guild leave that would orphan the team is arguably a case the
+    // product should surface to the user, not silently allow). A captain in this situation can
+    // still stop the requeue loop via "Get a new invite" once PR-5 ships, or by demoting/
+    // reassigning `team:manage` before leaving.
     execute: (input) => sql`
       UPDATE pending_guild_joins
       SET status = 'pending', attempts = 0, last_error = NULL, processed_at = NULL
       WHERE user_id = ${input.user_id} AND status = 'failed'
+        AND EXISTS (
+          SELECT 1 FROM team_members tm
+          WHERE tm.team_id = pending_guild_joins.team_id
+            AND tm.user_id = pending_guild_joins.user_id
+            AND tm.active
+        )
     `,
   });
 

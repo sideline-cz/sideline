@@ -7,8 +7,10 @@ import { requireMembership, requirePermission } from '~/api/permissions.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
+import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { resolveOrCreateAcceptance } from '~/utils/resolveOrCreateAcceptance.js';
 
 const INVITE_CODE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 const INVITE_CODE_LENGTH = 12;
@@ -27,7 +29,8 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
     Effect.bind('acceptances', () => InviteAcceptancesRepository.asEffect()),
     Effect.bind('groups', () => GroupsRepository.asEffect()),
     Effect.bind('oauthConnections', () => OAuthConnectionsRepository.asEffect()),
-    Effect.map(({ members, invites, acceptances, groups, oauthConnections }) =>
+    Effect.bind('pendingGuildJoins', () => PendingGuildJoinsRepository.asEffect()),
+    Effect.map(({ members, invites, acceptances, groups, oauthConnections, pendingGuildJoins }) =>
       handlers
         .handle('getInvite', ({ params: { code } }) =>
           invites.findByCodeWithContext(code).pipe(
@@ -65,33 +68,51 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
             Effect.bind('existing', ({ user, invite }) =>
               members.findMembershipByIds(invite.team_id, user.id, { includeInactive: true }),
             ),
-            Effect.tap(({ existing }) =>
-              Option.isSome(existing) && existing.value.active
-                ? Effect.fail(new Invite.AlreadyMember())
-                : Effect.void,
+            // Should-fix 6 (third review of PR-4): single source of truth for "is this a
+            // returning member who is already active", used below by `membership`, the
+            // `assignRole` gate, and `roleNames` — previously each computed
+            // `Option.isSome(existing) && existing.value.active` independently, with nothing
+            // enforcing they agreed.
+            Effect.let('activeMembership', ({ existing }) =>
+              Option.filter(existing, (member) => member.active),
             ),
-            Effect.bind('playerRole', ({ invite }) =>
-              members.getPlayerRoleId(invite.team_id).pipe(
-                Effect.flatMap(
-                  Option.match({
+            // Should-fix 5 (third review of PR-4): no longer fails the request when the team
+            // has no "Player" role. That value is only consumed by the `assignRole` tap below,
+            // which itself is skipped for a returning active member — failing here unconditionally
+            // 404'd every idempotent re-join for a team that renamed or deleted its Player role.
+            Effect.bind('playerRole', ({ invite }) => members.getPlayerRoleId(invite.team_id)),
+            // CC-14: `Invite.AlreadyMember` is no longer raised. A returning active member does
+            // not get re-inserted; everyone else (new member, or a previously-removed member
+            // being reactivated) runs today's insert/reactivate path. Both cases fall through to
+            // the same acceptance-resolution + enqueue tail below.
+            Effect.bind('membership', ({ user, invite, existing, activeMembership }) =>
+              Option.isSome(activeMembership)
+                ? Effect.succeed({ id: activeMembership.value.id })
+                : Option.isSome(existing)
+                  ? members
+                      .reactivateMember(existing.value.id)
+                      .pipe(Effect.map((member) => ({ id: member.id })))
+                  : members
+                      .addMember({
+                        team_id: invite.team_id,
+                        user_id: user.id,
+                        active: true,
+                        joined_at: undefined,
+                      })
+                      .pipe(Effect.map((member) => ({ id: member.id }))),
+            ),
+            // Must-fix 7: skip for a returning ACTIVE member. The removed `AlreadyMember` tap
+            // used to short-circuit above this line for that cohort; without an equivalent
+            // guard here, a captain or coach without the Player role who opens their own team's
+            // invite link would silently gain it on every re-join. Should-fix 5: only fail on a
+            // missing Player role when the assignment is actually about to run.
+            Effect.tap(({ activeMembership, membership, playerRole }) =>
+              Option.isSome(activeMembership)
+                ? Effect.void
+                : Option.match(playerRole, {
                     onNone: () => Effect.fail(new Invite.InviteNotFound()),
-                    onSome: Effect.succeed,
+                    onSome: (role) => members.assignRole(membership.id, role.id),
                   }),
-                ),
-              ),
-            ),
-            Effect.bind('membership', ({ user, invite, existing }) =>
-              Option.isSome(existing)
-                ? members.reactivateMember(existing.value.id)
-                : members.addMember({
-                    team_id: invite.team_id,
-                    user_id: user.id,
-                    active: true,
-                    joined_at: undefined,
-                  }),
-            ),
-            Effect.tap(({ membership, playerRole }) =>
-              members.assignRole(membership.id, playerRole.id),
             ),
             Effect.bind('grantedScopes', ({ user }) =>
               oauthConnections.getGrantedScopes(user.id, 'discord'),
@@ -103,17 +124,49 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                   !OAuthConnection.hasScope(raw, OAuthConnection.REQUIRED_DISCORD_SCOPE),
               }),
             ),
-            Effect.bind('acceptance', ({ user, invite }) =>
-              acceptances.create({ team_invite_id: invite.id, user_id: user.id }),
+            // Should-fix 7: derived from whether `assignRole` actually ran above, rather than
+            // unconditionally `['Player']` — a returning active member whose assignment was
+            // skipped may not hold the role.
+            Effect.let('roleNames', ({ activeMembership }) =>
+              Option.isSome(activeMembership) ? [] : ['Player'],
+            ),
+            // BLOCKER 1 (third review of PR-4): `resolveOrCreateAcceptance`'s rate limit is now
+            // scoped to this (user, invite) pair, so it always returns a real acceptance — see
+            // its doc comment for why the old "fails closed, no acceptance" branch is provably
+            // unreachable. `resolved.acceptance` is no longer `Option`, so there is nothing left
+            // to log or plumb through `JoinResult` as absent (should-fix 8: this also removes
+            // the double logging — the one remaining rate-limit log lives in the helper, next
+            // to the branch it describes).
+            Effect.bind('resolved', ({ user, invite }) =>
+              resolveOrCreateAcceptance(user.id, invite),
+            ),
+            // S4/step 6 — `enqueue` fires only from this explicit Join click (never a background
+            // job), and it fires here whether this is a first join or an idempotent re-join,
+            // which is the point: a returning member whose auto-join previously failed gets
+            // re-queued by clicking Join again. Guarded with `catchCause` (must-fix 8): a queue
+            // insert failing must never fail the user's join — membership and the acceptance
+            // are already committed by this point.
+            Effect.tap(({ user, invite, requiresReauth }) =>
+              requiresReauth
+                ? Effect.logInfo(
+                    '[invite/join] skipping pending_guild_joins enqueue — missing guilds.join',
+                  )
+                : pendingGuildJoins
+                    .enqueue(user.id, invite.team_id)
+                    .pipe(
+                      Effect.catchCause((cause) =>
+                        Effect.logError('[invite/join] pending_guild_joins enqueue failed', cause),
+                      ),
+                    ),
             ),
             Effect.map(
-              ({ user, invite, requiresReauth, acceptance }) =>
+              ({ user, invite, requiresReauth, resolved, roleNames }) =>
                 new Invite.JoinResult({
                   teamId: invite.team_id,
-                  roleNames: ['Player'],
+                  roleNames,
                   isProfileComplete: user.isProfileComplete,
                   requiresReauth,
-                  acceptanceId: Option.some(acceptance.id),
+                  acceptanceId: resolved.acceptance.id,
                 }),
             ),
             Effect.catchTag('MemberAlreadyExistsError', () =>
@@ -126,12 +179,25 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
           ),
         )
         .handle('getJoinStatus', ({ params: { acceptanceId } }) =>
-          acceptances.findById(acceptanceId).pipe(
-            Effect.flatMap(
-              Option.match({
-                onNone: () => Effect.fail(new Invite.InviteNotFound()),
-                onSome: Effect.succeed,
-              }),
+          Effect.Do.pipe(
+            Effect.bind('user', () => Auth.CurrentUserContext.asEffect()),
+            Effect.bind('acc', () =>
+              acceptances.findById(acceptanceId).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () => Effect.fail(new Invite.InviteNotFound()),
+                    onSome: Effect.succeed,
+                  }),
+                ),
+              ),
+            ),
+            // Ownership check (live security fix): without it, any authenticated caller holding
+            // an acceptanceId gets a working one-time Discord invite to a server they were never
+            // invited to. 404, not 403 — do not confirm existence to a non-owner.
+            Effect.flatMap(({ user, acc }) =>
+              acc.user_id === user.id
+                ? Effect.succeed(acc)
+                : Effect.fail(new Invite.InviteNotFound()),
             ),
             Effect.map(
               (acc) =>

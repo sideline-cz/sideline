@@ -52,6 +52,19 @@ const CreateInput = Schema.Struct({
   user_id: User.UserId,
 });
 
+const OpenByUserAndInviteInput = Schema.Struct({
+  user_id: User.UserId,
+  team_invite_id: TeamInvite.TeamInviteId,
+});
+
+const CountRecentInput = Schema.Struct({
+  user_id: User.UserId,
+  team_invite_id: TeamInvite.TeamInviteId,
+});
+const CountRecentResult = Schema.Struct({
+  count: Schema.Number,
+});
+
 const make = SqlClient.SqlClient.asEffect().pipe(
   Effect.map((sql) => {
     const create = SqlSchema.findOne({
@@ -68,6 +81,53 @@ const make = SqlClient.SqlClient.asEffect().pipe(
       Request: InviteAcceptance.InviteAcceptanceId,
       Result: InviteAcceptance.InviteAcceptance,
       execute: (id) => sql`SELECT * FROM invite_acceptances WHERE id = ${id}`,
+    });
+
+    // "Open" = not terminally failed AND, if a code was already minted, still usable.
+    // `discord_code_error_code` makes a row terminal (CC-14). A row with a `discord_code` is
+    // only open while that one-time code can still work: the bot mints codes with
+    // `max_age: 86400` (`applications/bot/src/rcp/inviteGenerator/ProcessorService.ts`), so a
+    // code generated more than 24h ago is dead. Consumption (a single `max_uses: 1`) isn't
+    // observable server-side, so this only closes the permanent (expired) case — that's fine
+    // and expected (BLOCKER 2, third review of PR-4).
+    const findOpenByUserAndInvite = SqlSchema.findOneOption({
+      Request: OpenByUserAndInviteInput,
+      Result: InviteAcceptance.InviteAcceptance,
+      execute: (input) => sql`
+        SELECT * FROM invite_acceptances
+        WHERE user_id = ${input.user_id} AND team_invite_id = ${input.team_invite_id}
+          AND discord_code_error_code IS NULL
+          AND (discord_code IS NULL OR generated_at > now() - interval '24 hours')
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      `,
+    });
+
+    // Newest acceptance for a (user, invite) pair regardless of state — used by
+    // `resolveOrCreateAcceptance` (CC-14) to reuse a rate-limited or terminally-failed row as-is.
+    const findNewestByUserAndInvite = SqlSchema.findOneOption({
+      Request: OpenByUserAndInviteInput,
+      Result: InviteAcceptance.InviteAcceptance,
+      execute: (input) => sql`
+        SELECT * FROM invite_acceptances
+        WHERE user_id = ${input.user_id} AND team_invite_id = ${input.team_invite_id}
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      `,
+    });
+
+    // CC-14's rate limit: ≤3 regenerations per hour per (user, invite) pair. BLOCKER 1 (third
+    // review of PR-4): scoped to the pair, not just the user — a global count let a user who
+    // had joined several OTHER invites recently get fail-closed on the very first click of an
+    // invite they had never touched (the "four squads" production bug).
+    const countRecentByUserAndInvite = SqlSchema.findOne({
+      Request: CountRecentInput,
+      Result: CountRecentResult,
+      execute: (input) => sql`
+        SELECT COUNT(*)::int AS count FROM invite_acceptances
+        WHERE user_id = ${input.user_id} AND team_invite_id = ${input.team_invite_id}
+          AND created_at > now() - interval '1 hour'
+      `,
     });
 
     const findPending = SqlSchema.findAll({
@@ -198,6 +258,19 @@ const make = SqlClient.SqlClient.asEffect().pipe(
     return {
       create: (input: typeof CreateInput.Type) => create(input).pipe(catchSqlErrors),
       findById: (id: InviteAcceptance.InviteAcceptanceId) => findById(id).pipe(catchSqlErrors),
+      findOpenByUserAndInvite: (userId: User.UserId, teamInviteId: TeamInvite.TeamInviteId) =>
+        findOpenByUserAndInvite({ user_id: userId, team_invite_id: teamInviteId }).pipe(
+          catchSqlErrors,
+        ),
+      findNewestByUserAndInvite: (userId: User.UserId, teamInviteId: TeamInvite.TeamInviteId) =>
+        findNewestByUserAndInvite({ user_id: userId, team_invite_id: teamInviteId }).pipe(
+          catchSqlErrors,
+        ),
+      countRecentByUserAndInvite: (userId: User.UserId, teamInviteId: TeamInvite.TeamInviteId) =>
+        countRecentByUserAndInvite({ user_id: userId, team_invite_id: teamInviteId }).pipe(
+          Effect.map((row) => row.count),
+          catchSqlErrors,
+        ),
       findPending: (limit: number) => findPending(limit).pipe(catchSqlErrors),
       setDiscordCode: (input: typeof SetDiscordCodeInput.Type) =>
         setDiscordCode(input).pipe(catchSqlErrors),

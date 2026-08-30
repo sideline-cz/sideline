@@ -21,7 +21,10 @@ export class JoinResult extends Schema.Class<JoinResult>('JoinResult')({
   roleNames: Schema.Array(Schema.String),
   isProfileComplete: Schema.Boolean,
   requiresReauth: Schema.Boolean,
-  acceptanceId: Schema.OptionFromNullOr(InviteAcceptanceId),
+  // BLOCKER 1 (third review of PR-4): `resolveOrCreateAcceptance`'s rate limit is scoped to
+  // the (user, invite) pair, which makes "no acceptance returned" provably unreachable — see
+  // `applications/server/src/utils/resolveOrCreateAcceptance.ts`. No longer `Option`.
+  acceptanceId: InviteAcceptanceId,
 }) {}
 
 export class JoinStatus extends Schema.Class<JoinStatus>('JoinStatus')({
