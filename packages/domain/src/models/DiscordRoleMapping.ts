@@ -11,5 +11,9 @@ export class DiscordRoleMapping extends Model.Class<DiscordRoleMapping>('Discord
   team_id: TeamId,
   role_id: RoleId,
   discord_role_id: Schema.String,
+  /** `true` when this mapping points at a pre-existing Discord role the bot adopted rather than
+   * created (`ensureMapping`'s tier 2). The bot must never delete or strip the underlying Discord
+   * role for an adopted mapping — see blocker 2 in the PR-6 fix plan. */
+  adopted: Schema.Boolean,
   created_at: Model.DateTimeInsertFromDate,
 }) {}

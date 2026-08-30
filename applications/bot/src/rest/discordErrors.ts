@@ -40,6 +40,19 @@ export const isDiscordNotFoundError = (error: unknown): boolean => {
   return discordCode === 10007 || discordCode === 10011 || discordCode === 10013;
 };
 
+/** `true` specifically for Discord JSON error code 10011 (Unknown Role) — narrower than
+ * {@link isDiscordNotFoundError}, which also matches Unknown Member (10007) / Unknown User
+ * (10013). Those mean a *different* thing for `addGuildMemberRole` (the target member left the
+ * guild) than 10011 does (the mapped `discord_role_id` itself no longer exists in the guild —
+ * e.g. a captain deleted the role directly in Discord). Only the latter should delete the stale
+ * `discord_role_mappings` row so the next event re-resolves via `ensureMapping` instead of
+ * retrying the same dead id forever. */
+export const isUnknownRoleError = (error: unknown): boolean => {
+  if (!isRecord(error)) return false;
+  const discordCode = numberProp(error.data, 'code') ?? numberProp(error, 'code');
+  return discordCode === 10011;
+};
+
 /** True for errors that are permanent (retrying will not help):
  * - Any non-429 4xx Discord HTTP error (permission denied, unknown resource, bad request, etc.)
  * - Discord JSON error codes 10xxx (Unknown resource) or 50013 (Missing Permissions)

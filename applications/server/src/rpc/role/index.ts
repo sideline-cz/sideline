@@ -76,6 +76,7 @@ export const RolesRpcLive = Effect.Do.pipe(
                   team_id: m.team_id,
                   role_id: m.role_id,
                   discord_role_id: m.discord_role_id,
+                  adopted: m.adopted,
                 }),
             ),
           ),
@@ -88,12 +89,14 @@ export const RolesRpcLive = Effect.Do.pipe(
         team_id,
         role_id,
         discord_role_id,
+        adopted,
       }: {
         readonly team_id: Team.TeamId;
         readonly role_id: Role.RoleId;
         readonly discord_role_id: Discord.Snowflake;
+        readonly adopted: boolean;
       }) =>
-        mappings.insert(team_id, role_id, discord_role_id),
+        mappings.insert(team_id, role_id, discord_role_id, adopted),
   ),
   Effect.let(
     'Role/DeleteMapping',

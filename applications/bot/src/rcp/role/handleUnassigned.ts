@@ -4,6 +4,16 @@ import { Effect } from 'effect';
 import { retryPolicy } from '~/rest/utils.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
+/** Blocker 2 asked us to consider `mapping.adopted` here too, the way `handleDeleted` does.
+ * Decision: do NOT special-case it. `handleDeleted` destroys the shared Discord *resource* for
+ * every one of its (possibly untracked) members; this handler only ever touches ONE member's
+ * membership in that role, and only fires because a captain used Sideline's own role UI to revoke
+ * this specific member's Sideline role — the same authority that granted it via `role_assigned` in
+ * the first place (`handleAssigned.ts`). A member Sideline never assigned this role to has no
+ * `member_roles` row to delete, so no `role_unassigned` event is ever emitted for them regardless
+ * of whether the mapping is adopted — this handler's blast radius is inherently limited to members
+ * Sideline itself put in this role. Symmetric with assignment: adopting a role means Sideline can
+ * manage membership in it, in both directions. */
 export const handleMemberRemoved = (event: RoleRpcEvents.RoleUnassignedEvent) =>
   Effect.Do.pipe(
     Effect.bind('rpc', () => SyncRpc.asEffect()),

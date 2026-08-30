@@ -50,7 +50,11 @@ export const handleGuildCreate = (
     ),
     Effect.tap(({ rpc }) => {
       const roles = guild.roles ?? [];
-      if (roles.length === 0) return Effect.void;
+      if (roles.length === 0) {
+        return Effect.logWarning(
+          `Guild ${guild.id} sent an empty roles payload on GUILD_CREATE; skipping role sync`,
+        );
+      }
       return rpc['Guild/SyncGuildRoles']({
         guild_id: decodeSnowflake(guild.id),
         roles: Arr.map(roles, (r) => ({
