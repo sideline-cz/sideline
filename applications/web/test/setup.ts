@@ -22,19 +22,43 @@ if (typeof globalThis.cancelAnimationFrame === 'undefined') {
   globalThis.cancelAnimationFrame = (handle: number): void => clearTimeout(handle);
 }
 
-// Ensure localStorage is available in jsdom tests (needed by @sideline/i18n/runtime)
+// Ensure localStorage is available in jsdom tests (needed by @sideline/i18n/runtime).
+//
+// The fallback must be a WORKING in-memory store, not a no-op. It used to stub `setItem` as
+// `vi.fn()` and `getItem` as `vi.fn(() => null)`, which silently swallowed every write — any
+// test asserting that something was persisted then failed with "expected null to be ...", but
+// only on a runner whose jsdom lacks localStorage. That is invisible locally and fails in CI,
+// and worse, it would let a genuine persistence regression pass wherever jsdom does provide it.
+//
+// It is installed UNCONDITIONALLY, once per test file. Several suites redefine
+// `globalThis.localStorage` themselves — `resolveStoredTheme.test.ts` even installs one whose
+// getter throws — and `Object.defineProperty` on `globalThis` is not undone between files in the
+// same worker. A conditional install therefore inherits whatever the previously-run file left
+// behind, which makes storage-dependent tests pass or fail based on file order. Starting every
+// file from a clean in-memory store removes that coupling; suites needing custom behaviour still
+// override it in their own `beforeEach`, which runs after this.
 beforeAll(() => {
-  if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') {
-    Object.defineProperty(globalThis, 'localStorage', {
-      value: {
-        getItem: vi.fn(() => null),
-        setItem: vi.fn(),
-        removeItem: vi.fn(),
-        clear: vi.fn(),
+  const store = new Map<string, string>();
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, String(value));
       },
-      writable: true,
-    });
-  }
+      removeItem: (key: string) => {
+        store.delete(key);
+      },
+      clear: () => {
+        store.clear();
+      },
+      key: (index: number) => Array.from(store.keys())[index] ?? null,
+      get length() {
+        return store.size;
+      },
+    },
+    writable: true,
+    configurable: true,
+  });
 });
 
 afterEach(() => {
