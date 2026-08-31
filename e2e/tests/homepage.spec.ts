@@ -42,7 +42,11 @@ test.describe('Homepage', () => {
     const signInLink = page.getByRole('link', { name: /Sign in with Discord/ });
     await expect(signInLink).toBeVisible();
 
-    const discordIcon = signInLink.locator('svg[aria-label="Discord"]');
+    // The glyph is decorative here: the link already reads "Sign in with Discord", so
+    // `DiscordIcon` is passed `aria-hidden` and deliberately carries no `aria-label` —
+    // otherwise a screen reader announces "Discord" twice for one control. Assert the icon
+    // renders AND that it is hidden from the accessibility tree, which is the actual contract.
+    const discordIcon = signInLink.locator('svg[aria-hidden="true"]');
     await expect(discordIcon).toBeVisible();
   });
 
