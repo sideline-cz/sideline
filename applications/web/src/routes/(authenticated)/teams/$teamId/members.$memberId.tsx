@@ -209,7 +209,10 @@ function MemberDetailRoute() {
     if (Option.isNone(result)) return undefined;
     const { addedCount, removedCount } = result.value;
     toast.success(tr('discord_syncQueuedResult', { added: addedCount, removed: removedCount }));
-    return { addedCount, removedCount };
+    // Return the whole DTO — `PlayerDetailPage` also renders `roleSyncState` /
+    // `lastRoleSyncAt` / `lastRoleSyncError` (the PREVIOUS completed attempt), not just this
+    // click's freshly-enqueued counts.
+    return result.value;
   }, [teamId, memberId, run]);
 
   const handleAddToRoster = React.useCallback(

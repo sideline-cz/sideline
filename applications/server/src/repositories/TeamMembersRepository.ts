@@ -1,4 +1,4 @@
-import { Discord, Role, Team, TeamMember, User } from '@sideline/domain';
+import { Discord, Role, RoleApi, Team, TeamMember, User } from '@sideline/domain';
 import { LogicError, Schemas, SqlErrors } from '@sideline/effect-lib';
 import { Effect, Layer, Option, pipe, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
@@ -80,6 +80,19 @@ export class RosterEntry extends Schema.Class<RosterEntry>('RosterEntry')({
   joined_at: Schema.String,
   active: Schema.Boolean,
 }) {}
+
+// Raw row shape of `team_members.last_role_sync_*` (see `RoleSyncEventsRepository.recordLastRoleSync`,
+// the only writer). `last_role_sync_at` is a `TIMESTAMPTZ` column read back through node-pg as a JS
+// `Date`, so it MUST use `Schema.DateTimeUtcFromDate` — NOT `Schema.DateTimeUtc` (that codec expects
+// an ISO string / epoch and silently short-circuits `Schema.OptionFromNullOr` on every row where the
+// column is NULL, only throwing once a real, non-null timestamp reaches the inner decoder). Mirrors
+// `discord_joined_at` in `findDiscordJoinedAtQuery` above, the established shape for this exact
+// TIMESTAMPTZ-via-node-pg situation.
+const LastRoleSyncRow = Schema.Struct({
+  last_role_sync_at: Schema.OptionFromNullOr(Schema.DateTimeUtcFromDate),
+  last_role_sync_state: Schema.OptionFromNullOr(Schema.Literals(['ok', 'failed'])),
+  last_role_sync_error: Schema.OptionFromNullOr(RoleApi.DiscordSyncErrorCode),
+});
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -532,6 +545,40 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  // Closes the read side of PR-9/9b: `RoleSyncEventsRepository.recordLastRoleSync` (called from
+  // `markProcessed`/`markFailed`) is the only writer of these three columns; this is what
+  // `syncMemberDiscordRoles.ts` reads to populate `roleSyncState` / `lastRoleSyncAt` /
+  // `lastRoleSyncError` on `RoleApi.SyncMemberRolesResult` with the member's PREVIOUS completed
+  // attempt (as opposed to the freshly-enqueued counts from the current click).
+  //
+  // `Option.none()` covers BOTH "no such member row" and "member row exists but has never
+  // completed a role sync" (`last_role_sync_state IS NULL`) — the caller only needs to distinguish
+  // "there is a prior attempt on record" from "there is not", not which of those two produced it.
+  const findLastRoleSyncQuery = SqlSchema.findOneOption({
+    Request: Schema.Struct({ member_id: TeamMember.TeamMemberId }),
+    Result: LastRoleSyncRow,
+    execute: (input) => sql`
+      SELECT last_role_sync_at, last_role_sync_state, last_role_sync_error
+      FROM team_members WHERE id = ${input.member_id}
+    `,
+  });
+
+  const findLastRoleSync = (memberId: TeamMember.TeamMemberId) =>
+    findLastRoleSyncQuery({ member_id: memberId }).pipe(
+      Effect.map(
+        Option.flatMap((row) =>
+          // Both columns are always written together by `recordLastRoleSync` — `zipWith` is a
+          // defensive pairing (never actually `None` on one side alone), not a real partiality.
+          Option.zipWith(row.last_role_sync_state, row.last_role_sync_at, (state, at) => ({
+            state,
+            at,
+            errorCode: row.last_role_sync_error,
+          })),
+        ),
+      ),
+      catchSqlErrors,
+    );
+
   const setJerseyNumber = (
     memberId: TeamMember.TeamMemberId,
     jerseyNumber: Option.Option<number>,
@@ -633,6 +680,7 @@ const make = Effect.gen(function* () {
     markDiscordJoined,
     clearDiscordJoined,
     findDiscordJoinedAt,
+    findLastRoleSync,
     setJerseyNumber,
     resetMissedRsvps,
     hasOtherActiveManager,

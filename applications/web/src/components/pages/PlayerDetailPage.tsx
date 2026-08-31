@@ -11,11 +11,12 @@ import type {
   Roster,
 } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
-import { Option, Schema } from 'effect';
+import { DateTime, Option, Schema } from 'effect';
 import { Pencil, RefreshCw, UserMinus, X } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import { errorCopyKey as discordSyncErrorCopyKey } from '~/components/molecules/SyncRolesButton.js';
 import { AchievementsGridI18n } from '~/components/organisms/AchievementsGrid.js';
 import { ActivityLogList } from '~/components/organisms/ActivityLogList';
 import { ActivityStatsCard } from '~/components/organisms/ActivityStatsCard';
@@ -121,7 +122,7 @@ interface PlayerDetailPageProps {
   onSave: (values: PlayerEditValues) => Promise<boolean>;
   onAssignRole: (roleId: string) => Promise<void>;
   onUnassignRole: (roleId: string) => Promise<void>;
-  onSyncDiscordRoles: () => Promise<{ addedCount: number; removedCount: number } | undefined>;
+  onSyncDiscordRoles: () => Promise<RoleApi.SyncMemberRolesResult | undefined>;
   onAddToRoster: (rosterId: string) => Promise<void>;
   onRemoveFromRoster: (rosterId: string) => Promise<void>;
   onAddToGroup: (groupId: string) => Promise<void>;
@@ -181,7 +182,7 @@ export function PlayerDetailPage({
   onUpdateLog,
   onDeleteLog,
 }: PlayerDetailPageProps) {
-  const { formatDate } = useFormatDate();
+  const { formatDate, formatRelative } = useFormatDate();
   const isInactive = !player.active;
   const getDefaultValues = React.useCallback(
     () => ({
@@ -252,10 +253,8 @@ export function PlayerDetailPage({
   const [syncRolesState, setSyncRolesState] = React.useState<'idle' | 'syncing' | 'cooldown'>(
     'idle',
   );
-  const [syncRolesResult, setSyncRolesResult] = React.useState<{
-    addedCount: number;
-    removedCount: number;
-  } | null>(null);
+  const [syncRolesResult, setSyncRolesResult] =
+    React.useState<RoleApi.SyncMemberRolesResult | null>(null);
   const handleSyncDiscordRoles = React.useCallback(async () => {
     if (syncRolesState !== 'idle') return;
     setSyncRolesState('syncing');
@@ -441,12 +440,35 @@ export function PlayerDetailPage({
           </CardHeader>
           <CardContent>
             {syncRolesResult ? (
-              <p className='text-xs text-muted-foreground mb-2'>
-                {tr('discord_syncQueuedResult', {
-                  added: syncRolesResult.addedCount,
-                  removed: syncRolesResult.removedCount,
+              <div className='mb-2 flex flex-col gap-1'>
+                <p className='text-xs text-muted-foreground'>
+                  {tr('discord_syncQueuedResult', {
+                    added: syncRolesResult.addedCount,
+                    removed: syncRolesResult.removedCount,
+                  })}
+                </p>
+                {Option.match(syncRolesResult.lastRoleSyncAt, {
+                  onNone: () => null,
+                  onSome: (at) => (
+                    <p className='text-xs text-muted-foreground'>
+                      {tr('discord_syncLastSyncedRelative', {
+                        relativeTime: formatRelative(new Date(Number(DateTime.toEpochMillis(at)))),
+                      })}
+                    </p>
+                  ),
                 })}
-              </p>
+                {/* Surfaces the PREVIOUS completed attempt's recorded failure reason — this can be
+                    populated even when roleSyncState is 'queued' (a fresh retry is in flight), so a
+                    captain who just fixed a Discord permission still sees why the last one failed. */}
+                {Option.match(syncRolesResult.lastRoleSyncError, {
+                  onNone: () => null,
+                  onSome: (code) => (
+                    <p role='alert' className='text-xs text-destructive'>
+                      {tr(discordSyncErrorCopyKey(code))}
+                    </p>
+                  ),
+                })}
+              </div>
             ) : null}
             <RolesSection
               player={player}

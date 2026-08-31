@@ -22,7 +22,12 @@ export interface SyncRolesResult {
  * guild. Mirrors the constant already shipped in `PlayerDetailPage.tsx`. */
 const SYNC_COOLDOWN_MS = 60_000;
 
-const errorCopyKey = (code: 'retryable' | 'captain_action' | 'user_action' | 'unknown'): string =>
+/** Exported so other surfaces rendering `lastRoleSyncError` (e.g. `PlayerDetailPage`, which owns
+ * its own sync-button markup rather than this molecule) map the code to the same i18n key without
+ * duplicating the mapping. */
+export const errorCopyKey = (
+  code: 'retryable' | 'captain_action' | 'user_action' | 'unknown',
+): string =>
   `discord_syncError_${code === 'captain_action' ? 'captainAction' : code === 'user_action' ? 'userAction' : code}`;
 
 type ButtonState = 'idle' | 'syncing' | 'cooldown';
