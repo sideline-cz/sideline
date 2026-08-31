@@ -59,7 +59,16 @@ jobs:
   integration-test:
     name: Integration Test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # This job runs `pnpm build` AND the integration suite, which is strictly
+    # sequential: every test calls `cleanDatabase`'s `TRUNCATE ... CASCADE`, so the
+    # cost grows with both the test count and the schema. At ~620 tests it takes
+    # ~8min locally, and 15 was no longer enough once build and a slower shared
+    # runner were added on top. Raised rather than trimmed coverage -- these tests
+    # exist because mocks cannot catch the failures they catch (a nullable
+    # TIMESTAMPTZ decoded with the wrong schema passes every mocked test and throws
+    # on any non-null row). If this creeps up again, shard it the way `e2e` is
+    # sharded rather than raising this a second time.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - name: Install dependencies
