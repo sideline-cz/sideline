@@ -36,8 +36,8 @@
     "arctic": "^3.7.0",
     "dfx": "1.0.11",
     "effect": "4.0.0-beta.40",
-    "imapflow": "^1.7.2",
-    "mailparser": "^3.9.15"
+    "imapflow": "^1.7.6",
+    "mailparser": "^3.9.17"
   },
   "effect": {
     "generateExports": {
