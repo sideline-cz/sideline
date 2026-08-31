@@ -1,7 +1,7 @@
-import type { InviteAcceptance } from '@sideline/domain';
+import type { InviteAcceptance, Onboarding } from '@sideline/domain';
 import { Bind } from '@sideline/effect-lib';
 import { DiscordREST } from 'dfx/DiscordREST';
-import { Array, Effect, Metric, Option, type ServiceMap } from 'effect';
+import { Array, Duration, Effect, Metric, Option, type ServiceMap } from 'effect';
 import { SyncRpc, type SyncRpcClient } from '../../services/SyncRpc.js';
 import { classifyInviteGeneratorError } from './errorClassifier.js';
 
@@ -10,10 +10,12 @@ const inviteGeneratorTotal = Metric.counter('invite_generator_total', {
   incremental: true,
 });
 
-// PR-2 wire expand (CC-1): `welcome_channel_id` is now `Option` (tolerates a missing key or an
-// explicit `null` from the widened `Invite/PendingAcceptances` schema) and `bot_present` is
-// added, decoding to `true` when an old-shaped payload omits it. Neither PR-2 producer (server
-// or bot) actually emits `None` / `false` yet — this release is behaviour-neutral by design.
+// CC-0 / blocker 2: a 429 burst must not hold the poll loop hostage. `retry_after` is honoured
+// but capped so a single tick can never outlast the CC-4 sweep window.
+const MAX_RETRY_SLEEP_SECONDS = 30;
+
+// PR-2 wire expand (CC-1) / PR-3 contract: `welcome_channel_id` is `Option` and `bot_present` is
+// a real column (`LEFT JOIN bot_guilds`) — both are now genuinely emitted by the server.
 export interface PendingAcceptance {
   readonly acceptance_id: InviteAcceptance.InviteAcceptanceId;
   readonly guild_id: string;
@@ -21,93 +23,127 @@ export interface PendingAcceptance {
   readonly bot_present: boolean;
 }
 
-const makeProcessAcceptance =
-  (rpc: SyncRpcClient, discord: ServiceMap.Service.Shape<typeof DiscordREST>) =>
-  (acceptance: PendingAcceptance): Effect.Effect<void> =>
-    Option.match(acceptance.welcome_channel_id, {
-      // Finally reachable in code, even though the server's temporary wire guard
-      // (`InviteAcceptancesRepository.findPending`) makes this unreachable in production this
-      // release — PR-3 lifts that guard, at which point this is a one-line SQL change, not a
-      // bot deploy.
-      onNone: () =>
-        rpc['Invite/MarkAcceptanceFailed']({
-          acceptance_id: acceptance.acceptance_id,
-          error_code: 'welcome_channel_missing',
-          error_detail: 'Team has no welcome channel configured',
-        }).pipe(
-          Effect.tap(() =>
-            Effect.logWarning(
-              `Discord invite generation skipped for acceptance ${acceptance.acceptance_id} — no welcome channel configured`,
-            ),
-          ),
-          Effect.tap(() =>
-            Metric.update(Metric.withAttributes(inviteGeneratorTotal, { status: 'failed' }), 1),
-          ),
-          Effect.catchTag('RpcClientError', (e) =>
-            Effect.logError(
-              `MarkAcceptanceFailed RPC failed for acceptance ${acceptance.acceptance_id}`,
-              e,
-            ),
-          ),
-        ),
-      onSome: (welcomeChannelId) =>
-        discord
-          .createChannelInvite(welcomeChannelId, {
-            max_age: 86400,
-            max_uses: 1,
-            unique: true,
-            temporary: false,
-          })
-          .pipe(
-            Effect.flatMap((response) =>
-              rpc['Invite/SetAcceptanceDiscordCode']({
-                acceptance_id: acceptance.acceptance_id,
-                discord_code: response.code,
-              }).pipe(
-                Effect.tap(() =>
-                  Effect.logInfo(
-                    `Generated 1-use Discord invite ${response.code} for acceptance ${acceptance.acceptance_id}`,
-                  ),
+const markTerminallyFailed = (
+  rpc: SyncRpcClient,
+  acceptance: PendingAcceptance,
+  errorCode: Onboarding.InviteGeneratorErrorCode,
+  errorDetail: string,
+  logMessage: string,
+) =>
+  rpc['Invite/MarkAcceptanceFailed']({
+    acceptance_id: acceptance.acceptance_id,
+    error_code: errorCode,
+    error_detail: errorDetail,
+  }).pipe(
+    Effect.tap(() => Effect.logWarning(logMessage)),
+    Effect.tap(() =>
+      Metric.update(Metric.withAttributes(inviteGeneratorTotal, { status: 'failed' }), 1),
+    ),
+    Effect.catchTag('RpcClientError', (e) =>
+      Effect.logError(
+        `MarkAcceptanceFailed RPC failed for acceptance ${acceptance.acceptance_id}`,
+        e,
+      ),
+    ),
+  );
+
+const processWelcomeChannel = (
+  rpc: SyncRpcClient,
+  discord: ServiceMap.Service.Shape<typeof DiscordREST>,
+  acceptance: PendingAcceptance,
+) =>
+  Option.match(acceptance.welcome_channel_id, {
+    // CC-0 rule 2: fixable by a captain setting the welcome channel (`TeamSettingsPage.tsx` ->
+    // `updateTeamInfo`), so `findPending` re-opens this row once `teams.welcome_channel_id`
+    // becomes non-null. Terminal in the meantime — a human action is required.
+    onNone: () =>
+      markTerminallyFailed(
+        rpc,
+        acceptance,
+        'welcome_channel_missing',
+        'Team has no welcome channel configured',
+        `Discord invite generation skipped for acceptance ${acceptance.acceptance_id} — no welcome channel configured`,
+      ),
+    onSome: (welcomeChannelId) =>
+      discord
+        .createChannelInvite(welcomeChannelId, {
+          max_age: 86400,
+          max_uses: 1,
+          unique: true,
+          temporary: false,
+        })
+        .pipe(
+          Effect.flatMap((response) =>
+            rpc['Invite/SetAcceptanceDiscordCode']({
+              acceptance_id: acceptance.acceptance_id,
+              discord_code: response.code,
+            }).pipe(
+              Effect.tap(() =>
+                Effect.logInfo(
+                  `Generated 1-use Discord invite ${response.code} for acceptance ${acceptance.acceptance_id}`,
                 ),
-                Effect.tap(() =>
-                  Metric.update(
-                    Metric.withAttributes(inviteGeneratorTotal, { status: 'success' }),
-                    1,
-                  ),
+              ),
+              Effect.tap(() =>
+                Metric.update(
+                  Metric.withAttributes(inviteGeneratorTotal, { status: 'success' }),
+                  1,
                 ),
               ),
             ),
-            // PR-3 splits this classifier further (e.g. the `bot_not_in_guild` gate); this
-            // release keeps it exactly as it was.
-            Effect.catch((error) => {
-              const classified = classifyInviteGeneratorError(error);
-              return rpc['Invite/MarkAcceptanceFailed']({
-                acceptance_id: acceptance.acceptance_id,
-                error_code: classified.code,
-                error_detail: classified.detail,
-              }).pipe(
-                Effect.tap(() =>
-                  Effect.logWarning(
-                    `Discord invite generation failed for acceptance ${acceptance.acceptance_id}`,
-                    error,
-                  ),
-                ),
-                Effect.tap(() =>
-                  Metric.update(
-                    Metric.withAttributes(inviteGeneratorTotal, { status: 'failed' }),
-                    1,
-                  ),
-                ),
-                Effect.catchTag('RpcClientError', (e) =>
-                  Effect.logError(
-                    `MarkAcceptanceFailed RPC failed for acceptance ${acceptance.acceptance_id}`,
-                    e,
-                  ),
-                ),
-              );
-            }),
           ),
-    }).pipe(
+          // CC-0 / blocker 2: a first failure is not automatically terminal. The classifier says
+          // which; only a terminal classification is allowed to write `discord_code_error_code`.
+          Effect.catch((error) => {
+            const classified = classifyInviteGeneratorError(error);
+
+            return classified.terminal
+              ? markTerminallyFailed(
+                  rpc,
+                  acceptance,
+                  classified.code,
+                  classified.detail,
+                  `Discord invite generation failed for acceptance ${acceptance.acceptance_id}: ${classified.code}`,
+                )
+              : Effect.logWarning(
+                  `Discord invite generation transiently failed for acceptance ${acceptance.acceptance_id} (${classified.code}); leaving row open for the next poll`,
+                  error,
+                ).pipe(
+                  Effect.tap(() =>
+                    Metric.update(
+                      Metric.withAttributes(inviteGeneratorTotal, { status: 'transient' }),
+                      1,
+                    ),
+                  ),
+                  Effect.tap(() =>
+                    classified.retry_after !== undefined
+                      ? Effect.sleep(
+                          Duration.seconds(
+                            Math.min(classified.retry_after, MAX_RETRY_SLEEP_SECONDS),
+                          ),
+                        )
+                      : Effect.void,
+                  ),
+                );
+          }),
+        ),
+  });
+
+const makeProcessAcceptance =
+  (rpc: SyncRpcClient, discord: ServiceMap.Service.Shape<typeof DiscordREST>) =>
+  (acceptance: PendingAcceptance): Effect.Effect<void> =>
+    (acceptance.bot_present
+      ? processWelcomeChannel(rpc, discord, acceptance)
+      : // Checked ahead of the welcome-channel branch (test 15 pins the precedence): the bot
+        // being absent from the guild is the more actionable fact. Terminal — a human must
+        // re-invite the bot; CC-14's regenerate primitive is the recovery path.
+        markTerminallyFailed(
+          rpc,
+          acceptance,
+          'bot_not_in_guild',
+          `Bot is not present in guild ${acceptance.guild_id}`,
+          `Discord invite generation skipped for acceptance ${acceptance.acceptance_id} — bot not in guild ${acceptance.guild_id}`,
+        )
+    ).pipe(
       Effect.asVoid,
       Effect.withSpan('sync/invite_generator', {
         attributes: {
