@@ -11,12 +11,12 @@ import type {
   Roster,
 } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
-import { DateTime, Option, Schema } from 'effect';
-import { Pencil, RefreshCw, UserMinus, X } from 'lucide-react';
+import { Option, Schema } from 'effect';
+import { Pencil, UserMinus, X } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
-import { errorCopyKey as discordSyncErrorCopyKey } from '~/components/molecules/SyncRolesButton.js';
+import { SyncRolesButton } from '~/components/molecules/SyncRolesButton.js';
 import { AchievementsGridI18n } from '~/components/organisms/AchievementsGrid.js';
 import { ActivityLogList } from '~/components/organisms/ActivityLogList';
 import { ActivityStatsCard } from '~/components/organisms/ActivityStatsCard';
@@ -56,11 +56,6 @@ import {
 } from '~/components/ui/select';
 import { useFormatDate } from '~/hooks/useFormatDate.js';
 import { tr } from '~/lib/translations.js';
-
-// The bot's role loop runs at concurrency: 1 (see AGENTS.md / PR-7 plan) — a client-side
-// cooldown keeps a captain from serialising hundreds of Discord calls by repeatedly clicking
-// "Sync Discord roles" across many members.
-const DISCORD_ROLE_SYNC_COOLDOWN_MS = 60_000;
 
 const isNotFutureDate = Schema.makeFilter<string>((value) => {
   const parsed = new Date(value);
@@ -182,7 +177,7 @@ export function PlayerDetailPage({
   onUpdateLog,
   onDeleteLog,
 }: PlayerDetailPageProps) {
-  const { formatDate, formatRelative } = useFormatDate();
+  const { formatDate } = useFormatDate();
   const isInactive = !player.active;
   const getDefaultValues = React.useCallback(
     () => ({
@@ -245,27 +240,17 @@ export function PlayerDetailPage({
     activityLogCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
-  // Client-side debounce + cooldown for the manual Discord role sync button: this button
-  // amplifies Discord writes and the bot's role loop runs at concurrency: 1, so a captain
-  // clicking it repeatedly across many members would otherwise serialise hundreds of Discord
-  // calls. 'syncing' blocks re-entrancy while the request is in flight; 'cooldown' blocks
-  // re-clicks for DISCORD_ROLE_SYNC_COOLDOWN_MS after it settles, success or failure.
-  const [syncRolesState, setSyncRolesState] = React.useState<'idle' | 'syncing' | 'cooldown'>(
-    'idle',
-  );
-  const [syncRolesResult, setSyncRolesResult] =
-    React.useState<RoleApi.SyncMemberRolesResult | null>(null);
+  // `SyncRolesButton` owns the idle/syncing/cooldown state machine and the 60s cooldown itself
+  // (it amplifies Discord writes and the bot's role loop runs at concurrency: 1) — this adapter
+  // only bridges `onSyncDiscordRoles`'s `| undefined` failure signal (already toasted by the
+  // route's `run()`) into a rejection, matching `DiscordConnectCard`'s `handleSync`.
   const handleSyncDiscordRoles = React.useCallback(async () => {
-    if (syncRolesState !== 'idle') return;
-    setSyncRolesState('syncing');
-    try {
-      const result = await onSyncDiscordRoles();
-      if (result) setSyncRolesResult(result);
-    } finally {
-      setSyncRolesState('cooldown');
-      window.setTimeout(() => setSyncRolesState('idle'), DISCORD_ROLE_SYNC_COOLDOWN_MS);
+    const result = await onSyncDiscordRoles();
+    if (result === undefined) {
+      throw new Error('Discord role sync failed');
     }
-  }, [syncRolesState, onSyncDiscordRoles]);
+    return result;
+  }, [onSyncDiscordRoles]);
 
   return (
     <div className='mx-auto flex max-w-3xl flex-col gap-6 lg:max-w-5xl'>
@@ -422,54 +407,10 @@ export function PlayerDetailPage({
           <CardHeader className='flex items-center justify-between'>
             <CardTitle>{tr('roles_currentRoles')}</CardTitle>
             {canManageRoles && !isInactive ? (
-              <Button
-                type='button'
-                variant='ghost'
-                size='sm'
-                onClick={handleSyncDiscordRoles}
-                disabled={syncRolesState !== 'idle'}
-              >
-                <RefreshCw className='size-4' aria-hidden='true' />
-                {syncRolesState === 'syncing'
-                  ? tr('discord_syncing')
-                  : syncRolesState === 'cooldown'
-                    ? tr('discord_syncCooldown')
-                    : tr('discord_syncRolesFor')}
-              </Button>
+              <SyncRolesButton onSync={handleSyncDiscordRoles} />
             ) : null}
           </CardHeader>
           <CardContent>
-            {syncRolesResult ? (
-              <div className='mb-2 flex flex-col gap-1'>
-                <p className='text-xs text-muted-foreground'>
-                  {tr('discord_syncQueuedResult', {
-                    added: syncRolesResult.addedCount,
-                    removed: syncRolesResult.removedCount,
-                  })}
-                </p>
-                {Option.match(syncRolesResult.lastRoleSyncAt, {
-                  onNone: () => null,
-                  onSome: (at) => (
-                    <p className='text-xs text-muted-foreground'>
-                      {tr('discord_syncLastSyncedRelative', {
-                        relativeTime: formatRelative(new Date(Number(DateTime.toEpochMillis(at)))),
-                      })}
-                    </p>
-                  ),
-                })}
-                {/* Surfaces the PREVIOUS completed attempt's recorded failure reason — this can be
-                    populated even when roleSyncState is 'queued' (a fresh retry is in flight), so a
-                    captain who just fixed a Discord permission still sees why the last one failed. */}
-                {Option.match(syncRolesResult.lastRoleSyncError, {
-                  onNone: () => null,
-                  onSome: (code) => (
-                    <p role='alert' className='text-xs text-destructive'>
-                      {tr(discordSyncErrorCopyKey(code))}
-                    </p>
-                  ),
-                })}
-              </div>
-            ) : null}
             <RolesSection
               player={player}
               canManageRoles={canManageRoles && !isInactive}

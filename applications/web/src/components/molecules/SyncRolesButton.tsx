@@ -1,4 +1,4 @@
-import { Option } from 'effect';
+import { DateTime, Option } from 'effect';
 import { Check, Loader2, RefreshCw } from 'lucide-react';
 import React from 'react';
 import { Button } from '~/components/ui/button';
@@ -12,6 +12,14 @@ export interface SyncRolesResult {
   readonly addedCount: number;
   readonly removedCount: number;
   readonly roleSyncState: 'queued' | 'ok' | 'failed' | 'never';
+  /** The member's PREVIOUS completed sync attempt, as recorded server-side (see
+   * `syncMemberDiscordRoles.ts`'s doc comment) — NOT this click's outcome. It can be populated
+   * even when `roleSyncState` is `'queued'` (a fresh retry just enqueued), so a captain who just
+   * fixed a Discord permission still sees when the last real attempt happened and why it failed,
+   * rather than a stale "synced just now" from their own click. This is a different fact from the
+   * component's local `syncedAt` state below and the two must never silently substitute for one
+   * another — see where they are reconciled in the render body. */
+  readonly lastRoleSyncAt: Option.Option<DateTime.Utc>;
   readonly lastRoleSyncError: Option.Option<
     'retryable' | 'captain_action' | 'user_action' | 'unknown'
   >;
@@ -73,6 +81,15 @@ export function SyncRolesButton({ onSync, disabled = false }: SyncRolesButtonPro
   const errorCode = result === null ? Option.none() : result.lastRoleSyncError;
   const failed = Option.isSome(errorCode);
 
+  // Prefer the server-recorded `lastRoleSyncAt` (the previous completed attempt) over the local
+  // `syncedAt` click-stamp — they are different facts (see the field's doc comment above) and the
+  // server's is the one worth showing. Fall back to the local stamp only when the server has no
+  // prior record at all (e.g. `roleSyncState === 'never'`).
+  const lastSyncedDate =
+    result !== null && Option.isSome(result.lastRoleSyncAt)
+      ? new Date(Number(DateTime.toEpochMillis(result.lastRoleSyncAt.value)))
+      : syncedAt;
+
   return (
     <div className='flex flex-col gap-1'>
       <Button
@@ -95,14 +112,14 @@ export function SyncRolesButton({ onSync, disabled = false }: SyncRolesButtonPro
       <div role='status' aria-live='polite' className='sr-only'>
         {state === 'syncing' ? tr('discord_syncing') : null}
       </div>
-      {result !== null && !failed && (
+      {result !== null && (
         <p className='text-xs text-muted-foreground'>
           {tr('discord_syncQueuedResult', {
             added: result.addedCount,
             removed: result.removedCount,
           })}
-          {syncedAt !== null &&
-            ` · ${tr('discord_syncLastSyncedRelative', { relativeTime: formatRelative(syncedAt) })}`}
+          {lastSyncedDate !== null &&
+            ` · ${tr('discord_syncLastSyncedRelative', { relativeTime: formatRelative(lastSyncedDate) })}`}
         </p>
       )}
       {Option.match(errorCode, {
