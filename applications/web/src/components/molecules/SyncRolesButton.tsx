@@ -84,6 +84,12 @@ export function SyncRolesButton({ onSync, disabled = false }: SyncRolesButtonPro
       // promise rejection while the UI silently flips to the cooldown/✓ state below, reporting
       // success for a sync that never happened. Catch it, record it, and let `finally` still
       // apply the cooldown — a failed attempt is still a completed run for rate-limit purposes.
+      //
+      // Should-fix 2 (review of 46806427): a PREVIOUS successful run's `result` must not survive
+      // this — otherwise the stale "queued: added N removed M · last synced X" summary renders
+      // right next to the failure notice below, and (if that success also carried an
+      // error-bucket `lastRoleSyncError`) `getByRole('alert')` becomes ambiguous.
+      setResult(null);
       setCallFailed(true);
     } finally {
       setState('cooldown');

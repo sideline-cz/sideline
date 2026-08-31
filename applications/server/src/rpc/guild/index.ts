@@ -68,8 +68,10 @@ type RegisterMemberPayload = {
 /**
  * Per-call options for `registerMemberWithReconcile`, distinct from the wire payload:
  * - `guildBudget` — the shared per-`ReconcileMembers`-call emission budget (see
- *   `reconcileMemberDiscordRoles.ts`). Direct `member_add`/`interaction` calls pass no budget
- *   (unbounded — they only ever touch one member).
+ *   `reconcileMemberDiscordRoles.ts`). Should-fix 7 (whole-series review of commit 46806427):
+ *   direct `member_add` calls pass no budget (unbounded — they only ever touch one member).
+ *   `source`'s union (below) is exactly `'member_add' | 'reconcile'` — there is no `'interaction'`
+ *   variant to pass a budget for; this comment used to claim otherwise.
  * - `markDiscordJoined` — defaults to `true` (any `Some(source)` observation is a real, complete
  *   sighting of the member). `Guild/ReconcileMembers` overrides this to `complete` because a
  *   truncated member-list page cannot be trusted to certify `bot_guilds.members_backfilled_at`-

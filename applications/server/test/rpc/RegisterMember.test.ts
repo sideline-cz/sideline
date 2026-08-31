@@ -86,6 +86,10 @@ let memberships: Map<string, MembershipRow>;
 let discordJoinedAt: Map<string, Date | null | undefined>;
 // Keyed by TeamMemberId (string) -> the member's effective Sideline role ids (PR-8's "desired").
 let effectiveRoles: Map<string, ReadonlyArray<{ role_id: string; role_name: string }>>;
+// Keyed by TeamMemberId (string) -> role ids `member_role_grants` records Sideline itself having
+// granted this member (blocker, whole-series review of commit 46806427). The unassign decision
+// keys on THIS, not on `discordRoleMappings[].adopted` — see `reconcileMemberDiscordRoles.ts`.
+let grantedRoleIds: Map<string, ReadonlyArray<string>>;
 // Configurable `discord_role_mappings` rows for TEAM_ID.
 let discordRoleMappings: Array<{
   id: string;
@@ -197,6 +201,7 @@ const resetStores = () => {
   memberships = new Map();
   discordJoinedAt = new Map();
   effectiveRoles = new Map();
+  grantedRoleIds = new Map();
   discordRoleMappings = [
     {
       id: 'mapping-captain',
@@ -338,6 +343,18 @@ const MockTeamMembersRepository = Layer.succeed(TeamMembersRepository, {
   hasOtherActiveManager: () => Effect.succeed(true),
   findEffectiveRoleIdsForMember: (memberId: string) =>
     Effect.succeed(effectiveRoles.get(memberId) ?? []),
+  findGrantedRoleIds: (memberId: string) => Effect.succeed(grantedRoleIds.get(memberId) ?? []),
+  recordRoleGrant: (memberId: string, roleId: string) => {
+    grantedRoleIds.set(memberId, [...(grantedRoleIds.get(memberId) ?? []), roleId]);
+    return Effect.void;
+  },
+  clearRoleGrant: (memberId: string, roleId: string) => {
+    grantedRoleIds.set(
+      memberId,
+      (grantedRoleIds.get(memberId) ?? []).filter((id) => id !== roleId),
+    );
+    return Effect.void;
+  },
   markDiscordJoined: (memberId: string) => {
     if (discordJoinedAt.get(memberId) == null) discordJoinedAt.set(memberId, new Date());
     return Effect.void;
@@ -978,6 +995,10 @@ describe('Guild/RegisterMember — PR-8 level-based role diff (CC-10)', () => {
       seedActiveMember(discordId, memberId);
       // Desires nothing, but Discord shows them holding the Coach role.
       effectiveRoles.set(memberId, []);
+      // Blocker (whole-series review of commit 46806427): the unassign candidate list keys on
+      // `member_role_grants`, not merely on the mapping being present — Sideline must have
+      // granted THIS member the Coach role for it to be stripped.
+      grantedRoleIds.set(memberId, [COACH_ROLE_ID]);
       return callRegisterMember({
         discord_id: discordId,
         username: 'diff-member-3',
@@ -1182,21 +1203,23 @@ describe('Guild/ReconcileMembers — PR-8 level-based reconcile (CC-10)', () => 
     },
   );
 
-  // Blocker A (whole-series review): PR-8's level-based diff computes `unassignCandidates` from
-  // EVERY managed mapping present in `actual` and absent from `desired` — including `adopted:
-  // true` ones. Before this fix, a member holding a hand-made, adopted Discord role Sideline
-  // never assigned them (no `member_roles` row, so `desired` never contains it) got
-  // `role_unassigned` -> `deleteGuildMemberRole` on the very next `Guild/ReconcileMembers`. That
-  // is the destruction of human-managed state `handleDeleted.ts` and the `adopted` column exist
-  // to prevent — it must never happen from this path either.
+  // Blocker (whole-series review of commit 46806427): PR-8's level-based diff computes
+  // `unassignCandidates` from EVERY managed mapping present in `actual` and absent from
+  // `desired` AND recorded as granted to this member in `member_role_grants` — NOT merely from
+  // "not `adopted`" (`46806427`'s original, overshooting fix). A member holding a hand-made,
+  // adopted Discord role Sideline never granted THEM (no `member_role_grants` row for this
+  // member+role) must never get `role_unassigned` -> `deleteGuildMemberRole` — that is the
+  // destruction of human-managed state `handleDeleted.ts` and the `adopted` column exist to
+  // prevent.
   itEffect.effect(
-    'never emits role_unassigned for an adopted mapping the member holds but Sideline never assigned',
+    'never emits role_unassigned for an adopted mapping the member holds but Sideline never granted THEM',
     () => {
       const discordId = '500000000000000004';
       const memberId = 'member-reconcile-adopted' as TeamMember.TeamMemberId;
       seedActiveMember(discordId, memberId);
       // Desires nothing — no `member_roles` row for the adopted role — but Discord shows them
-      // holding it (a captain granted it by hand before Sideline adopted the mapping).
+      // holding it (a captain granted it by hand before Sideline adopted the mapping). No
+      // `member_role_grants` row either — Sideline never gave THIS member the role.
       effectiveRoles.set(memberId, []);
       return callReconcileMembers(
         [{ discord_id: discordId, username: 'adopted-member', roles: [ADOPTED_DISCORD_ROLE_ID] }],
@@ -1206,6 +1229,40 @@ describe('Guild/ReconcileMembers — PR-8 level-based reconcile (CC-10)', () => 
           Effect.sync(() => {
             expect(roleUnassignedEvents).toHaveLength(0);
             expect(roleAssignedEvents).toHaveLength(0);
+          }),
+        ),
+      );
+    },
+  );
+
+  // The other half of the blocker fix: an adopted mapping Sideline itself GRANTED to this member
+  // (a `member_role_grants` row exists) is no longer protected just because the mapping is
+  // `adopted: true` — provenance is per-member, not per-mapping. This is what lets a member
+  // demoted out of an adopted role (e.g. a group-detach) actually lose Discord access, instead
+  // of keeping it forever the way `46806427`'s blanket `!adopted` exclusion left them.
+  itEffect.effect(
+    'emits role_unassigned for an adopted mapping Sideline itself granted to this member',
+    () => {
+      const discordId = '500000000000000006';
+      const memberId = 'member-reconcile-adopted-granted' as TeamMember.TeamMemberId;
+      seedActiveMember(discordId, memberId);
+      effectiveRoles.set(memberId, []);
+      grantedRoleIds.set(memberId, [ADOPTED_ROLE_ID]);
+      return callReconcileMembers(
+        [
+          {
+            discord_id: discordId,
+            username: 'adopted-member-granted',
+            roles: [ADOPTED_DISCORD_ROLE_ID],
+          },
+        ],
+        true,
+      ).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(roleUnassignedEvents).toHaveLength(1);
+            expect(roleUnassignedEvents[0]?.roleId).toBe(ADOPTED_ROLE_ID);
+            expect(roleUnassignedEvents[0]?.teamMemberId).toBe(memberId);
           }),
         ),
       );

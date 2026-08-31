@@ -151,6 +151,47 @@ describe('ConnectDiscordPage', () => {
     expect(screen.queryByText('discord_connect_noLinkTitle')).toBeNull();
   });
 
+  // Should-fix 1 (review of 46806427, fix/discord-onboarding-webapp): `inviteMissing` used to be
+  // set only by `handleRegenerate` and never cleared by `fetchStatus`, so once a member hit the
+  // "no active invite link" case the "ask your captain" copy stuck for as long as the page stayed
+  // mounted — with NO CTA — even while the 10s/focus poll kept running and even after the captain
+  // fixed it. The poll must re-arm the CTA so the member can find out the fix landed.
+  it('re-arms the regenerate CTA on the next poll, so a captain fixing the invite link is discoverable', async () => {
+    mockGetMyPendingDiscordJoin.mockReturnValue(Effect.succeed(Option.none()));
+    mockRegenerateMyDiscordInvite.mockReturnValue(Effect.succeed(Option.none()));
+
+    render(
+      <ConnectDiscordPage teamId={TEAM_ID as never} teamName='Ultimate Praha' userId={USER_ID} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('discord_connect_regenerateButton')).not.toBeNull();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('discord_connect_regenerateButton'));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('discord_connect_noGuildTitle')).not.toBeNull();
+    });
+    expect(screen.queryByText('discord_connect_regenerateButton')).toBeNull();
+
+    // The page also re-polls on window focus — cheaper to trigger in a test than the 10s
+    // interval, and it is the same `fetchStatus` code path.
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('discord_connect_noLinkTitle')).not.toBeNull();
+    });
+    expect(screen.getByText('discord_connect_regenerateButton')).not.toBeNull();
+    expect(screen.queryByText('discord_connect_noGuildTitle')).toBeNull();
+  });
+
   // Case 1 (no acceptance row at all — the ordinary first-visit state) must keep its own copy
   // and CTA and must not be confused with case 3 above.
   it('shows the plain "no invite" copy and CTA on first load, before any regenerate attempt', async () => {
@@ -192,6 +233,98 @@ describe('ConnectDiscordPage', () => {
     expect(screen.getByText('discord_connect_expiredBody')).not.toBeNull();
     expect(screen.getByText('discord_connect_regenerateButton')).not.toBeNull();
     expect(screen.queryByText('discord_connect_noLinkTitle')).toBeNull();
+  });
+
+  // BLOCKER (review of 46806427, fix/discord-onboarding-webapp): dropping the SQL filter on
+  // `findOpenByUserAndTeam` made the `failed` state reachable again for every error code, but the
+  // retry CTA was only rendered when `errorCode` is `None` — which `projectInviteErrorToWire`
+  // only produces for `'expired'` (collapsed to the `expired` state, not `failed`, anyway). Every
+  // other error code (`bot_missing_perms`, `welcome_channel_deleted`, `bot_not_in_guild`,
+  // `unknown`, ...) rendered its explanatory copy with NO way out — the row can't be re-opened by
+  // the bot for most codes, and the only thing that creates a fresh row is this CTA. Each error
+  // code must render both its specific copy and a working "Try again" CTA.
+  describe('failed state renders a working CTA for every error code', () => {
+    const cases: ReadonlyArray<{ readonly errorCode: string; readonly expectedCopyKey: string }> = [
+      {
+        errorCode: 'welcome_channel_missing',
+        expectedCopyKey: 'discord_connect_error_captainAction',
+      },
+      {
+        errorCode: 'welcome_channel_deleted',
+        expectedCopyKey: 'discord_connect_error_captainAction',
+      },
+      { errorCode: 'bot_missing_perms', expectedCopyKey: 'discord_connect_error_botPerms' },
+      { errorCode: 'bot_not_in_guild', expectedCopyKey: 'discord_connect_error_botPerms' },
+      { errorCode: 'rate_limited', expectedCopyKey: 'discord_connect_error_rateLimited' },
+      { errorCode: 'unknown', expectedCopyKey: 'discord_connect_error_generic' },
+    ];
+
+    for (const { errorCode, expectedCopyKey } of cases) {
+      it(`errorCode "${errorCode}" renders its copy plus a retry CTA that calls regenerate`, async () => {
+        mockGetMyPendingDiscordJoin.mockReturnValue(
+          Effect.succeed(
+            Option.some({
+              acceptanceId: 'acc-failed',
+              discordInviteUrl: Option.none(),
+              errorCode: Option.some(errorCode),
+              state: 'failed',
+            }),
+          ),
+        );
+        mockRegenerateMyDiscordInvite.mockReturnValue(
+          Effect.succeed(
+            Option.some({
+              acceptanceId: 'acc-failed-2',
+              discordInviteUrl: Option.none(),
+              errorCode: Option.none(),
+              state: 'preparing',
+            }),
+          ),
+        );
+
+        render(
+          <ConnectDiscordPage
+            teamId={TEAM_ID as never}
+            teamName='Ultimate Praha'
+            userId={USER_ID}
+          />,
+        );
+
+        await waitFor(() => {
+          expect(screen.getByText(expectedCopyKey)).not.toBeNull();
+        });
+        expect(screen.getByText('discord_connect_retry')).not.toBeNull();
+
+        await act(async () => {
+          fireEvent.click(screen.getByText('discord_connect_retry'));
+          await Promise.resolve();
+        });
+
+        expect(mockRegenerateMyDiscordInvite).toHaveBeenCalledWith({ params: { teamId: TEAM_ID } });
+      });
+    }
+
+    it('the no-error-code case (e.g. a legacy None row) also renders its copy plus the CTA', async () => {
+      mockGetMyPendingDiscordJoin.mockReturnValue(
+        Effect.succeed(
+          Option.some({
+            acceptanceId: 'acc-failed-none',
+            discordInviteUrl: Option.none(),
+            errorCode: Option.none(),
+            state: 'failed',
+          }),
+        ),
+      );
+
+      render(
+        <ConnectDiscordPage teamId={TEAM_ID as never} teamName='Ultimate Praha' userId={USER_ID} />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('discord_connect_error_generic')).not.toBeNull();
+      });
+      expect(screen.getByText('discord_connect_retry')).not.toBeNull();
+    });
   });
 
   it('renders the success state and a Continue button when state is joined', async () => {

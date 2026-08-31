@@ -489,7 +489,10 @@ export function HomePage({ loginUrl, error, reason }: HomePageProps) {
               <p className='text-lg text-muted-foreground max-w-2xl'>{tr('hero_subheadline')}</p>
               <Button asChild size='lg' className='mt-4 text-base px-8 h-12'>
                 <a href={loginUrl}>
-                  <DiscordIcon className='size-5 mr-1' />
+                  {/* Should-fix 3 (review of 46806427): the visible `auth_signInDiscord` label
+                      ("Sign in with Discord") sits right next to this icon — without
+                      `aria-hidden` a screen reader announces "Discord, Discord" here. */}
+                  <DiscordIcon className='size-5 mr-1' aria-hidden />
                   {tr('auth_signInDiscord')}
                 </a>
               </Button>

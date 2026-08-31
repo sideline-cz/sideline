@@ -44,6 +44,10 @@ services:
       APP_ENV: preview
       APP_ORIGIN: ${SERVICE_FQDN_PROXY}
       APP_GLOBAL_ADMIN_DISCORD_IDS: "635530520125767750"
+      # Kill switch for the Discord-join enforcement redirect (should-fix 6, whole-series review
+      # of commit 46806427) — see docs/deployment.md §3.1. Explicit here (not left to env.ts's
+      # own default) so the incident-response lever is discoverable without reading source.
+      DISCORD_JOIN_ENFORCEMENT_ENABLED: ${DISCORD_JOIN_ENFORCEMENT_ENABLED:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: https://otelcollectorhttp-ccogw4cogg00wwowc0s4c0cs.majksa.net/
       OTEL_SERVICE_NAME: sideline-server
     healthcheck:

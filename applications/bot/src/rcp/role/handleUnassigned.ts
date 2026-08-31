@@ -5,27 +5,35 @@ import { retryPolicy } from '~/rest/utils.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 /** This handler executes `role_unassigned` unconditionally: whatever mapping's `discord_role_id`
- * comes back from `Role/GetMapping`, it calls `deleteGuildMemberRole` for it, with no
- * `mapping.adopted` check of its own.
+ * comes back from `Role/GetMapping`, it calls `deleteGuildMemberRole` for it, with no provenance
+ * check of its own. That is deliberate, not an oversight — see below for why it does not need
+ * one, and should-fix 8 (whole-series review of commit 46806427) for why the invariant this
+ * comment used to claim was overstated.
  *
- * That is safe ONLY because the emission side now guarantees it never has to be: this event used
- * to be edge-triggered purely from a captain revoking a role through Sideline's own UI
- * (`role.ts`'s `unassignRole`), which is what the now-stale version of this comment (removed by
- * blocker A, whole-series review of `fix/discord-onboarding-webapp`) relied on. PR-8's
- * `reconcileMemberDiscordRoles.ts` broke that premise: it emits `role_unassigned` for every
- * managed mapping present in a member's *actual* Discord roles and absent from their *desired*
- * Sideline roles — including `adopted: true` mappings, which have no `member_roles` row and so
- * never appear in `desired`. Left unguarded, that meant a member holding a hand-made, adopted
- * Discord role Sideline never assigned them got it silently deleted on the next
- * `Guild/ReconcileMembers`.
+ * `role_unassigned` has two different emitters with two different guarantees:
  *
- * The fix lives upstream, not here: `reconcileMemberDiscordRoles.ts` (`unassignCandidates`) and
- * `syncMemberDiscordRoles.ts` (`removedCandidates`) both now exclude `adopted` mappings from the
- * diff, so `role_unassigned` for an adopted mapping is no longer emitted for a member Sideline
- * didn't itself put in that role. Keep the decision there, where the full diff (desired vs.
- * actual) is visible — this handler only ever sees one event with no way to reconstruct that
- * context, so re-adding a check here would be duplicated, harder-to-verify policy, not defense
- * in depth. */
+ * - The diff functions (`reconcileMemberDiscordRoles.ts` `unassignCandidates`,
+ *   `syncMemberDiscordRoles.ts` `removedCandidates`) now emit it only when `member_role_grants`
+ *   records that SIDELINE ITSELF gave *this* member the role (the blocker fix, whole-series
+ *   review of commit 46806427) — a member holding a hand-granted Discord role, adopted mapping or
+ *   not, is excluded from those diffs entirely. See those files' doc comments for the full
+ *   rationale.
+ * - The direct, captain-initiated path (`api/role.ts`'s `unassignRole`, `role.ts:322-329`) emits
+ *   it unconditionally whenever a captain revokes a role through Sideline's own UI, with no
+ *   provenance check and no rowcount check on its `member_roles` DELETE — it emits even if that
+ *   DELETE matched zero rows (a stale roster page, a double submit, or a direct API call can all
+ *   reach this with the member already role-less in Sideline). That is intentional: a captain
+ *   explicitly acting through Sideline's UI should always be able to ask Discord to remove a role
+ *   Sideline manages, regardless of how the member came to hold it.
+ *
+ * So this handler cannot rely on "every `role_unassigned` event implies Sideline granted the
+ * role" — the direct path is a standing counter-example, not a bug to guard against. What makes
+ * the unconditional `deleteGuildMemberRole` call below safe is different: removing a role the
+ * member does not currently hold is a Discord no-op (`deleteGuildMemberRole` on an absent role
+ * neither errors nor changes anything), so a spurious emission from either path costs nothing.
+ * Re-adding a provenance check here would only reject the direct path's legitimate, deliberate
+ * unconditional case — the diff functions already own the provenance decision where the full
+ * context (desired vs. actual vs. granted) is visible; this handler only ever sees one event. */
 export const handleMemberRemoved = (event: RoleRpcEvents.RoleUnassignedEvent) =>
   Effect.Do.pipe(
     Effect.bind('rpc', () => SyncRpc.asEffect()),

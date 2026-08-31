@@ -49,17 +49,28 @@ const reserveFromBudget = (budget: Option.Option<Ref.Ref<number>>, requested: nu
  *   intersected with `managed`'s keys.
  * - **managed** = `discord_role_mappings` for the team — the Discord roles Sideline owns.
  * - **actual** = the payload's `roles`, implicitly restricted to `managed`'s values below.
+ * - **granted** = `TeamMembersRepository.findGrantedRoleIds` — the role ids THIS member was
+ *   actually given by Sideline (`member_role_grants`, written from the bot's own success path;
+ *   see that table's migration and `unassignCandidates` below).
  * - `role_assigned` for every managed+desired role missing from `actual`.
- * - `role_unassigned` for every NON-ADOPTED managed role present in `actual` but not desired.
+ * - `role_unassigned` for every managed role present in `actual`, not desired, AND granted (see
+ *   `unassignCandidates` below).
  * - **A Discord role with no `discord_role_mappings` row is never considered** — both candidate
  *   lists are filtered from `managed`, never from `actual` directly, so an unmapped role a captain
  *   granted by hand can never be stripped (the anti-stripping guard, CC-8).
- * - **An `adopted: true` mapping is excluded from `unassignCandidates` (blocker A, whole-series
- *   review)** — a member holding an adopted Discord role by hand, with no `member_roles` row,
- *   never appears in `desired`, so unlike CC-8's "no mapping at all" case, adoption alone does
- *   NOT keep the role out of `managed`/`actual` the way an unmapped role does. Without this
- *   explicit exclusion every such member gets `role_unassigned` on the very next reconcile. It
- *   may still be ADDED via `assignCandidates` — only stripping is forbidden.
+ * - **`unassignCandidates` is restricted to roles `granted` records for THIS member (blocker,
+ *   whole-series review of commit 46806427)** — not to non-`adopted` mappings. `adopted` is a
+ *   MAPPING-level fact ("did Sideline create or adopt this Discord role at all") and cannot answer
+ *   the MEMBER-level question this diff actually needs: did *this* member receive the role via
+ *   Sideline. `46806427` excluded every `adopted` mapping from `unassignCandidates` wholesale,
+ *   which also blocked stripping it from a member Sideline itself promoted into an adopted role
+ *   and later demoted — nothing else in the system re-emits `role_unassigned` for a group-detach
+ *   or group-removal, so that member kept Discord access forever. Keying on `granted` instead
+ *   allows stripping a role this member received via Sideline (adopted mapping or not) while still
+ *   never stripping a role held before/outside Sideline — a member with no grant row for a role is
+ *   never in `unassignCandidates`, which is also the correct default for a member who predates
+ *   `member_role_grants` and has no recorded provenance at all (no backfill exists; see the
+ *   migration's doc comment).
  * - **In steady state (actual already matches desired) both candidate lists are empty and nothing
  *   is emitted.** This is the flood protection that replaces the transition gate, and it holds on
  *   every call, not just the first one after a migration.
@@ -85,6 +96,12 @@ const computeRoleDiff = (
     Effect.bind('roleSyncEvents', () => RoleSyncEventsRepository.asEffect()),
     Effect.bind('desired', ({ members }) => members.findEffectiveRoleIdsForMember(teamMember.id)),
     Effect.bind('managed', ({ mappings }) => mappings.findAllByTeam(team.id)),
+    // Blocker (whole-series review of commit 46806427): per-member provenance for the removal
+    // decision below — see `member_role_grants`'s migration and this file's top-of-file doc
+    // comment for why `adopted` (a mapping-level fact) cannot answer this member-level question.
+    Effect.bind('grantedRoleIds', ({ members }) =>
+      members.findGrantedRoleIds(teamMember.id).pipe(Effect.map((ids) => new Set(ids))),
+    ),
     Effect.let('desiredRoleIds', ({ desired }) => new Set(desired.map((r) => r.role_id))),
     Effect.let('actualRoleIds', () => new Set(actualDiscordRoleIds)),
     // Both candidate lists are filtered from `managed` — never from `actual` directly — so a
@@ -93,18 +110,22 @@ const computeRoleDiff = (
     Effect.let('assignCandidates', ({ managed, desiredRoleIds, actualRoleIds }) =>
       managed.filter((m) => desiredRoleIds.has(m.role_id) && !actualRoleIds.has(m.discord_role_id)),
     ),
-    // Blocker A (whole-series review): `adopted` mappings are excluded here — never from
-    // `assignCandidates` above. An adopted mapping points at a Discord role Sideline did not
-    // create (`ensureMapping.ts`); members holding it because a captain granted it by hand,
-    // before or outside Sideline, have no `member_roles` row and so never appear in `desired`.
-    // Stripping it on that basis would destroy human-managed Discord state — exactly what
-    // `handleDeleted.ts` and the `adopted` column exist to prevent, just reached through this
-    // diff instead of a role deletion. Adopted roles may still be ADDED (Sideline is free to
-    // bring its own members into sync with a role it now manages); they must never be REMOVED
-    // by a diff Sideline did not author.
-    Effect.let('unassignCandidates', ({ managed, desiredRoleIds, actualRoleIds }) =>
+    // Blocker (whole-series review of commit 46806427): a mapping is only an unassign candidate
+    // if `grantedRoleIds` says SIDELINE ITSELF gave *this* member the role (`member_role_grants`,
+    // written from the bot's own successful `addGuildMemberRole` call — see that table's
+    // migration). This replaces `46806427`'s blanket `!m.adopted` exclusion, which conflated a
+    // MAPPING-level fact (did Sideline create/adopt this Discord role at all) with the
+    // MEMBER-level question this diff actually needs (did *this* member get it from Sideline) —
+    // see this file's top-of-file doc comment for the full rationale. A member with no grant row
+    // for a role — because they hold it by hand, or because they predate `member_role_grants` and
+    // have no recorded provenance — is never in `unassignCandidates`, matching the "no backfill,
+    // default to not stripping" rule that table's migration documents.
+    Effect.let('unassignCandidates', ({ managed, desiredRoleIds, actualRoleIds, grantedRoleIds }) =>
       managed.filter(
-        (m) => !m.adopted && actualRoleIds.has(m.discord_role_id) && !desiredRoleIds.has(m.role_id),
+        (m) =>
+          grantedRoleIds.has(m.role_id) &&
+          actualRoleIds.has(m.discord_role_id) &&
+          !desiredRoleIds.has(m.role_id),
       ),
     ),
     // Resolve role names; a mapping whose role can no longer be found (e.g. archived) is skipped

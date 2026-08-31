@@ -130,6 +130,10 @@ type PriorRoleSync = {
 let effectiveRoles: EffectiveRole[] = [];
 let managedMappings: ManagedMapping[] = [];
 let priorRoleSync: Option.Option<PriorRoleSync> = Option.none();
+// Blocker (whole-series review of commit 46806427): per-member Discord-role provenance
+// (`member_role_grants`). Role ids in this list are ones Sideline itself is recorded as having
+// granted `TEST_MEMBER_ID` — the removal decision keys on THIS, not on `ManagedMapping.adopted`.
+let grantedRoleIds: Role.RoleId[] = [];
 
 type RecordedEvent =
   | { readonly type: 'role_assigned'; readonly roleId: Role.RoleId }
@@ -243,6 +247,14 @@ const makeTeamMembersRepositoryLayer = () =>
     reactivateMember: () => Effect.die(new Error('Not implemented')),
     findLastRoleSync: (memberId: TeamMember.TeamMemberId) =>
       memberId === TEST_MEMBER_ID ? Effect.succeed(priorRoleSync) : Effect.succeed(Option.none()),
+    // Blocker (whole-series review of commit 46806427): the removal decision keys on this, not
+    // on `ManagedMapping.adopted` — see `grantedRoleIds`'s doc comment above.
+    findGrantedRoleIds: (memberId: TeamMember.TeamMemberId) =>
+      memberId === TEST_MEMBER_ID || memberId === TEST_MEMBER_NO_DISCORD_ID
+        ? Effect.succeed(grantedRoleIds)
+        : Effect.succeed([]),
+    recordRoleGrant: () => Effect.void,
+    clearRoleGrant: () => Effect.void,
     getPlayerRoleId: () => Effect.succeed(Option.none()),
     assignRole: () => Effect.void,
     unassignRole: () => Effect.void,
@@ -475,6 +487,7 @@ beforeEach(() => {
   managedMappings = [];
   recordedEvents = [];
   priorRoleSync = Option.none();
+  grantedRoleIds = [];
 });
 
 const syncUrl = (memberId: string) =>
@@ -575,6 +588,10 @@ describe('POST /teams/:teamId/members/:memberId/sync-discord-roles', () => {
       { role_id: ROLE_A, discord_role_id: '1' as Discord.Snowflake },
       { role_id: ROLE_B, discord_role_id: '2' as Discord.Snowflake },
     ];
+    // Blocker (whole-series review of commit 46806427): removal now keys on `member_role_grants`
+    // provenance, not merely on the mapping being present — Sideline must have granted THIS
+    // member ROLE_B for it to be an unassign candidate.
+    grantedRoleIds = [ROLE_B];
 
     const response = await syncMember(TEST_MEMBER_ID);
     const body = await response.json();
@@ -603,18 +620,17 @@ describe('POST /teams/:teamId/members/:memberId/sync-discord-roles', () => {
     expect(recordedEvents.filter((e) => e.type === 'role_unassigned')).toHaveLength(0);
   });
 
-  // Blocker A (whole-series review): unlike the "no mapping at all" case above, an ADOPTED
-  // mapping IS present in `managed` — it points at a pre-existing Discord role Sideline adopted
-  // rather than created (`ensureMapping.ts`). A member holding it because a captain granted it
-  // by hand, with no `member_roles` row, never appears in `effectiveRoles` — before this fix
-  // that meant a captain clicking "sync" on ANY member stripped every adopted role that member
-  // held but was never assigned through Sideline. Adoption must be as strong a stripping guard
-  // as having no mapping at all.
-  it('never queues role_unassigned for an adopted mapping the member holds but was never assigned', async () => {
+  // Blocker (whole-series review of commit 46806427): an ADOPTED mapping IS present in `managed`
+  // — it points at a pre-existing Discord role Sideline adopted rather than created
+  // (`ensureMapping.ts`). A member holding it because a captain granted it by hand, with no
+  // `member_role_grants` row for it, never shows up in `grantedRoleIds` — that (not
+  // `ManagedMapping.adopted`) is what keeps this member's hand-held role safe from stripping.
+  it('never queues role_unassigned for an adopted mapping the member holds but Sideline never granted', async () => {
     effectiveRoles = [];
     managedMappings = [
       { role_id: ROLE_A, discord_role_id: '1' as Discord.Snowflake, adopted: true },
     ];
+    grantedRoleIds = []; // No member_role_grants row — this member holds it by hand.
 
     const response = await syncMember(TEST_MEMBER_ID);
     const body = await response.json();
@@ -625,8 +641,47 @@ describe('POST /teams/:teamId/members/:memberId/sync-discord-roles', () => {
     expect(recordedEvents.filter((e) => e.type === 'role_unassigned')).toHaveLength(0);
   });
 
+  // The other half of the blocker fix: an adopted mapping Sideline itself GRANTED to this member
+  // (a `member_role_grants` row exists) is no longer protected from stripping just because the
+  // mapping is `adopted: true` — provenance is per-member, not per-mapping. Before the fix, this
+  // member kept the role forever once desired became false (e.g. a group-detach), because
+  // nothing else in the system re-emits `role_unassigned` for that.
+  it('queues role_unassigned for an adopted mapping Sideline itself granted to this member', async () => {
+    effectiveRoles = [];
+    managedMappings = [
+      { role_id: ROLE_A, discord_role_id: '1' as Discord.Snowflake, adopted: true },
+    ];
+    grantedRoleIds = [ROLE_A]; // member_role_grants row exists: Sideline gave THIS member ROLE_A.
+
+    const response = await syncMember(TEST_MEMBER_ID);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.addedCount).toBe(0);
+    expect(body.removedCount).toBe(1);
+    expect(recordedEvents).toContainEqual({ type: 'role_unassigned', roleId: ROLE_A });
+  });
+
+  // Symmetric with the "adopted" cases: a NON-adopted mapping the member holds but Sideline never
+  // granted (no `member_role_grants` row) must also survive — `adopted` was never the right axis
+  // either way, `member_role_grants` is.
+  it('never queues role_unassigned for a non-adopted mapping the member holds but Sideline never granted', async () => {
+    effectiveRoles = [];
+    managedMappings = [
+      { role_id: ROLE_A, discord_role_id: '1' as Discord.Snowflake, adopted: false },
+    ];
+    grantedRoleIds = [];
+
+    const response = await syncMember(TEST_MEMBER_ID);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.removedCount).toBe(0);
+    expect(recordedEvents.filter((e) => e.type === 'role_unassigned')).toHaveLength(0);
+  });
+
   // Symmetric with the above: an adopted mapping is still eligible to be ADDED — only stripping
-  // is forbidden.
+  // is guarded, and adding never depended on `member_role_grants` either.
   it('still queues role_assigned for an adopted mapping the member newly desires', async () => {
     effectiveRoles = [{ role_id: ROLE_A, role_name: 'Captain' }];
     managedMappings = [
@@ -772,5 +827,64 @@ describe('POST /teams/:teamId/members/:memberId/sync-discord-roles — prior-att
     // ...but the prior failure reason is still surfaced as context, not discarded.
     expect(body.lastRoleSyncError).toBe('captain_action');
     expect(body.lastRoleSyncAt).not.toBeNull();
+  });
+});
+
+// Should-fix 3 (whole-series review of commit 46806427): the self-serve sync carve-out is
+// reachable by every member of every team, and `syncMemberDiscordRoles` enqueues `role_assigned`
+// for ALL desired roles on every call (not a diff against what is already queued). The only
+// existing limit was a 60s browser `setTimeout` (`SyncRolesButton.tsx`'s `SYNC_COOLDOWN_MS`),
+// trivially bypassed. `RESYNC_THROTTLE_SECONDS` in `syncMemberDiscordRoles.ts` closes that.
+describe('POST /teams/:teamId/members/:memberId/sync-discord-roles — server-side throttle (should-fix 3)', () => {
+  it('rejects a click within 60s of the prior completed sync and enqueues nothing', async () => {
+    effectiveRoles = [{ role_id: ROLE_A, role_name: 'Captain' }];
+    managedMappings = [];
+    priorRoleSync = Option.some({
+      state: 'ok',
+      at: DateTime.subtract(DateTime.nowUnsafe(), { seconds: 10 }),
+      errorCode: Option.none(),
+    });
+
+    const response = await syncMember(TEST_MEMBER_ID);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.addedCount).toBe(0);
+    expect(body.removedCount).toBe(0);
+    // The prior record is still reported back, unchanged — a throttled click is not "never".
+    expect(body.roleSyncState).toBe('ok');
+    expect(body.lastRoleSyncAt).not.toBeNull();
+    expect(recordedEvents).toHaveLength(0);
+  });
+
+  it('proceeds normally once the prior completed sync is more than 60s old', async () => {
+    effectiveRoles = [{ role_id: ROLE_A, role_name: 'Captain' }];
+    managedMappings = [];
+    priorRoleSync = Option.some({
+      state: 'ok',
+      at: DateTime.subtract(DateTime.nowUnsafe(), { seconds: 61 }),
+      errorCode: Option.none(),
+    });
+
+    const response = await syncMember(TEST_MEMBER_ID);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.addedCount).toBe(1);
+    expect(body.roleSyncState).toBe('queued');
+    expect(recordedEvents).toHaveLength(1);
+  });
+
+  it('is not throttled when there is no prior completed sync at all', async () => {
+    effectiveRoles = [{ role_id: ROLE_A, role_name: 'Captain' }];
+    managedMappings = [];
+    priorRoleSync = Option.none();
+
+    const response = await syncMember(TEST_MEMBER_ID);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.addedCount).toBe(1);
+    expect(recordedEvents).toHaveLength(1);
   });
 });

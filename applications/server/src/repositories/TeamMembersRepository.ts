@@ -499,6 +499,56 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  // Blocker (whole-series review of `fix/discord-onboarding-webapp`, commit 46806427):
+  // per-member Discord-role provenance. `member_role_grants` records "Sideline's own
+  // `handleAssigned.ts` successfully added this Discord role to this member" — a MEMBER-level
+  // fact, unlike `discord_role_mappings.adopted` which is a MAPPING-level fact and cannot answer
+  // "did THIS member get the role from Sideline or by hand". `recordRoleGrant` /
+  // `clearRoleGrant` are called from `rpc/role/index.ts`'s `Role/MarkEventProcessed` handler,
+  // keyed off the very `role_assigned` / `role_unassigned` event that was just marked processed —
+  // i.e. only after the bot's REST call to Discord actually succeeded. See the migration
+  // (`1791100000_create_member_role_grants.ts`) for the full rationale and why no backfill exists.
+  const recordRoleGrantQuery = SqlSchema.void({
+    Request: MemberRoleInput,
+    execute: (input) => sql`
+      INSERT INTO member_role_grants (team_member_id, role_id)
+      VALUES (${input.team_member_id}, ${input.role_id})
+      ON CONFLICT (team_member_id, role_id) DO UPDATE SET granted_at = now()
+    `,
+  });
+
+  const clearRoleGrantQuery = SqlSchema.void({
+    Request: MemberRoleInput,
+    execute: (input) => sql`
+      DELETE FROM member_role_grants
+      WHERE team_member_id = ${input.team_member_id} AND role_id = ${input.role_id}
+    `,
+  });
+
+  const findGrantedRoleIdsQuery = SqlSchema.findAll({
+    Request: Schema.String,
+    Result: Schema.Struct({ role_id: Role.RoleId }),
+    execute: (teamMemberId) => sql`
+      SELECT role_id FROM member_role_grants WHERE team_member_id = ${teamMemberId}
+    `,
+  });
+
+  const recordRoleGrant = (teamMemberId: TeamMember.TeamMemberId, roleId: Role.RoleId) =>
+    recordRoleGrantQuery({ team_member_id: teamMemberId, role_id: roleId }).pipe(catchSqlErrors);
+
+  const clearRoleGrant = (teamMemberId: TeamMember.TeamMemberId, roleId: Role.RoleId) =>
+    clearRoleGrantQuery({ team_member_id: teamMemberId, role_id: roleId }).pipe(catchSqlErrors);
+
+  // Consumed by `reconcileMemberDiscordRoles.ts` / `syncMemberDiscordRoles.ts` to restrict their
+  // unassign candidates to roles THIS member actually received via Sideline — never from
+  // `adopted` alone. A member with no rows here has no recorded Sideline provenance for any role;
+  // both diff functions treat that as "don't strip" (see their doc comments).
+  const findGrantedRoleIds = (teamMemberId: TeamMember.TeamMemberId) =>
+    findGrantedRoleIdsQuery(teamMemberId).pipe(
+      Effect.map((rows) => rows.map((row) => row.role_id)),
+      catchSqlErrors,
+    );
+
   // PR-8 (CC-10): idempotent by construction — a repeated `member_add`/`reconcile` observation
   // never overwrites an earlier timestamp, which is what makes this safe to call unconditionally
   // and structurally impossible to "consume" (see blocker 7 in the plan).
@@ -677,6 +727,9 @@ const make = Effect.gen(function* () {
     getPlayerRoleId,
     assignRole,
     unassignRole,
+    recordRoleGrant,
+    clearRoleGrant,
+    findGrantedRoleIds,
     markDiscordJoined,
     clearDiscordJoined,
     findDiscordJoinedAt,

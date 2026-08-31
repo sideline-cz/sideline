@@ -212,6 +212,7 @@ Build stages:
 | `LLM_API_URL` | No | `''` | Base URL of the OpenAI-compatible LLM API used for email summarization (e.g. `https://api.openai.com/v1`). When empty or unset, the AI summarization pipeline uses a deterministic stub that returns the first 500 characters of the email body as the summary. |
 | `LLM_API_KEY` | No | — | API key for the LLM service. Redacted in logs. Required when `LLM_API_URL` is set; ignored otherwise. |
 | `LLM_MODEL` | No | `gpt-4o-mini` | Model identifier passed to the LLM API (e.g. `gpt-4o`, `gpt-4o-mini`). Ignored when `LLM_API_URL` is empty. |
+| `DISCORD_JOIN_ENFORCEMENT_ENABLED` | No | `false` | Kill switch for the Discord-join enforcement redirect (`auth.myTeams`). Accepted values are case-insensitive: `true`/`1`/`yes`/`on` enable it, `false`/`0`/`no`/`off`/empty disable it. Any other value is treated as disabled and logs a startup warning — it deliberately never fails server boot, since this flag is the incident-response lever for turning the redirect off fast. When disabled (the default), every team's `discordJoined` status is forced to `'unknown'`, which removes the redirect, the onboarding card, and the badge on the client in one move. |
 
 ### 3.2 Bot (`applications/bot/src/env.ts`)
 

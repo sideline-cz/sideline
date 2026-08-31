@@ -1,4 +1,4 @@
-import { Schema } from 'effect';
+import { DateTime, Schema } from 'effect';
 import { Rpc, RpcGroup } from 'effect/unstable/rpc';
 import { Discord, Role, RoleApi, RoleSyncEvent, Team } from '~/index.js';
 import { UnprocessedRoleEvent } from './RoleRpcEvents.js';
@@ -10,7 +10,23 @@ export const RoleRpcGroup = RpcGroup.make(
     success: Schema.Array(UnprocessedRoleEvent),
   }),
   Rpc.make('MarkEventProcessed', {
-    payload: { id: RoleSyncEvent.RoleSyncEventId },
+    payload: {
+      id: RoleSyncEvent.RoleSyncEventId,
+      // Should-fix 1 (whole-series review of `fix/discord-onboarding-webapp`): the bot-side start
+      // of the poll tick this event was drained in (`ProcessorService.ts`'s `processTick`, one
+      // value shared by every event processed in that tick). `RoleSyncEventsRepository.markProcessed`
+      // uses this to stop a same-tick `role_assigned` success from clobbering a same-tick
+      // `role_unassigned`/`role_assigned` FAILURE recorded for the same member a moment earlier —
+      // `role_sync_events` has no `ORDER BY` on the emission side, so which of a member's several
+      // events in one tick lands last is not meaningful and must not decide which reason survives
+      // on `team_members.last_role_sync_*`. `withDecodingDefaultKey` (not required) so a
+      // not-yet-upgraded bot omitting this key during a rolling deploy still decodes — defaulting
+      // to "now" disables the same-tick guard for that bot, exactly the pre-fix behavior, never
+      // less safe than before this fix shipped.
+      tick_started_at: Schema.DateTimeUtc.pipe(
+        Schema.withDecodingDefaultKey(() => DateTime.nowUnsafe()),
+      ),
+    },
   }),
   Rpc.make('MarkEventFailed', {
     payload: {

@@ -1246,28 +1246,114 @@ describe('InviteAcceptancesRepository — findOpenByUserAndTeam (TDD: PR-5 CC-14
     ),
   );
 
-  it.effect('does not reuse a row whose discord_code was generated more than 24h ago', () =>
-    Effect.Do.pipe(
-      Effect.bind('user', () => createUser('700000000000000026', 'joiner-twentysix')),
-      Effect.bind('team', ({ user }) =>
-        createTeam('600000000000000026' as Discord.Snowflake, user.id),
-      ),
-      Effect.bind('invite', ({ user, team }) =>
-        createInvite(team.id, user.id, 'PR5-STALE-CODE-BY-TEAM'),
-      ),
-      Effect.bind('acceptance', ({ user, invite }) => createAcceptance(invite.id, user.id)),
-      Effect.tap(({ acceptance }) =>
-        InviteAcceptancesRepository.asEffect().pipe(
-          Effect.andThen((repo) =>
-            repo.setDiscordCode({ acceptanceId: acceptance.id, discordCode: 'stale-by-team' }),
+  // Should-fix 4 (whole-series review of commit 46806427): this test used to assert `Option.isNone`
+  // — that the staleness `WHERE` clause filtered the row out entirely. That was the bug: the row
+  // disappearing into `None` is what made `getMyPendingDiscordJoin` show generic "No invite
+  // available" instead of `'expired'`'s dedicated copy. The row is now RETURNED regardless of
+  // staleness; `deriveJoinStatusState` (`joinStatusState.ts`) is what turns a stale
+  // `discord_code` into `state: 'expired'` — see `test/unit/joinStatusState.test.ts` for that half.
+  it.effect(
+    'still returns a row whose discord_code was generated more than 24h ago — deriveJoinStatusState decides, not the SQL',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('user', () => createUser('700000000000000026', 'joiner-twentysix')),
+        Effect.bind('team', ({ user }) =>
+          createTeam('600000000000000026' as Discord.Snowflake, user.id),
+        ),
+        Effect.bind('invite', ({ user, team }) =>
+          createInvite(team.id, user.id, 'PR5-STALE-CODE-BY-TEAM'),
+        ),
+        Effect.bind('acceptance', ({ user, invite }) => createAcceptance(invite.id, user.id)),
+        Effect.tap(({ acceptance }) =>
+          InviteAcceptancesRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.setDiscordCode({ acceptanceId: acceptance.id, discordCode: 'stale-by-team' }),
+            ),
           ),
         ),
+        Effect.tap(({ acceptance }) => backdateGeneratedAt(acceptance.id)),
+        Effect.bind('open', ({ user, team }) => findOpenByUserAndTeam(user.id, team.id)),
+        Effect.tap(({ open, acceptance }) =>
+          Effect.sync(() => {
+            expect(Option.isSome(open)).toBe(true);
+            if (Option.isSome(open)) {
+              expect(open.value.id).toBe(acceptance.id);
+              expect(Option.isSome(open.value.discord_code)).toBe(true);
+            }
+          }),
+        ),
+        Effect.provide(TestLayer),
       ),
-      Effect.tap(({ acceptance }) => backdateGeneratedAt(acceptance.id)),
+  );
+
+  // Should-fix 4 (whole-series review of commit 46806427): the "handle the shadowing" half. Once
+  // the staleness `WHERE` is gone, a plain `ORDER BY created_at DESC` would let a NEWER row with
+  // no usable code (here: a terminally failed one) shadow an OLDER row that still has a live,
+  // unexpired `discord_code` — regressing the exact case `getMyPendingDiscordJoin` most needs to
+  // get right (a user who can still join right now). The leading boolean ORDER BY key must pick
+  // the older-but-usable row over the newer-but-unusable one.
+  it.effect(
+    'prefers an OLDER row with a still-usable discord_code over a NEWER row with none (no shadowing)',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('user', () => createUser('700000000000000027', 'joiner-twentyseven')),
+        Effect.bind('team', ({ user }) =>
+          createTeam('600000000000000027' as Discord.Snowflake, user.id),
+        ),
+        Effect.bind('invite', ({ user, team }) =>
+          createInvite(team.id, user.id, 'PR5-SHADOW-CODE'),
+        ),
+        // Older row: still has a live, unexpired discord_code.
+        Effect.bind('usable', ({ user, invite }) => createAcceptance(invite.id, user.id)),
+        Effect.tap(({ usable }) => backdateCreatedAt(usable.id)),
+        Effect.tap(({ usable }) =>
+          InviteAcceptancesRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.setDiscordCode({ acceptanceId: usable.id, discordCode: 'still-usable' }),
+            ),
+          ),
+        ),
+        // Newer row: terminally failed, no discord_code at all.
+        Effect.bind('failed', ({ user, invite }) => createAcceptance(invite.id, user.id)),
+        Effect.tap(({ failed }) => markFailed(failed.id, 'welcome_channel_missing')),
+        Effect.bind('open', ({ user, team }) => findOpenByUserAndTeam(user.id, team.id)),
+        Effect.tap(({ open, usable }) =>
+          Effect.sync(() => {
+            expect(Option.isSome(open)).toBe(true);
+            if (Option.isSome(open)) {
+              expect(open.value.id).toBe(usable.id);
+              expect(Option.getOrNull(open.value.discord_code)).toBe('still-usable');
+            }
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  // Symmetric with the shadowing test above: when NEITHER candidate row has a usable code, the
+  // newest row must still win — that is what lets a recently-failed row's actionable error
+  // message (e.g. `welcome_channel_missing`) surface instead of an older, staler failure.
+  it.effect('falls back to the newest row when no candidate has a usable discord_code', () =>
+    Effect.Do.pipe(
+      Effect.bind('user', () => createUser('700000000000000028', 'joiner-twentyeight')),
+      Effect.bind('team', ({ user }) =>
+        createTeam('600000000000000028' as Discord.Snowflake, user.id),
+      ),
+      Effect.bind('invite', ({ user, team }) =>
+        createInvite(team.id, user.id, 'PR5-NO-USABLE-CODE'),
+      ),
+      Effect.bind('older', ({ user, invite }) => createAcceptance(invite.id, user.id)),
+      Effect.tap(({ older }) => backdateCreatedAt(older.id)),
+      Effect.tap(({ older }) => markFailed(older.id, 'bot_missing_perms')),
+      Effect.bind('newer', ({ user, invite }) => createAcceptance(invite.id, user.id)),
+      Effect.tap(({ newer }) => markFailed(newer.id, 'welcome_channel_missing')),
       Effect.bind('open', ({ user, team }) => findOpenByUserAndTeam(user.id, team.id)),
-      Effect.tap(({ open }) =>
+      Effect.tap(({ open, newer }) =>
         Effect.sync(() => {
-          expect(Option.isNone(open)).toBe(true);
+          expect(Option.isSome(open)).toBe(true);
+          if (Option.isSome(open)) {
+            expect(open.value.id).toBe(newer.id);
+          }
         }),
       ),
       Effect.provide(TestLayer),

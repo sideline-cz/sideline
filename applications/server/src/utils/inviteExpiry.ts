@@ -11,3 +11,12 @@
 // shown it as expired, so the UI never flips backwards.
 export const INVITE_ACCEPTANCE_SWEEP_DAYS = 3;
 export const INVITE_ACCEPTANCE_DERIVED_EXPIRY_DAYS = INVITE_ACCEPTANCE_SWEEP_DAYS + 1;
+
+// Should-fix 4 (whole-series review of commit 46806427): how long a minted `discord_code` stays
+// usable — mirrors the bot's `max_age: 86400` on the one-time invite it creates
+// (`applications/bot/src/rcp/inviteGenerator/ProcessorService.ts`). Consumed by
+// `joinStatusState.ts`'s `deriveJoinStatusState`, which is now the ONLY place that decides a
+// `discord_code` is stale — `InviteAcceptancesRepository.findOpenByUserAndTeam` used to bake this
+// same 24h boundary into a SQL `WHERE`, which filtered a stale-code row out of the result entirely
+// (`None`) instead of letting it be classified `'expired'` with its dedicated copy.
+export const DISCORD_CODE_MAX_AGE_HOURS = 24;

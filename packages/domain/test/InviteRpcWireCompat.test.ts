@@ -58,17 +58,44 @@ describe('Invite/PendingAcceptances wire compatibility (PR-2, CC-1)', () => {
     expect(decoded.bot_present).toBe(false);
   });
 
-  // This test used to assert the OLD (pre-PR-2) schema still decodes the PR-2 server's output,
-  // on the premise that `findPending`'s temporary wire guard (`AND t.welcome_channel_id IS NOT
-  // NULL`) kept `welcome_channel_id` always non-null this release. PR-3 removed that guard
+  // This test used to assert ONLY that the OLD (pre-PR-2) schema still decodes the PR-2 server's
+  // output, on the premise that `findPending`'s temporary wire guard (`AND t.welcome_channel_id
+  // IS NOT NULL`) kept `welcome_channel_id` always non-null this release. PR-3 removed that guard
   // (fixed here — whole-series review of `fix/discord-onboarding-webapp`: the premise was
   // invalidated two commits after this test was written), so the server now genuinely emits
-  // `null` for a team with no welcome channel configured. The OLD schema — declared locally,
-  // deliberately NOT reusing `PendingAcceptanceEntry`, since asserting the new schema decodes
-  // its own output would prove nothing about compatibility — has no `Option` wrapper and cannot
-  // decode a `null` here; it dies with a `ParseError` in this test's own thread rather than
-  // reject the promise.
+  // `null` for a team with no welcome channel configured.
   //
+  // Should-fix 5 (whole-series review of commit 46806427): the rewrite that added the `null`
+  // case dropped the ORIGINAL assertion — that the server's real, non-null output still decodes
+  // under the OLD schema — leaving it with only a `.toThrow()` and no matcher on the `null` case.
+  // A decoder-first rollout (CC-1) needs BOTH proven: the common case (a configured welcome
+  // channel) must keep working for an un-upgraded bot, AND the new case (no welcome channel) must
+  // fail loudly rather than silently coerce to something wrong. Losing the first assertion let a
+  // regression that broke the OLD schema's decoding of the (far more common) non-null shape pass
+  // silently — the very kind of premise-invalidation bug this whole file exists to catch (CC-1).
+  // The OLD schema is declared locally in both tests below, deliberately NOT reusing
+  // `PendingAcceptanceEntry`, since asserting the new schema decodes its own output would prove
+  // nothing about compatibility.
+  const LegacyPendingAcceptance = Schema.Struct({
+    acceptance_id: Schema.String,
+    guild_id: Schema.String,
+    welcome_channel_id: Schema.String,
+  });
+
+  it('a non-null welcome_channel_id (the common case) still decodes under the OLD (pre-PR-2) schema', () => {
+    const serverEmitted: unknown = Schema.encodeSync(PendingAcceptanceEntry)(
+      new PendingAcceptanceEntry({
+        acceptance_id: ACCEPTANCE_ID,
+        guild_id: GUILD_ID,
+        welcome_channel_id: Option.some(CHANNEL_ID),
+        bot_present: true,
+      }),
+    );
+
+    const decoded = Schema.decodeUnknownSync(LegacyPendingAcceptance)(serverEmitted);
+    expect(decoded.welcome_channel_id).toBe(CHANNEL_ID);
+  });
+
   // This failure is the exact deploy-window CC-1's contract does NOT cover: a bot that has not
   // yet received the PR-2 wire-expand release, still running once a PR-3+ server starts emitting
   // real nulls. CC-1's whole point is decoder-first ordering (deploy the tolerant PR-2 bot
@@ -76,12 +103,6 @@ describe('Invite/PendingAcceptances wire compatibility (PR-2, CC-1)', () => {
   // rollout — but it is worth pinning as a failure, not silently "would also work", so a future
   // reader does not mistake the wire-expand for permanent unconditional back-compat.
   it('a genuinely null welcome_channel_id (the PR-3+ server) does NOT decode under the OLD (pre-PR-2) schema', () => {
-    const LegacyPendingAcceptance = Schema.Struct({
-      acceptance_id: Schema.String,
-      guild_id: Schema.String,
-      welcome_channel_id: Schema.String,
-    });
-
     const serverEmitted: unknown = Schema.encodeSync(PendingAcceptanceEntry)(
       new PendingAcceptanceEntry({
         acceptance_id: ACCEPTANCE_ID,
