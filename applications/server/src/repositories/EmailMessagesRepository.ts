@@ -214,6 +214,49 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  /**
+   * Empties the body and drops the attachments of messages that finished
+   * being handled more than `days` ago.
+   *
+   * **Terminal statuses only.** Anything still in flight — `received`,
+   * `summarizing`, `pending_approval`, `approved`, `send_original` — is left
+   * alone however old it is, because purging it would destroy work a human
+   * has not finished. The known cost is that a message nobody ever approves
+   * keeps its body forever; closing that needs a separate decision about
+   * silently discarding a pending approval, which is not this job's to make.
+   *
+   * `purged_at IS NULL` keeps it idempotent: a second run in the same window
+   * matches nothing, so the job is safe to run as often as you like and safe
+   * to retry after a crash.
+   *
+   * `body = ''` rather than NULL because the column is `NOT NULL`, and adding
+   * nullability would push an `Option` into every read path for a value none
+   * of them look at after posting.
+   *
+   * The attachment delete is a separate statement rather than relying on the
+   * `ON DELETE CASCADE`, because the row is deliberately NOT deleted.
+   */
+  const purgeOldQuery = SqlSchema.findAll({
+    Request: Schema.Struct({ days: Schema.Number }),
+    Result: Schema.Struct({ id: EmailForwarding.EmailMessageId }),
+    execute: (input) => sql`
+      UPDATE email_messages
+      SET body = '', purged_at = now(), updated_at = now()
+      WHERE purged_at IS NULL
+        AND status IN ('posted_summary', 'posted_original', 'rejected', 'failed')
+        AND received_at < now() - make_interval(days => ${input.days})
+      RETURNING id
+    `,
+  });
+
+  const deleteAttachmentsForQuery = SqlSchema.void({
+    Request: Schema.Struct({ ids: Schema.Array(EmailForwarding.EmailMessageId) }),
+    execute: (input) => sql`
+      DELETE FROM email_attachments
+      WHERE email_message_id IN ${sql.in(input.ids)}
+    `,
+  });
+
   const insertReceived = (input: {
     readonly team_id: Team.TeamId;
     readonly from_address: string;
@@ -302,6 +345,20 @@ const make = Effect.gen(function* () {
     channelId: string,
   ) => setPostedQuery({ id, status, channel_id: channelId }).pipe(catchSqlErrors);
 
+  /** Returns how many messages were purged, for the cron to log. */
+  const purgeOlderThan = (days: number) =>
+    purgeOldQuery({ days }).pipe(
+      catchSqlErrors,
+      Effect.flatMap((rows) =>
+        rows.length === 0
+          ? Effect.succeed(0)
+          : deleteAttachmentsForQuery({ ids: rows.map((r) => r.id) }).pipe(
+              catchSqlErrors,
+              Effect.as(rows.length),
+            ),
+      ),
+    );
+
   return {
     insertReceived,
     insertReceivedDedup,
@@ -315,6 +372,7 @@ const make = Effect.gen(function* () {
     sendOriginal,
     dismiss,
     setPosted,
+    purgeOlderThan,
   } as const;
 });
 
