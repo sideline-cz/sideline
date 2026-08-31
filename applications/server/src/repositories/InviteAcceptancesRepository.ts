@@ -11,11 +11,10 @@ import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 
-// PR-2 wire expand (CC-1): matches the widened `Invite/PendingAcceptances` success shape
-// (`PendingAcceptanceEntry`) so the row can be returned to the RPC handler as-is. `findPending`
-// still never selects a null `welcome_channel_id` this release — the `WHERE` clause's temporary
-// wire guard (below) keeps it non-null — but the column type is `Option` regardless because
-// that's what the widened wire schema now declares.
+// PR-2 wire expand (CC-1) / PR-3 contract: matches the widened `Invite/PendingAcceptances`
+// success shape (`PendingAcceptanceEntry`) so the row can be returned to the RPC handler as-is.
+// `findPending` now genuinely selects a null `welcome_channel_id` and a false `bot_present` —
+// the temporary wire guard that kept both non-null is removed below (PR-3).
 class PendingAcceptanceRow extends Schema.Class<PendingAcceptanceRow>('PendingAcceptanceRow')({
   acceptance_id: InviteAcceptance.InviteAcceptanceId,
   guild_id: Discord.Snowflake,
@@ -69,6 +68,10 @@ const CountRecentInput = Schema.Struct({
 });
 const CountRecentResult = Schema.Struct({
   count: Schema.Number,
+});
+
+const SweepExpiredInput = Schema.Struct({
+  older_than_days: Schema.Number,
 });
 
 const make = SqlClient.SqlClient.asEffect().pipe(
@@ -136,35 +139,50 @@ const make = SqlClient.SqlClient.asEffect().pipe(
       `,
     });
 
+    // PR-3 contract (CC-1 release B): the temporary wire guard that kept `welcome_channel_id`
+    // non-null and `bot_present` hardcoded `TRUE` is gone. `bot_guilds` is now a LEFT JOIN — a
+    // team whose guild the bot has never joined still needs to be selected so the bot's
+    // `bot_not_in_guild` short-circuit (ProcessorService) can fail it loudly instead of the row
+    // vanishing forever. No age predicate here (CC-4): the sweep and the derived guard (PR-5)
+    // bound stale rows with a terminal code, never a filter.
     const findPending = SqlSchema.findAll({
       Request: Schema.Number,
       Result: PendingAcceptanceRow,
       execute: (limit) => sql`
         SELECT
-          ia.id                AS acceptance_id,
-          t.guild_id           AS guild_id,
-          t.welcome_channel_id AS welcome_channel_id,
-          TRUE                 AS bot_present
+          ia.id                     AS acceptance_id,
+          t.guild_id                AS guild_id,
+          t.welcome_channel_id      AS welcome_channel_id,
+          (b.guild_id IS NOT NULL)  AS bot_present
         FROM invite_acceptances ia
-        JOIN team_invites ti ON ti.id = ia.team_invite_id
-        JOIN teams t         ON t.id = ti.team_id
-        JOIN bot_guilds b    ON b.guild_id = t.guild_id
+        JOIN team_invites ti      ON ti.id = ia.team_invite_id
+        JOIN teams t              ON t.id = ti.team_id
+        LEFT JOIN bot_guilds b    ON b.guild_id = t.guild_id
         WHERE ia.discord_code IS NULL
-          AND ia.discord_code_error_code IS NULL
-          -- Temporary wire guard, not a business rule: it keeps welcome_channel_id non-null so the
-          -- encoded row stays byte-identical for bots running the pre-PR-2 schema. Removed in PR-3
-          -- once the tolerant schema is rolled out everywhere. Do not delete early.
-          AND t.welcome_channel_id IS NOT NULL
+          -- CC-0 rule 2: a welcome_channel_missing row re-opens once the captain sets the
+          -- welcome channel (TeamSettingsPage.tsx -> updateTeamInfo). Every other error code
+          -- stays terminal here.
+          AND (ia.discord_code_error_code IS NULL
+               OR (ia.discord_code_error_code = 'welcome_channel_missing'
+                   AND t.welcome_channel_id IS NOT NULL))
         ORDER BY ia.created_at ASC
         LIMIT ${limit}
       `,
     });
 
+    // CC-14 / PR-3 step 5: clears any previously-stored error so a row that re-opened via the
+    // `welcome_channel_missing` re-open clause above (or the regenerate primitive) does not end
+    // up with both a `discord_code` and a stale `discord_code_error_code`. `getJoinStatus`
+    // already prefers `discord_code` when present, so this is belt-and-braces — but the stored
+    // row should not lie about its own state.
     const setDiscordCode = SqlSchema.void({
       Request: SetDiscordCodeInput,
       execute: ({ acceptanceId, discordCode }) => sql`
         UPDATE invite_acceptances
-        SET discord_code = ${discordCode}, generated_at = now()
+        SET discord_code = ${discordCode},
+            discord_code_error_code = NULL,
+            discord_code_error_detail = NULL,
+            generated_at = now()
         WHERE id = ${acceptanceId}
       `,
     });
@@ -177,6 +195,23 @@ const make = SqlClient.SqlClient.asEffect().pipe(
             discord_code_error_detail = ${errorDetail},
             generated_at = now()
         WHERE id = ${acceptanceId}
+      `,
+    });
+
+    // CC-4 / CC-5: the authoritative backstop for rows `findPending` would otherwise retry
+    // forever. Idempotent (re-running affects 0 rows the second time) and NEVER touches
+    // `created_at` — CC-5 rejects rewriting audit timestamps outright. Already perfectly served
+    // by `idx_invite_acceptances_pending`, whose predicate is byte-for-byte this WHERE clause.
+    const sweepExpired = SqlSchema.void({
+      Request: SweepExpiredInput,
+      execute: ({ older_than_days }) => sql`
+        UPDATE invite_acceptances
+        SET discord_code_error_code = 'expired',
+            discord_code_error_detail = 'aged out before generation',
+            generated_at = now()
+        WHERE discord_code IS NULL
+          AND discord_code_error_code IS NULL
+          AND created_at < now() - (${older_than_days} * interval '1 day')
       `,
     });
 
@@ -282,6 +317,8 @@ const make = SqlClient.SqlClient.asEffect().pipe(
       setDiscordCode: (input: typeof SetDiscordCodeInput.Type) =>
         setDiscordCode(input).pipe(catchSqlErrors),
       markFailed: (input: typeof MarkFailedInput.Type) => markFailed(input).pipe(catchSqlErrors),
+      sweepExpired: (olderThanDays: number) =>
+        sweepExpired({ older_than_days: olderThanDays }).pipe(catchSqlErrors),
       findByDiscordCodeWithContext: (code: string) =>
         findByDiscordCodeWithContext(code).pipe(Effect.map(Option.map(toContext)), catchSqlErrors),
       findRecentByUserAndGuildWithContext: (discordId: string, guildId: string) =>

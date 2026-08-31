@@ -23,6 +23,7 @@ import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsReposit
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { FeeAssignmentsRepository } from '~/repositories/FeeAssignmentsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { PaymentReminderSyncEventsRepository } from '~/repositories/PaymentReminderSyncEventsRepository.js';
 import { RulesQuizSyncEventsRepository } from '~/repositories/RulesQuizSyncEventsRepository.js';
@@ -42,6 +43,7 @@ import { EventHorizonCron } from '~/services/EventHorizonCron.js';
 import { EventStartCron } from '~/services/EventStartCron.js';
 import { ImapClient } from '~/services/ImapClient.js';
 import { ImapPoller } from '~/services/ImapPoller.js';
+import { InviteAcceptanceSweepCron } from '~/services/InviteAcceptanceSweepCron.js';
 import { LlmClient } from '~/services/LlmClient.js';
 import { PaymentReminderCron } from '~/services/PaymentReminderCron.js';
 import { RsvpReminderCron } from '~/services/RsvpReminderCron.js';
@@ -218,6 +220,12 @@ const CoachingStatusCronEffect = CoachingStatusCron.asEffect().pipe(
   ),
 );
 
+const InviteAcceptanceSweepCronEffect = InviteAcceptanceSweepCron.asEffect().pipe(
+  Effect.provide(
+    InviteAcceptancesRepository.Default.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
+  ),
+);
+
 const EmailSummarizerCronEffect = EmailSummarizer.asEffect().pipe(
   Effect.provide(
     EmailMessagesRepository.Default.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
@@ -259,6 +267,7 @@ Effect.Do.pipe(
         PaymentReminderCronEffect,
         ClaimRequestCronEffect,
         CoachingStatusCronEffect,
+        InviteAcceptanceSweepCronEffect,
         EmailSummarizerCronEffect,
         ImapPollerCronEffect,
       ],

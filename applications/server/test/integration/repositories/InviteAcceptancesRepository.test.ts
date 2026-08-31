@@ -19,7 +19,7 @@
 
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, InviteAcceptance, Team, TeamInvite, User } from '@sideline/domain';
-import { Effect, Layer, Option } from 'effect';
+import { DateTime, Effect, Layer, Option } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
@@ -202,11 +202,11 @@ describe('InviteAcceptancesRepository — findPending', () => {
     ),
   );
 
-  // NOTE: this test is inverted in PR-3, once `t.welcome_channel_id IS NOT
-  // NULL` and the `bot_guilds` join are removed from findPending. At that
-  // point a team with no welcome_channel_id should also be returned (a null
-  // welcome channel becomes a failure path elsewhere, not a silent filter).
-  it.effect('still excludes a team with no welcome_channel_id', () =>
+  // INVERTED IN PR-3 (was "still excludes a team with no welcome_channel_id"): `t.welcome_channel_id
+  // IS NOT NULL` is no longer part of findPending's WHERE clause. A null welcome channel is now a
+  // failure path (the bot's `welcome_channel_missing` short-circuit), not a silent SQL filter — the
+  // row must be selected so the bot can fail it loudly.
+  it.effect('findPending returns an acceptance when the team has no welcome_channel_id', () =>
     Effect.Do.pipe(
       Effect.bind('setup', () =>
         setupAcceptance({
@@ -218,20 +218,25 @@ describe('InviteAcceptancesRepository — findPending', () => {
           guild: Option.some({ isCommunityEnabled: true }),
         }),
       ),
-      Effect.bind('pending', () => findPending(10)),
+      Effect.bind('pending', ({ setup }) =>
+        findPending(10).pipe(Effect.map((rows) => ({ rows, setup }))),
+      ),
       Effect.tap(({ pending }) =>
         Effect.sync(() => {
-          expect(pending.length).toBe(0);
+          expect(pending.rows.length).toBe(1);
+          expect(pending.rows[0].acceptance_id).toBe(pending.setup.acceptance.id);
+          expect(Option.isNone(pending.rows[0].welcome_channel_id)).toBe(true);
         }),
       ),
       Effect.provide(TestLayer),
     ),
   );
 
-  // NOTE: this test is inverted in PR-3, once the `bot_guilds` join is
-  // removed from findPending. At that point an acceptance whose team's guild
-  // has no bot_guilds row should also be returned.
-  it.effect("still excludes an acceptance whose team's guild has no bot_guilds row", () =>
+  // INVERTED IN PR-3 (was "still excludes an acceptance whose team's guild has no bot_guilds row"):
+  // the `bot_guilds` join is now a LEFT JOIN. An acceptance whose team's guild has no bot_guilds row
+  // is selected with `bot_present: false`, so the bot can fail it loudly with `bot_not_in_guild`
+  // instead of the row vanishing forever.
+  it.effect('findPending returns bot_present: false when no bot_guilds row exists', () =>
     Effect.Do.pipe(
       Effect.bind('setup', () =>
         setupAcceptance({
@@ -242,6 +247,167 @@ describe('InviteAcceptancesRepository — findPending', () => {
           welcomeChannelId: Option.some('800000000000000004' as Discord.Snowflake),
           guild: Option.none(),
         }),
+      ),
+      Effect.bind('pending', ({ setup }) =>
+        findPending(10).pipe(Effect.map((rows) => ({ rows, setup }))),
+      ),
+      Effect.tap(({ pending }) =>
+        Effect.sync(() => {
+          expect(pending.rows.length).toBe(1);
+          expect(pending.rows[0].acceptance_id).toBe(pending.setup.acceptance.id);
+          expect(pending.rows[0].bot_present).toBe(false);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  // PR-3, CC-4: no age predicate. A 90-day-old open acceptance must still be returned — the sweep
+  // (not a SQL filter) is what bounds stale rows.
+  it.effect('findPending does not filter by age', () =>
+    Effect.Do.pipe(
+      Effect.bind('setup', () =>
+        setupAcceptance({
+          guildId: '600000000000000014' as Discord.Snowflake,
+          discordUserId: '700000000000000014',
+          username: 'joiner-fourteen',
+          code: 'PENDING-VERY-OLD',
+          welcomeChannelId: Option.some('800000000000000014' as Discord.Snowflake),
+          guild: Option.some({ isCommunityEnabled: true }),
+        }),
+      ),
+      Effect.tap(({ setup }) =>
+        SqlClient.SqlClient.asEffect().pipe(
+          Effect.andThen(
+            (sql) => sql`
+              UPDATE invite_acceptances SET created_at = now() - interval '90 days'
+              WHERE id = ${setup.acceptance.id}
+            `,
+          ),
+        ),
+      ),
+      Effect.bind('pending', ({ setup }) =>
+        findPending(10).pipe(Effect.map((rows) => ({ rows, setup }))),
+      ),
+      Effect.tap(({ pending }) =>
+        Effect.sync(() => {
+          expect(pending.rows.length).toBe(1);
+          expect(pending.rows[0].acceptance_id).toBe(pending.setup.acceptance.id);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  // PR-3, CC-0 rule 2: a `welcome_channel_missing` row is fixable by a captain setting the welcome
+  // channel, so it must re-open once `teams.welcome_channel_id` becomes non-null.
+  it.effect(
+    'findPending re-opens a welcome_channel_missing row once the team gets a welcome channel',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('setup', () =>
+          setupAcceptance({
+            guildId: '600000000000000015' as Discord.Snowflake,
+            discordUserId: '700000000000000015',
+            username: 'joiner-fifteen',
+            code: 'PENDING-WELCOME-REOPEN',
+            welcomeChannelId: Option.none(),
+            guild: Option.some({ isCommunityEnabled: true }),
+          }),
+        ),
+        Effect.tap(({ setup }) =>
+          InviteAcceptancesRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.markFailed({
+                acceptanceId: setup.acceptance.id,
+                errorCode: 'welcome_channel_missing',
+                errorDetail: 'Team has no welcome channel configured',
+              }),
+            ),
+          ),
+        ),
+        // Bypasses the repository's full `update` (which requires every column) — this test only
+        // cares about the one column `findPending`'s re-open clause reads.
+        Effect.tap(({ setup }) =>
+          SqlClient.SqlClient.asEffect().pipe(
+            Effect.andThen(
+              (sql) => sql`
+                UPDATE teams SET welcome_channel_id = '800000000000000015'
+                WHERE id = ${setup.team.id}
+              `,
+            ),
+          ),
+        ),
+        Effect.bind('pending', ({ setup }) =>
+          findPending(10).pipe(Effect.map((rows) => ({ rows, setup }))),
+        ),
+        Effect.tap(({ pending }) =>
+          Effect.sync(() => {
+            expect(pending.rows.length).toBe(1);
+            expect(pending.rows[0].acceptance_id).toBe(pending.setup.acceptance.id);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'findPending still excludes a welcome_channel_missing row while welcome_channel_id is NULL',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('setup', () =>
+          setupAcceptance({
+            guildId: '600000000000000016' as Discord.Snowflake,
+            discordUserId: '700000000000000016',
+            username: 'joiner-sixteen',
+            code: 'PENDING-WELCOME-STILL-MISSING',
+            welcomeChannelId: Option.none(),
+            guild: Option.some({ isCommunityEnabled: true }),
+          }),
+        ),
+        Effect.tap(({ setup }) =>
+          InviteAcceptancesRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.markFailed({
+                acceptanceId: setup.acceptance.id,
+                errorCode: 'welcome_channel_missing',
+                errorDetail: 'Team has no welcome channel configured',
+              }),
+            ),
+          ),
+        ),
+        Effect.bind('pending', () => findPending(10)),
+        Effect.tap(({ pending }) =>
+          Effect.sync(() => {
+            expect(pending.length).toBe(0);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect('findPending still excludes rows with any other error code', () =>
+    Effect.Do.pipe(
+      Effect.bind('setup', () =>
+        setupAcceptance({
+          guildId: '600000000000000017' as Discord.Snowflake,
+          discordUserId: '700000000000000017',
+          username: 'joiner-seventeen',
+          code: 'PENDING-OTHER-ERROR-CODE',
+          welcomeChannelId: Option.some('800000000000000017' as Discord.Snowflake),
+          guild: Option.some({ isCommunityEnabled: true }),
+        }),
+      ),
+      Effect.tap(({ setup }) =>
+        InviteAcceptancesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.markFailed({
+              acceptanceId: setup.acceptance.id,
+              errorCode: 'bot_missing_perms',
+              errorDetail: 'missing perms',
+            }),
+          ),
+        ),
       ),
       Effect.bind('pending', () => findPending(10)),
       Effect.tap(({ pending }) =>
@@ -343,6 +509,309 @@ describe('InviteAcceptancesRepository — findPending', () => {
           expect(pending.length).toBe(2);
           expect(pending[0].acceptance_id).toBe(acceptance1.id);
           expect(pending[1].acceptance_id).toBe(acceptance2.id);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// PR-3 (Discord onboarding fix), CC-14 step 5 — `setDiscordCode` must clear any previously-stored
+// error so a row re-opened via the `welcome_channel_missing` re-open clause (or the regenerate
+// primitive) never ends up with both a `discord_code` and a stale `discord_code_error_code`.
+// ---------------------------------------------------------------------------
+
+describe('InviteAcceptancesRepository — setDiscordCode (PR-3, CC-14 step 5)', () => {
+  it.effect('clears discord_code_error_code and discord_code_error_detail', () =>
+    Effect.Do.pipe(
+      Effect.bind('setup', () =>
+        setupAcceptance({
+          guildId: '600000000000000018' as Discord.Snowflake,
+          discordUserId: '700000000000000018',
+          username: 'joiner-eighteen',
+          code: 'PENDING-SET-CODE-CLEARS-ERROR',
+          welcomeChannelId: Option.some('800000000000000018' as Discord.Snowflake),
+          guild: Option.some({ isCommunityEnabled: true }),
+        }),
+      ),
+      Effect.tap(({ setup }) =>
+        InviteAcceptancesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.markFailed({
+              acceptanceId: setup.acceptance.id,
+              errorCode: 'welcome_channel_missing',
+              errorDetail: 'Team has no welcome channel configured',
+            }),
+          ),
+        ),
+      ),
+      Effect.tap(({ setup }) =>
+        InviteAcceptancesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.setDiscordCode({
+              acceptanceId: setup.acceptance.id,
+              discordCode: 'freshly-generated-code',
+            }),
+          ),
+        ),
+      ),
+      Effect.bind('reloaded', ({ setup }) =>
+        InviteAcceptancesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findById(setup.acceptance.id)),
+        ),
+      ),
+      Effect.tap(({ reloaded }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(reloaded)).toBe(true);
+          if (Option.isSome(reloaded)) {
+            expect(Option.isSome(reloaded.value.discord_code)).toBe(true);
+            expect(Option.getOrThrow(reloaded.value.discord_code)).toBe('freshly-generated-code');
+            expect(Option.isNone(reloaded.value.discord_code_error_code)).toBe(true);
+            expect(Option.isNone(reloaded.value.discord_code_error_detail)).toBe(true);
+          }
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// PR-3 (Discord onboarding fix), CC-4 / CC-5 — the expiry sweep. Idempotent, closes the entire
+// stuck backlog to the terminal `'expired'` code, and NEVER touches `created_at` (CC-5 rejects
+// rewriting audit timestamps outright — that was rev 1's rejected backfill).
+// ---------------------------------------------------------------------------
+
+const sweepExpired = (olderThanDays: number) =>
+  InviteAcceptancesRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.sweepExpired(olderThanDays)),
+  );
+
+const findById = (id: InviteAcceptance.InviteAcceptanceId) =>
+  InviteAcceptancesRepository.asEffect().pipe(Effect.andThen((repo) => repo.findById(id)));
+
+const setupAgedAcceptance = (options: {
+  readonly guildId: Discord.Snowflake;
+  readonly discordUserId: string;
+  readonly username: string;
+  readonly code: string;
+  readonly ageDays: number;
+}) =>
+  Effect.Do.pipe(
+    Effect.bind('user', () => createUser(options.discordUserId, options.username)),
+    Effect.bind('team', ({ user }) => createTeam(options.guildId, user.id)),
+    Effect.bind('invite', ({ user, team }) => createInvite(team.id, user.id, options.code)),
+    Effect.bind('acceptance', ({ user, invite }) => createAcceptance(invite.id, user.id)),
+    Effect.tap(({ acceptance }) =>
+      SqlClient.SqlClient.asEffect().pipe(
+        Effect.andThen(
+          (sql) => sql`
+            UPDATE invite_acceptances SET created_at = now() - (${options.ageDays} * interval '1 day')
+            WHERE id = ${acceptance.id}
+          `,
+        ),
+      ),
+    ),
+  );
+
+describe('InviteAcceptancesRepository — sweepExpired (PR-3, CC-4 / CC-5)', () => {
+  it.effect('closes rows older than the window', () =>
+    Effect.Do.pipe(
+      Effect.bind('setup', () =>
+        setupAgedAcceptance({
+          guildId: '600000000000000019' as Discord.Snowflake,
+          discordUserId: '700000000000000019',
+          username: 'joiner-nineteen',
+          code: 'SWEEP-OLD-ROW',
+          ageDays: 4,
+        }),
+      ),
+      Effect.tap(() => sweepExpired(3)),
+      Effect.bind('reloaded', ({ setup }) => findById(setup.acceptance.id)),
+      Effect.tap(({ reloaded }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(reloaded)).toBe(true);
+          if (Option.isSome(reloaded)) {
+            expect(Option.isSome(reloaded.value.discord_code_error_code)).toBe(true);
+            expect(Option.getOrThrow(reloaded.value.discord_code_error_code)).toBe('expired');
+            expect(Option.isSome(reloaded.value.discord_code_error_detail)).toBe(true);
+            expect(Option.getOrThrow(reloaded.value.discord_code_error_detail)).toBe(
+              'aged out before generation',
+            );
+          }
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  // Guards CC-5: rev 1's rejected backfill rewrote `created_at`. The sweep must never do that.
+  it.effect('does not modify created_at', () =>
+    Effect.Do.pipe(
+      Effect.bind('setup', () =>
+        setupAgedAcceptance({
+          guildId: '600000000000000020' as Discord.Snowflake,
+          discordUserId: '700000000000000020',
+          username: 'joiner-twenty',
+          code: 'SWEEP-CREATED-AT-GUARD',
+          ageDays: 4,
+        }),
+      ),
+      Effect.bind('before', ({ setup }) => findById(setup.acceptance.id)),
+      Effect.tap(() => sweepExpired(3)),
+      Effect.bind('after', ({ setup }) => findById(setup.acceptance.id)),
+      Effect.tap(({ before, after }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(before)).toBe(true);
+          expect(Option.isSome(after)).toBe(true);
+          if (Option.isSome(before) && Option.isSome(after)) {
+            expect(DateTime.toEpochMillis(after.value.created_at)).toBe(
+              DateTime.toEpochMillis(before.value.created_at),
+            );
+          }
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('leaves rows inside the window untouched', () =>
+    Effect.Do.pipe(
+      Effect.bind('setup', () =>
+        setupAgedAcceptance({
+          guildId: '600000000000000021' as Discord.Snowflake,
+          discordUserId: '700000000000000021',
+          username: 'joiner-twentyone',
+          code: 'SWEEP-INSIDE-WINDOW',
+          ageDays: 1,
+        }),
+      ),
+      Effect.tap(() => sweepExpired(3)),
+      Effect.bind('reloaded', ({ setup }) => findById(setup.acceptance.id)),
+      Effect.tap(({ reloaded }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(reloaded)).toBe(true);
+          if (Option.isSome(reloaded)) {
+            expect(Option.isNone(reloaded.value.discord_code_error_code)).toBe(true);
+          }
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('is idempotent — a second run affects 0 rows and does not change generated_at', () =>
+    Effect.Do.pipe(
+      Effect.bind('setup', () =>
+        setupAgedAcceptance({
+          guildId: '600000000000000022' as Discord.Snowflake,
+          discordUserId: '700000000000000022',
+          username: 'joiner-twentytwo',
+          code: 'SWEEP-IDEMPOTENT',
+          ageDays: 4,
+        }),
+      ),
+      Effect.tap(() => sweepExpired(3)),
+      Effect.bind('first', ({ setup }) => findById(setup.acceptance.id)),
+      // Second run must be a no-op: `discord_code_error_code IS NULL` is no longer true, so the
+      // WHERE clause excludes this row and `generated_at` must not move again.
+      Effect.tap(() => sweepExpired(3)),
+      Effect.bind('second', ({ setup }) => findById(setup.acceptance.id)),
+      Effect.tap(({ first, second }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(first)).toBe(true);
+          expect(Option.isSome(second)).toBe(true);
+          if (Option.isSome(first) && Option.isSome(second)) {
+            expect(Option.isSome(first.value.generated_at)).toBe(true);
+            expect(Option.isSome(second.value.generated_at)).toBe(true);
+            if (
+              Option.isSome(first.value.generated_at) &&
+              Option.isSome(second.value.generated_at)
+            ) {
+              expect(second.value.generated_at.value.getTime()).toBe(
+                first.value.generated_at.value.getTime(),
+              );
+            }
+          }
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('does not touch rows that already have a discord_code', () =>
+    Effect.Do.pipe(
+      Effect.bind('setup', () =>
+        setupAgedAcceptance({
+          guildId: '600000000000000023' as Discord.Snowflake,
+          discordUserId: '700000000000000023',
+          username: 'joiner-twentythree',
+          code: 'SWEEP-HAS-CODE',
+          ageDays: 4,
+        }),
+      ),
+      Effect.tap(({ setup }) =>
+        InviteAcceptancesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.setDiscordCode({
+              acceptanceId: setup.acceptance.id,
+              discordCode: 'already-generated-before-sweep',
+            }),
+          ),
+        ),
+      ),
+      Effect.tap(() => sweepExpired(3)),
+      Effect.bind('reloaded', ({ setup }) => findById(setup.acceptance.id)),
+      Effect.tap(({ reloaded }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(reloaded)).toBe(true);
+          if (Option.isSome(reloaded)) {
+            expect(Option.isNone(reloaded.value.discord_code_error_code)).toBe(true);
+            expect(Option.isSome(reloaded.value.discord_code)).toBe(true);
+            expect(Option.getOrThrow(reloaded.value.discord_code)).toBe(
+              'already-generated-before-sweep',
+            );
+          }
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('does not touch rows that already have an error code', () =>
+    Effect.Do.pipe(
+      Effect.bind('setup', () =>
+        setupAgedAcceptance({
+          guildId: '600000000000000024' as Discord.Snowflake,
+          discordUserId: '700000000000000024',
+          username: 'joiner-twentyfour',
+          code: 'SWEEP-HAS-ERROR',
+          ageDays: 4,
+        }),
+      ),
+      Effect.tap(({ setup }) =>
+        InviteAcceptancesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.markFailed({
+              acceptanceId: setup.acceptance.id,
+              errorCode: 'bot_missing_perms',
+              errorDetail: 'missing perms',
+            }),
+          ),
+        ),
+      ),
+      Effect.tap(() => sweepExpired(3)),
+      Effect.bind('reloaded', ({ setup }) => findById(setup.acceptance.id)),
+      Effect.tap(({ reloaded }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(reloaded)).toBe(true);
+          if (Option.isSome(reloaded)) {
+            expect(Option.isSome(reloaded.value.discord_code_error_code)).toBe(true);
+            expect(Option.getOrThrow(reloaded.value.discord_code_error_code)).toBe(
+              'bot_missing_perms',
+            );
+          }
         }),
       ),
       Effect.provide(TestLayer),
