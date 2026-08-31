@@ -77,10 +77,14 @@ export const DiscordSyncErrorCode = Schema.Literals([
 ]);
 export type DiscordSyncErrorCode = Schema.Schema.Type<typeof DiscordSyncErrorCode>;
 
-// Final shape shipped once in PR-7 (CC-8) — PR-8/PR-9 populate `roleSyncState` and the two
-// `last*` fields without touching this DTO, its copy, or its i18n keys. In PR-7 `roleSyncState`
-// is always `'queued'` (or `'never'` when the member has no `discord_id`) and both `last*`
-// fields are `Option.none()`.
+// Final shape shipped once in PR-7 (CC-8) — later PRs populate `roleSyncState` and the two
+// `last*` fields without touching this DTO, its copy, or its i18n keys. `RoleSyncEventsRepository`
+// (9b) writes `team_members.last_role_sync_*` when the bot reports a `role_assigned` /
+// `role_unassigned` event processed or terminally failed; `syncMemberDiscordRoles.ts` (9c) reads
+// those columns back via `TeamMembersRepository.findLastRoleSync` to populate `roleSyncState` /
+// `lastRoleSyncAt` / `lastRoleSyncError` with the member's PREVIOUS completed attempt — see that
+// file's doc comment for the precedence rule against `addedCount`/`removedCount` (THIS click's
+// fresh enqueue, a different axis entirely).
 export class SyncMemberRolesResult extends Schema.Class<SyncMemberRolesResult>(
   'SyncMemberRolesResult',
 )({

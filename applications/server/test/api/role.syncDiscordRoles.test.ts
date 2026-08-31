@@ -116,9 +116,15 @@ sessionsStore.set('token', TEST_USER_ID);
 
 type EffectiveRole = { role_id: Role.RoleId; role_name: string };
 type ManagedMapping = { role_id: Role.RoleId; discord_role_id: Discord.Snowflake };
+type PriorRoleSync = {
+  readonly state: 'ok' | 'failed';
+  readonly at: DateTime.Utc;
+  readonly errorCode: Option.Option<'retryable' | 'captain_action' | 'user_action' | 'unknown'>;
+};
 
 let effectiveRoles: EffectiveRole[] = [];
 let managedMappings: ManagedMapping[] = [];
+let priorRoleSync: Option.Option<PriorRoleSync> = Option.none();
 
 type RecordedEvent =
   | { readonly type: 'role_assigned'; readonly roleId: Role.RoleId }
@@ -230,6 +236,8 @@ const makeTeamMembersRepositoryLayer = () =>
     },
     deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
     reactivateMember: () => Effect.die(new Error('Not implemented')),
+    findLastRoleSync: (memberId: TeamMember.TeamMemberId) =>
+      memberId === TEST_MEMBER_ID ? Effect.succeed(priorRoleSync) : Effect.succeed(Option.none()),
     getPlayerRoleId: () => Effect.succeed(Option.none()),
     assignRole: () => Effect.void,
     unassignRole: () => Effect.void,
@@ -460,6 +468,7 @@ beforeEach(() => {
   effectiveRoles = [];
   managedMappings = [];
   recordedEvents = [];
+  priorRoleSync = Option.none();
 });
 
 const syncUrl = (memberId: string) =>
@@ -596,6 +605,11 @@ describe('POST /teams/:teamId/members/:memberId/sync-discord-roles', () => {
     expect(body.addedCount).toBe(0);
     expect(body.removedCount).toBe(0);
     expect(body.skippedCount).toBe(0);
+    // No prior completed attempt on record — distinguishable from a prior success with nothing
+    // left to do (see the "fidelity fields" describe block below).
+    expect(body.roleSyncState).toBe('never');
+    expect(body.lastRoleSyncAt).toBeNull();
+    expect(body.lastRoleSyncError).toBeNull();
     expect(recordedEvents).toHaveLength(0);
   });
 
@@ -625,5 +639,70 @@ describe('POST /teams/:teamId/members/:memberId/sync-discord-roles', () => {
     expect(response.status).toBe(200);
     expect(body.addedCount).toBe(MAX_ROLE_SYNC_EMISSIONS_PER_MEMBER);
     expect(recordedEvents).toHaveLength(MAX_ROLE_SYNC_EMISSIONS_PER_MEMBER);
+  });
+});
+
+// Closes the read side of PR-9/9b: `TeamMembersRepository.findLastRoleSync` is what fills
+// `roleSyncState` / `lastRoleSyncAt` / `lastRoleSyncError` with the member's PREVIOUS completed
+// attempt — a distinct axis from `addedCount`/`removedCount`, which describe THIS click's fresh
+// enqueue (see `syncMemberDiscordRoles.ts`'s doc comment for the full precedence rule).
+describe('POST /teams/:teamId/members/:memberId/sync-discord-roles — prior-attempt fidelity fields', () => {
+  it('reports the prior failure and reason when nothing is enqueued this click', async () => {
+    effectiveRoles = [];
+    managedMappings = [];
+    priorRoleSync = Option.some({
+      state: 'failed',
+      at: DateTime.makeUnsafe('2026-01-01T00:00:00Z'),
+      errorCode: Option.some('captain_action'),
+    });
+
+    const response = await syncMember(TEST_MEMBER_ID);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.addedCount).toBe(0);
+    expect(body.removedCount).toBe(0);
+    expect(body.roleSyncState).toBe('failed');
+    expect(body.lastRoleSyncError).toBe('captain_action');
+    expect(body.lastRoleSyncAt).not.toBeNull();
+  });
+
+  it('reports the prior success (not "never") when nothing is enqueued this click', async () => {
+    effectiveRoles = [];
+    managedMappings = [];
+    priorRoleSync = Option.some({
+      state: 'ok',
+      at: DateTime.makeUnsafe('2026-01-01T00:00:00Z'),
+      errorCode: Option.none(),
+    });
+
+    const response = await syncMember(TEST_MEMBER_ID);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.roleSyncState).toBe('ok');
+    expect(body.lastRoleSyncError).toBeNull();
+    expect(body.lastRoleSyncAt).not.toBeNull();
+  });
+
+  it('reports "queued" (not the prior failure) when this click enqueues new work, but still surfaces the prior failure reason', async () => {
+    effectiveRoles = [{ role_id: ROLE_A, role_name: 'Captain' }];
+    managedMappings = [];
+    priorRoleSync = Option.some({
+      state: 'failed',
+      at: DateTime.makeUnsafe('2026-01-01T00:00:00Z'),
+      errorCode: Option.some('captain_action'),
+    });
+
+    const response = await syncMember(TEST_MEMBER_ID);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.addedCount).toBe(1);
+    // The headline state reflects THIS click's fresh enqueue...
+    expect(body.roleSyncState).toBe('queued');
+    // ...but the prior failure reason is still surfaced as context, not discarded.
+    expect(body.lastRoleSyncError).toBe('captain_action');
+    expect(body.lastRoleSyncAt).not.toBeNull();
   });
 });

@@ -9,7 +9,7 @@
 // composition/gating only, not their internals.
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { Option } from 'effect';
+import { DateTime, Option } from 'effect';
 import type React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -92,6 +92,12 @@ vi.mock('~/lib/translations.js', () => ({
       discord_syncing: 'Syncing…',
       discord_syncCooldown: 'Synced — try again soon',
       discord_syncQueuedResult: 'Queued {added} additions and {removed} removals.',
+      discord_syncLastSyncedRelative: 'Synced {relativeTime}',
+      discord_syncError_captainAction:
+        'The bot needs a captain to fix something in Discord (permissions or the role hierarchy).',
+      discord_syncError_retryable: "We'll retry automatically — nothing for you to do.",
+      discord_syncError_unknown: 'Something went wrong syncing this role.',
+      discord_syncError_userAction: "This member needs to rejoin the team's Discord server.",
     };
     const template = map[key] ?? key;
     if (!params) return template;
@@ -265,7 +271,14 @@ const baseProps = {
   onSave: vi.fn().mockResolvedValue(undefined),
   onAssignRole: vi.fn().mockResolvedValue(undefined),
   onUnassignRole: vi.fn().mockResolvedValue(undefined),
-  onSyncDiscordRoles: vi.fn().mockResolvedValue({ addedCount: 0, removedCount: 0 }),
+  onSyncDiscordRoles: vi.fn().mockResolvedValue({
+    addedCount: 0,
+    removedCount: 0,
+    skippedCount: 0,
+    roleSyncState: 'never',
+    lastRoleSyncAt: Option.none(),
+    lastRoleSyncError: Option.none(),
+  }),
   onAddToRoster: vi.fn().mockResolvedValue(undefined),
   onRemoveFromRoster: vi.fn().mockResolvedValue(undefined),
   onAddToGroup: vi.fn().mockResolvedValue(undefined),
@@ -1140,7 +1153,14 @@ describe('PlayerDetailPage — Discord role sync (PR-7)', () => {
   });
 
   it('the button is disabled during the cooldown after a click', async () => {
-    const onSyncDiscordRoles = vi.fn().mockResolvedValue({ addedCount: 1, removedCount: 0 });
+    const onSyncDiscordRoles = vi.fn().mockResolvedValue({
+      addedCount: 1,
+      removedCount: 0,
+      skippedCount: 0,
+      roleSyncState: 'queued',
+      lastRoleSyncAt: Option.none(),
+      lastRoleSyncError: Option.none(),
+    });
     render(
       <PlayerDetailPage
         {...(baseProps as any)}
@@ -1171,7 +1191,14 @@ describe('PlayerDetailPage — Discord role sync (PR-7)', () => {
   });
 
   it('renders discord_syncQueuedResult with both counts after a successful sync', async () => {
-    const onSyncDiscordRoles = vi.fn().mockResolvedValue({ addedCount: 3, removedCount: 2 });
+    const onSyncDiscordRoles = vi.fn().mockResolvedValue({
+      addedCount: 3,
+      removedCount: 2,
+      skippedCount: 0,
+      roleSyncState: 'queued',
+      lastRoleSyncAt: Option.none(),
+      lastRoleSyncError: Option.none(),
+    });
     render(
       <PlayerDetailPage
         {...(baseProps as any)}
@@ -1191,5 +1218,73 @@ describe('PlayerDetailPage — Discord role sync (PR-7)', () => {
     await waitFor(() => {
       expect(screen.getByText('Queued 3 additions and 2 removals.')).not.toBeNull();
     });
+  });
+
+  // Closes the read-side gap: `roleSyncState` / `lastRoleSyncAt` / `lastRoleSyncError` describe
+  // the member's PREVIOUS completed attempt (a different axis from `addedCount`/`removedCount`,
+  // this click's fresh enqueue) — see `syncMemberDiscordRoles.ts`'s doc comment on the server.
+  it('renders the recorded failure reason from a previous attempt using existing copy', async () => {
+    const onSyncDiscordRoles = vi.fn().mockResolvedValue({
+      addedCount: 0,
+      removedCount: 0,
+      skippedCount: 0,
+      roleSyncState: 'failed',
+      lastRoleSyncAt: Option.some(DateTime.makeUnsafe('2026-01-01T00:00:00Z')),
+      lastRoleSyncError: Option.some('captain_action'),
+    });
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={false}
+        canManageRoles={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+        onSyncDiscordRoles={onSyncDiscordRoles}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sync Discord roles' }));
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          'The bot needs a captain to fix something in Discord (permissions or the role hierarchy).',
+        ),
+      ).not.toBeNull();
+    });
+  });
+
+  it('does not render a failure reason when lastRoleSyncError is absent', async () => {
+    const onSyncDiscordRoles = vi.fn().mockResolvedValue({
+      addedCount: 1,
+      removedCount: 0,
+      skippedCount: 0,
+      roleSyncState: 'queued',
+      lastRoleSyncAt: Option.none(),
+      lastRoleSyncError: Option.none(),
+    });
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={false}
+        canManageRoles={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+        onSyncDiscordRoles={onSyncDiscordRoles}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sync Discord roles' }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Queued 1 additions and 0 removals.')).not.toBeNull();
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

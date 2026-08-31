@@ -9,6 +9,7 @@
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Team, User } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option } from 'effect';
+import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -268,6 +269,76 @@ describe('TeamMembersRepository — findDiscordJoinedAt', () => {
         const afterClear = yield* members.findDiscordJoinedAt(team.id, userId);
         expect(Option.isNone(afterClear)).toBe(true);
       }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// PR-9c — `findLastRoleSync` reads `team_members.last_role_sync_*`
+// (`RoleSyncEventsRepository.recordLastRoleSync` is the only writer). Exercised against REAL,
+// non-null TIMESTAMPTZ rows on purpose: a `Schema.DateTimeUtc` vs `Schema.DateTimeUtcFromDate`
+// mixup on this column type-checks and passes against every mocked test (`Schema.OptionFromNullOr`
+// short-circuits on NULL, so the inner decoder is never reached), and only throws once a real
+// non-null timestamp comes back from node-pg as a JS `Date`.
+describe('TeamMembersRepository — findLastRoleSync', () => {
+  const setLastRoleSync = (memberId: string, state: 'ok' | 'failed', errorCode: string | null) =>
+    SqlClient.SqlClient.asEffect().pipe(
+      Effect.andThen(
+        (sql) => sql`
+          UPDATE team_members
+          SET last_role_sync_at = now(), last_role_sync_state = ${state}, last_role_sync_error = ${errorCode}
+          WHERE id = ${memberId}
+        `,
+      ),
+    );
+
+  it.effect('returns None for a member that has never completed a role sync', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('800000000000000040', 'lastsync-none');
+      const team = yield* createTeam('800700000000000040' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      const members = yield* TeamMembersRepository.asEffect();
+
+      const result = yield* members.findLastRoleSync(member.id);
+      expect(Option.isNone(result)).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('returns Some with a real DateTime.Utc and no error code for state=ok', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('800000000000000041', 'lastsync-ok');
+      const team = yield* createTeam('800700000000000041' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      yield* setLastRoleSync(member.id, 'ok', null);
+
+      const members = yield* TeamMembersRepository.asEffect();
+      const result = yield* members.findLastRoleSync(member.id);
+
+      expect(Option.isSome(result)).toBe(true);
+      const value = Option.getOrThrow(result);
+      expect(value.state).toBe('ok');
+      expect(Option.isNone(value.errorCode)).toBe(true);
+      // The regression this guards: `at` MUST decode into a real DateTime.Utc from the non-null
+      // column, not silently pass through as an undecoded/NULL value.
+      expect(DateTime.isDateTime(value.at)).toBe(true);
+      expect(Math.abs(DateTime.toEpochMillis(value.at) - Date.now())).toBeLessThan(60_000);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('returns Some with the recorded error code for state=failed', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('800000000000000042', 'lastsync-failed');
+      const team = yield* createTeam('800700000000000042' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      yield* setLastRoleSync(member.id, 'failed', 'captain_action');
+
+      const members = yield* TeamMembersRepository.asEffect();
+      const result = yield* members.findLastRoleSync(member.id);
+
+      expect(Option.isSome(result)).toBe(true);
+      const value = Option.getOrThrow(result);
+      expect(value.state).toBe('failed');
+      expect(Option.getOrNull(value.errorCode)).toBe('captain_action');
+      expect(DateTime.isDateTime(value.at)).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
   );
 });
 

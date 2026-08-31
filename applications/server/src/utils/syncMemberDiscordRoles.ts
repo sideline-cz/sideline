@@ -46,8 +46,34 @@ const neverSyncedResult = new RoleApi.SyncMemberRolesResult({
  *   with no `guild_id`, so a team without Discord returns all-zero counts without an error.
  * - The combined fan-out is capped at `MAX_ROLE_SYNC_EMISSIONS_PER_MEMBER`; if the diff is
  *   larger, only the first N (added, then removed) are enqueued and a warning is logged with the
- *   full vs. capped counts. `roleSyncState` still reports `'queued'` — the client can click sync
- *   again to drain the remainder.
+ *   full vs. capped counts.
+ *
+ * `SyncMemberRolesResult` reports two DIFFERENT things that a later reader must not conflate:
+ *
+ * - `addedCount` / `removedCount` / `skippedCount` describe what THIS CLICK enqueued (the diff
+ *   computed just now, against the live `member_roles` / `discord_role_mappings` state).
+ * - `roleSyncState` / `lastRoleSyncAt` / `lastRoleSyncError` describe the member's PREVIOUS
+ *   COMPLETED attempt, as recorded on `team_members.last_role_sync_*` by
+ *   `RoleSyncEventsRepository.recordLastRoleSync` (written when the bot reports a `role_assigned`
+ *   / `role_unassigned` event processed or terminally failed — see that repository's docs for why
+ *   a transient failure, CC-0, writes nothing there). These two halves of the DTO are computed
+ *   from different sources and are allowed to disagree (e.g. `addedCount: 2` alongside
+ *   `roleSyncState: 'failed'` from an unrelated earlier attempt) — do NOT try to make one derive
+ *   from the other.
+ *
+ * `roleSyncState` precedence when this click BOTH enqueues new work AND a prior attempt is on
+ * record: `'queued'` wins. A captain who just clicked "sync" wants confirmation that the click
+ * did something — reporting a stale `'failed'` (or `'ok'`) as the headline state while a fresh
+ * attempt is already in flight would read as "the bot ignored my click". The prior outcome is not
+ * discarded, though: `lastRoleSyncAt` / `lastRoleSyncError` are still populated from the prior
+ * record even when `roleSyncState` is `'queued'`, so a captain retrying after fixing a permission
+ * issue still sees "previously failed: bot missing permission" as context alongside the new
+ * "queued" state.
+ *
+ * When nothing is enqueued this click, `roleSyncState` falls through to the prior record's own
+ * `state` (`'ok'` or `'failed'`), or `'never'` when there is no prior record at all. This is what
+ * keeps `'never'` ("this member has no completed sync in its history") distinguishable from a
+ * prior success with nothing left to do right now (`roleSyncState: 'ok'`, `lastRoleSyncAt: Some`).
  */
 export const syncMemberDiscordRoles = (
   teamId: Team.TeamId,
@@ -94,6 +120,9 @@ const syncLinkedMember = (params: {
   Effect.Do.pipe(
     Effect.bind('desired', () => params.members.findEffectiveRoleIdsForMember(params.teamMemberId)),
     Effect.bind('managed', () => params.mappings.findAllByTeam(params.teamId)),
+    // The PREVIOUS completed attempt, independent of the diff computed below — see the module
+    // doc comment for why these two never derive from one another.
+    Effect.bind('priorSync', () => params.members.findLastRoleSync(params.teamMemberId)),
     Effect.let('desiredIds', ({ desired }) => new Set(desired.map((r) => r.role_id))),
     Effect.let('removedCandidates', ({ managed, desiredIds }) =>
       managed.filter((mapping) => !desiredIds.has(mapping.role_id)),
@@ -156,15 +185,21 @@ const syncLinkedMember = (params: {
         { concurrency: 1, discard: true },
       ),
     ),
-    Effect.map(
-      ({ cappedAdded, cappedRemoved }) =>
-        new RoleApi.SyncMemberRolesResult({
-          addedCount: cappedAdded.length,
-          removedCount: cappedRemoved.length,
-          skippedCount: 0,
-          roleSyncState: 'queued',
-          lastRoleSyncAt: Option.none(),
-          lastRoleSyncError: Option.none(),
-        }),
-    ),
+    Effect.map(({ cappedAdded, cappedRemoved, priorSync }) => {
+      const enqueuedThisClick = cappedAdded.length + cappedRemoved.length > 0;
+      // 'queued' wins whenever this click enqueued work, even over a prior 'failed'/'ok' — see
+      // the module doc comment ("`roleSyncState` precedence") for why. When nothing was enqueued,
+      // fall through to the prior record's own state, or 'never' when there is none at all.
+      const roleSyncState = enqueuedThisClick
+        ? 'queued'
+        : Option.match(priorSync, { onNone: () => 'never' as const, onSome: (p) => p.state });
+      return new RoleApi.SyncMemberRolesResult({
+        addedCount: cappedAdded.length,
+        removedCount: cappedRemoved.length,
+        skippedCount: 0,
+        roleSyncState,
+        lastRoleSyncAt: Option.map(priorSync, (p) => p.at),
+        lastRoleSyncError: Option.flatMap(priorSync, (p) => p.errorCode),
+      });
+    }),
   );
