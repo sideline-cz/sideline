@@ -12,7 +12,7 @@ import type {
 } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import { Option, Schema } from 'effect';
-import { Pencil, UserMinus, X } from 'lucide-react';
+import { Pencil, RefreshCw, UserMinus, X } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
@@ -55,6 +55,11 @@ import {
 } from '~/components/ui/select';
 import { useFormatDate } from '~/hooks/useFormatDate.js';
 import { tr } from '~/lib/translations.js';
+
+// The bot's role loop runs at concurrency: 1 (see AGENTS.md / PR-7 plan) — a client-side
+// cooldown keeps a captain from serialising hundreds of Discord calls by repeatedly clicking
+// "Sync Discord roles" across many members.
+const DISCORD_ROLE_SYNC_COOLDOWN_MS = 60_000;
 
 const isNotFutureDate = Schema.makeFilter<string>((value) => {
   const parsed = new Date(value);
@@ -116,6 +121,7 @@ interface PlayerDetailPageProps {
   onSave: (values: PlayerEditValues) => Promise<boolean>;
   onAssignRole: (roleId: string) => Promise<void>;
   onUnassignRole: (roleId: string) => Promise<void>;
+  onSyncDiscordRoles: () => Promise<{ addedCount: number; removedCount: number } | undefined>;
   onAddToRoster: (rosterId: string) => Promise<void>;
   onRemoveFromRoster: (rosterId: string) => Promise<void>;
   onAddToGroup: (groupId: string) => Promise<void>;
@@ -164,6 +170,7 @@ export function PlayerDetailPage({
   onSave,
   onAssignRole,
   onUnassignRole,
+  onSyncDiscordRoles,
   onAddToRoster,
   onRemoveFromRoster,
   onAddToGroup,
@@ -236,6 +243,30 @@ export function PlayerDetailPage({
   const handleFocusActivityLog = React.useCallback(() => {
     activityLogCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
+
+  // Client-side debounce + cooldown for the manual Discord role sync button: this button
+  // amplifies Discord writes and the bot's role loop runs at concurrency: 1, so a captain
+  // clicking it repeatedly across many members would otherwise serialise hundreds of Discord
+  // calls. 'syncing' blocks re-entrancy while the request is in flight; 'cooldown' blocks
+  // re-clicks for DISCORD_ROLE_SYNC_COOLDOWN_MS after it settles, success or failure.
+  const [syncRolesState, setSyncRolesState] = React.useState<'idle' | 'syncing' | 'cooldown'>(
+    'idle',
+  );
+  const [syncRolesResult, setSyncRolesResult] = React.useState<{
+    addedCount: number;
+    removedCount: number;
+  } | null>(null);
+  const handleSyncDiscordRoles = React.useCallback(async () => {
+    if (syncRolesState !== 'idle') return;
+    setSyncRolesState('syncing');
+    try {
+      const result = await onSyncDiscordRoles();
+      if (result) setSyncRolesResult(result);
+    } finally {
+      setSyncRolesState('cooldown');
+      window.setTimeout(() => setSyncRolesState('idle'), DISCORD_ROLE_SYNC_COOLDOWN_MS);
+    }
+  }, [syncRolesState, onSyncDiscordRoles]);
 
   return (
     <div className='mx-auto flex max-w-3xl flex-col gap-6 lg:max-w-5xl'>
@@ -389,10 +420,34 @@ export function PlayerDetailPage({
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className='flex items-center justify-between'>
             <CardTitle>{tr('roles_currentRoles')}</CardTitle>
+            {canManageRoles && !isInactive ? (
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                onClick={handleSyncDiscordRoles}
+                disabled={syncRolesState !== 'idle'}
+              >
+                <RefreshCw className='size-4' aria-hidden='true' />
+                {syncRolesState === 'syncing'
+                  ? tr('discord_syncing')
+                  : syncRolesState === 'cooldown'
+                    ? tr('discord_syncCooldown')
+                    : tr('discord_syncRolesFor')}
+              </Button>
+            ) : null}
           </CardHeader>
           <CardContent>
+            {syncRolesResult ? (
+              <p className='text-xs text-muted-foreground mb-2'>
+                {tr('discord_syncQueuedResult', {
+                  added: syncRolesResult.addedCount,
+                  removed: syncRolesResult.removedCount,
+                })}
+              </p>
+            ) : null}
             <RolesSection
               player={player}
               canManageRoles={canManageRoles && !isInactive}

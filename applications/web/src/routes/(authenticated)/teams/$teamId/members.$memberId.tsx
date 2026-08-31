@@ -12,6 +12,7 @@ import {
 import { createFileRoute, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
 import React from 'react';
+import { toast } from 'sonner';
 import type { PlayerEditValues } from '~/components/pages/PlayerDetailPage';
 import { PlayerDetailPage } from '~/components/pages/PlayerDetailPage';
 import type { Client } from '~/lib/runtime';
@@ -198,6 +199,18 @@ function MemberDetailRoute() {
     },
     [teamId, memberId, runMutation],
   );
+
+  const handleSyncDiscordRoles = React.useCallback(async () => {
+    const result = await ApiClient.asEffect().pipe(
+      Effect.flatMap((api) => api.role.syncMemberDiscordRoles({ params: { teamId, memberId } })),
+      Effect.mapError(() => ClientError.make(tr('discord_syncFailed'))),
+      run(),
+    );
+    if (Option.isNone(result)) return undefined;
+    const { addedCount, removedCount } = result.value;
+    toast.success(tr('discord_syncQueuedResult', { added: addedCount, removed: removedCount }));
+    return { addedCount, removedCount };
+  }, [teamId, memberId, run]);
 
   const handleAddToRoster = React.useCallback(
     async (rosterIdRaw: string) => {
@@ -403,6 +416,7 @@ function MemberDetailRoute() {
       onSave={handleSave}
       onAssignRole={handleAssignRole}
       onUnassignRole={handleUnassignRole}
+      onSyncDiscordRoles={handleSyncDiscordRoles}
       onAddToRoster={handleAddToRoster}
       onRemoveFromRoster={handleRemoveFromRoster}
       onAddToGroup={handleAddToGroup}

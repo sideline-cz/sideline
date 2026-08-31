@@ -88,6 +88,10 @@ vi.mock('~/lib/translations.js', () => ({
       roles_removeRoleCancel: 'Cancel',
       members_unsavedChanges: 'Unsaved changes',
       stats_activityEmptyCta: 'Log your first activity',
+      discord_syncRolesFor: 'Sync Discord roles',
+      discord_syncing: 'Syncing…',
+      discord_syncCooldown: 'Synced — try again soon',
+      discord_syncQueuedResult: 'Queued {added} additions and {removed} removals.',
     };
     const template = map[key] ?? key;
     if (!params) return template;
@@ -261,6 +265,7 @@ const baseProps = {
   onSave: vi.fn().mockResolvedValue(undefined),
   onAssignRole: vi.fn().mockResolvedValue(undefined),
   onUnassignRole: vi.fn().mockResolvedValue(undefined),
+  onSyncDiscordRoles: vi.fn().mockResolvedValue({ addedCount: 0, removedCount: 0 }),
   onAddToRoster: vi.fn().mockResolvedValue(undefined),
   onRemoveFromRoster: vi.fn().mockResolvedValue(undefined),
   onAddToGroup: vi.fn().mockResolvedValue(undefined),
@@ -1100,5 +1105,91 @@ describe('PlayerDetailPage — deactivate/reactivate (item 3)', () => {
     );
 
     expect(screen.queryByText('Danger zone')).toBeNull();
+  });
+});
+
+describe('PlayerDetailPage — Discord role sync (PR-7)', () => {
+  it('canManageRoles=true → renders the sync button', () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={false}
+        canManageRoles={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Sync Discord roles' })).not.toBeNull();
+  });
+
+  it('canManageRoles=false → the sync button is not rendered', () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={false}
+        canManageRoles={false}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Sync Discord roles' })).toBeNull();
+  });
+
+  it('the button is disabled during the cooldown after a click', async () => {
+    const onSyncDiscordRoles = vi.fn().mockResolvedValue({ addedCount: 1, removedCount: 0 });
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={false}
+        canManageRoles={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+        onSyncDiscordRoles={onSyncDiscordRoles}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: 'Sync Discord roles' });
+    expect(button.hasAttribute('disabled')).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    await waitFor(() => {
+      expect(onSyncDiscordRoles).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /synced|syncing/i }).hasAttribute('disabled')).toBe(
+        true,
+      );
+    });
+  });
+
+  it('renders discord_syncQueuedResult with both counts after a successful sync', async () => {
+    const onSyncDiscordRoles = vi.fn().mockResolvedValue({ addedCount: 3, removedCount: 2 });
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={false}
+        canManageRoles={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+        onSyncDiscordRoles={onSyncDiscordRoles}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sync Discord roles' }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Queued 3 additions and 2 removals.')).not.toBeNull();
+    });
   });
 });

@@ -231,6 +231,43 @@ const make = Effect.gen(function* () {
   const findTeamMembersWithNames = (teamId: string) =>
     findTeamMembersWithNamesQuery(teamId).pipe(catchSqlErrors);
 
+  const EffectiveRoleRow = Schema.Struct({
+    role_id: Role.RoleId,
+    role_name: Schema.String,
+  });
+
+  // Sibling of findMembershipQuery's role_names aggregation — same UNION/LATERAL/RECURSIVE body
+  // (member_roles UNION roles inherited through group_members → recursive group ancestry →
+  // role_groups), but returns one (role_id, role_name) row per effective role instead of a
+  // string_agg. Used by syncMemberDiscordRoles.ts to compute the "desired" role set. Do not
+  // refactor findMembershipQuery to share this — the shapes are different call sites.
+  const findEffectiveRoleIdsForMemberQuery = SqlSchema.findAll({
+    Request: Schema.String,
+    Result: EffectiveRoleRow,
+    execute: (teamMemberId) => sql`
+      SELECT DISTINCT combined.id AS role_id, combined.name AS role_name
+      FROM (
+        SELECT r.id, r.name FROM member_roles mr JOIN roles r ON r.id = mr.role_id WHERE mr.team_member_id = ${teamMemberId}
+        UNION
+        SELECT r.id, r.name FROM group_members gm
+        JOIN LATERAL (
+          WITH RECURSIVE ancestors AS (
+            SELECT gm.group_id AS id
+            UNION ALL
+            SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
+          )
+          SELECT id FROM ancestors
+        ) anc ON true
+        JOIN role_groups rg ON rg.group_id = anc.id
+        JOIN roles r ON r.id = rg.role_id
+        WHERE gm.team_member_id = ${teamMemberId}
+      ) combined
+    `,
+  });
+
+  const findEffectiveRoleIdsForMember = (teamMemberId: TeamMember.TeamMemberId) =>
+    findEffectiveRoleIdsForMemberQuery(teamMemberId).pipe(catchSqlErrors);
+
   const findByUserQuery = SqlSchema.findAll({
     Request: Schema.String,
     Result: MembershipWithRole,
@@ -517,6 +554,7 @@ const make = Effect.gen(function* () {
     findByUser,
     findRosterByTeam,
     findTeamMembersWithNames,
+    findEffectiveRoleIdsForMember,
     findMembershipByIds,
     findMembershipByDiscordAndTeam,
     findRosterMemberByIds,
