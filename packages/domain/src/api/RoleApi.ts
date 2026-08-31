@@ -65,6 +65,33 @@ export class RoleNameAlreadyTaken extends Schema.TaggedErrorClass<RoleNameAlread
   {},
 ) {}
 
+// Four buckets, not nine (CC-8) — collapse to a distinct remedy per code:
+// `retryable` (we will retry; nothing for the captain to do), `captain_action` (bot missing
+// permission, role hierarchy, guild not configured), `user_action` (not in the guild / left the
+// guild), `unknown` (fallback). Expand only when a new code implies a distinct remedy.
+export const DiscordSyncErrorCode = Schema.Literals([
+  'retryable',
+  'captain_action',
+  'user_action',
+  'unknown',
+]);
+export type DiscordSyncErrorCode = Schema.Schema.Type<typeof DiscordSyncErrorCode>;
+
+// Final shape shipped once in PR-7 (CC-8) — PR-8/PR-9 populate `roleSyncState` and the two
+// `last*` fields without touching this DTO, its copy, or its i18n keys. In PR-7 `roleSyncState`
+// is always `'queued'` (or `'never'` when the member has no `discord_id`) and both `last*`
+// fields are `Option.none()`.
+export class SyncMemberRolesResult extends Schema.Class<SyncMemberRolesResult>(
+  'SyncMemberRolesResult',
+)({
+  addedCount: Schema.Number,
+  removedCount: Schema.Number,
+  skippedCount: Schema.Number,
+  roleSyncState: Schema.Literals(['queued', 'ok', 'failed', 'never']),
+  lastRoleSyncAt: Schema.OptionFromNullOr(Schema.DateTimeUtc),
+  lastRoleSyncError: Schema.OptionFromNullOr(DiscordSyncErrorCode),
+}) {}
+
 export class RoleApiGroup extends HttpApiGroup.make('role')
   .add(
     HttpApiEndpoint.get('listRoles', '/teams/:teamId/roles', {
@@ -141,4 +168,18 @@ export class RoleApiGroup extends HttpApiGroup.make('role')
       ],
       params: { teamId: TeamId, memberId: TeamMemberId, roleId: RoleId },
     }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post(
+      'syncMemberDiscordRoles',
+      '/teams/:teamId/members/:memberId/sync-discord-roles',
+      {
+        success: SyncMemberRolesResult,
+        error: [
+          Forbidden.pipe(HttpApiSchema.status(403)),
+          MemberNotFound.pipe(HttpApiSchema.status(404)),
+        ],
+        params: { teamId: TeamId, memberId: TeamMemberId },
+      },
+    ).middleware(AuthMiddleware),
   ) {}
