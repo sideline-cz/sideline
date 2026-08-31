@@ -47,10 +47,24 @@ export class JoinResult extends Schema.Class<JoinResult>('JoinResult')({
   acceptanceId: InviteAcceptanceId,
 }) {}
 
+/**
+ * PR-5 / CC-15: `'joined'` is deliberately absent. The only truthful source for "already in
+ * the guild" is `team_members.discord_joined_at`, which does not exist until PR-8 — until
+ * then, "already in the guild" is expressed as `getMyPendingDiscordJoin` returning
+ * `Option.none()` (nothing pending), not a state on this union. `Schema.withDecodingDefaultKey`
+ * lets an old server's payload (no `state` key at all) decode in a new browser as `'preparing'`
+ * — harmless, since a browser that old never reads this field anyway.
+ */
+export const JoinStatusState = Schema.Literals(['preparing', 'ready', 'expired', 'failed']);
+export type JoinStatusState = typeof JoinStatusState.Type;
+
 export class JoinStatus extends Schema.Class<JoinStatus>('JoinStatus')({
   acceptanceId: InviteAcceptanceId,
   discordInviteUrl: Schema.OptionFromNullOr(Schema.String),
+  // CC-3: `'expired'` never appears here — it is carried by `state` instead. See
+  // `applications/server/src/utils/inviteErrorWireProjection.ts`.
   errorCode: Schema.OptionFromNullOr(JoinStatusErrorCode),
+  state: JoinStatusState.pipe(Schema.withDecodingDefaultKey(() => 'preparing')),
 }) {}
 
 export class InviteCode extends Schema.Class<InviteCode>('InviteCode')({
@@ -110,6 +124,27 @@ export class InviteApiGroup extends HttpApiGroup.make('invite')
       success: JoinStatus,
       error: InviteNotFound.pipe(HttpApiSchema.status(404)),
       params: { acceptanceId: InviteAcceptanceId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    // PR-5 step 3: server-sourced replacement for the localStorage-only banner
+    // (designer §1 root cause 1). Scoped to the CALLING user's own acceptance — never a
+    // request-controlled id (CC-14's ownership fix on `getJoinStatus` must not be reopened
+    // here).
+    HttpApiEndpoint.get('getMyPendingDiscordJoin', '/teams/:teamId/me/discord-join', {
+      success: Schema.OptionFromNullOr(JoinStatus),
+      error: Forbidden.pipe(HttpApiSchema.status(403)),
+      params: { teamId: TeamId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    // PR-5 step 4 / CC-14: what the "Get a new invite" CTA calls. Returns the SAME shape as
+    // the GET above so the client replaces its polled state with the response and keeps
+    // polling, with no second decode path and no new error tag.
+    HttpApiEndpoint.post('regenerateMyDiscordInvite', '/teams/:teamId/me/discord-join', {
+      success: Schema.OptionFromNullOr(JoinStatus),
+      error: Forbidden.pipe(HttpApiSchema.status(403)),
+      params: { teamId: TeamId },
     }).middleware(AuthMiddleware),
   )
   .add(

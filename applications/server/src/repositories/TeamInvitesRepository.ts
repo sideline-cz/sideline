@@ -58,6 +58,20 @@ const make = SqlClient.SqlClient.asEffect().pipe(
       execute: (teamId) => sql`SELECT * FROM team_invites WHERE team_id = ${teamId}`,
     });
 
+    // PR-5 / CC-14 step 8: what `regenerateMyDiscordInvite` resolves before calling
+    // `resolveOrCreateAcceptance` — the team's newest active, unexpired invite. `None` means
+    // the team has no invite link at all (the UI then shows the "ask your captain" copy).
+    const findActiveByTeamId = SqlSchema.findOneOption({
+      Request: Schema.String,
+      Result: TeamInvite.TeamInvite,
+      execute: (teamId) => sql`
+        SELECT * FROM team_invites
+        WHERE team_id = ${teamId} AND active = true AND (expires_at IS NULL OR expires_at > now())
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+    });
+
     const create = SqlSchema.findOne({
       Request: TeamInvite.TeamInvite.insert,
       Result: TeamInvite.TeamInvite,
@@ -140,6 +154,7 @@ const make = SqlClient.SqlClient.asEffect().pipe(
     return {
       findByCode: (code: string) => findByCode(code).pipe(catchSqlErrors),
       findByTeam: (teamId: string) => findByTeam(teamId).pipe(catchSqlErrors),
+      findActiveByTeamId: (teamId: string) => findActiveByTeamId(teamId).pipe(catchSqlErrors),
       create: (input: typeof TeamInvite.TeamInvite.insert.Type) =>
         create(input).pipe(catchSqlErrors),
       deactivateByTeam: (teamId: string) => deactivateByTeam(teamId).pipe(catchSqlErrors),

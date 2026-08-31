@@ -10,7 +10,7 @@ import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepos
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
-import { projectInviteErrorToWire } from '~/utils/inviteErrorWireProjection.js';
+import { deriveJoinStatusState } from '~/utils/joinStatusState.js';
 import { resolveOrCreateAcceptance } from '~/utils/resolveOrCreateAcceptance.js';
 
 const INVITE_CODE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -200,15 +200,85 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                 ? Effect.succeed(acc)
                 : Effect.fail(new Invite.InviteNotFound()),
             ),
-            Effect.map(
-              (acc) =>
-                new Invite.JoinStatus({
+            Effect.map((acc) => {
+              const derived = deriveJoinStatusState(acc);
+              return new Invite.JoinStatus({
+                acceptanceId: acc.id,
+                discordInviteUrl: derived.discordInviteUrl,
+                errorCode: derived.errorCode,
+                state: derived.state,
+              });
+            }),
+          ),
+        )
+        .handle('getMyPendingDiscordJoin', ({ params: { teamId } }) =>
+          Effect.Do.pipe(
+            Effect.bind('user', () => Auth.CurrentUserContext.asEffect()),
+            Effect.bind('membership', ({ user }) =>
+              requireMembership(members, teamId, user.id, forbidden),
+            ),
+            // Ownership: scoped to the CALLING user's own id, never anything
+            // request-controlled — the same hole PR-4 closed on `getJoinStatus`.
+            Effect.bind('open', ({ user }) => acceptances.findOpenByUserAndTeam(user.id, teamId)),
+            Effect.map(({ open }) =>
+              Option.map(open, (acc) => {
+                const derived = deriveJoinStatusState(acc);
+                return new Invite.JoinStatus({
                   acceptanceId: acc.id,
-                  discordInviteUrl: Option.map(acc.discord_code, (c) => `https://discord.gg/${c}`),
-                  // CC-3: the projection returns an Option, so an 'expired' row yields None —
-                  // exactly what an old browser (with no `state` field) should see.
-                  errorCode: Option.flatMap(acc.discord_code_error_code, projectInviteErrorToWire),
-                }),
+                  discordInviteUrl: derived.discordInviteUrl,
+                  errorCode: derived.errorCode,
+                  state: derived.state,
+                });
+              }),
+            ),
+          ),
+        )
+        .handle('regenerateMyDiscordInvite', ({ params: { teamId } }) =>
+          Effect.Do.pipe(
+            Effect.bind('user', () => Auth.CurrentUserContext.asEffect()),
+            Effect.bind('membership', ({ user }) =>
+              requireMembership(members, teamId, user.id, forbidden),
+            ),
+            // Step 8: resolve the team's active invite first — `None` means the team has no
+            // invite link at all, and the UI shows the "ask your captain" copy.
+            Effect.bind('activeInvite', () => invites.findActiveByTeamId(teamId)),
+            Effect.bind('resolved', ({ user, activeInvite }) =>
+              Option.match(activeInvite, {
+                onNone: () => Effect.succeedNone,
+                onSome: (invite) => resolveOrCreateAcceptance(user.id, invite).pipe(Effect.asSome),
+              }),
+            ),
+            // S4 / CC-14: `enqueue` fires only on the `created: true` branch — this is an
+            // explicit user click (the regenerate CTA), and reusing an existing row must not
+            // re-trigger the auto-join queue.
+            Effect.tap(({ user, activeInvite, resolved }) =>
+              Option.isSome(activeInvite) && Option.isSome(resolved) && resolved.value.created
+                ? pendingGuildJoins
+                    .enqueue(user.id, activeInvite.value.team_id)
+                    .pipe(
+                      Effect.catchCause((cause) =>
+                        Effect.logError(
+                          '[invite/regenerate] pending_guild_joins enqueue failed',
+                          cause,
+                        ),
+                      ),
+                    )
+                : Effect.void,
+            ),
+            Effect.map(({ resolved }) =>
+              Option.map(resolved, ({ acceptance }) => {
+                const derived = deriveJoinStatusState(acceptance);
+                return new Invite.JoinStatus({
+                  acceptanceId: acceptance.id,
+                  discordInviteUrl: derived.discordInviteUrl,
+                  errorCode: derived.errorCode,
+                  state: derived.state,
+                });
+              }),
+            ),
+            Effect.catchTag(
+              'NoSuchElementError',
+              LogicError.withMessage(() => 'Failed regenerating invite — no row returned'),
             ),
           ),
         )
