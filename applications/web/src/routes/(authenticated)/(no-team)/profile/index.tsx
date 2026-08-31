@@ -15,12 +15,12 @@ export const Route = createFileRoute('/(authenticated)/(no-team)/profile/')({
 });
 
 function ProfileRoute() {
-  const { user } = Route.useRouteContext();
+  const { user, teams } = Route.useRouteContext();
   const router = useRouter();
 
   const handleUpdated = React.useCallback(() => {
     router.invalidate();
   }, [router]);
 
-  return <MyProfilePage user={user} onUpdated={handleUpdated} />;
+  return <MyProfilePage user={user} teams={teams} onUpdated={handleUpdated} />;
 }

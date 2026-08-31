@@ -62,6 +62,11 @@ const OpenByUserAndInviteInput = Schema.Struct({
   team_invite_id: TeamInvite.TeamInviteId,
 });
 
+const OpenByUserAndTeamInput = Schema.Struct({
+  user_id: User.UserId,
+  team_id: Team.TeamId,
+});
+
 const CountRecentInput = Schema.Struct({
   user_id: User.UserId,
   team_invite_id: TeamInvite.TeamInviteId,
@@ -108,6 +113,24 @@ const make = SqlClient.SqlClient.asEffect().pipe(
           AND discord_code_error_code IS NULL
           AND (discord_code IS NULL OR generated_at > now() - interval '24 hours')
         ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      `,
+    });
+
+    // PR-5 / CC-14 step 5: as `findOpenByUserAndInvite` above, but joined through
+    // `team_invites` and filtered by `team_id` instead of a specific invite — what
+    // `getMyPendingDiscordJoin` reads through. "Open" carries the exact same meaning as
+    // `findOpenByUserAndInvite` (not terminally failed, and any minted code is still usable).
+    const findOpenByUserAndTeam = SqlSchema.findOneOption({
+      Request: OpenByUserAndTeamInput,
+      Result: InviteAcceptance.InviteAcceptance,
+      execute: (input) => sql`
+        SELECT ia.* FROM invite_acceptances ia
+        JOIN team_invites ti ON ti.id = ia.team_invite_id
+        WHERE ia.user_id = ${input.user_id} AND ti.team_id = ${input.team_id}
+          AND ia.discord_code_error_code IS NULL
+          AND (ia.discord_code IS NULL OR ia.generated_at > now() - interval '24 hours')
+        ORDER BY ia.created_at DESC, ia.id DESC
         LIMIT 1
       `,
     });
@@ -304,6 +327,8 @@ const make = SqlClient.SqlClient.asEffect().pipe(
         findOpenByUserAndInvite({ user_id: userId, team_invite_id: teamInviteId }).pipe(
           catchSqlErrors,
         ),
+      findOpenByUserAndTeam: (userId: User.UserId, teamId: Team.TeamId) =>
+        findOpenByUserAndTeam({ user_id: userId, team_id: teamId }).pipe(catchSqlErrors),
       findNewestByUserAndInvite: (userId: User.UserId, teamInviteId: TeamInvite.TeamInviteId) =>
         findNewestByUserAndInvite({ user_id: userId, team_invite_id: teamInviteId }).pipe(
           catchSqlErrors,

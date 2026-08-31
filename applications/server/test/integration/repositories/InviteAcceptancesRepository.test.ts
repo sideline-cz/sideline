@@ -1092,3 +1092,167 @@ describe('InviteAcceptancesRepository — countRecentByUserAndInvite (TDD: PR-4 
       ),
   );
 });
+// ---------------------------------------------------------------------------
+// TDD for PR-5 (Discord onboarding fix), CC-14 / step 5 — `findOpenByUserAndTeam`,
+// the read `getMyPendingDiscordJoin` is built on. As `findOpenByUserAndInvite` joined
+// through `team_invite_id`, this joins `team_invites ti ON ti.id = ia.team_invite_id`
+// and filters `ti.team_id = $teamId`, newest first. The method does not exist on the
+// repository yet — every test below MUST FAIL against current code (calling it throws).
+// See `.work-plans/discord-onboarding-fix-plan.md`, PR-5 test list (repository-level
+// coverage for `getMyPendingDiscordJoin`, items 7 and 9).
+// ---------------------------------------------------------------------------
+
+const findOpenByUserAndTeam = (
+  userId: User.UserId,
+  teamId: Team.TeamId,
+): Effect.Effect<
+  Option.Option<InviteAcceptance.InviteAcceptance>,
+  never,
+  InviteAcceptancesRepository
+> =>
+  InviteAcceptancesRepository.asEffect().pipe(
+    Effect.andThen(
+      (repo) =>
+        (repo as any).findOpenByUserAndTeam(userId, teamId) as Effect.Effect<
+          Option.Option<InviteAcceptance.InviteAcceptance>,
+          never,
+          never
+        >,
+    ),
+  );
+
+describe('InviteAcceptancesRepository — findOpenByUserAndTeam (TDD: PR-5 CC-14)', () => {
+  it.effect('returns the newest open row for a (user, team) pair', () =>
+    Effect.Do.pipe(
+      Effect.bind('user', () => createUser('700000000000000020', 'joiner-twenty')),
+      Effect.bind('team', ({ user }) =>
+        createTeam('600000000000000020' as Discord.Snowflake, user.id),
+      ),
+      Effect.bind('invite', ({ user, team }) =>
+        createInvite(team.id, user.id, 'PR5-OPEN-BY-TEAM-CODE'),
+      ),
+      Effect.bind('older', ({ user, invite }) => createAcceptance(invite.id, user.id)),
+      Effect.tap(({ older }) => backdateCreatedAt(older.id)),
+      Effect.bind('newer', ({ user, invite }) => createAcceptance(invite.id, user.id)),
+      Effect.bind('open', ({ user, team }) => findOpenByUserAndTeam(user.id, team.id)),
+      Effect.tap(({ open, newer }) =>
+        Effect.sync(() => {
+          expect(Option.isSome(open)).toBe(true);
+          if (Option.isSome(open)) {
+            expect(open.value.id).toBe(newer.id);
+          }
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    'skips a row with a discord_code_error_code — a terminally failed row is not "open"',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('user', () => createUser('700000000000000021', 'joiner-twentyone')),
+        Effect.bind('team', ({ user }) =>
+          createTeam('600000000000000021' as Discord.Snowflake, user.id),
+        ),
+        Effect.bind('invite', ({ user, team }) =>
+          createInvite(team.id, user.id, 'PR5-FAILED-BY-TEAM-CODE'),
+        ),
+        Effect.bind('acceptance', ({ user, invite }) => createAcceptance(invite.id, user.id)),
+        Effect.tap(({ acceptance }) => markFailed(acceptance.id, 'bot_missing_perms')),
+        Effect.bind('open', ({ user, team }) => findOpenByUserAndTeam(user.id, team.id)),
+        Effect.tap(({ open }) =>
+          Effect.sync(() => {
+            expect(Option.isNone(open)).toBe(true);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  // Ownership (PR-5 test list item 9, pinned at the repository level): a second user's
+  // acceptance for the SAME team's invite must never surface as "the caller's own" pending
+  // join. MUST FAIL against current code — the method does not exist, so this cannot even
+  // scope by user yet.
+  it.effect("never returns another user's acceptance for the same team", () =>
+    Effect.Do.pipe(
+      Effect.bind('owner', () => createUser('700000000000000022', 'joiner-twentytwo')),
+      Effect.bind('other', () => createUser('700000000000000023', 'joiner-twentythree')),
+      Effect.bind('team', ({ owner }) =>
+        createTeam('600000000000000022' as Discord.Snowflake, owner.id),
+      ),
+      Effect.bind('invite', ({ owner, team }) =>
+        createInvite(team.id, owner.id, 'PR5-OWNERSHIP-CODE'),
+      ),
+      Effect.bind('ownerAcceptance', ({ owner, invite }) => createAcceptance(invite.id, owner.id)),
+      Effect.bind('openForOther', ({ other, team }) => findOpenByUserAndTeam(other.id, team.id)),
+      Effect.bind('openForOwner', ({ owner, team }) => findOpenByUserAndTeam(owner.id, team.id)),
+      Effect.tap(({ openForOther, openForOwner, ownerAcceptance }) =>
+        Effect.sync(() => {
+          expect(Option.isNone(openForOther)).toBe(true);
+          expect(Option.isSome(openForOwner)).toBe(true);
+          if (Option.isSome(openForOwner)) {
+            expect(openForOwner.value.id).toBe(ownerAcceptance.id);
+          }
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  // Team-scoping analogue of PR-4's "four squads" regression: the same user has an open
+  // acceptance on a DIFFERENT team and must not see it when asking about THIS team.
+  it.effect('does not return an acceptance scoped to a different team', () =>
+    Effect.Do.pipe(
+      Effect.bind('user', () => createUser('700000000000000024', 'joiner-twentyfour')),
+      Effect.bind('teamA', ({ user }) =>
+        createTeam('600000000000000024' as Discord.Snowflake, user.id),
+      ),
+      Effect.bind('teamB', ({ user }) =>
+        createTeam('600000000000000025' as Discord.Snowflake, user.id),
+      ),
+      Effect.bind('inviteA', ({ user, teamA }) =>
+        createInvite(teamA.id, user.id, 'PR5-TEAM-A-CODE'),
+      ),
+      Effect.bind('inviteB', ({ user, teamB }) =>
+        createInvite(teamB.id, user.id, 'PR5-TEAM-B-CODE'),
+      ),
+      Effect.tap(({ user, inviteA }) => createAcceptance(inviteA.id, user.id)),
+      Effect.bind('openForTeamB', ({ user, teamB }) => findOpenByUserAndTeam(user.id, teamB.id)),
+      Effect.tap(({ openForTeamB }) =>
+        Effect.sync(() => {
+          expect(Option.isNone(openForTeamB)).toBe(true);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('does not reuse a row whose discord_code was generated more than 24h ago', () =>
+    Effect.Do.pipe(
+      Effect.bind('user', () => createUser('700000000000000026', 'joiner-twentysix')),
+      Effect.bind('team', ({ user }) =>
+        createTeam('600000000000000026' as Discord.Snowflake, user.id),
+      ),
+      Effect.bind('invite', ({ user, team }) =>
+        createInvite(team.id, user.id, 'PR5-STALE-CODE-BY-TEAM'),
+      ),
+      Effect.bind('acceptance', ({ user, invite }) => createAcceptance(invite.id, user.id)),
+      Effect.tap(({ acceptance }) =>
+        InviteAcceptancesRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.setDiscordCode({ acceptanceId: acceptance.id, discordCode: 'stale-by-team' }),
+          ),
+        ),
+      ),
+      Effect.tap(({ acceptance }) => backdateGeneratedAt(acceptance.id)),
+      Effect.bind('open', ({ user, team }) => findOpenByUserAndTeam(user.id, team.id)),
+      Effect.tap(({ open }) =>
+        Effect.sync(() => {
+          expect(Option.isNone(open)).toBe(true);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});

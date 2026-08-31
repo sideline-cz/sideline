@@ -2127,3 +2127,521 @@ describe('Invite API — resolveOrCreateAcceptance / requiresReauth gating (TDD:
 // `Onboarding.InviteGeneratorErrorCode`) cannot write or read an `'expired'`
 // row until that stored enum is widened — that widening is out of scope for
 // this test file and must land before or alongside PR-5's server code.
+// ---------------------------------------------------------------------------
+
+describe('Invite API — PR-5 durable link surface + regenerate endpoint (TDD)', () => {
+  const PR5_TEAM_ID = '00000000-0000-0000-0000-000000000014' as Team.TeamId;
+  const PR5_OTHER_MEMBER_ID = '00000000-0000-0000-0000-000000000023' as TeamMember.TeamMemberId;
+  const PR5_INVITE_ID = '00000000-0000-0000-0000-000000000037' as TeamInvite.TeamInviteId;
+  const PR5_INVITE_CODE = 'pr5-invite';
+
+  type Pr5AcceptanceRecord = {
+    id: string;
+    team_invite_id: string;
+    user_id: string;
+    discord_code: Option.Option<string>;
+    discord_code_error_code: Option.Option<string>;
+    created_at: DateTime.Utc;
+  };
+
+  const freshRecord = (overrides: Partial<Pr5AcceptanceRecord> = {}): Pr5AcceptanceRecord => ({
+    id: 'pr5-default-id',
+    team_invite_id: PR5_INVITE_ID,
+    user_id: TEST_USER_ID,
+    discord_code: Option.none(),
+    discord_code_error_code: Option.none(),
+    created_at: DateTime.nowUnsafe(),
+    ...overrides,
+  });
+
+  // Mutated by each `it` before dispatching a request; read by the mock layer's closures.
+  let scenario: {
+    isMember: boolean;
+    // GET /invite/acceptances/:acceptanceId (existing endpoint — tests 1-6)
+    findById: Option.Option<Pr5AcceptanceRecord>;
+    // GET /teams/:teamId/me/discord-join (tests 7-9), keyed per calling user so a
+    // cross-user leak (test 9) is observable rather than hidden by a single shared value.
+    findOpenByUserAndTeamByUser: Map<string, Option.Option<Pr5AcceptanceRecord>>;
+    // POST /teams/:teamId/me/discord-join → resolveOrCreateAcceptance (tests 10-15)
+    findOpenByUserAndInvite: Option.Option<Pr5AcceptanceRecord>;
+    findNewestByUserAndInvite: Option.Option<Pr5AcceptanceRecord>;
+    countRecent: number;
+    activeInvite: Option.Option<{ id: string; team_id: string }>;
+  };
+  let pr5CreateCalls: Array<{ team_invite_id: string; user_id: string }>;
+  let pr5EnqueueCalls: Array<{ userId: string; teamId: string }>;
+  let pr5FindOpenByUserAndTeamCalls: Array<{ userId: string; teamId: string }>;
+  let pr5CreatedIdCounter: number;
+
+  const resetPr5Scenario = () => {
+    scenario = {
+      isMember: true,
+      findById: Option.none(),
+      findOpenByUserAndTeamByUser: new Map(),
+      findOpenByUserAndInvite: Option.none(),
+      findNewestByUserAndInvite: Option.none(),
+      countRecent: 0,
+      activeInvite: Option.some({ id: PR5_INVITE_ID, team_id: PR5_TEAM_ID }),
+    };
+    pr5CreateCalls = [];
+    pr5EnqueueCalls = [];
+    pr5FindOpenByUserAndTeamCalls = [];
+    pr5CreatedIdCounter = 0;
+  };
+  resetPr5Scenario();
+
+  const pr5Membership: MembershipWithRole = {
+    id: PR5_OTHER_MEMBER_ID,
+    team_id: PR5_TEAM_ID,
+    user_id: TEST_USER_ID,
+    active: true,
+    role_names: ['Player'],
+    permissions: [],
+  };
+
+  const Pr5TeamMembersLayer = Layer.succeed(TeamMembersRepository, {
+    _tag: 'api/TeamMembersRepository',
+    findMembershipByIds: (_teamId: string, userId: string) =>
+      Effect.succeed(
+        scenario.isMember ? Option.some({ ...pr5Membership, user_id: userId }) : Option.none(),
+      ),
+    addMember: () => Effect.die(new Error('Not expected in PR-5 tests')),
+    reactivateMember: () => Effect.die(new Error('Not expected in PR-5 tests')),
+    findByTeam: () => Effect.succeed([]),
+    findByUser: () => Effect.succeed([]),
+    findRosterByTeam: () => Effect.succeed([]),
+    findRosterMemberByIds: () => Effect.succeed(Option.none()),
+    deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
+    getPlayerRoleId: () => Effect.succeed(Option.none()),
+    assignRole: () => Effect.void,
+    unassignRole: () => Effect.void,
+    setJerseyNumber: () => Effect.void,
+  } as any);
+
+  const Pr5TeamInvitesLayer = Layer.succeed(TeamInvitesRepository, {
+    _tag: 'api/TeamInvitesRepository',
+    findByCode: (code: string) =>
+      code === PR5_INVITE_CODE
+        ? Effect.succeed(
+            Option.some({
+              id: PR5_INVITE_ID,
+              team_id: PR5_TEAM_ID,
+              code: PR5_INVITE_CODE,
+              active: true,
+              created_by: TEST_ADMIN_ID,
+              created_at: DateTime.nowUnsafe(),
+              expires_at: Option.none(),
+              group_id: Option.none(),
+            }),
+          )
+        : Effect.succeed(Option.none()),
+    findByCodeWithContext: () => Effect.succeed(Option.none()),
+    findByTeam: () => Effect.succeed([]),
+    listForTeam: () => Effect.succeed([]),
+    create: () => Effect.die(new Error('Not implemented')),
+    deactivateByTeam: () => Effect.void,
+    deactivateByTeamExcept: () => Effect.void,
+    // Net-new for PR-5 step 5/8 — `regenerateMyDiscordInvite` resolves the team's active
+    // invite through this before calling `resolveOrCreateAcceptance`. Does not exist on the
+    // real repository yet; the mock accepts it anyway (`as any`) so this layer can drive
+    // both "has an active invite" and "no active invite" (test 15) scenarios.
+    findActiveByTeamId: (_teamId: string) => Effect.succeed(scenario.activeInvite),
+  } as any);
+
+  const Pr5PendingGuildJoinsLayer = Layer.succeed(PendingGuildJoinsRepository, {
+    _tag: 'api/PendingGuildJoinsRepository',
+    enqueue: (userId: string, teamId: string) => {
+      pr5EnqueueCalls.push({ userId, teamId });
+      return Effect.void;
+    },
+    listPending: () => Effect.succeed([]),
+    markDone: () => Effect.void,
+    markFailed: () => Effect.void,
+    requeueFailedForUser: () => Effect.void,
+  } as never);
+
+  const Pr5InviteAcceptancesLayer = Layer.succeed(InviteAcceptancesRepository, {
+    _tag: 'api/InviteAcceptancesRepository',
+    create: ({ team_invite_id, user_id }: { team_invite_id: string; user_id: string }) => {
+      pr5CreatedIdCounter += 1;
+      const record = {
+        id: `pr5-created-${pr5CreatedIdCounter}`,
+        team_invite_id,
+        user_id,
+        discord_code: Option.none(),
+        discord_code_error_code: Option.none(),
+        discord_code_error_detail: Option.none(),
+        created_at: DateTime.nowUnsafe(),
+        generated_at: Option.none(),
+      };
+      pr5CreateCalls.push({ team_invite_id, user_id });
+      return Effect.succeed(record);
+    },
+    findById: (_id: string) => Effect.succeed(scenario.findById),
+    // Net-new for PR-5 (repository step 5) — `getMyPendingDiscordJoin` reads through this.
+    // Records every call so test 9 can prove the handler queries with the CALLING user's
+    // own id rather than anything request-controlled, and that two different callers get
+    // two independently-scoped answers instead of one shared lookup.
+    findOpenByUserAndTeam: (userId: string, teamId: string) => {
+      pr5FindOpenByUserAndTeamCalls.push({ userId, teamId });
+      return Effect.succeed(scenario.findOpenByUserAndTeamByUser.get(userId) ?? Option.none());
+    },
+    findOpenByUserAndInvite: () => Effect.succeed(scenario.findOpenByUserAndInvite),
+    findNewestByUserAndInvite: () => Effect.succeed(scenario.findNewestByUserAndInvite),
+    countRecentByUserAndInvite: () => Effect.succeed(scenario.countRecent),
+    findPending: () => Effect.succeed([]),
+    setDiscordCode: () => Effect.void,
+    markFailed: () => Effect.void,
+    findByDiscordCodeWithContext: () => Effect.succeed(Option.none()),
+  } as never);
+
+  const Pr5Layer = ApiLive.pipe(
+    Layer.provideMerge(AuthMiddlewareLive),
+    Layer.provideMerge(HttpServer.layerServices),
+    Layer.provide(MockDiscordOAuthLayer),
+    Layer.provide(MockUsersRepositoryLayer),
+    Layer.provide(MockSessionsRepositoryLayer),
+    Layer.provide(MockTeamsRepositoryLayer),
+    Layer.provide(Pr5TeamMembersLayer),
+    Layer.provide(
+      Layer.merge(
+        Layer.merge(
+          Layer.merge(MockRostersRepositoryLayer, MockActivityLogsRepositoryLayer),
+          MockActivityTypesRepositoryLayer,
+        ),
+        MockLeaderboardRepositoryLayer,
+      ),
+    ),
+    Layer.provide(MockRolesRepositoryLayer),
+    Layer.provide(MockGroupsRepositoryLayer),
+    Layer.provide(MockTrainingTypesRepositoryLayer),
+    Layer.provide(
+      Layer.merge(
+        Pr5TeamInvitesLayer,
+        Layer.merge(Pr5PendingGuildJoinsLayer, Pr5InviteAcceptancesLayer),
+      ),
+    ),
+    Layer.provide(MockHttpClientLayer),
+    Layer.provide(MockAgeCheckServiceLayer),
+    Layer.provide(MockAgeThresholdRepositoryLayer),
+    Layer.provide(Layer.merge(MockNotificationsRepositoryLayer, MockRoleSyncEventsRepositoryLayer)),
+    Layer.provide(
+      Layer.merge(MockChannelSyncEventsRepositoryLayer, MockEventSyncEventsRepositoryLayer),
+    ),
+    Layer.provide(
+      Layer.merge(MockDiscordChannelMappingRepositoryLayer, MockICalTokensRepositoryLayer),
+    ),
+    Layer.provide(
+      Layer.merge(
+        Layer.merge(
+          Layer.merge(
+            Layer.merge(
+              Layer.merge(
+                Layer.merge(MockEventsRepositoryLayer, MockEventRsvpsRepositoryLayer),
+                MockBotGuildsRepositoryLayer,
+              ),
+              Layer.merge(MockDiscordChannelsRepositoryLayer, MockDiscordRolesRepositoryLayer),
+            ),
+            MockEventSeriesRepositoryLayer,
+          ),
+          Layer.succeed(TeamSettingsRepository, {
+            _tag: 'api/TeamSettingsRepository',
+            findByTeam: () => Effect.succeed(Option.none()),
+            findByTeamId: () => Effect.succeed(Option.none()),
+            upsertSettings: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+            upsert: () => Effect.succeed({ team_id: 'test', event_horizon_days: 30 }),
+            getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),
+            getHorizonDays: () => Effect.succeed(30),
+          } as any),
+        ),
+        MockOAuthConnectionsRepositoryLayer,
+      ),
+    ),
+    Layer.provide(MockAchievementAdminLayers),
+  )
+    .pipe(Layer.provide(MockFinanceLayers))
+    .pipe(Layer.provide(MockTranslationsLayers))
+    .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
+    .pipe(Layer.provide(MockTeamChallengeRepositoryLayer))
+    .pipe(Layer.provide(MockPlayerRatingsRepositoryLayer))
+    .pipe(Layer.provide(MockDashboardLayoutsRepositoryLayer))
+    .pipe(Layer.provide(MockRulesAttemptsRepositoryLayer))
+    .pipe(Layer.provide(MockChannelManagementLayers))
+    .pipe(Layer.provide(MockEmailLayers))
+    .pipe(Layer.provide(MockEventRosterLayers))
+    .pipe(Layer.provide(BotInfoStore.Default))
+    .pipe(
+      Layer.provide(
+        Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),
+      ),
+    );
+
+  let pr5Handler: (...args: any[]) => Promise<Response>;
+  let pr5Dispose: () => Promise<void>;
+
+  beforeAll(() => {
+    const app = HttpRouter.toWebHandler(Pr5Layer);
+    pr5Handler = app.handler;
+    pr5Dispose = app.dispose;
+  });
+
+  afterAll(async () => {
+    await pr5Dispose();
+  });
+
+  const getJoinStatusPr5 = (acceptanceId: string, token = 'user-token') =>
+    pr5Handler(
+      new Request(`http://localhost/invite/acceptances/${acceptanceId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    );
+
+  const getMyPendingDiscordJoin = (teamId: string, token = 'user-token') =>
+    pr5Handler(
+      new Request(`http://localhost/teams/${teamId}/me/discord-join`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    );
+
+  const regenerateMyDiscordInvite = (teamId: string, token = 'user-token') =>
+    pr5Handler(
+      new Request(`http://localhost/teams/${teamId}/me/discord-join`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    );
+
+  // -------------------------------------------------------------------------
+  // Tests 1-6: `getJoinStatus` gains `state`, via `joinStatusState.ts` (step 6).
+  // -------------------------------------------------------------------------
+
+  it("getJoinStatus returns state 'preparing' when neither code nor error is set and the row is fresh", async () => {
+    resetPr5Scenario();
+    scenario.findById = Option.some(
+      freshRecord({ id: 'pr5-preparing', created_at: DateTime.nowUnsafe() }),
+    );
+
+    const response = await getJoinStatusPr5('pr5-preparing');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.state).toBe('preparing');
+  });
+
+  it("getJoinStatus returns state 'ready' with a discord.gg URL when discord_code is set", async () => {
+    resetPr5Scenario();
+    scenario.findById = Option.some(
+      freshRecord({ id: 'pr5-ready', discord_code: Option.some('abc123') }),
+    );
+
+    const response = await getJoinStatusPr5('pr5-ready');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.state).toBe('ready');
+    expect(body.discordInviteUrl).toBe('https://discord.gg/abc123');
+  });
+
+  it("getJoinStatus returns state 'failed' with errorCode when marked bot_missing_perms", async () => {
+    resetPr5Scenario();
+    scenario.findById = Option.some(
+      freshRecord({
+        id: 'pr5-failed',
+        discord_code_error_code: Option.some('bot_missing_perms'),
+      }),
+    );
+
+    const response = await getJoinStatusPr5('pr5-failed');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.state).toBe('failed');
+    expect(body.errorCode).toBe('bot_missing_perms');
+  });
+
+  // Pins CC-3: expiry is carried by `state`, never by `errorCode` — see the SPEC GAP note
+  // at the top of this block re: PR-2 not having landed in this checkout yet.
+  it("getJoinStatus returns state 'expired' and errorCode None for an expired row", async () => {
+    resetPr5Scenario();
+    scenario.findById = Option.some(
+      freshRecord({ id: 'pr5-expired', discord_code_error_code: Option.some('expired') }),
+    );
+
+    const response = await getJoinStatusPr5('pr5-expired');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.state).toBe('expired');
+    expect(body.errorCode).toBeNull();
+  });
+
+  // Pins CC-6: `discord_code` present wins over everything, including a stale error code —
+  // a failed `pending_guild_joins` row (auto-join) is not surfaced as an error here at all
+  // (that table isn't read by this endpoint); the only way this scenario is reachable through
+  // `invite_acceptances` alone is a row that has BOTH a working code and a leftover error
+  // code from an earlier attempt. `state` must still read 'ready'.
+  it("getJoinStatus returns 'ready', not 'failed', when a discord_code exists alongside a stale error code", async () => {
+    resetPr5Scenario();
+    scenario.findById = Option.some(
+      freshRecord({
+        id: 'pr5-ready-despite-error',
+        discord_code: Option.some('still-works'),
+        discord_code_error_code: Option.some('bot_missing_perms'),
+      }),
+    );
+
+    const response = await getJoinStatusPr5('pr5-ready-despite-error');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.state).toBe('ready');
+  });
+
+  // Pins CC-4's defensive guard: derives 'expired' for a row the sweep hasn't reached yet.
+  // 10 days comfortably exceeds `INVITE_ACCEPTANCE_DERIVED_EXPIRY_DAYS` (sweep default 3 + 1 =
+  // 4, per CC-4) without pinning the exact boundary — that boundary is PR-3's unit test on
+  // `inviteExpiry.ts`, not this one.
+  it("getJoinStatus derives state 'expired' for an un-swept aged row", async () => {
+    resetPr5Scenario();
+    scenario.findById = Option.some(
+      freshRecord({
+        id: 'pr5-aged',
+        created_at: DateTime.subtract(DateTime.nowUnsafe(), { days: 10 }),
+      }),
+    );
+
+    const response = await getJoinStatusPr5('pr5-aged');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.state).toBe('expired');
+    expect(body.errorCode).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // Tests 7-9: `getMyPendingDiscordJoin` (GET /teams/:teamId/me/discord-join)
+  // -------------------------------------------------------------------------
+
+  it('getMyPendingDiscordJoin returns None when the caller has no open acceptance for the team', async () => {
+    resetPr5Scenario();
+    scenario.findOpenByUserAndTeamByUser.set(TEST_USER_ID, Option.none());
+
+    const response = await getMyPendingDiscordJoin(PR5_TEAM_ID);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toBeNull();
+  });
+
+  it('getMyPendingDiscordJoin returns 403 for a non-member', async () => {
+    resetPr5Scenario();
+    scenario.isMember = false;
+
+    const response = await getMyPendingDiscordJoin(PR5_TEAM_ID);
+    expect(response.status).toBe(403);
+  });
+
+  // PR-4 closed this exact hole on `getJoinStatus` (any authenticated caller holding an
+  // acceptanceId got a working invite for a team they were never invited to). Pins that
+  // `getMyPendingDiscordJoin` doesn't reopen it via a query scoped to team only (or to
+  // anything request-controlled) instead of the caller's own id.
+  it("getMyPendingDiscordJoin never returns another user's acceptance", async () => {
+    resetPr5Scenario();
+    scenario.findOpenByUserAndTeamByUser.set(TEST_USER_ID, Option.none());
+    scenario.findOpenByUserAndTeamByUser.set(
+      TEST_ADMIN_ID,
+      Option.some(freshRecord({ id: 'admin-owned-acceptance', user_id: TEST_ADMIN_ID })),
+    );
+
+    const asUser = await getMyPendingDiscordJoin(PR5_TEAM_ID, 'user-token');
+    expect(asUser.status).toBe(200);
+    expect(await asUser.json()).toBeNull();
+
+    const asAdmin = await getMyPendingDiscordJoin(PR5_TEAM_ID, 'admin-token');
+    expect(asAdmin.status).toBe(200);
+    const adminBody = await asAdmin.json();
+    expect(adminBody.acceptanceId).toBe('admin-owned-acceptance');
+
+    // The repository must be queried with the CALLING user's own id both times, not a
+    // single shared/global lookup.
+    expect(pr5FindOpenByUserAndTeamCalls).toEqual(
+      expect.arrayContaining([
+        { userId: TEST_USER_ID, teamId: PR5_TEAM_ID },
+        { userId: TEST_ADMIN_ID, teamId: PR5_TEAM_ID },
+      ]),
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Tests 10-15: `regenerateMyDiscordInvite` (POST /teams/:teamId/me/discord-join)
+  // -------------------------------------------------------------------------
+
+  it("regenerateMyDiscordInvite creates a new acceptance when the newest is expired, returning state 'preparing'", async () => {
+    resetPr5Scenario();
+    scenario.findOpenByUserAndInvite = Option.none(); // newest is terminally expired/absent
+    scenario.countRecent = 0;
+
+    const response = await regenerateMyDiscordInvite(PR5_TEAM_ID);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).not.toBeNull();
+    expect(body.state).toBe('preparing');
+    expect(pr5CreateCalls).toEqual([{ team_invite_id: PR5_INVITE_ID, user_id: TEST_USER_ID }]);
+  });
+
+  it('regenerateMyDiscordInvite reuses the open acceptance and creates nothing when one exists', async () => {
+    resetPr5Scenario();
+    scenario.findOpenByUserAndInvite = Option.some(freshRecord({ id: 'pr5-open-acceptance' }));
+
+    const response = await regenerateMyDiscordInvite(PR5_TEAM_ID);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.acceptanceId).toBe('pr5-open-acceptance');
+    expect(pr5CreateCalls.length).toBe(0);
+  });
+
+  it('regenerateMyDiscordInvite returns 200 and the existing row when rate-limited — no error tag', async () => {
+    resetPr5Scenario();
+    scenario.findOpenByUserAndInvite = Option.none();
+    scenario.countRecent = 3; // at CC-14's 3/hour cap
+    scenario.findNewestByUserAndInvite = Option.some(
+      freshRecord({
+        id: 'pr5-rate-limited',
+        discord_code_error_code: Option.some('bot_missing_perms'),
+      }),
+    );
+
+    const response = await regenerateMyDiscordInvite(PR5_TEAM_ID);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.acceptanceId).toBe('pr5-rate-limited');
+    expect(pr5CreateCalls.length).toBe(0);
+  });
+
+  it('regenerateMyDiscordInvite enqueues a pending guild join only when it created a row', async () => {
+    resetPr5Scenario();
+    scenario.findOpenByUserAndInvite = Option.some(freshRecord({ id: 'pr5-reused-no-enqueue' }));
+    const reuseResponse = await regenerateMyDiscordInvite(PR5_TEAM_ID);
+    expect(reuseResponse.status).toBe(200);
+    expect(pr5EnqueueCalls.length).toBe(0);
+
+    resetPr5Scenario();
+    scenario.findOpenByUserAndInvite = Option.none();
+    scenario.countRecent = 0;
+    const createResponse = await regenerateMyDiscordInvite(PR5_TEAM_ID);
+    expect(createResponse.status).toBe(200);
+    expect(pr5EnqueueCalls).toEqual([{ userId: TEST_USER_ID, teamId: PR5_TEAM_ID }]);
+  });
+
+  it('regenerateMyDiscordInvite returns 403 for a non-member', async () => {
+    resetPr5Scenario();
+    scenario.isMember = false;
+
+    const response = await regenerateMyDiscordInvite(PR5_TEAM_ID);
+    expect(response.status).toBe(403);
+  });
+
+  it('regenerateMyDiscordInvite returns None when the team has no active invite', async () => {
+    resetPr5Scenario();
+    scenario.activeInvite = Option.none();
+
+    const response = await regenerateMyDiscordInvite(PR5_TEAM_ID);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toBeNull();
+    expect(pr5CreateCalls.length).toBe(0);
+  });
+});
