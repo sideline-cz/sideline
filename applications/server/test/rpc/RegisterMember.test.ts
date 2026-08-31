@@ -56,6 +56,12 @@ const COACH_ROLE_ID =
 const COACH_DISCORD_ROLE_ID = '500000000000000002' as Discord.Snowflake;
 // A Discord role with NO `discord_role_mappings` row — Sideline must never touch it.
 const UNMANAGED_DISCORD_ROLE_ID = '500000000000000099' as Discord.Snowflake;
+// Blocker A (whole-series review): a mapping Sideline ADOPTED rather than created — a
+// hand-made Discord role held by members Sideline never assigned it to via `member_roles`.
+// The diff must be free to ADD this role, but must never STRIP it.
+const ADOPTED_ROLE_ID =
+  '00000000-0000-0000-0000-000000000052' as import('@sideline/domain').Role.RoleId;
+const ADOPTED_DISCORD_ROLE_ID = '500000000000000003' as Discord.Snowflake;
 
 // ---------------------------------------------------------------------------
 // In-memory stores (reset between tests)
@@ -205,6 +211,13 @@ const resetStores = () => {
       role_id: COACH_ROLE_ID,
       discord_role_id: COACH_DISCORD_ROLE_ID,
       adopted: false,
+    },
+    {
+      id: 'mapping-adopted',
+      team_id: TEAM_ID,
+      role_id: ADOPTED_ROLE_ID,
+      discord_role_id: ADOPTED_DISCORD_ROLE_ID,
+      adopted: true,
     },
   ];
   roleAssignedEvents = [];
@@ -475,6 +488,11 @@ const MockRolesRepository = Layer.succeed(RolesRepository, {
     if (roleId === COACH_ROLE_ID) {
       return Effect.succeed(Option.some({ id: COACH_ROLE_ID, team_id: TEAM_ID, name: 'Coach' }));
     }
+    if (roleId === ADOPTED_ROLE_ID) {
+      return Effect.succeed(
+        Option.some({ id: ADOPTED_ROLE_ID, team_id: TEAM_ID, name: 'Adopted' }),
+      );
+    }
     return Effect.succeed(Option.none());
   },
 } as any);
@@ -591,7 +609,7 @@ const callRegisterMember = (payload: {
   username: string;
   invite_code: Option.Option<string>;
   roles?: ReadonlyArray<string>;
-  source?: Option.Option<'member_add' | 'reconcile' | 'interaction'>;
+  source?: Option.Option<'member_add' | 'reconcile'>;
 }) =>
   withRpcClient((rpc) =>
     rpc['Guild/RegisterMember']({
@@ -837,7 +855,7 @@ describe('Guild/RegisterMember — PR-8 discord_joined_at (CC-0 / CC-10)', () =>
       discord_id: discordId,
       username: 'member-2',
       invite_code: Option.none(),
-      source: Option.some<'member_add' | 'reconcile' | 'interaction'>('member_add'),
+      source: Option.some<'member_add' | 'reconcile'>('member_add'),
     };
     return callRegisterMember(payload).pipe(
       Effect.flatMap(() => {
@@ -1011,7 +1029,7 @@ describe('Guild/RegisterMember — PR-8 level-based role diff (CC-10)', () => {
       username: 'diff-member-5',
       invite_code: Option.none(),
       roles: [CAPTAIN_DISCORD_ROLE_ID],
-      source: Option.some<'member_add' | 'reconcile' | 'interaction'>('member_add'),
+      source: Option.some<'member_add' | 'reconcile'>('member_add'),
     };
     return callRegisterMember(payload).pipe(
       Effect.flatMap(() => callRegisterMember(payload)),
@@ -1036,7 +1054,7 @@ describe('Guild/RegisterMember — PR-8 level-based role diff (CC-10)', () => {
         username: 'diff-member-6',
         invite_code: Option.none(),
         roles: [],
-        source: Option.some<'member_add' | 'reconcile' | 'interaction'>('reconcile'),
+        source: Option.some<'member_add' | 'reconcile'>('reconcile'),
       };
       return callRegisterMember(payload).pipe(
         Effect.tap(() =>
@@ -1158,6 +1176,60 @@ describe('Guild/ReconcileMembers — PR-8 level-based reconcile (CC-10)', () => 
         Effect.tap(() =>
           Effect.sync(() => {
             expect(roleAssignedEvents).toHaveLength(CAP);
+          }),
+        ),
+      );
+    },
+  );
+
+  // Blocker A (whole-series review): PR-8's level-based diff computes `unassignCandidates` from
+  // EVERY managed mapping present in `actual` and absent from `desired` — including `adopted:
+  // true` ones. Before this fix, a member holding a hand-made, adopted Discord role Sideline
+  // never assigned them (no `member_roles` row, so `desired` never contains it) got
+  // `role_unassigned` -> `deleteGuildMemberRole` on the very next `Guild/ReconcileMembers`. That
+  // is the destruction of human-managed state `handleDeleted.ts` and the `adopted` column exist
+  // to prevent — it must never happen from this path either.
+  itEffect.effect(
+    'never emits role_unassigned for an adopted mapping the member holds but Sideline never assigned',
+    () => {
+      const discordId = '500000000000000004';
+      const memberId = 'member-reconcile-adopted' as TeamMember.TeamMemberId;
+      seedActiveMember(discordId, memberId);
+      // Desires nothing — no `member_roles` row for the adopted role — but Discord shows them
+      // holding it (a captain granted it by hand before Sideline adopted the mapping).
+      effectiveRoles.set(memberId, []);
+      return callReconcileMembers(
+        [{ discord_id: discordId, username: 'adopted-member', roles: [ADOPTED_DISCORD_ROLE_ID] }],
+        true,
+      ).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(roleUnassignedEvents).toHaveLength(0);
+            expect(roleAssignedEvents).toHaveLength(0);
+          }),
+        ),
+      );
+    },
+  );
+
+  // Symmetric with the above: an adopted mapping is still eligible to be ADDED — only stripping
+  // is forbidden.
+  itEffect.effect(
+    'still emits role_assigned for an adopted mapping the member newly desires',
+    () => {
+      const discordId = '500000000000000005';
+      const memberId = 'member-reconcile-adopted-add' as TeamMember.TeamMemberId;
+      seedActiveMember(discordId, memberId);
+      effectiveRoles.set(memberId, [{ role_id: ADOPTED_ROLE_ID, role_name: 'Adopted' }]);
+      return callReconcileMembers(
+        [{ discord_id: discordId, username: 'adopted-member-add', roles: [] }],
+        true,
+      ).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(roleAssignedEvents).toHaveLength(1);
+            expect(roleAssignedEvents[0]?.roleId).toBe(ADOPTED_ROLE_ID);
+            expect(roleUnassignedEvents).toHaveLength(0);
           }),
         ),
       );

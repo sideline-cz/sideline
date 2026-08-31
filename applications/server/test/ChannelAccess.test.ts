@@ -60,6 +60,7 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
+import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementConfig.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
@@ -772,6 +773,7 @@ const buildFullLayer = (overrides?: {
     .pipe(Layer.provide(MockEmailLayers))
     .pipe(Layer.provide(MockEventRosterLayers))
     .pipe(Layer.provide(BotInfoStore.Default))
+    .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
     .pipe(
       Layer.provide(
         Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),

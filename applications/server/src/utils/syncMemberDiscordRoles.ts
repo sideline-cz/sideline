@@ -35,11 +35,15 @@ const neverSyncedResult = new RoleApi.SyncMemberRolesResult({
  * - **managed** = the Discord roles this team has a `discord_role_mappings` row for — i.e. the
  *   Discord roles Sideline actually owns.
  * - **added** = every role in `desired` → `role_assigned`.
- * - **removed** = every role in `managed` that is NOT in `desired` → `role_unassigned`.
+ * - **removed** = every NON-ADOPTED role in `managed` that is NOT in `desired` → `role_unassigned`.
  *   Removal is intentionally restricted to `managed`: a Discord role a captain granted by hand
  *   (no Sideline mapping for it) is never considered here, so this sync can never strip a
  *   hand-granted Discord role. Do not widen `removed` to "any Discord role the member doesn't
- *   need" — that is the anti-stripping guard CC-8 requires.
+ *   need" — that is the anti-stripping guard CC-8 requires. An `adopted: true` mapping IS in
+ *   `managed`, so it needs its own guard on top of CC-8 (blocker A, whole-series review): a
+ *   member holding an adopted role by hand has no `member_roles` row and so never appears in
+ *   `desired` either — without excluding `adopted` mappings from `removed` explicitly, this sync
+ *   would strip every adopted role on the very first click for any member who has one.
  * - A member with no `discord_id`, or that does not exist on this team, returns
  *   `{ skippedCount: 1, roleSyncState: 'never' }` and enqueues nothing.
  * - `RoleSyncEventsRepository`'s `_emitIfGuildLinked` already no-ops (writes nothing) for a team
@@ -124,8 +128,14 @@ const syncLinkedMember = (params: {
     // doc comment for why these two never derive from one another.
     Effect.bind('priorSync', () => params.members.findLastRoleSync(params.teamMemberId)),
     Effect.let('desiredIds', ({ desired }) => new Set(desired.map((r) => r.role_id))),
+    // Blocker A (whole-series review): `adopted` mappings are excluded here, same rationale as
+    // `reconcileMemberDiscordRoles.ts` — a member holding an adopted Discord role by hand has no
+    // `member_roles` row and so never appears in `desired`. Without this exclusion, a captain
+    // clicking "sync" on ANY member stripped every adopted role that member held but was never
+    // assigned through Sideline. It may still be ADDED via `desired` above; only removal is
+    // guarded.
     Effect.let('removedCandidates', ({ managed, desiredIds }) =>
-      managed.filter((mapping) => !desiredIds.has(mapping.role_id)),
+      managed.filter((mapping) => !mapping.adopted && !desiredIds.has(mapping.role_id)),
     ),
     // Resolve names for the roles being removed. A mapping whose role can no longer be found
     // (e.g. archived) is skipped rather than emitted with a fabricated name.

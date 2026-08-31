@@ -115,9 +115,15 @@ export const GuildRpcGroup = RpcGroup.make(
       // `rpc/guild/index.ts` `registerMember`). Do NOT default this to `'reconcile'` with
       // `withDecodingDefaultKey` — that is exactly what made a real join indistinguishable from a
       // reconcile pass and permanently stranded the member (blocker 7).
-      source: Schema.OptionFromOptionalKey(
-        Schema.Literals(['member_add', 'reconcile', 'interaction']),
-      ),
+      //
+      // Only two literals, not three (blocker "also fix" item, whole-series review of
+      // `fix/discord-onboarding-webapp`): the bot only ever sends `'member_add'`
+      // (`applications/bot/src/events/index.ts`) and the server only ever supplies `'reconcile'`
+      // itself (`rpc/guild/index.ts`'s `Guild/ReconcileMembers`); `observeGuildMembership` only
+      // branches on whether `source` is present at all, never on which literal it holds. A third,
+      // never-produced `'interaction'` value was unproducible dead wire surface — dropped rather
+      // than wired, since no interaction-driven caller of `RegisterMember` exists to produce it.
+      source: Schema.OptionFromOptionalKey(Schema.Literals(['member_add', 'reconcile'])),
     },
     success: Schema.OptionFromNullOr(
       Schema.Struct({

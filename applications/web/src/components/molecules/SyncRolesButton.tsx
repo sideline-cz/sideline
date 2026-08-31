@@ -30,12 +30,11 @@ export interface SyncRolesResult {
  * guild. Mirrors the constant already shipped in `PlayerDetailPage.tsx`. */
 const SYNC_COOLDOWN_MS = 60_000;
 
-/** Exported so other surfaces rendering `lastRoleSyncError` (e.g. `PlayerDetailPage`, which owns
- * its own sync-button markup rather than this molecule) map the code to the same i18n key without
- * duplicating the mapping. */
-export const errorCopyKey = (
-  code: 'retryable' | 'captain_action' | 'user_action' | 'unknown',
-): string =>
+/** `PlayerDetailPage` used to own its own sync-button markup and imported this to map
+ * `lastRoleSyncError` to the same i18n key without duplicating the mapping; it now renders this
+ * molecule directly (see `f99ea898`), which calls this mapping itself below. Kept module-private
+ * since nothing outside this file uses it anymore. */
+const errorCopyKey = (code: 'retryable' | 'captain_action' | 'user_action' | 'unknown'): string =>
   `discord_syncError_${code === 'captain_action' ? 'captainAction' : code === 'user_action' ? 'userAction' : code}`;
 
 type ButtonState = 'idle' | 'syncing' | 'cooldown';
@@ -55,6 +54,12 @@ export function SyncRolesButton({ onSync, disabled = false }: SyncRolesButtonPro
   const [state, setState] = React.useState<ButtonState>('idle');
   const [result, setResult] = React.useState<SyncRolesResult | null>(null);
   const [syncedAt, setSyncedAt] = React.useState<Date | null>(null);
+  // Blocker 2 (whole-series review, fix/discord-onboarding-webapp): a rejected `onSync()` (a
+  // 403 from a permission check, a network failure, anything) is a DIFFERENT fact from
+  // `result.lastRoleSyncError` below — that bucket describes a completed run that partially
+  // failed; this tracks the call never completing at all. Must be reset at the start of the next
+  // click so a stale failure notice doesn't linger across a later successful run.
+  const [callFailed, setCallFailed] = React.useState(false);
   const cooldownTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const { formatRelative } = useFormatDate();
 
@@ -68,10 +73,18 @@ export function SyncRolesButton({ onSync, disabled = false }: SyncRolesButtonPro
   const handleClick = React.useCallback(async () => {
     if (state !== 'idle') return;
     setState('syncing');
+    setCallFailed(false);
     try {
       const outcome = await onSync();
       setResult(outcome);
       setSyncedAt(new Date());
+    } catch {
+      // Blocker 2: `onSync` rejecting must never propagate out of this handler — nothing awaits
+      // `handleClick` (it's an `onClick` prop), so an uncaught rejection here is an unhandled
+      // promise rejection while the UI silently flips to the cooldown/✓ state below, reporting
+      // success for a sync that never happened. Catch it, record it, and let `finally` still
+      // apply the cooldown — a failed attempt is still a completed run for rate-limit purposes.
+      setCallFailed(true);
     } finally {
       setState('cooldown');
       cooldownTimerRef.current = setTimeout(() => setState('idle'), SYNC_COOLDOWN_MS);
@@ -79,7 +92,7 @@ export function SyncRolesButton({ onSync, disabled = false }: SyncRolesButtonPro
   }, [state, onSync]);
 
   const errorCode = result === null ? Option.none() : result.lastRoleSyncError;
-  const failed = Option.isSome(errorCode);
+  const failed = Option.isSome(errorCode) || callFailed;
 
   // Prefer the server-recorded `lastRoleSyncAt` (the previous completed attempt) over the local
   // `syncedAt` click-stamp — they are different facts (see the field's doc comment above) and the
@@ -130,6 +143,11 @@ export function SyncRolesButton({ onSync, disabled = false }: SyncRolesButtonPro
           </div>
         ),
       })}
+      {callFailed && (
+        <div role='alert' className='text-xs text-destructive'>
+          {tr('discord_syncFailed')}
+        </div>
+      )}
     </div>
   );
 }

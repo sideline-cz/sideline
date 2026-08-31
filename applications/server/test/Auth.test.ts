@@ -45,6 +45,7 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
+import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementConfig.js';
 import { DiscordOAuth, DiscordOAuthError } from '~/services/DiscordOAuth.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { MockChannelManagementLayers } from './mocks/channelMocks.js';
@@ -589,6 +590,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockEmailLayers))
   .pipe(Layer.provide(MockEventRosterLayers))
   .pipe(Layer.provide(BotInfoStore.Default))
+  .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
   .pipe(
     Layer.provide(
       Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),
@@ -793,6 +795,7 @@ describe('Auth API — isGlobalAdmin flag on GET /auth/me (TDD: first registered
       .pipe(Layer.provide(MockEmailLayers))
       .pipe(Layer.provide(MockEventRosterLayers))
       .pipe(Layer.provide(BotInfoStore.Default))
+      .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
       .pipe(
         Layer.provide(
           Layer.succeed(GlobalAdminAllowlist, {
@@ -923,6 +926,10 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
     teamsToReturn?: ReadonlyArray<typeof teamA>;
     profileComplete?: boolean;
     guildIds?: ReadonlyArray<string>;
+    // Blocker D — defaults to `true` (enforcement ON) so the pre-existing `discordJoined`
+    // derivation tests below keep exercising `deriveDiscordJoined` for real. The kill-switch
+    // tests explicitly pass `false`.
+    discordJoinEnforcementEnabled?: boolean;
   }) => {
     const CustomMembersLayer = Layer.succeed(TeamMembersRepository, {
       _tag: 'api/TeamMembersRepository',
@@ -1123,6 +1130,13 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
       .pipe(Layer.provide(BotInfoStore.Default))
       .pipe(
         Layer.provide(
+          Layer.succeed(DiscordJoinEnforcementConfig, {
+            asEffect: Effect.succeed(opts.discordJoinEnforcementEnabled ?? true),
+          } as any),
+        ),
+      )
+      .pipe(
+        Layer.provide(
           Layer.succeed(GlobalAdminAllowlist, {
             asEffect: Effect.succeed(new Set<string>()),
           } as any),
@@ -1211,6 +1225,41 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body[0].discordJoined).toBe('not_connected');
+  });
+
+  // Blocker D (whole-series review) — the kill switch the PR-9 rollout plan requires before the
+  // enforcement redirect goes live: a server-side flag that forces `discordJoined` to 'unknown'
+  // for every team, instantly removing the redirect, the card, and the badge on the client.
+  // Deliberately reuses the exact fixture from the 'not_connected' test above (backfilled guild,
+  // no `discord_joined_at`) — the case the anti-lockout guard already protects — to prove the
+  // kill switch overrides `deriveDiscordJoined` entirely rather than merely agreeing with it in
+  // the 'unknown' case by coincidence.
+  it("myTeams forces discordJoined to 'unknown' when the kill switch is off, even for a backfilled guild with no discord_joined_at", async () => {
+    const testLayer = buildAuthTestLayer({
+      findByUserResult: [
+        {
+          ...activeMembershipA,
+          discord_joined_at: Option.none(),
+          members_backfilled_at: Option.some(DateTime.nowUnsafe()),
+        },
+      ],
+      findMembershipByIdsResult: () => Option.none(),
+      teamsToReturn: [teamA],
+      discordJoinEnforcementEnabled: false,
+    });
+
+    const app = HttpRouter.toWebHandler(testLayer);
+    const handler = app.handler as (...args: any[]) => Promise<Response>;
+    const response = await handler(
+      new Request('http://localhost/auth/me/teams', {
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body[0].discordJoined).toBe('unknown');
   });
 
   // The anti-lockout guard: a guild whose backfill never completed must NEVER read as
@@ -1489,6 +1538,7 @@ describe('Global admin read access', () => {
       .pipe(Layer.provide(MockEmailLayers))
       .pipe(Layer.provide(MockEventRosterLayers))
       .pipe(Layer.provide(BotInfoStore.Default))
+      .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
       .pipe(
         Layer.provide(
           Layer.succeed(GlobalAdminAllowlist, {
@@ -1735,6 +1785,7 @@ describe('Auth API — requeueFailedForUser widening (TDD: PR-4 CC-6/S5)', () =>
     .pipe(Layer.provide(MockEmailLayers))
     .pipe(Layer.provide(MockEventRosterLayers))
     .pipe(Layer.provide(BotInfoStore.Default))
+    .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
     .pipe(
       Layer.provide(
         Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),

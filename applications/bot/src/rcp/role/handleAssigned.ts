@@ -1,12 +1,24 @@
 import type { RoleRpcEvents } from '@sideline/domain';
 import { DiscordREST } from 'dfx';
-import { Effect } from 'effect';
+import { Data, Effect } from 'effect';
 import { isUnknownRoleError } from '~/rest/discordErrors.js';
 import { hasDangerousPermissions } from '~/rest/roles/dangerousPermissions.js';
 import { ensureMapping } from '~/rest/roles/ensureMapping.js';
 import { retryPolicy } from '~/rest/utils.js';
 import { GuildRolesCache } from '~/services/GuildRolesCache.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
+
+/** Refusing to assign a role whose live permissions are dangerous (or unverifiable) — see
+ * `isUnsafeToAssign` below. Failed with this tag rather than swallowed (whole-series review,
+ * "also fix" item) so `errorClassifier.ts`'s `classifyRoleSyncError` can turn it into
+ * `captain_action`, which `Role/MarkEventFailed` records on `team_members.last_role_sync_*` —
+ * the UI already has copy for that code. The level-based diff re-derives the missing assignment
+ * on the next reconcile pass regardless, so failing the event loses nothing. */
+export class UnsafeRoleAssignmentError extends Data.TaggedError('UnsafeRoleAssignmentError')<{
+  readonly discordRoleId: string;
+  readonly guildId: string;
+  readonly discordUserId: string;
+}> {}
 
 /** Blocker 3: `ensureMapping` (and adoption in particular) validate a role's permissions only at
  * mapping time. Nothing re-checks afterwards, so a guild role that was `permissions: '0'` when
@@ -54,20 +66,31 @@ export const handleMemberAdded = (event: RoleRpcEvents.RoleAssignedEvent) =>
     ),
     Effect.bind('guildRoles', ({ rolesCache }) => rolesCache.get(event.guild_id)),
     Effect.let('unsafe', ({ guildRoles, roleId }) => isUnsafeToAssign(guildRoles, roleId)),
-    Effect.flatMap(({ rest, roleId, unsafe }) =>
-      unsafe
-        ? Effect.logWarning(
-            `Refusing to assign Discord role ${roleId} to user ${event.discord_user_id} in guild ${event.guild_id}: the role now carries dangerous permissions, or its permissions could not be verified. Not failing the event — an operator should review the role's permissions in Discord and re-run role sync once fixed.`,
-          )
-        : rest.addGuildMemberRole(event.guild_id, event.discord_user_id, roleId).pipe(
-            Effect.retry(retryPolicy),
-            Effect.tapError((error) => clearStaleMappingOnUnknownRole(event, error)),
-            Effect.tap(() =>
-              Effect.logInfo(
-                `Assigned role ${roleId} to user ${event.discord_user_id} in guild ${event.guild_id}`,
+    Effect.flatMap(
+      ({ rest, roleId, unsafe }): Effect.Effect<void, unknown, SyncRpc> =>
+        unsafe
+          ? Effect.logWarning(
+              `Refusing to assign Discord role ${roleId} to user ${event.discord_user_id} in guild ${event.guild_id}: the role now carries dangerous permissions, or its permissions could not be verified. Failing the event (captain_action) — an operator should review the role's permissions in Discord and re-run role sync once fixed.`,
+            ).pipe(
+              Effect.flatMap(() =>
+                Effect.fail(
+                  new UnsafeRoleAssignmentError({
+                    discordRoleId: roleId,
+                    guildId: event.guild_id,
+                    discordUserId: event.discord_user_id,
+                  }),
+                ),
+              ),
+            )
+          : rest.addGuildMemberRole(event.guild_id, event.discord_user_id, roleId).pipe(
+              Effect.retry(retryPolicy),
+              Effect.tapError((error) => clearStaleMappingOnUnknownRole(event, error)),
+              Effect.tap(() =>
+                Effect.logInfo(
+                  `Assigned role ${roleId} to user ${event.discord_user_id} in guild ${event.guild_id}`,
+                ),
               ),
             ),
-          ),
     ),
     Effect.asVoid,
   );

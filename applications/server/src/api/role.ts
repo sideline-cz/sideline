@@ -364,7 +364,15 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
-            Effect.tap(({ membership }) => requirePermission(membership, 'role:manage', forbidden)),
+            // Blocker C (whole-series review): `role:manage` is Admin-only (not even Captain
+            // holds it), but the web renders the sync button to every member. Self-serve
+            // carve-out — a member re-syncing THEIR OWN roles is always allowed; syncing anyone
+            // else still requires `role:manage`.
+            Effect.tap(({ membership }) =>
+              membership.id === memberId
+                ? Effect.void
+                : requirePermission(membership, 'role:manage', forbidden),
+            ),
             Effect.bind('targetMember', () =>
               members.findRosterMemberByIds(teamId, memberId).pipe(
                 Effect.flatMap(

@@ -4,16 +4,28 @@ import { Effect } from 'effect';
 import { retryPolicy } from '~/rest/utils.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
-/** Blocker 2 asked us to consider `mapping.adopted` here too, the way `handleDeleted` does.
- * Decision: do NOT special-case it. `handleDeleted` destroys the shared Discord *resource* for
- * every one of its (possibly untracked) members; this handler only ever touches ONE member's
- * membership in that role, and only fires because a captain used Sideline's own role UI to revoke
- * this specific member's Sideline role — the same authority that granted it via `role_assigned` in
- * the first place (`handleAssigned.ts`). A member Sideline never assigned this role to has no
- * `member_roles` row to delete, so no `role_unassigned` event is ever emitted for them regardless
- * of whether the mapping is adopted — this handler's blast radius is inherently limited to members
- * Sideline itself put in this role. Symmetric with assignment: adopting a role means Sideline can
- * manage membership in it, in both directions. */
+/** This handler executes `role_unassigned` unconditionally: whatever mapping's `discord_role_id`
+ * comes back from `Role/GetMapping`, it calls `deleteGuildMemberRole` for it, with no
+ * `mapping.adopted` check of its own.
+ *
+ * That is safe ONLY because the emission side now guarantees it never has to be: this event used
+ * to be edge-triggered purely from a captain revoking a role through Sideline's own UI
+ * (`role.ts`'s `unassignRole`), which is what the now-stale version of this comment (removed by
+ * blocker A, whole-series review of `fix/discord-onboarding-webapp`) relied on. PR-8's
+ * `reconcileMemberDiscordRoles.ts` broke that premise: it emits `role_unassigned` for every
+ * managed mapping present in a member's *actual* Discord roles and absent from their *desired*
+ * Sideline roles — including `adopted: true` mappings, which have no `member_roles` row and so
+ * never appear in `desired`. Left unguarded, that meant a member holding a hand-made, adopted
+ * Discord role Sideline never assigned them got it silently deleted on the next
+ * `Guild/ReconcileMembers`.
+ *
+ * The fix lives upstream, not here: `reconcileMemberDiscordRoles.ts` (`unassignCandidates`) and
+ * `syncMemberDiscordRoles.ts` (`removedCandidates`) both now exclude `adopted` mappings from the
+ * diff, so `role_unassigned` for an adopted mapping is no longer emitted for a member Sideline
+ * didn't itself put in that role. Keep the decision there, where the full diff (desired vs.
+ * actual) is visible — this handler only ever sees one event with no way to reconstruct that
+ * context, so re-adding a check here would be duplicated, harder-to-verify policy, not defense
+ * in depth. */
 export const handleMemberRemoved = (event: RoleRpcEvents.RoleUnassignedEvent) =>
   Effect.Do.pipe(
     Effect.bind('rpc', () => SyncRpc.asEffect()),

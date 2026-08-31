@@ -20,6 +20,21 @@ const ALL_CODES: ReadonlyArray<RoleApi.DiscordSyncErrorCode> = [
 ];
 
 describe('classifyRoleSyncError', () => {
+  // Blocker 3's TOCTOU re-check (`handleAssigned.ts`) fails with this tag when a role's live
+  // permissions are dangerous or unverifiable — whole-series review, "also fix" item: this
+  // failure used to be swallowed (resolved, not rejected), so `Role/MarkEventProcessed` recorded
+  // a refused assignment as `'ok'`. It must classify the same way 50013 does.
+  it('classifies an UnsafeRoleAssignmentError as captain_action', () => {
+    const result = classifyRoleSyncError({
+      _tag: 'UnsafeRoleAssignmentError',
+      discordRoleId: '555555555555555555',
+      guildId: '111111111111111111',
+      discordUserId: '444444444444444444',
+    });
+    expect(result.code).toBe('captain_action');
+    expect(result.terminal).toBe(true);
+  });
+
   it('classifies a 50013 ErrorResponse as captain_action (missing permission or role hierarchy)', () => {
     const result = classifyRoleSyncError({
       _tag: 'ErrorResponse',

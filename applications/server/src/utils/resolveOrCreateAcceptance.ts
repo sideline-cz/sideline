@@ -8,7 +8,6 @@ const RATE_LIMIT_PER_HOUR = 3;
 export interface ResolveOrCreateAcceptanceResult {
   readonly acceptance: InviteAcceptance.InviteAcceptance;
   readonly created: boolean;
-  readonly rateLimited: boolean;
 }
 
 /**
@@ -29,6 +28,12 @@ export interface ResolveOrCreateAcceptanceResult {
  *     which is an invariant violation, not a legitimate state. It surfaces as a defect
  *     (`LogicError.die`) rather than silently returning no acceptance (the pre-fix "fails
  *     closed" bug), so `acceptance` never needs to be `Option` downstream.
+ *
+ * `ResolveOrCreateAcceptanceResult` deliberately does NOT carry a `rateLimited` flag (removed —
+ * whole-series review, "also fix" item): no caller ever read it, and the one place that would
+ * plausibly want it (`api/invite.ts`'s `join` handler) already documents, at its call site, that
+ * the rate-limit event is logged once, right here, next to the branch that produces it — adding
+ * a second log at the call site would just reintroduce the double-logging should-fix 8 removed.
  */
 export const resolveOrCreateAcceptance = (
   userId: User.UserId,
@@ -42,11 +47,7 @@ export const resolveOrCreateAcceptance = (
     Effect.flatMap(({ acceptances, open }) =>
       Option.match(open, {
         onSome: (acceptance) =>
-          Effect.succeed<ResolveOrCreateAcceptanceResult>({
-            acceptance,
-            created: false,
-            rateLimited: false,
-          }),
+          Effect.succeed<ResolveOrCreateAcceptanceResult>({ acceptance, created: false }),
         onNone: () =>
           acceptances.countRecentByUserAndInvite(userId, invite.id).pipe(
             Effect.flatMap((recentCount) =>
@@ -70,7 +71,6 @@ export const resolveOrCreateAcceptance = (
                             Effect.as<ResolveOrCreateAcceptanceResult>({
                               acceptance,
                               created: false,
-                              rateLimited: true,
                             }),
                           ),
                       }),
@@ -81,7 +81,6 @@ export const resolveOrCreateAcceptance = (
                       (acceptance): ResolveOrCreateAcceptanceResult => ({
                         acceptance,
                         created: true,
-                        rateLimited: false,
                       }),
                     ),
                   ),

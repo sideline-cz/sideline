@@ -50,10 +50,16 @@ const reserveFromBudget = (budget: Option.Option<Ref.Ref<number>>, requested: nu
  * - **managed** = `discord_role_mappings` for the team — the Discord roles Sideline owns.
  * - **actual** = the payload's `roles`, implicitly restricted to `managed`'s values below.
  * - `role_assigned` for every managed+desired role missing from `actual`.
- * - `role_unassigned` for every managed role present in `actual` but not desired.
+ * - `role_unassigned` for every NON-ADOPTED managed role present in `actual` but not desired.
  * - **A Discord role with no `discord_role_mappings` row is never considered** — both candidate
  *   lists are filtered from `managed`, never from `actual` directly, so an unmapped role a captain
  *   granted by hand can never be stripped (the anti-stripping guard, CC-8).
+ * - **An `adopted: true` mapping is excluded from `unassignCandidates` (blocker A, whole-series
+ *   review)** — a member holding an adopted Discord role by hand, with no `member_roles` row,
+ *   never appears in `desired`, so unlike CC-8's "no mapping at all" case, adoption alone does
+ *   NOT keep the role out of `managed`/`actual` the way an unmapped role does. Without this
+ *   explicit exclusion every such member gets `role_unassigned` on the very next reconcile. It
+ *   may still be ADDED via `assignCandidates` — only stripping is forbidden.
  * - **In steady state (actual already matches desired) both candidate lists are empty and nothing
  *   is emitted.** This is the flood protection that replaces the transition gate, and it holds on
  *   every call, not just the first one after a migration.
@@ -87,8 +93,19 @@ const computeRoleDiff = (
     Effect.let('assignCandidates', ({ managed, desiredRoleIds, actualRoleIds }) =>
       managed.filter((m) => desiredRoleIds.has(m.role_id) && !actualRoleIds.has(m.discord_role_id)),
     ),
+    // Blocker A (whole-series review): `adopted` mappings are excluded here — never from
+    // `assignCandidates` above. An adopted mapping points at a Discord role Sideline did not
+    // create (`ensureMapping.ts`); members holding it because a captain granted it by hand,
+    // before or outside Sideline, have no `member_roles` row and so never appear in `desired`.
+    // Stripping it on that basis would destroy human-managed Discord state — exactly what
+    // `handleDeleted.ts` and the `adopted` column exist to prevent, just reached through this
+    // diff instead of a role deletion. Adopted roles may still be ADDED (Sideline is free to
+    // bring its own members into sync with a role it now manages); they must never be REMOVED
+    // by a diff Sideline did not author.
     Effect.let('unassignCandidates', ({ managed, desiredRoleIds, actualRoleIds }) =>
-      managed.filter((m) => actualRoleIds.has(m.discord_role_id) && !desiredRoleIds.has(m.role_id)),
+      managed.filter(
+        (m) => !m.adopted && actualRoleIds.has(m.discord_role_id) && !desiredRoleIds.has(m.role_id),
+      ),
     ),
     // Resolve role names; a mapping whose role can no longer be found (e.g. archived) is skipped
     // rather than emitted with a fabricated name — mirrors syncMemberDiscordRoles.ts.
