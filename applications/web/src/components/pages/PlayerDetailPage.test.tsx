@@ -8,6 +8,7 @@
 // Heavy child organisms are mocked as identifiable stubs so this file tests
 // composition/gating only, not their internals.
 
+import { getLocale } from '@sideline/i18n/runtime';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DateTime, Option } from 'effect';
 import type React from 'react';
@@ -1184,9 +1185,12 @@ describe('PlayerDetailPage — Discord role sync (PR-7)', () => {
       expect(onSyncDiscordRoles).toHaveBeenCalled();
     });
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /synced|syncing/i }).hasAttribute('disabled')).toBe(
-        true,
-      );
+      // `SyncRolesButton` (the shared molecule) keeps the same accessible name across
+      // idle/cooldown — only its icon and `disabled` state change — so assert on `disabled`
+      // rather than a state-specific name.
+      expect(
+        screen.getByRole('button', { name: 'Sync Discord roles' }).hasAttribute('disabled'),
+      ).toBe(true);
     });
   });
 
@@ -1215,8 +1219,11 @@ describe('PlayerDetailPage — Discord role sync (PR-7)', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Sync Discord roles' }));
     });
 
+    // `SyncRolesButton` appends a "· Synced …" relative-time suffix to this same line (using its
+    // local click-stamp as a fallback, since this result carries no `lastRoleSyncAt`) — match on
+    // the leading counts text rather than the full line.
     await waitFor(() => {
-      expect(screen.getByText('Queued 3 additions and 2 removals.')).not.toBeNull();
+      expect(screen.getByText(/^Queued 3 additions and 2 removals\./)).not.toBeNull();
     });
   });
 
@@ -1283,8 +1290,51 @@ describe('PlayerDetailPage — Discord role sync (PR-7)', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('Queued 1 additions and 0 removals.')).not.toBeNull();
+      expect(screen.getByText(/^Queued 1 additions and 0 removals\./)).not.toBeNull();
     });
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  // `SyncRolesButton` (the shared molecule) tracks its own `syncedAt` local click-stamp as a
+  // fallback, but the server's `lastRoleSyncAt` (the previous completed attempt) is the correct
+  // value to show — see the molecule's doc comment. Regression guard for the consolidation: a
+  // captain retrying after fixing a Discord permission must see when the last REAL attempt
+  // happened, not "just now" from their own click.
+  it('renders the server-recorded lastRoleSyncAt, not the local click timestamp', async () => {
+    const twoHoursAgo = DateTime.makeUnsafe(
+      new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    );
+    const onSyncDiscordRoles = vi.fn().mockResolvedValue({
+      addedCount: 1,
+      removedCount: 0,
+      skippedCount: 0,
+      roleSyncState: 'queued',
+      lastRoleSyncAt: Option.some(twoHoursAgo),
+      lastRoleSyncError: Option.none(),
+    });
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        player={makePlayer() as any}
+        canEdit={false}
+        canManageRoles={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+        onSyncDiscordRoles={onSyncDiscordRoles}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sync Discord roles' }));
+    });
+
+    const expectedRelative = new Intl.RelativeTimeFormat(getLocale(), { numeric: 'auto' }).format(
+      -2,
+      'hour',
+    );
+    const escapedRelative = expectedRelative.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    await waitFor(() => {
+      expect(screen.getByText(new RegExp(`Synced ${escapedRelative}`))).not.toBeNull();
+    });
   });
 });

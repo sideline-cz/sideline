@@ -15,6 +15,7 @@ const okResult = (overrides: Partial<Record<string, unknown>> = {}) => ({
   addedCount: 2,
   removedCount: 1,
   roleSyncState: 'ok' as const,
+  lastRoleSyncAt: Option.none(),
   lastRoleSyncError: Option.none(),
   ...overrides,
 });
