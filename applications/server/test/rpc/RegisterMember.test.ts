@@ -1,11 +1,12 @@
 import { it as itEffect } from '@effect/vitest';
-import type { Auth, Discord, GroupModel, Team } from '@sideline/domain';
+import type { Auth, Discord, GroupModel, Team, TeamMember } from '@sideline/domain';
 import { GuildRpcGroup } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { RpcTest } from 'effect/unstable/rpc';
 import { SqlClient } from 'effect/unstable/sql';
 import { afterEach, beforeEach, describe, expect } from 'vitest';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsRepository.js';
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
@@ -16,6 +17,9 @@ import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRep
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
 import { PersonalEventChannelsRepository } from '~/repositories/PersonalEventChannelsRepository.js';
 import { PersonalEventOverflowCategoriesRepository } from '~/repositories/PersonalEventOverflowCategoriesRepository.js';
+import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
+import { RolesRepository } from '~/repositories/RolesRepository.js';
+import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SudoSessionsRepository } from '~/repositories/SudoSessionsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -42,6 +46,17 @@ const EXPIRED_CODE = 'EXPIRED-INVITE';
 const NONEXISTENT_CODE = 'NONEXISTENT';
 const CROSS_TEAM_CODE = 'CROSS-TEAM-CODE';
 
+// PR-8: a role Sideline manages (mapped to a Discord role) plus a second one, so the
+// role_unassigned path has something distinct from the role_assigned path to exercise.
+const CAPTAIN_ROLE_ID =
+  '00000000-0000-0000-0000-000000000050' as import('@sideline/domain').Role.RoleId;
+const CAPTAIN_DISCORD_ROLE_ID = '500000000000000001' as Discord.Snowflake;
+const COACH_ROLE_ID =
+  '00000000-0000-0000-0000-000000000051' as import('@sideline/domain').Role.RoleId;
+const COACH_DISCORD_ROLE_ID = '500000000000000002' as Discord.Snowflake;
+// A Discord role with NO `discord_role_mappings` row — Sideline must never touch it.
+const UNMANAGED_DISCORD_ROLE_ID = '500000000000000099' as Discord.Snowflake;
+
 // ---------------------------------------------------------------------------
 // In-memory stores (reset between tests)
 // ---------------------------------------------------------------------------
@@ -49,33 +64,65 @@ const CROSS_TEAM_CODE = 'CROSS-TEAM-CODE';
 let teamMembersAdded: Array<{ team_id: string; user_id: string }>;
 let groupMembersAdded: Array<{ group_id: string; member_id: string }>;
 
-// Shape of the outer RPC result
-type RegisterMemberResult = Option.Option<{
-  system_log_channel_id: Option.Option<Discord.Snowflake>;
-  welcome: Option.Option<{
-    welcome_channel_id: Option.Option<Discord.Snowflake>;
-    welcome_message_rendered: Option.Option<string>;
-    group_name: Option.Option<string>;
-    group_color_int: Option.Option<number>;
-    inviter_discord_id: Option.Option<Discord.Snowflake>;
-  }>;
-  invite_code: Option.Option<string>;
-}>;
+// Deterministic per-discord_id user id so repeated calls with the same discord_id resolve to the
+// same user (needed for the "already active member" scenarios — PR-8's actual bug).
+const userIdForDiscordId = (discordId: string) => `user-${discordId}`;
 
-type InviteContext = {
-  code: string;
-  team_id: Team.TeamId;
-  group_id: Option.Option<GroupModel.GroupId>;
-  group_name: Option.Option<string>;
-  group_color: Option.Option<string>;
-  inviter_discord_id: Option.Option<Discord.Snowflake>;
-  welcome_message_template: Option.Option<string>;
-  welcome_channel_id: Option.Option<Discord.Snowflake>;
-  system_log_channel_id: Option.Option<Discord.Snowflake>;
+type MembershipRow = {
+  readonly id: TeamMember.TeamMemberId;
+  readonly team_id: string;
+  readonly user_id: string;
   active: boolean;
 };
+// Keyed by user_id.
+let memberships: Map<string, MembershipRow>;
+// Keyed by TeamMemberId (string) -> discord_joined_at, `undefined` = never set, `null` = cleared.
+let discordJoinedAt: Map<string, Date | null | undefined>;
+// Keyed by TeamMemberId (string) -> the member's effective Sideline role ids (PR-8's "desired").
+let effectiveRoles: Map<string, ReadonlyArray<{ role_id: string; role_name: string }>>;
+// Configurable `discord_role_mappings` rows for TEAM_ID.
+let discordRoleMappings: Array<{
+  id: string;
+  team_id: string;
+  role_id: string;
+  discord_role_id: string;
+  adopted: boolean;
+}>;
+let roleAssignedEvents: Array<{
+  teamId: string;
+  roleId: string;
+  roleName: string;
+  teamMemberId: string;
+  discordUserId: string;
+}>;
+let roleUnassignedEvents: Array<typeof roleAssignedEvents extends Array<infer T> ? T : never>;
+let markMembersBackfilledCalls: Array<string>;
+let nextMemberId = 1;
 
-const inviteContexts: ReadonlyMap<string, InviteContext> = new Map([
+const seedActiveMember = (discordId: string, memberId: TeamMember.TeamMemberId) => {
+  memberships.set(userIdForDiscordId(discordId), {
+    id: memberId,
+    team_id: TEAM_ID,
+    user_id: userIdForDiscordId(discordId),
+    active: true,
+  });
+};
+
+const inviteContexts: ReadonlyMap<
+  string,
+  {
+    code: string;
+    team_id: Team.TeamId;
+    group_id: Option.Option<GroupModel.GroupId>;
+    group_name: Option.Option<string>;
+    group_color: Option.Option<string>;
+    inviter_discord_id: Option.Option<Discord.Snowflake>;
+    welcome_message_template: Option.Option<string>;
+    welcome_channel_id: Option.Option<Discord.Snowflake>;
+    system_log_channel_id: Option.Option<Discord.Snowflake>;
+    active: boolean;
+  }
+> = new Map([
   [
     VALID_CODE_WITH_GROUP,
     {
@@ -141,6 +188,29 @@ const inviteContexts: ReadonlyMap<string, InviteContext> = new Map([
 const resetStores = () => {
   teamMembersAdded = [];
   groupMembersAdded = [];
+  memberships = new Map();
+  discordJoinedAt = new Map();
+  effectiveRoles = new Map();
+  discordRoleMappings = [
+    {
+      id: 'mapping-captain',
+      team_id: TEAM_ID,
+      role_id: CAPTAIN_ROLE_ID,
+      discord_role_id: CAPTAIN_DISCORD_ROLE_ID,
+      adopted: false,
+    },
+    {
+      id: 'mapping-coach',
+      team_id: TEAM_ID,
+      role_id: COACH_ROLE_ID,
+      discord_role_id: COACH_DISCORD_ROLE_ID,
+      adopted: false,
+    },
+  ];
+  roleAssignedEvents = [];
+  roleUnassignedEvents = [];
+  markMembersBackfilledCalls = [];
+  nextMemberId = 1;
 };
 
 beforeEach(resetStores);
@@ -172,7 +242,7 @@ const MockTeamsRepository = Layer.succeed(TeamsRepository, {
 
 const MockUsersRepository = Layer.succeed(UsersRepository, {
   upsertFromDiscord: (input: { discord_id: string; username: string }) => {
-    const id = crypto.randomUUID() as Auth.UserId;
+    const id = userIdForDiscordId(input.discord_id) as Auth.UserId;
     return Effect.succeed({
       id,
       discord_id: input.discord_id,
@@ -182,18 +252,53 @@ const MockUsersRepository = Layer.succeed(UsersRepository, {
     });
   },
   findById: () => Effect.succeed(Option.none()),
-  findByDiscordId: () => Effect.succeed(Option.none()),
+  findByDiscordId: (discordId: string) =>
+    Effect.succeed(
+      Option.some({
+        id: userIdForDiscordId(discordId) as Auth.UserId,
+        discord_id: discordId,
+        username: discordId,
+        avatar: Option.none(),
+        is_profile_complete: false,
+      }),
+    ),
 } as any);
 
 const MockTeamMembersRepository = Layer.succeed(TeamMembersRepository, {
-  findMembershipByIds: () => Effect.succeed(Option.none()),
+  findMembershipByIds: (
+    teamId: string,
+    userId: string,
+    options?: { includeInactive?: boolean },
+  ) => {
+    const row = memberships.get(userId);
+    if (!row || row.team_id !== teamId) return Effect.succeed(Option.none());
+    if (!row.active && options?.includeInactive !== true) return Effect.succeed(Option.none());
+    return Effect.succeed(Option.some({ ...row, role_names: [], permissions: [] }));
+  },
   addMember: (input: { team_id: string; user_id: string }) => {
     teamMembersAdded.push({ team_id: input.team_id, user_id: input.user_id });
-    const memberId = crypto.randomUUID();
-    return Effect.succeed({
-      id: memberId as import('@sideline/domain').TeamMember.TeamMemberId,
+    const memberId = `member-${nextMemberId++}` as TeamMember.TeamMemberId;
+    memberships.set(input.user_id, {
+      id: memberId,
       team_id: input.team_id,
       user_id: input.user_id,
+      active: true,
+    });
+    return Effect.succeed({
+      id: memberId,
+      team_id: input.team_id,
+      user_id: input.user_id,
+      active: true,
+      jersey_number: Option.none(),
+      joined_at: DateTime.nowUnsafe(),
+    });
+  },
+  reactivateMember: (memberId: string) => {
+    for (const row of memberships.values()) {
+      if (row.id === memberId) row.active = true;
+    }
+    return Effect.succeed({
+      id: memberId,
       active: true,
       jersey_number: Option.none(),
       joined_at: DateTime.nowUnsafe(),
@@ -205,6 +310,29 @@ const MockTeamMembersRepository = Layer.succeed(TeamMembersRepository, {
   findByUser: () => Effect.succeed([]),
   findRosterByTeam: () => Effect.succeed([]),
   findRosterMemberByIds: () => Effect.succeed(Option.none()),
+  findById: (memberId: string) => {
+    for (const row of memberships.values()) {
+      if (row.id === memberId) return Effect.succeed(Option.some({ active: row.active }));
+    }
+    return Effect.succeed(Option.none());
+  },
+  deactivateMemberByIds: (_teamId: string, memberId: string) => {
+    for (const row of memberships.values()) {
+      if (row.id === memberId) row.active = false;
+    }
+    return Effect.void;
+  },
+  hasOtherActiveManager: () => Effect.succeed(true),
+  findEffectiveRoleIdsForMember: (memberId: string) =>
+    Effect.succeed(effectiveRoles.get(memberId) ?? []),
+  markDiscordJoined: (memberId: string) => {
+    if (discordJoinedAt.get(memberId) == null) discordJoinedAt.set(memberId, new Date());
+    return Effect.void;
+  },
+  clearDiscordJoined: (memberId: string) => {
+    discordJoinedAt.set(memberId, null);
+    return Effect.void;
+  },
 } as any);
 
 const MockGroupsRepository = Layer.succeed(GroupsRepository, {
@@ -228,6 +356,14 @@ const MockGroupsRepository = Layer.succeed(GroupsRepository, {
   },
   getAncestorIds: () => Effect.succeed([]),
   getDescendantMemberIds: () => Effect.succeed([]),
+  findGroupIdsByMember: () => Effect.succeed([]),
+  removeAllForMember: () => Effect.void,
+} as any);
+
+const MockRostersRepository = Layer.succeed(RostersRepository, {
+  findRosterIdsByMember: () => Effect.succeed([]),
+  findRosterById: () => Effect.succeed(Option.none()),
+  removeAllForMember: () => Effect.void,
 } as any);
 
 const MockTeamInvitesRepository = Layer.succeed(TeamInvitesRepository, {
@@ -279,6 +415,10 @@ const MockBotGuildsRepository = Layer.succeed(BotGuildsRepository, {
   remove: () => Effect.void,
   exists: () => Effect.succeed(false),
   findAll: () => Effect.succeed([]),
+  markMembersBackfilled: (guildId: string) => {
+    markMembersBackfilledCalls.push(guildId);
+    return Effect.void;
+  },
 } as any);
 
 const MockDiscordChannelsRepository = Layer.succeed(DiscordChannelsRepository, {
@@ -290,7 +430,8 @@ const MockDiscordChannelsRepository = Layer.succeed(DiscordChannelsRepository, {
 } as any);
 
 const MockDiscordRoleMappingRepository = Layer.succeed(DiscordRoleMappingRepository, {
-  findAllByTeam: () => Effect.succeed([]),
+  findAllByTeam: (teamId: string) =>
+    Effect.succeed(discordRoleMappings.filter((m) => m.team_id === teamId)),
 } as any);
 
 const MockDiscordChannelMappingRepository = Layer.succeed(DiscordChannelMappingRepository, {
@@ -323,6 +464,50 @@ const MockPersonalEventOverflowCategoriesRepository = Layer.succeed(
     save: () => Effect.void,
   } as any,
 );
+
+const MockRolesRepository = Layer.succeed(RolesRepository, {
+  findRoleById: (roleId: string) => {
+    if (roleId === CAPTAIN_ROLE_ID) {
+      return Effect.succeed(
+        Option.some({ id: CAPTAIN_ROLE_ID, team_id: TEAM_ID, name: 'Captain' }),
+      );
+    }
+    if (roleId === COACH_ROLE_ID) {
+      return Effect.succeed(Option.some({ id: COACH_ROLE_ID, team_id: TEAM_ID, name: 'Coach' }));
+    }
+    return Effect.succeed(Option.none());
+  },
+} as any);
+
+const MockRoleSyncEventsRepository = Layer.succeed(RoleSyncEventsRepository, {
+  emitRoleAssigned: (
+    teamId: string,
+    roleId: string,
+    roleName: string,
+    teamMemberId: string,
+    discordUserId: string,
+  ) => {
+    roleAssignedEvents.push({ teamId, roleId, roleName, teamMemberId, discordUserId });
+    return Effect.void;
+  },
+  emitRoleUnassigned: (
+    teamId: string,
+    roleId: string,
+    roleName: string,
+    teamMemberId: string,
+    discordUserId: string,
+  ) => {
+    roleUnassignedEvents.push({ teamId, roleId, roleName, teamMemberId, discordUserId });
+    return Effect.void;
+  },
+  emitRoleCreated: () => Effect.void,
+  emitRoleDeleted: () => Effect.void,
+  findUnprocessed: () => Effect.succeed([]),
+  markProcessed: () => Effect.void,
+  // Purely illustrative for test 10 — the level-based diff never reads this state, so marking an
+  // event failed has no bearing on whether the next pass re-emits it.
+  markFailed: () => Effect.void,
+} as any);
 
 const MockSqlClientLayer = Layer.succeed(
   SqlClient.SqlClient,
@@ -368,10 +553,17 @@ const TestLayer = GuildsRpcLive.pipe(
       MockTeamSettingsRepository,
       MockPersonalEventChannelsRepository,
       MockPersonalEventOverflowCategoriesRepository,
+      MockRolesRepository,
+      MockRoleSyncEventsRepository,
       MockSqlClientLayer,
       Layer.succeed(EventsRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       Layer.succeed(DiscordRolesRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       Layer.succeed(SudoSessionsRepository, new Proxy({} as any, { get: () => () => Effect.void })),
+      MockRostersRepository,
+      Layer.succeed(
+        ChannelSyncEventsRepository,
+        new Proxy({} as any, { get: () => () => Effect.void }),
+      ),
       Layer.succeed(PendingGuildJoinsRepository, {
         _tag: 'api/PendingGuildJoinsRepository',
         enqueue: () => Effect.void,
@@ -384,31 +576,71 @@ const TestLayer = GuildsRpcLive.pipe(
 );
 
 // ---------------------------------------------------------------------------
-// RPC call helper
+// RPC call helpers
 // ---------------------------------------------------------------------------
+
+const withRpcClient = <A>(run: (rpc: any) => Effect.Effect<A, any, any>) =>
+  Effect.scoped(
+    (RpcTest.makeClient(GuildRpcGroup.GuildRpcGroup) as Effect.Effect<any, never, any>).pipe(
+      Effect.flatMap(run),
+    ),
+  ).pipe(Effect.provide(TestLayer));
 
 const callRegisterMember = (payload: {
   discord_id: string;
   username: string;
   invite_code: Option.Option<string>;
+  roles?: ReadonlyArray<string>;
+  source?: Option.Option<'member_add' | 'reconcile' | 'interaction'>;
 }) =>
-  Effect.scoped(
-    (RpcTest.makeClient(GuildRpcGroup.GuildRpcGroup) as Effect.Effect<any, never, any>).pipe(
-      Effect.flatMap(
-        (rpc: any) =>
-          rpc['Guild/RegisterMember']({
-            guild_id: GUILD_ID,
-            discord_id: payload.discord_id,
-            username: payload.username,
-            avatar: Option.none(),
-            roles: [],
-            nickname: Option.none(),
-            display_name: Option.none(),
-            invite_code: payload.invite_code,
-          }) as Effect.Effect<any, any, any>,
-      ),
-    ),
-  ).pipe(Effect.provide(TestLayer)) as Effect.Effect<RegisterMemberResult, any, never>;
+  withRpcClient((rpc) =>
+    rpc['Guild/RegisterMember']({
+      guild_id: GUILD_ID,
+      discord_id: payload.discord_id,
+      username: payload.username,
+      avatar: Option.none(),
+      roles: payload.roles ?? [],
+      nickname: Option.none(),
+      display_name: Option.none(),
+      invite_code: payload.invite_code,
+      source: payload.source ?? Option.some('member_add'),
+    }),
+  ) as Effect.Effect<RegisterMemberResult, any, never>;
+
+const callRemoveMember = (discordId: string) =>
+  withRpcClient((rpc) => rpc['Guild/RemoveMember']({ guild_id: GUILD_ID, discord_id: discordId }));
+
+const callReconcileMembers = (
+  members: ReadonlyArray<{ discord_id: string; username: string; roles: ReadonlyArray<string> }>,
+  complete: boolean,
+) =>
+  withRpcClient((rpc) =>
+    rpc['Guild/ReconcileMembers']({
+      guild_id: GUILD_ID,
+      complete,
+      members: members.map((m) => ({
+        discord_id: m.discord_id,
+        username: m.username,
+        avatar: Option.none(),
+        roles: m.roles,
+        nickname: Option.none(),
+        display_name: Option.none(),
+      })),
+    }),
+  );
+
+// Shape of the outer RPC result
+type RegisterMemberResult = Option.Option<{
+  system_log_channel_id: Option.Option<Discord.Snowflake>;
+  welcome: Option.Option<{
+    welcome_channel_id: Option.Option<Discord.Snowflake>;
+    welcome_message_rendered: Option.Option<string>;
+    group_name: Option.Option<string>;
+    group_color_int: Option.Option<number>;
+    inviter_discord_id: Option.Option<Discord.Snowflake>;
+  }>;
+  invite_code: Option.Option<string>;
+}>;
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -571,5 +803,364 @@ describe('Guild/RegisterMember RPC — invite_code handling', () => {
           }),
         ),
       ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// PR-8 — level-based role reconciliation on guild join
+// ---------------------------------------------------------------------------
+
+describe('Guild/RegisterMember — PR-8 discord_joined_at (CC-0 / CC-10)', () => {
+  itEffect.effect('sets discord_joined_at on first observation when source is Some', () => {
+    const discordId = '300000000000000001';
+    const memberId = 'member-discord-joined-1' as TeamMember.TeamMemberId;
+    seedActiveMember(discordId, memberId);
+    return callRegisterMember({
+      discord_id: discordId,
+      username: 'member-1',
+      invite_code: Option.none(),
+      source: Option.some('member_add'),
+    }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(discordJoinedAt.get(memberId)).toBeInstanceOf(Date);
+        }),
+      ),
+    );
+  });
+
+  itEffect.effect('does not overwrite an existing discord_joined_at', () => {
+    const discordId = '300000000000000002';
+    const memberId = 'member-discord-joined-2' as TeamMember.TeamMemberId;
+    seedActiveMember(discordId, memberId);
+    const payload = {
+      discord_id: discordId,
+      username: 'member-2',
+      invite_code: Option.none(),
+      source: Option.some<'member_add' | 'reconcile' | 'interaction'>('member_add'),
+    };
+    return callRegisterMember(payload).pipe(
+      Effect.flatMap(() => {
+        const first = discordJoinedAt.get(memberId);
+        return callRegisterMember(payload).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              const second = discordJoinedAt.get(memberId);
+              expect(second).toBe(first);
+            }),
+          ),
+        );
+      }),
+    );
+  });
+
+  itEffect.effect('Guild/RemoveMember clears discord_joined_at', () => {
+    const discordId = '300000000000000003';
+    const memberId = 'member-discord-joined-3' as TeamMember.TeamMemberId;
+    seedActiveMember(discordId, memberId);
+    return callRegisterMember({
+      discord_id: discordId,
+      username: 'member-3',
+      invite_code: Option.none(),
+      source: Option.some('member_add'),
+    }).pipe(
+      Effect.flatMap(() => {
+        expect(discordJoinedAt.get(memberId)).toBeInstanceOf(Date);
+        return callRemoveMember(discordId);
+      }),
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(discordJoinedAt.get(memberId)).toBeNull();
+        }),
+      ),
+    );
+  });
+
+  itEffect.effect('a payload with NO source field sets no timestamp and emits nothing', () => {
+    const discordId = '300000000000000004';
+    const memberId = 'member-discord-joined-4' as TeamMember.TeamMemberId;
+    seedActiveMember(discordId, memberId);
+    // Member is missing the Captain role — if the diff ran, this would emit role_assigned.
+    return callRegisterMember({
+      discord_id: discordId,
+      username: 'member-4',
+      invite_code: Option.none(),
+      roles: [],
+      source: Option.none(),
+    }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(discordJoinedAt.has(memberId)).toBe(false);
+          expect(roleAssignedEvents.length).toBe(0);
+          expect(roleUnassignedEvents.length).toBe(0);
+        }),
+      ),
+    );
+  });
+});
+
+describe('Guild/RegisterMember — PR-8 level-based role diff (CC-10)', () => {
+  itEffect.effect(
+    'emits role_assigned for each missing mapped role when an already-active member joins the guild',
+    () => {
+      const discordId = '400000000000000001';
+      const memberId = 'member-diff-1' as TeamMember.TeamMemberId;
+      seedActiveMember(discordId, memberId);
+      effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
+      // The reporter's exact case: registered on Sideline already, joins Discord with NO roles.
+      return callRegisterMember({
+        discord_id: discordId,
+        username: 'diff-member-1',
+        invite_code: Option.none(),
+        roles: [],
+        source: Option.some('member_add'),
+      }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(roleAssignedEvents).toHaveLength(1);
+            expect(roleAssignedEvents[0]?.roleId).toBe(CAPTAIN_ROLE_ID);
+            expect(roleAssignedEvents[0]?.teamMemberId).toBe(memberId);
+            expect(roleAssignedEvents[0]?.discordUserId).toBe(discordId);
+            expect(roleUnassignedEvents).toHaveLength(0);
+          }),
+        ),
+      );
+    },
+  );
+
+  itEffect.effect(
+    "emits nothing when the member's Discord roles already match their Sideline roles",
+    () => {
+      const discordId = '400000000000000002';
+      const memberId = 'member-diff-2' as TeamMember.TeamMemberId;
+      seedActiveMember(discordId, memberId);
+      effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
+      return callRegisterMember({
+        discord_id: discordId,
+        username: 'diff-member-2',
+        invite_code: Option.none(),
+        roles: [CAPTAIN_DISCORD_ROLE_ID],
+        source: Option.some('member_add'),
+      }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(roleAssignedEvents).toHaveLength(0);
+            expect(roleUnassignedEvents).toHaveLength(0);
+          }),
+        ),
+      );
+    },
+  );
+
+  itEffect.effect(
+    'emits role_unassigned for a mapped Discord role the member should not have',
+    () => {
+      const discordId = '400000000000000003';
+      const memberId = 'member-diff-3' as TeamMember.TeamMemberId;
+      seedActiveMember(discordId, memberId);
+      // Desires nothing, but Discord shows them holding the Coach role.
+      effectiveRoles.set(memberId, []);
+      return callRegisterMember({
+        discord_id: discordId,
+        username: 'diff-member-3',
+        invite_code: Option.none(),
+        roles: [COACH_DISCORD_ROLE_ID],
+        source: Option.some('member_add'),
+      }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(roleAssignedEvents).toHaveLength(0);
+            expect(roleUnassignedEvents).toHaveLength(1);
+            expect(roleUnassignedEvents[0]?.roleId).toBe(COACH_ROLE_ID);
+            expect(roleUnassignedEvents[0]?.teamMemberId).toBe(memberId);
+          }),
+        ),
+      );
+    },
+  );
+
+  itEffect.effect('never emits for a Discord role with no mapping', () => {
+    const discordId = '400000000000000004';
+    const memberId = 'member-diff-4' as TeamMember.TeamMemberId;
+    seedActiveMember(discordId, memberId);
+    effectiveRoles.set(memberId, []);
+    // Member holds a Discord role Sideline has no mapping for — a captain granted it by hand.
+    return callRegisterMember({
+      discord_id: discordId,
+      username: 'diff-member-4',
+      invite_code: Option.none(),
+      roles: [UNMANAGED_DISCORD_ROLE_ID],
+      source: Option.some('member_add'),
+    }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(roleAssignedEvents).toHaveLength(0);
+          expect(roleUnassignedEvents).toHaveLength(0);
+        }),
+      ),
+    );
+  });
+
+  itEffect.effect('a second identical member_add for the same member emits nothing', () => {
+    const discordId = '400000000000000005';
+    const memberId = 'member-diff-5' as TeamMember.TeamMemberId;
+    seedActiveMember(discordId, memberId);
+    effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
+    const payload = {
+      discord_id: discordId,
+      username: 'diff-member-5',
+      invite_code: Option.none(),
+      roles: [CAPTAIN_DISCORD_ROLE_ID],
+      source: Option.some<'member_add' | 'reconcile' | 'interaction'>('member_add'),
+    };
+    return callRegisterMember(payload).pipe(
+      Effect.flatMap(() => callRegisterMember(payload)),
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(roleAssignedEvents).toHaveLength(0);
+          expect(roleUnassignedEvents).toHaveLength(0);
+        }),
+      ),
+    );
+  });
+
+  itEffect.effect(
+    're-running the same reconcile after a simulated MarkEventFailed re-emits the event',
+    () => {
+      const discordId = '400000000000000006';
+      const memberId = 'member-diff-6' as TeamMember.TeamMemberId;
+      seedActiveMember(discordId, memberId);
+      effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
+      const payload = {
+        discord_id: discordId,
+        username: 'diff-member-6',
+        invite_code: Option.none(),
+        roles: [],
+        source: Option.some<'member_add' | 'reconcile' | 'interaction'>('reconcile'),
+      };
+      return callRegisterMember(payload).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(roleAssignedEvents).toHaveLength(1);
+          }),
+        ),
+        // Simulate `Role/MarkEventFailed` consuming the just-emitted event — under the old
+        // design this permanently stranded the member (blocker 8). The level-based diff has no
+        // memory of it: nothing here should suppress the next pass.
+        Effect.flatMap(() => Effect.void),
+        Effect.flatMap(() => callRegisterMember(payload)),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            // Same missing role, still missing — re-derived, not gated by prior emission or by
+            // the queue-consumption event above.
+            expect(roleAssignedEvents).toHaveLength(2);
+          }),
+        ),
+      );
+    },
+  );
+
+  itEffect.effect('still runs setupNewMember for a genuinely new member', () => {
+    const discordId = '400000000000000007';
+    // No seeded membership — this is a brand-new member.
+    return callRegisterMember({
+      discord_id: discordId,
+      username: 'brand-new-member',
+      invite_code: Option.none(),
+      roles: [CAPTAIN_DISCORD_ROLE_ID],
+      source: Option.some('member_add'),
+    }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(teamMembersAdded.some((m) => m.user_id === userIdForDiscordId(discordId))).toBe(
+            true,
+          );
+        }),
+      ),
+    );
+  });
+});
+
+describe('Guild/ReconcileMembers — PR-8 level-based reconcile (CC-10)', () => {
+  itEffect.effect('does not emit role_assigned events in steady state', () => {
+    const discordId = '500000000000000001';
+    const memberId = 'member-reconcile-steady' as TeamMember.TeamMemberId;
+    seedActiveMember(discordId, memberId);
+    effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
+    return callReconcileMembers(
+      [{ discord_id: discordId, username: 'steady-member', roles: [CAPTAIN_DISCORD_ROLE_ID] }],
+      true,
+    ).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(roleAssignedEvents).toHaveLength(0);
+          expect(roleUnassignedEvents).toHaveLength(0);
+        }),
+      ),
+    );
+  });
+
+  itEffect.effect('with complete: false runs the diff but sets no discord_joined_at', () => {
+    const discordId = '500000000000000002';
+    const memberId = 'member-reconcile-partial' as TeamMember.TeamMemberId;
+    seedActiveMember(discordId, memberId);
+    effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
+    return callReconcileMembers(
+      [{ discord_id: discordId, username: 'partial-member', roles: [] }],
+      false,
+    ).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(roleAssignedEvents).toHaveLength(1);
+          expect(discordJoinedAt.has(memberId)).toBe(false);
+          expect(markMembersBackfilledCalls).toHaveLength(0);
+        }),
+      ),
+    );
+  });
+
+  itEffect.effect(
+    'with complete: true sets discord_joined_at and bot_guilds.members_backfilled_at',
+    () => {
+      const discordId = '500000000000000003';
+      const memberId = 'member-reconcile-complete' as TeamMember.TeamMemberId;
+      seedActiveMember(discordId, memberId);
+      effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
+      return callReconcileMembers(
+        [{ discord_id: discordId, username: 'complete-member', roles: [] }],
+        true,
+      ).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(roleAssignedEvents).toHaveLength(1);
+            expect(discordJoinedAt.get(memberId)).toBeInstanceOf(Date);
+            expect(markMembersBackfilledCalls).toEqual([GUILD_ID]);
+          }),
+        ),
+      );
+    },
+  );
+
+  itEffect.effect(
+    'stops emitting at the per-guild cap and logs how many members were skipped',
+    () => {
+      // MAX_ROLE_SYNC_EMISSIONS_PER_GUILD_RECONCILE is 200 — 201 members each missing exactly
+      // one mapped role guarantees exactly 1 is deferred to the next pass.
+      const CAP = 200;
+      const members = Array.from({ length: CAP + 1 }, (_, i) => {
+        const discordId = `60000000000000${String(i).padStart(4, '0')}`;
+        const memberId = `member-cap-${i}` as TeamMember.TeamMemberId;
+        seedActiveMember(discordId, memberId);
+        effectiveRoles.set(memberId, [{ role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' }]);
+        return { discord_id: discordId, username: `cap-member-${i}`, roles: [] };
+      });
+      return callReconcileMembers(members, true).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(roleAssignedEvents).toHaveLength(CAP);
+          }),
+        ),
+      );
+    },
   );
 });

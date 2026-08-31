@@ -1,6 +1,6 @@
 import {
   Auth,
-  type Discord,
+  Discord,
   EventRpcModels,
   EventRsvp,
   type GroupModel,
@@ -12,7 +12,7 @@ import {
 } from '@sideline/domain';
 import { LogicError, Schemas } from '@sideline/effect-lib';
 import { applyTemplate, sanitizeHexColor, sanitizeRendered } from '@sideline/template-renderer';
-import { Array, DateTime, Effect, Option, pipe, Schema } from 'effect';
+import { Array, DateTime, Effect, Option, pipe, Ref, Schema } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
@@ -35,6 +35,13 @@ import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
 import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
+import {
+  MAX_ROLE_SYNC_EMISSIONS_PER_GUILD_RECONCILE,
+  type ReconcileMemberRolesResult,
+  reconcileMemberDiscordRoles,
+} from '~/utils/reconcileMemberDiscordRoles.js';
+
+const toSnowflake = Schema.decodeSync(Discord.Snowflake);
 
 type IdentifyEventsChannelResult = {
   readonly kind: 'global' | 'personal' | 'none';
@@ -55,6 +62,22 @@ type RegisterMemberPayload = {
   readonly nickname: Option.Option<string>;
   readonly display_name: Option.Option<string>;
   readonly invite_code: Option.Option<string>;
+  readonly source: Option.Option<'member_add' | 'reconcile' | 'interaction'>;
+};
+
+/**
+ * Per-call options for `registerMemberWithReconcile`, distinct from the wire payload:
+ * - `guildBudget` — the shared per-`ReconcileMembers`-call emission budget (see
+ *   `reconcileMemberDiscordRoles.ts`). Direct `member_add`/`interaction` calls pass no budget
+ *   (unbounded — they only ever touch one member).
+ * - `markDiscordJoined` — defaults to `true` (any `Some(source)` observation is a real, complete
+ *   sighting of the member). `Guild/ReconcileMembers` overrides this to `complete` because a
+ *   truncated member-list page cannot be trusted to certify `bot_guilds.members_backfilled_at`-
+ *   grade completeness; it still lets the per-member role diff run regardless (CC-10 S6).
+ */
+type RegisterMemberOptions = {
+  readonly guildBudget?: Option.Option<Ref.Ref<number>>;
+  readonly markDiscordJoined?: boolean;
 };
 
 type WelcomeDetail = {
@@ -251,14 +274,63 @@ export const GuildsRpcLive = Effect.Do.pipe(
       });
     };
 
-    const registerMember = (payload: RegisterMemberPayload) =>
+    type RegisterMemberOutcome = {
+      readonly welcomeMeta: Option.Option<WelcomeMeta>;
+      readonly reconcile: Option.Option<ReconcileMemberRolesResult>;
+    };
+    const noOutcome: RegisterMemberOutcome = {
+      welcomeMeta: Option.none(),
+      reconcile: Option.none(),
+    };
+
+    // PR-8 (CC-10): runs the level-based role diff on EVERY observation of the member (a fresh
+    // join, a re-join, or — critically, the reporter's exact bug — a member already active on
+    // the team who is only now being seen in the guild). `payload.source` gates whether this runs
+    // at all (`None` = an un-upgraded bot; skip entirely and pick the member up on the next
+    // reconcile from an upgraded bot).
+    const observeGuildMembership = (
+      team: { readonly id: Team.TeamId },
+      newMember: { readonly id: TeamMember.TeamMemberId },
+      payload: RegisterMemberPayload,
+      options: RegisterMemberOptions,
+    ) =>
+      Option.match(payload.source, {
+        onNone: () =>
+          Effect.logDebug(
+            `RegisterMember: no source on payload for discord_id ${payload.discord_id} in team ${team.id} ` +
+              `(pre-PR-8 bot); skipping discord_joined_at + role diff`,
+          ).pipe(Effect.as(Option.none<ReconcileMemberRolesResult>())),
+        onSome: () =>
+          Effect.Do.pipe(
+            Effect.tap(() =>
+              (options.markDiscordJoined ?? true)
+                ? deps.members.markDiscordJoined(newMember.id)
+                : Effect.void,
+            ),
+            Effect.flatMap(() =>
+              reconcileMemberDiscordRoles(
+                team,
+                newMember,
+                toSnowflake(payload.discord_id),
+                payload.roles,
+                options.guildBudget ?? Option.none(),
+              ),
+            ),
+            Effect.map(Option.some),
+          ),
+      });
+
+    const registerMemberWithReconcile = (
+      payload: RegisterMemberPayload,
+      options: RegisterMemberOptions = {},
+    ) =>
       deps.teams.findByGuildId(payload.guild_id).pipe(
         Effect.flatMap(
           Option.match({
             onNone: () =>
               Effect.logInfo(
                 `No team found for guild ${payload.guild_id}, skipping member registration`,
-              ).pipe(Effect.as(Option.none<WelcomeMeta>())),
+              ).pipe(Effect.as(noOutcome)),
             onSome: (team) =>
               Effect.Do.pipe(
                 Effect.bind('user', () =>
@@ -298,17 +370,32 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     ),
                   );
                 }),
-                Effect.flatMap(({ newMember }) => resolveWelcomeMeta(team, newMember, payload)),
-                Effect.map(Option.some),
+                // Runs on every branch above — including "already active", which is exactly the
+                // reporter's case (a member registered via web who only later joins Discord).
+                Effect.bind('reconcile', ({ newMember }) =>
+                  observeGuildMembership(team, newMember, payload, options),
+                ),
+                Effect.bind('welcomeMeta', ({ newMember }) =>
+                  resolveWelcomeMeta(team, newMember, payload),
+                ),
+                Effect.map(
+                  ({ welcomeMeta, reconcile }): RegisterMemberOutcome => ({
+                    welcomeMeta: Option.some(welcomeMeta),
+                    reconcile,
+                  }),
+                ),
               ),
           }),
         ),
         Effect.catchTag(['MemberAlreadyExistsError', 'NoSuchElementError'], (error) =>
           Effect.logError(`RegisterMember failed for ${payload.username}`, error).pipe(
-            Effect.as(Option.none<WelcomeMeta>()),
+            Effect.as(noOutcome),
           ),
         ),
       );
+
+    const registerMember = (payload: RegisterMemberPayload) =>
+      registerMemberWithReconcile(payload).pipe(Effect.map((outcome) => outcome.welcomeMeta));
 
     return {
       'Guild/RegisterGuild': ({
@@ -415,9 +502,18 @@ export const GuildsRpcLive = Effect.Do.pipe(
                                       ).pipe(Effect.asVoid),
                                     onSome: (m) => {
                                       if (!m.active) {
-                                        return Effect.logInfo(
-                                          `Guild/RemoveMember: membership for user ${resolvedUser.id} in team ${team.id} is already inactive, skipping`,
-                                        ).pipe(Effect.asVoid);
+                                        // A user who left Discord is not in the guild regardless
+                                        // of Sideline membership state (CC-10 step 7).
+                                        return deps.members
+                                          .clearDiscordJoined(m.id)
+                                          .pipe(
+                                            Effect.andThen(
+                                              Effect.logInfo(
+                                                `Guild/RemoveMember: membership for user ${resolvedUser.id} in team ${team.id} is already inactive, skipping`,
+                                              ),
+                                            ),
+                                            Effect.asVoid,
+                                          );
                                       }
                                       const memberHoldsManage =
                                         m.permissions.includes('team:manage');
@@ -445,6 +541,11 @@ export const GuildsRpcLive = Effect.Do.pipe(
                                         memberHoldsManage,
                                         discord_id,
                                       ).pipe(
+                                        // A user who left Discord is not in the guild regardless
+                                        // of Sideline membership state (CC-10 step 7) — clear on
+                                        // every outcome, including `last_admin` (deactivation is
+                                        // skipped there, but the Discord departure is real).
+                                        Effect.tap(() => deps.members.clearDiscordJoined(m.id)),
                                         Effect.flatMap((result) => {
                                           if (result.deactivated) {
                                             return Effect.logInfo(
@@ -479,6 +580,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
       'Guild/ReconcileMembers': ({
         guild_id,
         members: membersList,
+        complete,
       }: {
         readonly guild_id: Discord.Snowflake;
         readonly members: ReadonlyArray<{
@@ -489,27 +591,60 @@ export const GuildsRpcLive = Effect.Do.pipe(
           readonly nickname: Option.Option<string>;
           readonly display_name: Option.Option<string>;
         }>;
+        readonly complete: boolean;
       }) =>
         Effect.Do.pipe(
           Effect.tap(() =>
             Effect.logInfo(`Reconciling ${membersList.length} members for guild ${guild_id}`),
           ),
-          Effect.tap(() =>
+          // Per-guild-per-pass emission budget (CC-10 S6 / PR-8 step 6) — shared across every
+          // member processed in this call so the first post-deploy backfill of a large,
+          // long-unsynced guild drains over several reconnects instead of dumping thousands of
+          // role_sync_events into the bot's `concurrency: 1` drain loop in one shot.
+          Effect.bind('budget', () => Ref.make(MAX_ROLE_SYNC_EMISSIONS_PER_GUILD_RECONCILE)),
+          Effect.bind('results', ({ budget }) =>
             Effect.all(
               Array.map(membersList, (member) =>
-                registerMember({
-                  guild_id,
-                  discord_id: member.discord_id,
-                  username: member.username,
-                  avatar: member.avatar,
-                  roles: member.roles,
-                  nickname: member.nickname,
-                  display_name: member.display_name,
-                  invite_code: Option.none(),
-                }),
+                registerMemberWithReconcile(
+                  {
+                    guild_id,
+                    discord_id: member.discord_id,
+                    username: member.username,
+                    avatar: member.avatar,
+                    roles: member.roles,
+                    nickname: member.nickname,
+                    display_name: member.display_name,
+                    invite_code: Option.none(),
+                    // The server supplies 'reconcile' explicitly — an absent key on the wire can
+                    // therefore only mean a bot older than PR-8 hitting `RegisterMember` directly.
+                    source: Option.some('reconcile'),
+                  },
+                  {
+                    guildBudget: Option.some(budget),
+                    // A truncated page cannot certify "we have seen this member" the way a
+                    // realtime member_add can — see CC-10 S6. The diff still runs unconditionally
+                    // (below, independent of `complete`).
+                    markDiscordJoined: complete,
+                  },
+                ),
               ),
               { concurrency: 5 },
             ),
+          ),
+          Effect.tap(({ results }) => {
+            const skipped = results.reduce(
+              (acc, { reconcile }) =>
+                acc + Option.match(reconcile, { onNone: () => 0, onSome: (r) => r.skippedForCap }),
+              0,
+            );
+            return skipped > 0
+              ? Effect.logWarning(
+                  `Guild/ReconcileMembers: per-guild emission cap reached for guild ${guild_id}; ${skipped} role_sync_events deferred to the next reconcile`,
+                )
+              : Effect.void;
+          }),
+          Effect.tap(() =>
+            complete ? deps.botGuilds.markMembersBackfilled(guild_id) : Effect.void,
           ),
           Effect.tap(() => Effect.logInfo(`Reconciliation complete for guild ${guild_id}`)),
           Effect.asVoid,

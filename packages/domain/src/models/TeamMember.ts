@@ -1,3 +1,4 @@
+import * as Schemas from '@sideline/effect-lib/Schemas';
 import { Schema } from 'effect';
 import { Model } from 'effect/unstable/schema';
 import { TeamId } from '~/models/Team.js';
@@ -18,4 +19,10 @@ export class TeamMember extends Model.Class<TeamMember>('TeamMember')({
   active: Schema.Boolean,
   jersey_number: Model.FieldExcept(['insert'])(Schema.OptionFromNullOr(Schema.Number)),
   joined_at: Model.DateTimeInsertFromDate,
+  // PR-8 (CC-10): tri-state ("have we ever observed this user in the guild"), NULL = unknown.
+  // Written by `Guild/RegisterMember` (idempotent COALESCE) and `Guild/ReconcileMembers`, cleared
+  // by `Guild/RemoveMember`. It does NOT gate role-sync emission — see reconcileMemberDiscordRoles.ts.
+  discord_joined_at: Model.FieldExcept(['insert'])(
+    Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
+  ),
 }) {}
