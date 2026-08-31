@@ -1,7 +1,7 @@
 import type { RoleRpcEvents } from '@sideline/domain';
 import { Bind } from '@sideline/effect-lib';
 import { DiscordREST } from 'dfx/DiscordREST';
-import { Array, Effect, Match, Metric, Option } from 'effect';
+import { Array, DateTime, Effect, Match, Metric, Option } from 'effect';
 import { syncEventsProcessedTotal } from '../../metrics.js';
 import { POLL_BATCH_SIZE } from '../../rest/utils.js';
 import { GuildRolesCache } from '../../services/GuildRolesCache.js';
@@ -29,9 +29,15 @@ const processEvent = Effect.Do.pipe(
   Effect.bind('discord', () => DiscordREST.asEffect()),
   Effect.map(
     ({ rpc, discord }) =>
-      (event: RoleRpcEvents.UnprocessedRoleEvent) =>
+      // `tickStartedAt` is captured once per poll tick by `processTick` below and threaded
+      // through every event in that tick — see `RoleSyncEventsRepository.recordLastRoleSync`'s
+      // doc comment (should-fix 1, whole-series review) for why a same-tick `'ok'` write must
+      // never clobber a same-tick `'failed'` write for a different role on the same member.
+      (event: RoleRpcEvents.UnprocessedRoleEvent, tickStartedAt: DateTime.Utc) =>
         action(event).pipe(
-          Effect.flatMap(() => rpc['Role/MarkEventProcessed']({ id: event.id })),
+          Effect.flatMap(() =>
+            rpc['Role/MarkEventProcessed']({ id: event.id, tick_started_at: tickStartedAt }),
+          ),
           Effect.tap(() =>
             Metric.update(
               Metric.withAttributes(
@@ -87,12 +93,17 @@ export const ProcessorService = Effect.Do.pipe(
     // observed on the very next one.
     Effect.Do.pipe(
       Effect.bind('rolesCache', () => GuildRolesCache.make),
+      // One instant shared by every event this tick processes — see `processEvent`'s doc comment.
+      Effect.bind('tickStartedAt', () => DateTime.now),
       Effect.bind('events', () => rpc['Role/GetUnprocessedEvents']({ limit: POLL_BATCH_SIZE })),
       Effect.tap(({ events }) => Effect.logDebug(`Role sync poll: ${events.length} event(s)`)),
-      Effect.flatMap(({ events, rolesCache }) =>
+      Effect.flatMap(({ events, rolesCache, tickStartedAt }) =>
         events.length === 0
           ? Effect.void
-          : Effect.all(Array.map(events, processEvent), { concurrency: 1 }).pipe(
+          : Effect.all(
+              Array.map(events, (event) => processEvent(event, tickStartedAt)),
+              { concurrency: 1 },
+            ).pipe(
               Effect.provideService(GuildRolesCache, rolesCache),
               Effect.tap(() => Effect.logInfo(`Processed ${events.length} role sync event(s)`)),
               Effect.asVoid,

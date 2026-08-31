@@ -195,20 +195,34 @@ describe('handleMemberAdded', () => {
     expect(restCalls.addGuildMemberRole).toHaveLength(0);
   });
 
-  it('refuses to assign when the mapped role is missing from a fresh listGuildRoles read, and FAILS the event as captain_action', async () => {
+  // Should-fix 2 (whole-series review of commit 46806427): a role missing from the fresh
+  // `listGuildRoles` read is a STALE MAPPING (the Discord role was deleted), not a
+  // dangerous-permissions problem — it must fail as `StaleRoleMappingError` (classified
+  // `retryable`, non-terminal, by `errorClassifier.ts`), not `UnsafeRoleAssignmentError`
+  // (`captain_action`, terminal). `captain_action` tells a captain to fix a role's permissions,
+  // which is meaningless and unactionable for a role that no longer exists. It must also clear
+  // the now-stale `discord_role_mappings` row via `Role/DeleteMapping` so the next event
+  // re-resolves a fresh mapping via `ensureMapping` — before this fix, this branch never reached
+  // `addGuildMemberRole`, so the REST-level 10011 cleanup path was unreachable and the SAME stale
+  // id failed the SAME way forever.
+  it('should-fix 2: clears the stale mapping and fails as StaleRoleMappingError (not captain_action) when the mapped role is missing from a fresh listGuildRoles read', async () => {
     const { calls: restCalls, layer: restLayer } = makeRest({
       listGuildRoles: (...args: unknown[]) => {
         restCalls.listGuildRoles?.push(args);
         return Effect.succeed([]);
       },
     });
-    const { layer: rpcLayer } = makeSyncRpc();
+    const { calls: rpcCalls, layer: rpcLayer } = makeSyncRpc();
 
     await expect(run(handleMemberAdded(makeEvent()), restLayer, rpcLayer)).rejects.toMatchObject({
-      _tag: 'UnsafeRoleAssignmentError',
+      _tag: 'StaleRoleMappingError',
     });
 
     expect(restCalls.addGuildMemberRole).toHaveLength(0);
+    expect(rpcCalls['Role/DeleteMapping']).toHaveLength(1);
+    expect(rpcCalls['Role/DeleteMapping']?.[0]).toMatchObject([
+      { team_id: TEAM_ID, role_id: ROLE_ID },
+    ]);
   });
 
   it('caches listGuildRoles across two events sharing one GuildRolesCache instance', async () => {

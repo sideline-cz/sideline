@@ -140,9 +140,25 @@ const make = SqlClient.SqlClient.asEffect().pipe(
     // original onboarding root cause) must still be RETURNED here so `deriveJoinStatusState` can
     // turn it into the one actionable error message the product has. Filtering it out here meant
     // that message was unreachable and a captain-fixable failure looked identical to "no pending
-    // join at all". This returns the newest row for the pair unconditionally; the staleness
-    // clause (`generated_at > now() - 24h`) still applies ONLY when a `discord_code` exists,
-    // since a dead one-time code is the one case a fresh regenerate is unambiguously needed for.
+    // join at all".
+    //
+    // Should-fix 4 (whole-series review of commit 46806427): the staleness predicate
+    // (`generated_at > now() - 24h`) that used to live in this query's `WHERE` is GONE — the same
+    // "the SQL should not decide, `deriveJoinStatusState` should" principle blocker B already
+    // applied to `discord_code_error_code IS NULL`. A stale-code row is still RETURNED here now;
+    // `deriveJoinStatusState` (`joinStatusState.ts`, `isStaleDiscordCode`) is what turns it into
+    // `'expired'`. Filtering it out here meant that row vanished into `None`, and the web showed
+    // generic "No invite available" instead of `'expired'`'s dedicated copy.
+    //
+    // The `ORDER BY` still returns exactly one row per (user, team), so it must resolve which row
+    // wins when the pair has several — and a plain `created_at DESC` reintroduces a different
+    // failure mode dropping the `WHERE` clause exposed: a row with a currently-USABLE code that
+    // is not the newest would otherwise be shadowed by a newer row that has no usable code at all
+    // (e.g. a newest row that terminally failed). The leading boolean key prefers any row with a
+    // live, unexpired `discord_code` over one without, regardless of recency; only when NEITHER
+    // candidate row has a usable code does it fall through to `created_at DESC` — which is
+    // exactly when surfacing the newest (e.g. most recently failed) row matters, per the
+    // `getMyPendingDiscordJoin` rationale above.
     const findOpenByUserAndTeam = SqlSchema.findOneOption({
       Request: OpenByUserAndTeamInput,
       Result: InviteAcceptance.InviteAcceptance,
@@ -150,8 +166,10 @@ const make = SqlClient.SqlClient.asEffect().pipe(
         SELECT ia.* FROM invite_acceptances ia
         JOIN team_invites ti ON ti.id = ia.team_invite_id
         WHERE ia.user_id = ${input.user_id} AND ti.team_id = ${input.team_id}
-          AND (ia.discord_code IS NULL OR ia.generated_at > now() - interval '24 hours')
-        ORDER BY ia.created_at DESC, ia.id DESC
+        ORDER BY
+          (ia.discord_code IS NOT NULL AND ia.generated_at > now() - interval '24 hours') DESC,
+          ia.created_at DESC,
+          ia.id DESC
         LIMIT 1
       `,
     });

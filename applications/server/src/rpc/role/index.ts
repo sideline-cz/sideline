@@ -6,11 +6,13 @@ import {
   RoleRpcModels,
   type RoleSyncEvent,
   type Team,
+  type TeamMember,
 } from '@sideline/domain';
 import { Bind } from '@sideline/effect-lib';
-import { Array, Data, Effect, flow, Option, Result } from 'effect';
+import { Array, Data, type DateTime, Effect, flow, Option, Result, type ServiceMap } from 'effect';
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
+import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { constructEvent, EventPropertyMissing } from './events.js';
 
 class NoChanges extends Data.TaggedError('NoChanges')<{
@@ -19,9 +21,27 @@ class NoChanges extends Data.TaggedError('NoChanges')<{
   static make = () => new NoChanges({ count: 0 });
 }
 
+// Blocker (whole-series review of `fix/discord-onboarding-webapp`, commit 46806427): the
+// per-member Discord-role provenance write. Only reached from `Role/MarkEventProcessed` — i.e.
+// only after the bot's REST call to Discord actually succeeded (`processed_at` was just set) — so
+// a terminally-failed event (`Role/MarkEventFailed`) never touches `member_role_grants`, and
+// `role_created` / `role_deleted` (team-scoped, no `team_member_id`) never do either.
+// `reconcileMemberDiscordRoles.ts` / `syncMemberDiscordRoles.ts` are the readers.
+const applyGrantProvenance = (
+  members: ServiceMap.Service.Shape<typeof TeamMembersRepository>,
+  teamMemberId: TeamMember.TeamMemberId,
+  roleId: Role.RoleId,
+  eventType: RoleSyncEvent.RoleSyncEventType,
+) => {
+  if (eventType === 'role_assigned') return members.recordRoleGrant(teamMemberId, roleId);
+  if (eventType === 'role_unassigned') return members.clearRoleGrant(teamMemberId, roleId);
+  return Effect.void;
+};
+
 export const RolesRpcLive = Effect.Do.pipe(
   Effect.bind('syncEvents', () => RoleSyncEventsRepository.asEffect()),
   Effect.bind('mappings', () => DiscordRoleMappingRepository.asEffect()),
+  Effect.bind('members', () => TeamMembersRepository.asEffect()),
   Effect.let(
     'Role/GetUnprocessedEvents',
     ({ syncEvents }) =>
@@ -54,9 +74,24 @@ export const RolesRpcLive = Effect.Do.pipe(
   ),
   Effect.let(
     'Role/MarkEventProcessed',
-    ({ syncEvents }) =>
-      ({ id }: { readonly id: RoleSyncEvent.RoleSyncEventId }) =>
-        syncEvents.markProcessed(id),
+    ({ syncEvents, members }) =>
+      ({
+        id,
+        tick_started_at,
+      }: {
+        readonly id: RoleSyncEvent.RoleSyncEventId;
+        readonly tick_started_at: DateTime.Utc;
+      }) =>
+        syncEvents.markProcessed(id, tick_started_at).pipe(
+          Effect.flatMap((result) =>
+            Option.match(result.team_member_id, {
+              onNone: () => Effect.void,
+              onSome: (teamMemberId) =>
+                applyGrantProvenance(members, teamMemberId, result.role_id, result.event_type),
+            }),
+          ),
+          Effect.asVoid,
+        ),
   ),
   Effect.let(
     'Role/MarkEventFailed',
@@ -115,5 +150,6 @@ export const RolesRpcLive = Effect.Do.pipe(
   ),
   Bind.remove('syncEvents'),
   Bind.remove('mappings'),
+  Bind.remove('members'),
   (handlers) => RoleRpcGroup.RoleRpcGroup.toLayer(handlers),
 );

@@ -12,6 +12,7 @@ import { DateTime, Effect, Layer, Option } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
+import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
@@ -22,6 +23,7 @@ const TestLayer = Layer.mergeAll(
   TeamsRepository.Default,
   UsersRepository.Default,
   BotGuildsRepository.Default,
+  RolesRepository.Default,
 ).pipe(Layer.provideMerge(TestPgClient));
 
 beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runPromise));
@@ -426,6 +428,117 @@ describe('TeamMembersRepository — reactivateMember', () => {
       );
       expect(Option.isSome(reactivated)).toBe(true);
       expect(Option.getOrThrow(reactivated).active).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// recordRoleGrant / clearRoleGrant / findGrantedRoleIds — member_role_grants (blocker,
+// whole-series review of commit 46806427). Per-member Discord-role provenance: which roles THIS
+// member was actually given by Sideline, as opposed to `discord_role_mappings.adopted`, which
+// only says whether the MAPPING itself was adopted vs. created — see
+// `packages/migrations/src/before/1791100000_create_member_role_grants.ts` for the full
+// rationale.
+// ---------------------------------------------------------------------------
+
+describe('TeamMembersRepository — recordRoleGrant / clearRoleGrant / findGrantedRoleIds', () => {
+  it.effect('findGrantedRoleIds is empty for a member with no recorded grants', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('800000000000000050', 'grants-none');
+      const team = yield* createTeam('800800000000000050' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+
+      const members = yield* TeamMembersRepository.asEffect();
+      const granted = yield* members.findGrantedRoleIds(member.id);
+
+      expect(granted).toEqual([]);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('recordRoleGrant makes the role id show up in findGrantedRoleIds', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('800000000000000051', 'grants-record');
+      const team = yield* createTeam('800800000000000051' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      const roles = yield* RolesRepository.asEffect();
+      const role = yield* roles.insertRole(team.id, 'Captain');
+
+      const members = yield* TeamMembersRepository.asEffect();
+      yield* members.recordRoleGrant(member.id, role.id);
+
+      const granted = yield* members.findGrantedRoleIds(member.id);
+      expect(granted).toEqual([role.id]);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'recordRoleGrant is idempotent — recording the same grant twice does not duplicate it',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('800000000000000052', 'grants-idempotent');
+        const team = yield* createTeam('800800000000000052' as Discord.Snowflake, userId);
+        const member = yield* addActiveMember(team.id, userId);
+        const roles = yield* RolesRepository.asEffect();
+        const role = yield* roles.insertRole(team.id, 'Captain');
+
+        const members = yield* TeamMembersRepository.asEffect();
+        yield* members.recordRoleGrant(member.id, role.id);
+        yield* members.recordRoleGrant(member.id, role.id);
+
+        const granted = yield* members.findGrantedRoleIds(member.id);
+        expect(granted).toEqual([role.id]);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('clearRoleGrant removes a previously recorded grant', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('800000000000000053', 'grants-clear');
+      const team = yield* createTeam('800800000000000053' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      const roles = yield* RolesRepository.asEffect();
+      const role = yield* roles.insertRole(team.id, 'Captain');
+
+      const members = yield* TeamMembersRepository.asEffect();
+      yield* members.recordRoleGrant(member.id, role.id);
+      yield* members.clearRoleGrant(member.id, role.id);
+
+      const granted = yield* members.findGrantedRoleIds(member.id);
+      expect(granted).toEqual([]);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('clearRoleGrant on a role never granted is a no-op, not an error', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('800000000000000054', 'grants-clear-noop');
+      const team = yield* createTeam('800800000000000054' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      const roles = yield* RolesRepository.asEffect();
+      const role = yield* roles.insertRole(team.id, 'Captain');
+
+      const members = yield* TeamMembersRepository.asEffect();
+      // Must not throw even though no grant row exists for this (member, role) pair.
+      yield* members.clearRoleGrant(member.id, role.id);
+
+      const granted = yield* members.findGrantedRoleIds(member.id);
+      expect(granted).toEqual([]);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('grants are scoped per member — recording one member does not grant another', () =>
+    Effect.gen(function* () {
+      const userA = yield* createUser('800000000000000055', 'grants-member-a');
+      const userB = yield* createUser('800000000000000056', 'grants-member-b');
+      const team = yield* createTeam('800800000000000055' as Discord.Snowflake, userA);
+      const memberA = yield* addActiveMember(team.id, userA);
+      const memberB = yield* addActiveMember(team.id, userB);
+      const roles = yield* RolesRepository.asEffect();
+      const role = yield* roles.insertRole(team.id, 'Captain');
+
+      const members = yield* TeamMembersRepository.asEffect();
+      yield* members.recordRoleGrant(memberA.id, role.id);
+
+      expect(yield* members.findGrantedRoleIds(memberA.id)).toEqual([role.id]);
+      expect(yield* members.findGrantedRoleIds(memberB.id)).toEqual([]);
     }).pipe(Effect.provide(TestLayer)),
   );
 });

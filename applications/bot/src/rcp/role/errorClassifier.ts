@@ -128,15 +128,33 @@ const classifyHttpClientError = (error: Record<string, unknown>): ClassifiedRole
  */
 export const classifyRoleSyncError = (error: unknown): ClassifiedRoleSyncError => {
   // `handleAssigned.ts`'s TOCTOU re-check (blocker 3) fails with this tag, not a raw Discord REST
-  // error, when a role's live permissions are dangerous or unverifiable — a captain needs to fix
-  // the role in Discord, the same remedy 50013 already has copy for.
+  // error, when a role that DOES still exist carries dangerous permissions — a captain needs to
+  // fix the role in Discord, the same remedy 50013 already has copy for. A role that no longer
+  // exists at all fails with `StaleRoleMappingError` instead (should-fix 2, whole-series review)
+  // — see that branch below.
   if (isTagged(error, 'UnsafeRoleAssignmentError')) {
     const guildId = stringProp(error, 'guildId') ?? 'unknown guild';
     const discordRoleId = stringProp(error, 'discordRoleId') ?? 'unknown role';
     return {
       code: 'captain_action',
-      detail: `Refused to assign Discord role ${discordRoleId} in guild ${guildId}: dangerous or unverifiable permissions`,
+      detail: `Refused to assign Discord role ${discordRoleId} in guild ${guildId}: dangerous permissions`,
       terminal: TERMINAL_ROLE_SYNC_ERROR_CODES.captain_action,
+    };
+  }
+
+  // Should-fix 2 (whole-series review of commit 46806427): the mapped Discord role no longer
+  // exists — `handleAssigned.ts` already deleted the stale mapping before failing with this tag.
+  // `retryable` (non-terminal): no captain action is needed (there is nothing to fix — the next
+  // event re-resolves a fresh mapping via `ensureMapping`), so this must NOT be recorded on
+  // `team_members.last_role_sync_*` or counted toward a captain-visible `syncEventsFailedTotal`
+  // the way a real, unfixed failure would be.
+  if (isTagged(error, 'StaleRoleMappingError')) {
+    const guildId = stringProp(error, 'guildId') ?? 'unknown guild';
+    const discordRoleId = stringProp(error, 'discordRoleId') ?? 'unknown role';
+    return {
+      code: 'retryable',
+      detail: `Discord role ${discordRoleId} in guild ${guildId} no longer exists; cleared the stale mapping for re-resolution`,
+      terminal: TERMINAL_ROLE_SYNC_ERROR_CODES.retryable,
     };
   }
 

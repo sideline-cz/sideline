@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Role, Team, TeamMember, User } from '@sideline/domain';
-import { Effect, Layer, Option } from 'effect';
+import { DateTime, Effect, Layer, Option } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -162,7 +162,7 @@ describe('RoleSyncEventsRepository — markProcessed / markFailed fidelity field
       const [event] = yield* roleSyncEvents.findUnprocessed(10);
       if (event === undefined) throw new Error('expected one unprocessed event');
 
-      yield* roleSyncEvents.markProcessed(event.id);
+      yield* roleSyncEvents.markProcessed(event.id, DateTime.nowUnsafe());
 
       const row = yield* readLastRoleSync(member.id);
       expect(row?.last_role_sync_state).toBe('ok');
@@ -248,8 +248,129 @@ describe('RoleSyncEventsRepository — markProcessed / markFailed fidelity field
       if (event === undefined) throw new Error('expected one unprocessed event');
 
       // Must not throw even though there is no team_member_id to update.
-      yield* roleSyncEvents.markProcessed(event.id);
+      yield* roleSyncEvents.markProcessed(event.id, DateTime.nowUnsafe());
     }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// Should-fix 1 (whole-series review of commit 46806427): `role_sync_events` rows for one member's
+// several roles are emitted with no `ORDER BY` guaranteeing a stable order, so which of a
+// member's events a `concurrency: 1` drain processes LAST within one poll tick is not meaningful.
+// Without a guard, a healthy role's `markProcessed` (`state: 'ok'`) landing after a
+// dangerous-permission role's `markFailed` (`state: 'failed'`, `captain_action`) erased the
+// failure reason the UI has dedicated copy for.
+describe('RoleSyncEventsRepository — markProcessed same-tick guard (should-fix 1)', () => {
+  const readLastRoleSync = (memberId: TeamMember.TeamMemberId) =>
+    SqlClient.SqlClient.asEffect().pipe(
+      Effect.andThen(
+        (sql) =>
+          sql<{
+            last_role_sync_at: Date | null;
+            last_role_sync_state: string | null;
+            last_role_sync_error: string | null;
+          }>`SELECT last_role_sync_at, last_role_sync_state, last_role_sync_error FROM team_members WHERE id = ${memberId}`,
+      ),
+      Effect.map((rows) => rows[0]),
+    );
+
+  it.effect(
+    'a same-tick markProcessed (ok) does NOT clobber a same-tick markFailed (failed) recorded moments earlier',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('900000000000000020', 'tick-guard-1');
+        const team = yield* createTeam('900100000000000020' as Discord.Snowflake, userId);
+        const member = yield* addActiveMember(team.id, userId);
+        const roles = yield* RolesRepository.asEffect();
+        const dangerousRole = yield* roles.insertRole(team.id, 'Captain');
+        const healthyRole = yield* roles.insertRole(team.id, 'Coach');
+
+        const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+        const discordId = '111111111111111111' as Discord.Snowflake;
+        yield* roleSyncEvents.emitRoleAssigned(
+          team.id,
+          dangerousRole.id,
+          dangerousRole.name,
+          member.id,
+          discordId,
+        );
+        yield* roleSyncEvents.emitRoleAssigned(
+          team.id,
+          healthyRole.id,
+          healthyRole.name,
+          member.id,
+          discordId,
+        );
+        const events = yield* roleSyncEvents.findUnprocessed(10);
+        const dangerousEvent = events.find((e) => e.role_id === dangerousRole.id);
+        const healthyEvent = events.find((e) => e.role_id === healthyRole.id);
+        if (dangerousEvent === undefined || healthyEvent === undefined) {
+          throw new Error('expected two unprocessed events');
+        }
+
+        const tickStartedAt = DateTime.nowUnsafe();
+
+        // The dangerous role's assignment fails first (captain_action)...
+        yield* roleSyncEvents.markFailed(
+          dangerousEvent.id,
+          'Refused to assign Discord role: dangerous permissions',
+          Option.some('captain_action'),
+        );
+        // ...then the healthy role's assignment succeeds, in the SAME tick.
+        yield* roleSyncEvents.markProcessed(healthyEvent.id, tickStartedAt);
+
+        const row = yield* readLastRoleSync(member.id);
+        expect(row?.last_role_sync_state).toBe('failed');
+        expect(row?.last_role_sync_error).toBe('captain_action');
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'a markProcessed (ok) from a genuinely NEW tick still clears a stale failure recorded in an earlier tick',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('900000000000000021', 'tick-guard-2');
+        const team = yield* createTeam('900100000000000021' as Discord.Snowflake, userId);
+        const member = yield* addActiveMember(team.id, userId);
+        const roles = yield* RolesRepository.asEffect();
+        const role = yield* roles.insertRole(team.id, 'Coach');
+
+        const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+        const discordId = '111111111111111111' as Discord.Snowflake;
+        yield* roleSyncEvents.emitRoleAssigned(team.id, role.id, role.name, member.id, discordId);
+        const [firstEvent] = yield* roleSyncEvents.findUnprocessed(10);
+        if (firstEvent === undefined) throw new Error('expected one unprocessed event');
+
+        // First tick: this role fails.
+        yield* roleSyncEvents.markFailed(
+          firstEvent.id,
+          'Discord error 50013: Missing Permissions',
+          Option.some('captain_action'),
+        );
+
+        // A captain fixes the permission; the level-based diff re-emits the same assignment.
+        yield* roleSyncEvents.emitRoleAssigned(team.id, role.id, role.name, member.id, discordId);
+        const events = yield* roleSyncEvents.findUnprocessed(10);
+        const secondEvent = events.find((e) => e.id !== firstEvent.id);
+        if (secondEvent === undefined) throw new Error('expected a second unprocessed event');
+
+        // Derive the second tick's start from the FIRST tick's own recorded failure timestamp
+        // (read back from Postgres) plus a fixed offset, rather than a real-time wait — this
+        // cannot be flaky against clock/timestamp rounding between the test process and Postgres,
+        // and does not depend on wall-clock delay to prove the guard's direction.
+        const afterFirstFailure = yield* readLastRoleSync(member.id);
+        if (afterFirstFailure?.last_role_sync_at == null) {
+          throw new Error('expected last_role_sync_at to be set after the first failure');
+        }
+        const secondTickStartedAt = DateTime.add(
+          DateTime.fromDateUnsafe(afterFirstFailure.last_role_sync_at),
+          { seconds: 1 },
+        );
+        yield* roleSyncEvents.markProcessed(secondEvent.id, secondTickStartedAt);
+
+        const row = yield* readLastRoleSync(member.id);
+        expect(row?.last_role_sync_state).toBe('ok');
+        expect(row?.last_role_sync_error).toBeNull();
+      }).pipe(Effect.provide(TestLayer)),
   );
 });
 

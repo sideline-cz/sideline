@@ -2225,6 +2225,12 @@ describe('Invite API — PR-5 durable link surface + regenerate endpoint (TDD)',
     discord_code: Option.Option<string>;
     discord_code_error_code: Option.Option<string>;
     created_at: DateTime.Utc;
+    // Should-fix 4 (whole-series review of commit 46806427): consumed by
+    // `deriveJoinStatusState`'s `isStaleDiscordCode` — a `discord_code` older than
+    // `DISCORD_CODE_MAX_AGE_HOURS` reads as `'expired'`, not `'ready'`. Defaults to `Option.none()`
+    // (never stale) below, matching a fresh `discord_code: Option.some(...)` fixture's intent
+    // unless a test explicitly overrides it.
+    generated_at: Option.Option<Date>;
   };
 
   const freshRecord = (overrides: Partial<Pr5AcceptanceRecord> = {}): Pr5AcceptanceRecord => ({
@@ -2234,6 +2240,7 @@ describe('Invite API — PR-5 durable link surface + regenerate endpoint (TDD)',
     discord_code: Option.none(),
     discord_code_error_code: Option.none(),
     created_at: DateTime.nowUnsafe(),
+    generated_at: Option.none(),
     ...overrides,
   });
 

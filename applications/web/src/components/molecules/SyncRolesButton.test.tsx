@@ -136,4 +136,45 @@ describe('SyncRolesButton', () => {
     expect(button.querySelector('svg.lucide-check')).toBeNull();
     expect(screen.getByRole('alert').textContent).toContain('discord_syncFailed');
   });
+
+  // Should-fix 2 (review of 46806427, fix/discord-onboarding-webapp): `handleClick`'s `catch`
+  // recorded `callFailed` but never cleared the PREVIOUS successful run's `result` — so after a
+  // click-succeeds-then-click-fails sequence, the stale "queued: added N removed M · last synced
+  // X" summary rendered right next to "Failed to sync Discord roles.", and `getByRole('alert')`
+  // became ambiguous if the success path had also produced an error-bucket alert. A failed
+  // attempt must clear the previous success summary.
+  it('clears the previous success summary when a later sync fails', async () => {
+    const onSync = vi
+      .fn()
+      .mockResolvedValueOnce(okResult())
+      .mockRejectedValueOnce(new Error('boom'));
+    render(<SyncRolesButton onSync={onSync} />);
+
+    const button = screen.getByRole('button') as HTMLButtonElement;
+
+    // First click succeeds and shows the queued-result summary.
+    await act(async () => {
+      fireEvent.click(button);
+      await Promise.resolve();
+    });
+    expect(screen.getByText(/discord_syncQueuedResult/)).not.toBeNull();
+
+    // Wait out the cooldown (60s — see SyncRolesButton's SYNC_COOLDOWN_MS) so a second click is
+    // possible.
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(button.disabled).toBe(false);
+
+    // Second click rejects — the stale success summary must be gone, and exactly one alert
+    // (the failure notice) must render.
+    await act(async () => {
+      fireEvent.click(button);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText(/discord_syncQueuedResult/)).toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('discord_syncFailed');
+  });
 });

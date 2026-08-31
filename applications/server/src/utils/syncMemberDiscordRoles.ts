@@ -1,6 +1,6 @@
 import type { Discord, Team, TeamMember } from '@sideline/domain';
 import { RoleApi } from '@sideline/domain';
-import { Array, Effect, Option, type ServiceMap } from 'effect';
+import { Array, DateTime, Effect, Option, type ServiceMap } from 'effect';
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
@@ -15,6 +15,17 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
  */
 export const MAX_ROLE_SYNC_EMISSIONS_PER_MEMBER = 25;
 
+/**
+ * Should-fix 3 (whole-series review of commit 46806427): server-side throttle for the self-serve
+ * sync carve-out (`api/role.ts` `syncMemberDiscordRoles` handler, reachable by every member of
+ * every team, not just `role:manage` holders). Mirrors `SYNC_COOLDOWN_MS` in the web's
+ * `SyncRolesButton.tsx` — that cooldown is a `setTimeout` on the CLIENT only, trivially bypassed
+ * (repeated direct calls, a second tab, curl), and this endpoint is not idempotent: it enqueues
+ * `role_assigned` for every desired role on every call (not a diff against what is already
+ * queued), so N rapid calls enqueue N × up-to-25 events with no dedupe on `insertEvent`.
+ */
+export const RESYNC_THROTTLE_SECONDS = 60;
+
 const neverSyncedResult = new RoleApi.SyncMemberRolesResult({
   addedCount: 0,
   removedCount: 0,
@@ -23,6 +34,40 @@ const neverSyncedResult = new RoleApi.SyncMemberRolesResult({
   lastRoleSyncAt: Option.none(),
   lastRoleSyncError: Option.none(),
 });
+
+// Should-fix 3: `priorSync.at` is the timestamp of the member's last COMPLETED sync attempt
+// (`team_members.last_role_sync_at`) — see the module doc comment's "two different things"
+// section. A click within `RESYNC_THROTTLE_SECONDS` of that is throttled: the click's own diff is
+// never computed and nothing new is enqueued, only the same prior result is reported back — this
+// intentionally reuses the already-loaded `priorSync`, not a second query.
+const isThrottled = (priorSync: Option.Option<{ readonly at: DateTime.Utc }>): boolean =>
+  Option.match(priorSync, {
+    onNone: () => false,
+    onSome: (prior) =>
+      !DateTime.isLessThan(
+        prior.at,
+        DateTime.subtract(DateTime.nowUnsafe(), { seconds: RESYNC_THROTTLE_SECONDS }),
+      ),
+  });
+
+const throttledResult = (
+  priorSync: Option.Option<{
+    readonly state: 'ok' | 'failed';
+    readonly at: DateTime.Utc;
+    readonly errorCode: Option.Option<RoleApi.DiscordSyncErrorCode>;
+  }>,
+) =>
+  new RoleApi.SyncMemberRolesResult({
+    addedCount: 0,
+    removedCount: 0,
+    skippedCount: 0,
+    roleSyncState: Option.match(priorSync, {
+      onNone: () => 'never' as const,
+      onSome: (p) => p.state,
+    }),
+    lastRoleSyncAt: Option.map(priorSync, (p) => p.at),
+    lastRoleSyncError: Option.flatMap(priorSync, (p) => p.errorCode),
+  });
 
 /**
  * Pushes one member's current effective Sideline roles into Discord by enqueueing
@@ -35,15 +80,25 @@ const neverSyncedResult = new RoleApi.SyncMemberRolesResult({
  * - **managed** = the Discord roles this team has a `discord_role_mappings` row for — i.e. the
  *   Discord roles Sideline actually owns.
  * - **added** = every role in `desired` → `role_assigned`.
- * - **removed** = every NON-ADOPTED role in `managed` that is NOT in `desired` → `role_unassigned`.
- *   Removal is intentionally restricted to `managed`: a Discord role a captain granted by hand
- *   (no Sideline mapping for it) is never considered here, so this sync can never strip a
- *   hand-granted Discord role. Do not widen `removed` to "any Discord role the member doesn't
- *   need" — that is the anti-stripping guard CC-8 requires. An `adopted: true` mapping IS in
- *   `managed`, so it needs its own guard on top of CC-8 (blocker A, whole-series review): a
- *   member holding an adopted role by hand has no `member_roles` row and so never appears in
- *   `desired` either — without excluding `adopted` mappings from `removed` explicitly, this sync
- *   would strip every adopted role on the very first click for any member who has one.
+ * - **removed** = every role in `managed` that is NOT in `desired` AND that
+ *   `TeamMembersRepository.findGrantedRoleIds` says THIS member was actually given by Sideline
+ *   (`member_role_grants`, written from the bot's own success path — see that table's migration)
+ *   → `role_unassigned`. Removal is intentionally restricted to `managed`: a Discord role a
+ *   captain granted by hand (no Sideline mapping for it) is never considered here, so this sync
+ *   can never strip a hand-granted Discord role. Do not widen `removed` to "any Discord role the
+ *   member doesn't need" — that is the anti-stripping guard CC-8 requires.
+ *   **The `member_role_grants` check (blocker, whole-series review of commit 46806427) replaces
+ *   an earlier blanket `!mapping.adopted` exclusion.** `adopted` is a MAPPING-level fact ("did
+ *   Sideline create or adopt this Discord role at all") and cannot answer the MEMBER-level
+ *   question this diff actually needs: did *this* member receive the role via Sideline. Excluding
+ *   every adopted mapping wholesale also blocked stripping it from a member Sideline itself
+ *   promoted into an adopted role and later demoted — nothing else in the system re-emits
+ *   `role_unassigned` for a group-detach or group-removal, so that member kept Discord access
+ *   forever. Keying on `member_role_grants` instead allows stripping a role this member received
+ *   via Sideline (adopted mapping or not) while never stripping a role held before/outside
+ *   Sideline — a member with no grant row for a role is never in `removedCandidates`, which is
+ *   also the correct default for a member who predates `member_role_grants` and has no recorded
+ *   provenance at all (no backfill exists; see the migration's doc comment).
  * - A member with no `discord_id`, or that does not exist on this team, returns
  *   `{ skippedCount: 1, roleSyncState: 'never' }` and enqueues nothing.
  * - `RoleSyncEventsRepository`'s `_emitIfGuildLinked` already no-ops (writes nothing) for a team
@@ -112,7 +167,7 @@ export const syncMemberDiscordRoles = (
     ),
   );
 
-const syncLinkedMember = (params: {
+type SyncLinkedMemberParams = {
   readonly teamId: Team.TeamId;
   readonly teamMemberId: TeamMember.TeamMemberId;
   readonly discordId: Discord.Snowflake;
@@ -120,22 +175,51 @@ const syncLinkedMember = (params: {
   readonly mappings: ServiceMap.Service.Shape<typeof DiscordRoleMappingRepository>;
   readonly roles: ServiceMap.Service.Shape<typeof RolesRepository>;
   readonly roleSyncEvents: ServiceMap.Service.Shape<typeof RoleSyncEventsRepository>;
-}) =>
+};
+
+// Should-fix 3 (whole-series review of commit 46806427): `priorSync` is fetched FIRST, and a
+// throttled click short-circuits here — before `desired` / `managed` / `grantedRoleIds` are even
+// queried, let alone anything enqueued. Reuses the exact `findLastRoleSync` result the un-throttled
+// path already needed (`priorSync` in the module doc comment's "two different things" section),
+// not a second query bolted on.
+const syncLinkedMember = (params: SyncLinkedMemberParams) =>
+  params.members
+    .findLastRoleSync(params.teamMemberId)
+    .pipe(
+      Effect.flatMap((priorSync) =>
+        isThrottled(priorSync)
+          ? Effect.succeed(throttledResult(priorSync))
+          : syncLinkedMemberDiff(params, priorSync),
+      ),
+    );
+
+const syncLinkedMemberDiff = (
+  params: SyncLinkedMemberParams,
+  priorSync: Option.Option<{
+    readonly state: 'ok' | 'failed';
+    readonly at: DateTime.Utc;
+    readonly errorCode: Option.Option<RoleApi.DiscordSyncErrorCode>;
+  }>,
+) =>
   Effect.Do.pipe(
     Effect.bind('desired', () => params.members.findEffectiveRoleIdsForMember(params.teamMemberId)),
     Effect.bind('managed', () => params.mappings.findAllByTeam(params.teamId)),
-    // The PREVIOUS completed attempt, independent of the diff computed below — see the module
-    // doc comment for why these two never derive from one another.
-    Effect.bind('priorSync', () => params.members.findLastRoleSync(params.teamMemberId)),
+    // Blocker (whole-series review of commit 46806427): per-member provenance for the removal
+    // decision below — see this file's top-of-file doc comment and `member_role_grants`'s
+    // migration for why `adopted` (a mapping-level fact) cannot answer this member-level question.
+    Effect.bind('grantedRoleIds', () =>
+      params.members
+        .findGrantedRoleIds(params.teamMemberId)
+        .pipe(Effect.map((ids) => new Set(ids))),
+    ),
     Effect.let('desiredIds', ({ desired }) => new Set(desired.map((r) => r.role_id))),
-    // Blocker A (whole-series review): `adopted` mappings are excluded here, same rationale as
-    // `reconcileMemberDiscordRoles.ts` — a member holding an adopted Discord role by hand has no
-    // `member_roles` row and so never appears in `desired`. Without this exclusion, a captain
-    // clicking "sync" on ANY member stripped every adopted role that member held but was never
-    // assigned through Sideline. It may still be ADDED via `desired` above; only removal is
-    // guarded.
-    Effect.let('removedCandidates', ({ managed, desiredIds }) =>
-      managed.filter((mapping) => !mapping.adopted && !desiredIds.has(mapping.role_id)),
+    // Blocker (whole-series review of commit 46806427): a mapping is only a removal candidate if
+    // `grantedRoleIds` says SIDELINE ITSELF gave *this* member the role — replaces the earlier
+    // blanket `!mapping.adopted` exclusion; see this file's top-of-file doc comment for why.
+    Effect.let('removedCandidates', ({ managed, desiredIds, grantedRoleIds }) =>
+      managed.filter(
+        (mapping) => grantedRoleIds.has(mapping.role_id) && !desiredIds.has(mapping.role_id),
+      ),
     ),
     // Resolve names for the roles being removed. A mapping whose role can no longer be found
     // (e.g. archived) is skipped rather than emitted with a fabricated name.
@@ -195,7 +279,7 @@ const syncLinkedMember = (params: {
         { concurrency: 1, discard: true },
       ),
     ),
-    Effect.map(({ cappedAdded, cappedRemoved, priorSync }) => {
+    Effect.map(({ cappedAdded, cappedRemoved }) => {
       const enqueuedThisClick = cappedAdded.length + cappedRemoved.length > 0;
       // 'queued' wins whenever this click enqueued work, even over a prior 'failed'/'ok' — see
       // the module doc comment ("`roleSyncState` precedence") for why. When nothing was enqueued,

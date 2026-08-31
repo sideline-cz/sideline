@@ -1,6 +1,6 @@
 import { Discord, Role, RoleApi, RoleSyncEvent, Team, TeamMember } from '@sideline/domain';
-import { LogicError } from '@sideline/effect-lib';
-import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
+import { LogicError, Schemas } from '@sideline/effect-lib';
+import { DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 
@@ -46,10 +46,27 @@ class MarkResult extends Schema.Class<MarkResult>('MarkResult')({
   team_member_id: Schema.OptionFromNullOr(TeamMember.TeamMemberId),
 }) {}
 
+// Blocker (whole-series review, commit 46806427): `markProcessed` additionally RETURNs `role_id`
+// and `event_type` so `rpc/role/index.ts`'s `Role/MarkEventProcessed` handler can update
+// `member_role_grants` provenance — a `role_assigned` event that reaches here means the bot's
+// `addGuildMemberRole` call actually succeeded; a `role_unassigned` event means its
+// `deleteGuildMemberRole` call did. `role_id` / `event_type` are NOT NULL columns on
+// `role_sync_events`, unlike `team_member_id`.
+class MarkProcessedResult extends Schema.Class<MarkProcessedResult>('MarkProcessedResult')({
+  team_member_id: Schema.OptionFromNullOr(TeamMember.TeamMemberId),
+  role_id: Role.RoleId,
+  event_type: RoleSyncEvent.RoleSyncEventType,
+}) {}
+
 const RecordLastRoleSyncInput = Schema.Struct({
   team_member_id: TeamMember.TeamMemberId,
   state: Schema.Literals(['ok', 'failed']),
   error_code: Schema.OptionFromNullOr(RoleApi.DiscordSyncErrorCode),
+  // Should-fix 1 (whole-series review): the poll-tick start `markProcessed` was called with. Only
+  // meaningful when `state = 'ok'` — see `recordLastRoleSync`'s guard below. `markFailed` always
+  // passes the current instant here; it is never read for `state = 'failed'` writes (short-circuit
+  // on `input.state <> 'ok'`), so an unconditional "now" is fine, not a real staleness claim.
+  tick_started_at: Schemas.DateTimeFromIsoString,
 });
 
 const make = Effect.gen(function* () {
@@ -83,13 +100,14 @@ const make = Effect.gen(function* () {
 
   // `SqlSchema.findOne`, not `.void` (9b): the row being marked was just selected by
   // `findUnprocessed`, so the `UPDATE ... RETURNING` always yields exactly one row — see
-  // `AGENTS.md`'s "INSERT ... RETURNING always yields one row" pattern.
+  // `AGENTS.md`'s "INSERT ... RETURNING always yields one row" pattern. RETURNs `role_id` /
+  // `event_type` too — see `MarkProcessedResult`'s doc comment.
   const markEventProcessed = SqlSchema.findOne({
     Request: MarkProcessedInput,
-    Result: MarkResult,
+    Result: MarkProcessedResult,
     execute: (input) => sql`
       UPDATE role_sync_events SET processed_at = now() WHERE id = ${input.id}
-      RETURNING team_member_id
+      RETURNING team_member_id, role_id, event_type
     `,
   });
 
@@ -104,12 +122,30 @@ const make = Effect.gen(function* () {
 
   // 9b: writes `team_members.last_role_sync_*`, which is what fills `roleSyncState` /
   // `lastRoleSyncAt` / `lastRoleSyncError` on `RoleApi.SyncMemberRolesResult` (PR-7's DTO).
+  //
+  // Should-fix 1 (whole-series review, commit 46806427): the trailing `AND (...)` guard stops a
+  // `state = 'ok'` write from clobbering a `'failed'` recorded earlier IN THE SAME POLL TICK.
+  // `role_sync_events` rows for one member's several roles are emitted in `discord_role_mappings`
+  // row order (no `ORDER BY` on that SELECT — see `reconcileMemberDiscordRoles.ts` /
+  // `syncMemberDiscordRoles.ts`), so which of a member's events a `concurrency: 1` drain processes
+  // LAST within one tick is not meaningful; without the guard, a healthy role's `'ok'` landing
+  // after a dangerous-permission role's `'captain_action'` failure erased the failure the UI has
+  // dedicated copy for. The guard only blocks `'ok'` writes: `'failed'` always applies
+  // unconditionally (`input.state <> 'ok'` short-circuits true), so any failure in a tick still
+  // wins over any success in that same tick, and a GENUINELY new tick's success (`last_role_sync_at
+  // < tick_started_at`, i.e. the recorded failure predates this tick) still clears a stale failure
+  // once the underlying problem is fixed and re-synced.
   const recordLastRoleSync = SqlSchema.void({
     Request: RecordLastRoleSyncInput,
     execute: (input) => sql`
       UPDATE team_members
       SET last_role_sync_at = now(), last_role_sync_state = ${input.state}, last_role_sync_error = ${input.error_code}
       WHERE id = ${input.team_member_id}
+        AND (
+          ${input.state} <> 'ok'
+          OR last_role_sync_state IS DISTINCT FROM 'failed'
+          OR last_role_sync_at < ${input.tick_started_at}
+        )
     `,
   });
 
@@ -180,9 +216,13 @@ const make = Effect.gen(function* () {
 
   const findUnprocessed = (limit: number) => findUnprocessedEvents(limit).pipe(catchSqlErrors);
 
-  const markProcessed = (id: RoleSyncEvent.RoleSyncEventId) =>
+  // `tickStartedAt` is the bot-side start of the poll tick this event was drained in — see
+  // `recordLastRoleSync`'s guard doc comment. Returns `MarkProcessedResult` (not void) so
+  // `rpc/role/index.ts`'s `Role/MarkEventProcessed` handler can update `member_role_grants`
+  // provenance off the same `role_id` / `event_type` / `team_member_id` this UPDATE just resolved.
+  const markProcessed = (id: RoleSyncEvent.RoleSyncEventId, tickStartedAt: DateTime.Utc) =>
     markEventProcessed({ id }).pipe(
-      Effect.flatMap((result) =>
+      Effect.tap((result) =>
         Option.match(result.team_member_id, {
           onNone: () => Effect.void,
           onSome: (teamMemberId) =>
@@ -190,6 +230,7 @@ const make = Effect.gen(function* () {
               team_member_id: teamMemberId,
               state: 'ok',
               error_code: Option.none(),
+              tick_started_at: tickStartedAt,
             }),
         }),
       ),
@@ -216,6 +257,10 @@ const make = Effect.gen(function* () {
               team_member_id: result.team_member_id.value,
               state: 'failed',
               error_code: errorCode,
+              // Never read by `recordLastRoleSync`'s guard for `state = 'failed'` writes (it
+              // short-circuits on `input.state <> 'ok'`) — a real instant only because the column
+              // is NOT NULL, not a staleness claim.
+              tick_started_at: DateTime.nowUnsafe(),
             })
           : Effect.void,
       ),

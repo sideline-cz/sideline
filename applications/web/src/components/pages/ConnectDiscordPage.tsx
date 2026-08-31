@@ -63,8 +63,19 @@ export function ConnectDiscordPage({ teamId, teamName, userId, next }: ConnectDi
   // second one is not retryable by a member — clicking "Get a new invite" again returns `None`
   // again, forever, with no visible change. Track that the LAST regenerate click specifically
   // hit that case so the render below can swap to the "ask your captain" copy instead of the
-  // misleading, endlessly-repeatable CTA. Only `handleRegenerate` updates this — the polling
-  // `fetchStatus` says nothing about invite-link existence, so it must not clear it.
+  // misleading, endlessly-repeatable CTA.
+  //
+  // Should-fix 1 (review of 46806427): this used to be write-only — only `handleRegenerate` set
+  // it, and `fetchStatus` deliberately never cleared it — so once a member hit this case the
+  // "ask your captain" copy (with NO CTA) stuck for as long as the page stayed mounted, including
+  // while the 10s/focus poll kept running and while the captain was actively fixing it. The
+  // server's response shape can't tell the two `None` cases apart on a plain poll (only
+  // `regenerateMyDiscordInvite` distinguishes them), so there is no reliable signal to clear this
+  // on. Instead, re-arm it on every poll tick: `fetchStatus` already runs every
+  // `POLL_INTERVAL_MS` and on window focus, so the CTA reappears within one poll of being hidden,
+  // letting the member re-check whether the captain's fix landed. Worst case this flickers the
+  // CTA back for up to `POLL_INTERVAL_MS` before another failed click re-hides it — acceptable,
+  // since the alternative is a permanently dead end.
   const [inviteMissing, setInviteMissing] = React.useState(false);
   const copyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const successTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -94,6 +105,10 @@ export function ConnectDiscordPage({ teamId, teamName, userId, next }: ConnectDi
           Effect.sync(() => {
             setHasLoaded(true);
             setStatus(result);
+            // Should-fix 1: re-arm the "ask your captain" CTA on every poll tick — see the
+            // `inviteMissing` state doc comment above for why this can't be conditioned on
+            // `result`.
+            setInviteMissing(false);
           }),
         ),
         Effect.mapError(() => new SilentClientError({ message: '' })),
@@ -178,7 +193,10 @@ export function ConnectDiscordPage({ teamId, teamName, userId, next }: ConnectDi
         <CardHeader className='text-center'>
           <div className='mb-2 flex justify-center'>
             <div className='flex size-12 items-center justify-center rounded-full bg-primary/10'>
-              <DiscordIcon className='size-6 text-primary' />
+              {/* Should-fix 3 (review of 46806427): the visible CardTitle right below this
+                  ("Join the {teamName} Discord") already says "Discord" — without `aria-hidden`
+                  a screen reader announces "Discord, Discord, Join the ... Discord" here. */}
+              <DiscordIcon className='size-6 text-primary' aria-hidden />
             </div>
           </div>
           <CardTitle>
@@ -281,15 +299,19 @@ export function ConnectDiscordPage({ teamId, teamName, userId, next }: ConnectDi
             )}
 
             {hasLoaded && status?.state === 'failed' && (
+              // BLOCKER (review of 46806427): dropping `findOpenByUserAndTeam`'s SQL filter made
+              // this state reachable again for every `InviteGeneratorErrorCode`, not just the
+              // `None`-projected ones. The explanatory copy is error-specific (`errorCopyKey`),
+              // but the escape hatch is not: whatever the cause, the only thing that can move the
+              // member forward is a fresh acceptance row, and `handleRegenerate` is the only thing
+              // that creates one. Render the CTA unconditionally alongside the copy.
               <Alert variant={Option.isSome(status.errorCode) ? 'warning' : 'destructive'}>
                 <AlertTitle>{tr(errorCopyKey(status.errorCode))}</AlertTitle>
-                {Option.isNone(status.errorCode) && (
-                  <AlertDescription>
-                    <Button variant='outline' size='sm' onClick={handleRegenerate}>
-                      {tr('discord_connect_retry')}
-                    </Button>
-                  </AlertDescription>
-                )}
+                <AlertDescription>
+                  <Button variant='outline' size='sm' onClick={handleRegenerate}>
+                    {tr('discord_connect_retry')}
+                  </Button>
+                </AlertDescription>
               </Alert>
             )}
 
