@@ -15,9 +15,13 @@ import { InviteGeneratorErrorCode } from '~/models/Onboarding.js';
  *   behaviour-preserving default before PR-3 adds the real "is the bot actually in this
  *   guild" gate.
  *
- * This release (PR-2) the server still only ever emits a non-null `welcome_channel_id` and
- * never emits `bot_present: false` — see `InviteAcceptancesRepository.findPending`'s
- * temporary wire guard. Nothing behaves differently yet; only the schema is widened.
+ * PR-2 itself only widened the schema — the server still only ever emitted a non-null
+ * `welcome_channel_id`. That is no longer true (stale comment fixed, whole-series review of
+ * `fix/discord-onboarding-webapp`): PR-3 lifted `findPending`'s `welcome_channel_id IS NOT NULL`
+ * guard, so the server now genuinely emits `null` for a team with no welcome channel configured,
+ * and `bot_present: false` for a guild the bot has never joined. Both fields decode for real now
+ * — this schema is not just tolerant, it is load-bearing. See
+ * `InviteAcceptancesRepository.findPending` for the current query.
  */
 export class PendingAcceptanceEntry extends Schema.Class<PendingAcceptanceEntry>(
   'PendingAcceptanceEntry',

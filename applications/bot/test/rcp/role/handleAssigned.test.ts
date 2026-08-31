@@ -174,7 +174,12 @@ describe('handleMemberAdded', () => {
     ]);
   });
 
-  it('BLOCKER 3 regression: refuses to assign when the role now carries ADMINISTRATOR, without failing the event', async () => {
+  // Blocker 3's original fix (this comment used to end here: "without failing the event") was
+  // itself a bug (whole-series review, "also fix" item): resolving instead of rejecting meant
+  // `ProcessorService.ts` called `Role/MarkEventProcessed`, so `last_role_sync_state` was
+  // recorded `'ok'` for a refused assignment. It must now reject with `UnsafeRoleAssignmentError`
+  // so the processor's `Effect.catch` classifies it as `captain_action` instead.
+  it('BLOCKER 3 regression: refuses to assign when the role now carries ADMINISTRATOR, and FAILS the event as captain_action', async () => {
     const { calls: restCalls, layer: restLayer } = makeRest({
       listGuildRoles: (...args: unknown[]) => {
         restCalls.listGuildRoles?.push(args);
@@ -183,13 +188,14 @@ describe('handleMemberAdded', () => {
     });
     const { layer: rpcLayer } = makeSyncRpc();
 
-    // Must resolve (not reject) — the fix is explicit that this is NOT a MarkEventFailed path.
-    await expect(run(handleMemberAdded(makeEvent()), restLayer, rpcLayer)).resolves.toBeUndefined();
+    await expect(run(handleMemberAdded(makeEvent()), restLayer, rpcLayer)).rejects.toMatchObject({
+      _tag: 'UnsafeRoleAssignmentError',
+    });
 
     expect(restCalls.addGuildMemberRole).toHaveLength(0);
   });
 
-  it('refuses to assign when the mapped role is missing from a fresh listGuildRoles read', async () => {
+  it('refuses to assign when the mapped role is missing from a fresh listGuildRoles read, and FAILS the event as captain_action', async () => {
     const { calls: restCalls, layer: restLayer } = makeRest({
       listGuildRoles: (...args: unknown[]) => {
         restCalls.listGuildRoles?.push(args);
@@ -198,7 +204,9 @@ describe('handleMemberAdded', () => {
     });
     const { layer: rpcLayer } = makeSyncRpc();
 
-    await expect(run(handleMemberAdded(makeEvent()), restLayer, rpcLayer)).resolves.toBeUndefined();
+    await expect(run(handleMemberAdded(makeEvent()), restLayer, rpcLayer)).rejects.toMatchObject({
+      _tag: 'UnsafeRoleAssignmentError',
+    });
 
     expect(restCalls.addGuildMemberRole).toHaveLength(0);
   });

@@ -127,6 +127,19 @@ const classifyHttpClientError = (error: Record<string, unknown>): ClassifiedRole
  *   `unknown`, terminal — never silently retried forever on an error we can't name.
  */
 export const classifyRoleSyncError = (error: unknown): ClassifiedRoleSyncError => {
+  // `handleAssigned.ts`'s TOCTOU re-check (blocker 3) fails with this tag, not a raw Discord REST
+  // error, when a role's live permissions are dangerous or unverifiable — a captain needs to fix
+  // the role in Discord, the same remedy 50013 already has copy for.
+  if (isTagged(error, 'UnsafeRoleAssignmentError')) {
+    const guildId = stringProp(error, 'guildId') ?? 'unknown guild';
+    const discordRoleId = stringProp(error, 'discordRoleId') ?? 'unknown role';
+    return {
+      code: 'captain_action',
+      detail: `Refused to assign Discord role ${discordRoleId} in guild ${guildId}: dangerous or unverifiable permissions`,
+      terminal: TERMINAL_ROLE_SYNC_ERROR_CODES.captain_action,
+    };
+  }
+
   if (isTagged(error, 'RatelimitedResponse')) {
     const retry_after = numberProp(error, 'retry_after');
     return {

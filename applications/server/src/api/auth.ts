@@ -35,6 +35,7 @@ import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
+import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementConfig.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { deriveDiscordJoined } from '~/utils/discordJoinedState.js';
 import { provisionNewTeam } from '~/utils/provisionNewTeam.js';
@@ -311,6 +312,11 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
     Effect.bind('botGuilds', () => BotGuildsRepository.asEffect()),
     Effect.bind('oauthConnections', () => OAuthConnectionsRepository.asEffect()),
     Effect.bind('pendingGuildJoins', () => PendingGuildJoinsRepository.asEffect()),
+    Effect.bind('discordJoinEnforcementService', () => DiscordJoinEnforcementConfig.asEffect()),
+    Effect.bind(
+      'discordJoinEnforcement',
+      ({ discordJoinEnforcementService }) => discordJoinEnforcementService.asEffect,
+    ),
     Effect.map(
       ({
         discord,
@@ -321,6 +327,7 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
         botGuilds,
         oauthConnections,
         pendingGuildJoins,
+        discordJoinEnforcement,
       }) =>
         handlers
           .handle('getLogin', () =>
@@ -474,10 +481,11 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
                             logoUrl: team.logo_url,
                             roleNames: m.role_names,
                             permissions: m.permissions,
-                            discordJoined: deriveDiscordJoined(
-                              m.discord_joined_at,
-                              m.members_backfilled_at,
-                            ),
+                            // Blocker D: the kill switch. Forced to 'unknown' for every team
+                            // while the flag is off — see `DiscordJoinEnforcementConfig`.
+                            discordJoined: discordJoinEnforcement
+                              ? deriveDiscordJoined(m.discord_joined_at, m.members_backfilled_at)
+                              : 'unknown',
                           }),
                       ),
                     ),

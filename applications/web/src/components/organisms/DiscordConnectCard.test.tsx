@@ -75,4 +75,28 @@ describe('DiscordConnectCard', () => {
     expect(screen.getByText('discord_connect_bannerTitle')).not.toBeNull();
     expect(screen.getByText('discord_connect_bannerCta')).not.toBeNull();
   });
+
+  // Blocker 2 (whole-series review, fix/discord-onboarding-webapp): the server only allows a
+  // member to sync `myMemberId === callerMembership.id` (self-serve) without `role:manage`. This
+  // component has exactly two callers (`TeamDetailPage`, which passes its OWN dashboard's
+  // `myMemberId`, and `MyProfilePage`, which omits it entirely for a cross-team list it has no
+  // per-team membership id for) — there is no call site that could pass a DIFFERENT member's id,
+  // so `myMemberId !== undefined` is equivalent to "the caller's own row" and needs no additional
+  // permission gate here (contrast `PlayerDetailPage`, which renders another member's page and
+  // does gate on `canManageRoles`). These pin that the button's visibility is driven purely by
+  // whether the caller's own member id is known, matching that contract.
+  it('renders the sync button when connected and the caller supplies their own myMemberId', () => {
+    render(
+      <DiscordConnectCard
+        team={{ ...baseTeam, discordJoined: 'connected' }}
+        myMemberId={'member-1' as import('@sideline/domain').TeamMember.TeamMemberId}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /discord_syncRolesFor/ })).not.toBeNull();
+  });
+
+  it('omits the sync button when connected but no myMemberId is known (e.g. MyProfilePage)', () => {
+    render(<DiscordConnectCard team={{ ...baseTeam, discordJoined: 'connected' }} />);
+    expect(screen.queryByRole('button', { name: /discord_syncRolesFor/ })).toBeNull();
+  });
 });

@@ -50,6 +50,7 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
+import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementConfig.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { MockChannelManagementLayers } from './mocks/channelMocks.js';
@@ -845,6 +846,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockEmailLayers))
   .pipe(Layer.provide(MockEventRosterLayers))
   .pipe(Layer.provide(BotInfoStore.Default))
+  .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
   .pipe(
     Layer.provide(
       Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),
@@ -1600,6 +1602,7 @@ describe('Invite API — removed-user re-join (TDD: Handle removing user)', () =
       .pipe(Layer.provide(MockEmailLayers))
       .pipe(Layer.provide(MockEventRosterLayers))
       .pipe(Layer.provide(BotInfoStore.Default))
+      .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
       .pipe(
         Layer.provide(
           Layer.succeed(GlobalAdminAllowlist, {
@@ -2008,6 +2011,7 @@ describe('Invite API — resolveOrCreateAcceptance / requiresReauth gating (TDD:
     .pipe(Layer.provide(MockEmailLayers))
     .pipe(Layer.provide(MockEventRosterLayers))
     .pipe(Layer.provide(BotInfoStore.Default))
+    .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
     .pipe(
       Layer.provide(
         Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),
@@ -2452,6 +2456,7 @@ describe('Invite API — PR-5 durable link surface + regenerate endpoint (TDD)',
     .pipe(Layer.provide(MockEmailLayers))
     .pipe(Layer.provide(MockEventRosterLayers))
     .pipe(Layer.provide(BotInfoStore.Default))
+    .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
     .pipe(
       Layer.provide(
         Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),
@@ -2645,6 +2650,34 @@ describe('Invite API — PR-5 durable link surface + regenerate endpoint (TDD)',
         { userId: TEST_ADMIN_ID, teamId: PR5_TEAM_ID },
       ]),
     );
+  });
+
+  // Blocker B (whole-series review of `fix/discord-onboarding-webapp`): `getMyPendingDiscordJoin`
+  // is the ONLY web caller of `findOpenByUserAndTeam`, and — before the repository fix pinned by
+  // `InviteAcceptancesRepository.test.ts`'s "findOpenByUserAndTeam" suite — that method silently
+  // excluded any row with `discord_code_error_code` set. `welcome_channel_missing` is the
+  // dominant cohort of the original onboarding root cause (the onboarding wizard makes the
+  // welcome channel optional), and it is the one error the product has actionable copy for
+  // ("ask your captain to set the welcome channel"). This pins that the state actually reaches
+  // the wire: `deriveJoinStatusState`'s `'failed'` branch, not `None`.
+  it("getMyPendingDiscordJoin returns state 'failed' with errorCode 'welcome_channel_missing' for a marked row", async () => {
+    resetPr5Scenario();
+    scenario.findOpenByUserAndTeamByUser.set(
+      TEST_USER_ID,
+      Option.some(
+        freshRecord({
+          id: 'pr5-welcome-channel-missing',
+          discord_code_error_code: Option.some('welcome_channel_missing'),
+        }),
+      ),
+    );
+
+    const response = await getMyPendingDiscordJoin(PR5_TEAM_ID);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).not.toBeNull();
+    expect(body.state).toBe('failed');
+    expect(body.errorCode).toBe('welcome_channel_missing');
   });
 
   // -------------------------------------------------------------------------

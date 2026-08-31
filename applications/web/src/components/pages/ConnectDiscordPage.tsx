@@ -56,6 +56,16 @@ export function ConnectDiscordPage({ teamId, teamName, userId, next }: ConnectDi
   const [hasLoaded, setHasLoaded] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
   const [regenerating, setRegenerating] = React.useState(false);
+  // Blocker 3 (whole-series review, fix/discord-onboarding-webapp): `regenerateMyDiscordInvite`
+  // returns `None` for two structurally different reasons that both collapse onto
+  // `status === null` — the initial "no acceptance row yet" state, and (per the server's own
+  // doc comment on the `activeInvite` step) "the team has no active invite link at all". The
+  // second one is not retryable by a member — clicking "Get a new invite" again returns `None`
+  // again, forever, with no visible change. Track that the LAST regenerate click specifically
+  // hit that case so the render below can swap to the "ask your captain" copy instead of the
+  // misleading, endlessly-repeatable CTA. Only `handleRegenerate` updates this — the polling
+  // `fetchStatus` says nothing about invite-link existence, so it must not clear it.
+  const [inviteMissing, setInviteMissing] = React.useState(false);
   const copyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const successTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -140,6 +150,7 @@ export function ConnectDiscordPage({ teamId, teamName, userId, next }: ConnectDi
           Effect.sync(() => {
             setHasLoaded(true);
             setStatus(result);
+            setInviteMissing(result === null);
           }),
         ),
         Effect.mapError(() => new SilentClientError({ message: '' })),
@@ -192,7 +203,18 @@ export function ConnectDiscordPage({ teamId, teamName, userId, next }: ConnectDi
               </>
             )}
 
-            {hasLoaded && status === null && (
+            {hasLoaded && status === null && inviteMissing && (
+              // Blocker 3: the team has no active invite link at all (the server's own doc
+              // comment on `regenerateMyDiscordInvite`'s `activeInvite` step). Nothing a member
+              // can do fixes this — no CTA, matching the designer's §4.2(b) "ask your captain"
+              // copy (`.work-plans/discord-connect-enforcement-design.md`).
+              <Alert variant='default'>
+                <AlertTitle>{tr('discord_connect_noGuildTitle')}</AlertTitle>
+                <AlertDescription>{tr('discord_connect_noGuildBody')}</AlertDescription>
+              </Alert>
+            )}
+
+            {hasLoaded && status === null && !inviteMissing && (
               <>
                 <Alert variant='default'>
                   <AlertTitle>{tr('discord_connect_noLinkTitle')}</AlertTitle>
@@ -200,7 +222,7 @@ export function ConnectDiscordPage({ teamId, teamName, userId, next }: ConnectDi
                 </Alert>
                 <Button onClick={handleRegenerate} disabled={regenerating}>
                   {regenerating && <Loader2 className='size-4 animate-spin' aria-hidden='true' />}
-                  {tr('discord_connect_regenerate')}
+                  {tr('discord_connect_regenerateButton')}
                 </Button>
               </>
             )}
@@ -248,12 +270,12 @@ export function ConnectDiscordPage({ teamId, teamName, userId, next }: ConnectDi
             {hasLoaded && status?.state === 'expired' && (
               <>
                 <Alert variant='default'>
-                  <AlertTitle>{tr('discord_connect_noLinkTitle')}</AlertTitle>
-                  <AlertDescription>{tr('discord_connect_noLinkBody')}</AlertDescription>
+                  <AlertTitle>{tr('discord_connect_expiredTitle')}</AlertTitle>
+                  <AlertDescription>{tr('discord_connect_expiredBody')}</AlertDescription>
                 </Alert>
                 <Button onClick={handleRegenerate} disabled={regenerating}>
                   {regenerating && <Loader2 className='size-4 animate-spin' aria-hidden='true' />}
-                  {tr('discord_connect_regenerate')}
+                  {tr('discord_connect_regenerateButton')}
                 </Button>
               </>
             )}

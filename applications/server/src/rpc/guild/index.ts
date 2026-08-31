@@ -62,7 +62,7 @@ type RegisterMemberPayload = {
   readonly nickname: Option.Option<string>;
   readonly display_name: Option.Option<string>;
   readonly invite_code: Option.Option<string>;
-  readonly source: Option.Option<'member_add' | 'reconcile' | 'interaction'>;
+  readonly source: Option.Option<'member_add' | 'reconcile'>;
 };
 
 /**

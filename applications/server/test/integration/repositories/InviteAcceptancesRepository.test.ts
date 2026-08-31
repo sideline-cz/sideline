@@ -1147,8 +1147,22 @@ describe('InviteAcceptancesRepository — findOpenByUserAndTeam (TDD: PR-5 CC-14
     ),
   );
 
+  // Blocker B (whole-series review of `fix/discord-onboarding-webapp`): this test used to assert
+  // the opposite — that a row with `discord_code_error_code` set was excluded here. That filter
+  // was the bug: `getMyPendingDiscordJoin` (the only web caller) is built directly on this
+  // method, and `deriveJoinStatusState` already knows how to turn a `discord_code_error_code`
+  // into `state: 'failed'` with the matching wire `errorCode` — including
+  // `welcome_channel_missing`, the dominant cohort of the original onboarding root cause, since
+  // the onboarding wizard makes the welcome channel optional. Filtering the row out here meant
+  // `getMyPendingDiscordJoin` returned `None` for it instead, the UI showed "we need a fresh
+  // invite", and the regenerate button re-minted an acceptance that failed the exact same way,
+  // up to three times an hour, forever — the one actionable error message in the product
+  // unreachable. `findOpenByUserAndTeam` now returns the newest row for the pair REGARDLESS of
+  // `discord_code_error_code`; `deriveJoinStatusState` is the thing that decides what it means,
+  // not the SQL. The staleness clause (`generated_at > now() - 24h`) still applies only to the
+  // `discord_code IS NOT NULL` case — see the test below this one.
   it.effect(
-    'skips a row with a discord_code_error_code — a terminally failed row is not "open"',
+    'returns a row even when discord_code_error_code is set — deriveJoinStatusState decides, not the SQL',
     () =>
       Effect.Do.pipe(
         Effect.bind('user', () => createUser('700000000000000021', 'joiner-twentyone')),
@@ -1159,11 +1173,15 @@ describe('InviteAcceptancesRepository — findOpenByUserAndTeam (TDD: PR-5 CC-14
           createInvite(team.id, user.id, 'PR5-FAILED-BY-TEAM-CODE'),
         ),
         Effect.bind('acceptance', ({ user, invite }) => createAcceptance(invite.id, user.id)),
-        Effect.tap(({ acceptance }) => markFailed(acceptance.id, 'bot_missing_perms')),
+        Effect.tap(({ acceptance }) => markFailed(acceptance.id, 'welcome_channel_missing')),
         Effect.bind('open', ({ user, team }) => findOpenByUserAndTeam(user.id, team.id)),
-        Effect.tap(({ open }) =>
+        Effect.tap(({ open, acceptance }) =>
           Effect.sync(() => {
-            expect(Option.isNone(open)).toBe(true);
+            expect(Option.isSome(open)).toBe(true);
+            if (Option.isSome(open)) {
+              expect(open.value.id).toBe(acceptance.id);
+              expect(Option.isSome(open.value.discord_code_error_code)).toBe(true);
+            }
           }),
         ),
         Effect.provide(TestLayer),

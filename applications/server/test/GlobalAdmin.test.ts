@@ -131,6 +131,7 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
+import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementConfig.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 // TODO(implementer): create this file at the path below.
 // Shape: class GlobalAdminAllowlist extends ServiceMap.Service<...>()('api/GlobalAdminAllowlist')
@@ -743,7 +744,8 @@ const buildTestLayer = (
     .pipe(Layer.provide(MockChannelManagementLayers))
     .pipe(Layer.provide(MockEmailLayers))
     .pipe(Layer.provide(MockEventRosterLayers))
-    .pipe(Layer.provide(BotInfoStore.Default));
+    .pipe(Layer.provide(BotInfoStore.Default))
+    .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default));
 
 // ---------------------------------------------------------------------------
 // Helpers

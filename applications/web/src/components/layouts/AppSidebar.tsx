@@ -46,6 +46,15 @@ import {
 } from '~/components/ui/sidebar';
 import { tr } from '~/lib/translations.js';
 
+// The nav row already renders the visible label `tr('discord_navTitle')` right next to this
+// icon (`<item.icon /><span>{item.title}</span>`, below) — `DiscordIcon`'s default
+// `role='img' aria-label='Discord'` would announce "Discord, Discord" to a screen reader.
+// `<item.icon />` is rendered with no props for every nav item, so this wrapper is how the
+// Discord entry alone opts into `aria-hidden` without widening `NavItem.icon`'s prop-less type.
+function DiscordNavIcon() {
+  return <DiscordIcon aria-hidden />;
+}
+
 interface NavItem {
   title: string;
   // Widened from `LucideIcon` so `DiscordIcon` (a plain function component, not a lucide
@@ -78,7 +87,7 @@ function getTeamNavGroups(
         },
         {
           title: tr('discord_navTitle'),
-          icon: DiscordIcon,
+          icon: DiscordNavIcon,
           to: '/teams/$teamId/connect-discord',
           params: { teamId },
           needsAttention: discordNeedsAttention,

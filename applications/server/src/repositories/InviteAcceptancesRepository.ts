@@ -130,10 +130,19 @@ const make = SqlClient.SqlClient.asEffect().pipe(
       `,
     });
 
-    // PR-5 / CC-14 step 5: as `findOpenByUserAndInvite` above, but joined through
-    // `team_invites` and filtered by `team_id` instead of a specific invite — what
-    // `getMyPendingDiscordJoin` reads through. "Open" carries the exact same meaning as
-    // `findOpenByUserAndInvite` (not terminally failed, and any minted code is still usable).
+    // PR-5 / CC-14 step 5: what `getMyPendingDiscordJoin` reads through — joined through
+    // `team_invites` and filtered by `team_id` instead of a specific invite, as
+    // `findOpenByUserAndInvite` is. Despite the name, "open" here does NOT mean "not terminally
+    // failed" the way `findOpenByUserAndInvite` does (blocker B, whole-series review of
+    // `fix/discord-onboarding-webapp`): `getMyPendingDiscordJoin` is the ONLY caller, and it is
+    // itself the only web surface for `deriveJoinStatusState`'s `'failed'` state — a row with
+    // `discord_code_error_code` set (e.g. `welcome_channel_missing`, the dominant cohort of the
+    // original onboarding root cause) must still be RETURNED here so `deriveJoinStatusState` can
+    // turn it into the one actionable error message the product has. Filtering it out here meant
+    // that message was unreachable and a captain-fixable failure looked identical to "no pending
+    // join at all". This returns the newest row for the pair unconditionally; the staleness
+    // clause (`generated_at > now() - 24h`) still applies ONLY when a `discord_code` exists,
+    // since a dead one-time code is the one case a fresh regenerate is unambiguously needed for.
     const findOpenByUserAndTeam = SqlSchema.findOneOption({
       Request: OpenByUserAndTeamInput,
       Result: InviteAcceptance.InviteAcceptance,
@@ -141,7 +150,6 @@ const make = SqlClient.SqlClient.asEffect().pipe(
         SELECT ia.* FROM invite_acceptances ia
         JOIN team_invites ti ON ti.id = ia.team_invite_id
         WHERE ia.user_id = ${input.user_id} AND ti.team_id = ${input.team_id}
-          AND ia.discord_code_error_code IS NULL
           AND (ia.discord_code IS NULL OR ia.generated_at > now() - interval '24 hours')
         ORDER BY ia.created_at DESC, ia.id DESC
         LIMIT 1

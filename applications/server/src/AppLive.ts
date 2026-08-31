@@ -83,6 +83,7 @@ import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
+import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementConfig.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { EmailApprovalService } from '~/services/EmailApprovalService.js';
 import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
@@ -199,6 +200,7 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   Layer.provide(AchievementPreview.Default),
   Layer.provide(BotInfoStore.Default),
   Layer.provide(GlobalAdminAllowlist.Default),
+  Layer.provide(DiscordJoinEnforcementConfig.Default),
   Layer.provide(TranslationCache.Default),
   Layer.provide(
     Layer.merge(Repositories, EmailApprovalService.Default.pipe(Layer.provide(Repositories))),

@@ -90,11 +90,11 @@ describe('ConnectDiscordPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('discord_connect_regenerate')).not.toBeNull();
+      expect(screen.getByText('discord_connect_regenerateButton')).not.toBeNull();
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByText('discord_connect_regenerate'));
+      fireEvent.click(screen.getByText('discord_connect_regenerateButton'));
       await Promise.resolve();
     });
 
@@ -119,6 +119,79 @@ describe('ConnectDiscordPage', () => {
     });
     fireEvent.click(screen.getByText('discord_connect_skip'));
     expect(mockNavigate).toHaveBeenCalledWith({ to: `/teams/${TEAM_ID}` });
+  });
+
+  // Blocker 3 (whole-series review, fix/discord-onboarding-webapp): `regenerateMyDiscordInvite`
+  // returning `None` because the team has no active invite link at all (a captain-only fix) must
+  // not render the same "Get a new invite" copy/CTA as the initial "no acceptance row" state —
+  // that CTA returns `None` again on every click, silently, forever. It must render the
+  // "ask your captain" copy instead, with no CTA to retry a request that cannot succeed.
+  it('shows the "ask your captain" copy, not a repeatable CTA, when regenerate finds no active invite link', async () => {
+    mockGetMyPendingDiscordJoin.mockReturnValue(Effect.succeed(Option.none()));
+    mockRegenerateMyDiscordInvite.mockReturnValue(Effect.succeed(Option.none()));
+
+    render(
+      <ConnectDiscordPage teamId={TEAM_ID as never} teamName='Ultimate Praha' userId={USER_ID} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('discord_connect_regenerateButton')).not.toBeNull();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('discord_connect_regenerateButton'));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('discord_connect_noGuildTitle')).not.toBeNull();
+    });
+    expect(screen.getByText('discord_connect_noGuildBody')).not.toBeNull();
+    expect(screen.queryByText('discord_connect_regenerateButton')).toBeNull();
+    expect(screen.queryByText('discord_connect_noLinkTitle')).toBeNull();
+  });
+
+  // Case 1 (no acceptance row at all — the ordinary first-visit state) must keep its own copy
+  // and CTA and must not be confused with case 3 above.
+  it('shows the plain "no invite" copy and CTA on first load, before any regenerate attempt', async () => {
+    mockGetMyPendingDiscordJoin.mockReturnValue(Effect.succeed(Option.none()));
+
+    render(
+      <ConnectDiscordPage teamId={TEAM_ID as never} teamName='Ultimate Praha' userId={USER_ID} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('discord_connect_noLinkTitle')).not.toBeNull();
+    });
+    expect(screen.getByText('discord_connect_regenerateButton')).not.toBeNull();
+    expect(screen.queryByText('discord_connect_noGuildTitle')).toBeNull();
+  });
+
+  // The `expired` state has its own copy distinct from the `status === null` "no invite" copy —
+  // they render identical Alert markup by accident otherwise, even though separate i18n keys
+  // exist for exactly this state.
+  it('renders the expired-specific copy for an expired invite, not the generic no-invite copy', async () => {
+    mockGetMyPendingDiscordJoin.mockReturnValue(
+      Effect.succeed(
+        Option.some({
+          acceptanceId: 'acc-4',
+          discordInviteUrl: Option.none(),
+          errorCode: Option.none(),
+          state: 'expired',
+        }),
+      ),
+    );
+
+    render(
+      <ConnectDiscordPage teamId={TEAM_ID as never} teamName='Ultimate Praha' userId={USER_ID} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('discord_connect_expiredTitle')).not.toBeNull();
+    });
+    expect(screen.getByText('discord_connect_expiredBody')).not.toBeNull();
+    expect(screen.getByText('discord_connect_regenerateButton')).not.toBeNull();
+    expect(screen.queryByText('discord_connect_noLinkTitle')).toBeNull();
   });
 
   it('renders the success state and a Continue button when state is joined', async () => {

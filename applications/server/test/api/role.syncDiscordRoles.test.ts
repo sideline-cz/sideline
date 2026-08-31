@@ -53,6 +53,7 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
+import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementConfig.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
@@ -115,7 +116,11 @@ sessionsStore.set('token', TEST_USER_ID);
 // ---------------------------------------------------------------------------
 
 type EffectiveRole = { role_id: Role.RoleId; role_name: string };
-type ManagedMapping = { role_id: Role.RoleId; discord_role_id: Discord.Snowflake };
+type ManagedMapping = {
+  role_id: Role.RoleId;
+  discord_role_id: Discord.Snowflake;
+  adopted?: boolean;
+};
 type PriorRoleSync = {
   readonly state: 'ok' | 'failed';
   readonly at: DateTime.Utc;
@@ -185,7 +190,7 @@ const makeDiscordRoleMappingRepositoryLayer = () =>
               team_id: teamId,
               role_id: m.role_id,
               discord_role_id: m.discord_role_id,
-              adopted: false,
+              adopted: m.adopted ?? false,
             }))
           : [],
       ),
@@ -440,6 +445,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockChannelManagementLayers))
   .pipe(Layer.provide(MockEmailLayers))
   .pipe(Layer.provide(BotInfoStore.Default))
+  .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
   .pipe(
     Layer.provide(
       Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),
@@ -483,12 +489,35 @@ const syncMember = (memberId: string, token = 'token') =>
   );
 
 describe('POST /teams/:teamId/members/:memberId/sync-discord-roles', () => {
-  it('403 for a member without role:manage', async () => {
+  // Blocker C (whole-series review): the web UI renders the sync button to every member, but
+  // `role:manage` (the endpoint's original gate) is Admin-only — not even Captain holds it
+  // (`packages/domain/src/models/Role.ts`). The self-serve carve-out below is the designer's
+  // intent: a member re-syncing THEIR OWN roles is always allowed; syncing anyone else still
+  // requires `role:manage`.
+  it('403 for a plain member syncing a DIFFERENT member (no role:manage, not self)', async () => {
     currentMembership = playerMembership;
 
-    const response = await syncMember(TEST_MEMBER_ID);
+    const response = await syncMember(TEST_MEMBER_NO_DISCORD_ID);
 
     expect(response.status).toBe(403);
+  });
+
+  it('200 for a plain member syncing THEMSELVES, despite lacking role:manage', async () => {
+    currentMembership = playerMembership;
+    effectiveRoles = [{ role_id: ROLE_A, role_name: 'Captain' }];
+
+    const response = await syncMember(playerMembership.id);
+
+    expect(response.status).toBe(200);
+  });
+
+  it('200 for an Admin (role:manage) syncing a member other than themselves', async () => {
+    currentMembership = managerMembership;
+    effectiveRoles = [{ role_id: ROLE_A, role_name: 'Captain' }];
+
+    const response = await syncMember(TEST_MEMBER_NO_DISCORD_ID);
+
+    expect(response.status).toBe(200);
   });
 
   it('404 MemberNotFound for a member of another team', async () => {
@@ -572,6 +601,45 @@ describe('POST /teams/:teamId/members/:memberId/sync-discord-roles', () => {
     expect(body.addedCount).toBe(1);
     expect(body.removedCount).toBe(0);
     expect(recordedEvents.filter((e) => e.type === 'role_unassigned')).toHaveLength(0);
+  });
+
+  // Blocker A (whole-series review): unlike the "no mapping at all" case above, an ADOPTED
+  // mapping IS present in `managed` — it points at a pre-existing Discord role Sideline adopted
+  // rather than created (`ensureMapping.ts`). A member holding it because a captain granted it
+  // by hand, with no `member_roles` row, never appears in `effectiveRoles` — before this fix
+  // that meant a captain clicking "sync" on ANY member stripped every adopted role that member
+  // held but was never assigned through Sideline. Adoption must be as strong a stripping guard
+  // as having no mapping at all.
+  it('never queues role_unassigned for an adopted mapping the member holds but was never assigned', async () => {
+    effectiveRoles = [];
+    managedMappings = [
+      { role_id: ROLE_A, discord_role_id: '1' as Discord.Snowflake, adopted: true },
+    ];
+
+    const response = await syncMember(TEST_MEMBER_ID);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.addedCount).toBe(0);
+    expect(body.removedCount).toBe(0);
+    expect(recordedEvents.filter((e) => e.type === 'role_unassigned')).toHaveLength(0);
+  });
+
+  // Symmetric with the above: an adopted mapping is still eligible to be ADDED — only stripping
+  // is forbidden.
+  it('still queues role_assigned for an adopted mapping the member newly desires', async () => {
+    effectiveRoles = [{ role_id: ROLE_A, role_name: 'Captain' }];
+    managedMappings = [
+      { role_id: ROLE_A, discord_role_id: '1' as Discord.Snowflake, adopted: true },
+    ];
+
+    const response = await syncMember(TEST_MEMBER_ID);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.addedCount).toBe(1);
+    expect(body.removedCount).toBe(0);
+    expect(recordedEvents).toContainEqual({ type: 'role_assigned', roleId: ROLE_A });
   });
 
   it('returns skippedCount: 1 and queues nothing for a member with no discord_id', async () => {

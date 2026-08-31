@@ -63,6 +63,15 @@ export const env = createEnv({
       Schemas.Optional(() => 'gpt-4o-mini'),
       Schema.toStandardSchemaV1,
     ),
+    // Blocker D (whole-series review of `fix/discord-onboarding-webapp`) — the kill switch the
+    // PR-9 rollout plan requires before the Discord-join enforcement redirect goes live: this
+    // flag, not the redirect logic itself, is the rollback. Defaults to `'false'` (enforcement
+    // OFF) so the redirect does not go live on deploy — see `discordJoinEnforcementEnabled`
+    // below and `auth.myTeams`, its only consumer.
+    DISCORD_JOIN_ENFORCEMENT_ENABLED: Schema.Literals(['true', 'false']).pipe(
+      Schemas.Optional<'true' | 'false'>(() => 'false'),
+      Schema.toStandardSchemaV1,
+    ),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
@@ -76,3 +85,10 @@ export const globalAdminDiscordIds: ReadonlySet<string> = new Set(
     .map((id) => id.trim())
     .filter((id) => SNOWFLAKE_RE.test(id)),
 );
+
+// Blocker D: OFF by default. When OFF, `auth.myTeams` forces `discordJoined` to `'unknown'` for
+// EVERY team regardless of `discord_joined_at` / `members_backfilled_at` — `'unknown'` already
+// renders nothing on the client, so this one flag removes the redirect, the card, and the badge
+// in one move (the designed rollback). Flip to `'true'` only once the PR-9 rollout plan's other
+// preconditions are met.
+export const discordJoinEnforcementEnabled = env.DISCORD_JOIN_ENFORCEMENT_ENABLED === 'true';
