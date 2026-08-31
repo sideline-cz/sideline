@@ -9,6 +9,7 @@
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Role, Team, TeamMember, User } from '@sideline/domain';
 import { Effect, Layer, Option } from 'effect';
+import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
@@ -121,6 +122,133 @@ describe('RoleSyncEventsRepository — emitRoleAssigned', () => {
 
       const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
       expect(unprocessed).toHaveLength(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// PR-9, 9b — `Role/MarkEventProcessed` / `Role/MarkEventFailed` also write
+// `team_members.last_role_sync_*`, which is what fills `roleSyncState` / `lastRoleSyncAt` /
+// `lastRoleSyncError` on `RoleApi.SyncMemberRolesResult` (PR-7's DTO).
+describe('RoleSyncEventsRepository — markProcessed / markFailed fidelity fields (9b)', () => {
+  const readLastRoleSync = (memberId: TeamMember.TeamMemberId) =>
+    SqlClient.SqlClient.asEffect().pipe(
+      Effect.andThen(
+        (sql) =>
+          sql<{
+            last_role_sync_at: Date | null;
+            last_role_sync_state: string | null;
+            last_role_sync_error: string | null;
+          }>`SELECT last_role_sync_at, last_role_sync_state, last_role_sync_error FROM team_members WHERE id = ${memberId}`,
+      ),
+      Effect.map((rows) => rows[0]),
+    );
+
+  it.effect('markProcessed writes last_role_sync_state=ok and clears any prior error', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('900000000000000010', 'fidelity-ok');
+      const team = yield* createTeam('900100000000000010' as Discord.Snowflake, userId);
+      const member = yield* addActiveMember(team.id, userId);
+      const roles = yield* RolesRepository.asEffect();
+      const role = yield* roles.insertRole(team.id, 'Coach');
+
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      yield* roleSyncEvents.emitRoleAssigned(
+        team.id,
+        role.id,
+        role.name,
+        member.id,
+        '111111111111111111' as Discord.Snowflake,
+      );
+      const [event] = yield* roleSyncEvents.findUnprocessed(10);
+      if (event === undefined) throw new Error('expected one unprocessed event');
+
+      yield* roleSyncEvents.markProcessed(event.id);
+
+      const row = yield* readLastRoleSync(member.id);
+      expect(row?.last_role_sync_state).toBe('ok');
+      expect(row?.last_role_sync_at).not.toBeNull();
+      expect(row?.last_role_sync_error).toBeNull();
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'markFailed with a terminal error_code writes last_role_sync_state=failed and the code',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('900000000000000011', 'fidelity-failed');
+        const team = yield* createTeam('900100000000000011' as Discord.Snowflake, userId);
+        const member = yield* addActiveMember(team.id, userId);
+        const roles = yield* RolesRepository.asEffect();
+        const role = yield* roles.insertRole(team.id, 'Coach');
+
+        const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+        yield* roleSyncEvents.emitRoleAssigned(
+          team.id,
+          role.id,
+          role.name,
+          member.id,
+          '111111111111111111' as Discord.Snowflake,
+        );
+        const [event] = yield* roleSyncEvents.findUnprocessed(10);
+        if (event === undefined) throw new Error('expected one unprocessed event');
+
+        yield* roleSyncEvents.markFailed(
+          event.id,
+          'Discord error 50013: Missing Permissions',
+          Option.some('captain_action'),
+        );
+
+        const row = yield* readLastRoleSync(member.id);
+        expect(row?.last_role_sync_state).toBe('failed');
+        expect(row?.last_role_sync_error).toBe('captain_action');
+        expect(row?.last_role_sync_at).not.toBeNull();
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'markFailed with error_code=None (transient/CC-0) does NOT touch team_members at all',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('900000000000000012', 'fidelity-transient');
+        const team = yield* createTeam('900100000000000012' as Discord.Snowflake, userId);
+        const member = yield* addActiveMember(team.id, userId);
+        const roles = yield* RolesRepository.asEffect();
+        const role = yield* roles.insertRole(team.id, 'Coach');
+
+        const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+        yield* roleSyncEvents.emitRoleAssigned(
+          team.id,
+          role.id,
+          role.name,
+          member.id,
+          '111111111111111111' as Discord.Snowflake,
+        );
+        const [event] = yield* roleSyncEvents.findUnprocessed(10);
+        if (event === undefined) throw new Error('expected one unprocessed event');
+
+        yield* roleSyncEvents.markFailed(event.id, 'HTTP 503: Discord server error', Option.none());
+
+        const row = yield* readLastRoleSync(member.id);
+        expect(row?.last_role_sync_state).toBeNull();
+        expect(row?.last_role_sync_error).toBeNull();
+        expect(row?.last_role_sync_at).toBeNull();
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('markProcessed on a team-scoped event (no team_member_id) does not error', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('900000000000000013', 'fidelity-team-scoped');
+      const team = yield* createTeam('900100000000000013' as Discord.Snowflake, userId);
+      const roles = yield* RolesRepository.asEffect();
+      const role = yield* roles.insertRole(team.id, 'Coach');
+
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      yield* roleSyncEvents.emitRoleCreated(team.id, role.id, role.name);
+      const [event] = yield* roleSyncEvents.findUnprocessed(10);
+      if (event === undefined) throw new Error('expected one unprocessed event');
+
+      // Must not throw even though there is no team_member_id to update.
+      yield* roleSyncEvents.markProcessed(event.id);
     }).pipe(Effect.provide(TestLayer)),
   );
 });

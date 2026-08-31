@@ -97,6 +97,19 @@ const make = SqlClient.SqlClient.asEffect().pipe(
       execute: (id) => sql`SELECT * FROM invite_acceptances WHERE id = ${id}`,
     });
 
+    // PR-9 / CC-15: `getJoinStatus` needs the team a bare acceptance id belongs to, in order to
+    // check `team_members.discord_joined_at` for that (team, user) pair — `InviteAcceptance`
+    // itself carries no `team_id`, only `team_invite_id`.
+    const findTeamIdById = SqlSchema.findOneOption({
+      Request: InviteAcceptance.InviteAcceptanceId,
+      Result: Schema.Struct({ team_id: Team.TeamId }),
+      execute: (id) => sql`
+        SELECT ti.team_id FROM invite_acceptances ia
+        JOIN team_invites ti ON ti.id = ia.team_invite_id
+        WHERE ia.id = ${id}
+      `,
+    });
+
     // "Open" = not terminally failed AND, if a code was already minted, still usable.
     // `discord_code_error_code` makes a row terminal (CC-14). A row with a `discord_code` is
     // only open while that one-time code can still work: the bot mints codes with
@@ -323,6 +336,8 @@ const make = SqlClient.SqlClient.asEffect().pipe(
     return {
       create: (input: typeof CreateInput.Type) => create(input).pipe(catchSqlErrors),
       findById: (id: InviteAcceptance.InviteAcceptanceId) => findById(id).pipe(catchSqlErrors),
+      findTeamIdById: (id: InviteAcceptance.InviteAcceptanceId) =>
+        findTeamIdById(id).pipe(Effect.map(Option.map((row) => row.team_id)), catchSqlErrors),
       findOpenByUserAndInvite: (userId: User.UserId, teamInviteId: TeamInvite.TeamInviteId) =>
         findOpenByUserAndInvite({ user_id: userId, team_invite_id: teamInviteId }).pipe(
           catchSqlErrors,

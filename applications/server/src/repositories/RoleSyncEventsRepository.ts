@@ -1,4 +1,5 @@
-import { Discord, Role, RoleSyncEvent, Team, TeamMember } from '@sideline/domain';
+import { Discord, Role, RoleApi, RoleSyncEvent, Team, TeamMember } from '@sideline/domain';
+import { LogicError } from '@sideline/effect-lib';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
@@ -37,6 +38,20 @@ const MarkFailedInput = Schema.Struct({
   error: Schema.String,
 });
 
+// `RETURNING team_member_id` off the same UPDATE that marks the row processed/failed — cheap
+// (one round-trip, not two) and gives `markProcessed`/`markFailed` what they need to decide
+// whether there is a `team_members` row to update at all. `role_created` / `role_deleted` events
+// carry no `team_member_id`, so this is `None` for them and the fidelity write is skipped.
+class MarkResult extends Schema.Class<MarkResult>('MarkResult')({
+  team_member_id: Schema.OptionFromNullOr(TeamMember.TeamMemberId),
+}) {}
+
+const RecordLastRoleSyncInput = Schema.Struct({
+  team_member_id: TeamMember.TeamMemberId,
+  state: Schema.Literals(['ok', 'failed']),
+  error_code: Schema.OptionFromNullOr(RoleApi.DiscordSyncErrorCode),
+});
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -66,17 +81,35 @@ const make = Effect.gen(function* () {
     `,
   });
 
-  const markEventProcessed = SqlSchema.void({
+  // `SqlSchema.findOne`, not `.void` (9b): the row being marked was just selected by
+  // `findUnprocessed`, so the `UPDATE ... RETURNING` always yields exactly one row — see
+  // `AGENTS.md`'s "INSERT ... RETURNING always yields one row" pattern.
+  const markEventProcessed = SqlSchema.findOne({
     Request: MarkProcessedInput,
+    Result: MarkResult,
     execute: (input) => sql`
       UPDATE role_sync_events SET processed_at = now() WHERE id = ${input.id}
+      RETURNING team_member_id
     `,
   });
 
-  const markEventFailed = SqlSchema.void({
+  const markEventFailed = SqlSchema.findOne({
     Request: MarkFailedInput,
+    Result: MarkResult,
     execute: (input) => sql`
       UPDATE role_sync_events SET processed_at = now(), error = ${input.error} WHERE id = ${input.id}
+      RETURNING team_member_id
+    `,
+  });
+
+  // 9b: writes `team_members.last_role_sync_*`, which is what fills `roleSyncState` /
+  // `lastRoleSyncAt` / `lastRoleSyncError` on `RoleApi.SyncMemberRolesResult` (PR-7's DTO).
+  const recordLastRoleSync = SqlSchema.void({
+    Request: RecordLastRoleSyncInput,
+    execute: (input) => sql`
+      UPDATE team_members
+      SET last_role_sync_at = now(), last_role_sync_state = ${input.state}, last_role_sync_error = ${input.error_code}
+      WHERE id = ${input.team_member_id}
     `,
   });
 
@@ -148,10 +181,50 @@ const make = Effect.gen(function* () {
   const findUnprocessed = (limit: number) => findUnprocessedEvents(limit).pipe(catchSqlErrors);
 
   const markProcessed = (id: RoleSyncEvent.RoleSyncEventId) =>
-    markEventProcessed({ id }).pipe(catchSqlErrors);
+    markEventProcessed({ id }).pipe(
+      Effect.flatMap((result) =>
+        Option.match(result.team_member_id, {
+          onNone: () => Effect.void,
+          onSome: (teamMemberId) =>
+            recordLastRoleSync({
+              team_member_id: teamMemberId,
+              state: 'ok',
+              error_code: Option.none(),
+            }),
+        }),
+      ),
+      catchSqlErrors,
+      Effect.catchTag(
+        'NoSuchElementError',
+        LogicError.withMessage(() => `Role/MarkEventProcessed(${id}) — UPDATE returned no row`),
+      ),
+    );
 
-  const markFailed = (id: RoleSyncEvent.RoleSyncEventId, error: string) =>
-    markEventFailed({ id, error }).pipe(catchSqlErrors);
+  // `errorCode` is `Option.none()` for a classifier-transient failure (CC-0): a 429 or a
+  // Discord 5xx must never be recorded as a user-visible sync failure, so `team_members` is left
+  // untouched in that case — only `role_sync_events` itself is marked processed, which is safe
+  // because the level-based diff (CC-10) re-derives the missing change on the next pass.
+  const markFailed = (
+    id: RoleSyncEvent.RoleSyncEventId,
+    error: string,
+    errorCode: Option.Option<RoleApi.DiscordSyncErrorCode>,
+  ) =>
+    markEventFailed({ id, error }).pipe(
+      Effect.flatMap((result) =>
+        Option.isSome(errorCode) && Option.isSome(result.team_member_id)
+          ? recordLastRoleSync({
+              team_member_id: result.team_member_id.value,
+              state: 'failed',
+              error_code: errorCode,
+            })
+          : Effect.void,
+      ),
+      catchSqlErrors,
+      Effect.catchTag(
+        'NoSuchElementError',
+        LogicError.withMessage(() => `Role/MarkEventFailed(${id}) — UPDATE returned no row`),
+      ),
+    );
 
   return {
     emitRoleCreated,

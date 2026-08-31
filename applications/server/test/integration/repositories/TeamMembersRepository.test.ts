@@ -8,8 +8,9 @@
 
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Team, User } from '@sideline/domain';
-import { Effect, Layer, Option } from 'effect';
+import { DateTime, Effect, Layer, Option } from 'effect';
 import { beforeEach } from 'vitest';
+import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
@@ -19,6 +20,7 @@ const TestLayer = Layer.mergeAll(
   TeamMembersRepository.Default,
   TeamsRepository.Default,
   UsersRepository.Default,
+  BotGuildsRepository.Default,
 ).pipe(Layer.provideMerge(TestPgClient));
 
 beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runPromise));
@@ -200,6 +202,72 @@ describe('TeamMembersRepository — findByUser', () => {
       );
       expect(results).toHaveLength(0);
     }).pipe(Effect.provide(TestLayer)),
+  );
+
+  // PR-9 / CC-15 — `findByUser` is what `auth.myTeams` derives `discordJoined` from. Real DB
+  // coverage of the two columns the tri-state gate reads, including the anti-lockout case: a
+  // team whose guild has no `bot_guilds` row at all (backfill never ran) must decode
+  // `members_backfilled_at` as `None`, not silently vanish or produce a false "confirmed absent".
+  it.effect('carries discord_joined_at and members_backfilled_at through the guild LEFT JOIN', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('800000000000000012', 'mbr-discord-state');
+      const botGuilds = yield* BotGuildsRepository.asEffect();
+      const members = yield* TeamMembersRepository.asEffect();
+
+      const backfilledGuildId = '800700000000000001' as Discord.Snowflake;
+      yield* botGuilds.upsert(backfilledGuildId, 'Backfilled Guild', false);
+      yield* botGuilds.markMembersBackfilled(backfilledGuildId);
+      const backfilledTeam = yield* createTeam(backfilledGuildId, userId);
+      const joinedMember = yield* addActiveMember(backfilledTeam.id, userId);
+      yield* members.markDiscordJoined(joinedMember.id);
+
+      const unbackfilledGuildId = '800700000000000002' as Discord.Snowflake;
+      // No bot_guilds row at all for this guild — the backfill never ran.
+      const unbackfilledTeam = yield* createTeam(unbackfilledGuildId, userId);
+      yield* addActiveMember(unbackfilledTeam.id, userId);
+
+      const results = yield* members.findByUser(userId);
+
+      const joinedRow = results.find((r) => r.team_id === backfilledTeam.id);
+      expect(joinedRow).toBeDefined();
+      expect(Option.isSome(joinedRow?.discord_joined_at ?? Option.none())).toBe(true);
+      expect(Option.isSome(joinedRow?.members_backfilled_at ?? Option.none())).toBe(true);
+
+      const unbackfilledRow = results.find((r) => r.team_id === unbackfilledTeam.id);
+      expect(unbackfilledRow).toBeDefined();
+      expect(
+        Option.isNone(unbackfilledRow?.discord_joined_at ?? Option.some(DateTime.nowUnsafe())),
+      ).toBe(true);
+      expect(
+        Option.isNone(unbackfilledRow?.members_backfilled_at ?? Option.some(DateTime.nowUnsafe())),
+      ).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// PR-9 / CC-15 — `findDiscordJoinedAt` is what `getJoinStatus` / `getMyPendingDiscordJoin` /
+// `regenerateMyDiscordInvite` derive `JoinStatus.state = 'joined'` from.
+describe('TeamMembersRepository — findDiscordJoinedAt', () => {
+  it.effect(
+    'returns None before markDiscordJoined, Some after, None again after clearDiscordJoined',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('800000000000000013', 'mbr-find-joined');
+        const team = yield* createTeam('800700000000000003' as Discord.Snowflake, userId);
+        const member = yield* addActiveMember(team.id, userId);
+        const members = yield* TeamMembersRepository.asEffect();
+
+        const before = yield* members.findDiscordJoinedAt(team.id, userId);
+        expect(Option.isNone(before)).toBe(true);
+
+        yield* members.markDiscordJoined(member.id);
+        const after = yield* members.findDiscordJoinedAt(team.id, userId);
+        expect(Option.isSome(after)).toBe(true);
+
+        yield* members.clearDiscordJoined(member.id);
+        const afterClear = yield* members.findDiscordJoinedAt(team.id, userId);
+        expect(Option.isNone(afterClear)).toBe(true);
+      }).pipe(Effect.provide(TestLayer)),
   );
 });
 

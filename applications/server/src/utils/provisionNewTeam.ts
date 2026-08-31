@@ -153,6 +153,9 @@ export function provisionNewTeam({
                   logoUrl: team.logo_url,
                   roleNames: ['Admin'],
                   permissions: [...Role.defaultPermissions.Admin],
+                  // A brand-new team has no guild backfill yet — 'unknown' is the only safe
+                  // value (PR-9 / CC-15); the caller's next `myTeams` load re-derives the truth.
+                  discordJoined: 'unknown',
                 }),
             ),
             Effect.catchTag(

@@ -33,7 +33,10 @@ import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
 import { TeamInvitesRepository } from '~/repositories/TeamInvitesRepository.js';
-import type { MembershipWithRole } from '~/repositories/TeamMembersRepository.js';
+import type {
+  MembershipWithDiscordState,
+  MembershipWithRole,
+} from '~/repositories/TeamMembersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
@@ -883,22 +886,26 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
     onboarding_sync_error: Option.none(),
   };
 
-  const activeMembershipA: MembershipWithRole = {
+  const activeMembershipA: MembershipWithDiscordState = {
     id: '00000000-0000-0000-0000-000000000060' as TeamMember.TeamMemberId,
     team_id: AUTH_TEAM_ID_A,
     user_id: TEST_USER_ID,
     active: true,
     role_names: ['Player'],
     permissions: ['roster:view'] as readonly Role.Permission[],
+    discord_joined_at: Option.none(),
+    members_backfilled_at: Option.none(),
   };
 
-  const inactiveMembershipB: MembershipWithRole = {
+  const inactiveMembershipB: MembershipWithDiscordState = {
     id: '00000000-0000-0000-0000-000000000061' as TeamMember.TeamMemberId,
     team_id: AUTH_TEAM_ID_B,
     user_id: TEST_USER_ID,
     active: false,
     role_names: ['Player'],
     permissions: ['roster:view'] as readonly Role.Permission[],
+    discord_joined_at: Option.none(),
+    members_backfilled_at: Option.none(),
   };
 
   // Track addMember / reactivateMember calls in autoJoinTeams tests
@@ -907,7 +914,7 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
 
   // Helper to build a test layer with configurable findByUser and findMembershipByIds behaviour
   const buildAuthTestLayer = (opts: {
-    findByUserResult: ReadonlyArray<MembershipWithRole>;
+    findByUserResult: ReadonlyArray<MembershipWithDiscordState>;
     findMembershipByIdsResult: (
       teamId: Team.TeamId,
       userId: Auth.UserId,
@@ -1150,6 +1157,90 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
     // Team B must NOT be in the list (inactive membership excluded by findByUser)
     const hasTeamB = body.some((t: { teamId: string }) => t.teamId === AUTH_TEAM_ID_B);
     expect(hasTeamB).toBe(false);
+  });
+
+  // PR-9 (Discord onboarding fix), CC-15 — the tri-state gate. `discordJoined` is derived purely
+  // from the two columns `findByUser` now selects; these three tests exercise it end-to-end
+  // through the real HTTP handler (the pure derivation itself is unit-tested in
+  // `test/unit/discordJoinedState.test.ts`).
+  it("myTeams returns discordJoined 'connected' for a member with discord_joined_at set", async () => {
+    const testLayer = buildAuthTestLayer({
+      findByUserResult: [
+        { ...activeMembershipA, discord_joined_at: Option.some(DateTime.nowUnsafe()) },
+      ],
+      findMembershipByIdsResult: () => Option.none(),
+      teamsToReturn: [teamA],
+    });
+
+    const app = HttpRouter.toWebHandler(testLayer);
+    const handler = app.handler as (...args: any[]) => Promise<Response>;
+    const response = await handler(
+      new Request('http://localhost/auth/me/teams', {
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body[0].discordJoined).toBe('connected');
+  });
+
+  it("myTeams returns 'not_connected' only when the guild has members_backfilled_at set", async () => {
+    const testLayer = buildAuthTestLayer({
+      findByUserResult: [
+        {
+          ...activeMembershipA,
+          discord_joined_at: Option.none(),
+          members_backfilled_at: Option.some(DateTime.nowUnsafe()),
+        },
+      ],
+      findMembershipByIdsResult: () => Option.none(),
+      teamsToReturn: [teamA],
+    });
+
+    const app = HttpRouter.toWebHandler(testLayer);
+    const handler = app.handler as (...args: any[]) => Promise<Response>;
+    const response = await handler(
+      new Request('http://localhost/auth/me/teams', {
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body[0].discordJoined).toBe('not_connected');
+  });
+
+  // The anti-lockout guard: a guild whose backfill never completed must NEVER read as
+  // 'not_connected' — that would be a hard gate on an unknown signal, which is what turns this
+  // gate into a lockout for an existing, working user base.
+  it("myTeams returns 'unknown' for a guild whose backfill never completed", async () => {
+    const testLayer = buildAuthTestLayer({
+      findByUserResult: [
+        {
+          ...activeMembershipA,
+          discord_joined_at: Option.none(),
+          members_backfilled_at: Option.none(),
+        },
+      ],
+      findMembershipByIdsResult: () => Option.none(),
+      teamsToReturn: [teamA],
+    });
+
+    const app = HttpRouter.toWebHandler(testLayer);
+    const handler = app.handler as (...args: any[]) => Promise<Response>;
+    const response = await handler(
+      new Request('http://localhost/auth/me/teams', {
+        headers: { Authorization: 'Bearer pre-existing-token' },
+      }),
+    );
+    await app.dispose();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body[0].discordJoined).toBe('unknown');
   });
 
   it('autoJoinTeams does NOT call addMember or reactivateMember for inactive membership', async () => {

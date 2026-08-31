@@ -10,7 +10,6 @@ import {
   Home,
   Languages,
   Link2,
-  type LucideIcon,
   Receipt,
   ReceiptText,
   Rss,
@@ -26,9 +25,12 @@ import {
   Wallet,
   Wand2,
 } from 'lucide-react';
+import type React from 'react';
+import { DiscordIcon } from '~/components/atoms/DiscordIcon.js';
 import { NavUser } from '~/components/layouts/NavUser';
 import { TeamSwitcher } from '~/components/layouts/TeamSwitcher';
 import { LegalLinks } from '~/components/molecules/LegalLinks';
+import { Badge } from '~/components/ui/badge';
 import {
   Sidebar,
   SidebarContent,
@@ -46,15 +48,21 @@ import { tr } from '~/lib/translations.js';
 
 interface NavItem {
   title: string;
-  icon: LucideIcon;
+  // Widened from `LucideIcon` so `DiscordIcon` (a plain function component, not a lucide
+  // `ForwardRefExoticComponent`) can share this list — rendered as `<item.icon />` with no
+  // props, so no lucide-specific prop is ever required here.
+  icon: React.ComponentType;
   to: string;
   params?: Record<string, string>;
   requiredPermission?: Role.Permission;
   exact?: boolean;
+  /** designer §2.3 — the sidebar nav badge dot. Currently only the Discord item uses this. */
+  needsAttention?: boolean;
 }
 
 function getTeamNavGroups(
   teamId: string,
+  discordNeedsAttention: boolean,
 ): ReadonlyArray<{ id: string; label: string; items: ReadonlyArray<NavItem> }> {
   return [
     {
@@ -67,6 +75,13 @@ function getTeamNavGroups(
           to: '/teams/$teamId',
           params: { teamId },
           exact: true,
+        },
+        {
+          title: tr('discord_navTitle'),
+          icon: DiscordIcon,
+          to: '/teams/$teamId/connect-discord',
+          params: { teamId },
+          needsAttention: discordNeedsAttention,
         },
         {
           title: tr('my_payments_navTitle'),
@@ -230,7 +245,10 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
 
 export function AppSidebar({ user, teams, activeTeam, onLogout, ...props }: AppSidebarProps) {
   const matchRoute = useMatchRoute();
-  const navGroups = getTeamNavGroups(activeTeam.teamId)
+  const navGroups = getTeamNavGroups(
+    activeTeam.teamId,
+    activeTeam.discordJoined === 'not_connected',
+  )
     .map((group) => ({
       ...group,
       items: group.items.filter(
@@ -263,6 +281,11 @@ export function AppSidebar({ user, teams, activeTeam, onLogout, ...props }: AppS
                       <Link to={item.to} params={item.params}>
                         <item.icon />
                         <span>{item.title}</span>
+                        {item.needsAttention && (
+                          <Badge variant='destructive' className='ml-auto size-2 rounded-full p-0'>
+                            <span className='sr-only'>{tr('discord_navNeedsAttention')}</span>
+                          </Badge>
+                        )}
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

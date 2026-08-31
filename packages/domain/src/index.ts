@@ -10,6 +10,19 @@ export * as ActivityTypeApi from './api/ActivityTypeApi.js';
 
 export * as AgeThresholdApi from './api/AgeThresholdApi.js';
 
+/**
+ * Tri-state, and `'unknown'` renders NOTHING (PR-9 / CC-15, designer §3.6) — never a boolean.
+ * A hard gate on an unknown signal bounces the entire existing user base (the day-one state for
+ * every member of every team, since the bot has to observe guild membership before anyone can be
+ * `'connected'` or `'not_connected'`), so `'unknown'` is a first-class state, not a default that
+ * degrades to `false`. Populated in `auth.myTeams`
+ * (`applications/server/src/api/auth.ts`) from `team_members.discord_joined_at` (PR-8):
+ * non-null → `'connected'`; null AND the team's guild has `bot_guilds.members_backfilled_at`
+ * non-null → `'not_connected'`; otherwise `'unknown'`. A guild whose member list was never
+ * provably read completely must never be interpreted as "nobody is connected".
+ * `withDecodingDefaultKey` keeps an old server payload (no `discordJoined` key at all) decoding
+ * safely in a new browser as `'unknown'` — the safe, inert default.
+ */
 export * as Auth from './api/Auth.js';
 
 export * as ChannelApi from './api/ChannelApi.js';
@@ -44,8 +57,9 @@ export * as ICalApi from './api/ICalApi.js';
 /**
  * The client-facing subset of `Onboarding.InviteGeneratorErrorCode`. `'expired'` is never here
  * — `JoinStatus.state` carries it (CC-3). Name is permanent, not `LegacyInviteGeneratorErrorCode`:
- * this is not a legacy artefact awaiting deletion, it is the permanent client contract (only
- * `'bot_not_in_guild'` joins it later, in PR-9). See
+ * this is not a legacy artefact awaiting deletion, it is the permanent client contract.
+ * `'bot_not_in_guild'` joined in PR-9, once the server bundles the widened stored enum (PR-2) and
+ * every browser that could receive it does too (CC-3's three-release schedule). See
  * `applications/server/src/utils/inviteErrorWireProjection.ts` for the projection applied at the
  * `getJoinStatus` read boundary. Model: `EventRsvpApi.ts` `LegacyRsvpResponse` /
  * `rsvpWireProjection.ts`.

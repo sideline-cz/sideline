@@ -195,13 +195,22 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
             // Ownership check (live security fix): without it, any authenticated caller holding
             // an acceptanceId gets a working one-time Discord invite to a server they were never
             // invited to. 404, not 403 — do not confirm existence to a non-owner.
-            Effect.flatMap(({ user, acc }) =>
-              acc.user_id === user.id
-                ? Effect.succeed(acc)
-                : Effect.fail(new Invite.InviteNotFound()),
+            Effect.tap(({ user, acc }) =>
+              acc.user_id === user.id ? Effect.void : Effect.fail(new Invite.InviteNotFound()),
             ),
-            Effect.map((acc) => {
-              const derived = deriveJoinStatusState(acc);
+            // PR-9 / CC-15: `InviteAcceptance` carries no `team_id` of its own — resolve it
+            // through `team_invites` so `discord_joined_at` can be checked for this (team, user)
+            // pair. `None` (an orphaned acceptance, or a race with the invite being deleted) just
+            // means "not observed joined" — never a hard failure of the whole read.
+            Effect.bind('teamId', ({ acc }) => acceptances.findTeamIdById(acc.id)),
+            Effect.bind('discordJoinedAt', ({ user, teamId }) =>
+              Option.match(teamId, {
+                onNone: () => Effect.succeedNone,
+                onSome: (id) => members.findDiscordJoinedAt(id, user.id),
+              }),
+            ),
+            Effect.map(({ acc, discordJoinedAt }) => {
+              const derived = deriveJoinStatusState(acc, Option.isSome(discordJoinedAt));
               return new Invite.JoinStatus({
                 acceptanceId: acc.id,
                 discordInviteUrl: derived.discordInviteUrl,
@@ -220,9 +229,12 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
             // Ownership: scoped to the CALLING user's own id, never anything
             // request-controlled — the same hole PR-4 closed on `getJoinStatus`.
             Effect.bind('open', ({ user }) => acceptances.findOpenByUserAndTeam(user.id, teamId)),
-            Effect.map(({ open }) =>
+            Effect.bind('discordJoinedAt', ({ user }) =>
+              members.findDiscordJoinedAt(teamId, user.id),
+            ),
+            Effect.map(({ open, discordJoinedAt }) =>
               Option.map(open, (acc) => {
-                const derived = deriveJoinStatusState(acc);
+                const derived = deriveJoinStatusState(acc, Option.isSome(discordJoinedAt));
                 return new Invite.JoinStatus({
                   acceptanceId: acc.id,
                   discordInviteUrl: derived.discordInviteUrl,
@@ -265,9 +277,12 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                     )
                 : Effect.void,
             ),
-            Effect.map(({ resolved }) =>
+            Effect.bind('discordJoinedAt', ({ user }) =>
+              members.findDiscordJoinedAt(teamId, user.id),
+            ),
+            Effect.map(({ resolved, discordJoinedAt }) =>
               Option.map(resolved, ({ acceptance }) => {
-                const derived = deriveJoinStatusState(acceptance);
+                const derived = deriveJoinStatusState(acceptance, Option.isSome(discordJoinedAt));
                 return new Invite.JoinStatus({
                   acceptanceId: acceptance.id,
                   discordInviteUrl: derived.discordInviteUrl,

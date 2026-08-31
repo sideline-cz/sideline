@@ -1,6 +1,7 @@
 import {
   type Discord,
   type Role,
+  type RoleApi,
   RoleRpcGroup,
   RoleRpcModels,
   type RoleSyncEvent,
@@ -60,8 +61,16 @@ export const RolesRpcLive = Effect.Do.pipe(
   Effect.let(
     'Role/MarkEventFailed',
     ({ syncEvents }) =>
-      ({ id, error }: { readonly id: RoleSyncEvent.RoleSyncEventId; readonly error: string }) =>
-        syncEvents.markFailed(id, error),
+      ({
+        id,
+        error,
+        error_code,
+      }: {
+        readonly id: RoleSyncEvent.RoleSyncEventId;
+        readonly error: string;
+        readonly error_code: Option.Option<RoleApi.DiscordSyncErrorCode>;
+      }) =>
+        syncEvents.markFailed(id, error, error_code),
   ),
   Effect.let(
     'Role/GetMapping',
