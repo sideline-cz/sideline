@@ -36,6 +36,7 @@ import {
 import { AgeCheckCron } from '~/services/AgeCheckCron.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 import { CoachingStatusCron } from '~/services/CoachingStatusCron.js';
+import { EmailRetentionCron } from '~/services/EmailRetentionCron.js';
 import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
 import { EmailSummarizer } from '~/services/EmailSummarizer.js';
 import { EventHorizonCron } from '~/services/EventHorizonCron.js';
@@ -228,6 +229,12 @@ const EmailSummarizerCronEffect = EmailSummarizer.asEffect().pipe(
   Effect.provide(LlmClient.Default.pipe(Layer.provide(FetchHttpClient.layer))),
 );
 
+const EmailRetentionCronEffect = EmailRetentionCron.pipe(
+  Effect.provide(
+    EmailMessagesRepository.Default.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
+  ),
+);
+
 const ImapPollerRepositoriesLive = Layer.mergeAll(
   EmailForwardingConfigRepository.Default,
   EmailMessagesRepository.Default,
@@ -260,6 +267,7 @@ Effect.Do.pipe(
         ClaimRequestCronEffect,
         CoachingStatusCronEffect,
         EmailSummarizerCronEffect,
+        EmailRetentionCronEffect,
         ImapPollerCronEffect,
       ],
       {
