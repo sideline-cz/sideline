@@ -10,8 +10,9 @@ import { UserId } from '~/models/User.js';
 /**
  * The client-facing subset of `Onboarding.InviteGeneratorErrorCode`. `'expired'` is never here
  * — `JoinStatus.state` carries it (CC-3). Name is permanent, not `LegacyInviteGeneratorErrorCode`:
- * this is not a legacy artefact awaiting deletion, it is the permanent client contract (only
- * `'bot_not_in_guild'` joins it later, in PR-9). See
+ * this is not a legacy artefact awaiting deletion, it is the permanent client contract.
+ * `'bot_not_in_guild'` joined in PR-9, once the server bundles the widened stored enum (PR-2) and
+ * every browser that could receive it does too (CC-3's three-release schedule). See
  * `applications/server/src/utils/inviteErrorWireProjection.ts` for the projection applied at the
  * `getJoinStatus` read boundary. Model: `EventRsvpApi.ts` `LegacyRsvpResponse` /
  * `rsvpWireProjection.ts`.
@@ -25,6 +26,7 @@ export const JoinStatusErrorCode = Schema.Literals([
   'discord_error',
   'network_error',
   'unknown',
+  'bot_not_in_guild',
 ]);
 export type JoinStatusErrorCode = typeof JoinStatusErrorCode.Type;
 
@@ -48,14 +50,25 @@ export class JoinResult extends Schema.Class<JoinResult>('JoinResult')({
 }) {}
 
 /**
- * PR-5 / CC-15: `'joined'` is deliberately absent. The only truthful source for "already in
- * the guild" is `team_members.discord_joined_at`, which does not exist until PR-8 — until
- * then, "already in the guild" is expressed as `getMyPendingDiscordJoin` returning
- * `Option.none()` (nothing pending), not a state on this union. `Schema.withDecodingDefaultKey`
- * lets an old server's payload (no `state` key at all) decode in a new browser as `'preparing'`
- * — harmless, since a browser that old never reads this field anyway.
+ * PR-5 shipped this without `'joined'` (CC-15): the only truthful source for "already in the
+ * guild" is `team_members.discord_joined_at`, which did not exist until PR-8 — until then,
+ * "already in the guild" was expressed as `getMyPendingDiscordJoin` returning `Option.none()`
+ * (nothing pending), not a state on this union. PR-9 adds `'joined'`, purely additively, derived
+ * from `discord_joined_at` — the only source that is *cleared* when a user leaves the guild
+ * (`Guild/RemoveMember`), so it can never go stale the way `pending_guild_joins.status = 'done'`
+ * would have (rev 2's sticky-`'done'` bug). `discordJoined` takes precedence over every other
+ * derivation in `joinStatusState.ts`: a user who is factually in the guild is `'joined'`
+ * regardless of what their invite acceptance row says. `Schema.withDecodingDefaultKey` lets an
+ * old server's payload (no `state` key at all) decode in a new browser as `'preparing'` —
+ * harmless, since a browser that old never reads this field anyway.
  */
-export const JoinStatusState = Schema.Literals(['preparing', 'ready', 'expired', 'failed']);
+export const JoinStatusState = Schema.Literals([
+  'preparing',
+  'ready',
+  'expired',
+  'failed',
+  'joined',
+]);
 export type JoinStatusState = typeof JoinStatusState.Type;
 
 export class JoinStatus extends Schema.Class<JoinStatus>('JoinStatus')({

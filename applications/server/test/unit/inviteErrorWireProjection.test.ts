@@ -1,7 +1,8 @@
 // Tests for `projectInviteErrorToWire` (PR-2, CC-3) — the wire-value projection applied at the
 // `getJoinStatus` read boundary. Table-driven over all 10 stored `Onboarding.InviteGeneratorErrorCode`
-// literals: `'expired'` collapses to `None` permanently, `'bot_not_in_guild'` projects to
-// `'unknown'` (until PR-9), and every other literal is identity.
+// literals: `'expired'` collapses to `None` permanently, and every other literal is identity —
+// PR-9 deletes the `'bot_not_in_guild' → 'unknown'` mapping now that the client-facing union
+// (`Invite.JoinStatusErrorCode`) carries the real code.
 
 import { describe, expect, it } from '@effect/vitest';
 import type { Onboarding } from '@sideline/domain';
@@ -20,7 +21,7 @@ describe('projectInviteErrorToWire', () => {
     ['discord_error', Option.some('discord_error')],
     ['network_error', Option.some('network_error')],
     ['unknown', Option.some('unknown')],
-    ['bot_not_in_guild', Option.some('unknown')],
+    ['bot_not_in_guild', Option.some('bot_not_in_guild')],
     ['expired', Option.none()],
   ];
 
@@ -37,7 +38,9 @@ describe('projectInviteErrorToWire', () => {
     expect(Option.isNone(projectInviteErrorToWire('expired'))).toBe(true);
   });
 
-  it("projects 'bot_not_in_guild' to Some('unknown') until PR-9", () => {
-    expect(Option.getOrThrow(projectInviteErrorToWire('bot_not_in_guild'))).toBe('unknown');
+  it("projects 'bot_not_in_guild' to its real code now that PR-9 removed the mapping", () => {
+    expect(Option.getOrThrow(projectInviteErrorToWire('bot_not_in_guild'))).toBe(
+      'bot_not_in_guild',
+    );
   });
 });

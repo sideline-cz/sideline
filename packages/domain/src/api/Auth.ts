@@ -34,12 +34,29 @@ export const BirthDateString = Schema.String.pipe(
   ),
 );
 
+/**
+ * Tri-state, and `'unknown'` renders NOTHING (PR-9 / CC-15, designer §3.6) — never a boolean.
+ * A hard gate on an unknown signal bounces the entire existing user base (the day-one state for
+ * every member of every team, since the bot has to observe guild membership before anyone can be
+ * `'connected'` or `'not_connected'`), so `'unknown'` is a first-class state, not a default that
+ * degrades to `false`. Populated in `auth.myTeams`
+ * (`applications/server/src/api/auth.ts`) from `team_members.discord_joined_at` (PR-8):
+ * non-null → `'connected'`; null AND the team's guild has `bot_guilds.members_backfilled_at`
+ * non-null → `'not_connected'`; otherwise `'unknown'`. A guild whose member list was never
+ * provably read completely must never be interpreted as "nobody is connected".
+ * `withDecodingDefaultKey` keeps an old server payload (no `discordJoined` key at all) decoding
+ * safely in a new browser as `'unknown'` — the safe, inert default.
+ */
+export const UserTeamDiscordJoined = Schema.Literals(['connected', 'not_connected', 'unknown']);
+export type UserTeamDiscordJoined = typeof UserTeamDiscordJoined.Type;
+
 export class UserTeam extends Schema.Class<UserTeam>('UserTeam')({
   teamId: TeamId,
   teamName: Schema.String,
   logoUrl: Schema.OptionFromNullOr(Schema.String),
   roleNames: Schema.Array(Schema.String),
   permissions: Schema.Array(Permission),
+  discordJoined: UserTeamDiscordJoined.pipe(Schema.withDecodingDefaultKey(() => 'unknown')),
 }) {}
 
 export class CurrentUser extends Schema.Class<CurrentUser>('CurrentUser')({

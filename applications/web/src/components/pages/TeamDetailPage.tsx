@@ -1,4 +1,4 @@
-import type { DashboardApi, DashboardLayoutApi } from '@sideline/domain';
+import type { Auth, DashboardApi, DashboardLayoutApi } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import { DateTime, Option } from 'effect';
 import {
@@ -16,6 +16,7 @@ import {
 import React from 'react';
 import { EventLocation } from '~/components/atoms/EventLocation.js';
 import { DashboardCustomizer } from '~/components/organisms/DashboardCustomizer.js';
+import { DiscordConnectCard } from '~/components/organisms/DiscordConnectCard.js';
 import type { MyFinanceStatus } from '~/components/organisms/OutstandingPaymentsBanner.js';
 import { OutstandingPaymentsBanner } from '~/components/organisms/OutstandingPaymentsBanner.js';
 import { Badge } from '~/components/ui/badge';
@@ -38,6 +39,10 @@ type WidgetId =
 interface TeamDetailPageProps {
   teamId: string;
   userId?: string;
+  /** PR-9 / designer §2.2 — the current user's own view of this team, carrying
+   * `discordJoined`. Optional so existing callers/tests that don't exercise the Discord surface
+   * keep compiling; when absent, `DiscordConnectCard` is not mounted. */
+  team?: Auth.UserTeam;
   dashboard: DashboardApi.DashboardResponse | undefined;
   myStatus?: ReadonlyArray<MyFinanceStatus>;
   layout?: DashboardLayoutApi.DashboardLayout;
@@ -428,6 +433,7 @@ function TeamManagementCard({ teamId }: { teamId: string }) {
 export function TeamDetailPage({
   teamId,
   userId,
+  team,
   dashboard,
   myStatus = [],
   layout,
@@ -484,6 +490,11 @@ export function TeamDetailPage({
           </Button>
         )}
       </div>
+
+      {/* PR-9 / designer §2.2 — the durable Discord card. Deliberately NOT part of the
+          customizable widget grid below: it is never dismissible and never hidden, which the
+          widget registry's opt-out semantics would otherwise allow. */}
+      {team !== undefined && <DiscordConnectCard team={team} myMemberId={dashboard.myMemberId} />}
 
       {/* Configurable widget region — banners are now part of the grid */}
       <DashboardCustomizer

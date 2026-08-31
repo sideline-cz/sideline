@@ -277,6 +277,9 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   assignRole: () => Effect.void,
   unassignRole: () => Effect.void,
   setJerseyNumber: () => Effect.void,
+  // PR-9 / CC-15 — reads `discordJoinedAtStore`, mutated per-test.
+  findDiscordJoinedAt: (_teamId: Team.TeamId, userId: Auth.UserId) =>
+    Effect.succeed(Option.fromNullishOr(discordJoinedAtStore.get(userId))),
 } as any);
 
 const MockTeamInvitesRepositoryLayer = Layer.succeed(TeamInvitesRepository, {
@@ -700,6 +703,12 @@ const acceptancesCreateCalls: Array<{ team_invite_id: string; user_id: string }>
 const pendingGuildJoinsEnqueueCalls: Array<{ userId: string; teamId: string }> = [];
 let acceptanceIdCounter = 0;
 
+// PR-9 / CC-15 — mutable per-user "have we observed this user in the guild" store, read by
+// `MockTeamMembersRepositoryLayer.findDiscordJoinedAt` below. Keyed by `userId` alone (every
+// acceptance in this describe block belongs to `TEST_TEAM_ID`), so tests 4/5 can flip a single
+// user's observed-join state between requests without rebuilding the router.
+const discordJoinedAtStore = new Map<string, Date>();
+
 const acceptanceKey = (teamInviteId: string, userId: string) => `${teamInviteId}:${userId}`;
 
 const TestLayer = ApiLive.pipe(
@@ -781,6 +790,8 @@ const TestLayer = ApiLive.pipe(
           setDiscordCode: () => Effect.void,
           markFailed: () => Effect.void,
           findByDiscordCodeWithContext: () => Effect.succeed(Option.none()),
+          // PR-9 / CC-15 — every acceptance in this describe block belongs to `TEST_TEAM_ID`.
+          findTeamIdById: () => Effect.succeed(Option.some(TEST_TEAM_ID)),
         } as never),
       ),
     ),
@@ -957,10 +968,10 @@ describe('Invite API', () => {
     expect(body.acceptanceId).toBe(firstJoinAcceptanceId);
   });
 
-  // PR-2 test list item 10 — `projectInviteErrorToWire` (CC-3) applied at the `getJoinStatus`
-  // read boundary: the stored `'bot_not_in_guild'` (unreachable in production this release —
-  // nothing writes it until PR-3) must still project to the client-facing `'unknown'`.
-  it("getJoinStatus projects bot_not_in_guild to 'unknown'", async () => {
+  // PR-9 test list item 6 (rewritten from the PR-2 test of the same name): CC-3's projection
+  // now carries `'bot_not_in_guild'` all the way through — `Invite.JoinStatusErrorCode` gained
+  // the literal and the `→ 'unknown'` mapping in `inviteErrorWireProjection.ts` is deleted.
+  it('getJoinStatus returns the true bot_not_in_guild code once that mapping is removed', async () => {
     acceptanceIdCounter += 1;
     const id = `acc-${acceptanceIdCounter}`;
     acceptancesStore.set(acceptanceKey('pr2-bot-not-in-guild-invite', TEST_USER_ID), {
@@ -981,7 +992,7 @@ describe('Invite API', () => {
     );
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.errorCode).toBe('unknown');
+    expect(body.errorCode).toBe('bot_not_in_guild');
   });
 
   // PR-2 test list item 11 — `'expired'` collapses to `None` permanently (CC-3): an old browser
@@ -1008,6 +1019,74 @@ describe('Invite API', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.errorCode).toBeNull();
+  });
+
+  // PR-9 test list item 4 — CC-15's top-priority derivation: `discord_joined_at` set means
+  // `'joined'`, regardless of what the acceptance row itself says (a `discord_code` is still
+  // Some here, which would otherwise derive `'ready'`).
+  it("getJoinStatus returns state 'joined' when discord_joined_at is set", async () => {
+    acceptanceIdCounter += 1;
+    const id = `acc-${acceptanceIdCounter}`;
+    acceptancesStore.set(acceptanceKey('pr9-joined-invite', TEST_USER_ID), {
+      id,
+      team_invite_id: 'pr9-joined-invite',
+      user_id: TEST_USER_ID,
+      discord_code: Option.some('some-code'),
+      discord_code_error_code: Option.none(),
+      discord_code_error_detail: Option.none(),
+      created_at: DateTime.nowUnsafe(),
+      generated_at: Option.none(),
+    });
+    discordJoinedAtStore.set(TEST_USER_ID, new Date());
+
+    const response = await handler(
+      new Request(`http://localhost/invite/acceptances/${id}`, {
+        headers: { Authorization: 'Bearer user-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.state).toBe('joined');
+
+    discordJoinedAtStore.delete(TEST_USER_ID);
+  });
+
+  // PR-9 test list item 5 — pins CC-15 against the sticky-`'done'` bug rev 2 would have
+  // shipped: once `Guild/RemoveMember` clears `discord_joined_at` (simulated here by removing
+  // the entry from the store), the SAME acceptance row must stop reporting `'joined'`.
+  it("getJoinStatus returns state 'joined' → not joined again after Guild/RemoveMember clears the timestamp", async () => {
+    acceptanceIdCounter += 1;
+    const id = `acc-${acceptanceIdCounter}`;
+    acceptancesStore.set(acceptanceKey('pr9-left-invite', TEST_USER_ID), {
+      id,
+      team_invite_id: 'pr9-left-invite',
+      user_id: TEST_USER_ID,
+      discord_code: Option.none(),
+      discord_code_error_code: Option.none(),
+      discord_code_error_detail: Option.none(),
+      created_at: DateTime.nowUnsafe(),
+      generated_at: Option.none(),
+    });
+    discordJoinedAtStore.set(TEST_USER_ID, new Date());
+
+    const joinedResponse = await handler(
+      new Request(`http://localhost/invite/acceptances/${id}`, {
+        headers: { Authorization: 'Bearer user-token' },
+      }),
+    );
+    expect((await joinedResponse.json()).state).toBe('joined');
+
+    // Guild/RemoveMember clears the timestamp.
+    discordJoinedAtStore.delete(TEST_USER_ID);
+
+    const afterLeaveResponse = await handler(
+      new Request(`http://localhost/invite/acceptances/${id}`, {
+        headers: { Authorization: 'Bearer user-token' },
+      }),
+    );
+    expect(afterLeaveResponse.status).toBe(200);
+    const body = await afterLeaveResponse.json();
+    expect(body.state).not.toBe('joined');
   });
 
   it('POST /invite/:code/join with invalid code returns 404', async () => {
@@ -2216,6 +2295,8 @@ describe('Invite API — PR-5 durable link surface + regenerate endpoint (TDD)',
     assignRole: () => Effect.void,
     unassignRole: () => Effect.void,
     setJerseyNumber: () => Effect.void,
+    // PR-9 / CC-15 — none of the PR-5 scenarios below exercise the 'joined' derivation.
+    findDiscordJoinedAt: () => Effect.succeed(Option.none()),
   } as any);
 
   const Pr5TeamInvitesLayer = Layer.succeed(TeamInvitesRepository, {
@@ -2293,6 +2374,7 @@ describe('Invite API — PR-5 durable link surface + regenerate endpoint (TDD)',
     setDiscordCode: () => Effect.void,
     markFailed: () => Effect.void,
     findByDiscordCodeWithContext: () => Effect.succeed(Option.none()),
+    findTeamIdById: () => Effect.succeed(Option.some(PR5_TEAM_ID)),
   } as never);
 
   const Pr5Layer = ApiLive.pipe(

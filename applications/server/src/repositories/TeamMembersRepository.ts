@@ -1,6 +1,6 @@
 import { Discord, Role, Team, TeamMember, User } from '@sideline/domain';
 import { LogicError, Schemas, SqlErrors } from '@sideline/effect-lib';
-import { Effect, Layer, type Option, pipe, Schema, ServiceMap } from 'effect';
+import { Effect, Layer, Option, pipe, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 
@@ -43,6 +43,24 @@ export class MembershipWithRole extends Schema.Class<MembershipWithRole>('Member
   active: Schema.Boolean,
   role_names: Schemas.ArrayFromSplitString(),
   permissions: pipe(Schemas.ArrayFromSplitString(), Schema.decodeTo(Schema.Array(Role.Permission))),
+}) {}
+
+// PR-9 / CC-15: what `auth.myTeams` needs to derive `Auth.UserTeam.discordJoined` (the tri-state
+// gate) — `findByUser`'s own result shape, since `MembershipWithRole` is shared by two other
+// queries (`findMembershipByIds`, `findMembershipByDiscordAndTeam`) that have no need for either
+// column and whose SQL was left untouched. `members_backfilled_at` is read off `bot_guilds` via
+// the team's `guild_id` (`None` when the team has no guild linked at all — also `'unknown'`).
+export class MembershipWithDiscordState extends Schema.Class<MembershipWithDiscordState>(
+  'MembershipWithDiscordState',
+)({
+  id: TeamMember.TeamMemberId,
+  team_id: Team.TeamId,
+  user_id: User.UserId,
+  active: Schema.Boolean,
+  role_names: Schemas.ArrayFromSplitString(),
+  permissions: pipe(Schemas.ArrayFromSplitString(), Schema.decodeTo(Schema.Array(Role.Permission))),
+  discord_joined_at: Schema.OptionFromNullOr(Schema.DateTimeUtcFromDate),
+  members_backfilled_at: Schema.OptionFromNullOr(Schema.DateTimeUtcFromDate),
 }) {}
 
 export class RosterEntry extends Schema.Class<RosterEntry>('RosterEntry')({
@@ -270,9 +288,10 @@ const make = Effect.gen(function* () {
 
   const findByUserQuery = SqlSchema.findAll({
     Request: Schema.String,
-    Result: MembershipWithRole,
+    Result: MembershipWithDiscordState,
     execute: (userId) =>
-      sql`SELECT tm.id, tm.team_id, tm.user_id, tm.active,
+      sql`SELECT tm.id, tm.team_id, tm.user_id, tm.active, tm.discord_joined_at,
+                   bg.members_backfilled_at,
                    COALESCE(
                      (SELECT string_agg(DISTINCT name, ',' ORDER BY name) FROM (
                        SELECT r.name FROM member_roles mr JOIN roles r ON r.id = mr.role_id WHERE mr.team_member_id = tm.id
@@ -313,6 +332,8 @@ const make = Effect.gen(function* () {
                      ) all_perms), ''
                    ) AS permissions
             FROM team_members tm
+            LEFT JOIN teams t ON t.id = tm.team_id
+            LEFT JOIN bot_guilds bg ON bg.guild_id = t.guild_id
             WHERE tm.user_id = ${userId} AND tm.active = true`,
   });
 
@@ -489,6 +510,28 @@ const make = Effect.gen(function* () {
   const clearDiscordJoined = (memberId: TeamMember.TeamMemberId) =>
     clearDiscordJoinedQuery({ member_id: memberId }).pipe(catchSqlErrors);
 
+  // PR-9 / CC-15: the ONLY question `getJoinStatus` / `getMyPendingDiscordJoin` /
+  // `regenerateMyDiscordInvite` need answered to derive `JoinStatus.state = 'joined'` — is this
+  // (team, user) pair's membership currently marked as having observed guild membership. Scoped
+  // to `active = true` for the same reason `findByUser` is: a deactivated membership has no
+  // business reporting a live join status.
+  const findDiscordJoinedAtQuery = SqlSchema.findOneOption({
+    Request: Schema.Struct({ team_id: Team.TeamId, user_id: User.UserId }),
+    Result: Schema.Struct({
+      discord_joined_at: Schema.OptionFromNullOr(Schema.DateTimeUtcFromDate),
+    }),
+    execute: (input) => sql`
+      SELECT discord_joined_at FROM team_members
+      WHERE team_id = ${input.team_id} AND user_id = ${input.user_id} AND active = true
+    `,
+  });
+
+  const findDiscordJoinedAt = (teamId: Team.TeamId, userId: User.UserId) =>
+    findDiscordJoinedAtQuery({ team_id: teamId, user_id: userId }).pipe(
+      Effect.map(Option.flatMap((row) => row.discord_joined_at)),
+      catchSqlErrors,
+    );
+
   const setJerseyNumber = (
     memberId: TeamMember.TeamMemberId,
     jerseyNumber: Option.Option<number>,
@@ -589,6 +632,7 @@ const make = Effect.gen(function* () {
     unassignRole,
     markDiscordJoined,
     clearDiscordJoined,
+    findDiscordJoinedAt,
     setJerseyNumber,
     resetMissedRsvps,
     hasOtherActiveManager,

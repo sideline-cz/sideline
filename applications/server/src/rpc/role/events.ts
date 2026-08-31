@@ -1,5 +1,5 @@
 import { RoleRpcEvents, type RoleSyncEvent } from '@sideline/domain';
-import { Data, Effect, Match } from 'effect';
+import { Data, Effect, Match, Option } from 'effect';
 import {
   type EventRow,
   RoleSyncEventsRepository,
@@ -18,7 +18,13 @@ export class EventPropertyMissing extends Data.TaggedError('EventPropertyMissing
 
   markFailed = () =>
     RoleSyncEventsRepository.asEffect().pipe(
-      Effect.flatMap((repository) => repository.markFailed(this.id, this.errorMessage())),
+      // No `error_code`: a missing event property is an internal data-integrity defect, not a
+      // Discord-side sync failure a captain or player can act on, so `team_members.last_role_sync_*`
+      // must not be touched for it (same "never a user-visible failure" rule as CC-0's transient
+      // codes — see `errorClassifier.ts`).
+      Effect.flatMap((repository) =>
+        repository.markFailed(this.id, this.errorMessage(), Option.none()),
+      ),
     );
 
   static handle = (e: EventPropertyMissing) => e.log().pipe(Effect.tap(() => e.markFailed()));

@@ -1,8 +1,10 @@
+import type { Auth } from '@sideline/domain';
 import { type DashboardLayoutApi, type FinanceApi, Team } from '@sideline/domain';
 import { createFileRoute, redirect, useRouter } from '@tanstack/react-router';
-import { Effect, Option, Schema } from 'effect';
+import { Array, Effect, Equal, flow, Option, Schema, Struct } from 'effect';
 import React from 'react';
 import { TeamDetailPage } from '~/components/pages/TeamDetailPage';
+import { isDiscordConnectSnoozed } from '~/lib/auth/discordConnectSnooze.js';
 import { DEFAULT_LAYOUT } from '~/lib/dashboardLayout.js';
 import { ApiClient, ClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
@@ -10,9 +12,26 @@ import { tr } from '~/lib/translations.js';
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/')({
   ssr: false,
   component: TeamDetailRoute,
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, params }) => {
     if (context.user && !context.user.isProfileComplete) {
       throw redirect({ to: '/profile/complete' });
+    }
+    // PR-9 / CC-15 & designer §3.1 — the redirect is dashboard-index only (this route), placed
+    // AFTER the profile-completion redirect so profile completion still wins. 'unknown' renders
+    // nothing (never redirects) and the snooze fails open (a `localStorage` throw is treated as
+    // snoozed, never as un-snoozed) — see `discordConnectSnooze.ts`.
+    if (context.user) {
+      const team = Array.findFirst(
+        context.teams,
+        flow(Struct.get('teamId'), Equal.equals(params.teamId)),
+      );
+      const notConnected = Option.match(team, {
+        onNone: () => false,
+        onSome: (t) => t.discordJoined === 'not_connected',
+      });
+      if (notConnected && !isDiscordConnectSnoozed(context.user.id, params.teamId)) {
+        throw redirect({ to: '/teams/$teamId/connect-discord', params: { teamId: params.teamId } });
+      }
     }
   },
   loader: async ({ params, context }) => {
@@ -40,12 +59,16 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/')({
 
 function TeamDetailRoute() {
   const { teamId } = Route.useParams();
-  const { user } = Route.useRouteContext();
+  const { user, teams } = Route.useRouteContext();
   const { dashboard, myStatus, layout } = Route.useLoaderData();
   const run = useRun();
   const router = useRouter();
 
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
+  // Explicit annotation (not a cast — `teams` already has this shape; see connect-discord.tsx
+  // for why `Array.prototype.find`'s inference needs the help here).
+  const typedTeams: ReadonlyArray<Auth.UserTeam> = teams;
+  const team = typedTeams.find((t) => t.teamId === teamIdBranded);
 
   const handleSaveLayout = React.useCallback(
     async (widgets: DashboardLayoutApi.DashboardWidget[]) => {
@@ -71,6 +94,7 @@ function TeamDetailRoute() {
     <TeamDetailPage
       teamId={teamId}
       userId={user?.id}
+      team={team}
       dashboard={dashboard}
       myStatus={myStatus}
       layout={layout}

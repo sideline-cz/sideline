@@ -36,6 +36,7 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
+import { deriveDiscordJoined } from '~/utils/discordJoinedState.js';
 import { provisionNewTeam } from '~/utils/provisionNewTeam.js';
 import { toCurrentUser } from '~/utils/toCurrentUser.js';
 
@@ -473,6 +474,10 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
                             logoUrl: team.logo_url,
                             roleNames: m.role_names,
                             permissions: m.permissions,
+                            discordJoined: deriveDiscordJoined(
+                              m.discord_joined_at,
+                              m.members_backfilled_at,
+                            ),
                           }),
                       ),
                     ),
@@ -593,6 +598,12 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
                                       logoUrl: team.logo_url,
                                       roleNames: ['Player'],
                                       permissions: [...Role.defaultPermissions.Player],
+                                      // Ephemeral response to the auto-join click itself, not a
+                                      // `myTeams` read — the caller's next load re-fetches the
+                                      // real tri-state from `discord_joined_at` /
+                                      // `members_backfilled_at`. `'unknown'` is the only safe
+                                      // value here: it renders nothing (CC-15).
+                                      discordJoined: 'unknown',
                                     }),
                                   ),
                                 ),
