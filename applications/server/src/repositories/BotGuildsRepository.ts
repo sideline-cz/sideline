@@ -69,6 +69,15 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // PR-8 (CC-10 S6): set only when `Guild/ReconcileMembers` reports `complete: true` — i.e. the
+  // bot's member listing paginated to a short page rather than hitting the 10-page cap.
+  const _markMembersBackfilled = SqlSchema.void({
+    Request: Discord.Snowflake,
+    execute: (guildId) => sql`
+      UPDATE bot_guilds SET members_backfilled_at = now() WHERE guild_id = ${guildId}
+    `,
+  });
+
   const upsert = (guildId: Discord.Snowflake, guildName: string, isCommunityEnabled = false) =>
     _upsertGuild({
       guild_id: guildId,
@@ -92,6 +101,9 @@ const make = Effect.gen(function* () {
 
   const findByGuildId = (guildId: Discord.Snowflake) =>
     _findByGuildId(guildId).pipe(catchSqlErrors);
+
+  const markMembersBackfilled = (guildId: Discord.Snowflake) =>
+    _markMembersBackfilled(guildId).pipe(catchSqlErrors);
 
   const bulkUpdateCommunityFlags = (
     rows: ReadonlyArray<{
@@ -119,6 +131,7 @@ const make = Effect.gen(function* () {
     findAll,
     findByGuildId,
     bulkUpdateCommunityFlags,
+    markMembersBackfilled,
   };
 });
 

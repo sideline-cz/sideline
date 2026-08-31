@@ -267,6 +267,9 @@ export const eventHandlers = Effect.Do.pipe(
             nickname: Option.fromNullishOr(member.nick ?? null),
             display_name: user.global_name,
             invite_code: matchedCode,
+            // PR-8 (CC-10, blocker 7): a real-time GuildMemberAdd dispatch is an unambiguous,
+            // complete observation — never omit this key on this call site.
+            source: Option.some('member_add'),
           }),
         ),
         Effect.tap(({ welcomeMeta }) =>

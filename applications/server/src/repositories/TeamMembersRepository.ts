@@ -465,6 +465,30 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  // PR-8 (CC-10): idempotent by construction — a repeated `member_add`/`reconcile` observation
+  // never overwrites an earlier timestamp, which is what makes this safe to call unconditionally
+  // and structurally impossible to "consume" (see blocker 7 in the plan).
+  const markDiscordJoinedQuery = SqlSchema.void({
+    Request: Schema.Struct({ member_id: TeamMember.TeamMemberId }),
+    execute: (input) => sql`
+      UPDATE team_members SET discord_joined_at = COALESCE(discord_joined_at, now())
+      WHERE id = ${input.member_id}
+    `,
+  });
+
+  const markDiscordJoined = (memberId: TeamMember.TeamMemberId) =>
+    markDiscordJoinedQuery({ member_id: memberId }).pipe(catchSqlErrors);
+
+  const clearDiscordJoinedQuery = SqlSchema.void({
+    Request: Schema.Struct({ member_id: TeamMember.TeamMemberId }),
+    execute: (input) => sql`
+      UPDATE team_members SET discord_joined_at = NULL WHERE id = ${input.member_id}
+    `,
+  });
+
+  const clearDiscordJoined = (memberId: TeamMember.TeamMemberId) =>
+    clearDiscordJoinedQuery({ member_id: memberId }).pipe(catchSqlErrors);
+
   const setJerseyNumber = (
     memberId: TeamMember.TeamMemberId,
     jerseyNumber: Option.Option<number>,
@@ -563,6 +587,8 @@ const make = Effect.gen(function* () {
     getPlayerRoleId,
     assignRole,
     unassignRole,
+    markDiscordJoined,
+    clearDiscordJoined,
     setJerseyNumber,
     resetMissedRsvps,
     hasOtherActiveManager,

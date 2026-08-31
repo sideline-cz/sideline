@@ -91,6 +91,12 @@ export const GuildRpcGroup = RpcGroup.make(
           display_name: Schema.OptionFromNullOr(Schema.String),
         }),
       ),
+      // PR-8 (CC-10 S6): whether `members` is the FULL guild member list. A bot older than PR-8
+      // omits the key entirely, which is conservative — a missing key is treated as "possibly
+      // truncated" so it never gates `discord_joined_at` / `bot_guilds.members_backfilled_at`
+      // on an incomplete page. It does NOT gate the diff, which is per-member and safe on a
+      // partial page.
+      complete: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
     },
   }),
   Rpc.make('RegisterMember', {
@@ -103,6 +109,15 @@ export const GuildRpcGroup = RpcGroup.make(
       nickname: Schema.OptionFromNullOr(Schema.String),
       display_name: Schema.OptionFromNullOr(Schema.String),
       invite_code: Schema.OptionFromNullOr(Schema.String),
+      // PR-8 (CC-10, blocker 7): tri-state provenance of this observation. `Option.none()` means
+      // *unknown* — the key is entirely absent, which can only come from a bot older than PR-8.
+      // On `None` the server must NOT set `discord_joined_at` and must NOT run the role diff (see
+      // `rpc/guild/index.ts` `registerMember`). Do NOT default this to `'reconcile'` with
+      // `withDecodingDefaultKey` — that is exactly what made a real join indistinguishable from a
+      // reconcile pass and permanently stranded the member (blocker 7).
+      source: Schema.OptionFromOptionalKey(
+        Schema.Literals(['member_add', 'reconcile', 'interaction']),
+      ),
     },
     success: Schema.OptionFromNullOr(
       Schema.Struct({
