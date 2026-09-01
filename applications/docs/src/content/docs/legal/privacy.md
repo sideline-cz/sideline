@@ -60,7 +60,9 @@ We keep your account data for as long as your account exists.
 
 Financial records and certain administrative audit entries are retained after account deletion, because an accurate financial history has to stay intact. Where the law allows, we anonymise rather than delete.
 
-**Email bodies and attachments are currently kept indefinitely.** There is no automatic purge yet. Until there is, ask your team admin — or us — to delete specific messages.
+**Email bodies and attachments are deleted 90 days after a message has been handled.** The body is emptied and the attachments removed; the summary that was posted, the sender and the subject are kept, so there is still a record of what arrived and what the bot did with it.
+
+A message still waiting on a decision from your team is not purged, however old it is — otherwise the purge would destroy work in progress. If you need something removed sooner than 90 days, ask your team admin or us.
 
 ## 6. Your rights
 

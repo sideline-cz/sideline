@@ -60,7 +60,9 @@ Tvoje údaje neprodáváme a nepoužíváme je k reklamě.
 
 Finanční záznamy a některé auditní zápisy zůstávají i po smazání účtu, protože finanční historie musí zůstat nedotčená. Kde to zákon dovolí, raději anonymizujeme než mažeme.
 
-**Těla e-mailů a přílohy se zatím drží bez omezení.** Automatické mazání zatím neexistuje. Než bude, řekni si adminovi týmu — nebo nám — o smazání konkrétních zpráv.
+**Těla e-mailů a přílohy mažeme 90 dní poté, co je zpráva vyřízená.** Tělo se vyprázdní a přílohy se smažou; shrnutí, které se zveřejnilo, odesílatel a předmět zůstávají, aby byla dohledatelná stopa, co přišlo a jak s tím bot naložil.
+
+Zpráva, která pořád čeká na rozhodnutí týmu, se nemaže, ať je jakkoli stará — jinak by mazání zlikvidovalo rozdělanou práci. Když potřebuješ něco smazat dřív než po 90 dnech, řekni si adminovi týmu nebo nám.
 
 ## 6. Tvoje práva
 
