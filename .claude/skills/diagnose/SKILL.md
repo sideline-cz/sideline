@@ -1,153 +1,129 @@
 ---
 name: diagnose
-description: Diagnose a running Sideline issue — errors, bad behaviour, "why did X happen", or a failed Coolify deployment. Routes read-only investigation to the right source (SigNoz for logs/traces, the Coolify CLI for deploy state, Postgres for data) and includes the full Coolify deploy-failure root-cause procedure (classify transient infra vs real code/migration defect, recommend fix or redeploy). Use when the user says "look into", "check logs", "why did this happen", "deploy/preview failed", "why did Coolify fail", or asks to investigate live behaviour. READ-ONLY; to change deploy config use /update-deploy-config.
+description: Diagnose a running Sideline issue — errors, bad behaviour, "why did X happen", or a failed deploy. Routes read-only investigation through the `majnet` CLI (logs, container state, events, and SQL against the managed database) and covers the failure modes that look like success. Use when the user says "look into", "check logs", "why did this happen", "deploy failed", or asks to investigate live behaviour. READ-ONLY; to change deploy config use /update-deploy-config.
 ---
 
 # Diagnose Skill
 
-Investigate a live Sideline problem and route it to the correct **read-only** data source, or
-root-cause a failed Coolify deployment. Combine sources to follow a request end-to-end.
+Investigate a live Sideline problem with the **`majnet`** CLI — everything the dashboard does, from
+a laptop: status, logs, container state, events, and SQL against an app's managed database.
 
-> Changing anything (env vars, secrets, forced/prod redeploys) is **out of scope** — the Coolify CLI
-> here is read-only. To change deploy config use **/update-deploy-config**.
+> **Do not guess at production state.** Every question this skill exists to answer — "did the cron
+> fire?", "did the bot get the event?", "is the setting saved?" — has an exact answer one command
+> away. Reasoning from source code about what production *probably* did is how an evening gets
+> spent on two wrong theories.
 
-## Environments
+## Before anything
 
-| Env | deployment.environment | Proxy URL | DB access |
-|---|---|---|---|
-| Preview | `preview` | `sideline-preview-<PR>.majksa.net` | direct via `bin/psql --pr <PR>` |
-| Dev | `development` | `sideline.majksa.net` | none — ask the user to run SQL |
-| Prod | `production` | `sideline.cz` | none — ask the user to run SQL |
-
-Services emit OpenTelemetry as `service.name` = `sideline-server` / `sideline-bot` / `sideline-web` /
-`sideline-proxy`, with resource attrs `deployment.environment` and `service.origin` (the FQDN).
-
----
-
-## Part A — Pick a data source
-
-### 1. Logs & traces → SigNoz MCP
-Use the **signoz** MCP tools (don't scrape container logs via Coolify for this).
-
-- `signoz_search_logs` — scope by env + service:
-  - `query`: `service.name = 'sideline-server' AND deployment.environment = 'preview'`
-  - `searchText`: a body substring (CONTAINS), e.g. `ImapPoller`, a team id, an error string.
-  - `severity`: `ERROR` for error sweeps. `timeRange`: `30m` / `2h` / `24h`.
-- `signoz_search_traces` / `signoz_get_trace_details` — follow one request across services via the
-  `trace_id` on log rows.
-- `signoz_list_services`, `signoz_get_field_keys`, `signoz_get_field_values` — discover names/values.
-- Read `signoz://traces/query-builder-guide` before a `signoz_execute_builder_query`.
-
-Example — did the IMAP poller ingest an email on preview?
-```
-signoz_search_logs(query="service.name='sideline-server' AND deployment.environment='preview'",
-                   searchText="ImapPoller", timeRange="2h")
+```sh
+majnet whoami          # ALWAYS first
 ```
 
-### 2. Deploy state → Coolify CLI (read-only)
-Answer "is it deployed / healthy / which app is which / what env vars exist", not mutate.
+**If it says *unidentified*, stop and report it.** Identity is the Tailscale device, not a token.
+An identity-less call is treated as the WireGuard break-glass and **passes every role check** —
+`whoami` will even print `admin: true`, which means "nobody checked", not "you are an admin".
+Causes: this machine is off the tailnet, the URL is not the identity-injecting front door, or the
+tailnet login has no entry in `people.yaml`.
 
-- `coolify app list` — apps + UUIDs (two of each service: dev + prod; previews are per-PR compose apps).
-  Map dev vs prod: `coolify app env get <uuid> APP_ENV --show-sensitive` (`development`/`production`)
-  or `FRONTEND_URL` (`sideline.majksa.net` vs `sideline.cz`).
-- `coolify app env list <uuid>` — which vars are set (masked unless `--show-sensitive`).
-- `coolify app deployments list <uuid>` — deployment history/status.
-- `coolify app logs <uuid>` — container boot/crash output (prefer SigNoz for app-level logs).
+Not installed?
 
-For a deployment that **failed to build / come up**, use **Part B** below.
-
-### 3. Database
-- **Preview** → the `bin/psql` wrapper:
-  ```bash
-  bin/psql --pr <PR> -c "SELECT ..."   # PR preview DB    (bin/psql -c "..." = main preview DB)
-  ```
-  Read-only intent: prefer `SELECT`, qualify columns, `LIMIT`. No destructive SQL on shared DBs without sign-off.
-- **Dev & Prod** → **no direct access**. Write the exact read-only SQL, ask the user to run it and paste
-  results, then continue. Never guess dev/prod row state — confirm via the user-run query.
-
----
-
-## Part B — Diagnose a Coolify deployment failure
-
-Sideline deploys **out-of-band via Coolify** (`coolify.majksa.net`) — there is **no GitHub Actions deploy
-workflow**. A `majksa-deploy[bot]` PR comment links the build/app logs and reports 🟡 in-progress / 🔴 failed
-/ 🟢 success. **GitHub "Check" CI green ≠ Coolify deploy green** — they're independent; always check Coolify.
-
-### Prerequisites
-- `coolify` CLI installed (`brew install coollabsio/coolify-cli/coolify-cli`), context `majksa.net`
-  (`https://coolify.majksa.net`). Verify: `coolify context verify` (expect "Connection successful / Authentication valid").
-  If it fails: `coolify context add -d majksa.net https://coolify.majksa.net <token>` (token from `/security/api-tokens`).
-- Regenerate CLI docs anytime with `coolify docs llms` → `llms.txt`/`llms-full.txt` (both gitignored — never commit).
-
-### Preview shape
-One Coolify **application resource per PR** builds ALL services via a docker-compose buildpack: services
-`server-pr-<PR>`, `bot-pr-<PR>`, `web-pr-<PR>`, `docs-pr-<PR>`; FQDN `sideline-preview-<PR>.majksa.net`. The
-build runs each app's Dockerfile (`pnpm --recursive --parallel run codegen && pnpm build`) — **all apps build
-in parallel**, memory-heavy and the usual cause of transient OOM kills.
-
-### Step 1 — Find the deployment
-Use a given UUID, or discover the app:
-```bash
-coolify app list --format json     # match name/fqdn containing pr-<PR> / sideline-preview-<PR>
-gh api repos/maxa-ondrej/sideline/issues/<PR>/comments \
-  --jq '.[] | select(.user.login=="majksa-deploy[bot]") | .body'   # embeds APP_UUID + DEPLOYMENT_UUID in log URLs
+```sh
+curl -fsSL https://raw.githubusercontent.com/majnet/majnet/main/scripts/install-cli.sh | bash
+majnet agent-guide     # the authoritative reference — prefer it over this file when they disagree
 ```
 
-### Step 2 — Read deployment history
-```bash
-coolify app deployments list <APP_UUID> --format json > /tmp/deps.json
-python3 - <<'PY'
-import json
-d=json.load(open('/tmp/deps.json')); items=d if isinstance(d,list) else d.get('deployments',d.get('data',[]))
-for x in items[:12]:
-    print(x.get('created_at'),'status=%s'%x.get('status'),
-          'commit=%s'%str(x.get('commit_message') or x.get('commit'))[:40],
-          'uuid=%s'%(x.get('deployment_uuid') or x.get('uuid')))
-PY
+## Environment classes
+
+`production`, `stable`, `testing`, `ephemeral`. **The CLI defaults to `stable`** — pass
+`-c production` explicitly or you will be reading the wrong environment and drawing confident
+conclusions from it. `production` needs project **admin** even to read, and prompts unless `--yes`.
+
+Sideline's project is `sideline`; apps are `server`, `bot`, `web`, `docs`, `proxy`.
+
+## Reading state
+
+```sh
+majnet status                                          # start here: health, deploys, recent failures
+majnet events --failed --project sideline              # what broke, and why
+majnet logs sideline bot -c production -n 300          # container logs (--follow to tail)
+majnet ps sideline server -c production                # what is actually running
+majnet info sideline server                            # what each env reported at /info
+majnet app sideline server                             # image, classes, build info, containers
 ```
-**Critical first check:** is there a *later* deployment of the **same commit** that `finished`? If a retry of
-the same SHA succeeded, the failure was almost certainly **transient** — say so and stop unless the user wants
-the failed-build root cause anyway.
 
-### Step 3 — Extract the failed build's error
-```bash
-python3 - <<'PY'
-import json
-d=json.load(open('/tmp/deps.json')); items=d if isinstance(d,list) else d.get('deployments',d.get('data',[]))
-fail=next((x for x in items if x.get('status')=='failed'), None)
-if not fail: print('no failed deployment found'); raise SystemExit
-logs=fail['logs'];
-if isinstance(logs,str): logs=json.loads(logs)
-out="\n".join(e.get('output','') if isinstance(e,dict) else str(e) for e in logs)
-open('/tmp/deploy_out.txt','w').write(out); print(out[-4000:])   # failure line is at the very end
-PY
+Add `--output json` for anything you parse — table output is elided by design.
+
+## SQL against the managed database
+
+This is the part most easily forgotten, and the most valuable. **Read-only by default.**
+
+```sh
+majnet db  sideline server -c production                        # engine + database name
+majnet sql sideline server -c production --tables
+majnet sql sideline server -c production --columns team_settings
+majnet sql sideline server -c production 'SELECT count(*) FROM email_messages'
 ```
-Decisive line: `Deployment failed: Command execution failed (exit code N): docker compose ... build`. Scan up
-for the last running service step (`#NN [<svc>-pr-<PR> build 4/4] RUN ... pnpm build`) and whether earlier
-services printed `DONE`.
 
-### Step 4 — Classify
-| Signature in the logs | Class | Action |
-|---|---|---|
-| `exit code 255` mid-`docker compose build`, some apps `DONE` then one killed with no compiler error; same commit later `finished` | **Transient — build-host OOM** (parallel multi-app builds) | Redeploy; no code change |
-| `failed to solve` / `pull access denied` / network/registry timeout / TLS | **Transient — registry/network** | Redeploy |
-| `error TS####` / `Type error` / biome / `astro build` / `vite` build error | **Deterministic — build/code** | Fix code, push |
-| `relation/column ... does not exist`, constraint violation, migration SQL error in **application** logs | **Deterministic — migration/runtime** | Fix migration (must be a superset of existing data) |
-| `variable is not set` warnings only | **Noise** — compose build-arg warnings | Ignore |
-| App boots then crash-loops in **application** logs | **Deterministic — runtime/config** | `coolify app logs <APP_UUID>` |
+- Runs as **the app's own database role**, never superuser — a query has exactly the app's privileges.
+- Without `--write` the statement runs in a read-only transaction. That is a seatbelt against a
+  mistyped `UPDATE`, **not** a sandbox.
+- **One statement per call.** Multiple statements concatenate result sets and the parsed shape stops
+  being meaningful.
+- Every returned value is a **string** — the engine's text output is not re-typed, so a `numeric` or
+  `timestamptz` arrives verbatim rather than guessed at.
+- `--limit` caps what is *printed*; the statement still runs in full, and `truncated: true` says rows
+  were dropped.
 
-For runtime (not build) failures also check live logs: `coolify app logs <APP_UUID> --follow`.
+## Answers that look like success but are not
 
-### Step 5 — Act
-- **Transient:** redeploy + report — `coolify deploy <APP_UUID> --force` (or `coolify app restart <APP_UUID>`).
-  Repeated OOM from parallel builds → flag as infra recommendation (more build RAM / serialize per-app builds);
-  don't retry blindly more than once or twice.
-- **Deterministic:** report exact error + file/line, fix via the normal dev loop (`/implement` for code, a new
-  migration for schema), re-ship. Don't redeploy without a fix.
-- Always end with: the class, the evidence (1–2 log lines), and the concrete next step.
+Re-read this when something seems wrong.
 
-## Guardrails
-- Read-only first. Any `deploy`/`restart`/`env` mutation only after classifying, and (for transient) confirming
-  redeploy is right; confirm with the user before changing env vars or forcing prod deploys.
-- Never commit `llms.txt`/`llms-full.txt` (gitignored). Use UUIDs not numeric IDs. Prefer `--format json`.
-- GitHub CI green ≠ Coolify deploy green — always check Coolify directly.
+| What you see | What it means |
+|---|---|
+| `whoami` says *unidentified* | No identity reached the API; every role check was skipped. Do not proceed with writes. |
+| HTTP **200** with `text/html` from `/api` | Auth failure wearing a success code — the request fell through to the dashboard SPA. Never parse the HTML. |
+| `converged: null` on `control-plane status` | The build did not report its version. **Unknown**, not "not converged". |
+| `mergeable: null` on a render PR | GitHub is still computing it. Wait; it is not a refusal. |
+| Empty `majnet ps`, healthy `majnet apps` | Declared for that class but nothing running — often the class was never rendered, or a deploy failed. `majnet events --failed` names it. |
+
+## Rules
+
+- **Read before you write.** `majnet status` and the relevant `logs` first.
+- **Never `--yes` on a production command** unless the human asked for that specific action in this
+  conversation. The prompt exists because production is the class the platform itself gates.
+- **Never `--write` a SQL statement on your own initiative.** Propose it, show what the read-only
+  version returns, let the human decide.
+- **Never `--reveal` a secret unless asked**, and never echo a revealed value into a summary, a
+  commit message, or a file.
+- **Report what the platform said, not what you hoped.** Quote stderr on failure. If identity was
+  unresolved, say so instead of continuing.
+- Prefer `exec` over `shell` — scriptable, role-scoped, returns an exit code. `shell` needs platform
+  admin and records a transcript a person will read.
+- Everything is audited: `exec`, `sql`, `restart`, `shell` all write an event naming the caller and
+  what was run.
+
+## A worked example
+
+The scheduled rules quiz did not post. What actually settled it, in order:
+
+```sh
+majnet sql sideline server -c production \
+  'SELECT rules_quiz_channel_id, rules_quiz_time, timezone FROM team_settings WHERE rules_quiz_channel_id IS NOT NULL'
+majnet sql sideline server -c production \
+  'SELECT scenario_id, attempts, processed_at, last_error FROM rules_quiz_sync_events ORDER BY scheduled_for DESC LIMIT 5'
+majnet logs sideline bot -c production -n 500      # the cause, in the log line's cause field
+```
+
+The settings were fine and the cron had fired; `attempts = 0` with `last_error = NULL` ruled out
+every post-attempt failure; the log line named a schema encode error. **Three commands.** Two
+plausible theories — cron drift, then the newly-shipped attachment code — were both wrong and both
+excluded by data that was already there.
+
+## Deploy state
+
+`majnet status` and `majnet events --failed` cover the deploy questions. Deploys are git: `promote`,
+`rollback`, manifest changes and release cuts are commits and PRs, so their output describes what was
+*written* — the rollout follows when the render PR merges. `majnet deploy list` shows render PRs
+waiting, `majnet deploy progress` shows rollouts in flight.
+
+**Green GitHub CI does not mean a green deploy.** They are independent; check the platform directly.

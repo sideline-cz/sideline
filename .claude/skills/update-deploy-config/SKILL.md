@@ -80,4 +80,4 @@ Guidance for this kind of key:
 - Prod is real: prefer a PR + the user's review over committing straight to `main`, and confirm the
   target env. Coolify redeploys the affected service when the env PR merges.
 - Verify after rollout with **/investigate** (Coolify CLI `app env list` to confirm the var exists;
-  SigNoz to confirm the service came back healthy).
+  `majnet logs <project> <app> -c <class>` to confirm the service came back healthy).
