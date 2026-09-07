@@ -38,17 +38,19 @@ majnet agent-guide     # the authoritative reference — prefer it over this fil
 `-c production` explicitly or you will be reading the wrong environment and drawing confident
 conclusions from it. `production` needs project **admin** even to read, and prompts unless `--yes`.
 
-Sideline's project is `sideline`; apps are `server`, `bot`, `web`, `docs`, `proxy`.
+Sideline's project is `sideline`. **The apps are named `sideline-server`, `sideline-bot`,
+`sideline-web`, `sideline-docs`, `sideline-proxy`** — the project prefix is part of the app name, so
+`majnet logs sideline bot` fails. Confirm with `majnet apps sideline` rather than guessing.
 
 ## Reading state
 
 ```sh
 majnet status                                          # start here: health, deploys, recent failures
 majnet events --failed --project sideline              # what broke, and why
-majnet logs sideline bot -c production -n 300          # container logs (--follow to tail)
-majnet ps sideline server -c production                # what is actually running
-majnet info sideline server                            # what each env reported at /info
-majnet app sideline server                             # image, classes, build info, containers
+majnet logs sideline sideline-bot -c production -n 300          # container logs (--follow to tail)
+majnet ps sideline sideline-server -c production                # what is actually running
+majnet info sideline sideline-server                            # what each env reported at /info
+majnet app sideline sideline-server                             # image, classes, build info, containers
 ```
 
 Add `--output json` for anything you parse — table output is elided by design.
@@ -58,10 +60,10 @@ Add `--output json` for anything you parse — table output is elided by design.
 This is the part most easily forgotten, and the most valuable. **Read-only by default.**
 
 ```sh
-majnet db  sideline server -c production                        # engine + database name
-majnet sql sideline server -c production --tables
-majnet sql sideline server -c production --columns team_settings
-majnet sql sideline server -c production 'SELECT count(*) FROM email_messages'
+majnet db  sideline sideline-server -c production                        # engine + database name
+majnet sql sideline sideline-server -c production --tables
+majnet sql sideline sideline-server -c production --columns team_settings
+majnet sql sideline sideline-server -c production 'SELECT count(*) FROM email_messages'
 ```
 
 - Runs as **the app's own database role**, never superuser — a query has exactly the app's privileges.
@@ -107,11 +109,11 @@ Re-read this when something seems wrong.
 The scheduled rules quiz did not post. What actually settled it, in order:
 
 ```sh
-majnet sql sideline server -c production \
+majnet sql sideline sideline-server -c production \
   'SELECT rules_quiz_channel_id, rules_quiz_time, timezone FROM team_settings WHERE rules_quiz_channel_id IS NOT NULL'
-majnet sql sideline server -c production \
+majnet sql sideline sideline-server -c production \
   'SELECT scenario_id, attempts, processed_at, last_error FROM rules_quiz_sync_events ORDER BY scheduled_for DESC LIMIT 5'
-majnet logs sideline bot -c production -n 500      # the cause, in the log line's cause field
+majnet logs sideline sideline-bot -c production -n 500      # the cause, in the log line's cause field
 ```
 
 The settings were fine and the cron had fired; `attempts = 0` with `last_error = NULL` ruled out
