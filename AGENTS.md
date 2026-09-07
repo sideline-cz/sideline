@@ -368,6 +368,63 @@ Reference implementation: `packages/rules` (nine scenario packages plus `rules.j
 2. **Add the JSON glob to the project's `include`.** `resolveJsonModule: true` (already set in `tsconfig.base.json`) is not sufficient under this repo's composite / project-references layout: `tsc -b` fails with `TS6307` unless the imported JSON is also matched by `include`. Use `"include": ["src", "src/**/*.json"]` in `tsconfig.src.json` (reference: `packages/rules/tsconfig.src.json`).
 3. **Add a `postbuild` assertion that the assets actually reached `dist/`.** `tsc -b` trusts `.tsbuildinfo` and will not re-copy JSON it believes is unchanged, so `pnpm build` can exit 0 with an empty `dist/content/`. Wire `"postbuild": "node scripts/assert-dist.mjs"` into `package.json`; the script must assert every expected JSON file exists under `dist/` **and** `import()` the built barrel for real (that import is also the only check for rule 1). Reference: `packages/rules/scripts/assert-dist.mjs`.
 
+## Stale Build Artifacts Lie To You
+
+**Every local check in this repo reads a build artifact, not your source.** A
+green `pnpm check` proves the artifacts agreed with each other, not that your
+code is correct. Four distinct failures in one session traced to this, each
+presenting as a bug somewhere innocent:
+
+| Stale thing | How it presents |
+|---|---|
+| `tsc -b` incremental cache | `pnpm check` passes; CI fails on a real type error |
+| `packages/domain/dist` | Type errors in apps you never touched, about RPC fields that exist in source |
+| Generated route tree (`tsr generate`) | `Type '"/teams/$teamId/x"' is not assignable to…` for a route that plainly exists |
+| `packages/migrations/dist` | A **deleted migration keeps running** — including after a rename, so a duplicate-id collision survives the fix |
+
+Before trusting any local result, and always before pushing:
+
+```bash
+pnpm build:packages          # apps type-check against dist/, not src/
+pnpm codegen                 # route tree, i18n registry, index barrels
+pnpm check                   # only meaningful after the two above
+```
+
+Two traps worth naming:
+
+- **`tsc -b` will not re-emit after you delete `build/`** — its `.tsbuildinfo`
+  still says everything is current, and the build fails with
+  `build/esm does not exist`. Use `pnpm clean`, or delete
+  `<package>/.tsbuildinfo` before rebuilding. `tsc -b --force` is the only
+  local type-check that cannot be fooled.
+- **A renamed or deleted file lingers in `dist/`.** `tsc` emits, it never
+  prunes. If a rename is supposed to remove something, verify with
+  `find <package>/dist -name '<old-name>*'` rather than assuming.
+
+## Migration IDs Collide Silently
+
+Migration ids are hand-picked timestamps, so two branches opened around the
+same time pick the same next number and only collide **after both have
+merged** — each PR is individually fine, and review cannot catch it.
+
+The failure is unrecognisable. Effect's `Migrator` aborts with
+`MigrationError { kind: 'Duplicates' }`, that abort happens inside the
+integration suite's `globalSetup`, and vitest reports:
+
+```
+No test files found, exiting with code 1
+```
+
+naming neither migrations nor the id. It fails **every** open PR, including
+ones touching nothing but frontend files — which is the tell that it is main,
+not the branch.
+
+`pnpm lint` now runs `scripts/check-migration-ids.mjs`, which names the
+colliding files and the next free id. When adding a migration, take the next
+id from the highest that exists **at merge time**, not at branch time, and
+write it idempotently (`ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT
+EXISTS`) so a renumber stays safe for any database that already applied it.
+
 ## Common Tasks
 
 ```bash
@@ -378,7 +435,8 @@ pnpm test:e2e            # Run Playwright E2E tests
 pnpm test:e2e:ui         # Open Playwright UI mode
 pnpm format              # Biome formatting and linting
 pnpm codegen             # Regenerate generated code
-pnpm clean               # Remove stale artifacts
+pnpm clean               # Remove stale artifacts (also clears .tsbuildinfo)
+pnpm lint                # Biome + workspace deps + migration ids
 pnpm tsx ./path/to/file.ts   # Execute TypeScript directly
 ```
 
