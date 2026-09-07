@@ -1,4 +1,4 @@
-// A source-text invariant, not a render test — see `TeamSettingsPage.dirty.test.ts` for the
+// A source-text invariant, not a render test — see `check-workspace-deps.mjs` for the
 // precedent of guarding an invariant by scanning source text when a full render is impractical
 // (`AppSidebar` needs `SidebarProvider` context plus `TeamSwitcher`/`NavUser`'s own data
 // dependencies, none of which this invariant is about).

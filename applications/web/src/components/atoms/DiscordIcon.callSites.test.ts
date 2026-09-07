@@ -7,7 +7,7 @@
 // screen reader said "Discord, Discord" there too.
 //
 // This is a source-text invariant, not a render test — same rationale as
-// `AppSidebar.discordIcon.test.ts` and `TeamSettingsPage.dirty.test.ts`: scanning every current
+// `AppSidebar.discordIcon.test.ts`: scanning every current
 // (and future) call site for the icon is cheaper and more durable than hand-picking components to
 // render. Every call site in `src/` that renders `<DiscordIcon` (other than the atom's own
 // definition and test files) is assumed to sit next to adjacent visible/accessible text — the

@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-07 — Fix: clearer errors when saving invalid Team settings
+
+**Team settings** now tells you exactly which field is wrong instead of silently doing nothing or showing a generic error.
+
+- Clearing the **Coach assignment → Days before training** field no longer silently saves `0` — an empty value is now reported as invalid, same as any other out-of-range number.
+- An empty or too-late **Reminders → Reminder time** (23:55 or later) used to fail with a bare "save failed" message; it now names the field so you know what to fix.
+- A blank **Personal channel name format** is now caught before saving instead of being rejected only after the request reaches the server.
+
 ## 2026-07-24 — RSVP "Maybe" is now "Coming later" and counts as attending
 
 The **Maybe** RSVP response has been renamed to **Coming later** and now means something more useful: "I'll be there, just running late" — not "I'm undecided".
