@@ -610,7 +610,7 @@ Always use `IF NOT EXISTS` / `IF EXISTS` guards so the command is idempotent. Ru
 
 ## Logs & Monitoring
 
-Logs, traces, and metrics are exported via OpenTelemetry to **SigNoz**. Node apps (server, bot) configure the telemetry layer in each application's `run.ts` using `makeTelemetryLayer` from `@sideline/effect-lib`. The web app uses a **separate browser-side** telemetry layer in `applications/web/src/lib/telemetry.ts` (`makeTelemetryLayer`) wired through a `ManagedRuntime` singleton — see `applications/web/AGENTS.md` → "Runtime Singleton & Browser Telemetry".
+Logs, traces, and metrics are exported via OpenTelemetry to **Tempo + Loki** (SigNoz was retired). Read them with the `majnet` CLI rather than a UI — see `/diagnose`. Node apps (server, bot) configure the telemetry layer in each application's `run.ts` using `makeTelemetryLayer` from `@sideline/effect-lib`. The web app uses a **separate browser-side** telemetry layer in `applications/web/src/lib/telemetry.ts` (`makeTelemetryLayer`) wired through a `ManagedRuntime` singleton — see `applications/web/AGENTS.md` → "Runtime Singleton & Browser Telemetry".
 
 ### Services
 
@@ -638,11 +638,19 @@ Logs, traces, and metrics are exported via OpenTelemetry to **SigNoz**. Node app
 
 ### Querying Logs
 
-When searching logs in SigNoz, always filter by resource attributes for faster queries:
+Use the `majnet` CLI. It reads container logs directly and also runs read-only SQL against an app's
+managed database, which is usually the faster answer:
 
-- `service.name = 'sideline-server'` — scope to a specific service
-- `deployment.environment = 'preview'` — scope to an environment
-- Severity levels: `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`
+```sh
+majnet whoami                                       # ALWAYS first — see /diagnose for why
+majnet logs sideline bot -c production -n 300        # --follow to tail
+majnet sql  sideline server -c production 'SELECT …' # read-only by default
+```
+
+**The CLI defaults to `-c stable`.** Pass `-c production` explicitly or you will read the wrong
+environment. Severity levels: `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`.
+
+`/diagnose` carries the full routine, including the answers that look like success but are not.
 
 ## Troubleshooting
 

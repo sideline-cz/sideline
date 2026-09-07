@@ -415,7 +415,7 @@ Required secrets: `SIDELINE_DB_HOST`, `SIDELINE_DB_PORT`, `SIDELINE_DB_USER`, `S
 
 ### 7.1 OpenTelemetry
 
-The server, bot, and web frontend all export telemetry via the OTLP HTTP protocol to a SigNoz instance.
+The server, bot, and web frontend all export telemetry via the OTLP HTTP protocol to **Tempo + Loki**. (SigNoz was retired; anything still naming it is stale.)
 
 **Server and bot** use `Telemetry.makeTelemetryLayer` from `@sideline/effect-lib`, configured in each application's `run.ts`:
 
@@ -468,13 +468,19 @@ In addition to traces, the web frontend reports the following OTEL histogram met
 
 Controlled by the `LOG_LEVEL` environment variable. Accepted values: `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`. Omitting the variable uses the framework default.
 
-### 7.5 Querying in SigNoz
+### 7.5 Querying logs
 
-For efficient queries, always filter by resource attributes first:
+Read them with the `majnet` CLI, not a UI:
 
-- `service.name = 'sideline-server'` — scope to a specific service
-- `deployment.environment = 'preview'` — scope to a specific environment
-- Combine both to narrow results to a single service in a single environment
+```sh
+majnet whoami                                   # ALWAYS first
+majnet logs sideline server -c production -n 300
+majnet events --failed --project sideline
+```
+
+`majnet` defaults to `-c stable`, so pass the class explicitly. It also runs read-only SQL against
+the managed database (`majnet sql sideline server -c production '…'`), which answers "what is the
+state?" faster than log archaeology. `/diagnose` has the full routine.
 
 Each cron job and application module includes log spans (e.g. `age-check-cron`, `event-horizon-cron`) which appear in traces and can be used to correlate cron execution with downstream effects.
 
@@ -630,7 +636,7 @@ Discord caches slash command registrations globally. After adding or modifying c
 
 **Operator checks:**
 
-- A blank screen with no JS errors often means a stale service worker is serving a cached `index.html` that references chunks from a previous build. Check `OTEL_EXPORTER_OTLP_ENDPOINT` is set so crash beacons reach SigNoz — filter by `service.name = 'sideline-web'` and `body CONTAINS 'pre-mount'` or `body CONTAINS 'boundary'`.
+- A blank screen with no JS errors often means a stale service worker is serving a cached `index.html` that references chunks from a previous build. Check `OTEL_EXPORTER_OTLP_ENDPOINT` is set so crash beacons are exported, then look for `pre-mount` or `boundary` in `majnet logs sideline web -c production`.
 - If the crash happened before the Effect runtime initialised, the beacon arrives via `navigator.sendBeacon` to the OTLP endpoint directly (not via the Effect logging pipeline). These events will appear as raw JSON payloads; their `phase` field will be `pre-mount`, `boundary`, or `preload-error`.
 
 ### 9.9 OTEL Telemetry Not Appearing
