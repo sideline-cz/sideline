@@ -1,5 +1,10 @@
 # @sideline/web
 
+## 0.36.1
+
+### 🐛 Fixes
+- move the Terms and Privacy links into the user menu (#616)
+
 ## 0.36.0
 
 ### 🚀 Features
