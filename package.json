@@ -11,7 +11,7 @@
     "build:packages": "pnpm --filter './packages/**' build",
     "check": "tsc -b tsconfig.json",
     "check:e2e": "tsc -p e2e/tsconfig.json",
-    "lint": "biome check . && pnpm lint:workspace-deps",
+    "lint": "biome check . && pnpm lint:workspace-deps && pnpm lint:migration-ids",
     "lint:workspace-deps": "node scripts/check-workspace-deps.mjs",
     "format": "biome check --write --unsafe .",
     "test": "vitest",
@@ -22,7 +22,8 @@
     "coverage": "vitest --coverage",
     "db:up": "docker compose -f docker-compose.db.yaml up -d postgres",
     "db:down": "docker compose -f docker-compose.db.yaml down",
-    "prepare": "husky"
+    "prepare": "husky",
+    "lint:migration-ids": "node scripts/check-migration-ids.mjs"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,json,css}": "biome check --write --no-errors-on-unmatched"
