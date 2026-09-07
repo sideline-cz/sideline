@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.47.0
+
+### 🚀 Features
+- purge forwarded email bodies and attachments 90 days after a message is handled (#613)
+
 ## 0.46.1
 
 ### 🐛 Fixes

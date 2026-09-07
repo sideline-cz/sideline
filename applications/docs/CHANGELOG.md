@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.1
+
+### 🐛 Fixes
+- the privacy policy states the email retention it now actually has (#613)
+
 ## 0.9.0
 
 ### 🚀 Features
