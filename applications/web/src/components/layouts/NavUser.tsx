@@ -14,6 +14,8 @@ import {
   LogOut,
   Monitor,
   Moon,
+  Scale,
+  ShieldCheck,
   Sun,
   UserIcon,
 } from 'lucide-react';
@@ -242,6 +244,22 @@ export function NavUser({ user, activeTeamId, onLogout }: NavUserProps) {
                 >
                   <Bug />
                   {tr('nav_reportBug')}
+                </a>
+              </DropdownMenuItem>
+              {/* Plain <a>, not router <Link>: the docs are a separate
+                  container proxied at /docs/, so a client-side navigation
+                  would 404. The trailing slash is required — the docs site
+                  builds with `trailingSlash: 'always'`. */}
+              <DropdownMenuItem asChild>
+                <a href='/docs/legal/terms/' target='_blank' rel='noopener noreferrer'>
+                  <Scale />
+                  {tr('legal_termsOfService')}
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a href='/docs/legal/privacy/' target='_blank' rel='noopener noreferrer'>
+                  <ShieldCheck />
+                  {tr('legal_privacyPolicy')}
                 </a>
               </DropdownMenuItem>
             </DropdownMenuGroup>
