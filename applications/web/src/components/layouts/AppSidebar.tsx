@@ -29,7 +29,6 @@ import type React from 'react';
 import { DiscordIcon } from '~/components/atoms/DiscordIcon.js';
 import { NavUser } from '~/components/layouts/NavUser';
 import { TeamSwitcher } from '~/components/layouts/TeamSwitcher';
-import { LegalLinks } from '~/components/molecules/LegalLinks';
 import { Badge } from '~/components/ui/badge';
 import {
   Sidebar,
@@ -351,11 +350,6 @@ export function AppSidebar({ user, teams, activeTeam, onLogout, ...props }: AppS
       </SidebarContent>
       <SidebarFooter>
         <NavUser user={user} activeTeamId={activeTeam.teamId} onLogout={onLogout} />
-        {/* Reachable from inside the product too, not only from the signed-out
-            landing page — a signed-in member is exactly who needs to find the
-            privacy policy. Hidden when the rail is collapsed, where there is
-            no room for text. */}
-        <LegalLinks className='justify-center px-2 pb-1 text-xs group-data-[collapsible=icon]:hidden' />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
