@@ -1,12 +1,31 @@
 import { type InviteAcceptance, InviteRpcGroup, type Onboarding } from '@sideline/domain';
-import { Effect } from 'effect';
+import { Array, Effect } from 'effect';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 
 export const InvitesRpcLive = Effect.Do.pipe(
   Effect.bind('acceptances', () => InviteAcceptancesRepository.asEffect()),
   Effect.map(({ acceptances }) => ({
+    /**
+     * The rows are mapped into `PendingAcceptanceEntry` rather than returned
+     * as-is, even though the two carry identical fields.
+     *
+     * `Schema.Class` is **nominal**: encoding a `PendingAcceptanceRow` against
+     * a `PendingAcceptanceEntry` schema fails with "Expected
+     * PendingAcceptanceEntry, got PendingAcceptanceRow" however well the
+     * shapes line up. Returning the row type-checks, because structurally it
+     * satisfies the handler's signature — the mismatch exists only at encode
+     * time, and encode only runs once a pending acceptance actually exists.
+     * This shipped in v0.47.0 and stayed silent until bot v0.39.0 began
+     * polling this outbox, at which point it failed the tick roughly once a
+     * second. Identical to the `RulesQuiz/PendingEvents` bug; see
+     * `rpc/rulesQuiz/index.ts`.
+     */
     'Invite/PendingAcceptances': ({ limit }: { readonly limit: number }) =>
-      acceptances.findPending(limit),
+      acceptances
+        .findPending(limit)
+        .pipe(
+          Effect.map(Array.map((row) => new InviteRpcGroup.PendingAcceptanceEntry({ ...row }))),
+        ),
 
     'Invite/SetAcceptanceDiscordCode': ({
       acceptance_id,
