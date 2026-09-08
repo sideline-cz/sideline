@@ -270,7 +270,7 @@ applications/server/test/integration/
 
 **Key helpers:**
 - `TestPgClient` — a `Layer` that creates PgClient from env vars set by setupFile
-- `cleanDatabase` — an Effect that truncates all public tables (except `migrations_*`) before each test
+- `cleanDatabase` — an Effect that empties every public table holding rows (except `migrations_*`) before each test, in one `TRUNCATE`. It probes with `EXISTS` first and skips already-empty tables: it runs once per test across 617 tests, and truncating all 85 tables one command at a time cost 480ms a clean and was what blew `hookTimeout` under load — blaming whichever test happened to be next. Keep it a single statement over only the dirty tables.
 
 **Writing integration tests:**
 ```typescript
