@@ -5,6 +5,12 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-08 — Team generation settings say which number is wrong
+
+Saving **Team Generation** settings could leave the Save button greyed out with no explanation when the default number of teams or the iteration limit was out of range.
+
+- Both fields now show the accepted range under the input as soon as the value is invalid.
+
 ## 2026-09-08 — You can now turn off performance and crash reports
 
 Sideline records page timings and crash reports from your browser to find and fix problems. That has always been disclosed in the privacy policy, but there was no way to say no to it.
