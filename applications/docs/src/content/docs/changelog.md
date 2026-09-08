@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-08 — You can now turn off performance and crash reports
+
+Sideline records page timings and crash reports from your browser to find and fix problems. That has always been disclosed in the privacy policy, but there was no way to say no to it.
+
+- **Profile → Performance and crash reports** turns it off. It applies to that browser and takes effect immediately.
+- If your browser sends a **Global Privacy Control** or **Do Not Track** signal, we now treat it as an objection and keep monitoring off without you having to ask.
+- Nothing about what is recorded has changed, and it still never records what you type.
+
 ## 2026-09-07 — Fix: clearer errors when saving invalid Team settings
 
 **Team settings** now tells you exactly which field is wrong instead of silently doing nothing or showing a generic error.

@@ -671,6 +671,24 @@ Rules:
    ```
    Dropping the standalone `clientConfigLayer` from `Layer.mergeAll` makes the runtime's success type `ManagedRuntime<ApiClient, never>` and breaks every `ApiClient | ClientConfig` effect at the type level.
 
+### The Telemetry Objection Gate — `lib/telemetryOptOut.ts`
+
+Telemetry runs on **legitimate interest** (GDPR Art. 6(1)(f)), which the privacy policy states in §3. It is **not** consent: there is no banner, nothing to opt *in* to, and no consent record. What Art. 21 and §6 of the policy require is a way to **object**, and `lib/telemetryOptOut.ts` is it. Do not turn this into a consent gate without changing §3 of the policy in both `legal/privacy.md` and `cs/legal/privacy.md` first — the code and the published legal basis have to agree.
+
+`isTelemetryAllowed()` is the single gate. Precedence, strongest first: a browser privacy signal (`navigator.globalPrivacyControl`, then Do Not Track) → the stored per-browser preference (`sideline-telemetry-opt-out`) → allowed, which is what legitimate interest permits.
+
+Rules:
+
+1. **Every path that transmits must consult the gate.** There are six, and they do not share a chokepoint: `makeTelemetryLayer` (returns `Layer.empty` when objected, so nothing leaves), `recordReactRender`, `registerWebVitals`, `registerErrorHandlers`, `beaconCrash` (`lib/crashBeacon.ts`), and the inline ES5 IIFE in `lib/preMountGuard.ts`. **Adding a seventh means adding a gate** — grep for `isTelemetryAllowed` before you add any browser-side send.
+2. **Gate at send time, not only at registration time.** The Web Vitals and error listeners attach once at boot, so a registration-only check keeps sending for the rest of the session after someone switches telemetry off. `telemetry.ts` wraps the runner in `gated(runEffect)` for exactly this, which is what makes the switch take effect with no reload. Use `gated(...)`, never the raw `runEffect`, inside a listener.
+3. **`beaconCrash` and the pre-mount IIFE need their own checks.** Neither goes through the Effect runtime, so gating the OTLP layer does not cover them — and both fire precisely when the app has crashed or has not booted, which is when an objection is easiest to leak.
+4. **`telemetryOptOut.ts` must stay self-contained and non-throwing**, in the shape of `resolveStoredTheme.ts`: no imports from the app runtime, every `localStorage` and `navigator` access wrapped. `beaconCrash` calls it from a crashed page and must not be able to add a second failure to the first.
+5. **The inline guard duplicates the precedence in ES5** because it runs before any module loads. It interpolates `TELEMETRY_OPT_OUT_STORAGE_KEY` from the module so the key cannot drift, and `preMountGuard.test.ts` asserts that. If you change the precedence, change it in both places — an objection honoured everywhere except the boot-failure path is worse than none, because it is invisible.
+6. **No backticks or `${` in comments inside `PRE_MOUNT_GUARD_SOURCE`.** It is a template literal; a backtick in a comment terminates it and the parse error is reported against the *test* file, not the string.
+7. **Unreadable `localStorage` means allowed, not objected.** A private window or blocked site data holds no objection we can see; that is not the same as one having been made.
+8. **`isTelemetryAllowed()` returns `true` off the browser** (SSR, tests). The objection governs what a user's *device* transmits, not the web server's own instrumentation.
+9. **The UI reads the value in an effect, never during render** (`TelemetryPreferenceCard`). It depends on `localStorage` and `navigator`, so rendering it directly hydrates mismatched against the server markup.
+
 ### `runEffect` — Fire-And-Forget From Non-Effect Callbacks
 
 `runEffect(effect: Effect.Effect<void>): void` (`lib/runtime.ts`) does `void getRuntime().runFork(effect)`. Use it ONLY to record metrics/spans from plain (non-Effect) callbacks — Web Vitals, the React `<Profiler>` `onRender` hook. Never use it for API calls, navigation, or anything whose result the UI depends on — those go through `useRun()` / `runPromiseClient` / `runPromiseServer`.

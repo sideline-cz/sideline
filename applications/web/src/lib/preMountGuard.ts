@@ -1,4 +1,5 @@
 import { clearReloadGuard, RELOAD_CAP, RELOAD_COUNT_KEY } from './reloadGuard.js';
+import { TELEMETRY_OPT_OUT_STORAGE_KEY } from './telemetryOptOut.js';
 
 export const WATCHDOG_MS = 10000;
 export const MOUNTED_FLAG = '__SIDELINE_MOUNTED__';
@@ -89,8 +90,23 @@ export const PRE_MOUNT_GUARD_SOURCE: string = `(function() {
     return true;
   }
 
+  // Same precedence as telemetryOptOut.ts, restated in ES5 because this IIFE
+  // runs before any module loads and so cannot import it. The storage key is
+  // interpolated from that module so the two cannot drift apart.
+  // (No backticks in here: this text lives inside a template literal.)
+  function telemetryAllowed() {
+    try {
+      if (navigator.globalPrivacyControl === true) return false;
+      var dnt = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
+      if (dnt === '1' || dnt === 'yes') return false;
+      if (localStorage.getItem('${TELEMETRY_OPT_OUT_STORAGE_KEY}') === 'true') return false;
+    } catch (e) {}
+    return true;
+  }
+
   function sendPreMountBeacon(msg, stack) {
     try {
+      if (!telemetryAllowed()) return;
       var endpoint = window.__SIDELINE_OTLP__;
       if (!endpoint) return;
       var payload = JSON.stringify({

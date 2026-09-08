@@ -2383,5 +2383,10 @@
   "waive_dialog_reasonPlaceholder": "Zadejte důvod prominutí",
   "waive_dialog_submit": "Prominout",
   "waive_dialog_title": "Označit jako prominuto",
-  "waive_dialog_validation_reasonRequired": "Důvod je povinný"
+  "waive_dialog_validation_reasonRequired": "Důvod je povinný",
+  "privacy_telemetryTitle": "Hlášení výkonu a chyb",
+  "privacy_telemetryDescription": "Sideline zaznamenává časy načtení stránek a hlášení chyb z tvého prohlížeče, abychom mohli problémy najít a opravit. Nikdy nezaznamenává, co píšeš.",
+  "privacy_telemetryToggle": "Posílat hlášení výkonu a chyb",
+  "privacy_telemetryHelp": "Ve výchozím nastavení zapnuto na základě našeho oprávněného zájmu udržet Sideline funkční. Vypnutím vzneseš námitku — platí pro tento prohlížeč a hned.",
+  "privacy_telemetryBrowserSignal": "Tvůj prohlížeč posílá signál Global Privacy Control nebo Do Not Track, takže je to už vypnuté a nelze to zde zapnout."
 }

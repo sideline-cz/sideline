@@ -1,6 +1,7 @@
 import { Effect, Layer, Metric } from 'effect';
 import { FetchHttpClient } from 'effect/unstable/http';
 import { Otlp } from 'effect/unstable/observability';
+import { isTelemetryAllowed } from '~/lib/telemetryOptOut.js';
 
 export const makeTelemetryLayer = (options: {
   readonly endpoint: string | undefined;
@@ -8,7 +9,10 @@ export const makeTelemetryLayer = (options: {
   readonly environment: string | undefined;
   readonly origin: string | undefined;
 }): Layer.Layer<never> =>
-  !options.endpoint
+  // No endpoint, or this browser has objected (see `telemetryOptOut.ts`).
+  // Returning an empty layer is what stops metrics and forwarded logs from
+  // leaving the page at all, rather than collecting them and dropping them.
+  !options.endpoint || !isTelemetryAllowed()
     ? Layer.empty
     : Otlp.layerJson({
         baseUrl: options.endpoint,
@@ -63,10 +67,26 @@ const reactRenderMetric = Metric.histogram('react_render_ms', {
 type RunEffect = (effect: Effect.Effect<void>) => void;
 
 /**
+ * Re-checks the objection at *send* time, not just at registration time.
+ *
+ * The Web Vitals and error listeners are attached once at boot, so a gate on
+ * registration alone would keep sending for the rest of the session after
+ * someone switches telemetry off. Wrapping the runner makes the switch take
+ * effect immediately, with no reload.
+ */
+const gated =
+  (runEffect: RunEffect): RunEffect =>
+  (effect) => {
+    if (!isTelemetryAllowed()) return;
+    runEffect(effect);
+  };
+
+/**
  * Record a React Profiler render duration as an OTEL metric.
  * Call this from the `onRender` callback of a `<Profiler>` wrapper.
  */
 export const recordReactRender = (runEffect: RunEffect, actualDuration: number): void => {
+  if (!isTelemetryAllowed()) return;
   runEffect(Metric.update(reactRenderMetric, actualDuration));
 };
 
@@ -79,16 +99,19 @@ let _vitalsRegistered = false;
  */
 export const registerWebVitals = (runEffect: RunEffect): void => {
   if (typeof window === 'undefined') return;
+  if (!isTelemetryAllowed()) return;
   if (_vitalsRegistered) return;
   _vitalsRegistered = true;
 
+  const send = gated(runEffect);
+
   // Web Vitals — lazy import so the bundle doesn't grow unless used
   void import('web-vitals').then(({ onLCP, onCLS, onFCP, onINP, onTTFB }) => {
-    onLCP((m) => runEffect(Metric.update(lcpMetric, m.value)));
-    onCLS((m) => runEffect(Metric.update(clsMetric, m.value)));
-    onFCP((m) => runEffect(Metric.update(fcpMetric, m.value)));
-    onINP((m) => runEffect(Metric.update(inpMetric, m.value)));
-    onTTFB((m) => runEffect(Metric.update(ttfbMetric, m.value)));
+    onLCP((m) => send(Metric.update(lcpMetric, m.value)));
+    onCLS((m) => send(Metric.update(clsMetric, m.value)));
+    onFCP((m) => send(Metric.update(fcpMetric, m.value)));
+    onINP((m) => send(Metric.update(inpMetric, m.value)));
+    onTTFB((m) => send(Metric.update(ttfbMetric, m.value)));
   });
 
   // Page load timing — wait until load event so all timing is available
@@ -96,7 +119,7 @@ export const registerWebVitals = (runEffect: RunEffect): void => {
     const entries = performance.getEntriesByType('navigation');
     const nav = entries[0] as PerformanceNavigationTiming | undefined;
     if (nav && nav.loadEventEnd > 0) {
-      runEffect(Metric.update(pageLoadMetric, nav.loadEventEnd - nav.startTime));
+      send(Metric.update(pageLoadMetric, nav.loadEventEnd - nav.startTime));
     }
   };
 
@@ -117,17 +140,20 @@ let _errorHandlersRegistered = false;
  */
 export const registerErrorHandlers = (runEffect: RunEffect): void => {
   if (typeof window === 'undefined') return;
+  if (!isTelemetryAllowed()) return;
   if (_errorHandlersRegistered) return;
   _errorHandlersRegistered = true;
 
+  const send = gated(runEffect);
+
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
-    runEffect(Effect.logError('Unhandled promise rejection', reason));
+    send(Effect.logError('Unhandled promise rejection', reason));
   });
 
   window.addEventListener('error', (event) => {
     if (event.error instanceof Error) {
-      runEffect(Effect.logError('Unhandled error', event.error));
+      send(Effect.logError('Unhandled error', event.error));
     }
   });
 };
