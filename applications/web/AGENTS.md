@@ -483,14 +483,12 @@ Rules:
    recompute `useCardForm`'s baseline and the form goes clean with no reset
    call.
 
-Two cards in that directory are **not** the pattern and must not be copied:
-`EmailForwardingCard.tsx` and `GenerationWeightsCard.tsx` were moved out of the
-page unchanged and still hold one `React.useState` per field, a hand-written
-`hasChanges`/`isValid`, a bare `<Button>` instead of `SaveRow`, and a silent
-`if (!isValid) return;`. Convert them to `useCardForm` + a `*Form.ts` module +
-`SaveRow` the next time either is edited; `EmailForwardingCard`'s
-`monitoredAddresses` list must stay outside the form type (rule 1 forbids
-arrays) with its own comparison folded into the card's dirty check.
+All six cards in that directory now follow this pattern. Two carry documented exceptions rather than deviations:
+
+- **`EmailForwardingCard`** keeps `monitoredAddresses` and `imapSecret` outside the form type, because neither survives a shallow compare: the first is an array (a new reference every render), and the second is write-only and three-state — whether a typed value counts as a change depends on `imapSecretSet` and `replacingSecret`, not on inequality, since the stored secret is never sent to the browser. The card ORs both into `hasChanges` explicitly. It is also the one card that calls `form.reset(...)` after saving, because the server normalises an empty IMAP folder to `INBOX` and the form would otherwise read as dirty for ever.
+- **Both `EmailForwardingCard` and `GenerationWeightsCard` keep a hand-rolled Save row** instead of `SaveRow`, because each has a second button beside Save (Regenerate token, Reset to defaults). They still gate on `form.isDirty` from the same object their payload is built from, which is the part that matters.
+
+Prefer **per-field errors over a single toast** where a card has more than one rejectable input. `settingsForm.ts` returns the first bad field's key because its four cards share one Save button and one toast; `emailForwardingForm.ts` and `generationWeightsForm.ts` return a key *per field* so each renders under its own input with `aria-invalid` and `aria-describedby`. A disabled Save button with no message is the same defect as a dead click — `GenerationWeightsCard` greyed out its button on an out-of-range number and displayed nothing until this was fixed.
 
 ## Submitting Branded Values to API Endpoints
 

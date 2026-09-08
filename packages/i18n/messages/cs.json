@@ -2388,5 +2388,7 @@
   "privacy_telemetryDescription": "Sideline zaznamenává časy načtení stránek a hlášení chyb z tvého prohlížeče, abychom mohli problémy najít a opravit. Nikdy nezaznamenává, co píšeš.",
   "privacy_telemetryToggle": "Posílat hlášení výkonu a chyb",
   "privacy_telemetryHelp": "Ve výchozím nastavení zapnuto na základě našeho oprávněného zájmu udržet Sideline funkční. Vypnutím vzneseš námitku — platí pro tento prohlížeč a hned.",
-  "privacy_telemetryBrowserSignal": "Tvůj prohlížeč posílá signál Global Privacy Control nebo Do Not Track, takže je to už vypnuté a nelze to zde zapnout."
+  "privacy_telemetryBrowserSignal": "Tvůj prohlížeč posílá signál Global Privacy Control nebo Do Not Track, takže je to už vypnuté a nelze to zde zapnout.",
+  "teamGenSettings_defaultTeamCountInvalid": "Zadej celé číslo mezi 2 a 20.",
+  "teamGenSettings_maxIterationsInvalid": "Zadej celé číslo mezi 0 a 10000."
 }
