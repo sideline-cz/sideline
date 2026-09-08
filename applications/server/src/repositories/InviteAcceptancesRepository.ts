@@ -15,7 +15,9 @@ import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 // success shape (`PendingAcceptanceEntry`) so the row can be returned to the RPC handler as-is.
 // `findPending` now genuinely selects a null `welcome_channel_id` and a false `bot_present` —
 // the temporary wire guard that kept both non-null is removed below (PR-3).
-class PendingAcceptanceRow extends Schema.Class<PendingAcceptanceRow>('PendingAcceptanceRow')({
+export class PendingAcceptanceRow extends Schema.Class<PendingAcceptanceRow>(
+  'PendingAcceptanceRow',
+)({
   acceptance_id: InviteAcceptance.InviteAcceptanceId,
   guild_id: Discord.Snowflake,
   welcome_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),

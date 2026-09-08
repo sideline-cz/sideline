@@ -364,6 +364,32 @@ Rules:
 3. **Server-side decode failures** (`EventPropertyMissing` in `src/rpc/channel/events.ts`) always call `markPermanentlyFailed` — missing payload fields are not transient.
 4. When adding a new failure-classification rule, update the bot's `isPermanentError` and `applications/bot/AGENTS.md`, not the server.
 
+### An RPC Handler Must Map Rows Into The Domain Class — `Schema.Class` Is Nominal
+
+Returning a repository row straight from an RPC handler whose contract declares a domain class **type-checks and then fails at encode**:
+
+```
+Expected PendingAcceptanceEntry, got PendingAcceptanceRow({...})
+```
+
+The two carry identical fields, so structurally the row satisfies the handler's signature and `tsc` is content. `Schema.Class` is nominal, so the encoder is not. **Encode only runs when a row exists**, which is why this reaches production and sits dormant: an empty outbox never encodes anything.
+
+This has now shipped **twice**:
+
+| RPC | Shipped in | Surfaced when | Symptom |
+|---|---|---|---|
+| `RulesQuiz/PendingEvents` | the day the feature landed | the first team enabled a quiz | 320 failed ticks in 27 minutes, `attempts` stuck at 0 |
+| `Invite/PendingAcceptances` | server v0.47.0 | bot v0.39.0 began polling that outbox, ten days later | the tick failed ~once a second |
+
+The first was fixed and given a guard test, and the second shipped broken anyway, because the guard was never generalised.
+
+Rules:
+
+1. **Map explicitly**: `Effect.map(Array.map((row) => new SomeRpcGroup.SomeEntry({ ...row })))`. Never return the repository result directly when the contract's `success` is a domain `Schema.Class`.
+2. **Every `success: Schema.Array(SomeDomainClass)` RPC needs an encode guard test.** Copy `test/rpc/RulesQuizPendingEventsEncode.test.ts` or `test/rpc/InvitePendingAcceptancesEncode.test.ts`: encode what the handler returns, and assert the **raw row is rejected**. That negative case is the whole point — without it, dropping the mapping makes the test pass again.
+3. **Export the row class** from its repository so the guard can construct one.
+4. The remaining outbox-style RPCs have **not** been audited for this. Anything with a `success` of a domain class and a handler that is a one-line pass-through is a candidate.
+
 ### Outbox Failure Modes: Two-RPC Classification vs `attempts`-Counted Retry
 
 There are two server-side patterns for failure handling on a `*_sync_events` / `*_provision_events` outbox table. Pick one per table; do not mix them.
