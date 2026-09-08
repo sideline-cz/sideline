@@ -81,7 +81,21 @@ const adoptExistingRole = (
     Effect.bind('rpc', () => SyncRpc.asEffect()),
     Effect.bind('rest', () => DiscordREST.asEffect()),
     Effect.bind('roles', ({ rest }) => rest.listGuildRoles(guildId)),
-    Effect.bind('me', ({ rest }) => rest.getMyGuildMember(guildId)),
+    /**
+     * `getMyGuildMember` is `GET /users/@me/guilds/{id}/member`, which is
+     * **user-OAuth only** — a bot token gets `20001 "Bots cannot use this
+     * endpoint"` every single time. That failure propagated out of this
+     * pipeline to the `HttpClientError` handler in `ensureMapping`, so
+     * adoption never once succeeded in production and every role fell through
+     * to `createGuildRole`, which is exactly the duplicate-role behaviour
+     * adoption exists to prevent.
+     *
+     * `GET /guilds/{id}/members/{userId}` is the bot-callable equivalent, and
+     * `getMyUser` (`GET /users/@me`) is bot-callable too, so the bot's own id
+     * comes from there.
+     */
+    Effect.bind('self', ({ rest }) => rest.getMyUser()),
+    Effect.bind('me', ({ rest, self }) => rest.getGuildMember(guildId, self.id)),
     Effect.let('topPosition', ({ roles, me }) => botTopPosition(roles, me.roles)),
     Effect.tap(({ roles, topPosition }) => logNearMisses(roles, guildId, roleName, topPosition)),
     Effect.bind('picked', ({ roles, topPosition }) =>
