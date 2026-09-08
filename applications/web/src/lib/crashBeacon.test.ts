@@ -6,6 +6,7 @@
 //     - uses navigator.sendBeacon when available
 //     - falls back to fetch(..., { keepalive: true }) when sendBeacon unavailable
 //     - no-op when window.__SIDELINE_OTLP__ is not set
+//     - no-op when this browser has objected to telemetry (privacy policy §6)
 //     - NEVER throws
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -197,5 +198,74 @@ describe('crashBeacon', () => {
     for (const phase of phases) {
       expect(() => beaconCrash(makePayload(phase))).not.toThrow();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Telemetry objection
+//
+// This path never touches the Effect runtime, so gating the OTLP layer does
+// not cover it — it needs its own check or an objection leaks exactly when the
+// app has crashed.
+// ---------------------------------------------------------------------------
+
+describe('crashBeacon and the telemetry objection', () => {
+  it('does not beacon when this browser has objected', async () => {
+    (window as unknown as Record<string, unknown>).__SIDELINE_OTLP__ = 'https://otlp.test/v1/logs';
+    const sendBeaconMock = vi.fn().mockReturnValue(true);
+    Object.defineProperty(navigator, 'sendBeacon', {
+      value: sendBeaconMock,
+      configurable: true,
+      writable: true,
+    });
+
+    const { setTelemetryOptOut } = await import('~/lib/telemetryOptOut.js');
+    setTelemetryOptOut(true);
+
+    const { beaconCrash } = await import('~/lib/crashBeacon.js');
+    beaconCrash(makePayload());
+
+    expect(sendBeaconMock).not.toHaveBeenCalled();
+    setTelemetryOptOut(false);
+  });
+
+  it('does not beacon under Global Privacy Control', async () => {
+    (window as unknown as Record<string, unknown>).__SIDELINE_OTLP__ = 'https://otlp.test/v1/logs';
+    const sendBeaconMock = vi.fn().mockReturnValue(true);
+    Object.defineProperty(navigator, 'sendBeacon', {
+      value: sendBeaconMock,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(navigator, 'globalPrivacyControl', {
+      value: true,
+      configurable: true,
+      writable: true,
+    });
+
+    const { beaconCrash } = await import('~/lib/crashBeacon.js');
+    beaconCrash(makePayload());
+
+    expect(sendBeaconMock).not.toHaveBeenCalled();
+    Object.defineProperty(navigator, 'globalPrivacyControl', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+  });
+
+  it('still beacons when no objection has been made', async () => {
+    (window as unknown as Record<string, unknown>).__SIDELINE_OTLP__ = 'https://otlp.test/v1/logs';
+    const sendBeaconMock = vi.fn().mockReturnValue(true);
+    Object.defineProperty(navigator, 'sendBeacon', {
+      value: sendBeaconMock,
+      configurable: true,
+      writable: true,
+    });
+
+    const { beaconCrash } = await import('~/lib/crashBeacon.js');
+    beaconCrash(makePayload());
+
+    expect(sendBeaconMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -276,3 +276,72 @@ describe('preMountGuard', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Telemetry objection
+//
+// The IIFE runs before any module loads, so it cannot import
+// `telemetryOptOut.ts` and restates the precedence in ES5. That duplication is
+// the risk: if the two drift, an objection is honoured everywhere except the
+// one path that fires when the app fails to boot.
+// ---------------------------------------------------------------------------
+
+describe('PRE_MOUNT_GUARD_SOURCE and the telemetry objection', () => {
+  const evalGuard = async () => {
+    const { PRE_MOUNT_GUARD_SOURCE } = await import('~/lib/preMountGuard.js');
+    // biome-ignore lint/security/noGlobalEval: evaluating the guard IIFE under test
+    eval(PRE_MOUNT_GUARD_SOURCE);
+  };
+
+  const mockBeacon = () => {
+    const sendBeaconMock = vi.fn().mockReturnValue(true);
+    Object.defineProperty(navigator, 'sendBeacon', {
+      value: sendBeaconMock,
+      configurable: true,
+      writable: true,
+    });
+    return sendBeaconMock;
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    // Each eval of the guard chains onto the previous `window.onerror` via its
+    // own `_prevOnerror`, so without this one error cascades through every
+    // handler installed by earlier tests and the call count is meaningless.
+    window.onerror = null;
+    window.onunhandledrejection = null;
+    (window as unknown as Record<string, unknown>).__SIDELINE_MOUNTED__ = false;
+    (window as unknown as Record<string, unknown>).__SIDELINE_OTLP__ = 'https://otlp.test/v1/logs';
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    (window as unknown as Record<string, unknown>).__SIDELINE_OTLP__ = undefined;
+  });
+
+  it('interpolates the same storage key the module writes, so they cannot drift', async () => {
+    const { PRE_MOUNT_GUARD_SOURCE } = await import('~/lib/preMountGuard.js');
+    const { TELEMETRY_OPT_OUT_STORAGE_KEY } = await import('~/lib/telemetryOptOut.js');
+    expect(PRE_MOUNT_GUARD_SOURCE).toContain(`'${TELEMETRY_OPT_OUT_STORAGE_KEY}'`);
+  });
+
+  it('does not beacon a pre-mount error when this browser has objected', async () => {
+    const { setTelemetryOptOut } = await import('~/lib/telemetryOptOut.js');
+    setTelemetryOptOut(true);
+    const sendBeaconMock = mockBeacon();
+    await evalGuard();
+
+    window.onerror?.('boom', 'app.js', 1, 1, new Error('boom'));
+
+    expect(sendBeaconMock).not.toHaveBeenCalled();
+  });
+
+  it('does beacon a pre-mount error when no objection has been made', async () => {
+    const sendBeaconMock = mockBeacon();
+    await evalGuard();
+
+    window.onerror?.('boom', 'app.js', 1, 1, new Error('boom'));
+
+    expect(sendBeaconMock).toHaveBeenCalledTimes(1);
+  });
+});

@@ -3,7 +3,7 @@ title: Zásady ochrany osobních údajů
 description: Jaké osobní údaje Sideline sbírá, proč, komu je předává a jak je nechat smazat.
 ---
 
-Poslední aktualizace: 27. srpna 2026
+Poslední aktualizace: 8. září 2026
 
 ## 1. Kdo jsme
 
@@ -76,11 +76,13 @@ Admin týmu tě může z týmu odebrat, čímž se smažou tvoje data vázaná n
 
 ## 7. Cookies a local storage
 
-Používáme jen nezbytné úložiště: session token, aby ses nemusel pořád přihlašovat, a local storage pro jazyk, motiv a nastavení postranního panelu.
+Používáme jen nezbytné úložiště: session token, aby ses nemusel pořád přihlašovat, a local storage pro jazyk, motiv, nastavení postranního panelu a nastavení monitoringu.
 
 Žádné reklamní ani analytické cookies, žádné sledování třetími stranami.
 
 Náš vlastní monitoring chyb a výkonu běží zčásti v tvém prohlížeči. Zaznamenává časy načtení stránek a hlášení pádů — ne obsah toho, co píšeš.
+
+Můžeš ho vypnout: **Profil → Hlášení výkonu a chyb**. Platí pro prohlížeč, ve kterém ho vypneš, a projeví se okamžitě. Pokud tvůj prohlížeč posílá signál Global Privacy Control nebo Do Not Track, bereme to jako námitku a necháme monitoring vypnutý, aniž bys o to musel žádat.
 
 ## 8. Děti
 

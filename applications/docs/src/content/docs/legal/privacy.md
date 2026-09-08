@@ -3,7 +3,7 @@ title: Privacy Policy
 description: What personal data Sideline collects, why, who it goes to, and how to get it removed.
 ---
 
-Last updated: 27 August 2026
+Last updated: 8 September 2026
 
 ## 1. Who we are
 
@@ -76,11 +76,13 @@ Your team admin can remove you from a team, which deletes your team-scoped data.
 
 ## 7. Cookies and local storage
 
-We use strictly necessary storage only: a session token to keep you signed in, and local storage for your language, theme and sidebar preferences.
+We use strictly necessary storage only: a session token to keep you signed in, and local storage for your language, theme, sidebar and monitoring preferences.
 
 We use no advertising or analytics cookies, and no third-party tracking.
 
 Our own error and performance monitoring runs partly in your browser. It records page timings and crash reports — not the contents of what you type.
+
+You can turn it off: **Profile → Performance and crash reports**. It applies to the browser you switch it off in and takes effect immediately. If your browser sends a Global Privacy Control or Do Not Track signal, we treat that as an objection and keep it off without you having to ask.
 
 ## 8. Children
 

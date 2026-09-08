@@ -6,6 +6,7 @@ import { ArrowLeft } from 'lucide-react';
 import { DiscordConnectCard } from '~/components/organisms/DiscordConnectCard.js';
 import { LanguageSwitcher } from '~/components/organisms/LanguageSwitcher';
 import { ProfileEditForm } from '~/components/organisms/ProfileEditForm';
+import { TelemetryPreferenceCard } from '~/components/organisms/TelemetryPreferenceCard.js';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
@@ -95,6 +96,7 @@ export function MyProfilePage({ user, teams, onUpdated }: MyProfilePageProps) {
           </CardContent>
         </Card>
         <DiscordConnectSection teams={teams} />
+        <TelemetryPreferenceCard />
       </main>
     </div>
   );
