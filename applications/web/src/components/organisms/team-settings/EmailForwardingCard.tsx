@@ -1,5 +1,5 @@
 import type { EmailForwardingApi, GroupApi } from '@sideline/domain';
-import { Discord, Team } from '@sideline/domain';
+import { Team } from '@sideline/domain';
 import { getLocale } from '@sideline/i18n/runtime';
 import { DateTime, Effect, Option, Schema } from 'effect';
 import { AlertTriangle, Copy, Mail, ShieldCheck } from 'lucide-react';
@@ -25,7 +25,16 @@ import { Switch } from '~/components/ui/switch';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { useServerUrl } from '~/lib/translation-overrides-context.js';
 import { tr } from '~/lib/translations.js';
+import {
+  type EmailForwardingErrors,
+  emailForwardingFormFrom,
+  emailForwardingRequestFrom,
+  hasEmailForwardingErrors,
+  imapSecretPayload,
+  validateEmailForwarding,
+} from './emailForwardingForm';
 import { textChannelOptions as buildTextChannelOptions, NONE_VALUE } from './shared';
+import { useCardForm } from './useCardForm';
 
 interface EmailForwardingCardProps {
   teamId: string;
@@ -51,14 +60,23 @@ export function EmailForwardingCard({
   // The inbound token is only revealed after regeneration
   const [lastToken, setLastToken] = React.useState<string | null>(null);
 
-  // Form state — initialise from loader data
-  const [enabled, setEnabled] = React.useState(initialConfig?.enabled ?? false);
-  const [coachChannelId, setCoachChannelId] = React.useState(
-    initialConfig?.coachChannelId || NONE_VALUE,
-  );
-  const [targetChannelId, setTargetChannelId] = React.useState(
-    initialConfig?.targetChannelId || NONE_VALUE,
-  );
+  // The nine primitive fields the Save button owns. `monitoredAddresses` and
+  // `imapSecret` stay out of the form and are folded into `hasChanges` below —
+  // see `emailForwardingForm.ts` for why neither survives a shallow compare.
+  const form = useCardForm(emailForwardingFormFrom(config));
+  const { setField } = form;
+  const {
+    enabled,
+    coachChannelId,
+    targetChannelId,
+    imapEnabled,
+    imapHost,
+    imapPort,
+    imapUseTls,
+    imapUsername,
+    imapFolder,
+  } = form.values;
+
   const [monitoredAddresses, setMonitoredAddresses] = React.useState<string[]>(
     initialConfig ? [...initialConfig.monitoredAddresses] : [],
   );
@@ -69,64 +87,25 @@ export function EmailForwardingCard({
   const [showRegenerateConfirm, setShowRegenerateConfirm] = React.useState(false);
   const [copiedAddress, setCopiedAddress] = React.useState(false);
 
-  // IMAP form state
-  const [imapEnabled, setImapEnabled] = React.useState(initialConfig?.imapEnabled ?? false);
-  const [imapHost, setImapHost] = React.useState(
-    Option.getOrElse(initialConfig?.imapHost ?? Option.none<string>(), () => ''),
-  );
-  const [imapPort, setImapPort] = React.useState(
-    Option.match(initialConfig?.imapPort ?? Option.none<number>(), {
-      onNone: () => '993',
-      onSome: (p) => String(p),
-    }),
-  );
-  const [imapUseTls, setImapUseTls] = React.useState(initialConfig?.imapUseTls ?? true);
-  const [imapUsername, setImapUsername] = React.useState(
-    Option.getOrElse(initialConfig?.imapUsername ?? Option.none<string>(), () => ''),
-  );
-  const [imapFolder, setImapFolder] = React.useState(
-    Option.getOrElse(initialConfig?.imapFolder ?? Option.none<string>(), () => ''),
-  );
-  // Write-only password — 3-state
+  // Write-only password — 3-state: unset, kept, or being replaced.
   const [imapSecret, setImapSecret] = React.useState('');
   const [replacingSecret, setReplacingSecret] = React.useState(false);
 
-  // IMAP validation errors
-  const [imapHostError, setImapHostError] = React.useState<string | null>(null);
-  const [imapPortError, setImapPortError] = React.useState<string | null>(null);
-  const [imapUsernameError, setImapUsernameError] = React.useState<string | null>(null);
-  const [imapSecretError, setImapSecretError] = React.useState<string | null>(null);
+  // Per-field, so each error renders next to the input it belongs to.
+  const [errors, setErrors] = React.useState<EmailForwardingErrors>({});
 
-  const initialEnabled = config?.enabled ?? false;
-  const initialCoach = config?.coachChannelId || NONE_VALUE;
-  const initialTarget = config?.targetChannelId || NONE_VALUE;
+  const secretOptions = {
+    imapSecretSet: config?.imapSecretSet ?? false,
+    replacingSecret,
+    imapSecret,
+  };
+
   const initialAddresses = React.useMemo(() => [...(config?.monitoredAddresses ?? [])], [config]);
-  const initialImapEnabled = config?.imapEnabled ?? false;
-  const initialImapHost = Option.getOrElse(config?.imapHost ?? Option.none<string>(), () => '');
-  const initialImapPort = Option.match(config?.imapPort ?? Option.none<number>(), {
-    onNone: () => '993',
-    onSome: (p) => String(p),
-  });
-  const initialImapUseTls = config?.imapUseTls ?? true;
-  const initialImapUsername = Option.getOrElse(
-    config?.imapUsername ?? Option.none<string>(),
-    () => '',
-  );
-  const initialImapFolder = Option.getOrElse(config?.imapFolder ?? Option.none<string>(), () => '');
+  const addressesChanged = JSON.stringify(monitoredAddresses) !== JSON.stringify(initialAddresses);
+  // A typed secret only counts as a change when it would actually be sent.
+  const secretChanged = Option.isSome(imapSecretPayload(secretOptions));
 
-  const hasChanges =
-    enabled !== initialEnabled ||
-    coachChannelId !== initialCoach ||
-    targetChannelId !== initialTarget ||
-    JSON.stringify(monitoredAddresses) !== JSON.stringify(initialAddresses) ||
-    imapEnabled !== initialImapEnabled ||
-    imapHost !== initialImapHost ||
-    imapPort !== initialImapPort ||
-    imapUseTls !== initialImapUseTls ||
-    imapUsername !== initialImapUsername ||
-    imapFolder !== initialImapFolder ||
-    (replacingSecret && imapSecret.length > 0) ||
-    (!config?.imapSecretSet && imapSecret.length > 0);
+  const hasChanges = form.isDirty || addressesChanged || secretChanged;
 
   const hasInvalidSender = newSender.trim().length > 0 && !EMAIL_REGEX.test(newSender.trim());
 
@@ -164,135 +143,45 @@ export function EmailForwardingCard({
     setTimeout(() => setCopiedAddress(false), 2000);
   };
 
-  const validateImapFields = React.useCallback((): boolean => {
-    if (!imapEnabled) return true;
-    let valid = true;
+  /** Computes errors, renders them, and says whether the save may proceed. */
+  const runValidation = (): boolean => {
+    const next = validateEmailForwarding(form.values, secretOptions);
+    setErrors(next);
+    return !hasEmailForwardingErrors(next);
+  };
 
-    if (!imapHost.trim()) {
-      setImapHostError(tr('team_email_forwarding_imap_host_required'));
-      valid = false;
-    } else {
-      setImapHostError(null);
-    }
-
-    if (!imapUsername.trim()) {
-      setImapUsernameError(tr('team_email_forwarding_imap_username_required'));
-      valid = false;
-    } else {
-      setImapUsernameError(null);
-    }
-
-    const portNum = Number(imapPort);
-    if (!imapPort.trim() || !Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
-      setImapPortError(tr('team_email_forwarding_imap_port_invalid'));
-      valid = false;
-    } else {
-      setImapPortError(null);
-    }
-
-    // Secret required only when no existing secret is set and not replacing
-    const needsSecret = !config?.imapSecretSet || replacingSecret;
-    if (needsSecret && !imapSecret.trim()) {
-      setImapSecretError(tr('team_email_forwarding_imap_secret_required'));
-      valid = false;
-    } else {
-      setImapSecretError(null);
-    }
-
-    return valid;
-  }, [
-    imapEnabled,
-    imapHost,
-    imapUsername,
-    imapPort,
-    imapSecret,
-    config?.imapSecretSet,
-    replacingSecret,
-  ]);
-
-  const handleSave = React.useCallback(async () => {
-    if (!validateImapFields()) return;
+  const handleSave = async () => {
+    if (!runValidation()) return;
     setSaving(true);
-
-    // Build imap_secret payload:
-    // - State B (secretSet && !replacing): omit the key → Option.none()
-    // - State A (no secret set) or State C (replacing): include the value → Option.some(value)
-    const imapSecretPayload: Option.Option<string> =
-      config?.imapSecretSet && !replacingSecret
-        ? Option.none()
-        : imapSecret.trim()
-          ? Option.some(imapSecret.trim())
-          : Option.none();
-
-    const portNum = Number(imapPort);
-    const folderValue = imapFolder.trim() || 'INBOX';
 
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.emailForwarding.upsertEmailForwardingConfig({
           params: { teamId: Schema.decodeSync(Team.TeamId)(teamId) },
-          payload: {
-            enabled,
-            coach_channel_id:
-              coachChannelId !== NONE_VALUE
-                ? Discord.Snowflake.makeUnsafe(coachChannelId)
-                : Discord.Snowflake.makeUnsafe(''),
-            target_channel_id:
-              targetChannelId !== NONE_VALUE
-                ? Discord.Snowflake.makeUnsafe(targetChannelId)
-                : Discord.Snowflake.makeUnsafe(''),
-            monitored_addresses: monitoredAddresses,
-            imap_enabled: imapEnabled,
-            imap_host: imapHost.trim() ? Option.some(imapHost.trim()) : Option.none(),
-            imap_port:
-              Number.isInteger(portNum) && portNum >= 1 ? Option.some(portNum) : Option.none(),
-            imap_username: imapUsername.trim() ? Option.some(imapUsername.trim()) : Option.none(),
-            imap_use_tls: imapUseTls,
-            imap_folder: Option.some(folderValue),
-            imap_secret: imapSecretPayload,
-          },
+          payload: emailForwardingRequestFrom(form.values, {
+            monitoredAddresses,
+            imapSecret: imapSecretPayload(secretOptions),
+          }),
         }),
       ),
       Effect.mapError(() => ClientError.make(tr('team_email_forwarding_save_error'))),
       run({ success: tr('team_email_forwarding_save_success') }),
     );
     setSaving(false);
+
     if (Option.isSome(result)) {
       const cfg = result.value;
+      // Adopt what the server stored, not what was typed: it normalises an
+      // empty folder to INBOX, which would otherwise read as dirty for ever.
       setConfig(cfg);
-      setEnabled(cfg.enabled);
-      setCoachChannelId(cfg.coachChannelId || NONE_VALUE);
-      setTargetChannelId(cfg.targetChannelId || NONE_VALUE);
+      form.reset(emailForwardingFormFrom(cfg));
       setMonitoredAddresses([...cfg.monitoredAddresses]);
-      setImapEnabled(cfg.imapEnabled);
-      setImapHost(Option.getOrElse(cfg.imapHost, () => ''));
-      setImapPort(Option.match(cfg.imapPort, { onNone: () => '993', onSome: (p) => String(p) }));
-      setImapUseTls(cfg.imapUseTls);
-      setImapUsername(Option.getOrElse(cfg.imapUsername, () => ''));
-      setImapFolder(Option.getOrElse(cfg.imapFolder, () => ''));
       setImapSecret('');
       setReplacingSecret(false);
+      setErrors({});
       onRefresh();
     }
-  }, [
-    teamId,
-    enabled,
-    coachChannelId,
-    targetChannelId,
-    monitoredAddresses,
-    imapEnabled,
-    imapHost,
-    imapPort,
-    imapUseTls,
-    imapUsername,
-    imapFolder,
-    imapSecret,
-    replacingSecret,
-    config,
-    run,
-    onRefresh,
-    validateImapFields,
-  ]);
+  };
 
   const handleRegenerate = React.useCallback(async () => {
     setRegenerating(true);
@@ -321,9 +210,8 @@ export function EmailForwardingCard({
   const showChannelsWarning =
     enabled && (coachChannelId === NONE_VALUE || targetChannelId === NONE_VALUE);
 
-  // Derived IMAP validation state for Save button
-  const imapHasErrors =
-    imapEnabled && (!!imapHostError || !!imapPortError || !!imapUsernameError || !!imapSecretError);
+  // Derived IMAP validation state for the Save button.
+  const imapHasErrors = imapEnabled && hasEmailForwardingErrors(errors);
 
   // IMAP sync status
   const imapSyncStatus = React.useMemo(() => {
@@ -378,7 +266,7 @@ export function EmailForwardingCard({
               <Switch
                 id='email-forwarding-enabled'
                 checked={enabled}
-                onCheckedChange={setEnabled}
+                onCheckedChange={(v) => setField('enabled', v)}
               />
             </div>
 
@@ -452,7 +340,7 @@ export function EmailForwardingCard({
                   <Switch
                     id='imap-enabled'
                     checked={imapEnabled}
-                    onCheckedChange={setImapEnabled}
+                    onCheckedChange={(v) => setField('imapEnabled', v)}
                   />
                 </div>
 
@@ -473,15 +361,15 @@ export function EmailForwardingCard({
                           id='imap-host'
                           value={imapHost}
                           onChange={(e) => {
-                            setImapHost(e.target.value);
-                            setImapHostError(null);
+                            setField('imapHost', e.target.value);
+                            setErrors((prev) => ({ ...prev, imapHost: undefined }));
                           }}
-                          aria-invalid={imapHostError !== null}
-                          aria-describedby={imapHostError ? 'imap-host-error' : undefined}
+                          aria-invalid={errors.imapHost !== null}
+                          aria-describedby={errors.imapHost ? 'imap-host-error' : undefined}
                         />
-                        {imapHostError && (
+                        {errors.imapHost && (
                           <p id='imap-host-error' className='text-xs text-destructive mt-1'>
-                            {imapHostError}
+                            {errors.imapHost}
                           </p>
                         )}
                       </div>
@@ -499,16 +387,16 @@ export function EmailForwardingCard({
                           max={65535}
                           value={imapPort}
                           onChange={(e) => {
-                            setImapPort(e.target.value);
-                            setImapPortError(null);
+                            setField('imapPort', e.target.value);
+                            setErrors((prev) => ({ ...prev, imapPort: undefined }));
                           }}
                           className='max-w-32'
-                          aria-invalid={imapPortError !== null}
-                          aria-describedby={imapPortError ? 'imap-port-error' : undefined}
+                          aria-invalid={errors.imapPort !== null}
+                          aria-describedby={errors.imapPort ? 'imap-port-error' : undefined}
                         />
-                        {imapPortError && (
+                        {errors.imapPort && (
                           <p id='imap-port-error' className='text-xs text-destructive mt-1'>
-                            {imapPortError}
+                            {errors.imapPort}
                           </p>
                         )}
                       </div>
@@ -527,7 +415,7 @@ export function EmailForwardingCard({
                       <Switch
                         id='imap-use-tls'
                         checked={imapUseTls}
-                        onCheckedChange={setImapUseTls}
+                        onCheckedChange={(v) => setField('imapUseTls', v)}
                       />
                     </div>
 
@@ -543,15 +431,15 @@ export function EmailForwardingCard({
                         id='imap-username'
                         value={imapUsername}
                         onChange={(e) => {
-                          setImapUsername(e.target.value);
-                          setImapUsernameError(null);
+                          setField('imapUsername', e.target.value);
+                          setErrors((prev) => ({ ...prev, imapUsername: undefined }));
                         }}
-                        aria-invalid={imapUsernameError !== null}
-                        aria-describedby={imapUsernameError ? 'imap-username-error' : undefined}
+                        aria-invalid={errors.imapUsername !== null}
+                        aria-describedby={errors.imapUsername ? 'imap-username-error' : undefined}
                       />
-                      {imapUsernameError && (
+                      {errors.imapUsername && (
                         <p id='imap-username-error' className='text-xs text-destructive mt-1'>
-                          {imapUsernameError}
+                          {errors.imapUsername}
                         </p>
                       )}
                     </div>
@@ -593,10 +481,10 @@ export function EmailForwardingCard({
                               value={imapSecret}
                               onChange={(e) => {
                                 setImapSecret(e.target.value);
-                                setImapSecretError(null);
+                                setErrors((prev) => ({ ...prev, imapSecret: undefined }));
                               }}
-                              aria-invalid={imapSecretError !== null}
-                              aria-describedby={imapSecretError ? 'imap-secret-error' : undefined}
+                              aria-invalid={errors.imapSecret !== null}
+                              aria-describedby={errors.imapSecret ? 'imap-secret-error' : undefined}
                             />
                             {/* State C: cancel button */}
                             {replacingSecret && (
@@ -606,7 +494,7 @@ export function EmailForwardingCard({
                                 type='button'
                                 onClick={() => {
                                   setImapSecret('');
-                                  setImapSecretError(null);
+                                  setErrors((prev) => ({ ...prev, imapSecret: undefined }));
                                   setReplacingSecret(false);
                                 }}
                               >
@@ -614,9 +502,9 @@ export function EmailForwardingCard({
                               </Button>
                             )}
                           </div>
-                          {imapSecretError && (
+                          {errors.imapSecret && (
                             <p id='imap-secret-error' className='text-xs text-destructive mt-1'>
-                              {imapSecretError}
+                              {errors.imapSecret}
                             </p>
                           )}
                         </>
@@ -635,7 +523,7 @@ export function EmailForwardingCard({
                         id='imap-folder'
                         value={imapFolder}
                         placeholder='INBOX'
-                        onChange={(e) => setImapFolder(e.target.value)}
+                        onChange={(e) => setField('imapFolder', e.target.value)}
                       />
                     </div>
 
@@ -735,7 +623,7 @@ export function EmailForwardingCard({
                   <SearchableSelect
                     id='email-forwarding-coach-channel'
                     value={coachChannelId}
-                    onValueChange={setCoachChannelId}
+                    onValueChange={(v) => setField('coachChannelId', v)}
                     placeholder={tr('teamSettings_channelNone')}
                     pinnedValues={[NONE_VALUE]}
                     options={textChannelOptions}
@@ -756,7 +644,7 @@ export function EmailForwardingCard({
                   <SearchableSelect
                     id='email-forwarding-target-channel'
                     value={targetChannelId}
-                    onValueChange={setTargetChannelId}
+                    onValueChange={(v) => setField('targetChannelId', v)}
                     placeholder={tr('teamSettings_channelNone')}
                     pinnedValues={[NONE_VALUE]}
                     options={textChannelOptions}

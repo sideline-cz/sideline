@@ -2388,5 +2388,7 @@
   "privacy_telemetryDescription": "Sideline records page timings and crash reports from your browser so we can find and fix problems. It never records what you type.",
   "privacy_telemetryToggle": "Send performance and crash reports",
   "privacy_telemetryHelp": "On by default, under our legitimate interest in keeping Sideline working. Turn it off to object — it applies to this browser, straight away.",
-  "privacy_telemetryBrowserSignal": "Your browser is sending a Global Privacy Control or Do Not Track signal, so this is already off and cannot be turned on here."
+  "privacy_telemetryBrowserSignal": "Your browser is sending a Global Privacy Control or Do Not Track signal, so this is already off and cannot be turned on here.",
+  "teamGenSettings_defaultTeamCountInvalid": "Enter a whole number between 2 and 20.",
+  "teamGenSettings_maxIterationsInvalid": "Enter a whole number between 0 and 10000."
 }

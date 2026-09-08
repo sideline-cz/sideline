@@ -9,6 +9,13 @@ import { Input } from '~/components/ui/input';
 import { Separator } from '~/components/ui/separator';
 import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
+import {
+  generationWeightsFormFrom,
+  generationWeightsRequestFrom,
+  hasGenerationWeightsErrors,
+  validateGenerationWeights,
+} from './generationWeightsForm';
+import { useCardForm } from './useCardForm';
 
 // Defaults imported from domain so "Reset to defaults" always matches server defaults
 const DEFAULT_WEIGHT_ELO = TeamGenerationConfig.DEFAULT_WEIGHT_ELO;
@@ -30,13 +37,9 @@ export function GenerationWeightsCard({
 }: GenerationWeightsCardProps) {
   const run = useRun();
 
-  const [weightElo, setWeightElo] = React.useState(initialConfig.weightElo);
-  const [weightSize, setWeightSize] = React.useState(initialConfig.weightSize);
-  const [weightGender, setWeightGender] = React.useState(initialConfig.weightGender);
-  const [defaultTeamCount, setDefaultTeamCount] = React.useState(
-    String(initialConfig.defaultTeamCount),
-  );
-  const [maxIterations, setMaxIterations] = React.useState(String(initialConfig.maxIterations));
+  const form = useCardForm(generationWeightsFormFrom(initialConfig));
+  const { setField } = form;
+  const { weightElo, weightSize, weightGender, defaultTeamCount, maxIterations } = form.values;
   const [saving, setSaving] = React.useState(false);
 
   const totalWeight = weightElo + weightSize + weightGender;
@@ -44,38 +47,19 @@ export function GenerationWeightsCard({
   const sizePercent = totalWeight > 0 ? Math.round((weightSize / totalWeight) * 100) : 0;
   const genderPercent = totalWeight > 0 ? 100 - eloPercent - sizePercent : 0;
 
-  const hasChanges =
-    weightElo !== initialConfig.weightElo ||
-    weightSize !== initialConfig.weightSize ||
-    weightGender !== initialConfig.weightGender ||
-    defaultTeamCount !== String(initialConfig.defaultTeamCount) ||
-    maxIterations !== String(initialConfig.maxIterations);
+  const errors = validateGenerationWeights(form.values);
+  const isValid = !hasGenerationWeightsErrors(errors);
 
-  const parsedTeamCount = Number.parseInt(defaultTeamCount, 10);
-  const parsedMaxIter = Number.parseInt(maxIterations, 10);
-  const isValid =
-    !Number.isNaN(parsedTeamCount) &&
-    parsedTeamCount >= 2 &&
-    parsedTeamCount <= 20 &&
-    !Number.isNaN(parsedMaxIter) &&
-    parsedMaxIter >= 0 &&
-    parsedMaxIter <= 10000;
-
-  const handleSave = React.useCallback(async () => {
+  const handleSave = async () => {
+    // Unreachable from the UI — Save is disabled while invalid — but the
+    // payload builder assumes the numbers parse, so keep the guard.
     if (!isValid) return;
-    const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
     setSaving(true);
     const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.teamGeneration.updateGenerationConfig({
-          params: { teamId: teamIdBranded },
-          payload: {
-            weightElo: Option.some(weightElo),
-            weightSize: Option.some(weightSize),
-            weightGender: Option.some(weightGender),
-            defaultTeamCount: Option.some(parsedTeamCount),
-            maxIterations: Option.some(parsedMaxIter),
-          },
+          params: { teamId: Schema.decodeSync(Team.TeamId)(teamId) },
+          payload: generationWeightsRequestFrom(form.values),
         }),
       ),
       Effect.catchTag('TeamGenerationForbidden', () =>
@@ -88,25 +72,15 @@ export function GenerationWeightsCard({
     if (Option.isSome(result)) {
       onRefresh();
     }
-  }, [
-    isValid,
-    teamId,
-    weightElo,
-    weightSize,
-    weightGender,
-    parsedTeamCount,
-    parsedMaxIter,
-    run,
-    onRefresh,
-  ]);
+  };
 
   const handleResetToDefaults = React.useCallback(() => {
-    setWeightElo(DEFAULT_WEIGHT_ELO);
-    setWeightSize(DEFAULT_WEIGHT_SIZE);
-    setWeightGender(DEFAULT_WEIGHT_GENDER);
-    setDefaultTeamCount(String(DEFAULT_TEAM_COUNT));
-    setMaxIterations(String(DEFAULT_MAX_ITERATIONS));
-  }, []);
+    setField('weightElo', DEFAULT_WEIGHT_ELO);
+    setField('weightSize', DEFAULT_WEIGHT_SIZE);
+    setField('weightGender', DEFAULT_WEIGHT_GENDER);
+    setField('defaultTeamCount', String(DEFAULT_TEAM_COUNT));
+    setField('maxIterations', String(DEFAULT_MAX_ITERATIONS));
+  }, [setField]);
 
   return (
     <Card>
@@ -121,7 +95,7 @@ export function GenerationWeightsCard({
             label={tr('teamGenSettings_weightElo')}
             description={tr('teamGenSettings_weightEloDescription')}
             value={weightElo}
-            onChange={setWeightElo}
+            onChange={(v) => setField('weightElo', v)}
             disabled={saving}
           />
           <WeightSliderField
@@ -129,7 +103,7 @@ export function GenerationWeightsCard({
             label={tr('teamGenSettings_weightSize')}
             description={tr('teamGenSettings_weightSizeDescription')}
             value={weightSize}
-            onChange={setWeightSize}
+            onChange={(v) => setField('weightSize', v)}
             disabled={saving}
           />
           <WeightSliderField
@@ -137,7 +111,7 @@ export function GenerationWeightsCard({
             label={tr('teamGenSettings_weightGender')}
             description={tr('teamGenSettings_weightGenderDescription')}
             value={weightGender}
-            onChange={setWeightGender}
+            onChange={(v) => setField('weightGender', v)}
             disabled={saving}
           />
 
@@ -167,10 +141,17 @@ export function GenerationWeightsCard({
               min={2}
               max={20}
               value={defaultTeamCount}
-              onChange={(e) => setDefaultTeamCount(e.target.value)}
+              onChange={(e) => setField('defaultTeamCount', e.target.value)}
               disabled={saving}
               className='max-w-32'
+              aria-invalid={errors.defaultTeamCount !== undefined}
+              aria-describedby={errors.defaultTeamCount ? 'default-team-count-error' : undefined}
             />
+            {errors.defaultTeamCount && (
+              <p id='default-team-count-error' className='text-xs text-destructive mt-1'>
+                {tr(errors.defaultTeamCount)}
+              </p>
+            )}
           </div>
 
           <div>
@@ -186,20 +167,27 @@ export function GenerationWeightsCard({
               min={0}
               max={10000}
               value={maxIterations}
-              onChange={(e) => setMaxIterations(e.target.value)}
+              onChange={(e) => setField('maxIterations', e.target.value)}
               disabled={saving}
               className='max-w-32'
+              aria-invalid={errors.maxIterations !== undefined}
+              aria-describedby={errors.maxIterations ? 'max-iterations-error' : undefined}
             />
+            {errors.maxIterations && (
+              <p id='max-iterations-error' className='text-xs text-destructive mt-1'>
+                {tr(errors.maxIterations)}
+              </p>
+            )}
           </div>
 
           <div className='flex items-center gap-3'>
-            <Button onClick={handleSave} disabled={saving || !hasChanges || !isValid}>
+            <Button onClick={handleSave} disabled={saving || !form.isDirty || !isValid}>
               {saving ? tr('teamGenSettings_saving') : tr('teamGenSettings_save')}
             </Button>
             <Button variant='ghost' size='sm' onClick={handleResetToDefaults} disabled={saving}>
               {tr('teamGenSettings_resetToDefaults')}
             </Button>
-            {hasChanges && (
+            {form.isDirty && (
               <p className='text-sm text-muted-foreground'>{tr('teamSettings_unsavedChanges')}</p>
             )}
           </div>
