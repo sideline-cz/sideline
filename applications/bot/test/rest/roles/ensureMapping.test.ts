@@ -1,12 +1,12 @@
 /**
  * TDD tests for ensureMapping — the three-tier role-mapping resolution:
  *   1. Role/GetMapping → Some → use it (unchanged)
- *   2. adopt: listGuildRoles + getMyGuildMember → pickAdoptableRole → Some → Role/UpsertMapping
+ *   2. adopt: listGuildRoles + getMyUser + getGuildMember → pickAdoptableRole → Some → Role/UpsertMapping
  *   3. None, or any failure in tier 2 → createGuildRole (unchanged, always safe)
  *
  * These tests describe NEW behavior after PR-6 lands and are expected to FAIL until
  * applications/bot/src/rest/roles/ensureMapping.ts is rewritten to read candidates from
- * DiscordREST (`listGuildRoles`, `getMyGuildMember`) via `pickAdoptableRole`.
+ * DiscordREST (`listGuildRoles`, `getMyUser`, `getGuildMember`) via `pickAdoptableRole`.
  *
  * Spec: .work-plans/discord-onboarding-fix-plan.md, PR-6 step 2, tests 8-14. Decision CC-7.
  *
@@ -32,6 +32,8 @@ const ROLE_ID = '00000000-0000-0000-0000-000000000031' as Role.RoleId;
 const ROLE_NAME = 'Captain';
 
 const BOT_OWN_ROLE_ID = '333333333333333333';
+/** Distinct from the role id — the old mock conflated the two. */
+const BOT_USER_ID = '444444444444444444';
 const BOT_TOP_POSITION = 10;
 
 const EXISTING_ROLE_ID = '555555555555555555' as Discord.Snowflake;
@@ -60,7 +62,7 @@ const makeGuildRole = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-/** The bot's own role, present in listGuildRoles and referenced by getMyGuildMember().roles. */
+/** The bot's own role, present in listGuildRoles and referenced by getGuildMember().roles. */
 const botOwnRole = makeGuildRole({
   id: BOT_OWN_ROLE_ID,
   name: '@sideline-bot',
@@ -90,6 +92,9 @@ const makeLogCapture = (): { messages: string[]; levels: string[]; layer: Layer.
 
 type RestCallRecord = {
   listGuildRoles: unknown[][];
+  getMyUser: unknown[][];
+  getGuildMember: unknown[][];
+  /** Kept only so a test can assert this user-OAuth endpoint is never called. */
   getMyGuildMember: unknown[][];
   createGuildRole: unknown[][];
 };
@@ -99,6 +104,8 @@ const makeRest = (
 ): { calls: RestCallRecord; layer: Layer.Layer<DiscordREST> } => {
   const calls: RestCallRecord = {
     listGuildRoles: [],
+    getMyUser: [],
+    getGuildMember: [],
     getMyGuildMember: [],
     createGuildRole: [],
   };
@@ -108,8 +115,22 @@ const makeRest = (
       calls.listGuildRoles.push(args);
       return Effect.succeed([botOwnRole, makeGuildRole({ id: EXISTING_ROLE_ID, position: 3 })]);
     },
+    getMyUser: (...args: any[]) => {
+      calls.getMyUser.push(args);
+      return Effect.succeed({ id: BOT_USER_ID, username: 'sideline-bot' });
+    },
+    // `GET /users/@me/guilds/{id}/member` — user-OAuth only. A bot token gets
+    // 20001 every time, which is what shipped. Mocking it as if it worked is
+    // why the suite stayed green while adoption failed 100% in production, so
+    // the default now reproduces Discord's actual answer.
     getMyGuildMember: (...args: any[]) => {
       calls.getMyGuildMember.push(args);
+      return Effect.fail(
+        new Error('DiscordRestError: {"message":"Bots cannot use this endpoint","code":20001}'),
+      );
+    },
+    getGuildMember: (...args: any[]) => {
+      calls.getGuildMember.push(args);
       return Effect.succeed({
         avatar: null,
         banner: null,
@@ -120,7 +141,7 @@ const makeRest = (
         pending: false,
         premium_since: null,
         roles: [BOT_OWN_ROLE_ID],
-        user: { id: BOT_OWN_ROLE_ID, username: 'sideline-bot' },
+        user: { id: BOT_USER_ID, username: 'sideline-bot' },
         mute: false,
         deaf: false,
       });
@@ -228,7 +249,7 @@ describe('ensureMapping', () => {
 
     expect(result).toBe(EXISTING_ROLE_ID);
     expect(restCalls.listGuildRoles).toHaveLength(0);
-    expect(restCalls.getMyGuildMember).toHaveLength(0);
+    expect(restCalls.getGuildMember).toHaveLength(0);
     expect(restCalls.createGuildRole).toHaveLength(0);
   });
 
@@ -318,16 +339,16 @@ describe('ensureMapping', () => {
     ]);
   });
 
-  it('#13 falls back to createGuildRole when getMyGuildMember fails (a Discord hiccup, not the -1 fail-safe)', async () => {
+  it('#13 falls back to createGuildRole when getGuildMember fails (a Discord hiccup, not the -1 fail-safe)', async () => {
     // NOTE (should-fix): this test's original name/rationale claimed to cover the `-1` fail-safe
-    // default for an unknown bot position, but `getMyGuildMember` FAILING short-circuits before
+    // default for an unknown bot position, but `getGuildMember` FAILING short-circuits before
     // `botTopPosition` is ever computed — this actually exercises the `HttpClientError` tier-2
     // REST-failure catch (same family as test #12), not the fail-safe default. The real `-1` path
     // — both REST calls succeed, but the bot's own role id is absent from `listGuildRoles` — is
     // covered separately below (`#13b`).
     const { calls: restCalls, layer: restLayer } = makeRest({
-      getMyGuildMember: (...args: any[]) => {
-        restCalls.getMyGuildMember.push(args);
+      getGuildMember: (...args: any[]) => {
+        restCalls.getGuildMember.push(args);
         return Effect.fail({ _tag: 'HttpClientError' });
       },
     });
@@ -345,11 +366,11 @@ describe('ensureMapping', () => {
   it('#13b covers the REAL -1 fail-safe: both REST calls succeed but the bot has no role in common with listGuildRoles', async () => {
     const OTHER_BOT_ROLE_ID = '777777777777777777';
     const { calls: restCalls, layer: restLayer } = makeRest({
-      // A valid-looking candidate (EXISTING_ROLE_ID) is present, but `getMyGuildMember().roles`
+      // A valid-looking candidate (EXISTING_ROLE_ID) is present, but `getGuildMember().roles`
       // shares nothing with `listGuildRoles`'s ids — `botTopPosition` computes to its documented
       // default (-1) via `Arr.reduce(-1, ...)` finding no matching role, NOT via any REST failure.
-      getMyGuildMember: (...args: any[]) => {
-        restCalls.getMyGuildMember.push(args);
+      getGuildMember: (...args: any[]) => {
+        restCalls.getGuildMember.push(args);
         return Effect.succeed({
           avatar: null,
           banner: null,
@@ -370,7 +391,7 @@ describe('ensureMapping', () => {
 
     const result = await runEnsureMapping(rpcLayer, restLayer);
 
-    expect(restCalls.getMyGuildMember).toHaveLength(1);
+    expect(restCalls.getGuildMember).toHaveLength(1);
     expect(result).toBe(NEW_ROLE_ID);
     expect(restCalls.createGuildRole).toHaveLength(1);
     expect(rpcCalls['Role/UpsertMapping']?.[0]).toMatchObject([
@@ -463,5 +484,38 @@ describe('ensureMapping', () => {
     expect(upsertCalls?.[1]).toMatchObject([
       expect.objectContaining({ discord_role_id: NEW_ROLE_ID, adopted: false }),
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A bot token may not call user-OAuth endpoints
+//
+// `getMyGuildMember` is `GET /users/@me/guilds/{id}/member`, which answers
+// `20001 "Bots cannot use this endpoint"` for every bot token. Adoption called
+// it, so it failed 100% of the time in production and every role fell through
+// to `createGuildRole` — precisely the duplicate-role outcome adoption exists
+// to prevent. The suite stayed green throughout because the mock returned a
+// success for an endpoint Discord would never have answered.
+//
+// The default mock now returns the real 20001, so any return to that endpoint
+// breaks the adoption tests on its own. This states the rule outright as well,
+// because the next person to reach for "the bot's own member" will find
+// `getMyGuildMember` by name and it reads like the obvious choice.
+// ---------------------------------------------------------------------------
+
+describe('ensureMapping and user-OAuth endpoints', () => {
+  it('never calls getMyGuildMember — a bot token always gets 20001 there', async () => {
+    // The default `Role/GetMapping` returns `Option.none()`, which is what
+    // sends this down the adopt path.
+    const { calls: restCalls, layer: restLayer } = makeRest();
+    const { layer: rpcLayer } = makeSyncRpc();
+
+    await runEnsureMapping(rpcLayer, restLayer);
+
+    expect(restCalls.getMyGuildMember).toHaveLength(0);
+    // The bot-callable pair instead: who am I, then my member in this guild.
+    expect(restCalls.getMyUser).toHaveLength(1);
+    expect(restCalls.getGuildMember).toHaveLength(1);
+    expect(restCalls.getGuildMember[0]).toEqual([GUILD_ID, BOT_USER_ID]);
   });
 });
