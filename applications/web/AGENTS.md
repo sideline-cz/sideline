@@ -23,9 +23,11 @@ components/
 | `ui/` | Shadcn primitives only. Added via `pnpm -C ./applications/web dlx shadcn@latest add <component>`. Never hand-edited. |
 | `atoms/` | Single responsibility, no business logic, no API calls. |
 | `molecules/` | Compose atoms + ui. No route-level data fetching, no API calls. |
-| `organisms/` | May own significant local state, form logic, or API calls via `useRun()`. No TanStack Router hooks. |
+| `organisms/` | May own significant local state, form logic, or API calls via `useRun()`. No TanStack Router hooks — take an `onRefresh: () => void` prop instead (see below). |
 | `pages/` | One file per route. Receives data from `Route.useLoaderData()` / `Route.useRouteContext()` via props. Contains navigation callbacks. |
 | `layouts/` | Pure structural wrappers. Render `{children}` slots. No business logic. |
+
+An organism that must refetch loader data after a mutation takes an `onRefresh: () => void` prop and the **page** supplies `() => { router.invalidate(); }` — never `useRouter()`/`useNavigate()`/`useSearch()`/`useParams()`/`useRouteContext()` inside the organism. Reference: `components/organisms/team-settings/*` + `components/pages/TeamSettingsPage.tsx`. Six organisms predate this rule and still call `useRouter()` directly — `AdoptChannelDialog.tsx`, `ArchiveChannelDialog.tsx`, `BulkArchiveDialog.tsx`, `ChannelAccessSheet.tsx`, `CreateChannelDialog.tsx`, `RenameChannelDialog.tsx`. They are known debt, not precedent: convert each to `onRefresh` the next time it is edited. Importing the `<Link>` component (not a hook) into an organism stays allowed.
 
 ## Shadcn Components
 
@@ -269,7 +271,7 @@ Rules:
 
 ## Forms — React Hook Form + Effect Schema
 
-**Always use Shadcn Form (`components/ui/form`) with React Hook Form and Effect Schema** for any form that collects user input.
+**Always use Shadcn Form (`components/ui/form`) with React Hook Form and Effect Schema** for any form that collects user input. The single exception is a page whose cards each carry their own Save button — see "Pages With Several Independent Save Buttons — `useCardForm`" below; nothing else may opt out.
 
 ```typescript
 import { effectTsResolver } from '@hookform/resolvers/effect-ts';
@@ -399,6 +401,96 @@ Rules:
 2. **The page's `onSave` prop returns `Promise<boolean>` (`true` = persisted), and the form re-baselines only on `true` via `form.reset(form.getValues())`.** Capture the submitted values with `form.getValues()` BEFORE awaiting, then `form.reset(submittedValues)` after success so the dirty diff is recomputed against what was actually saved. Never navigate away on save — the cleaned form stays in place. The route-level handler returns `true` after a successful mutation and calls `router.invalidate()`; it returns `false` on failure (see `members.$memberId.tsx`).
 3. **Mark each changed field at its label**, not just globally, via a small `DirtyFieldLabel({ label, dirty })` helper reading `Boolean(form.formState.dirtyFields.<field>)`. Render the visual dot with `aria-hidden='true'` and pair it with an `<span className='sr-only'>{tr('form_fieldChanged')}</span>` so the change is announced to screen readers.
 4. **Show the dirty-field count + a Cancel (reset) control only while `form.formState.isDirty`.** Cancel is a `type='button'` that calls `form.reset()` (no args — reverts to the original `defaultValues`); the count uses an ICU-pluralized key (`tr('members_unsavedChanges', { count: dirtyFieldCount })`).
+
+### Pages With Several Independent Save Buttons — `useCardForm`
+
+A settings page is not one form. `TeamSettingsPage` renders **nine cards
+behind six Save buttons**, each button posting its own payload — and three of
+those six PATCH the *same* endpoint (`updateTeamInfo`) over disjoint field
+slices. React Hook Form assumes one form per submit, so these cards use
+`components/organisms/team-settings/useCardForm.ts` instead — the **only**
+sanctioned exception to the React Hook Form rule above, and it applies solely
+to a page whose cards each have their own Save button.
+
+The invariant it exists to enforce: **the dirty flag and the request payload
+must be derived from the same object.** They used to be hand-written lists
+that agreed only by discipline, and the page shipped two bugs because of it:
+
+- The rules-quiz fields were compared in `hasWelcomeChanges` while
+  `handleSaveSettings` was the handler that sent them. Editing them left the
+  settings card's button **disabled** and lit up the *welcome* card's button,
+  whose payload had no rules-quiz fields in it — so it succeeded, toasted
+  "saved", and discarded the edit. Nothing in the type system objects.
+- Seven bare `return`s guarded out-of-range fields in one save handler, so any
+  single bad field made Save do nothing at all — no toast, no request, no clue.
+  Clearing a number input to retype it (`''` → `NaN`) stopped the page saving
+  *anything*.
+
+Rules:
+
+1. **One `SomethingFormValues` type per Save button**, holding
+   primitive-typed fields only — `string | number | boolean`, string literal
+   unions included (`ChannelSyncEvent.ChannelCleanupMode`,
+   `Onboarding.OnboardingLocale`) — never an object, array or `Option`, because
+   the dirty check is a shallow `!==` over `Object.keys(baseline)`
+   (`isFormDirty`). Declare it as a `type`, not an `interface` — an interface
+   has no implicit index signature and will not satisfy `useCardForm`'s
+   `T extends Record<string, string | number | boolean>` constraint. Convert to
+   the API's shapes at the form/payload boundary with the `shared.ts` helpers
+   (`selectValue` in, `channelToOption` / `groupIdToOption` out), and use the
+   `NONE_VALUE` sentinel — never `''` — for a `SearchableSelect`'s "nothing
+   selected".
+2. **Pure functions in a `*Form.ts` module beside the cards, one module per
+   endpoint** (`settingsForm.ts` for `updateTeamSettings`, `teamInfoForm.ts`
+   for all three `updateTeamInfo` cards): `xFormFrom(savedDto)` (saved values →
+   form), `xRequestFrom(values)` (form → DTO), and — only when the form has a
+   field that can be invalid — `findInvalidXField(values)`, returning the
+   *translation key* of the first bad field or `undefined`.
+   `welcomeRequestFrom` and `onboardingRequestFrom` have no validator because
+   neither card has a rejectable field. Keeping them pure is what makes the
+   invariant testable without rendering.
+3. **Never bail out of a save silently.** When a `findInvalidXField` exists,
+   the handler toasts `tr('teamSettings_fieldInvalid', { field: tr(invalidField) })`
+   and returns — the key comes back untranslated so the toast reuses the
+   field's own label. A blank numeric input must be invalid, not `0` —
+   `Number('')` is `0`, so a cleared field otherwise saves a silent zero.
+4. **Cards that only render fields take `CardForm` and own no dirty flag or
+   handler.** `GeneralLimitsCard`, `RemindersCard`, `CoachAssignmentCard` and
+   `DiscordDefaultsCard` take `form: CardForm<SettingsFormValues>` and read and
+   write it; their one Save button lives in the parent that holds the form
+   (`TeamSettingsSection`), rendered via `SaveRow` with `dirty={form.isDirty}`.
+   A presentational card physically cannot wire a field to a button that does
+   not send it. `SaveRow`'s `disabled` prop is for an extra reason the card
+   cannot be saved at all (`OnboardingCard` passes `!isCommunityEnabled`) and
+   never for dirty state.
+5. **When several cards PATCH the same endpoint, spread a shared
+   all-`Option.none()` constant** (`untouchedTeamInfo`) and name only the keys
+   that card owns. A field added to the DTO then defaults to untouched
+   everywhere instead of needing to be added to every handler's "don't touch"
+   list.
+6. **Test the invariant, not the source text.** `settingsForm.test.ts` holds a
+   `BASE` and an `EDITED` object both typed `SettingsFormValues` — so a new
+   field with no test value is a compile error — and asserts for every key of
+   `BASE` that editing it both flips `isFormDirty` and changes the JSON of
+   `settingsRequestFrom`. `teamInfoForm.test.ts` asserts each builder touches
+   exactly its own keys and that the three slices together cover every key of
+   `untouchedTeamInfo` exactly once. This replaces the deleted source-text
+   guard `TeamSettingsPage.dirty.test.ts`.
+7. **Reloading loader data stays the page's job.** These cards are organisms,
+   so they hold no TanStack Router hooks: each takes an `onRefresh: () => void`
+   and the page supplies a `router.invalidate()` callback. Call `onRefresh()`
+   only when the save succeeded (`Option.isSome(result)`); the fresh props then
+   recompute `useCardForm`'s baseline and the form goes clean with no reset
+   call.
+
+Two cards in that directory are **not** the pattern and must not be copied:
+`EmailForwardingCard.tsx` and `GenerationWeightsCard.tsx` were moved out of the
+page unchanged and still hold one `React.useState` per field, a hand-written
+`hasChanges`/`isValid`, a bare `<Button>` instead of `SaveRow`, and a silent
+`if (!isValid) return;`. Convert them to `useCardForm` + a `*Form.ts` module +
+`SaveRow` the next time either is edited; `EmailForwardingCard`'s
+`monitoredAddresses` list must stay outside the form type (rule 1 forbids
+arrays) with its own comparison folded into the card's dirty check.
 
 ## Submitting Branded Values to API Endpoints
 

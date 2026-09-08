@@ -1,6 +1,7 @@
 // TDD mode — e2e tests for the Discord Native Onboarding card on TeamSettingsPage.
 // These tests will FAIL until Phase 5 implements:
-//   - The onboarding card component in applications/web/src/components/pages/TeamSettingsPage.tsx
+//   - The onboarding card component in
+//     applications/web/src/components/organisms/team-settings/OnboardingCard.tsx
 //   - The retryOnboardingSync endpoint
 //   - The mockTeamInfo in e2e/fixtures/mock-data.ts extended with onboarding fields
 //

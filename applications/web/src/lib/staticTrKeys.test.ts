@@ -9,7 +9,7 @@
 // the key actually resolves against the compiled `@sideline/i18n` catalogue. It is a source-text
 // regex, not a type-checker — dynamic call sites (`tr(variable)`, `tr(\`template-${x}\`)`,
 // `tr(lookup[key])`) are invisible to it by construction and are skipped rather than flagged;
-// only a literal first argument is checked. See `TeamSettingsPage.dirty.test.ts` for the
+// only a literal first argument is checked. See `check-workspace-deps.mjs` for the
 // precedent of guarding an invariant this way when the type system can't express it.
 //
 // Should-fix 4 (review of 46806427): two gaps in this guard.
