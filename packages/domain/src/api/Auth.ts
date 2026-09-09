@@ -112,6 +112,20 @@ export type UpdateProfileRequest = Schema.Schema.Type<typeof UpdateProfileReques
 
 export class Unauthorized extends Schema.TaggedErrorClass<Unauthorized>()('Unauthorized', {}) {}
 
+/**
+ * The export envelope. `data` is keyed by `table.column` — a row can be yours
+ * through more than one relationship, and the key says which one — and
+ * `excluded` / `redactedColumns` state in the document itself what was held
+ * back, so the gaps are visible rather than inferred.
+ */
+export class DataExport extends Schema.Class<DataExport>('DataExport')({
+  generatedAt: Schema.String,
+  subjectUserId: Schema.String,
+  data: Schema.Record(Schema.String, Schema.Array(Schema.Record(Schema.String, Schema.Unknown))),
+  excluded: Schema.Array(Schema.Struct({ table: Schema.String, reason: Schema.String })),
+  redactedColumns: Schema.Array(Schema.String),
+}) {}
+
 export class CurrentUserContext extends ServiceMap.Service<CurrentUserContext, CurrentUser>()(
   'CurrentUserContext',
 ) {}
@@ -170,6 +184,26 @@ export class AuthApiGroup extends HttpApiGroup.make('auth')
       success: CurrentUser,
       error: Unauthorized.pipe(HttpApiSchema.status(401)),
       payload: UpdateProfileRequest,
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    /**
+     * A GDPR Art. 15 data export of the caller's own data.
+     *
+     * **The subject is the session, never a parameter.** There is deliberately
+     * no `/users/:id/export`: an id in the path turns one missing
+     * authorisation check into a full data breach, and there is no legitimate
+     * caller who needs someone else's export through this route.
+     *
+     * The body is generated from `applications/server/src/gdpr/exportManifest.ts`,
+     * so its shape follows the schema rather than a hand-maintained DTO —
+     * hence `Schema.Unknown` for the row payloads. A typed-per-table success
+     * schema would reintroduce exactly the drift the manifest exists to
+     * prevent.
+     */
+    HttpApiEndpoint.get('exportMyData', '/me/export', {
+      success: DataExport,
+      error: Unauthorized.pipe(HttpApiSchema.status(401)),
     }).middleware(AuthMiddleware),
   )
   .add(

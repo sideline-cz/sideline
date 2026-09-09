@@ -28,6 +28,7 @@ import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { Redirect } from '~/api/index.js';
 import { env } from '~/env.js';
+import { buildExport } from '~/gdpr/buildExport.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { OAuthConnectionsRepository } from '~/repositories/OAuthConnectionsRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
@@ -403,6 +404,22 @@ export const AuthApiLive = HttpApiBuilder.group(Api, 'auth', (handlers) =>
             ),
           )
           .handle('me', () => Auth.CurrentUserContext.asEffect())
+          .handle('exportMyData', () =>
+            Effect.Do.pipe(
+              // The subject is the session, never a parameter — see the
+              // endpoint's own comment for why there is no `:id` route.
+              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+              Effect.bind('bundle', ({ currentUser }) => buildExport(currentUser.id)),
+              // `Schema.Class` is nominal: returning the plain object would
+              // type-check and then fail at encode with "Expected DataExport,
+              // got Object". That exact bug has shipped twice; see
+              // `scripts/check-rpc-encoding.mjs`.
+              Effect.map(({ bundle }) => new Auth.DataExport({ ...bundle })),
+              // A failure to read the database is a 500, not a 401; the
+              // endpoint declares only Unauthorized.
+              Effect.orDie,
+            ),
+          )
           .handle('updateLocale', ({ payload }) =>
             Effect.Do.pipe(
               Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
