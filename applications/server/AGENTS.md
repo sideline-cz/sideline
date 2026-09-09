@@ -364,6 +364,20 @@ Rules:
 3. **Server-side decode failures** (`EventPropertyMissing` in `src/rpc/channel/events.ts`) always call `markPermanentlyFailed` — missing payload fields are not transient.
 4. When adding a new failure-classification rule, update the bot's `isPermanentError` and `applications/bot/AGENTS.md`, not the server.
 
+### GDPR Export — The Manifest Is The Source Of Truth
+
+`src/gdpr/exportManifest.ts` records, for every table with a foreign key into `users` or `team_members`, whether a data export includes it — and if not, why not.
+
+An Art. 15 export has to be **complete**: one that silently omits a table is worse than none, because it presents itself as "your data". There are 51 such foreign keys and the set grows, so completeness cannot rest on whoever adds a table remembering the export.
+
+`test/integration/gdpr/exportManifest.test.ts` reads the real foreign keys out of `information_schema` and asserts the manifest matches exactly. **Adding a table that references a person fails that test** until a decision is recorded.
+
+Rules:
+
+1. **Every entry is `export` or `exclude` with a reason**, and the reason has to be an argument, not a label — the test enforces a minimum length precisely so `'internal'` does not pass. Exclusions so far are Discord delivery plumbing (outbox rows, channel and message ids), where the underlying thing *is* exported.
+2. **`redact` is not cosmetic.** An export is a file someone downloads, mails to themselves and keeps. A live session token or OAuth refresh token in it turns a privacy feature into a credential leak. The redacted set is asserted as a literal list, so a new secret column has to be thought about rather than silently matched by a pattern.
+3. **Add the manifest entry in the same PR as the migration**, not afterwards — the integration suite goes red the moment the table lands.
+
 ### An RPC Handler Must Map Rows Into The Domain Class — `Schema.Class` Is Nominal
 
 Returning a repository row straight from an RPC handler whose contract declares a domain class **type-checks and then fails at encode**:
