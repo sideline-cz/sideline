@@ -5,6 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-09 — Privacy policy: what leaving a team actually does
+
+The policy said that being removed from a team deleted your team-scoped data. It does not, and we have corrected the wording rather than leave an inaccurate statement standing.
+
+- Removal takes you out of the team's groups and rosters, revokes your Discord channel access, and marks your membership inactive.
+- Your RSVPs and attendance, rating history, poll votes and financial records are **kept** — section 5 of the policy explains why.
+- If you want that data erased rather than deactivated, ask us; section 6 says how.
+
+Nothing about how the product behaves has changed — only the description, which is now accurate.
+
 ## 2026-09-08 — Team generation settings say which number is wrong
 
 Saving **Team Generation** settings could leave the Save button greyed out with no explanation when the default number of teams or the iteration limit was out of range.

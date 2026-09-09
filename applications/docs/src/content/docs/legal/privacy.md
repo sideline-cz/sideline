@@ -3,7 +3,7 @@ title: Privacy Policy
 description: What personal data Sideline collects, why, who it goes to, and how to get it removed.
 ---
 
-Last updated: 8 September 2026
+Last updated: 9 September 2026
 
 ## 1. Who we are
 
@@ -72,7 +72,9 @@ You can also complain to the Czech data protection authority, [Úřad pro ochran
 
 **How to exercise these rights:** contact us through the channels in section 1. We will respond within one month. There is currently no self-service export or delete button — these requests are handled by a person.
 
-Your team admin can remove you from a team, which deletes your team-scoped data. Deleting your Discord account does **not** automatically delete your Sideline account.
+Your team admin can remove you from a team. That takes you out of its groups and rosters and revokes your access to its Discord channels, and your membership becomes inactive — but it is not an erasure. What the team still holds about you, such as your RSVPs and attendance, your rating history, poll votes and anything financial, is kept; section 5 explains why. If you want that erased rather than deactivated, ask us using the channels in section 1.
+
+Deleting your Discord account does **not** automatically delete your Sideline account.
 
 ## 7. Cookies and local storage
 
