@@ -388,7 +388,8 @@ Rules:
 1. **Map explicitly**: `Effect.map(Array.map((row) => new SomeRpcGroup.SomeEntry({ ...row })))`. Never return the repository result directly when the contract's `success` is a domain `Schema.Class`.
 2. **Every `success: Schema.Array(SomeDomainClass)` RPC needs an encode guard test.** Copy `test/rpc/RulesQuizPendingEventsEncode.test.ts` or `test/rpc/InvitePendingAcceptancesEncode.test.ts`: encode what the handler returns, and assert the **raw row is rejected**. That negative case is the whole point — without it, dropping the mapping makes the test pass again.
 3. **Export the row class** from its repository so the guard can construct one.
-4. The remaining outbox-style RPCs have **not** been audited for this. Anything with a `success` of a domain class and a handler that is a one-line pass-through is a candidate.
+4. **`scripts/check-rpc-encoding.mjs` now enforces this at lint time**, so a third occurrence cannot ship the way the second did. For every `Rpc.make('X', { success: SomeDomainClass })` it asserts the server constructs one somewhere. Validated against the commit before the invite fix, where it flags that RPC and nothing else; all 49 class-returning RPCs pass today.
+5. **The guard is coarse on purpose and does not replace rule 2.** It checks that the class is built *somewhere* in the server, not that *every* handler for it does. If one handler constructs `CarpoolView` correctly and another passes a row through, the guard stays quiet — the per-RPC encode tests are the finer net.
 
 ### Outbox Failure Modes: Two-RPC Classification vs `attempts`-Counted Retry
 

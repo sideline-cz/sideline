@@ -436,7 +436,7 @@ pnpm test:e2e:ui         # Open Playwright UI mode
 pnpm format              # Biome formatting and linting
 pnpm codegen             # Regenerate generated code
 pnpm clean               # Remove stale artifacts (also clears .tsbuildinfo)
-pnpm lint                # Biome + workspace deps + migration ids
+pnpm lint                # Biome + workspace deps + migration ids + rpc encoding
 pnpm tsx ./path/to/file.ts   # Execute TypeScript directly
 ```
 
@@ -456,7 +456,7 @@ The `check.yml` workflow runs on pushes to `main` and on pull requests:
 
 | Job | Command | Purpose |
 |-----|---------|---------|
-| **Lint & Format** | `pnpm lint` | Biome formatting and lint rules |
+| **Lint & Format** | `pnpm lint` | Biome formatting and lint rules, plus the workspace-dep, migration-id and RPC-encoding guards |
 | **Build** | `pnpm codegen && pnpm build` | Verifies codegen + builds all packages |
 | **Types** | `pnpm check` | Type-checks all packages |
 | **Test** | `pnpm build && pnpm test` | Builds packages, then runs tests |
