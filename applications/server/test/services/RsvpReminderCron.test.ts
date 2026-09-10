@@ -50,6 +50,8 @@ type ReminderEvent = {
   /** Channel from team_settings.reminders_channel_id */
   reminders_channel_id: Option.Option<Discord.Snowflake>;
   discord_role_id: Option.Option<Discord.Snowflake>;
+  /** PR 2: forwarded from events.all_day, through to emitRsvpReminder/emitUnclaimedTrainingReminder. */
+  all_day: boolean;
 };
 
 type EmittedReminder = {
@@ -58,6 +60,7 @@ type EmittedReminder = {
   channelId: Option.Option<Discord.Snowflake>;
   memberGroupId: Option.Option<GroupModel.GroupId>;
   discordRoleId: Option.Option<Discord.Snowflake>;
+  allDay: boolean;
 };
 
 let eventsNeedingReminder: ReminderEvent[];
@@ -134,11 +137,13 @@ const makeMockSyncEventsRepository = () =>
       _endAt: Option.Option<unknown>,
       _location: Option.Option<string>,
       _eventType: string,
+      // PR 2: allDay is inserted right after eventType, before discordTargetChannelId.
+      allDay: boolean,
       channelId: Option.Option<Discord.Snowflake>,
       memberGroupId: Option.Option<GroupModel.GroupId>,
       discordRoleId: Option.Option<Discord.Snowflake>,
     ) => {
-      emittedReminders.push({ teamId, eventId, channelId, memberGroupId, discordRoleId });
+      emittedReminders.push({ teamId, eventId, channelId, memberGroupId, discordRoleId, allDay });
       return Effect.void;
     },
     emitEventCreated: () => Effect.void,
@@ -187,6 +192,7 @@ const makeBaseEvent = (
   member_group_id: Option.none(),
   reminders_channel_id: Option.none(),
   discord_role_id: Option.none(),
+  all_day: false,
   ...overrides,
 });
 
@@ -502,6 +508,37 @@ describe('rsvpReminderCronEffect', () => {
       Effect.asVoid,
     );
   });
+
+  // PR 2 — event.all_day must be forwarded into emitRsvpReminder unchanged.
+  it.effect('forwards all_day: true into emitRsvpReminder', () => {
+    eventsNeedingReminder = [makeBaseEvent(EVENT_ID_1, { all_day: true })];
+
+    return rsvpReminderCronEffect.pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(emittedReminders).toHaveLength(1);
+          expect(emittedReminders[0].allDay).toBe(true);
+        }),
+      ),
+      Effect.provide(buildMockLayer()),
+      Effect.asVoid,
+    );
+  });
+
+  it.effect('forwards all_day: false into emitRsvpReminder', () => {
+    eventsNeedingReminder = [makeBaseEvent(EVENT_ID_1, { all_day: false })];
+
+    return rsvpReminderCronEffect.pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(emittedReminders).toHaveLength(1);
+          expect(emittedReminders[0].allDay).toBe(false);
+        }),
+      ),
+      Effect.provide(buildMockLayer()),
+      Effect.asVoid,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -542,6 +579,7 @@ type EmittedUnclaimedReminder = {
   teamId: Team.TeamId;
   eventId: Event.EventId;
   discordTargetChannelId: Discord.Snowflake;
+  allDay: boolean;
   discordRoleId: Option.Option<Discord.Snowflake>;
   claimDiscordChannelId: Option.Option<Discord.Snowflake>;
   claimDiscordMessageId: Option.Option<Discord.Snowflake>;
@@ -563,6 +601,7 @@ const makeExtendedBaseEvent = (
   member_group_id: Option.none(),
   reminders_channel_id: Option.none(),
   discord_role_id: Option.none(),
+  all_day: false,
   claimed_by: Option.none(),
   claim_discord_channel_id: Option.none(),
   claim_discord_message_id: Option.none(),
@@ -580,11 +619,13 @@ const makeMockSyncEventsWithUnclaimedReminder = () =>
       _endAt: Option.Option<unknown>,
       _location: Option.Option<string>,
       _eventType: string,
+      // PR 2: allDay is inserted right after eventType, before discordTargetChannelId.
+      allDay: boolean,
       channelId: Option.Option<Discord.Snowflake>,
       memberGroupId: Option.Option<GroupModel.GroupId>,
       discordRoleId: Option.Option<Discord.Snowflake>,
     ) => {
-      emittedReminders.push({ teamId, eventId, channelId, memberGroupId, discordRoleId });
+      emittedReminders.push({ teamId, eventId, channelId, memberGroupId, discordRoleId, allDay });
       return Effect.void;
     },
     // New method: emitUnclaimedTrainingReminder
@@ -596,6 +637,8 @@ const makeMockSyncEventsWithUnclaimedReminder = () =>
       _endAt: unknown,
       _location: unknown,
       discordTargetChannelId: Discord.Snowflake,
+      // PR 2: allDay is inserted right after discordTargetChannelId, before discordRoleId.
+      allDay: boolean,
       discordRoleId: Option.Option<Discord.Snowflake>,
       claimDiscordChannelId: Option.Option<Discord.Snowflake>,
       claimDiscordMessageId: Option.Option<Discord.Snowflake>,
@@ -604,6 +647,7 @@ const makeMockSyncEventsWithUnclaimedReminder = () =>
         teamId,
         eventId,
         discordTargetChannelId,
+        allDay,
         discordRoleId,
         claimDiscordChannelId,
         claimDiscordMessageId,
@@ -722,4 +766,61 @@ describe('rsvpReminderCronEffect — unclaimed_training_reminder', () => {
       );
     },
   );
+
+  // PR 2 — event.all_day must be forwarded into emitUnclaimedTrainingReminder unchanged.
+  it.effect('forwards all_day: true into emitUnclaimedTrainingReminder', () => {
+    const event = makeExtendedBaseEvent(EVENT_ID_UNCLAIMED_TRAINING, {
+      event_type: 'training',
+      claimed_by: Option.none(),
+      owner_group_id: Option.some(GROUP_ID_A),
+      all_day: true,
+    });
+    channelMappings.set(`${TEAM_ID}:${GROUP_ID_A}`, {
+      discord_channel_id: Option.some(CHANNEL_OWNER),
+      discord_role_id: Option.none(),
+    });
+    eventsNeedingReminder = [event as any];
+
+    return rsvpReminderCronEffect.pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          const unclaimedEmitted = emittedUnclaimedReminders.filter(
+            (e) => e.eventId === EVENT_ID_UNCLAIMED_TRAINING,
+          );
+          expect(unclaimedEmitted).toHaveLength(1);
+          expect(unclaimedEmitted[0].allDay).toBe(true);
+        }),
+      ),
+      Effect.provide(buildUnclaimedReminderMockLayer()),
+      Effect.asVoid,
+    );
+  });
+
+  it.effect('forwards all_day: false into emitUnclaimedTrainingReminder', () => {
+    const event = makeExtendedBaseEvent(EVENT_ID_UNCLAIMED_TRAINING, {
+      event_type: 'training',
+      claimed_by: Option.none(),
+      owner_group_id: Option.some(GROUP_ID_A),
+      all_day: false,
+    });
+    channelMappings.set(`${TEAM_ID}:${GROUP_ID_A}`, {
+      discord_channel_id: Option.some(CHANNEL_OWNER),
+      discord_role_id: Option.none(),
+    });
+    eventsNeedingReminder = [event as any];
+
+    return rsvpReminderCronEffect.pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          const unclaimedEmitted = emittedUnclaimedReminders.filter(
+            (e) => e.eventId === EVENT_ID_UNCLAIMED_TRAINING,
+          );
+          expect(unclaimedEmitted).toHaveLength(1);
+          expect(unclaimedEmitted[0].allDay).toBe(false);
+        }),
+      ),
+      Effect.provide(buildUnclaimedReminderMockLayer()),
+      Effect.asVoid,
+    );
+  });
 });

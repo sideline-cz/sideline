@@ -239,6 +239,7 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
                   member_group_id: event.member_group_id,
                   title: event.title,
                   start_at: event.start_at,
+                  all_day: event.all_day,
                 },
                 memberId: membership.id,
                 discordUserId: Option.none(),

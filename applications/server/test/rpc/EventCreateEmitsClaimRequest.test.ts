@@ -239,6 +239,7 @@ const makeMockSyncEventsRepository = () =>
       _location: unknown,
       _description: unknown,
       discordTargetChannelId: Discord.Snowflake,
+      _allDay: boolean,
       discordRoleId: Option.Option<Discord.Snowflake>,
       locationUrl: Option.Option<string>,
       // Change B: owner_group_id carried via member_group_id column overload

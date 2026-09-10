@@ -91,6 +91,11 @@ export class RsvpReminderEvent extends Schema.TaggedClass<RsvpReminderEvent>()('
   discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  // Skew-safe: a not-yet-upgraded server omits the key entirely. Without the decoding
+  // default, ONE such row fails the whole batch decode of Event/GetUnprocessedEvents and
+  // stops the entire Discord event sync — see
+  // applications/bot/src/rcp/event/ProcessorService.ts:96-108 and §8.2.
+  all_day: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
 }) {}
 
 export class TrainingClaimRequestEvent extends Schema.TaggedClass<TrainingClaimRequestEvent>()(
@@ -109,6 +114,11 @@ export class TrainingClaimRequestEvent extends Schema.TaggedClass<TrainingClaimR
     discord_target_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
     discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
     owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
+    // Skew-safe: a not-yet-upgraded server omits the key entirely. Without the decoding
+    // default, ONE such row fails the whole batch decode of Event/GetUnprocessedEvents and
+    // stops the entire Discord event sync — see
+    // applications/bot/src/rcp/event/ProcessorService.ts:96-108 and §8.2.
+    all_day: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
   },
 ) {}
 
@@ -134,6 +144,11 @@ export class TrainingClaimUpdateEvent extends Schema.TaggedClass<TrainingClaimUp
     claimed_by_display_name: Schema.OptionFromNullOr(Schema.String),
     claimed_by_username: Schema.OptionFromNullOr(Schema.String),
     event_status: Schema.String,
+    // Skew-safe: a not-yet-upgraded server omits the key entirely. Without the decoding
+    // default, ONE such row fails the whole batch decode of Event/GetUnprocessedEvents and
+    // stops the entire Discord event sync — see
+    // applications/bot/src/rcp/event/ProcessorService.ts:96-108 and §8.2.
+    all_day: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
   },
 ) {}
 
@@ -153,6 +168,11 @@ export class UnclaimedTrainingReminderEvent extends Schema.TaggedClass<Unclaimed
     discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
     claim_discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
     claim_discord_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
+    // Skew-safe: a not-yet-upgraded server omits the key entirely. Without the decoding
+    // default, ONE such row fails the whole batch decode of Event/GetUnprocessedEvents and
+    // stops the entire Discord event sync — see
+    // applications/bot/src/rcp/event/ProcessorService.ts:96-108 and §8.2.
+    all_day: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
   },
 ) {}
 
@@ -189,6 +209,11 @@ export class EventRosterApprovalRequestEvent extends Schema.TaggedClass<EventRos
     owners_thread_id: Schema.OptionFromNullOr(Discord.Snowflake),
     owner_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
     roster_name: Schema.OptionFromNullOr(Schema.String),
+    // Skew-safe: a not-yet-upgraded server omits the key entirely. Without the decoding
+    // default, ONE such row fails the whole batch decode of Event/GetUnprocessedEvents and
+    // stops the entire Discord event sync — see
+    // applications/bot/src/rcp/event/ProcessorService.ts:96-108 and §8.2.
+    all_day: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
   },
 ) {}
 

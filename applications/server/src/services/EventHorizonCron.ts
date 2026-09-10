@@ -68,6 +68,7 @@ export const eventHorizonCronEffect = Effect.Do.pipe(
                     endAt: event.end_at,
                     location: event.location,
                     locationUrl: event.location_url,
+                    allDay: event.all_day,
                   }),
                 ),
               );

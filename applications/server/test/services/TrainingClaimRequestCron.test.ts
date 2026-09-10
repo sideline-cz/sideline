@@ -44,6 +44,7 @@ type ClaimEvent = {
   description: Option.Option<string>;
   event_type: string;
   owner_group_id: Option.Option<GroupModel.GroupId>;
+  all_day: boolean;
 };
 
 let pendingEvents: ClaimEvent[];
@@ -128,6 +129,7 @@ const makeMockSyncEvents = () =>
       _location: unknown,
       _description: unknown,
       _channelId: unknown,
+      _allDay: boolean,
       _discordRoleId: unknown,
       _locationUrl: unknown,
       ownerGroupId: Option.Option<GroupModel.GroupId>,
@@ -178,6 +180,7 @@ const makeEvent = (overrides: Partial<ClaimEvent> = {}): ClaimEvent => ({
   description: Option.none(),
   event_type: 'training',
   owner_group_id: Option.some(GROUP_ID_A),
+  all_day: false,
   ...overrides,
 });
 

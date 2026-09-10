@@ -196,6 +196,7 @@ const makeOnRsvpParams = (
       member_group_id: Option.none(),
       title: 'Roster Discord ID Test Event',
       start_at: DateTime.fromDateUnsafe(new Date('2099-09-01T10:00:00Z')) as DateTime.Utc,
+      all_day: false,
     },
     memberId,
     discordUserId,
@@ -422,6 +423,7 @@ describe('EventRosterProvisioningService — roster member_added discord_user_id
                   start_at: DateTime.fromDateUnsafe(
                     new Date('2099-09-01T10:00:00Z'),
                   ) as DateTime.Utc,
+                  all_day: false,
                 },
                 memberId: tm.id,
                 discordUserId: Option.none(),
@@ -482,6 +484,7 @@ describe('EventRosterProvisioningService — roster member_added discord_user_id
                 member_group_id: Option.none(),
                 title: 'Roster Discord ID Test Event',
                 start_at: DateTime.fromDateUnsafe(new Date('2099-09-01T10:00:00Z')) as DateTime.Utc,
+                all_day: false,
               },
               memberId: tm.id,
               discordUserId: Option.none(),
