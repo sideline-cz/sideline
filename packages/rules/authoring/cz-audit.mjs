@@ -10,11 +10,16 @@
  * ON FALSE POSITIVES — read before acting on output. When this was first run over 109 situations
  * it produced 18 numeric flags and every one was a false positive:
  *   - Czech renders quantities as words where English uses digits ("maximum 6" / "maximum šest").
- *   - Czech says "oba" (both) where English says "the two".
+ *     Suppressed by comparing numeric VALUES rather than surface forms.
+ *   - Czech says "oba"/"obě"/"dvojka" (both / the two) where English says "two".
+ *     Suppressed by CZ_WORDS carrying those stems.
  *   - The trainer deliberately keeps the marker's spoken call in English, so „ten" and
  *     „stalling six" appear verbatim in Czech text and are correct.
- * The checks below compare numeric VALUES rather than surface forms to suppress most of that,
- * but treat every flag as "look at this", never as "this is wrong".
+ *     Suppressed by stripping quoted spans from both sides before counting.
+ * Those three took section A from 14 permanent flags to 1, and the survivor is a real judgement
+ * call (s6 renders "two players converging" as "sbíhání k jednomu bodu", dropping the count).
+ * Still treat every flag as "look at this", never as "this is wrong" — the point of the
+ * suppressions is that the remaining flags are worth reading, not that they are defects.
  *
  * It did earn its keep twice: it found `s12`'s "Odkud huck vypustil" (missing subject — reads
  * "from where the huck released") and the terminology spread below.
@@ -95,7 +100,34 @@ const CZ_WORDS = [
   ['dvou', 2],
   ['dvě', 2],
   ['dva', 2],
+  // English "two" / "the two" / "both" is routinely Czech `oba`/`obě`/`dvojka`
+  // rather than a numeral — `to2`'s "the two are always added" is `dvojka se
+  // přičítá`, and `gd1`'s "both get two hands" is `oba máte obě ruce`. Without
+  // these, every such pair flagged as a missing 2. Longest stem first, since
+  // the loop consumes what it matches.
+  ['oběma', 2],
+  ['obou', 2],
+  ['obě', 2],
+  ['oba', 2],
+  ['dvojk', 2],
 ];
+
+/**
+ * The marker's spoken call is deliberately left in English inside the Czech
+ * text — the quotation marks change but the words do not. The number lives
+ * inside a span that is verbatim identical on both sides, so counting it on
+ * the English side and hunting for a Czech numeral that was never meant to be
+ * there flagged nine pairs, every one correct as written.
+ *
+ * Stripping quoted spans from BOTH sides before counting is a no-op wherever
+ * the call is preserved, which is the policy. The cost is that a number
+ * appearing only inside a quotation goes unchecked — the right trade for a
+ * check whose header already says to treat every flag as "look at this".
+ * The citation and brevity checks are untouched.
+ *
+ * Matches Czech low-open quotes, English curly quotes and plain doubles.
+ */
+const stripQuotedCalls = (s) => s.replace(/[\u201E\u201C"][^\u201C\u201D"]*[\u201C\u201D"]/g, ' ');
 
 const digits = (s) => {
   const out = [];
@@ -103,7 +135,8 @@ const digits = (s) => {
   return out;
 };
 
-const valuesEn = (t) => {
+const valuesEn = (rawText) => {
+  const t = stripQuotedCalls(rawText);
   const bag = new Map();
   const add = (n, k = 1) => bag.set(n, (bag.get(n) ?? 0) + k);
   for (const d of digits(t)) add(d);
@@ -117,7 +150,8 @@ const valuesEn = (t) => {
   return bag;
 };
 
-const valuesCs = (t) => {
+const valuesCs = (rawText) => {
+  const t = stripQuotedCalls(rawText);
   const bag = new Map();
   const add = (n, k = 1) => bag.set(n, (bag.get(n) ?? 0) + k);
   for (const d of digits(t)) add(d);
