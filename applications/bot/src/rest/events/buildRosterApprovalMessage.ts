@@ -4,16 +4,12 @@ import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
 import { DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
+import { formatEventWhen } from '~/rest/events/eventWhen.js';
 import { formatNameWithMention } from '../utils.js';
 
 const PENDING_COLOR = 0xed8936; // orange
 const APPROVED_COLOR = 0x57f287; // green
 const DECLINED_COLOR = 0xed4245; // red
-
-const toDiscordTimestamp = (dt: DateTime.Utc): string => {
-  const unix = Math.floor(Number(DateTime.toEpochMillis(dt)) / 1000);
-  return `<t:${unix}:f>`;
-};
 
 export type RosterApprovalStatus = 'pending' | 'approved' | 'declined' | 'cancelled';
 
@@ -27,6 +23,7 @@ export const buildRosterApprovalMessage = (opts: {
   rosterName: Option.Option<string>;
   status: RosterApprovalStatus;
   locale: Locale;
+  allDay: boolean;
 }): {
   embeds: ReadonlyArray<Discord.RichEmbed>;
   components: ReadonlyArray<Discord.ActionRowComponentForMessageRequest>;
@@ -51,7 +48,17 @@ export const buildRosterApprovalMessage = (opts: {
   // Event field
   fields.push({
     name: m.bot_roster_approval_field_event({}, { locale }),
-    value: `**${opts.eventTitle}** — ${toDiscordTimestamp(opts.startAt)}`,
+    value: `**${opts.eventTitle}** — ${formatEventWhen({
+      startAt: opts.startAt,
+      // ⚠ the all-day branch takes DATES, not instants. This supplies the UTC date of the
+      // (still noon-anchored) instant, which is correct under the current storage anchor; a
+      // later change replaces it with the payload's real `start_date`.
+      startDate: DateTime.formatIsoDateUtc(opts.startAt),
+      endAt: Option.none(),
+      endDate: Option.none(),
+      allDay: opts.allDay,
+      locale,
+    })}`,
     inline: false,
   });
 

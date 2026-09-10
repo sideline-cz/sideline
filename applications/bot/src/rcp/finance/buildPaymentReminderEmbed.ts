@@ -1,6 +1,7 @@
 import type { FinanceRpcEvents, PaymentReminder } from '@sideline/domain';
 import type * as Discord from 'dfx/types';
 import { Match } from 'effect';
+import { discordTimestampFromEpochSeconds } from '~/rest/discordTimestamp.js';
 import { formatMoney } from '~/rest/finance/formatMoney.js';
 
 // ---------------------------------------------------------------------------
@@ -10,15 +11,6 @@ import { formatMoney } from '~/rest/finance/formatMoney.js';
 const COLOR_BLUE = 0x5865f2;
 const COLOR_YELLOW = 0xfee75c;
 const COLOR_RED = 0xed4245;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const toDiscordDateTimestamp = (isoString: string): string => {
-  const unixSecs = Math.floor(new Date(isoString).getTime() / 1000);
-  return `<t:${unixSecs}:D>`;
-};
 
 type EmbedCopy = { title: string; color: number; description: (feeName: string) => string };
 
@@ -81,7 +73,10 @@ export const buildPaymentReminderEmbed = (
   const outstanding = Math.max(0, amount_minor - paid_minor);
   const amountStr = formatMoney(amount_minor, currency, 'en');
   const outstandingStr = formatMoney(outstanding, currency, 'en');
-  const dueStr = toDiscordDateTimestamp(effective_due_at);
+  const dueStr = discordTimestampFromEpochSeconds(
+    Math.floor(new Date(effective_due_at).getTime() / 1000),
+    'D',
+  );
 
   const { title, color, description } = copyForKind(kind);
 

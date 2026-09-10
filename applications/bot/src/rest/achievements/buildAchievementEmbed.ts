@@ -3,6 +3,7 @@ import * as m from '@sideline/i18n/messages';
 import type * as Discord from 'dfx/types';
 import { Option } from 'effect';
 import type { Locale } from '~/locale.js';
+import { discordTimestampFromEpochSeconds } from '~/rest/discordTimestamp.js';
 
 const ACHIEVEMENT_COLOR = 0xffd700; // gold
 
@@ -75,7 +76,7 @@ export const buildAchievementEmbed = (opts: {
 
   const fields: Array<Discord.RichEmbedField> = [
     { name: 'Player', value: `<@${opts.discord_user_id}>`, inline: true },
-    { name: 'Earned', value: `<t:${earnedUnix}:R>`, inline: true },
+    { name: 'Earned', value: discordTimestampFromEpochSeconds(earnedUnix, 'R'), inline: true },
   ];
 
   Option.match(opts.discord_role_id, {

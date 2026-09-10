@@ -9,6 +9,7 @@ import { formatSudoDuration } from '~/commands/sudo/duration.js';
 import { guildLocale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { isDiscordNotFoundError, isDiscordPermissionError } from '~/rest/discordErrors.js';
+import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
 import { ensureSudoRole } from '~/rest/roles/ensureSudoRole.js';
 import { DfxGuild, interactionUserId } from '~/schemas.js';
 import type { SyncRpcClient } from '~/services/SyncRpc.js';
@@ -49,9 +50,6 @@ const replyWebhook = (
   rest
     .updateOriginalWebhookMessage(interaction.application_id, interaction.token, { payload })
     .pipe(logRestErrors(context));
-
-const toDiscordTimestamp = (dt: DateTime.Utc): string =>
-  `<t:${Math.floor(Number(DateTime.toEpochMillis(dt)) / 1000)}:F>`;
 
 /** Builds the audit embed + "Leave sudo" button posted to the system channel when a
  * team admin enters sudo mode. Permanent, guild-visible message → uses guild locale. */
@@ -117,7 +115,7 @@ const postAuditAndReply = (
           ),
         onSome: (systemChannelId) => {
           const startedAt = DateTime.nowUnsafe();
-          const timestamp = toDiscordTimestamp(startedAt);
+          const timestamp = toDiscordTimestamp(startedAt, 'F');
           const { embeds, components } = buildSudoAuditMessage(userId, timestamp, embedLocale);
           return rest
             .createMessage(systemChannelId, {
@@ -258,8 +256,8 @@ const closeAuditMessage = (
     {
       userId,
       actorId: userId,
-      from: toDiscordTimestamp(session.started_at),
-      to: toDiscordTimestamp(now),
+      from: toDiscordTimestamp(session.started_at, 'F'),
+      to: toDiscordTimestamp(now, 'F'),
       duration: formatSudoDuration(elapsedMs),
     },
     { locale: embedLocale },

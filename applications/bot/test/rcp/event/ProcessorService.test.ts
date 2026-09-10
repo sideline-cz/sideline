@@ -239,3 +239,48 @@ describe('EventProcessorService — removed-board tags are explicit no-ops', () 
     expect(restCalls).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PR 1 §7.3 case 7 — an all-day `event_started` row is still marked processed
+// (never failed) when the render succeeds. Without this, a throwing all-day
+// render would retry forever.
+// Plan: all-day-discord-start-time-plan.md §7.3 (Part I spec, case 7).
+// ---------------------------------------------------------------------------
+
+const makeAllDayEventStartedEvent = (id: string): EventRpcEvents.EventStartedEvent =>
+  ({
+    _tag: 'event_started' as const,
+    id,
+    team_id: TEAM_ID as any,
+    guild_id: GUILD_ID as any,
+    event_id: EVENT_ID as any,
+    title: 'All-day PR1 routing test',
+    image_url: Option.none(),
+    start_at: DateTime.makeUnsafe('2026-05-01T12:00:00Z'),
+    end_at: Option.none(),
+    location: Option.none(),
+    location_url: Option.none(),
+    event_type: 'match',
+    all_day: true,
+    member_group_id: Option.none(),
+    discord_channel_id: Option.some(TRAINING_CHANNEL as any),
+    discord_role_id: Option.none(),
+    claimed_by_discord_id: Option.none(),
+  }) as any;
+
+describe('EventProcessorService — event_started routing for all-day events (PR 1)', () => {
+  it('an all-day event_started row is marked processed, never failed', async () => {
+    const SYNC_ID = 'sync-all-day-started-1';
+    const {
+      markedProcessed,
+      markedFailed,
+      layer: rpcLayer,
+    } = makeRpc([makeAllDayEventStartedEvent(SYNC_ID) as any]);
+    const restLayer = makeRest();
+
+    await runProcessTick(rpcLayer, restLayer);
+
+    expect(markedProcessed).toContain(SYNC_ID);
+    expect(markedFailed).toHaveLength(0);
+  });
+});

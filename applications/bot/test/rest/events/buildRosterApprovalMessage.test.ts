@@ -1,6 +1,7 @@
 // NOTE: TDD mode — tests will FAIL until buildRosterApprovalMessage is implemented.
 
 import type { Discord, Event, RosterModel, TeamMember } from '@sideline/domain';
+import * as m from '@sideline/i18n/messages';
 import { DateTime, Option } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { buildRosterApprovalMessage } from '~/rest/events/buildRosterApprovalMessage.js';
@@ -23,6 +24,10 @@ const baseOpts = {
   candidateDisplayName: Option.some('Alice'),
   rosterName: Option.some('Tournament Squad'),
   locale: 'en' as const,
+  // PR 1 (all-day-discord-start-time-plan.md §5 PR 1 step 5): `allDay` is a new required
+  // field on buildRosterApprovalMessage's opts. `false` here keeps every pre-existing
+  // test in this file byte-for-byte unchanged (§7.4).
+  allDay: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -180,5 +185,45 @@ describe('buildRosterApprovalMessage — cancelled state', () => {
           c.disabled !== true,
       );
     expect(activeButtons).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR 1 §7.4 — Event field: date, not a fake noon clock time, for all-day events.
+// Plan: all-day-discord-start-time-plan.md §7.4, builder tests for buildRosterApprovalMessage.
+// ---------------------------------------------------------------------------
+describe('buildRosterApprovalMessage — Event field with allDay (PR 1)', () => {
+  const locale = 'en' as const;
+  const ALL_DAY_MARKER = ` · ${m.bot_embed_all_day({}, { locale })}`;
+  const NOON_JUL_15 = DateTime.makeUnsafe('2026-07-15T12:00:00Z'); // 1784116800
+
+  it("allDay false → Event field is exactly **{title}** — <t:S:f> (today's output)", () => {
+    const message = buildRosterApprovalMessage({
+      ...baseOpts,
+      status: 'pending',
+      allDay: false,
+      startAt: NOON_JUL_15,
+    });
+    const fields = message.embeds[0]?.fields ?? [];
+    const eventField = fields.find(
+      (f) => f.name === m.bot_roster_approval_field_event({}, { locale }),
+    );
+    expect(eventField?.value).toBe(`**${baseOpts.eventTitle}** — <t:1784116800:f>`);
+  });
+
+  it('allDay true → Event field is exactly **{title}** — <t:S:D> · All day', () => {
+    const message = buildRosterApprovalMessage({
+      ...baseOpts,
+      status: 'pending',
+      allDay: true,
+      startAt: NOON_JUL_15,
+    });
+    const fields = message.embeds[0]?.fields ?? [];
+    const eventField = fields.find(
+      (f) => f.name === m.bot_roster_approval_field_event({}, { locale }),
+    );
+    expect(eventField?.value).toBe(
+      `**${baseOpts.eventTitle}** — <t:1784116800:D>${ALL_DAY_MARKER}`,
+    );
   });
 });

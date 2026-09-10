@@ -2,8 +2,9 @@ import type { EmailForwarding, EmailRpcEvents, Team } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
-import { DateTime, Option } from 'effect';
+import { Option } from 'effect';
 import type { Locale } from '~/locale.js';
+import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
 
 const APPROVAL_COLOR = 0xfee75c; // amber / yellow
 const DETAILED_COLOR = 0x5865f2; // blurple
@@ -16,9 +17,6 @@ const DETAILED_TRUNCATE_LIMIT = 3500;
 /** Return Some(s) only when s has non-whitespace content, otherwise None. */
 const nonBlank = (s: string): Option.Option<string> =>
   s.trim().length > 0 ? Option.some(s) : Option.none();
-
-const toDiscordTimestamp = (dt: DateTime.Utc, style: 'R' | 'f' = 'R'): string =>
-  `<t:${Math.floor(Number(DateTime.toEpochMillis(dt)) / 1000)}:${style}>`;
 
 const truncateBody = (text: string, truncatedMarker: string): string =>
   text.length > BODY_TRUNCATE_LIMIT

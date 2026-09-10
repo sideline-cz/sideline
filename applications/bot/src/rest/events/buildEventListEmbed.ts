@@ -2,8 +2,9 @@ import type { EventRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
-import { DateTime, Option } from 'effect';
+import { Option } from 'effect';
 import type { Locale } from '~/locale.js';
+import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
 import { locationDisplay } from './locationDisplay.js';
 
 const EVENT_COLOR = 0x5865f2;
@@ -15,14 +16,6 @@ const EVENT_TYPE_EMOJIS: Record<string, string> = {
   meeting: '\u{1F4CB}',
   social: '\u{1F389}',
   other: '\u{1F4C5}',
-};
-
-const toDiscordTimestamp = (
-  dt: DateTime.Utc,
-  style: 'D' | 'F' | 'R' | 'd' | 'f' | 't' = 'f',
-): string => {
-  const unix = Math.floor(Number(DateTime.toEpochMillis(dt)) / 1000);
-  return `<t:${unix}:${style}>`;
 };
 
 const formatEntry = (entry: EventRpcModels.GuildEventListEntry, locale: Locale): string => {

@@ -1,4 +1,5 @@
 import { EventRpcModels } from '@sideline/domain';
+import * as m from '@sideline/i18n/messages';
 import { DateTime, Option } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { buildUpcomingEventEmbed } from '~/rest/events/buildUpcomingEventEmbed.js';
@@ -184,6 +185,47 @@ describe('buildUpcomingEventEmbed', () => {
       const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const fields = embeds[0].fields ?? [];
       expect(fields[0].value).toContain(' — ');
+    });
+  });
+
+  // PR 1 §7.4 — all-day "When" field: date, not a fake noon clock time.
+  // Plan: all-day-discord-start-time-plan.md §7.4, builder tests for buildUpcomingEventEmbed.
+  describe('when field with all_day (PR 1)', () => {
+    const ALL_DAY_MARKER = ` · ${m.bot_embed_all_day({}, { locale: 'en' })}`;
+    const NOON_JUL_15 = DateTime.makeUnsafe('2026-07-15T12:00:00Z'); // 1784116800
+    const NOON_JUL_17 = DateTime.makeUnsafe('2026-07-17T12:00:00Z'); // 1784289600
+
+    it('case 1: all_day true, no end → When field is exactly <t:S:D> · All day, no F/f/R/t/d style on that field', () => {
+      const entry = makeEntry({ all_day: true, start_at: NOON_JUL_15, end_at: Option.none() });
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const fields = embeds[0].fields ?? [];
+      expect(fields[0].value).toBe(`<t:1784116800:D>${ALL_DAY_MARKER}`);
+      expect(fields[0].value).not.toMatch(/<t:\d+:[FfRtd]>/);
+    });
+
+    it('case 2: all_day true → description still contains <t:S:R> (PR 4 changes this; PR 1 must not)', () => {
+      const entry = makeEntry({ all_day: true, start_at: NOON_JUL_15, end_at: Option.none() });
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      expect(embeds[0].description).toContain('<t:1784116800:R>');
+    });
+
+    it('case 3: all_day true, multi-day → When field is exactly <t:S:D> — <t:E:D> · All day', () => {
+      const entry = makeEntry({
+        all_day: true,
+        start_at: NOON_JUL_15,
+        end_at: Option.some(NOON_JUL_17),
+      });
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const fields = embeds[0].fields ?? [];
+      expect(fields[0].value).toBe(`<t:1784116800:D> — <t:1784289600:D>${ALL_DAY_MARKER}`);
+    });
+
+    it('case 4: all_day false → When field carries no all-day marker (existing behaviour unchanged)', () => {
+      const entry = makeEntry({ all_day: false, start_at: NOON_JUL_15, end_at: Option.none() });
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const fields = embeds[0].fields ?? [];
+      expect(fields[0].value).toBe('<t:1784116800:f>');
+      expect(fields[0].value).not.toContain(ALL_DAY_MARKER);
     });
   });
 

@@ -15,6 +15,10 @@ const baseOpts = {
   teamId: 'team-1',
   eventId: 'event-1',
   locale,
+  // PR 1 (all-day-discord-start-time-plan.md §5 PR 1 step 5): `allDay` is a new required
+  // field on buildClaimMessage's opts. `false` here keeps every pre-existing test in this
+  // file byte-for-byte unchanged (§7.4 case 4).
+  allDay: false,
 };
 
 describe('buildClaimMessage — Where field with locationUrl', () => {
@@ -115,5 +119,69 @@ describe('buildClaimMessage — Status field with new claimedBy shape', () => {
     expect(statusField?.value).not.toContain('****');
     expect(statusField?.value).toContain('<@999>');
     expect(statusField?.value).not.toContain('Unknown');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR 1 §7.4 — all-day "When" field: date, not a fake noon clock time.
+// Plan: all-day-discord-start-time-plan.md §7.4, builder tests for buildClaimMessage.
+// ---------------------------------------------------------------------------
+describe('buildClaimMessage — When field with allDay (PR 1)', () => {
+  const ALL_DAY_MARKER = ` · ${m.bot_embed_all_day({}, { locale: 'en' })}`;
+  const NOON_JUL_15 = DateTime.makeUnsafe('2026-07-15T12:00:00Z'); // 1784116800
+  const NOON_JUL_17 = DateTime.makeUnsafe('2026-07-17T12:00:00Z'); // 1784289600
+
+  it('allDay true, no end → When field is exactly <t:S:D> · All day', () => {
+    const { embeds } = buildClaimMessage({
+      ...baseOpts,
+      location: Option.none(),
+      locationUrl: Option.none(),
+      allDay: true,
+      startAt: NOON_JUL_15,
+      endAt: Option.none(),
+    });
+    const fields = embeds[0].fields ?? [];
+    const whenField = fields.find((f) => f.name === m.bot_embed_when({}, { locale }));
+    expect(whenField?.value).toBe(`<t:1784116800:D>${ALL_DAY_MARKER}`);
+  });
+
+  it('allDay true, multi-day → When field is exactly <t:S:D> — <t:E:D> · All day', () => {
+    const { embeds } = buildClaimMessage({
+      ...baseOpts,
+      location: Option.none(),
+      locationUrl: Option.none(),
+      allDay: true,
+      startAt: NOON_JUL_15,
+      endAt: Option.some(NOON_JUL_17),
+    });
+    const fields = embeds[0].fields ?? [];
+    const whenField = fields.find((f) => f.name === m.bot_embed_when({}, { locale }));
+    expect(whenField?.value).toBe(`<t:1784116800:D> — <t:1784289600:D>${ALL_DAY_MARKER}`);
+  });
+
+  it('allDay true → description still contains <t:S:R> (unchanged from today)', () => {
+    const { embeds } = buildClaimMessage({
+      ...baseOpts,
+      location: Option.none(),
+      locationUrl: Option.none(),
+      allDay: true,
+      startAt: NOON_JUL_15,
+      endAt: Option.none(),
+    });
+    expect(embeds[0].description).toContain('<t:1784116800:R>');
+  });
+
+  it('allDay false → all existing assertions unchanged, byte-for-byte', () => {
+    const { embeds } = buildClaimMessage({
+      ...baseOpts,
+      location: Option.none(),
+      locationUrl: Option.none(),
+      allDay: false,
+      startAt: NOON_JUL_15,
+      endAt: Option.none(),
+    });
+    const fields = embeds[0].fields ?? [];
+    const whenField = fields.find((f) => f.name === m.bot_embed_when({}, { locale }));
+    expect(whenField?.value).toBe('<t:1784116800:f>');
   });
 });

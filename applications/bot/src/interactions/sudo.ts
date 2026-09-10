@@ -9,6 +9,7 @@ import { formatSudoDuration } from '~/commands/sudo/duration.js';
 import { guildLocale, userLocale } from '~/locale.js';
 import { discordInteractionsTotal } from '~/metrics.js';
 import { isDiscordNotFoundError } from '~/rest/discordErrors.js';
+import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
 import { ensureSudoRole } from '~/rest/roles/ensureSudoRole.js';
 import { interactionUserId } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
@@ -71,9 +72,6 @@ const replyWebhook = (
     .updateOriginalWebhookMessage(interaction.application_id, interaction.token, { payload })
     .pipe(logRestErrors(context));
 
-const toDiscordTimestamp = (dt: DateTime.Utc): string =>
-  `<t:${Math.floor(Number(DateTime.toEpochMillis(dt)) / 1000)}:F>`;
-
 /** Builds the "sudo mode ended" embed that replaces the active audit message.
  * Permanent, guild-visible message → uses guild locale. */
 const buildSudoEndedMessage = (
@@ -92,8 +90,8 @@ const buildSudoEndedMessage = (
           {
             userId: subjectUserId,
             actorId,
-            from: toDiscordTimestamp(startedAt),
-            to: toDiscordTimestamp(now),
+            from: toDiscordTimestamp(startedAt, 'F'),
+            to: toDiscordTimestamp(now, 'F'),
             duration: formatSudoDuration(elapsedMs),
           },
           { locale: embedLocale },

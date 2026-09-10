@@ -36,6 +36,8 @@ export const handleEventRosterApprovalRequest = (
             rosterName: event.roster_name,
             status: 'pending',
             locale: 'en',
+            // TODO: PR 2 replaces this with `event.all_day` once the payload carries it.
+            allDay: false,
           });
 
           // Create a new thread for this event, persist it, and resolve the winning thread id.

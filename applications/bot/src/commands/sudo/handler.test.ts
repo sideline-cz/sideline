@@ -326,7 +326,12 @@ describe('sudoHandler', () => {
       expect.objectContaining({ components: [] }),
     );
     const updatePayload = JSON.stringify(rest.updateMessage.mock.calls[0]);
-    expect(updatePayload).toContain('<t:');
+    // SF1 regression guard (all-day-discord-start-time-plan.md §4.1/§7.4): the shared
+    // `toDiscordTimestamp` primitive defaults to style `f`. This call site must keep
+    // passing 'F' explicitly, or the audit message silently downgrades from
+    // weekday+long-date+time to short time only.
+    expect(updatePayload).toMatch(/<t:\d+:F>/);
+    expect(updatePayload).not.toMatch(/<t:\d+:f>/);
     expect(updatePayload).toContain('2h 15m');
 
     expect(rest.updateOriginalWebhookMessage).toHaveBeenCalled();
@@ -572,5 +577,8 @@ describe('sudoHandler', () => {
     expect(rest.createMessage).toHaveBeenCalled();
     const createPayload = JSON.stringify(rest.createMessage.mock.calls[0]);
     expect(createPayload).toContain('<t:');
+    // SF1 regression guard — see the comment on the equivalent assertion above.
+    expect(createPayload).toMatch(/<t:\d+:F>/);
+    expect(createPayload).not.toMatch(/<t:\d+:f>/);
   });
 });
