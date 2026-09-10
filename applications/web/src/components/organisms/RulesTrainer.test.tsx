@@ -193,9 +193,26 @@ const { ipos } = await import('@sideline/rules');
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Registers with `requestAnimationFrame` but never auto-schedules — tests
- * drive frames manually via the returned `tick()` so the animation is fully
- * deterministic (no reliance on real timers/frames). */
+/**
+ * Registers with `requestAnimationFrame` but never auto-schedules — tests drive
+ * frames manually via the returned `tick()`.
+ *
+ * The frames are deterministic; the *component* is not fully so, and the older
+ * version of this comment claimed otherwise. `RulesTrainer` starts the
+ * animation from a real `setTimeout(…, 500)` (see the `[activeId, screen]`
+ * effect), and `startPractice()` ends on a `findBy*` poll that also runs on
+ * real timers and can take arbitrarily long on a loaded machine. So whether
+ * React has committed the effect that schedules the first frame by the time
+ * the first `tick()` lands is a race, and `latestTick` being null was that
+ * race losing — four CI failures with `expected null not to be null`, never
+ * once reproducible locally (7 runs, file and full suite).
+ *
+ * `latestTick` is only ever assigned, never cleared, so the *only* way it can
+ * be null is that no frame has been requested yet. Flushing effects and
+ * re-checking closes exactly that hole without touching the component or
+ * swapping the suite onto fake timers, which would change behaviour for the
+ * other sixteen tests in this file to chase a race none of them hit.
+ */
 function stubAnimationFrame() {
   let latestTick: ((now: number) => void) | null = null;
   const rafSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => {
@@ -205,8 +222,18 @@ function stubAnimationFrame() {
   vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => {});
   return {
     tick: (now: number) => {
+      if (latestTick === null) {
+        // Let any pending effect commit; the scheduling effect may not have
+        // run yet. Deliberately not a retry loop — one flush is enough for a
+        // committed-but-not-yet-flushed effect, and anything still missing
+        // afterwards is a real failure worth surfacing.
+        act(() => {});
+      }
       const cb = latestTick;
-      expect(cb).not.toBeNull();
+      expect(
+        cb,
+        'no requestAnimationFrame was scheduled — the animation never became enabled',
+      ).not.toBeNull();
       act(() => cb?.(now));
     },
     restore: () => rafSpy.mockRestore(),
