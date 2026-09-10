@@ -13,7 +13,7 @@
 import { describe, expect, it } from '@effect/vitest';
 import { Effect } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
-import { EXPORT_MANIFEST, NEVER_EXPORT_COLUMNS } from '~/gdpr/exportManifest.js';
+import { EXPORT_MANIFEST, NEVER_EXPORT_COLUMNS, SUBJECT_ERASURE } from '~/gdpr/exportManifest.js';
 import { TestPgClient } from '../helpers.js';
 
 interface ForeignKey {
@@ -100,4 +100,90 @@ describe('GDPR export manifest', () => {
       }
     }
   });
+
+  // Erasure decisions get the same treatment as export decisions: the manifest
+  // is one list, so adding a table forces both answers at once. A second list
+  // would drift from the first, which is the failure this file exists to stop.
+  it('gives every table an erasure decision with a reason', () => {
+    for (const entry of EXPORT_MANIFEST) {
+      expect(
+        entry.erasure.reason.length,
+        `${entry.table}.${entry.via.join('/')} needs a real erasure reason`,
+      ).toBeGreaterThan(40);
+      if (entry.erasure.kind === 'scrub') {
+        expect(entry.erasure.columns.length, `${entry.table} scrubs nothing`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it.effect('scrubs and nulls only columns that exist', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient.asEffect();
+      const cols = yield* sql.unsafe<{ table_name: string; column_name: string }>(
+        `SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'`,
+      );
+      const existing = new Set(cols.map((c) => `${c.table_name}.${c.column_name}`));
+
+      const named = [
+        ...EXPORT_MANIFEST.flatMap((e) =>
+          e.erasure.kind === 'scrub' ? e.erasure.columns.map((c) => `${e.table}.${c}`) : [],
+        ),
+        ...SUBJECT_ERASURE.flatMap((s) =>
+          [...s.nullColumns, ...s.placeholderColumns].map((c) => `${s.table}.${c}`),
+        ),
+      ];
+
+      // A scrub naming a column that no longer exists erases nothing while
+      // reading as though it does — the same trap as a stale redaction.
+      expect(named.filter((c) => !existing.has(c)).sort()).toEqual([]);
+    }).pipe(Effect.provide(TestPgClient)),
+  );
+
+  it.effect('never nulls a NOT NULL column — those need a placeholder', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient.asEffect();
+      const cols = yield* sql.unsafe<{
+        table_name: string;
+        column_name: string;
+        is_nullable: string;
+      }>(
+        `SELECT table_name, column_name, is_nullable FROM information_schema.columns WHERE table_schema = 'public'`,
+      );
+      const notNull = new Set(
+        cols.filter((c) => c.is_nullable === 'NO').map((c) => `${c.table_name}.${c.column_name}`),
+      );
+
+      const nulled = [
+        ...EXPORT_MANIFEST.flatMap((e) =>
+          e.erasure.kind === 'scrub' ? e.erasure.columns.map((c) => `${e.table}.${c}`) : [],
+        ),
+        ...SUBJECT_ERASURE.flatMap((s) => s.nullColumns.map((c) => `${s.table}.${c}`)),
+      ];
+
+      // Erasure that throws at runtime is worse than erasure that is merely
+      // incomplete: the request fails halfway and leaves a half-scrubbed row.
+      expect(
+        nulled.filter((c) => notNull.has(c)).sort(),
+        'These are NOT NULL — move them to placeholderColumns.',
+      ).toEqual([]);
+    }).pipe(Effect.provide(TestPgClient)),
+  );
+
+  it.effect('replaces every NOT NULL identity column with a placeholder', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient.asEffect();
+      const cols = yield* sql.unsafe<{ column_name: string; is_nullable: string }>(
+        `SELECT column_name, is_nullable FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'users'`,
+      );
+      const notNull = new Set(cols.filter((c) => c.is_nullable === 'NO').map((c) => c.column_name));
+      const users = SUBJECT_ERASURE.find((s) => s.table === 'users');
+
+      // `discord_id` and `username` identify a person and cannot be nulled.
+      for (const column of ['discord_id', 'username']) {
+        expect(notNull.has(column), `${column} is expected to be NOT NULL`).toBe(true);
+        expect(users?.placeholderColumns).toContain(column);
+      }
+    }).pipe(Effect.provide(TestPgClient)),
+  );
 });
