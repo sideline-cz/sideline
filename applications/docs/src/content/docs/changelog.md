@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-10 — Download your own data
+
+**Profile → Download your data** gives you everything Sideline holds about you as a JSON file, immediately. Until now this was a request handled by a person.
+
+- The file states what it leaves out and why, rather than leaving you to spot the gaps.
+- It never contains passwords, session tokens or Discord access tokens.
+- Deletion is still a request — section 6 of the privacy policy says how.
+
 ## 2026-09-09 — Privacy policy: what leaving a team actually does
 
 The policy said that being removed from a team deleted your team-scoped data. It does not, and we have corrected the wording rather than leave an inaccurate statement standing.

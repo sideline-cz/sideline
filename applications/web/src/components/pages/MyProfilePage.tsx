@@ -3,6 +3,7 @@ import { useRouter } from '@tanstack/react-router';
 import { Option } from 'effect';
 import { ArrowLeft } from 'lucide-react';
 
+import { DataExportCard } from '~/components/organisms/DataExportCard.js';
 import { DiscordConnectCard } from '~/components/organisms/DiscordConnectCard.js';
 import { LanguageSwitcher } from '~/components/organisms/LanguageSwitcher';
 import { ProfileEditForm } from '~/components/organisms/ProfileEditForm';
@@ -97,6 +98,7 @@ export function MyProfilePage({ user, teams, onUpdated }: MyProfilePageProps) {
         </Card>
         <DiscordConnectSection teams={teams} />
         <TelemetryPreferenceCard />
+        <DataExportCard />
       </main>
     </div>
   );
