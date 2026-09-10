@@ -2390,5 +2390,11 @@
   "privacy_telemetryHelp": "Ve výchozím nastavení zapnuto na základě našeho oprávněného zájmu udržet Sideline funkční. Vypnutím vzneseš námitku — platí pro tento prohlížeč a hned.",
   "privacy_telemetryBrowserSignal": "Tvůj prohlížeč posílá signál Global Privacy Control nebo Do Not Track, takže je to už vypnuté a nelze to zde zapnout.",
   "teamGenSettings_defaultTeamCountInvalid": "Zadej celé číslo mezi 2 a 20.",
-  "teamGenSettings_maxIterationsInvalid": "Zadej celé číslo mezi 0 a 10000."
+  "teamGenSettings_maxIterationsInvalid": "Zadej celé číslo mezi 0 a 10000.",
+  "privacy_exportTitle": "Stáhni si svoje data",
+  "privacy_exportDescription": "Kopie všeho, co o tobě Sideline drží, jako soubor JSON.",
+  "privacy_exportButton": "Stáhnout moje data",
+  "privacy_exportPreparing": "Připravuji…",
+  "privacy_exportHelp": "Soubor sám uvádí, co v něm není a proč. Nikdy neobsahuje hesla, session tokeny ani přístupové tokeny k Discordu — i tak ho ale ulož někam bezpečně, protože obsahuje tvoje osobní údaje.",
+  "privacy_exportFailed": "Export dat se nepodařilo připravit. Zkus to prosím znovu."
 }

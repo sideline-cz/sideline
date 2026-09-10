@@ -2390,5 +2390,11 @@
   "privacy_telemetryHelp": "On by default, under our legitimate interest in keeping Sideline working. Turn it off to object — it applies to this browser, straight away.",
   "privacy_telemetryBrowserSignal": "Your browser is sending a Global Privacy Control or Do Not Track signal, so this is already off and cannot be turned on here.",
   "teamGenSettings_defaultTeamCountInvalid": "Enter a whole number between 2 and 20.",
-  "teamGenSettings_maxIterationsInvalid": "Enter a whole number between 0 and 10000."
+  "teamGenSettings_maxIterationsInvalid": "Enter a whole number between 0 and 10000.",
+  "privacy_exportTitle": "Download your data",
+  "privacy_exportDescription": "A copy of everything Sideline holds about you, as a JSON file.",
+  "privacy_exportButton": "Download my data",
+  "privacy_exportPreparing": "Preparing…",
+  "privacy_exportHelp": "The file lists what it leaves out and why. It never contains passwords, session tokens or Discord access tokens — keep it somewhere safe anyway, because it does contain your personal data.",
+  "privacy_exportFailed": "Could not prepare your data export. Please try again."
 }

@@ -3,7 +3,7 @@ title: Zásady ochrany osobních údajů
 description: Jaké osobní údaje Sideline sbírá, proč, komu je předává a jak je nechat smazat.
 ---
 
-Poslední aktualizace: 9. září 2026
+Poslední aktualizace: 10. září 2026
 
 ## 1. Kdo jsme
 
@@ -70,7 +70,9 @@ Podle GDPR nás můžeš požádat o kopii svých údajů, o jejich opravu nebo 
 
 Můžeš si taky stěžovat u [Úřadu pro ochranu osobních údajů](https://uoou.gov.cz).
 
-**Jak práva uplatnit:** ozvi se kanály z bodu 1. Odpovíme do jednoho měsíce. Tlačítko na export ani smazání zatím v aplikaci není — tyhle žádosti vyřizuje člověk.
+**Kopii svých údajů** si stáhneš hned sám: **Profil → Stáhni si svoje data** ti dá všechno jako soubor JSON. Soubor sám uvádí, co v něm není a proč, a nikdy neobsahuje hesla, session tokeny ani přístupové tokeny k Discordu.
+
+**Všechno ostatní** — oprava, výmaz, omezení, námitka nebo odvolání souhlasu: ozvi se kanály z bodu 1. Odpovíme do jednoho měsíce. Tlačítko na smazání zatím v aplikaci není, tyhle žádosti vyřizuje člověk.
 
 Admin týmu tě může z týmu odebrat. Tím tě vyřadí z jeho skupin a soupisek a ztratíš přístup do jeho kanálů na Discordu a členství se označí jako neaktivní — není to ale výmaz. Co o tobě tým dál drží, tedy tvoje účasti a docházku, historii hodnocení, hlasy v anketách a cokoli finančního, se uchovává; proč, vysvětluje bod 5. Pokud chceš tyhle údaje opravdu vymazat, a ne jen deaktivovat, ozvi se nám kanály z bodu 1.
 
