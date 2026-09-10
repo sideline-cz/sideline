@@ -378,6 +378,48 @@ Rules:
 2. **`redact` is not cosmetic.** An export is a file someone downloads, mails to themselves and keeps. A live session token or OAuth refresh token in it turns a privacy feature into a credential leak. The redacted set is asserted as a literal list, so a new secret column has to be thought about rather than silently matched by a pattern.
 3. **Add the manifest entry in the same PR as the migration**, not afterwards — the integration suite goes red the moment the table lands.
 
+### Handling a GDPR Erasure Request — `scripts/erase-user.ts`
+
+In production, inside the running container:
+
+```bash
+majnet exec sideline sideline-server -c production -- \
+  node /app/applications/server/build/scripts/eraseUserCli.js --user <uuid>            # dry run
+majnet exec sideline sideline-server -c production -- \
+  node /app/applications/server/build/scripts/eraseUserCli.js --user <uuid> --confirm  # writes
+```
+
+Locally, against whatever database the environment points at:
+
+```bash
+pnpm --filter @sideline/server erase-user --user <uuid>            # dry run
+pnpm --filter @sideline/server erase-user --user <uuid> --confirm  # writes
+```
+
+**It lives at `src/scripts/eraseUserCli.ts`, not a top-level `scripts/`.** The Dockerfile's runtime stage copies only `build/esm` and installs with `--prod`, so a `scripts/*.ts` file is absent from the image and `tsx` is not there to run it. Under `src/` it compiles to `build/esm/scripts/`, lands at `/app/applications/server/build/scripts/` in the image, and runs under plain `node` — the only thing the runtime image has. Verified by running the compiled file.
+
+`majnet sql --write` also exists and requires project admin in every class, but do **not** hand-write erasure SQL: the dispositions live in the manifest and the transaction/idempotency guarantees live in `eraseUser.ts`.
+
+**Dry run is the default.** It opens the transaction, runs the real statements against the real rows, rolls back, and prints what would change — so the preview is the operation, not a description of it.
+
+A script rather than an endpoint or a button, on purpose:
+
+- §6 of the privacy policy says deletion is handled by a person. A script keeps that sentence true with no policy change.
+- An authorisation slip on an erasure *endpoint* destroys data rather than merely leaking it. There is no such endpoint to get wrong.
+- Self-service needs decisions this does not: what the confirmation says, whether there is a grace period, whether a team admin may trigger it for somebody else. **Do not add a button without making those decisions and updating §6 in both languages.**
+
+What it does is decided by `EXPORT_MANIFEST` + `SUBJECT_ERASURE`, not by the script — see `eraseUser.ts`. Anonymise in place: the identity is scrubbed on `users`, which pseudonymises the id in all 49 referencing tables, so other people's events, polls and ratings survive.
+
+Properties the integration tests pin, all worth preserving:
+
+1. **A dry run writes nothing.** Break the rollback and `eraseUser.test.ts` fails.
+2. **One transaction.** A half-erased person is worse than an un-erased one.
+3. **Idempotent** — the `NOT NULL` placeholder is derived from the row id, not random, so re-running to check does not churn.
+4. **Credentials are deleted, not pseudonymised.** Erasure revokes access; it does not rename it.
+5. **The `users` row survives**, which is the premise of anonymising in place.
+
+The script imports `env.js` and `eraseUser.js` **lazily, after the argument check**, and with relative paths rather than `~` — the alias is only configured for files under `src/`, and a static `env` import answers a missing `--user` with an env stack trace instead of the usage line.
+
 ### An RPC Handler Must Map Rows Into The Domain Class — `Schema.Class` Is Nominal
 
 Returning a repository row straight from an RPC handler whose contract declares a domain class **type-checks and then fails at encode**:
