@@ -380,10 +380,25 @@ Rules:
 
 ### Handling a GDPR Erasure Request — `scripts/erase-user.ts`
 
+In production, inside the running container:
+
+```bash
+majnet exec sideline sideline-server -c production -- \
+  node /app/applications/server/build/scripts/eraseUserCli.js --user <uuid>            # dry run
+majnet exec sideline sideline-server -c production -- \
+  node /app/applications/server/build/scripts/eraseUserCli.js --user <uuid> --confirm  # writes
+```
+
+Locally, against whatever database the environment points at:
+
 ```bash
 pnpm --filter @sideline/server erase-user --user <uuid>            # dry run
 pnpm --filter @sideline/server erase-user --user <uuid> --confirm  # writes
 ```
+
+**It lives at `src/scripts/eraseUserCli.ts`, not a top-level `scripts/`.** The Dockerfile's runtime stage copies only `build/esm` and installs with `--prod`, so a `scripts/*.ts` file is absent from the image and `tsx` is not there to run it. Under `src/` it compiles to `build/esm/scripts/`, lands at `/app/applications/server/build/scripts/` in the image, and runs under plain `node` — the only thing the runtime image has. Verified by running the compiled file.
+
+`majnet sql --write` also exists and requires project admin in every class, but do **not** hand-write erasure SQL: the dispositions live in the manifest and the transaction/idempotency guarantees live in `eraseUser.ts`.
 
 **Dry run is the default.** It opens the transaction, runs the real statements against the real rows, rolls back, and prints what would change — so the preview is the operation, not a description of it.
 

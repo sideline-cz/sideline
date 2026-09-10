@@ -2,8 +2,22 @@
 /**
  * Erase a person, for whoever is handling a GDPR Art. 17 request.
  *
+ * In production, inside the running container:
+ *
+ *   majnet exec sideline sideline-server -c production -- \
+ *     node /app/applications/server/build/scripts/eraseUserCli.js --user <uuid>
+ *
+ * Locally, against whatever database the environment points at:
+ *
  *   pnpm --filter @sideline/server erase-user --user <uuid>             # dry run
  *   pnpm --filter @sideline/server erase-user --user <uuid> --confirm   # writes
+ *
+ * It lives under `src/` rather than a top-level `scripts/` directory for one
+ * concrete reason: the Dockerfile's runtime stage copies only `build/esm`,
+ * and installs with `--prod`, so a `scripts/*.ts` file would be absent from
+ * the image and `tsx` would not be there to run it. Compiled into
+ * `build/esm/scripts/` it runs under plain `node`, which is the only thing
+ * the runtime image has.
  *
  * A script rather than an endpoint or a button, deliberately:
  *
@@ -20,6 +34,10 @@
  * a transaction it rolls back, so what it prints is what would happen rather
  * than a guess.
  */
+// Type-only: erased at compile time, so it does not defeat the lazy runtime
+// imports below.
+import type { Effect as EffectNs } from 'effect';
+
 const args = process.argv.slice(2);
 
 const flag = (name: string): string | undefined => {
@@ -47,8 +65,8 @@ if (userId === undefined) {
 const main = async () => {
   const { PgClient } = await import('@effect/sql-pg');
   const { Config, Effect } = await import('effect');
-  const { env } = await import('../src/env.js');
-  const { eraseUser } = await import('../src/gdpr/eraseUser.js');
+  const { env } = await import('~/env.js');
+  const { eraseUser } = await import('~/gdpr/eraseUser.js');
 
   const Pg = PgClient.layerConfig({
     host: Config.succeed(env.DATABASE_HOST),
@@ -91,7 +109,7 @@ const main = async () => {
     Effect.provide(Pg),
   );
 
-  await Effect.runPromise(program as Effect.Effect<unknown, never, never>);
+  await Effect.runPromise(program as EffectNs.Effect<unknown, never, never>);
 };
 
 main().then(
