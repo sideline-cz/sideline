@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Asserts every RPC whose contract returns a domain `Schema.Class` has a
- * handler that actually constructs one.
+ * Asserts every contract returning a domain `Schema.Class` — `Rpc.make` and
+ * `HttpApiEndpoint` alike — has a handler that actually constructs one.
  *
  * `Schema.Class` is **nominal**. Returning a repository row from a handler
  * whose contract declares the domain class type-checks perfectly — the two
@@ -20,10 +20,12 @@
  * The first was fixed and given a hand-written encode test. That test did not
  * generalise, so the second shipped straight past it. This does generalise.
  *
- * **What it checks:** for each `Rpc.make('X', { success: SomeDomainClass })`,
- * that `new SomeDomainClass(` or a decode of it appears somewhere in the
- * server source. Validated against the commit before the invite fix, where it
- * flags that RPC and nothing else.
+ * **What it checks:** for each contract with `success: SomeDomainClass`, that
+ * `new SomeDomainClass(` or a decode of it appears somewhere in the server
+ * source. Validated twice by breaking a real case: against the commit before
+ * the invite fix it flags that RPC alone, and removing the explicit
+ * `new Auth.DataExport(...)` from the export handler flags `exportMyData`
+ * alone.
  *
  * **What it cannot check:** whether *every* handler for a given class
  * constructs it. If class X is built correctly in one handler and passed
@@ -59,26 +61,54 @@ for (const file of walk(DOMAIN)) {
   }
 }
 
-/** `Rpc.make('Name', { ... success: X ... })` → the class X, when X is one. */
+/** The class a `success:` schema resolves to, when it is a domain class. */
+const successClass = (src, bodyStart) => {
+  let depth = 1;
+  let i = bodyStart;
+  while (i < src.length && depth > 0) {
+    if (src[i] === '{') depth += 1;
+    else if (src[i] === '}') depth -= 1;
+    i += 1;
+  }
+  const success = /success:\s*([^,\n]+)/.exec(src.slice(bodyStart, i));
+  if (!success) return undefined;
+  const raw = success[1].trim().replace(/,$/, '');
+  const inner = raw.startsWith('Schema.Array(')
+    ? raw.slice('Schema.Array('.length).replace(/\)$/, '').trim()
+    : raw;
+  return domainClasses.has(inner) ? inner : undefined;
+};
+
+/**
+ * Both contract kinds, because the trap is identical on either.
+ *
+ * `Rpc.make` was the only one covered at first, and the gap showed up
+ * immediately: `Auth.DataExport` on `GET /me/export` sat outside the guard and
+ * had to be protected by a hand-written test instead — which is exactly the
+ * "a guard that does not generalise is not a guard" failure that let the
+ * nominal bug ship twice in the first place.
+ */
 const contracts = [];
+
 for (const file of walk(join(DOMAIN, 'rpc'))) {
   const src = readFileSync(file, 'utf8');
   for (const m of src.matchAll(/Rpc\.make\(\s*'([\w/]+)'\s*,\s*\{/g)) {
-    let depth = 1;
-    let i = m.index + m[0].length;
-    const start = i;
-    while (i < src.length && depth > 0) {
-      if (src[i] === '{') depth += 1;
-      else if (src[i] === '}') depth -= 1;
-      i += 1;
-    }
-    const success = /success:\s*([^,\n]+)/.exec(src.slice(start, i));
-    if (!success) continue;
-    const raw = success[1].trim().replace(/,$/, '');
-    const inner = raw.startsWith('Schema.Array(')
-      ? raw.slice('Schema.Array('.length).replace(/\)$/, '').trim()
-      : raw;
-    if (domainClasses.has(inner)) contracts.push({ rpc: m[1], cls: inner });
+    const cls = successClass(src, m.index + m[0].length);
+    if (cls !== undefined) contracts.push({ kind: 'RPC', name: m[1], cls });
+  }
+}
+
+for (const file of walk(join(DOMAIN, 'api'))) {
+  const src = readFileSync(file, 'utf8');
+  // `HttpApiEndpoint.get('name', '/path', { … })` — the options object is the
+  // first `{` after the endpoint name, so the path argument is skipped.
+  for (const m of src.matchAll(
+    /HttpApiEndpoint\.(?:get|post|patch|put|del|delete)\(\s*'([\w/]+)'/g,
+  )) {
+    const brace = src.indexOf('{', m.index + m[0].length);
+    if (brace === -1) continue;
+    const cls = successClass(src, brace + 1);
+    if (cls !== undefined) contracts.push({ kind: 'HTTP', name: m[1], cls });
   }
 }
 
@@ -93,18 +123,26 @@ const unconstructed = contracts.filter(({ cls }) => {
 });
 
 if (unconstructed.length > 0) {
-  console.error('RPC encoding check FAILED — a contract class is never constructed server-side.\n');
-  console.error('`Schema.Class` is nominal: returning a repository row here type-checks and then');
-  console.error('fails at encode, but only once a row exists — so it ships silently.\n');
-  for (const { rpc, cls } of unconstructed) {
-    console.error(`  ${rpc}  declares  ${cls}  — nothing builds one in applications/server/src`);
+  console.error('Encoding check FAILED — a contract class is never constructed server-side.\n');
+  console.error('`Schema.Class` is nominal: returning a plain object or a repository row here');
+  console.error('type-checks and then fails at encode — but only once there is data to encode,');
+  console.error('so it ships silently and surfaces later against real rows.\n');
+  for (const { kind, name, cls } of unconstructed) {
+    console.error(
+      `  [${kind}] ${name}  declares  ${cls}  — nothing builds one in applications/server/src`,
+    );
   }
-  console.error('\nMap the rows instead:');
-  console.error('  Effect.map(Array.map((row) => new SomeRpcGroup.SomeEntry({ ...row })))');
-  console.error('\nReference: applications/server/src/rpc/invite/index.ts');
+  console.error('\nConstruct the class the contract names:');
+  console.error('  a list  →  Effect.map(Array.map((row) => new SomeGroup.SomeEntry({ ...row })))');
+  console.error('  one     →  Effect.map((value) => new SomeApi.SomeResult({ ...value }))');
+  console.error('\nReferences: applications/server/src/rpc/invite/index.ts (list),');
+  console.error('            applications/server/src/api/auth.ts exportMyData (single).');
   process.exit(1);
 }
 
+const rpcs = contracts.filter((c) => c.kind === 'RPC').length;
+const http = contracts.length - rpcs;
 console.log(
-  `RPC encoding OK — all ${contracts.length} class-returning RPCs construct their contract class`,
+  `Encoding OK — all ${contracts.length} class-returning contracts construct their class ` +
+    `(${rpcs} RPC, ${http} HTTP)`,
 );
