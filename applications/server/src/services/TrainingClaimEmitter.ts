@@ -31,6 +31,7 @@ export const emitTrainingClaimRequestIfApplicable = (args: {
   readonly endAt: Option.Option<DateTime.Utc>;
   readonly location: Option.Option<string>;
   readonly locationUrl?: Option.Option<string>;
+  readonly allDay: boolean;
 }): Effect.Effect<
   void,
   never,
@@ -84,6 +85,7 @@ export const emitTrainingClaimRequestIfApplicable = (args: {
               args.location,
               args.description,
               mapping.value.discord_channel_id.value,
+              args.allDay,
               mapping.value.discord_role_id,
               args.locationUrl ?? Option.none(),
               Option.some(ownerGroupId),

@@ -134,6 +134,21 @@ const getLatestChannelId = (eventType: string) =>
     Effect.map((rows) => rows[0]?.discord_target_channel_id ?? null),
   );
 
+// Helper: fetch event_all_day from the latest event_sync_events row of a given type.
+const getLatestAllDay = (eventType: string) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen((sql) =>
+      sql.unsafe<{ event_all_day: boolean | null }>(`
+      SELECT event_all_day
+      FROM event_sync_events
+      WHERE event_type = '${eventType}'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `),
+    ),
+    Effect.map((rows) => rows[0]?.event_all_day ?? null),
+  );
+
 // ---------------------------------------------------------------------------
 // Regression tests
 // ---------------------------------------------------------------------------
@@ -157,6 +172,7 @@ describe('EventSyncEventsRepository — discord_target_channel_id payload regres
                 Option.some(KNOWN_END_AT),
                 Option.none(),
                 'training',
+                false, // allDay (PR 2: required, before discordTargetChannelId)
                 Option.some(CHANNEL_ID), // discord_target_channel_id
                 Option.none(),
                 Option.none(),
@@ -193,6 +209,7 @@ describe('EventSyncEventsRepository — discord_target_channel_id payload regres
                 Option.none(),
                 event.description,
                 CHANNEL_ID, // discordTargetChannelId (required, not optional for claim)
+                false, // allDay (PR 2: required, after discordTargetChannelId, before discordRoleId)
                 Option.none(),
                 Option.none(),
                 Option.none(),
@@ -437,4 +454,194 @@ describe('EventSyncEventsRepository — discord_target_channel_id payload regres
         Effect.provide(TestLayer),
       ),
   );
+});
+
+// ---------------------------------------------------------------------------
+// PR 2 — all_day payload plumbing regression
+//
+// Proves the hard-coded `false`s at EventSyncEventsRepository.ts:347, :414,
+// :458, :501, :635 are gone: each of the five remaining emitters must
+// forward its `allDay` argument through to `event_sync_events.event_all_day`.
+// ---------------------------------------------------------------------------
+
+describe('EventSyncEventsRepository — all_day payload plumbing (PR 2)', () => {
+  for (const allDay of [true, false]) {
+    it.effect(`rsvp_reminder: emitRsvpReminder stores allDay=${String(allDay)}`, () =>
+      Effect.Do.pipe(
+        Effect.bind('seed', () => seedTeamWithMember()),
+        Effect.bind('event', ({ seed }) => createTrainingEvent(seed.team.id, seed.member.id)),
+        Effect.tap(({ seed, event }) =>
+          EventSyncEventsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.emitRsvpReminder(
+                seed.team.id,
+                event.id,
+                event.title,
+                event.description,
+                KNOWN_START_AT,
+                Option.some(KNOWN_END_AT),
+                Option.none(),
+                'training',
+                allDay,
+                Option.some(CHANNEL_ID),
+                Option.none(),
+                Option.none(),
+              ),
+            ),
+          ),
+        ),
+        Effect.bind('storedAllDay', () => getLatestAllDay('rsvp_reminder')),
+        Effect.tap(({ storedAllDay }) =>
+          Effect.sync(() => {
+            expect(storedAllDay).toBe(allDay);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+    );
+
+    it.effect(
+      `training_claim_request: emitTrainingClaimRequest stores allDay=${String(allDay)}`,
+      () =>
+        Effect.Do.pipe(
+          Effect.bind('seed', () => seedTeamWithMember()),
+          Effect.bind('event', ({ seed }) => createTrainingEvent(seed.team.id, seed.member.id)),
+          Effect.tap(({ seed, event }) =>
+            EventSyncEventsRepository.asEffect().pipe(
+              Effect.andThen((repo) =>
+                repo.emitTrainingClaimRequest(
+                  seed.team.id,
+                  event.id,
+                  event.title,
+                  KNOWN_START_AT,
+                  Option.some(KNOWN_END_AT),
+                  Option.none(),
+                  event.description,
+                  CHANNEL_ID,
+                  allDay,
+                  Option.none(),
+                  Option.none(),
+                  Option.none(),
+                ),
+              ),
+            ),
+          ),
+          Effect.bind('storedAllDay', () => getLatestAllDay('training_claim_request')),
+          Effect.tap(({ storedAllDay }) =>
+            Effect.sync(() => {
+              expect(storedAllDay).toBe(allDay);
+            }),
+          ),
+          Effect.provide(TestLayer),
+        ),
+    );
+
+    it.effect(
+      `training_claim_update: emitTrainingClaimUpdate stores allDay=${String(allDay)}`,
+      () =>
+        Effect.Do.pipe(
+          Effect.bind('seed', () => seedTeamWithMember()),
+          Effect.bind('event', ({ seed }) => createTrainingEvent(seed.team.id, seed.member.id)),
+          Effect.tap(({ seed, event }) =>
+            EventSyncEventsRepository.asEffect().pipe(
+              Effect.andThen((repo) =>
+                repo.emitTrainingClaimUpdate(
+                  seed.team.id,
+                  event.id,
+                  event.title,
+                  KNOWN_START_AT,
+                  Option.some(KNOWN_END_AT),
+                  Option.none(),
+                  event.description,
+                  Option.some(CHANNEL_ID),
+                  Option.none(),
+                  Option.none(),
+                  Option.none(),
+                  'active',
+                  allDay,
+                ),
+              ),
+            ),
+          ),
+          Effect.bind('storedAllDay', () => getLatestAllDay('training_claim_update')),
+          Effect.tap(({ storedAllDay }) =>
+            Effect.sync(() => {
+              expect(storedAllDay).toBe(allDay);
+            }),
+          ),
+          Effect.provide(TestLayer),
+        ),
+    );
+
+    it.effect(
+      `unclaimed_training_reminder: emitUnclaimedTrainingReminder stores allDay=${String(allDay)}`,
+      () =>
+        Effect.Do.pipe(
+          Effect.bind('seed', () => seedTeamWithMember()),
+          Effect.bind('event', ({ seed }) => createTrainingEvent(seed.team.id, seed.member.id)),
+          Effect.tap(({ seed, event }) =>
+            EventSyncEventsRepository.asEffect().pipe(
+              Effect.andThen((repo) =>
+                repo.emitUnclaimedTrainingReminder(
+                  seed.team.id,
+                  event.id,
+                  event.title,
+                  KNOWN_START_AT,
+                  Option.some(KNOWN_END_AT),
+                  Option.none(),
+                  CHANNEL_ID,
+                  allDay,
+                  Option.none(),
+                  Option.none(),
+                  Option.none(),
+                ),
+              ),
+            ),
+          ),
+          Effect.bind('storedAllDay', () => getLatestAllDay('unclaimed_training_reminder')),
+          Effect.tap(({ storedAllDay }) =>
+            Effect.sync(() => {
+              expect(storedAllDay).toBe(allDay);
+            }),
+          ),
+          Effect.provide(TestLayer),
+        ),
+    );
+
+    it.effect(
+      `event_roster_approval_request: emitEventRosterApprovalRequest stores allDay=${String(allDay)}`,
+      () =>
+        Effect.Do.pipe(
+          Effect.bind('seed', () => seedTeamWithMember()),
+          Effect.bind('event', ({ seed }) => createTrainingEvent(seed.team.id, seed.member.id)),
+          Effect.tap(({ seed, event }) =>
+            EventSyncEventsRepository.asEffect().pipe(
+              Effect.andThen((repo) =>
+                repo.emitEventRosterApprovalRequest(
+                  seed.team.id,
+                  event.id,
+                  'event-roster-1' as any,
+                  '00000000-0000-0000-0000-000000000099' as any, // roster_id (member_group_id column is UUID)
+                  seed.member.id as any,
+                  Option.some('Alice'),
+                  event.title,
+                  KNOWN_START_AT,
+                  Option.none(),
+                  Option.none(),
+                  Option.some('Tournament Squad'),
+                  allDay,
+                ),
+              ),
+            ),
+          ),
+          Effect.bind('storedAllDay', () => getLatestAllDay('event_roster_approval_request')),
+          Effect.tap(({ storedAllDay }) =>
+            Effect.sync(() => {
+              expect(storedAllDay).toBe(allDay);
+            }),
+          ),
+          Effect.provide(TestLayer),
+        ),
+    );
+  }
 });

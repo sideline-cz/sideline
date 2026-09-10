@@ -9,6 +9,7 @@
 // These new tests will FAIL until the developer rewrites handleTrainingClaimRequest.
 
 import type { EventRpcEvents, EventRpcModels } from '@sideline/domain';
+import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
 import type { MessageCreateRequest } from 'dfx/types';
 import { DateTime, Effect, Layer, Option } from 'effect';
@@ -52,6 +53,7 @@ const makeEvent = (
     discord_target_channel_id: Option.some(OWNER_CHANNEL as any),
     discord_role_id: Option.none(),
     owner_group_id: Option.some(OWNER_GROUP_ID as any),
+    all_day: false,
     ...overrides,
   }) as any;
 
@@ -466,5 +468,41 @@ describe('handleTrainingClaimRequest', () => {
 
     expect(restCreateThreadCalls).toHaveLength(0);
     expect(restCreateMessageCalls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR 2 — event.all_day must reach buildClaimMessage (handleTrainingClaimRequest.ts:45
+// replaces the PR 1 literal `allDay: false` with `event.all_day`).
+// ---------------------------------------------------------------------------
+
+describe('handleTrainingClaimRequest — all_day forwarding (PR 2)', () => {
+  it('all-day: claim embed "When" field is exactly <t:S:D> · All day', async () => {
+    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+
+    const event = makeEvent({
+      all_day: true,
+      start_at: DateTime.makeUnsafe('2026-07-15T12:00:00Z'),
+    });
+    await run(handleTrainingClaimRequest(event), Layer.merge(rpcLayer, restLayer));
+
+    expect(createMessageCalls).toHaveLength(1);
+    const [, payload] = createMessageCalls[0];
+    const whenField = payload.embeds?.[0]?.fields?.[0];
+    const marker = m.bot_embed_all_day({}, { locale: 'en' });
+    expect(whenField?.value).toBe(`<t:1784116800:D> · ${marker}`);
+  });
+
+  it('timed (default): claim embed "When" field is unchanged at <t:S:f>', async () => {
+    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+
+    await run(handleTrainingClaimRequest(makeEvent()), Layer.merge(rpcLayer, restLayer));
+
+    expect(createMessageCalls).toHaveLength(1);
+    const [, payload] = createMessageCalls[0];
+    const whenField = payload.embeds?.[0]?.fields?.[0];
+    expect(whenField?.value).toBe('<t:1780308000:f>');
   });
 });

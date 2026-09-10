@@ -148,6 +148,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                           endAt: event.end_at,
                           location: event.location,
                           locationUrl: event.location_url,
+                          allDay: event.all_day,
                         }),
                       ),
                       Effect.tap((event) =>

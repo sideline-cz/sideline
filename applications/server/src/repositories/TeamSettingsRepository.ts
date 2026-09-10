@@ -111,6 +111,7 @@ class EventNeedingClaimRequest extends Schema.Class<EventNeedingClaimRequest>(
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   reminders_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   timezone: Schema.String,
+  all_day: Schema.Boolean,
 }) {}
 
 class EventNeedingCoachingStatus extends Schema.Class<EventNeedingCoachingStatus>(
@@ -141,6 +142,7 @@ class EventNeedingReminder extends Schema.Class<EventNeedingReminder>('EventNeed
   claimed_by: Schema.OptionFromNullOr(TeamMember.TeamMemberId),
   claim_discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   claim_discord_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  all_day: Schema.Boolean,
 }) {}
 
 const make = Effect.gen(function* () {
@@ -327,7 +329,8 @@ const make = Effect.gen(function* () {
         SELECT e.id AS event_id, e.team_id, e.title, e.start_at, e.event_type,
                e.owner_group_id, e.member_group_id,
                ts.reminders_channel_id, ts.timezone,
-               e.claimed_by, e.claim_discord_channel_id, e.claim_discord_message_id
+               e.claimed_by, e.claim_discord_channel_id, e.claim_discord_message_id,
+               e.all_day
         FROM events e
         JOIN team_settings ts ON ts.team_id = e.team_id
         WHERE e.status = 'active'
@@ -351,7 +354,8 @@ const make = Effect.gen(function* () {
         SELECT e.id AS event_id, e.team_id, e.title, e.start_at,
                e.end_at, e.location, e.description, e.event_type,
                e.owner_group_id, e.member_group_id,
-               ts.reminders_channel_id, ts.timezone
+               ts.reminders_channel_id, ts.timezone,
+               e.all_day
         FROM events e
         JOIN team_settings ts ON ts.team_id = e.team_id
         WHERE e.status = 'active'

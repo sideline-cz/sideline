@@ -3,6 +3,8 @@ import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
 import { Array, DateTime, Effect, Option, pipe, Schema } from 'effect';
 import { guildLocale } from '~/locale.js';
+import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
+import { formatEventWhen } from '~/rest/events/eventWhen.js';
 import { formatNameWithMention, splitIntoFieldChunks } from '~/rest/utils.js';
 import { DfxGuild } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
@@ -10,9 +12,6 @@ import { SyncRpc } from '~/services/SyncRpc.js';
 const decodeGuild = Schema.decodeUnknownSync(DfxGuild);
 
 const REMINDER_COLOR = 0xfee75c; // yellow
-
-const toDiscordTimestamp = (dt: DateTime.Utc, style: 'R' | 'f' = 'f'): string =>
-  `<t:${Math.floor(Number(DateTime.toEpochMillis(dt)) / 1000)}:${style}>`;
 
 export const handleRsvpReminder = (event: EventRpcEvents.RsvpReminderEvent) =>
   Effect.Do.pipe(
@@ -51,7 +50,26 @@ export const handleRsvpReminder = (event: EventRpcEvents.RsvpReminderEvent) =>
       const yesAttendeeNames = pipe(summary.yesAttendees, Array.map(formatNameWithMention));
       const nonResponderNames = pipe(summary.nonResponders, Array.map(formatNameWithMention));
 
-      const whenText = `${toDiscordTimestamp(event.start_at, 'f')} (${toDiscordTimestamp(event.start_at, 'R')})`;
+      // `RsvpReminderEvent` has no `end_at` field, so `endAt: Option.none()` is required here.
+      const whenText = `${formatEventWhen({
+        startAt: event.start_at,
+        // ⚠ the all-day branch takes DATES, not instants. This supplies the UTC date of the
+        // (still noon-anchored) instant, which is correct under the current storage anchor; a
+        // later change replaces it with the payload's real `start_date`.
+        startDate: DateTime.formatIsoDateUtc(event.start_at),
+        endAt: Option.none(),
+        endDate: Option.none(),
+        allDay: event.all_day,
+        locale,
+      })} (${toDiscordTimestamp(event.start_at, 'R')})`;
+
+      // The DM uses a full sentence, not the "field" composition — the all-day sentence key
+      // (`bot_rsvp_reminder_dm_all_day`) is grammatically correct with a bare date + relative
+      // suffix and must NOT carry the " · All day" marker that `whenText` adds for the embed
+      // field (A1b).
+      const whenSentence = event.all_day
+        ? `${toDiscordTimestamp(event.start_at, 'D')} (${toDiscordTimestamp(event.start_at, 'R')})`
+        : whenText;
 
       const fields = [
         {
@@ -116,10 +134,15 @@ export const handleRsvpReminder = (event: EventRpcEvents.RsvpReminderEvent) =>
                 embeds: [
                   {
                     title: m.bot_rsvp_reminder_title({ title: event.title }, { locale }),
-                    description: m.bot_rsvp_reminder_dm(
-                      { title: event.title, when: whenText, link: linkFor(discordId) },
-                      { locale },
-                    ),
+                    description: event.all_day
+                      ? m.bot_rsvp_reminder_dm_all_day(
+                          { title: event.title, when: whenSentence, link: linkFor(discordId) },
+                          { locale },
+                        )
+                      : m.bot_rsvp_reminder_dm(
+                          { title: event.title, when: whenSentence, link: linkFor(discordId) },
+                          { locale },
+                        ),
                     color: REMINDER_COLOR,
                   },
                 ],

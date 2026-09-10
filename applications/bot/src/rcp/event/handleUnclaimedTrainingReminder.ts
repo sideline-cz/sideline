@@ -3,14 +3,13 @@ import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
 import { DateTime, Effect, Option, Schema } from 'effect';
 import { guildLocale } from '~/locale.js';
+import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
+import { formatEventWhen } from '~/rest/events/eventWhen.js';
 import { DfxGuild } from '~/schemas.js';
 
 const decodeGuild = Schema.decodeUnknownSync(DfxGuild);
 
 const REMINDER_COLOR = 0xfee75c; // yellow
-
-const toDiscordTimestamp = (dt: DateTime.Utc, style: 'R' | 'f' = 'f'): string =>
-  `<t:${Math.floor(Number(DateTime.toEpochMillis(dt)) / 1000)}:${style}>`;
 
 export const handleUnclaimedTrainingReminder = (
   event: EventRpcEvents.UnclaimedTrainingReminderEvent,
@@ -29,7 +28,26 @@ export const handleUnclaimedTrainingReminder = (
         Effect.flatMap(({ rest, guild }) => {
           const locale = guildLocale({ guild_locale: guild.preferred_locale });
 
-          const whenText = `${toDiscordTimestamp(event.start_at, 'f')} (${toDiscordTimestamp(event.start_at, 'R')})`;
+          // `endAt: Option.none()` is intentional — today's render ignores `event.end_at`, and
+          // keeping it that way here holds the timed output byte-identical.
+          const whenText = `${formatEventWhen({
+            startAt: event.start_at,
+            // ⚠ the all-day branch takes DATES, not instants. This supplies the UTC date of the
+            // (still noon-anchored) instant, which is correct under the current storage anchor;
+            // a later change replaces it with the payload's real `start_date`.
+            startDate: DateTime.formatIsoDateUtc(event.start_at),
+            endAt: Option.none(),
+            endDate: Option.none(),
+            allDay: event.all_day,
+            locale,
+          })} (${toDiscordTimestamp(event.start_at, 'R')})`;
+
+          // The description sentence must NOT carry the " · All day" marker that `whenText`
+          // bakes in for the (unused-here) field composition — the all-day description key
+          // is grammatically correct with a bare date + relative suffix (A1b).
+          const whenSentence = event.all_day
+            ? `${toDiscordTimestamp(event.start_at, 'D')} (${toDiscordTimestamp(event.start_at, 'R')})`
+            : whenText;
 
           // Optionally append a jump link when we have the claim message IDs
           const jumpLink = Option.flatMap(event.claim_discord_channel_id, (claimChannelId) =>
@@ -40,11 +58,14 @@ export const handleUnclaimedTrainingReminder = (
             ),
           );
 
+          const descriptionBase = event.all_day
+            ? m.bot_claim_unclaimed_reminder_description_all_day({ when: whenSentence }, { locale })
+            : m.bot_claim_unclaimed_reminder_description({ when: whenSentence }, { locale });
+
           const description = Option.match(jumpLink, {
-            onNone: () =>
-              m.bot_claim_unclaimed_reminder_description({ when: whenText }, { locale }),
+            onNone: () => descriptionBase,
             onSome: (link) =>
-              `${m.bot_claim_unclaimed_reminder_description({ when: whenText }, { locale })}\n[${m.bot_claim_unclaimed_reminder_jump({}, { locale })}](${link})`,
+              `${descriptionBase}\n[${m.bot_claim_unclaimed_reminder_jump({}, { locale })}](${link})`,
           });
 
           const roleMention = Option.match(event.discord_role_id, {
