@@ -36,3 +36,6 @@ llms-full.txt
 
 # Local Czech-review progress (packages/rules/authoring/review-server.mjs)
 review-state.json
+
+# Session handover notes — a working document, never part of repo history
+HANDOVER.md
