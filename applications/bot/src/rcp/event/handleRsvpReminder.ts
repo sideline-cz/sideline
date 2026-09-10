@@ -3,7 +3,7 @@ import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
 import { Array, DateTime, Effect, Option, pipe, Schema } from 'effect';
 import { guildLocale } from '~/locale.js';
-import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
+import { discordDateInstant, toDiscordTimestamp } from '~/rest/discordTimestamp.js';
 import { formatEventWhen } from '~/rest/events/eventWhen.js';
 import { formatNameWithMention, splitIntoFieldChunks } from '~/rest/utils.js';
 import { DfxGuild } from '~/schemas.js';
@@ -51,12 +51,15 @@ export const handleRsvpReminder = (event: EventRpcEvents.RsvpReminderEvent) =>
       const nonResponderNames = pipe(summary.nonResponders, Array.map(formatNameWithMention));
 
       // `RsvpReminderEvent` has no `end_at` field, so `endAt: Option.none()` is required here.
+      // ⚠ the all-day branch takes DATES, not instants. `event.start_date` is the team-local
+      // calendar date projected by the server; fall back to the UTC date of `start_at` when an
+      // older server hasn't shipped the field yet (rolling-deploy skew, §17.1 row 3).
+      const startDate = Option.getOrElse(event.start_date, () =>
+        DateTime.formatIsoDateUtc(event.start_at),
+      );
       const whenText = `${formatEventWhen({
         startAt: event.start_at,
-        // ⚠ the all-day branch takes DATES, not instants. This supplies the UTC date of the
-        // (still noon-anchored) instant, which is correct under the current storage anchor; a
-        // later change replaces it with the payload's real `start_date`.
-        startDate: DateTime.formatIsoDateUtc(event.start_at),
+        startDate,
         endAt: Option.none(),
         endDate: Option.none(),
         allDay: event.all_day,
@@ -66,9 +69,10 @@ export const handleRsvpReminder = (event: EventRpcEvents.RsvpReminderEvent) =>
       // The DM uses a full sentence, not the "field" composition — the all-day sentence key
       // (`bot_rsvp_reminder_dm_all_day`) is grammatically correct with a bare date + relative
       // suffix and must NOT carry the " · All day" marker that `whenText` adds for the embed
-      // field (A1b).
+      // field (A1b). The display instant is reconstructed from the derived date (§11.4) — a raw
+      // read of `event.start_at` would render the previous day for any viewer west of the team.
       const whenSentence = event.all_day
-        ? `${toDiscordTimestamp(event.start_at, 'D')} (${toDiscordTimestamp(event.start_at, 'R')})`
+        ? `${toDiscordTimestamp(discordDateInstant(startDate, event.start_at), 'D')} (${toDiscordTimestamp(event.start_at, 'R')})`
         : whenText;
 
       const fields = [

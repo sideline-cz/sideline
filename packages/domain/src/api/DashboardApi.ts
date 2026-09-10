@@ -18,6 +18,13 @@ export class DashboardUpcomingEvent extends Schema.Class<DashboardUpcomingEvent>
   location: Schema.OptionFromOptional(Schema.String),
   locationUrl: Schema.OptionFromOptional(Schema.String),
   myRsvp: Schema.OptionFromOptional(RsvpResponse),
+  /**
+   * Derived team-local calendar date (`YYYY-MM-DD`), plan §11.2/§11.3. `Option.none()`
+   * means the key was absent (old-server skew) and the reader falls back to
+   * `formatUtcDate(startAt)`. Deliberately `OptionFromOptionalKey`, never a plain string
+   * defaulted to `''` — see `EventApi.EventInfo.startDate`'s doc comment.
+   */
+  startDate: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
 export class DashboardActivitySummary extends Schema.Class<DashboardActivitySummary>(

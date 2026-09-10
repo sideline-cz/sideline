@@ -37,6 +37,7 @@ const makeEvent = (
     member_group_id: Option.none(),
     discord_role_id: Option.none(),
     all_day: false,
+    start_date: Option.none(),
     ...overrides,
   }) as any;
 
@@ -248,8 +249,14 @@ describe('handleRsvpReminder — per-member personal channel link', () => {
 // ---------------------------------------------------------------------------
 
 describe('handleRsvpReminder — all_day rendering (PR 2)', () => {
-  const ALL_DAY_START_AT = DateTime.makeUnsafe('2026-07-15T12:00:00Z');
-  const ALL_DAY_EPOCH = 1784116800;
+  // Team-local midnight anchor (a Prague event on 2026-07-15 is stored at
+  // 2026-07-14T22:00:00Z, CEST +02:00), NOT the retired noon-UTC sentinel. `ALL_DAY_EPOCH`
+  // (noon UTC of 15 July) only matches if the code reads `start_date`, not a UTC read of
+  // `ALL_DAY_START_AT` (which would yield 2026-07-14 — one day early).
+  const ALL_DAY_START_AT = DateTime.makeUnsafe('2026-07-14T22:00:00Z');
+  const ALL_DAY_START_DATE = Option.some('2026-07-15');
+  const ALL_DAY_EPOCH = 1784116800; // :D> uses discordDateInstant(start_date) = noon UTC of 15 July
+  const ALL_DAY_START_AT_EPOCH = 1784066400; // :R> uses the raw start_at instant, unchanged
   const TIMED_START_AT = DateTime.makeUnsafe('2026-05-02T14:00:00Z');
   const TIMED_EPOCH = 1777730400;
 
@@ -268,7 +275,9 @@ describe('handleRsvpReminder — all_day rendering (PR 2)', () => {
     const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
 
     await run(
-      handleRsvpReminder(makeEvent({ all_day: true, start_at: ALL_DAY_START_AT })),
+      handleRsvpReminder(
+        makeEvent({ all_day: true, start_at: ALL_DAY_START_AT, start_date: ALL_DAY_START_DATE }),
+      ),
       Layer.merge(rpcLayer, restLayer),
     );
 
@@ -276,7 +285,9 @@ describe('handleRsvpReminder — all_day rendering (PR 2)', () => {
     expect(channelCall).toBeDefined();
     const whenField = channelCall?.[1].embeds?.[0]?.fields?.[0];
     const marker = m.bot_embed_all_day({}, { locale: 'en' });
-    expect(whenField?.value).toBe(`<t:${ALL_DAY_EPOCH}:D> · ${marker} (<t:${ALL_DAY_EPOCH}:R>)`);
+    expect(whenField?.value).toBe(
+      `<t:${ALL_DAY_EPOCH}:D> · ${marker} (<t:${ALL_DAY_START_AT_EPOCH}:R>)`,
+    );
   });
 
   it('all-day: DM uses bot_rsvp_reminder_dm_all_day with {when} = <t:S:D> (<t:S:R>) — no marker', async () => {
@@ -284,13 +295,15 @@ describe('handleRsvpReminder — all_day rendering (PR 2)', () => {
     const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
 
     await run(
-      handleRsvpReminder(makeEvent({ all_day: true, start_at: ALL_DAY_START_AT })),
+      handleRsvpReminder(
+        makeEvent({ all_day: true, start_at: ALL_DAY_START_AT, start_date: ALL_DAY_START_DATE }),
+      ),
       Layer.merge(rpcLayer, restLayer),
     );
 
     const dmCall = createMessageCalls.find(([channelId]) => channelId === 'dm-channel-id');
     expect(dmCall).toBeDefined();
-    const expectedWhen = `<t:${ALL_DAY_EPOCH}:D> (<t:${ALL_DAY_EPOCH}:R>)`;
+    const expectedWhen = `<t:${ALL_DAY_EPOCH}:D> (<t:${ALL_DAY_START_AT_EPOCH}:R>)`;
     const expectedDescription = m.bot_rsvp_reminder_dm_all_day(
       {
         title: 'Training Session',
@@ -300,6 +313,34 @@ describe('handleRsvpReminder — all_day rendering (PR 2)', () => {
       { locale: 'en' },
     );
     expect(dmCall?.[1].embeds?.[0]?.description).toBe(expectedDescription);
+  });
+
+  it('all-day regression (B1): embed field and DM sentence read start_date, not a UTC read of start_at', async () => {
+    // A Prague all-day event on 2026-09-16, stored at team-local midnight. A UTC read of
+    // this instant yields 2026-09-15 — one day early, for every viewer east of UTC (the
+    // entire default fleet). Reading `start_date` yields the correct 2026-09-16.
+    const startAt = DateTime.makeUnsafe('2026-09-15T22:00:00Z');
+    const startDate = Option.some('2026-09-16');
+    const correctEpoch = 1789560000; // 2026-09-16T12:00:00Z
+    const wrongEpoch = 1789473600; // 2026-09-15T12:00:00Z (the bug's output)
+
+    const { layer: rpcLayer } = makeRecordingSyncRpc({ nonResponders: ONE_NON_RESPONDER });
+    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(
+      handleRsvpReminder(makeEvent({ all_day: true, start_at: startAt, start_date: startDate })),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    const channelCall = createMessageCalls.find(([channelId]) => channelId === CHANNEL_ID);
+    const whenField = channelCall?.[1].embeds?.[0]?.fields?.[0];
+    expect(whenField?.value).toContain(`<t:${correctEpoch}:D>`);
+    expect(whenField?.value).not.toContain(`<t:${wrongEpoch}:D>`);
+
+    const dmCall = createMessageCalls.find(([channelId]) => channelId === 'dm-channel-id');
+    const description = dmCall?.[1].embeds?.[0]?.description ?? '';
+    expect(description).toContain(`<t:${correctEpoch}:D>`);
+    expect(description).not.toContain(`<t:${wrongEpoch}:D>`);
   });
 
   it('timed: channel embed "When" field is exactly <t:S:f> (<t:S:R>) — byte-identical baseline', async () => {

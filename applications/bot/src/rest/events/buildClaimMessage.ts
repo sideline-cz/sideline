@@ -1,7 +1,7 @@
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
-import { DateTime, Option } from 'effect';
+import { type DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
 import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
 import { formatEventWhen } from '~/rest/events/eventWhen.js';
@@ -23,7 +23,14 @@ export type ClaimedByEntry = {
 export const buildClaimMessage = (opts: {
   title: string;
   startAt: DateTime.Utc;
+  // Team-local calendar date projected by the server (§11.2/§11.4 of the plan); the caller
+  // falls back to `DateTime.formatIsoDateUtc(startAt)` when an older server hasn't shipped the
+  // field yet (rolling-deploy skew, §17.1 row 3).
+  startDate: string;
   endAt: Option.Option<DateTime.Utc>;
+  // Only meaningful when `endAt` is `Some` (§11.4: the caller derives the `Option` from `end_at`,
+  // not from `end_date`, which the server always sends non-null).
+  endDate: Option.Option<string>;
   location: Option.Option<string>;
   locationUrl: Option.Option<string>;
   description: Option.Option<string>;
@@ -58,12 +65,9 @@ export const buildClaimMessage = (opts: {
   // When field
   const when = formatEventWhen({
     startAt: opts.startAt,
-    // ⚠ the all-day branch takes DATES, not instants. This supplies the UTC date of the
-    // (still noon-anchored) instant, which is correct under the current storage anchor; a
-    // later change replaces it with the payload's real `start_date`/`end_date`.
-    startDate: DateTime.formatIsoDateUtc(opts.startAt),
+    startDate: opts.startDate,
     endAt: opts.endAt,
-    endDate: Option.map(opts.endAt, DateTime.formatIsoDateUtc),
+    endDate: opts.endDate,
     allDay: opts.allDay,
     locale,
   });

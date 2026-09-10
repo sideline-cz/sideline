@@ -12,7 +12,7 @@ import {
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { Textarea } from '~/components/ui/textarea';
-import { dateOnlyToUtc } from '~/lib/datetime.js';
+import { dateOnlyToUtcNoon } from '~/lib/datetime.js';
 import { parseAmount } from '~/lib/finance/parseAmount.js';
 import { tr } from '~/lib/translations.js';
 
@@ -88,7 +88,7 @@ export function RecordPaymentDialog({
     // Convert YYYY-MM-DD to DateTime.Utc anchored at noon to avoid timezone drift.
     // The schema (DateTimeFromIsoString = Schema.DateTimeUtcFromString) encodes
     // DateTime.Utc → ISO string automatically when the client sends the request.
-    const paidAtUtc: DateTime.Utc = dateOnlyToUtc(paidAt);
+    const paidAtUtc: DateTime.Utc = dateOnlyToUtcNoon(paidAt);
 
     const req: FinanceApi.RecordPaymentRequest = {
       amountMinor: Schema.decodeSync(Fee.AmountMinor)(amountMinor),

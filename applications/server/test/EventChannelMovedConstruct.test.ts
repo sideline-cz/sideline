@@ -59,6 +59,8 @@ const makeRow = (
   claimed_by_username: Option.none<string>(),
   event_all_day: false,
   teams_payload: Option.none<any>(),
+  event_start_date: '1970-01-01',
+  event_end_date: '1970-01-01',
 });
 
 // ---------------------------------------------------------------------------

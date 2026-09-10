@@ -2,7 +2,7 @@ import type { Event, TeamMember } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
-import { DateTime, Option } from 'effect';
+import { type DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
 import { formatEventWhen } from '~/rest/events/eventWhen.js';
 import { formatNameWithMention } from '../utils.js';
@@ -17,6 +17,10 @@ export const buildRosterApprovalMessage = (opts: {
   eventId: Event.EventId;
   eventTitle: string;
   startAt: DateTime.Utc;
+  // Team-local calendar date projected by the server (§11.2/§11.4 of the plan); the caller
+  // falls back to `DateTime.formatIsoDateUtc(startAt)` when an older server hasn't shipped the
+  // field yet (rolling-deploy skew, §17.1 row 3).
+  startDate: string;
   memberId: TeamMember.TeamMemberId;
   candidateDiscordId: Option.Option<string>;
   candidateDisplayName: Option.Option<string>;
@@ -50,10 +54,7 @@ export const buildRosterApprovalMessage = (opts: {
     name: m.bot_roster_approval_field_event({}, { locale }),
     value: `**${opts.eventTitle}** — ${formatEventWhen({
       startAt: opts.startAt,
-      // ⚠ the all-day branch takes DATES, not instants. This supplies the UTC date of the
-      // (still noon-anchored) instant, which is correct under the current storage anchor; a
-      // later change replaces it with the payload's real `start_date`.
-      startDate: DateTime.formatIsoDateUtc(opts.startAt),
+      startDate: opts.startDate,
       endAt: Option.none(),
       endDate: Option.none(),
       allDay: opts.allDay,

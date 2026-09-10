@@ -206,6 +206,17 @@ export class UpcomingEventForUserEntry extends Schema.Class<UpcomingEventForUser
    */
   my_response_actual: Schema.OptionFromOptionalKey(RsvpResponse),
   my_message: Schema.OptionFromNullOr(Schema.String),
+  /**
+   * Derived team-local calendar date (`YYYY-MM-DD`), projected server-side from
+   * `start_at`/`end_at` and the team's timezone (plan §11.2/§11.3). Feeds Discord's
+   * `buildUpcomingEventEmbed` (B0) render through `discordDateInstant`. `Option.none()`
+   * means the key was absent (old-server skew); the reader falls back to
+   * `DateTime.formatIsoDateUtc(start_at)`. Same `OptionFromOptionalKey` shape as
+   * `my_response_actual` above, for the identical rolling-deploy reason — never a plain
+   * string defaulted to `''` (see `EventApi.EventInfo.startDate`'s doc comment).
+   */
+  start_date: Schema.OptionFromOptionalKey(Schema.String),
+  end_date: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
 export class UpcomingEventsForUserResult extends Schema.Class<UpcomingEventsForUserResult>(

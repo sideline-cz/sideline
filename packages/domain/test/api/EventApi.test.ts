@@ -267,3 +267,129 @@ describe('UpdateEventRequest — encoding direction (regression for runtime cras
     expect(encoded.locationUrl).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// PR 3b — EventInfo/EventDetail.startDate/endDate: the derived team-local
+// calendar-date projection (plan §11.2, §11.3, §17.1 row 2).
+//
+// The field MUST be `Schema.OptionFromOptionalKey(Schema.String)`, never a
+// plain string with a `''` fallback (`withDecodingDefaultKey(() => '')`) —
+// see the plan's boxed warning in §11.2: an empty-string sentinel makes
+// `calendar-utils.ts`'s `key >= startDate && key <= endDate` false for every
+// real key, silently dropping the event from the calendar with no error.
+// `OptionFromOptionalKey` forces every reader's `onNone` branch to exist.
+//
+// Precedent for the exact absent-key / explicit-null semantics asserted here:
+// `EventRpcModels.ts`'s `my_response_actual` and `AgeThresholdCriteria`'s
+// `gender`/`requiredGroupId` (applications/server/test/AgeThreshold.test.ts).
+// ---------------------------------------------------------------------------
+
+const baseEventInfoWire = {
+  eventId: 'evt-1',
+  teamId: 'team-1',
+  title: 'Practice',
+  eventType: 'training',
+  trainingTypeName: null,
+  description: null,
+  imageUrl: null,
+  startAt: '2026-07-15T12:00:00.000Z',
+  endAt: null,
+  location: null,
+  locationUrl: null,
+  status: 'active',
+  allDay: true,
+  seriesId: null,
+};
+
+describe('EventInfo — startDate/endDate (PR 3b, derived team-local date projection)', () => {
+  it('decodes to Option.none() when the startDate/endDate keys are entirely absent (old-server skew, §17.1 row 2)', () => {
+    const result = Schema.decodeUnknownSync(EventApi.EventInfo)(baseEventInfoWire);
+    expect(result.startDate).toStrictEqual(Option.none());
+    expect(result.endDate).toStrictEqual(Option.none());
+  });
+
+  it('decodes a present startDate/endDate to Option.some(string), matching the YYYY-MM-DD shape', () => {
+    const result = Schema.decodeUnknownSync(EventApi.EventInfo)({
+      ...baseEventInfoWire,
+      startDate: '2026-07-15',
+      endDate: '2026-07-17',
+    });
+    expect(Option.isSome(result.startDate)).toBe(true);
+    expect(Option.isSome(result.endDate)).toBe(true);
+    expect(Option.getOrThrow(result.startDate)).toBe('2026-07-15');
+    expect(Option.getOrThrow(result.endDate)).toBe('2026-07-17');
+    expect(Option.getOrThrow(result.startDate)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(Option.getOrThrow(result.endDate)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  // The load-bearing rejection: `OptionFromOptionalKey` treats an EXPLICIT `null`
+  // as a decode error, unlike `OptionFromNullOr`. This is what distinguishes it
+  // from the rejected `''`-sentinel design — there is no silent "empty" value.
+  it('rejects an explicit null startDate — absent key and null are not the same', () => {
+    expect(() =>
+      Schema.decodeUnknownSync(EventApi.EventInfo)({
+        ...baseEventInfoWire,
+        startDate: null,
+      }),
+    ).toThrow();
+  });
+
+  it("does NOT decode an absent startDate as an empty string — the rejected `''` sentinel design", () => {
+    const result = Schema.decodeUnknownSync(EventApi.EventInfo)(baseEventInfoWire);
+    // If a future change regresses to `withDecodingDefaultKey(() => '')`, this
+    // would become `Option.some('')` — strictly wrong per §11.2's box, and the
+    // exact bug that makes an all-day event vanish from the calendar grid.
+    expect(result.startDate).not.toStrictEqual(Option.some(''));
+  });
+});
+
+describe('EventDetail — startDate/endDate (PR 3b)', () => {
+  const baseEventDetailWire = {
+    eventId: 'evt-1',
+    teamId: 'team-1',
+    title: 'Practice',
+    eventType: 'training',
+    trainingTypeId: null,
+    trainingTypeName: null,
+    description: null,
+    imageUrl: null,
+    startAt: '2026-07-15T12:00:00.000Z',
+    endAt: null,
+    location: null,
+    locationUrl: null,
+    status: 'active',
+    allDay: true,
+    createdByName: null,
+    canEdit: true,
+    canCancel: true,
+    seriesId: null,
+    seriesModified: false,
+    ownerGroupId: null,
+    ownerGroupName: null,
+    memberGroupId: null,
+    memberGroupName: null,
+  };
+
+  it('decodes to Option.none() when startDate/endDate keys are absent', () => {
+    const result = Schema.decodeUnknownSync(EventApi.EventDetail)(baseEventDetailWire);
+    expect(result.startDate).toStrictEqual(Option.none());
+    expect(result.endDate).toStrictEqual(Option.none());
+  });
+
+  it('decodes a present startDate to Option.some(string) — the edit form default source (W3)', () => {
+    const result = Schema.decodeUnknownSync(EventApi.EventDetail)({
+      ...baseEventDetailWire,
+      startDate: '2026-01-14',
+    });
+    expect(Option.getOrThrow(result.startDate)).toBe('2026-01-14');
+  });
+
+  it('rejects an explicit null startDate on EventDetail too', () => {
+    expect(() =>
+      Schema.decodeUnknownSync(EventApi.EventDetail)({
+        ...baseEventDetailWire,
+        startDate: null,
+      }),
+    ).toThrow();
+  });
+});

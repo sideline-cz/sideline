@@ -1,6 +1,6 @@
 import { Discord, type EventRpcEvents } from '@sideline/domain';
 import { DiscordREST } from 'dfx/DiscordREST';
-import { Effect, Option, Schema } from 'effect';
+import { DateTime, Effect, Option, Schema } from 'effect';
 import { buildRosterApprovalMessage } from '~/rest/events/buildRosterApprovalMessage.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
@@ -26,10 +26,17 @@ export const handleEventRosterApprovalRequest = (
         Effect.bind('rpc', () => SyncRpc.asEffect()),
         Effect.bind('rest', () => DiscordREST.asEffect()),
         Effect.flatMap(({ rpc, rest }) => {
+          // ⚠ the all-day branch takes DATES, not instants (§11.4 of the plan).
+          // `event.start_date` is the team-local calendar date projected by the server; fall
+          // back to the UTC date of the instant when an older server hasn't shipped the field
+          // yet (rolling-deploy skew, §17.1 row 3).
           const payload = buildRosterApprovalMessage({
             eventId: event.event_id,
             eventTitle: event.title,
             startAt: event.start_at,
+            startDate: Option.getOrElse(event.start_date, () =>
+              DateTime.formatIsoDateUtc(event.start_at),
+            ),
             memberId: event.team_member_id,
             candidateDiscordId: event.candidate_discord_id,
             candidateDisplayName: event.candidate_display_name,

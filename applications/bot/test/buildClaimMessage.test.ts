@@ -8,7 +8,13 @@ const locale = 'en' as const;
 const baseOpts = {
   title: 'Tuesday Training',
   startAt: DateTime.makeUnsafe('2023-11-14T22:13:20.000Z'),
+  // PR 3b (all-day-discord-start-time-plan.md §11.1 row B1-B5): `startDate`/`endDate` are new
+  // required fields on buildClaimMessage's opts, carrying the team-local calendar date
+  // derived server-side. Only meaningful for the all-day branch — a fixed UTC-date string
+  // here keeps every pre-existing (timed) test in this file byte-for-byte unchanged.
+  startDate: '2023-11-14',
   endAt: Option.none<DateTime.Utc>(),
+  endDate: Option.none<string>(),
   description: Option.none<string>(),
   claimedBy: Option.none<ClaimedByEntry>(),
   eventStatus: 'active',
@@ -126,10 +132,16 @@ describe('buildClaimMessage — Status field with new claimedBy shape', () => {
 // PR 1 §7.4 — all-day "When" field: date, not a fake noon clock time.
 // Plan: all-day-discord-start-time-plan.md §7.4, builder tests for buildClaimMessage.
 // ---------------------------------------------------------------------------
-describe('buildClaimMessage — When field with allDay (PR 1)', () => {
+describe('buildClaimMessage — When field with allDay (PR 1 / PR 3b)', () => {
   const ALL_DAY_MARKER = ` · ${m.bot_embed_all_day({}, { locale: 'en' })}`;
   const NOON_JUL_15 = DateTime.makeUnsafe('2026-07-15T12:00:00Z'); // 1784116800
-  const NOON_JUL_17 = DateTime.makeUnsafe('2026-07-17T12:00:00Z'); // 1784289600
+  const _NOON_JUL_17 = DateTime.makeUnsafe('2026-07-17T12:00:00Z'); // 1784289600
+  // Team-local midnight anchor (a Prague event on 2026-07-15 is stored at
+  // 2026-07-14T22:00:00Z, CEST +02:00), NOT the retired noon-UTC sentinel. The byte-exact
+  // assertions below only pass if the code reads `startDate`/`endDate`, not a UTC read of
+  // `startAt`/`endAt` (which would yield 2026-07-14/16 — one day early).
+  const MIDNIGHT_JUL_15 = DateTime.makeUnsafe('2026-07-14T22:00:00Z');
+  const MIDNIGHT_JUL_17 = DateTime.makeUnsafe('2026-07-16T22:00:00Z');
 
   it('allDay true, no end → When field is exactly <t:S:D> · All day', () => {
     const { embeds } = buildClaimMessage({
@@ -137,7 +149,8 @@ describe('buildClaimMessage — When field with allDay (PR 1)', () => {
       location: Option.none(),
       locationUrl: Option.none(),
       allDay: true,
-      startAt: NOON_JUL_15,
+      startAt: MIDNIGHT_JUL_15,
+      startDate: '2026-07-15',
       endAt: Option.none(),
     });
     const fields = embeds[0].fields ?? [];
@@ -151,8 +164,10 @@ describe('buildClaimMessage — When field with allDay (PR 1)', () => {
       location: Option.none(),
       locationUrl: Option.none(),
       allDay: true,
-      startAt: NOON_JUL_15,
-      endAt: Option.some(NOON_JUL_17),
+      startAt: MIDNIGHT_JUL_15,
+      startDate: '2026-07-15',
+      endAt: Option.some(MIDNIGHT_JUL_17),
+      endDate: Option.some('2026-07-17'),
     });
     const fields = embeds[0].fields ?? [];
     const whenField = fields.find((f) => f.name === m.bot_embed_when({}, { locale }));
@@ -166,6 +181,7 @@ describe('buildClaimMessage — When field with allDay (PR 1)', () => {
       locationUrl: Option.none(),
       allDay: true,
       startAt: NOON_JUL_15,
+      startDate: '2026-07-15',
       endAt: Option.none(),
     });
     expect(embeds[0].description).toContain('<t:1784116800:R>');
@@ -183,5 +199,24 @@ describe('buildClaimMessage — When field with allDay (PR 1)', () => {
     const fields = embeds[0].fields ?? [];
     const whenField = fields.find((f) => f.name === m.bot_embed_when({}, { locale }));
     expect(whenField?.value).toBe('<t:1784116800:f>');
+  });
+
+  it('all-day regression (B1): reads startDate, not a UTC read of startAt', () => {
+    // A Prague all-day event on 2026-09-16, stored at team-local midnight. A UTC read of
+    // this instant yields 2026-09-15 — one day early, for every viewer east of UTC (the
+    // entire default fleet). Reading `startDate` yields the correct 2026-09-16.
+    const { embeds } = buildClaimMessage({
+      ...baseOpts,
+      location: Option.none(),
+      locationUrl: Option.none(),
+      allDay: true,
+      startAt: DateTime.makeUnsafe('2026-09-15T22:00:00Z'),
+      startDate: '2026-09-16',
+      endAt: Option.none(),
+    });
+    const fields = embeds[0].fields ?? [];
+    const whenField = fields.find((f) => f.name === m.bot_embed_when({}, { locale }));
+    expect(whenField?.value).toContain('<t:1789560000:D>'); // 2026-09-16T12:00:00Z
+    expect(whenField?.value).not.toContain('<t:1789473600:D>'); // 2026-09-15T12:00:00Z
   });
 });

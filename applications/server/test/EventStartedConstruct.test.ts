@@ -40,6 +40,8 @@ describe('constructEvent with event_started type', () => {
           claimed_by_username: Option.none(),
           event_all_day: false,
           teams_payload: Option.none(),
+          event_start_date: '2026-04-09',
+          event_end_date: '2026-04-09',
         }),
       ),
       Effect.tap(({ result }) =>
@@ -85,6 +87,8 @@ describe('constructEvent with event_started type', () => {
           claimed_by_username: Option.none(),
           event_all_day: false,
           teams_payload: Option.none(),
+          event_start_date: '2026-04-09',
+          event_end_date: '2026-04-09',
         }),
       ),
       Effect.tap(({ result }) =>
@@ -136,6 +140,8 @@ describe('constructEvent with event_started type', () => {
     claimed_by_username: Option.none(),
     event_all_day: eventAllDay,
     teams_payload: Option.none(),
+    event_start_date: '2026-04-09',
+    event_end_date: '2026-04-09',
   });
 
   for (const allDay of [true, false]) {
@@ -263,6 +269,8 @@ describe('constructEvent with event_started type', () => {
           claimed_by_username: Option.none(),
           event_all_day: false,
           teams_payload: Option.none(),
+          event_start_date: '2026-04-09',
+          event_end_date: '2026-04-09',
         }),
       ),
       Effect.tap(({ result }) =>

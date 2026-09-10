@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from '~/components/ui/select';
 import { Textarea } from '~/components/ui/textarea';
-import { dateOnlyToUtc, formatLocalDate } from '~/lib/datetime.js';
+import { dateOnlyToUtcNoon, formatLocalDate } from '~/lib/datetime.js';
 import { parseAmount } from '~/lib/finance/parseAmount.js';
 import { tr } from '~/lib/translations.js';
 
@@ -162,8 +162,8 @@ export function ExpenseFormDialog(props: ExpenseFormDialogProps) {
     }
 
     const spentAtUtc = values.spentAt
-      ? dateOnlyToUtc(values.spentAt)
-      : dateOnlyToUtc(new Date().toISOString().split('T')[0]);
+      ? dateOnlyToUtcNoon(values.spentAt)
+      : dateOnlyToUtcNoon(new Date().toISOString().split('T')[0]);
 
     if (props.mode === 'edit') {
       props.onSubmit({

@@ -204,6 +204,8 @@ const makeEventRow = (
   claim_discord_channel_id: Option.none(),
   claim_discord_message_id: Option.none(),
   all_day: false,
+  start_date: '2099-07-01',
+  end_date: '2099-07-01',
 });
 
 const EVENT_A = makeEventRow(TEST_EVENT_ID_A, Option.some(GROUP_A), 'Event A');

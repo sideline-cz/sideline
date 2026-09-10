@@ -1,6 +1,6 @@
 import type { EventRpcEvents } from '@sideline/domain';
 import { DiscordREST } from 'dfx/DiscordREST';
-import { Effect, Option, Schema } from 'effect';
+import { DateTime, Effect, Option, Schema } from 'effect';
 import { guildLocale } from '~/locale.js';
 import { buildClaimMessage } from '~/rest/events/buildClaimMessage.js';
 import { DfxGuild } from '~/schemas.js';
@@ -40,10 +40,20 @@ export const handleTrainingClaimUpdate = (event: EventRpcEvents.TrainingClaimUpd
             username: event.claimed_by_username,
           });
 
+          // ⚠ the all-day branch takes DATES, not instants (§11.4 of the plan).
+          // `event.start_date`/`end_date` are the team-local calendar dates projected by the
+          // server; fall back to the UTC date of the instant when an older server hasn't
+          // shipped the field yet (rolling-deploy skew, §17.1 row 3).
           const payload = buildClaimMessage({
             title: event.title,
             startAt: event.start_at,
+            startDate: Option.getOrElse(event.start_date, () =>
+              DateTime.formatIsoDateUtc(event.start_at),
+            ),
             endAt: event.end_at,
+            endDate: Option.map(event.end_at, (endAt) =>
+              Option.getOrElse(event.end_date, () => DateTime.formatIsoDateUtc(endAt)),
+            ),
             location: event.location,
             locationUrl: event.location_url,
             description: event.description,

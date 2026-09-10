@@ -43,6 +43,14 @@ class EventWithDetails extends Schema.Class<EventWithDetails>('EventWithDetails'
   claim_discord_message_id: Schema.OptionFromNullOr(Discord.Snowflake),
   all_day: Schema.Boolean,
   personal_messages_dirty_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
+  // Derived team-local calendar date (plan §11.2/§11.3), projected in SQL from
+  // `start_at`/`end_at` and the team's timezone. Always present — this is the
+  // server's own row, decoded from its own query, not a wire field — so it is a
+  // plain `Schema.String`, not `OptionFromOptionalKey`. The `::date::text` cast in
+  // the query is mandatory: a bare `::date` comes back as a JS `Date`, which this
+  // schema would reject.
+  start_date: Schema.String,
+  end_date: Schema.String,
 }) {}
 
 class EventRow extends Schema.Class<EventRow>('EventRow')({
@@ -64,6 +72,9 @@ class EventRow extends Schema.Class<EventRow>('EventRow')({
   owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   all_day: Schema.Boolean,
+  // See `EventWithDetails.start_date` above — same derived projection (plan §11.2/§11.3).
+  start_date: Schema.String,
+  end_date: Schema.String,
 }) {}
 
 const EventInsertInput = Schema.Struct({
@@ -126,7 +137,12 @@ const make = Effect.gen(function* () {
                    e.claim_discord_channel_id,
                    e.claim_discord_message_id,
                    e.all_day,
-                   e.personal_messages_dirty_at
+                   e.personal_messages_dirty_at,
+                   (e.start_at AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                       AS start_date,
+                   (COALESCE(e.end_at, e.start_at)
+                       AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                       AS end_date
             FROM events e
             LEFT JOIN training_types tt ON tt.id = e.training_type_id
             LEFT JOIN team_members tm ON tm.id = e.created_by
@@ -135,6 +151,7 @@ const make = Effect.gen(function* () {
             LEFT JOIN groups mg ON mg.id = e.member_group_id
             LEFT JOIN team_members ctm ON ctm.id = e.claimed_by
             LEFT JOIN users cu ON cu.id = ctm.user_id
+            LEFT JOIN team_settings ts ON ts.team_id = e.team_id
             WHERE e.team_id = ${teamId}
             ORDER BY e.start_at ASC
           `,
@@ -158,7 +175,12 @@ const make = Effect.gen(function* () {
                    e.claim_discord_channel_id,
                    e.claim_discord_message_id,
                    e.all_day,
-                   e.personal_messages_dirty_at
+                   e.personal_messages_dirty_at,
+                   (e.start_at AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                       AS start_date,
+                   (COALESCE(e.end_at, e.start_at)
+                       AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                       AS end_date
             FROM events e
             LEFT JOIN training_types tt ON tt.id = e.training_type_id
             LEFT JOIN team_members tm ON tm.id = e.created_by
@@ -167,6 +189,7 @@ const make = Effect.gen(function* () {
             LEFT JOIN groups mg ON mg.id = e.member_group_id
             LEFT JOIN team_members ctm ON ctm.id = e.claimed_by
             LEFT JOIN users cu ON cu.id = ctm.user_id
+            LEFT JOIN team_settings ts ON ts.team_id = e.team_id
             WHERE e.id = ${id}
           `,
   });
@@ -175,18 +198,28 @@ const make = Effect.gen(function* () {
     Request: EventInsertInput,
     Result: EventRow,
     execute: (input) => sql`
-            INSERT INTO events (team_id, training_type_id, event_type, title, description,
-                                image_url, start_at, end_at, location, location_url, created_by, series_id,
-                                owner_group_id, member_group_id, all_day)
-            VALUES (${input.team_id}, ${input.training_type_id}, ${input.event_type},
-                    ${input.title}, ${input.description}, ${input.image_url}, ${input.start_at},
-                    ${input.end_at}, ${input.location}, ${input.location_url}, ${input.created_by},
-                    ${input.series_id},
-                    ${input.owner_group_id}, ${input.member_group_id}, ${input.all_day})
-            RETURNING id, team_id, training_type_id, event_type, title, description,
-                      image_url, start_at, end_at, location, location_url, status,
-                      created_by, series_id, series_modified,
-                      owner_group_id, member_group_id, all_day
+            WITH inserted AS (
+              INSERT INTO events (team_id, training_type_id, event_type, title, description,
+                                  image_url, start_at, end_at, location, location_url, created_by, series_id,
+                                  owner_group_id, member_group_id, all_day)
+              VALUES (${input.team_id}, ${input.training_type_id}, ${input.event_type},
+                      ${input.title}, ${input.description}, ${input.image_url}, ${input.start_at},
+                      ${input.end_at}, ${input.location}, ${input.location_url}, ${input.created_by},
+                      ${input.series_id},
+                      ${input.owner_group_id}, ${input.member_group_id}, ${input.all_day})
+              RETURNING id, team_id, training_type_id, event_type, title, description,
+                        image_url, start_at, end_at, location, location_url, status,
+                        created_by, series_id, series_modified,
+                        owner_group_id, member_group_id, all_day
+            )
+            SELECT inserted.*,
+                   (inserted.start_at AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                       AS start_date,
+                   (COALESCE(inserted.end_at, inserted.start_at)
+                       AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                       AS end_date
+            FROM inserted
+            LEFT JOIN team_settings ts ON ts.team_id = inserted.team_id
           `,
   });
 
@@ -194,25 +227,35 @@ const make = Effect.gen(function* () {
     Request: EventUpdateInput,
     Result: EventRow,
     execute: (input) => sql`
-            UPDATE events SET
-              title = ${input.title},
-              event_type = ${input.event_type},
-              training_type_id = ${input.training_type_id},
-              description = ${input.description},
-              image_url = ${input.image_url},
-              start_at = ${input.start_at},
-              end_at = ${input.end_at},
-              location = ${input.location},
-              location_url = ${input.location_url},
-              owner_group_id = ${input.owner_group_id},
-              member_group_id = ${input.member_group_id},
-              all_day = ${input.all_day},
-              updated_at = now()
-            WHERE id = ${input.id}
-            RETURNING id, team_id, training_type_id, event_type, title, description,
-                      image_url, start_at, end_at, location, location_url, status,
-                      created_by, series_id, series_modified,
-                      owner_group_id, member_group_id, all_day
+            WITH updated AS (
+              UPDATE events SET
+                title = ${input.title},
+                event_type = ${input.event_type},
+                training_type_id = ${input.training_type_id},
+                description = ${input.description},
+                image_url = ${input.image_url},
+                start_at = ${input.start_at},
+                end_at = ${input.end_at},
+                location = ${input.location},
+                location_url = ${input.location_url},
+                owner_group_id = ${input.owner_group_id},
+                member_group_id = ${input.member_group_id},
+                all_day = ${input.all_day},
+                updated_at = now()
+              WHERE id = ${input.id}
+              RETURNING id, team_id, training_type_id, event_type, title, description,
+                        image_url, start_at, end_at, location, location_url, status,
+                        created_by, series_id, series_modified,
+                        owner_group_id, member_group_id, all_day
+            )
+            SELECT updated.*,
+                   (updated.start_at AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                       AS start_date,
+                   (COALESCE(updated.end_at, updated.start_at)
+                       AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                       AS end_date
+            FROM updated
+            LEFT JOIN team_settings ts ON ts.team_id = updated.team_id
           `,
   });
 
@@ -461,13 +504,18 @@ const make = Effect.gen(function* () {
       member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
       my_rsvp: Schema.OptionFromNullOr(EventRsvp.RsvpResponse),
       all_day: Schema.Boolean,
+      // See `EventWithDetails.start_date` — same derived projection (plan §11.2/§11.3).
+      start_date: Schema.String,
     }),
     execute: (input) => sql`
       SELECT e.id, e.title, e.event_type, e.start_at, e.end_at,
              e.location, e.location_url, e.member_group_id, e.all_day,
-             er.response AS my_rsvp
+             er.response AS my_rsvp,
+             (e.start_at AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                 AS start_date
       FROM events e
       LEFT JOIN event_rsvps er ON er.event_id = e.id AND er.team_member_id = ${input.team_member_id}
+      LEFT JOIN team_settings ts ON ts.team_id = e.team_id
       WHERE e.team_id = ${input.team_id}
         AND e.status = 'active'
         AND e.start_at >= now()
@@ -606,15 +654,21 @@ const make = Effect.gen(function* () {
       team_name: Schema.String,
       rsvp_response: Schema.String,
       all_day: Schema.Boolean,
+      // Team's configured timezone (plan §11.1 row S1), used to project the calendar
+      // date for the iCal feed's `VALUE=DATE` all-day events. This feed is cross-team
+      // (JOIN teams), so the zone must be carried per row, not fetched once.
+      team_timezone: Schema.String,
     }),
     execute: (userId) => sql`
             SELECT e.id, e.title, e.description, e.image_url, e.start_at, e.end_at,
                    e.location, e.location_url, e.status, e.event_type, t.name AS team_name,
-                   er.response AS rsvp_response, e.all_day
+                   er.response AS rsvp_response, e.all_day,
+                   COALESCE(ts.timezone, 'Europe/Prague') AS team_timezone
             FROM events e
             JOIN teams t ON t.id = e.team_id
             JOIN team_members tm ON tm.team_id = t.id AND tm.active = true
             JOIN event_rsvps er ON er.event_id = e.id AND er.team_member_id = tm.id
+            LEFT JOIN team_settings ts ON ts.team_id = t.id
             WHERE tm.user_id = ${userId}
               AND e.status IN ('active', 'started')
               AND er.response IN ('yes', 'maybe', 'coming_later')

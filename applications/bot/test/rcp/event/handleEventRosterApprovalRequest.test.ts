@@ -58,6 +58,7 @@ const makeApprovalRequestEvent = (
     owner_channel_id: Option.some(OWNER_CHANNEL_ID),
     roster_name: Option.some('Tournament Squad'),
     all_day: false,
+    start_date: Option.none(),
     ...overrides,
   }) as any;
 
@@ -459,10 +460,15 @@ describe('handleEventRosterApprovalRequest — all_day forwarding (PR 2)', () =>
     const { calls: restCalls, layer: restLayer } = makeRecordingRest();
     const { layer: rpcLayer } = makeRecordingRpc();
 
+    // Team-local midnight anchor (a Prague event on 2026-07-15 is stored at
+    // 2026-07-14T22:00:00Z, CEST +02:00), NOT the retired noon-UTC sentinel. The byte-exact
+    // assertion below only passes if the code reads `start_date`, not a UTC read of
+    // `start_at` (which would yield 2026-07-14 — one day early).
     const event = makeApprovalRequestEvent({
       owners_thread_id: Option.none(),
       all_day: true,
-      start_at: DateTime.makeUnsafe('2026-07-15T12:00:00Z'),
+      start_at: DateTime.makeUnsafe('2026-07-14T22:00:00Z'),
+      start_date: Option.some('2026-07-15'),
     });
 
     await Effect.runPromise(
@@ -476,6 +482,33 @@ describe('handleEventRosterApprovalRequest — all_day forwarding (PR 2)', () =>
     const eventField = payload.embeds?.[0]?.fields?.[0];
     const marker = m.bot_embed_all_day({}, { locale: 'en' });
     expect(eventField?.value).toBe(`**Summer Tournament** — <t:1784116800:D> · ${marker}`);
+  });
+
+  it('all-day regression (B1): "Event" field reads start_date, not a UTC read of start_at', async () => {
+    const { calls: restCalls, layer: restLayer } = makeRecordingRest();
+    const { layer: rpcLayer } = makeRecordingRpc();
+
+    // A Prague all-day event on 2026-09-16, stored at team-local midnight. A UTC read of
+    // this instant yields 2026-09-15 — one day early, for every viewer east of UTC (the
+    // entire default fleet). Reading `start_date` yields the correct 2026-09-16.
+    const event = makeApprovalRequestEvent({
+      owners_thread_id: Option.none(),
+      all_day: true,
+      start_at: DateTime.makeUnsafe('2026-09-15T22:00:00Z'),
+      start_date: Option.some('2026-09-16'),
+    });
+
+    await Effect.runPromise(
+      handleEventRosterApprovalRequest(event).pipe(
+        Effect.provide(Layer.merge(restLayer, rpcLayer)),
+      ),
+    );
+
+    expect(restCalls.createMessage).toHaveLength(1);
+    const [, payload] = restCalls.createMessage[0] as [string, any];
+    const eventField = payload.embeds?.[0]?.fields?.[0];
+    expect(eventField?.value).toContain('<t:1789560000:D>'); // 2026-09-16T12:00:00Z
+    expect(eventField?.value).not.toContain('<t:1789473600:D>'); // 2026-09-15T12:00:00Z
   });
 
   it('timed (default): "Event" field is exactly **{title}** — <t:S:f>', async () => {

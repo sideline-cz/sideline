@@ -248,7 +248,15 @@ type EventRecord = {
   member_group_id: Option.Option<string>;
   owner_group_name: Option.Option<string>;
   member_group_name: Option.Option<string>;
+  start_date: string;
+  end_date: string;
 };
+
+// Mirrors the server-side `::date::text` projection (plan §11.2/§11.3), but this
+// mock has no team_settings row to read a timezone from — anchor-neutral UTC-date
+// is exactly right for these unit tests, none of which assert cross-timezone
+// behaviour (that's covered by the dedicated integration tests).
+const toDateOnly = (dt: DateTime.Utc): string => DateTime.formatIsoDateUtc(dt);
 
 let eventsStore: Map<Event.EventId, EventRecord>;
 
@@ -283,6 +291,8 @@ const resetStores = () => {
     member_group_id: Option.none(),
     owner_group_name: Option.none(),
     member_group_name: Option.none(),
+    start_date: '2026-03-10',
+    end_date: '2026-03-10',
   });
   eventsStore.set(TEST_EVENT_2, {
     id: TEST_EVENT_2,
@@ -308,6 +318,8 @@ const resetStores = () => {
     member_group_id: Option.none(),
     owner_group_name: Option.none(),
     member_group_name: Option.none(),
+    start_date: '2026-03-15',
+    end_date: '2026-03-15',
   });
   eventsStore.set(TEST_EVENT_SCOPED, {
     id: TEST_EVENT_SCOPED,
@@ -333,6 +345,8 @@ const resetStores = () => {
     member_group_id: Option.none(),
     owner_group_name: Option.none(),
     member_group_name: Option.none(),
+    start_date: '2026-03-12',
+    end_date: '2026-03-12',
   });
   eventsStore.set(TEST_EVENT_WITH_IMAGE, {
     id: TEST_EVENT_WITH_IMAGE,
@@ -358,6 +372,8 @@ const resetStores = () => {
     member_group_id: Option.none(),
     owner_group_name: Option.none(),
     member_group_name: Option.none(),
+    start_date: '2026-03-20',
+    end_date: '2026-03-20',
   });
   // Event scoped to a member group the test user is NOT a part of. The mock
   // GroupsRepository.getDescendantMemberIds returns [], so checkGroupAccess
@@ -386,6 +402,8 @@ const resetStores = () => {
     member_group_id: Option.some(TEST_OTHER_GROUP_ID),
     owner_group_name: Option.some('Other Group'),
     member_group_name: Option.some('Other Group'),
+    start_date: '2026-03-22',
+    end_date: '2026-03-22',
   });
 };
 
@@ -599,6 +617,8 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       member_group_id: Option.none(),
       owner_group_name: Option.none(),
       member_group_name: Option.none(),
+      start_date: toDateOnly(input.start_at),
+      end_date: toDateOnly(Option.getOrElse(input.end_at, () => input.start_at)),
     };
     eventsStore.set(id, record);
     return Effect.succeed({
@@ -621,6 +641,8 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       discord_target_channel_id: Option.none(),
       owner_group_id: Option.none(),
       member_group_id: Option.none(),
+      start_date: record.start_date,
+      end_date: record.end_date,
     });
   },
   insertEvent: (input: {
@@ -661,6 +683,8 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       member_group_id: Option.none(),
       owner_group_name: Option.none(),
       member_group_name: Option.none(),
+      start_date: toDateOnly(input.startAt),
+      end_date: toDateOnly(Option.getOrElse(input.endAt, () => input.startAt)),
     };
     eventsStore.set(id, record);
     return Effect.succeed({
@@ -683,6 +707,8 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       discord_target_channel_id: Option.none(),
       owner_group_id: Option.none(),
       member_group_id: Option.none(),
+      start_date: record.start_date,
+      end_date: record.end_date,
     });
   },
   update: (input: {
@@ -708,6 +734,8 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       start_at: input.start_at,
       end_at: input.end_at,
       location: input.location,
+      start_date: toDateOnly(input.start_at),
+      end_date: toDateOnly(Option.getOrElse(input.end_at, () => input.start_at)),
     };
     eventsStore.set(input.id, updated);
     return Effect.succeed({
@@ -728,6 +756,8 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       discord_target_channel_id: updated.discord_target_channel_id,
       owner_group_id: updated.owner_group_id,
       member_group_id: updated.member_group_id,
+      start_date: updated.start_date,
+      end_date: updated.end_date,
     });
   },
   updateEvent: (input: {
@@ -753,6 +783,8 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       start_at: input.startAt,
       end_at: input.endAt,
       location: input.location,
+      start_date: toDateOnly(input.startAt),
+      end_date: toDateOnly(Option.getOrElse(input.endAt, () => input.startAt)),
     };
     eventsStore.set(input.id, updated);
     return Effect.succeed({
@@ -773,6 +805,8 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       discord_target_channel_id: updated.discord_target_channel_id,
       owner_group_id: updated.owner_group_id,
       member_group_id: updated.member_group_id,
+      start_date: updated.start_date,
+      end_date: updated.end_date,
     });
   },
   cancel: (id: Event.EventId) => {

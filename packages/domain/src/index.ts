@@ -27,6 +27,12 @@ export * as Auth from './api/Auth.js';
 
 export * as ChannelApi from './api/ChannelApi.js';
 
+/**
+ * Derived team-local calendar date (`YYYY-MM-DD`), plan §11.2/§11.3. `Option.none()`
+ * means the key was absent (old-server skew) and the reader falls back to
+ * `formatUtcDate(startAt)`. Deliberately `OptionFromOptionalKey`, never a plain string
+ * defaulted to `''` — see `EventApi.EventInfo.startDate`'s doc comment.
+ */
 export * as DashboardApi from './api/DashboardApi.js';
 
 export * as DashboardLayoutApi from './api/DashboardLayoutApi.js';
@@ -36,6 +42,15 @@ export * as DashboardLayoutApi from './api/DashboardLayoutApi.js';
  */
 export * as EmailForwardingApi from './api/EmailForwardingApi.js';
 
+/**
+ * Derived team-local calendar date (`YYYY-MM-DD`), projected server-side from
+ * `startAt`/`endAt` and the team's timezone (plan §11.2/§11.3). `Option.none()`
+ * means the key was entirely absent — an old server during a rolling deploy — and
+ * every reader must fall back to `formatUtcDate(startAt)`. Deliberately
+ * `OptionFromOptionalKey`, never a plain string defaulted to `''`: an empty-string
+ * sentinel would make the web calendar's `key >= startDate && key <= endDate`
+ * bucketing false for every real key and silently drop the event from the grid.
+ */
 export * as EventApi from './api/EventApi.js';
 
 export * as EventRosterApi from './api/EventRosterApi.js';

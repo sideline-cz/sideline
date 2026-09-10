@@ -79,6 +79,12 @@ export class EventStartedEvent extends Schema.TaggedClass<EventStartedEvent>()('
   discord_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
   discord_role_id: Schema.OptionFromNullOr(Discord.Snowflake),
   claimed_by_discord_id: Schema.OptionFromNullOr(Discord.Snowflake),
+  // Derived team-local calendar date (plan §11.2/§11.3), projected at send time in the
+  // unprocessed-events query. `Option.none()` = an old server omitted the key; the bot
+  // falls back to `DateTime.formatIsoDateUtc(start_at)`/`(end_at)` via `discordDateInstant`.
+  // OptionFromOptionalKey, never a plain string defaulted to `''` (§11.2's boxed warning).
+  start_date: Schema.OptionFromOptionalKey(Schema.String),
+  end_date: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
 export class RsvpReminderEvent extends Schema.TaggedClass<RsvpReminderEvent>()('rsvp_reminder', {
@@ -96,6 +102,9 @@ export class RsvpReminderEvent extends Schema.TaggedClass<RsvpReminderEvent>()('
   // stops the entire Discord event sync — see
   // applications/bot/src/rcp/event/ProcessorService.ts:96-108 and §8.2.
   all_day: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
+  // Derived team-local calendar date (plan §11.2/§11.3). See `EventStartedEvent.start_date`
+  // above. No `end_date` here — this payload has no `end_at` to derive one from.
+  start_date: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
 export class TrainingClaimRequestEvent extends Schema.TaggedClass<TrainingClaimRequestEvent>()(
@@ -119,6 +128,9 @@ export class TrainingClaimRequestEvent extends Schema.TaggedClass<TrainingClaimR
     // stops the entire Discord event sync — see
     // applications/bot/src/rcp/event/ProcessorService.ts:96-108 and §8.2.
     all_day: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
+    // Derived team-local calendar date (plan §11.2/§11.3). See `EventStartedEvent.start_date`.
+    start_date: Schema.OptionFromOptionalKey(Schema.String),
+    end_date: Schema.OptionFromOptionalKey(Schema.String),
   },
 ) {}
 
@@ -149,6 +161,9 @@ export class TrainingClaimUpdateEvent extends Schema.TaggedClass<TrainingClaimUp
     // stops the entire Discord event sync — see
     // applications/bot/src/rcp/event/ProcessorService.ts:96-108 and §8.2.
     all_day: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
+    // Derived team-local calendar date (plan §11.2/§11.3). See `EventStartedEvent.start_date`.
+    start_date: Schema.OptionFromOptionalKey(Schema.String),
+    end_date: Schema.OptionFromOptionalKey(Schema.String),
   },
 ) {}
 
@@ -173,6 +188,9 @@ export class UnclaimedTrainingReminderEvent extends Schema.TaggedClass<Unclaimed
     // stops the entire Discord event sync — see
     // applications/bot/src/rcp/event/ProcessorService.ts:96-108 and §8.2.
     all_day: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
+    // Derived team-local calendar date (plan §11.2/§11.3). See `EventStartedEvent.start_date`.
+    start_date: Schema.OptionFromOptionalKey(Schema.String),
+    end_date: Schema.OptionFromOptionalKey(Schema.String),
   },
 ) {}
 
@@ -214,6 +232,9 @@ export class EventRosterApprovalRequestEvent extends Schema.TaggedClass<EventRos
     // stops the entire Discord event sync — see
     // applications/bot/src/rcp/event/ProcessorService.ts:96-108 and §8.2.
     all_day: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
+    // Derived team-local calendar date (plan §11.2/§11.3). See `EventStartedEvent.start_date`
+    // above. No `end_date` here — this payload has no `end_at` to derive one from.
+    start_date: Schema.OptionFromOptionalKey(Schema.String),
   },
 ) {}
 

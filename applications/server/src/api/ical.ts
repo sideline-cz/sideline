@@ -123,6 +123,7 @@ const buildICalFeed = (
     team_name: string;
     rsvp_response: string;
     all_day: boolean;
+    team_timezone: string;
   }>,
   paymentRows: ReadonlyArray<PaymentRow>,
   now: DateTime.Utc,
@@ -150,12 +151,19 @@ const buildICalFeed = (
     lines.push(`UID:${event.id}@sideline`);
     lines.push(`DTSTAMP:${dtstamp}`);
     if (event.all_day) {
-      const startDate = formatDateOnly(new Date(DateTime.toEpochMillis(event.start_at)), 'UTC');
+      // Team-local calendar date (plan §11.1 row S1, §11.2/§11.3): the anchor is now
+      // read in the team's own timezone, not hard-coded UTC, so this row renders the
+      // same date the team intended regardless of the reader's/server's zone. `DTEND`
+      // stays exclusive (`addOneDay` — §11.1 row S2, anchor-independent, untouched).
+      const startDate = formatDateOnly(
+        new Date(DateTime.toEpochMillis(event.start_at)),
+        event.team_timezone,
+      );
       lines.push(`DTSTART;VALUE=DATE:${startDate}`);
       const endDateStr = Option.match(event.end_at, {
         onNone: () => addOneDay(startDate),
         onSome: (endAt) =>
-          addOneDay(formatDateOnly(new Date(DateTime.toEpochMillis(endAt)), 'UTC')),
+          addOneDay(formatDateOnly(new Date(DateTime.toEpochMillis(endAt)), event.team_timezone)),
       });
       lines.push(`DTEND;VALUE=DATE:${endDateStr}`);
     } else {

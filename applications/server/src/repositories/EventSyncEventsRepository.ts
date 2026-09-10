@@ -101,6 +101,12 @@ export class EventSyncEventRow extends Schema.Class<EventSyncEventRow>('EventSyn
   // Nullable JSONB; only populated for 'teams_generated' rows.
   // node-pg auto-parses JSONB into a JS object/array, so we use the array schema directly.
   teams_payload: Schema.OptionFromNullOr(Schema.Array(EventRpcEvents.TeamsGeneratedTeam)),
+  // Derived team-local calendar date (plan §11.2/§11.3), projected at send time in
+  // `findUnprocessedEvents`. This row is decoded from the server's own query, not a
+  // wire payload, so it is a plain `Schema.String`, not `OptionFromOptionalKey` — the
+  // wire-facing `Option` wrapping happens in `constructEvent` below.
+  event_start_date: Schema.String,
+  event_end_date: Schema.String,
 }) {}
 
 const MarkProcessedInput = Schema.Struct({
@@ -146,10 +152,17 @@ const make = Effect.gen(function* () {
              u.discord_display_name AS claimed_by_user_display_name,
              u.username             AS claimed_by_username,
              ese.event_all_day,
-             ese.teams_payload
+             ese.teams_payload,
+             (ese.event_start_at::timestamptz
+                 AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                 AS event_start_date,
+             (COALESCE(ese.event_end_at, ese.event_start_at)::timestamptz
+                 AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                 AS event_end_date
       FROM event_sync_events ese
       LEFT JOIN team_members tm ON tm.id = ese.claimed_by_member_id
       LEFT JOIN users u         ON u.id = tm.user_id
+      LEFT JOIN team_settings ts ON ts.team_id = ese.team_id
       WHERE ese.processed_at IS NULL
       ORDER BY ese.created_at ASC
       LIMIT ${limit}
