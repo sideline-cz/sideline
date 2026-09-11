@@ -23,14 +23,14 @@ Follow these steps **in order**.
 
 ### 1. Find the active sprint
 
-Query the Sprints database (`notion db query <sprints-id> -f json --all`) and find the sprint whose date range covers today (or the most recent one). Fetch it to get linked stories and bugs.
+Query the Sprints database (`/opt/homebrew/bin/ntn api /v1/data_sources/0bb5bd1a-500c-4b2c-b482-cc6be3986a81/query -d '{"page_size":100}'`) and find the sprint whose date range covers today (or the most recent one). Fetch it to get linked stories and bugs.
 
 If no active sprint exists, tell the user and stop.
 
 ### 2. Gather sprint data
 
 For each story in the sprint:
-1. Fetch the story props via `notion page props <id> -f json` to get its status and linked tasks
+1. Fetch the story props via `/opt/homebrew/bin/ntn api /v1/pages/<id>` to get its status and linked tasks
 2. Fetch each task to get its status
 
 Build a map of: `story → [tasks]` with statuses for each.
@@ -103,7 +103,7 @@ If no changes are needed, tell the user everything is in sync and stop.
 
 ### 7. Apply changes
 
-After the user confirms (or if no ambiguity exists), apply all updates via `notion page set <id> "Status=<new-status>"`.
+After the user confirms (or if no ambiguity exists), apply all updates via `/opt/homebrew/bin/ntn api /v1/pages/<id> -X PATCH -d '{"properties":{"Status":{"status":{"name":"<new-status>"}}}}'` (use `"select"` instead of `"status"` for Bugs), then read the page back to confirm.
 
 Only move *tasks* to `Done` automatically (per the lifecycle rules). Do **not** move stories, epics, or milestones to `Done` — those are set manually by the user.
 

@@ -569,18 +569,28 @@ Stories/epics/milestones: `TODO → In Progress → In Review → In Test → Do
 - After PR merged, story → `In Test`
 - **Never** move stories/epics/milestones to `Done` — that's manual
 
-### Notion CLI (`notion`)
+### Notion CLI (`ntn`)
 
-Use the `notion` CLI tool (installed via `brew install 4ier/tap/notion-cli`) for all Notion operations:
+The binary is **`ntn`**, not `notion` — Homebrew cask `notion-cli` (v0.23+), at
+`/opt/homebrew/bin/ntn`. A stale `notion` formula symlink may also exist; it is dangling, ignore it.
+`/opt/homebrew/bin` is not on the nix devshell PATH, so use the absolute path.
+
+Everything goes through `ntn api` (the public Notion API). `ntn api ls` lists endpoints.
+**Queries take a data source id, not a database id** — see `.claude/agents/agile-coach.md` for the
+id table and the full command set.
 
 ```bash
-notion db query <db-id> -f json --all          # query database
-notion db query <db-id> -F "Status=Done"       # filter
-notion page props <page-id> -f json            # read properties
-notion page view <page-id> -f md               # read page body
-notion page set <page-id> "Status=In Progress" # update property
-notion search "keyword" -f json                # search
+N=/opt/homebrew/bin/ntn
+$N whoami                                                    # auth check
+$N api /v1/data_sources/<ds-id>/query -d '{"page_size":100}' # query rows
+$N api /v1/pages/<page-id>                                   # read properties
+$N api /v1/pages/<page-id>/markdown                          # read page body
+$N api /v1/pages/<page-id> -X PATCH \
+   -d '{"properties":{"Status":{"status":{"name":"In Progress"}}}}'   # update (status type)
+$N api /v1/databases/<database-id>                           # -> .data_sources[].id
 ```
+
+Always read a page back after writing it, before reporting the write succeeded.
 
 ## Preview Database Access
 

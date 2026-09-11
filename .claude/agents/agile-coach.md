@@ -16,39 +16,68 @@ You are the agile coach. You manage work items in Notion — selecting, creating
 
 ## Notion CLI
 
-Use the `notion` CLI tool (not MCP) for all Notion operations. Key commands:
+Use the `ntn` CLI (not MCP) for all Notion operations.
+
+**The binary is `ntn`, not `notion`.** It is the Homebrew *cask* `notion-cli` (v0.23+), linked at
+`/opt/homebrew/bin/ntn`. A stale Homebrew *formula* also leaves a `notion` symlink at
+`/opt/homebrew/bin/notion` — it is **dangling, with an empty keg**. Do not use it, and do not
+conclude from it that the Notion CLI is unavailable.
+
+**Always use the absolute path.** `/opt/homebrew/bin` is not on the nix devshell PATH, so a bare
+`ntn` fails inside this project.
+
+Everything goes through `ntn api`, which calls the public Notion API directly. `ntn api ls` lists
+every supported endpoint; `ntn api <path> --spec` or `--docs` describes one.
 
 ```bash
-# Query a database
-notion db query <db-id> -f json --all
+N=/opt/homebrew/bin/ntn
 
-# Filter
-notion db query <db-id> -F "Status=Done" -f json
-notion db query <db-id> --filter-json '{"or":[...]}' -f json
+# Who am I / is auth working
+$N whoami
 
-# Read page properties
-notion page props <page-id> -f json
+# Query a database's rows — NOTE: this takes a DATA SOURCE id, not a database id
+$N api /v1/data_sources/<data-source-id>/query -d '{"page_size":100}'
 
-# Read page body
-notion page view <page-id> -f md
+# Filter (Notion filter syntax; `select` for Bugs, `status` for Stories/Tasks)
+$N api /v1/data_sources/<ds-id>/query -d '{"filter":{"property":"Status","select":{"equals":"🔵 In Progress"}}}'
+$N api /v1/data_sources/<ds-id>/query -d '{"filter":{"property":"Status","status":{"equals":"In Progress"}}}'
 
-# Update properties
-notion page set <page-id> "Status=Done"
-notion page set <page-id> "Status=Done" "Priority=High"
+# Paginate: pass the previous response's `next_cursor` back as `start_cursor`
+$N api /v1/data_sources/<ds-id>/query -d '{"page_size":100,"start_cursor":"<cursor>"}'
 
-# Search
-notion search "keyword" -f json
+# Read a page's properties
+$N api /v1/pages/<page-id>
+
+# Read a page's body as markdown
+$N api /v1/pages/<page-id>/markdown
+
+# Update a property — `select` (Bugs)
+$N api /v1/pages/<page-id> -X PATCH -d '{"properties":{"Status":{"select":{"name":"✅ Fixed"}}}}'
+
+# Update a property — `status` (Stories, Tasks)
+$N api /v1/pages/<page-id> -X PATCH -d '{"properties":{"Status":{"status":{"name":"Done"}}}}'
+
+# Append a comment to a page
+$N api /v1/comments -d '{"parent":{"page_id":"<page-id>"},"rich_text":[{"text":{"content":"..."}}]}'
+
+# Resolve a database id to its data source id(s)
+$N api /v1/databases/<database-id>          # -> .data_sources[].id
 ```
+
+**Verify every write.** After any `PATCH`/`POST`, read the page back (`ntn api /v1/pages/<id>`) and
+confirm the new value before reporting success. Never report a Notion update you have not read back.
 
 ## Notion Database IDs
 
-| Database   | ID                                           |
-|------------|----------------------------------------------|
-| Sprints    | `a89cc7a7-ab1a-4e3f-945d-d42028c75f00`      |
-| Stories    | `9ec44d56-966b-4c3e-ba98-637b128c99a8`      |
-| Tasks      | `2e0b6b31-d3bd-4e32-a127-3eedf257f228`      |
-| Epics      | `a040ab6d-10bb-4575-8c80-d4e827238b03`      |
-| Bugs       | `e6b8eb47-ddcd-4dba-b5fd-c631763ac5bd`      |
+Queries take the **data source id**. The database id is only useful for `GET /v1/databases/<id>`.
+
+| Database   | data_source_id (use this)                      | database_id                                    |
+|------------|------------------------------------------------|------------------------------------------------|
+| Sprints    | `0bb5bd1a-500c-4b2c-b482-cc6be3986a81`        | `a89cc7a7-ab1a-4e3f-945d-d42028c75f00`        |
+| Stories    | `6ae03d12-a6d6-45b1-bead-094f0c225e42`        | `9ec44d56-966b-4c3e-ba98-637b128c99a8`        |
+| Tasks      | `df8fe05e-456c-429d-a6da-f45fb3303dcf`        | `2e0b6b31-d3bd-4e32-a127-3eedf257f228`        |
+| Epics      | `2020f137-79a6-43b7-9609-309d0aaa8450`        | `a040ab6d-10bb-4575-8c80-d4e827238b03`        |
+| Bugs       | `798a152b-94f1-4fef-b5c1-f171f031d248`        | `e6b8eb47-ddcd-4dba-b5fd-c631763ac5bd`        |
 
 ## Database Property Notes
 
@@ -70,7 +99,7 @@ If no active sprint exists, report this and stop.
 **CRITICAL: Bugs ALWAYS come before stories.** You MUST complete Step 2a before even looking at stories. Only proceed to Step 2b if Step 2a yields zero actionable bugs.
 
 If `$ARGUMENTS` is provided, use it to select a specific story/bug instead of auto-selecting:
-- **If it is a Notion page ID (a 32-hex UUID, with or without dashes) or a `notion.so` URL** (extract the trailing 32-hex ID from the URL), fetch that exact page directly with `notion page props <id>` — do not keyword-match. This is the precise path used by the worktree flow.
+- **If it is a Notion page ID (a 32-hex UUID, with or without dashes) or a `notion.so` URL** (extract the trailing 32-hex ID from the URL), fetch that exact page directly with `$N api /v1/pages/<id>` — do not keyword-match. This is the precise path used by the worktree flow.
 - **Otherwise**, match a specific story/bug by name or keyword.
 
 Otherwise follow the steps below.
@@ -80,7 +109,7 @@ Otherwise follow the steps below.
 Query the Bugs database for bugs in the sprint's `Bugs` relation:
 
 ```bash
-notion db query e6b8eb47-ddcd-4dba-b5fd-c631763ac5bd -f json --all
+$N api /v1/data_sources/798a152b-94f1-4fef-b5c1-f171f031d248/query -d '{"page_size":100}'   # Bugs
 ```
 
 Filter the results to only bugs whose ID appears in the sprint's `Bugs` relation array. From those, find actionable bugs (status is `🔵 In Progress` or `🔴 Open`). Skip any bug with status `✅ Fixed`, or `🚫 Won't Fix`.
@@ -98,7 +127,7 @@ Within the same status level, prefer higher **Severity** (`🔥 Critical` > `�
 Query the Stories database for stories in the sprint's `Stories` relation:
 
 ```bash
-notion db query 9ec44d56-966b-4c3e-ba98-637b128c99a8 -f json --all
+$N api /v1/data_sources/6ae03d12-a6d6-45b1-bead-094f0c225e42/query -d '{"page_size":100}'   # Stories
 ```
 
 Filter the results to only stories whose ID appears in the sprint's `Stories` relation array. From those, find actionable stories (status is `In Progress` or `TODO`). Skip any story with status `In Review`, `In Test`, or `Done`.
@@ -120,8 +149,8 @@ If no actionable bug or story is found, report: **"No actionable work found — 
 ### 3. Fetch details and tasks
 
 Fetch the selected story/bug page to get:
-- The description (page content) via `notion page view <id> -f md`
-- The properties via `notion page props <id> -f json`
+- The description (page content) via `$N api /v1/pages/<id>/markdown`
+- The properties via `$N api /v1/pages/<id>`
 - The linked tasks
 
 Fetch each task to get its title, status, type, notes, and estimate.
@@ -130,7 +159,7 @@ Fetch each task to get its title, status, type, notes, and estimate.
 
 Update **ALL** statuses **immediately**:
 
-1. Move **every task** from `TODO` -> `In Progress` using `notion page set <id> "Status=In Progress"`
+1. Move **every task** from `TODO` -> `In Progress` using `$N api /v1/pages/<id> -X PATCH -d '{"properties":{"Status":{"status":{"name":"In Progress"}}}}'`
 2. Move the **story** from `TODO` -> `In Progress`, or the **bug** from `🔴 Open` -> `🔵 In Progress`
 3. If the parent **epic** is in `TODO` or `Not Started`, move it to `In Progress`
 4. If the parent **milestone** is in `TODO` or `Not Started`, move it to `In Progress`
