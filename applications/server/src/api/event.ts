@@ -1,6 +1,6 @@
 import { Auth, type Event, EventApi } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
-import { Array, Effect, Option, type ServiceMap } from 'effect';
+import { Array, DateTime, Effect, Option, type ServiceMap } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { hasPermission, requireMembership, requirePermission } from '~/api/permissions.js';
@@ -8,6 +8,7 @@ import { checkCoachScoping, checkGroupAccess, checkTrainingTypeOwnerGroup } from
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
 
@@ -27,13 +28,112 @@ const forbidden = new EventApi.Forbidden();
 const notFound = new EventApi.EventNotFound();
 const notActive = new EventApi.EventNotActive();
 
+/** All-day events are stored at 00:00 in the team's timezone (plan §10). This
+ * resolves an IANA zone by name, falling back to `Europe/Prague` rather than
+ * throwing — `setZoneNamed` returns `None` for an invalid zone id, and the
+ * column has no CHECK constraint, so a migration/seed/operator write can
+ * still leave a bad id on `team_settings.timezone`. */
+const resolveZoned = (dt: DateTime.Utc, timezone: string): DateTime.Zoned =>
+  Option.getOrElse(DateTime.setZoneNamed(dt, timezone), () =>
+    DateTime.setZoneNamedUnsafe(dt, 'Europe/Prague'),
+  );
+
+/**
+ * Anchors the WIRE convention: the web sends all-day instants as
+ * `<date>T12:00:00Z`, so the intended date is the instant's **UTC** calendar
+ * date — read it with `toPartsUtc` on purpose, then re-anchor those parts to
+ * 00:00 in `timezone`. Recipe precedent: `WeeklySummary.ts:92-121`
+ * (`weekRangeFor`).
+ */
+const anchorAllDay = (dt: DateTime.Utc, timezone: string): DateTime.Utc => {
+  const { year, month, day } = DateTime.toPartsUtc(dt);
+  const midnight = DateTime.setParts(resolveZoned(dt, timezone), {
+    year,
+    month,
+    day,
+    hour: 0,
+    minute: 0,
+    second: 0,
+    millisecond: 0,
+  });
+  return DateTime.makeUnsafe(midnight.epochMilliseconds);
+};
+
+/**
+ * Re-anchors a row that is being CONVERTED from timed to all-day. Its stored
+ * `start_at`/`end_at` is a real instant, so the intended date is its LOCAL
+ * date in `timezone`, not its UTC date — reading the UTC date here would
+ * silently move an early-morning-local event (e.g. 23:00Z the previous day in
+ * Prague) a day back. Contrast `anchorAllDay`, which decodes the WIRE
+ * convention and must read UTC on purpose.
+ */
+const reanchorFromLocal = (dt: DateTime.Utc, timezone: string): DateTime.Utc => {
+  const zoned = resolveZoned(dt, timezone);
+  const { year, month, day } = DateTime.toParts(zoned);
+  const midnight = DateTime.setParts(zoned, {
+    year,
+    month,
+    day,
+    hour: 0,
+    minute: 0,
+    second: 0,
+    millisecond: 0,
+  });
+  return DateTime.makeUnsafe(midnight.epochMilliseconds);
+};
+
+/**
+ * The five-row merge (plan §12 step 4) for `startAt` on `updateEvent`.
+ * Branches on what the wire SUPPLIED, never on the merged value — merging
+ * `allDay` first and then anchoring the merged `startAt` is non-idempotent
+ * and moves an already-anchored row backwards on every partial PATCH that
+ * omits `startAt`.
+ */
+const mergeAllDayInstant = (
+  payloadValue: Option.Option<DateTime.Utc>,
+  existingValue: DateTime.Utc,
+  mergedAllDay: boolean,
+  existingAllDay: boolean,
+  timezone: string,
+): DateTime.Utc =>
+  Option.match(payloadValue, {
+    onSome: (v) => (mergedAllDay ? anchorAllDay(v, timezone) : v),
+    onNone: () => {
+      if (!mergedAllDay) return existingValue;
+      // Already anchored — pass through byte-identical, never re-derive it.
+      if (existingAllDay) return existingValue;
+      // Timed -> all-day transition with no new startAt supplied.
+      return reanchorFromLocal(existingValue, timezone);
+    },
+  });
+
+/** Same three-way split as `mergeAllDayInstant`, for `endAt` — preserves the
+ * `Option`-of-`Option` shape: "absent" (outer `None`) and "explicitly cleared
+ * to `null`" (outer `Some(None)`) must stay distinct. */
+const mergeAllDayEndAt = (
+  payloadValue: Option.Option<Option.Option<DateTime.Utc>>,
+  existingValue: Option.Option<DateTime.Utc>,
+  mergedAllDay: boolean,
+  existingAllDay: boolean,
+  timezone: string,
+): Option.Option<DateTime.Utc> =>
+  Option.match(payloadValue, {
+    onSome: (cleared) => Option.map(cleared, (v) => (mergedAllDay ? anchorAllDay(v, timezone) : v)),
+    onNone: () => {
+      if (!mergedAllDay) return existingValue;
+      if (existingAllDay) return existingValue;
+      return Option.map(existingValue, (v) => reanchorFromLocal(v, timezone));
+    },
+  });
+
 export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
   Effect.Do.pipe(
     Effect.bind('members', () => TeamMembersRepository.asEffect()),
     Effect.bind('events', () => EventsRepository.asEffect()),
     Effect.bind('groups', () => GroupsRepository.asEffect()),
     Effect.bind('trainingTypes', () => TrainingTypesRepository.asEffect()),
-    Effect.map(({ members, events, groups, trainingTypes }) =>
+    Effect.bind('teamSettings', () => TeamSettingsRepository.asEffect()),
+    Effect.map(({ members, events, groups, trainingTypes, teamSettings }) =>
       handlers
         .handle('listEvents', ({ params: { teamId }, query: { all } }) =>
           Effect.Do.pipe(
@@ -92,6 +192,16 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
             Effect.tap(({ membership }) =>
               requirePermission(membership, 'event:create', forbidden),
             ),
+            Effect.bind('teamZone', () =>
+              teamSettings.findByTeamId(teamId).pipe(
+                Effect.map(
+                  Option.match({
+                    onNone: () => 'Europe/Prague',
+                    onSome: (s) => s.timezone,
+                  }),
+                ),
+              ),
+            ),
             Effect.let('isAdmin', ({ membership }) => hasPermission(membership, 'team:manage')),
             Effect.tap(({ membership, isAdmin }) =>
               checkCoachScoping(events, membership.id, payload.trainingTypeId, isAdmin, forbidden),
@@ -132,7 +242,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                 ),
               );
             }),
-            Effect.bind('event', ({ membership, resolvedGroups }) =>
+            Effect.bind('event', ({ membership, resolvedGroups, teamZone }) =>
               events.insertEvent({
                 teamId,
                 trainingTypeId: payload.trainingTypeId,
@@ -140,8 +250,10 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                 title: payload.title,
                 description: payload.description,
                 imageUrl: payload.imageUrl,
-                startAt: payload.startAt,
-                endAt: payload.endAt,
+                startAt: payload.allDay ? anchorAllDay(payload.startAt, teamZone) : payload.startAt,
+                endAt: payload.allDay
+                  ? Option.map(payload.endAt, (v) => anchorAllDay(v, teamZone))
+                  : payload.endAt,
                 location: payload.location,
                 locationUrl: payload.locationUrl,
                 createdBy: membership.id,
@@ -274,6 +386,16 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
             Effect.tap(({ membership }) => requirePermission(membership, 'event:edit', forbidden)),
+            Effect.bind('teamZone', () =>
+              teamSettings.findByTeamId(teamId).pipe(
+                Effect.map(
+                  Option.match({
+                    onNone: () => 'Europe/Prague',
+                    onSome: (s) => s.timezone,
+                  }),
+                ),
+              ),
+            ),
             Effect.let('isAdmin', ({ membership }) => hasPermission(membership, 'team:manage')),
             Effect.bind('existing', () =>
               events.findEventByIdWithDetails(eventId).pipe(
@@ -336,8 +458,9 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                 ? Effect.fail(forbidden)
                 : Effect.void,
             ),
-            Effect.bind('updated', ({ existing, mergedLocation, mergedLocationUrl }) =>
-              events.updateEvent({
+            Effect.bind('updated', ({ existing, mergedLocation, mergedLocationUrl, teamZone }) => {
+              const mergedAllDay = Option.getOrElse(payload.allDay, () => existing.all_day);
+              return events.updateEvent({
                 id: eventId,
                 title: Option.getOrElse(payload.title, () => existing.title),
                 eventType: Option.getOrElse(payload.eventType, () => existing.event_type),
@@ -353,11 +476,23 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   onNone: () => existing.image_url,
                   onSome: (v) => v,
                 }),
-                startAt: Option.getOrElse(payload.startAt, () => existing.start_at),
-                endAt: Option.match(payload.endAt, {
-                  onNone: () => existing.end_at,
-                  onSome: (v) => v,
-                }),
+                // Five-row merge, plan §12 step 4 — branches on what the wire
+                // supplied, never on the merged `allDay` value. See the
+                // `mergeAllDayInstant`/`mergeAllDayEndAt` doc comments.
+                startAt: mergeAllDayInstant(
+                  payload.startAt,
+                  existing.start_at,
+                  mergedAllDay,
+                  existing.all_day,
+                  teamZone,
+                ),
+                endAt: mergeAllDayEndAt(
+                  payload.endAt,
+                  existing.end_at,
+                  mergedAllDay,
+                  existing.all_day,
+                  teamZone,
+                ),
                 location: mergedLocation,
                 locationUrl: mergedLocationUrl,
                 ownerGroupId: Option.match(payload.ownerGroupId, {
@@ -368,9 +503,9 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   onNone: () => existing.member_group_id,
                   onSome: (v) => v,
                 }),
-                allDay: Option.getOrElse(payload.allDay, () => existing.all_day),
-              }),
-            ),
+                allDay: mergedAllDay,
+              });
+            }),
             Effect.tap(({ existing }) =>
               Option.isSome(existing.series_id)
                 ? events.markEventSeriesModified(eventId)

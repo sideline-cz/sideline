@@ -2,6 +2,7 @@ import type { Auth, Discord, Event, EventRsvp, Role, Team, TeamMember } from '@s
 import { OAuth2Tokens } from 'arctic';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { HttpClient, HttpClientResponse, HttpRouter, HttpServer } from 'effect/unstable/http';
+import { SqlClient } from 'effect/unstable/sql';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ApiLive } from '~/api/index.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
@@ -534,6 +535,14 @@ const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
   incrementMissedForEventNonRespondersByEventId: () => Effect.void,
 } as any);
 
+// Stub SqlClient: repositories are mocked, so `updateTeamSettings`'s only real
+// usages are `sql.withTransaction(body)` (run the body directly) and the
+// conditional timezone-change re-anchor tagged-template call (no-op query) —
+// same pattern as `Roster.test.ts`.
+const sqlStub: any = (..._args: unknown[]) => Effect.succeed([]);
+sqlStub.withTransaction = (effect: unknown) => effect;
+const MockSqlClientLayer = Layer.succeed(SqlClient.SqlClient, sqlStub as any);
+
 const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
   _tag: 'api/TeamSettingsRepository',
   findByTeam: () =>
@@ -1048,6 +1057,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockEventRosterLayers))
   .pipe(Layer.provide(BotInfoStore.Default))
   .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
+  .pipe(Layer.provide(MockSqlClientLayer))
   .pipe(
     Layer.provide(
       Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),

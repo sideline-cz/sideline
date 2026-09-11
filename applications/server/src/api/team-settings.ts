@@ -2,8 +2,10 @@ import { Auth, EventApi, TeamSettingsApi } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import { Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
+import { SqlClient } from 'effect/unstable/sql';
 import { Api } from '~/api/api.js';
 import { requireMembership, requirePermission } from '~/api/permissions.js';
+import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import {
@@ -101,178 +103,241 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
             ),
             Effect.tap(({ membership }) => requirePermission(membership, 'team:manage', forbidden)),
             Effect.bind('existing', () => settings.findByTeamId(teamId)),
-            Effect.bind('result', ({ existing }) =>
+            // The team's OLD timezone, before this save — needed to re-anchor
+            // all-day events if the timezone is changing (plan §12 step 5).
+            // For a team's FIRST settings row (`onNone` below) there is no
+            // previous row to read, so the implicit old value is the column
+            // default (§12 step 5c).
+            Effect.let('oldTz', ({ existing }) =>
               Option.match(existing, {
-                onNone: () =>
-                  settings.upsert({
-                    teamId,
-                    eventHorizonDays: Option.getOrElse(payload.eventHorizonDays, () => 30),
-                    minPlayersThreshold: Option.getOrElse(payload.minPlayersThreshold, () => 0),
-                    rsvpRemindersEnabled: Option.getOrElse(
-                      payload.rsvpRemindersEnabled,
-                      () => true,
-                    ),
-                    rsvpReminderDaysBefore: Option.getOrElse(
-                      payload.rsvpReminderDaysBefore,
-                      () => 1,
-                    ),
-                    claimRequestDaysBefore: Option.getOrElse(
-                      payload.claimRequestDaysBefore,
-                      () => 3,
-                    ),
-                    rsvpReminderTime: Option.getOrElse(payload.rsvpReminderTime, () => '18:00'),
-                    remindersChannelId: Option.flatten(payload.remindersChannelId),
-                    timezone: Option.getOrElse(payload.timezone, () => 'Europe/Prague'),
-                    discordChannelLateRsvp: Option.flatten(payload.discordChannelLateRsvp),
-                    createDiscordChannelOnGroup: Option.getOrElse(
-                      payload.createDiscordChannelOnGroup,
-                      () => true,
-                    ),
-                    createDiscordChannelOnRoster: Option.getOrElse(
-                      payload.createDiscordChannelOnRoster,
-                      () => true,
-                    ),
-                    discordArchiveCategoryId: Option.flatten(payload.discordArchiveCategoryId),
-                    discordRosterCategoryId: Option.flatten(payload.discordRosterCategoryId),
-                    discordChannelCleanupOnGroupDelete: Option.getOrElse(
-                      payload.discordChannelCleanupOnGroupDelete,
-                      () => 'delete' as const,
-                    ),
-                    discordChannelCleanupOnRosterDeactivate: Option.getOrElse(
-                      payload.discordChannelCleanupOnRosterDeactivate,
-                      () => 'delete' as const,
-                    ),
-                    ...(Option.isSome(payload.discordRoleFormat)
-                      ? { discordRoleFormat: payload.discordRoleFormat.value }
-                      : {}),
-                    ...(Option.isSome(payload.discordChannelFormat)
-                      ? { discordChannelFormat: payload.discordChannelFormat.value }
-                      : {}),
-                    maxMissedRsvps: Option.getOrElse(payload.maxMissedRsvps, () => 4),
-                    rulesQuizChannelId: Option.flatten(payload.rulesQuizChannelId),
-                    rulesQuizIntervalDays: Option.getOrElse(payload.rulesQuizIntervalDays, () => 7),
-                    rulesQuizTime: Option.getOrElse(payload.rulesQuizTime, () => '18:00'),
-                    discordPersonalEventsCategoryId: Option.flatten(
-                      payload.discordPersonalEventsCategoryId,
-                    ),
-                    discordPersonalEventsGroupId: Option.flatten(
-                      payload.discordPersonalEventsGroupId,
-                    ),
-                    discordPersonalEventsChannelFormat: Option.getOrElse(
-                      payload.discordPersonalEventsChannelFormat,
-                      () => DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT,
-                    ),
-                    // Transitional: kept only so the full-row upsert doesn't NULL this column;
-                    // removed in Release B together with the column itself.
-                    discordEventsChannelId: Option.flatten(payload.discordEventsChannelId),
-                  }),
-                onSome: (s) =>
-                  settings.upsert({
-                    teamId,
-                    eventHorizonDays: Option.getOrElse(
-                      payload.eventHorizonDays,
-                      () => s.event_horizon_days,
-                    ),
-                    minPlayersThreshold: Option.getOrElse(
-                      payload.minPlayersThreshold,
-                      () => s.min_players_threshold,
-                    ),
-                    rsvpRemindersEnabled: Option.getOrElse(
-                      payload.rsvpRemindersEnabled,
-                      () => s.rsvp_reminders_enabled,
-                    ),
-                    rsvpReminderDaysBefore: Option.getOrElse(
-                      payload.rsvpReminderDaysBefore,
-                      () => s.rsvp_reminder_days_before,
-                    ),
-                    claimRequestDaysBefore: Option.getOrElse(
-                      payload.claimRequestDaysBefore,
-                      () => s.claim_request_days_before,
-                    ),
-                    rsvpReminderTime: Option.getOrElse(
-                      payload.rsvpReminderTime,
-                      () => s.rsvp_reminder_time,
-                    ),
-                    remindersChannelId: Option.match(payload.remindersChannelId, {
-                      onNone: () => s.reminders_channel_id,
-                      onSome: (v) => v,
-                    }),
-                    timezone: Option.getOrElse(payload.timezone, () => s.timezone),
-                    discordChannelLateRsvp: Option.match(payload.discordChannelLateRsvp, {
-                      onNone: () => s.discord_channel_late_rsvp,
-                      onSome: (v) => v,
-                    }),
-                    createDiscordChannelOnGroup: Option.getOrElse(
-                      payload.createDiscordChannelOnGroup,
-                      () => s.create_discord_channel_on_group,
-                    ),
-                    createDiscordChannelOnRoster: Option.getOrElse(
-                      payload.createDiscordChannelOnRoster,
-                      () => s.create_discord_channel_on_roster,
-                    ),
-                    discordArchiveCategoryId: Option.match(payload.discordArchiveCategoryId, {
-                      onNone: () => s.discord_archive_category_id,
-                      onSome: (v) => v,
-                    }),
-                    discordRosterCategoryId: Option.getOrElse(
-                      payload.discordRosterCategoryId,
-                      () => s.discord_roster_category_id,
-                    ),
-                    discordChannelCleanupOnGroupDelete: Option.getOrElse(
-                      payload.discordChannelCleanupOnGroupDelete,
-                      () => s.discord_channel_cleanup_on_group_delete,
-                    ),
-                    discordChannelCleanupOnRosterDeactivate: Option.getOrElse(
-                      payload.discordChannelCleanupOnRosterDeactivate,
-                      () => s.discord_channel_cleanup_on_roster_deactivate,
-                    ),
-                    discordRoleFormat: Option.getOrElse(
-                      payload.discordRoleFormat,
-                      () => s.discord_role_format,
-                    ),
-                    discordChannelFormat: Option.getOrElse(
-                      payload.discordChannelFormat,
-                      () => s.discord_channel_format,
-                    ),
-                    maxMissedRsvps: Option.getOrElse(
-                      payload.maxMissedRsvps,
-                      () => s.max_missed_rsvps,
-                    ),
-                    rulesQuizChannelId: Option.match(payload.rulesQuizChannelId, {
-                      onNone: () => s.rules_quiz_channel_id,
-                      onSome: (v) => v,
-                    }),
-                    rulesQuizIntervalDays: Option.getOrElse(
-                      payload.rulesQuizIntervalDays,
-                      () => s.rules_quiz_interval_days,
-                    ),
-                    rulesQuizTime: Option.getOrElse(payload.rulesQuizTime, () => s.rules_quiz_time),
-                    discordPersonalEventsCategoryId: Option.match(
-                      payload.discordPersonalEventsCategoryId,
-                      {
-                        onNone: () => s.discord_personal_events_category_id,
-                        onSome: (v) => v,
-                      },
-                    ),
-                    discordPersonalEventsGroupId: Option.match(
-                      payload.discordPersonalEventsGroupId,
-                      {
-                        onNone: () => s.discord_personal_events_group_id,
-                        onSome: (v) => v,
-                      },
-                    ),
-                    discordPersonalEventsChannelFormat: Option.getOrElse(
-                      payload.discordPersonalEventsChannelFormat,
-                      () => s.discord_personal_events_channel_format,
-                    ),
-                    // Transitional: kept only so the full-row upsert doesn't NULL this column;
-                    // removed in Release B together with the column itself.
-                    discordEventsChannelId: Option.match(payload.discordEventsChannelId, {
-                      onNone: () => s.discord_events_channel_id,
-                      onSome: (v) => v,
-                    }),
-                  }),
+                onNone: () => 'Europe/Prague',
+                onSome: (s) => s.timezone,
               }),
+            ),
+            Effect.bind('result', ({ existing, oldTz }) =>
+              SqlClient.SqlClient.asEffect().pipe(
+                Effect.flatMap((sql) =>
+                  sql
+                    .withTransaction(
+                      Option.match(existing, {
+                        onNone: () =>
+                          settings.upsert({
+                            teamId,
+                            eventHorizonDays: Option.getOrElse(payload.eventHorizonDays, () => 30),
+                            minPlayersThreshold: Option.getOrElse(
+                              payload.minPlayersThreshold,
+                              () => 0,
+                            ),
+                            rsvpRemindersEnabled: Option.getOrElse(
+                              payload.rsvpRemindersEnabled,
+                              () => true,
+                            ),
+                            rsvpReminderDaysBefore: Option.getOrElse(
+                              payload.rsvpReminderDaysBefore,
+                              () => 1,
+                            ),
+                            claimRequestDaysBefore: Option.getOrElse(
+                              payload.claimRequestDaysBefore,
+                              () => 3,
+                            ),
+                            rsvpReminderTime: Option.getOrElse(
+                              payload.rsvpReminderTime,
+                              () => '18:00',
+                            ),
+                            remindersChannelId: Option.flatten(payload.remindersChannelId),
+                            timezone: Option.getOrElse(payload.timezone, () => 'Europe/Prague'),
+                            discordChannelLateRsvp: Option.flatten(payload.discordChannelLateRsvp),
+                            createDiscordChannelOnGroup: Option.getOrElse(
+                              payload.createDiscordChannelOnGroup,
+                              () => true,
+                            ),
+                            createDiscordChannelOnRoster: Option.getOrElse(
+                              payload.createDiscordChannelOnRoster,
+                              () => true,
+                            ),
+                            discordArchiveCategoryId: Option.flatten(
+                              payload.discordArchiveCategoryId,
+                            ),
+                            discordRosterCategoryId: Option.flatten(
+                              payload.discordRosterCategoryId,
+                            ),
+                            discordChannelCleanupOnGroupDelete: Option.getOrElse(
+                              payload.discordChannelCleanupOnGroupDelete,
+                              () => 'delete' as const,
+                            ),
+                            discordChannelCleanupOnRosterDeactivate: Option.getOrElse(
+                              payload.discordChannelCleanupOnRosterDeactivate,
+                              () => 'delete' as const,
+                            ),
+                            ...(Option.isSome(payload.discordRoleFormat)
+                              ? { discordRoleFormat: payload.discordRoleFormat.value }
+                              : {}),
+                            ...(Option.isSome(payload.discordChannelFormat)
+                              ? { discordChannelFormat: payload.discordChannelFormat.value }
+                              : {}),
+                            maxMissedRsvps: Option.getOrElse(payload.maxMissedRsvps, () => 4),
+                            rulesQuizChannelId: Option.flatten(payload.rulesQuizChannelId),
+                            rulesQuizIntervalDays: Option.getOrElse(
+                              payload.rulesQuizIntervalDays,
+                              () => 7,
+                            ),
+                            rulesQuizTime: Option.getOrElse(payload.rulesQuizTime, () => '18:00'),
+                            discordPersonalEventsCategoryId: Option.flatten(
+                              payload.discordPersonalEventsCategoryId,
+                            ),
+                            discordPersonalEventsGroupId: Option.flatten(
+                              payload.discordPersonalEventsGroupId,
+                            ),
+                            discordPersonalEventsChannelFormat: Option.getOrElse(
+                              payload.discordPersonalEventsChannelFormat,
+                              () => DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT,
+                            ),
+                            // Transitional: kept only so the full-row upsert doesn't NULL this column;
+                            // removed in Release B together with the column itself.
+                            discordEventsChannelId: Option.flatten(payload.discordEventsChannelId),
+                          }),
+                        onSome: (s) =>
+                          settings.upsert({
+                            teamId,
+                            eventHorizonDays: Option.getOrElse(
+                              payload.eventHorizonDays,
+                              () => s.event_horizon_days,
+                            ),
+                            minPlayersThreshold: Option.getOrElse(
+                              payload.minPlayersThreshold,
+                              () => s.min_players_threshold,
+                            ),
+                            rsvpRemindersEnabled: Option.getOrElse(
+                              payload.rsvpRemindersEnabled,
+                              () => s.rsvp_reminders_enabled,
+                            ),
+                            rsvpReminderDaysBefore: Option.getOrElse(
+                              payload.rsvpReminderDaysBefore,
+                              () => s.rsvp_reminder_days_before,
+                            ),
+                            claimRequestDaysBefore: Option.getOrElse(
+                              payload.claimRequestDaysBefore,
+                              () => s.claim_request_days_before,
+                            ),
+                            rsvpReminderTime: Option.getOrElse(
+                              payload.rsvpReminderTime,
+                              () => s.rsvp_reminder_time,
+                            ),
+                            remindersChannelId: Option.match(payload.remindersChannelId, {
+                              onNone: () => s.reminders_channel_id,
+                              onSome: (v) => v,
+                            }),
+                            timezone: Option.getOrElse(payload.timezone, () => s.timezone),
+                            discordChannelLateRsvp: Option.match(payload.discordChannelLateRsvp, {
+                              onNone: () => s.discord_channel_late_rsvp,
+                              onSome: (v) => v,
+                            }),
+                            createDiscordChannelOnGroup: Option.getOrElse(
+                              payload.createDiscordChannelOnGroup,
+                              () => s.create_discord_channel_on_group,
+                            ),
+                            createDiscordChannelOnRoster: Option.getOrElse(
+                              payload.createDiscordChannelOnRoster,
+                              () => s.create_discord_channel_on_roster,
+                            ),
+                            discordArchiveCategoryId: Option.match(
+                              payload.discordArchiveCategoryId,
+                              {
+                                onNone: () => s.discord_archive_category_id,
+                                onSome: (v) => v,
+                              },
+                            ),
+                            discordRosterCategoryId: Option.getOrElse(
+                              payload.discordRosterCategoryId,
+                              () => s.discord_roster_category_id,
+                            ),
+                            discordChannelCleanupOnGroupDelete: Option.getOrElse(
+                              payload.discordChannelCleanupOnGroupDelete,
+                              () => s.discord_channel_cleanup_on_group_delete,
+                            ),
+                            discordChannelCleanupOnRosterDeactivate: Option.getOrElse(
+                              payload.discordChannelCleanupOnRosterDeactivate,
+                              () => s.discord_channel_cleanup_on_roster_deactivate,
+                            ),
+                            discordRoleFormat: Option.getOrElse(
+                              payload.discordRoleFormat,
+                              () => s.discord_role_format,
+                            ),
+                            discordChannelFormat: Option.getOrElse(
+                              payload.discordChannelFormat,
+                              () => s.discord_channel_format,
+                            ),
+                            maxMissedRsvps: Option.getOrElse(
+                              payload.maxMissedRsvps,
+                              () => s.max_missed_rsvps,
+                            ),
+                            rulesQuizChannelId: Option.match(payload.rulesQuizChannelId, {
+                              onNone: () => s.rules_quiz_channel_id,
+                              onSome: (v) => v,
+                            }),
+                            rulesQuizIntervalDays: Option.getOrElse(
+                              payload.rulesQuizIntervalDays,
+                              () => s.rules_quiz_interval_days,
+                            ),
+                            rulesQuizTime: Option.getOrElse(
+                              payload.rulesQuizTime,
+                              () => s.rules_quiz_time,
+                            ),
+                            discordPersonalEventsCategoryId: Option.match(
+                              payload.discordPersonalEventsCategoryId,
+                              {
+                                onNone: () => s.discord_personal_events_category_id,
+                                onSome: (v) => v,
+                              },
+                            ),
+                            discordPersonalEventsGroupId: Option.match(
+                              payload.discordPersonalEventsGroupId,
+                              {
+                                onNone: () => s.discord_personal_events_group_id,
+                                onSome: (v) => v,
+                              },
+                            ),
+                            discordPersonalEventsChannelFormat: Option.getOrElse(
+                              payload.discordPersonalEventsChannelFormat,
+                              () => s.discord_personal_events_channel_format,
+                            ),
+                            // Transitional: kept only so the full-row upsert doesn't NULL this column;
+                            // removed in Release B together with the column itself.
+                            discordEventsChannelId: Option.match(payload.discordEventsChannelId, {
+                              onNone: () => s.discord_events_channel_id,
+                              onSome: (v) => v,
+                            }),
+                          }),
+                      }).pipe(
+                        // Timezone change re-anchors this team's all-day events —
+                        // gated on `oldTz <> newTz` so an unrelated settings save does
+                        // not take row locks on every all-day event of the team (plan
+                        // §12 step 5a), and on `all_day_anchored` so a pre-PR-3
+                        // noon-UTC sentinel (not yet an anchored instant) is never
+                        // re-anchored by this formula — that would lose a day
+                        // permanently (plan §12 step 5d, the blocker-level guard).
+                        Effect.tap((upserted) =>
+                          oldTz === upserted.timezone
+                            ? Effect.void
+                            : sql`
+                        UPDATE events SET
+                          start_at = date_trunc('day', start_at AT TIME ZONE ${oldTz})
+                                       AT TIME ZONE ${upserted.timezone},
+                          end_at   = CASE WHEN end_at IS NULL THEN NULL
+                                          ELSE date_trunc('day', end_at AT TIME ZONE ${oldTz})
+                                                 AT TIME ZONE ${upserted.timezone} END,
+                          personal_messages_dirty_at = CASE
+                            WHEN personal_messages_dirty_at IS NULL
+                            THEN date_trunc('milliseconds', now())
+                            ELSE personal_messages_dirty_at END
+                        WHERE team_id = ${teamId} AND all_day = TRUE AND all_day_anchored
+                      `.pipe(Effect.asVoid),
+                        ),
+                      ),
+                    )
+                    .pipe(catchSqlErrors),
+                ),
+              ),
             ),
             Effect.map(
               ({ result }) =>
