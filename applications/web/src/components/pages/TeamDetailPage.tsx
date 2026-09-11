@@ -24,7 +24,7 @@ import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
 import { Skeleton } from '~/components/ui/skeleton';
 import { DEFAULT_LAYOUT } from '~/lib/dashboardLayout.js';
-import { formatLocalTime } from '~/lib/datetime';
+import { formatLocalTime, formatUtcDate } from '~/lib/datetime';
 import { tr } from '~/lib/translations.js';
 
 // WidgetId mirrors DashboardLayoutApi.DashboardWidgetId
@@ -60,6 +60,10 @@ const formatDuration = (minutes: number): string => {
 
 const toDate = (dt: DateTime.Utc): Date => new Date(Number(DateTime.toEpochMillis(dt)));
 
+// Timed events only — kept exactly as before (browser-local read of the instant).
+// Also the fallback for an all-day card missing `startDate` or the response missing
+// `todayLocalDate` (an older server, plan §11.5(c)/§17): today's behaviour rather
+// than a crash.
 const formatRelativeDate = (dt: DateTime.Utc): string => {
   const date = toDate(dt);
   const now = new Date();
@@ -70,6 +74,61 @@ const formatRelativeDate = (dt: DateTime.Utc): string => {
   if (diffDays === 0) return tr('dashboard_today');
   if (diffDays === 1) return tr('dashboard_tomorrow');
   return date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+};
+
+// `dateStr` is a `YYYY-MM-DD` calendar date (never an instant) — parse it as UTC
+// midnight so no browser timezone can shift it to the neighbouring day.
+const parseDateOnly = (dateStr: string): Date => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, (m ?? 1) - 1, d));
+};
+
+// All-day events, plan §11.1 row W6 / §11.5(c). Both operands are server-derived
+// team-local `YYYY-MM-DD` strings, compared as strings/UTC-midnight dates — never the
+// browser's own notion of "today" and never a UTC read of the (team-local) instant.
+const formatAllDayRelativeDate = (startDate: string, todayLocalDate: string): string => {
+  const diffDays = Math.round(
+    (parseDateOnly(startDate).getTime() - parseDateOnly(todayLocalDate).getTime()) /
+      (1000 * 60 * 60 * 24),
+  );
+  if (diffDays === 0) return tr('dashboard_today');
+  if (diffDays === 1) return tr('dashboard_tomorrow');
+  return parseDateOnly(startDate).toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+};
+
+// Dispatches between the two above. Falls back to `formatRelativeDate(event.startAt)`
+// — today's behaviour — whenever either date-only string is missing (older server).
+const relativeDateLabel = (
+  event: DashboardApi.DashboardUpcomingEvent,
+  todayLocalDate: Option.Option<string>,
+): string => {
+  if (event.allDay && Option.isSome(event.startDate) && Option.isSome(todayLocalDate)) {
+    return formatAllDayRelativeDate(event.startDate.value, todayLocalDate.value);
+  }
+  return formatRelativeDate(event.startAt);
+};
+
+// The date-badge box (`UpcomingEventsCard`). All-day events read the server-derived
+// team-local date (falling back to `formatUtcDate` on the instant for an older
+// server, plan §17) rather than the instant itself, mirroring `EventsListPage.tsx`.
+const eventBadgeDate = (
+  event: DashboardApi.DashboardUpcomingEvent,
+): { day: number; month: string } => {
+  if (event.allDay) {
+    const dateStr = Option.getOrElse(event.startDate, () => formatUtcDate(event.startAt));
+    const date = parseDateOnly(dateStr);
+    return {
+      day: date.getUTCDate(),
+      month: date.toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' }),
+    };
+  }
+  const date = toDate(event.startAt);
+  return { day: date.getDate(), month: date.toLocaleDateString(undefined, { month: 'short' }) };
 };
 
 const RsvpBadge = ({ rsvp }: { rsvp: Option.Option<'yes' | 'no' | 'maybe' | 'coming_later'> }) => {
@@ -199,9 +258,11 @@ function StatCards({
 function AwaitingRsvpBanner({
   teamId,
   events,
+  todayLocalDate,
 }: {
   teamId: string;
   events: ReadonlyArray<DashboardApi.DashboardUpcomingEvent>;
+  todayLocalDate: Option.Option<string>;
 }) {
   if (events.length === 0) return null;
 
@@ -233,7 +294,14 @@ function AwaitingRsvpBanner({
               <div className='min-w-0 flex-1'>
                 <p className='font-medium truncate text-sm'>{event.title}</p>
                 <p className='text-xs text-muted-foreground'>
-                  {formatRelativeDate(event.startAt)} · {formatLocalTime(event.startAt)}
+                  {relativeDateLabel(event, todayLocalDate)} ·{' '}
+                  {event.allDay ? (
+                    <span className='rounded bg-muted px-1 py-0.5 text-[10px]'>
+                      {tr('event_allDayLabel')}
+                    </span>
+                  ) : (
+                    formatLocalTime(event.startAt)
+                  )}
                 </p>
               </div>
               <Button size='sm' className='shrink-0'>
@@ -252,9 +320,11 @@ function AwaitingRsvpBanner({
 function UpcomingEventsCard({
   teamId,
   events,
+  todayLocalDate,
 }: {
   teamId: string;
   events: ReadonlyArray<DashboardApi.DashboardUpcomingEvent>;
+  todayLocalDate: Option.Option<string>;
 }) {
   return (
     <Card>
@@ -286,11 +356,9 @@ function UpcomingEventsCard({
               >
                 {/* Date column */}
                 <div className='flex size-10 shrink-0 flex-col items-center justify-center rounded-md bg-muted text-xs'>
-                  <span className='font-semibold leading-none'>
-                    {toDate(event.startAt).getDate()}
-                  </span>
+                  <span className='font-semibold leading-none'>{eventBadgeDate(event).day}</span>
                   <span className='text-muted-foreground leading-none mt-0.5'>
-                    {toDate(event.startAt).toLocaleDateString(undefined, { month: 'short' })}
+                    {eventBadgeDate(event).month}
                   </span>
                 </div>
                 {/* Event info */}
@@ -302,7 +370,14 @@ function UpcomingEventsCard({
                   <div className='flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground'>
                     <span className='flex items-center gap-1'>
                       <Clock className='size-3' />
-                      {formatRelativeDate(event.startAt)} · {formatLocalTime(event.startAt)}
+                      {relativeDateLabel(event, todayLocalDate)} ·{' '}
+                      {event.allDay ? (
+                        <span className='rounded bg-muted px-1 py-0.5 text-[10px]'>
+                          {tr('event_allDayLabel')}
+                        </span>
+                      ) : (
+                        formatLocalTime(event.startAt)
+                      )}
                     </span>
                     {Option.isSome(event.location) && (
                       <span className='flex items-center gap-1 truncate'>
@@ -450,7 +525,7 @@ export function TeamDetailPage({
     );
   }
 
-  const { upcomingEvents, awaitingRsvp, activitySummary } = dashboard;
+  const { upcomingEvents, awaitingRsvp, activitySummary, todayLocalDate } = dashboard;
   const effectiveLayout = layout ?? DEFAULT_LAYOUT;
 
   // Determine whether each banner has actionable data. When there is no data
@@ -466,14 +541,24 @@ export function TeamDetailPage({
   // This is a deliberate user choice — they opted out of the reminder.
   const widgetRegistry: Record<WidgetId, React.ReactNode | null> = {
     awaitingRsvp: hasRsvp ? (
-      <AwaitingRsvpBanner key='awaitingRsvp' teamId={teamId} events={awaitingRsvp} />
+      <AwaitingRsvpBanner
+        key='awaitingRsvp'
+        teamId={teamId}
+        events={awaitingRsvp}
+        todayLocalDate={todayLocalDate}
+      />
     ) : null,
     outstandingPayments: hasOutstandingPayments ? (
       <OutstandingPaymentsBanner key='outstandingPayments' teamId={teamId} groups={myStatus} />
     ) : null,
     stats: <StatCards key='stats' activitySummary={activitySummary} />,
     upcomingEvents: (
-      <UpcomingEventsCard key='upcomingEvents' teamId={teamId} events={upcomingEvents} />
+      <UpcomingEventsCard
+        key='upcomingEvents'
+        teamId={teamId}
+        events={upcomingEvents}
+        todayLocalDate={todayLocalDate}
+      />
     ),
     activity: <ActivityCard key='activity' activitySummary={activitySummary} teamId={teamId} />,
     teamManagement: <TeamManagementCard key='teamManagement' teamId={teamId} />,

@@ -78,6 +78,7 @@ vi.mock('~/lib/translations.js', () => ({
       finance_status_pending: 'Pending',
       finance_status_partial: 'Partial',
       finance_status_overdue: 'Overdue',
+      event_allDayLabel: 'All day',
     };
     return map[key] ?? key;
   },
@@ -112,13 +113,23 @@ vi.mock('~/components/atoms/EventLocation.js', () => ({
   EventLocation: ({ text }: { text: string }) => <span>{text}</span>,
 }));
 
-vi.mock('~/lib/datetime', () => ({
-  formatLocalTime: () => '10:00',
-}));
+vi.mock('~/lib/datetime', async () => {
+  const actual = await vi.importActual<typeof import('~/lib/datetime')>('~/lib/datetime');
+  return {
+    ...actual,
+    formatLocalTime: () => '10:00',
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Dynamic imports (after mocks)
 // ---------------------------------------------------------------------------
+
+// PR 5 (plan §7.8) — pin the runtime timezone so the all-day date badge / relative
+// label assertions below are deterministic regardless of the machine/CI's own TZ.
+// A sibling file repeats the key assertions with `Pacific/Auckland` to prove the
+// all-day paths read the server-derived date string rather than a local Date part.
+process.env.TZ = 'Europe/Prague';
 
 const { TeamDetailPage } = await import('~/components/pages/TeamDetailPage.js');
 
@@ -174,6 +185,40 @@ function makeDashboard() {
       leaderboardTotal: 20,
     },
     myMemberId: 'member-1' as import('@sideline/domain').TeamMember.TeamMemberId,
+    todayLocalDate: Option.none<string>(),
+  };
+}
+
+// All-day / timed event fixtures — PR 5 (plan §7.8).
+function makeAllDayEvent(overrides: Record<string, unknown> = {}) {
+  return {
+    eventId: 'evt-allday' as any,
+    title: 'Tournament',
+    eventType: 'match' as any,
+    startAt: DateTime.fromDateUnsafe(new Date('2026-07-15T00:00:00Z')),
+    endAt: Option.none(),
+    location: Option.none(),
+    locationUrl: Option.none(),
+    myRsvp: Option.none(),
+    startDate: Option.some('2026-07-15'),
+    allDay: true,
+    ...overrides,
+  };
+}
+
+function makeTimedEvent(overrides: Record<string, unknown> = {}) {
+  return {
+    eventId: 'evt-timed' as any,
+    title: 'Practice',
+    eventType: 'training' as any,
+    startAt: DateTime.fromDateUnsafe(new Date('2026-07-15T18:00:00Z')),
+    endAt: Option.none(),
+    location: Option.none(),
+    locationUrl: Option.none(),
+    myRsvp: Option.none(),
+    startDate: Option.none(),
+    allDay: false,
+    ...overrides,
   };
 }
 
@@ -241,6 +286,187 @@ describe('TeamDetailPage — banner integration', () => {
     expect(screen.getByText('Activity summary')).not.toBeNull();
     expect(screen.getByText('Team management')).not.toBeNull();
     expect(screen.getByText('Current streak')).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NEW: all-day events on the dashboard (PR 5, plan §7.8)
+// ---------------------------------------------------------------------------
+
+describe('TeamDetailPage — all-day upcoming-events card (PR 5)', () => {
+  it('shows the all-day label and no clock time for an all-day event', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      upcomingEvents: [makeAllDayEvent()],
+      todayLocalDate: Option.some('2026-07-14'),
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />);
+
+    expect(screen.getByText('All day')).not.toBeNull();
+    expect(screen.queryByText(/\d{2}:\d{2}/)).toBeNull();
+  });
+
+  it('date badge reads 15 / Jul, derived from the server-supplied startDate string', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      upcomingEvents: [makeAllDayEvent()],
+      todayLocalDate: Option.some('2026-07-14'),
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />);
+
+    expect(screen.getByText('15')).not.toBeNull();
+    expect(screen.getByText('Jul')).not.toBeNull();
+  });
+
+  it('relative label is "Today" when startDate equals todayLocalDate', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      upcomingEvents: [makeAllDayEvent({ startDate: Option.some('2026-07-14') })],
+      todayLocalDate: Option.some('2026-07-14'),
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />);
+
+    expect(screen.getByText(/Today/)).not.toBeNull();
+  });
+
+  it('relative label is "Tomorrow" when startDate is one day after todayLocalDate', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      upcomingEvents: [makeAllDayEvent({ startDate: Option.some('2026-07-15') })],
+      todayLocalDate: Option.some('2026-07-14'),
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />);
+
+    expect(screen.getByText(/Tomorrow/)).not.toBeNull();
+  });
+
+  it('relative label reads the plain weekday/month/day format further out', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      upcomingEvents: [makeAllDayEvent({ startDate: Option.some('2026-07-22') })],
+      todayLocalDate: Option.some('2026-07-14'),
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />);
+
+    expect(screen.queryByText(/Today/)).toBeNull();
+    expect(screen.queryByText(/Tomorrow/)).toBeNull();
+    expect(screen.getByText(/Jul 22/)).not.toBeNull();
+  });
+
+  it('a multi-day all-day event still reads its own startDate for the badge/label', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      upcomingEvents: [
+        makeAllDayEvent({
+          startDate: Option.some('2026-07-15'),
+          endAt: Option.some(DateTime.fromDateUnsafe(new Date('2026-07-17T00:00:00Z'))),
+        }),
+      ],
+      todayLocalDate: Option.some('2026-07-15'),
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />);
+
+    expect(screen.getByText('All day')).not.toBeNull();
+    expect(screen.getByText(/Today/)).not.toBeNull();
+    expect(screen.queryByText(/\d{2}:\d{2}/)).toBeNull();
+  });
+
+  it('a timed event is unchanged: HH:mm still renders, no all-day label', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      upcomingEvents: [makeTimedEvent()],
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />);
+
+    expect(screen.getByText(/10:00/)).not.toBeNull();
+    expect(screen.queryByText('All day')).toBeNull();
+  });
+
+  it('an all-day event with startDate: Option.none() (older server) falls back instead of breaking', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      upcomingEvents: [makeAllDayEvent({ startDate: Option.none() })],
+      todayLocalDate: Option.some('2026-07-14'),
+    };
+
+    expect(() =>
+      render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />),
+    ).not.toThrow();
+    // Still an all-day card: no fabricated clock time, even without the derived date.
+    expect(screen.getByText('All day')).not.toBeNull();
+    expect(screen.queryByText(/\d{2}:\d{2}/)).toBeNull();
+  });
+});
+
+describe('TeamDetailPage — all-day awaiting-RSVP card (PR 5)', () => {
+  it('shows the all-day label and no clock time for an all-day event', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      awaitingRsvp: [makeAllDayEvent()],
+      todayLocalDate: Option.some('2026-07-14'),
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />);
+
+    expect(screen.getByText('All day')).not.toBeNull();
+    expect(screen.queryByText(/\d{2}:\d{2}/)).toBeNull();
+  });
+
+  it('relative label is "Today" when startDate equals todayLocalDate', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      awaitingRsvp: [makeAllDayEvent({ startDate: Option.some('2026-07-14') })],
+      todayLocalDate: Option.some('2026-07-14'),
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />);
+
+    expect(screen.getByText(/Today/)).not.toBeNull();
+  });
+
+  it('relative label is "Tomorrow" when startDate is one day after todayLocalDate', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      awaitingRsvp: [makeAllDayEvent({ startDate: Option.some('2026-07-15') })],
+      todayLocalDate: Option.some('2026-07-14'),
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />);
+
+    expect(screen.getByText(/Tomorrow/)).not.toBeNull();
+  });
+
+  it('relative label reads the plain weekday/month/day format further out', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      awaitingRsvp: [makeAllDayEvent({ startDate: Option.some('2026-07-22') })],
+      todayLocalDate: Option.some('2026-07-14'),
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />);
+
+    expect(screen.getByText(/Jul 22/)).not.toBeNull();
+  });
+
+  it('a timed event is unchanged: HH:mm still renders, no all-day label', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      awaitingRsvp: [makeTimedEvent()],
+    };
+    render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />);
+
+    expect(screen.getByText(/10:00/)).not.toBeNull();
+    expect(screen.queryByText('All day')).toBeNull();
+  });
+
+  it('an all-day event with startDate: Option.none() (older server) falls back instead of breaking', () => {
+    const dashboard = {
+      ...makeDashboard(),
+      awaitingRsvp: [makeAllDayEvent({ startDate: Option.none() })],
+      todayLocalDate: Option.some('2026-07-14'),
+    };
+
+    expect(() =>
+      render(<TeamDetailPage teamId={TEAM_ID} dashboard={dashboard as any} />),
+    ).not.toThrow();
+    expect(screen.getByText('All day')).not.toBeNull();
+    expect(screen.queryByText(/\d{2}:\d{2}/)).toBeNull();
   });
 });
 

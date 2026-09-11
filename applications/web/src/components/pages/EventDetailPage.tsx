@@ -151,12 +151,16 @@ const EventDateRange = ({
     endDateOption,
   );
   const start = allDay ? startDate : `${startDate} ${startTime}`;
+  const allDayBadge = allDay ? (
+    <span className='rounded bg-muted px-1 py-0.5 text-[10px]'>{tr('event_allDayLabel')}</span>
+  ) : null;
   if (sameDay) {
     return (
       <p>
         <span className='text-sm font-medium'>{labelStart}: </span>
         {start}
         {Option.match(end, { onNone: () => '', onSome: (v) => ` – ${v}` })}
+        {allDayBadge !== null && <> {allDayBadge}</>}
       </p>
     );
   }
@@ -165,6 +169,7 @@ const EventDateRange = ({
       <p>
         <span className='text-sm font-medium'>{labelStart}: </span>
         {start}
+        {allDayBadge !== null && <> {allDayBadge}</>}
       </p>
       {Option.isSome(end) && (
         <p>

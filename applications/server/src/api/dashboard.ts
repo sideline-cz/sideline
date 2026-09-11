@@ -8,7 +8,25 @@ import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { LeaderboardRepository } from '~/repositories/LeaderboardRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { projectRsvpResponseToLegacy } from '~/utils/rsvpWireProjection.js';
+
+/**
+ * Format a `Date` as `YYYY-MM-DD` in an arbitrary IANA timezone. Shared by the
+ * "7 days ago" activity-count cutoff (already Prague-only, unchanged) and the
+ * team-local "today" the dashboard now sends the web (plan §11.5(c)) — the latter
+ * needs the *team's own* timezone, not a hard-coded one.
+ */
+const formatDateInTimeZone = (date: Date, timeZone: string): string => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+};
 
 const forbidden = new DashboardApi.Forbidden();
 const allTimeframe: Leaderboard.LeaderboardTimeframe = 'all';
@@ -20,7 +38,8 @@ export const DashboardApiLive = HttpApiBuilder.group(Api, 'dashboard', (handlers
     Effect.bind('groups', () => GroupsRepository.asEffect()),
     Effect.bind('leaderboardRepo', () => LeaderboardRepository.asEffect()),
     Effect.bind('activityLogs', () => ActivityLogsRepository.asEffect()),
-    Effect.map(({ members, events, groups, leaderboardRepo, activityLogs }) =>
+    Effect.bind('teamSettings', () => TeamSettingsRepository.asEffect()),
+    Effect.map(({ members, events, groups, leaderboardRepo, activityLogs, teamSettings }) =>
       handlers.handle('getDashboard', ({ params: { teamId } }) =>
         Effect.Do.pipe(
           Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
@@ -31,6 +50,9 @@ export const DashboardApiLive = HttpApiBuilder.group(Api, 'dashboard', (handlers
           Effect.bind('allUpcoming', ({ membership }) =>
             events.findUpcomingWithRsvp(teamId, membership.id),
           ),
+          // Team-local "today" (plan §11.5(c)) — the operand `event.startDate` is
+          // compared against on the web, since the web has no timezone of its own.
+          Effect.bind('teamSettingsRow', () => teamSettings.findByTeamId(teamId)),
           // Filter events by group access (with caching to avoid N+1)
           Effect.bind('filteredEvents', ({ allUpcoming, membership }) => {
             const groupCache = new Map<GroupModel.GroupId, boolean>();
@@ -56,7 +78,7 @@ export const DashboardApiLive = HttpApiBuilder.group(Api, 'dashboard', (handlers
             }),
           ),
           // Build the response
-          Effect.map(({ filteredEvents, membership, leaderboardAndStats }) => {
+          Effect.map(({ filteredEvents, membership, leaderboardAndStats, teamSettingsRow }) => {
             const { leaderboardRows, activityRows } = leaderboardAndStats;
             const today = ActivityStats.todayInPrague();
 
@@ -64,6 +86,26 @@ export const DashboardApiLive = HttpApiBuilder.group(Api, 'dashboard', (handlers
             const now = new Date();
             const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
             const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+            // Same `COALESCE(ts.timezone, 'Europe/Prague')` default as every SQL site
+            // in the plan (§11.2) — a team with no `team_settings` row still gets a
+            // sensible "today".
+            const rawTeamTimezone = pipe(
+              teamSettingsRow,
+              Option.map((row) => row.timezone),
+              Option.getOrElse(() => 'Europe/Prague'),
+            );
+            // `team_settings.timezone` is free-form `TEXT` with no CHECK constraint
+            // (same caveat as `resolveZoned` in `api/event.ts` and `endOfLastLocalDay`
+            // in `utils/allDayRsvpWindow.ts`) — an invalid IANA id must not reach
+            // `Intl.DateTimeFormat` unguarded, since that throws a `RangeError`
+            // (a defect inside `Effect.map`, 500ing the whole dashboard) rather than
+            // a typed failure. Validate with `DateTime.zoneMakeNamed` first and fall
+            // back to the same `'Europe/Prague'` literal the column default uses.
+            const teamTimezone = Option.isSome(DateTime.zoneMakeNamed(rawTeamTimezone))
+              ? rawTeamTimezone
+              : 'Europe/Prague';
+            const todayLocalDate = formatDateInTimeZone(now, teamTimezone);
 
             const toEvent = (
               e: (typeof filteredEvents)[number],
@@ -78,6 +120,7 @@ export const DashboardApiLive = HttpApiBuilder.group(Api, 'dashboard', (handlers
                 locationUrl: e.location_url,
                 myRsvp: Option.map(e.my_rsvp, projectRsvpResponseToLegacy),
                 startDate: Option.some(e.start_date),
+                allDay: e.all_day,
               });
 
             const toEpochMs = (dt: DateTime.Utc) => Number(DateTime.toEpochMillis(dt));
@@ -110,14 +153,7 @@ export const DashboardApiLive = HttpApiBuilder.group(Api, 'dashboard', (handlers
             // stores logged_at_date in Prague TZ. A system-wide timezone refactor
             // would be needed to support per-user timezones.
             const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-            const parts = new Intl.DateTimeFormat('en-CA', {
-              timeZone: 'Europe/Prague',
-              year: 'numeric',
-              month: '2-digit',
-              day: '2-digit',
-            }).formatToParts(sevenDaysAgo);
-            const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
-            const sevenDaysAgoDate = `${get('year')}-${get('month')}-${get('day')}`;
+            const sevenDaysAgoDate = formatDateInTimeZone(sevenDaysAgo, 'Europe/Prague');
             const recentActivityCount = pipe(
               activityRows,
               Array.filter((r) => r.logged_at_date >= sevenDaysAgoDate),
@@ -162,6 +198,7 @@ export const DashboardApiLive = HttpApiBuilder.group(Api, 'dashboard', (handlers
               awaitingRsvp,
               activitySummary,
               myMemberId: membership.id,
+              todayLocalDate: Option.some(todayLocalDate),
             });
           }),
         ),

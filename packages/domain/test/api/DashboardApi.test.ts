@@ -44,3 +44,67 @@ describe('DashboardUpcomingEvent — startDate (PR 3b)', () => {
     expect(result.startDate).not.toStrictEqual(Option.some(''));
   });
 });
+
+describe('DashboardUpcomingEvent — allDay (PR 5)', () => {
+  it('decodes to false when the allDay key is entirely absent (old-server skew guard)', () => {
+    const result = Schema.decodeUnknownSync(DashboardApi.DashboardUpcomingEvent)(baseWire);
+    expect(result.allDay).toBe(false);
+  });
+
+  it('decodes an explicit allDay: true as true', () => {
+    const result = Schema.decodeUnknownSync(DashboardApi.DashboardUpcomingEvent)({
+      ...baseWire,
+      allDay: true,
+    });
+    expect(result.allDay).toBe(true);
+  });
+
+  it('round-trips encode -> decode preserving allDay: true', () => {
+    const decoded = Schema.decodeUnknownSync(DashboardApi.DashboardUpcomingEvent)({
+      ...baseWire,
+      allDay: true,
+      startDate: '2026-07-15',
+    });
+    const encoded = Schema.encodeSync(DashboardApi.DashboardUpcomingEvent)(decoded);
+    const roundTripped = Schema.decodeUnknownSync(DashboardApi.DashboardUpcomingEvent)(encoded);
+    expect(roundTripped.allDay).toBe(true);
+  });
+});
+
+describe('DashboardResponse — todayLocalDate (PR 5, plan §11.5(c))', () => {
+  const baseResponse = {
+    upcomingEvents: [],
+    awaitingRsvp: [],
+    activitySummary: {
+      currentStreak: 0,
+      longestStreak: 0,
+      totalActivities: 0,
+      totalDurationMinutes: 0,
+      leaderboardTotal: 0,
+      recentActivityCount: 0,
+    },
+    myMemberId: 'member-1',
+  };
+
+  it('decodes to Option.none() when the key is entirely absent (old-server skew)', () => {
+    const result = Schema.decodeUnknownSync(DashboardApi.DashboardResponse)(baseResponse);
+    expect(result.todayLocalDate).toStrictEqual(Option.none());
+  });
+
+  it('decodes a present todayLocalDate to Option.some(string)', () => {
+    const result = Schema.decodeUnknownSync(DashboardApi.DashboardResponse)({
+      ...baseResponse,
+      todayLocalDate: '2026-07-15',
+    });
+    expect(Option.getOrThrow(result.todayLocalDate)).toBe('2026-07-15');
+  });
+
+  it('rejects an explicit null todayLocalDate — absent key and null are not the same', () => {
+    expect(() =>
+      Schema.decodeUnknownSync(DashboardApi.DashboardResponse)({
+        ...baseResponse,
+        todayLocalDate: null,
+      }),
+    ).toThrow();
+  });
+});
