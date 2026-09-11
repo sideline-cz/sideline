@@ -2,9 +2,9 @@ import type { EventRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
-import { Option } from 'effect';
+import { DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
-import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
+import { discordDateInstant, toDiscordTimestamp } from '~/rest/discordTimestamp.js';
 import { locationDisplay } from './locationDisplay.js';
 
 const EVENT_COLOR = 0x5865f2;
@@ -32,7 +32,18 @@ const formatEntry = (entry: EventRpcModels.GuildEventListEntry, locale: Locale):
     },
     { locale },
   );
-  const startTs = toDiscordTimestamp(entry.start_at, entry.all_day ? 'D' : 'f');
+  // `discordDateInstant` anchors the display instant at 12:00Z of the intended calendar
+  // date, so the `'D'` style renders the SAME date for every viewer regardless of their
+  // own timezone. `entry` (`EventRpcModels.GuildEventListEntry`) has no team-timezone-
+  // derived date string to work from, so the UTC calendar date of `start_at` itself is
+  // the best available fallback — same convention `buildUpcomingEventEmbed.ts` falls
+  // back to on rolling-deploy skew.
+  const startTs = entry.all_day
+    ? toDiscordTimestamp(
+        discordDateInstant(DateTime.formatIsoDateUtc(entry.start_at), entry.start_at),
+        'D',
+      )
+    : toDiscordTimestamp(entry.start_at, 'f');
   return `${emoji} **${entry.title}**\n${startTs}${locationPart}\n${rsvpSummary}`;
 };
 

@@ -4,7 +4,7 @@ import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
 import { Array, DateTime, Option, pipe } from 'effect';
 import type { Locale } from '~/locale.js';
-import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
+import { discordDateInstant, toDiscordTimestamp } from '~/rest/discordTimestamp.js';
 import { formatName } from '../utils.js';
 import { locationDisplay } from './locationDisplay.js';
 
@@ -63,13 +63,27 @@ export const buildEventEmbed = (opts: {
 
   const fields: Array<Discord.RichEmbedField> = [];
 
+  // `discordDateInstant` anchors the display instant at 12:00Z of the intended calendar
+  // date, so the `'D'` style renders the SAME date for every viewer regardless of their
+  // own timezone — `opts.startAt`/`endAt` are raw instants with no such guarantee (this
+  // function has no team-timezone-derived date string to work from, unlike
+  // `buildUpcomingEventEmbed.ts`'s `entry.start_date`/`end_date`, so the UTC calendar date
+  // of the instant itself is the best available fallback — same convention that file
+  // falls back to on rolling-deploy skew).
   const when = opts.allDay
     ? Option.match(opts.endAt, {
-        onNone: () => toDiscordTimestamp(opts.startAt, 'D'),
+        onNone: () =>
+          toDiscordTimestamp(
+            discordDateInstant(DateTime.formatIsoDateUtc(opts.startAt), opts.startAt),
+            'D',
+          ),
         onSome: (endAt) =>
           isSameDay(opts.startAt, endAt)
-            ? toDiscordTimestamp(opts.startAt, 'D')
-            : `${toDiscordTimestamp(opts.startAt, 'D')} — ${toDiscordTimestamp(endAt, 'D')}`,
+            ? toDiscordTimestamp(
+                discordDateInstant(DateTime.formatIsoDateUtc(opts.startAt), opts.startAt),
+                'D',
+              )
+            : `${toDiscordTimestamp(discordDateInstant(DateTime.formatIsoDateUtc(opts.startAt), opts.startAt), 'D')} — ${toDiscordTimestamp(discordDateInstant(DateTime.formatIsoDateUtc(endAt), endAt), 'D')}`,
       })
     : Option.match(opts.endAt, {
         onNone: () => toDiscordTimestamp(opts.startAt, 'f'),
