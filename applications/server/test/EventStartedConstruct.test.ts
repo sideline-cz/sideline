@@ -97,6 +97,144 @@ describe('constructEvent with event_started type', () => {
     ),
   );
 
+  // ---------------------------------------------------------------------------
+  // PR 2 — `all_day` must be carried from `event_all_day` on the five
+  // remaining event-sync constructors (currently missing `all_day` at all —
+  // events.ts:89,126,145,170,206 does not compile until it is added).
+  // ---------------------------------------------------------------------------
+
+  const baseRow = (
+    eventType:
+      | 'rsvp_reminder'
+      | 'training_claim_request'
+      | 'training_claim_update'
+      | 'unclaimed_training_reminder'
+      | 'event_roster_approval_request',
+    eventAllDay: boolean,
+  ) => ({
+    id: SYNC_EVENT_ID,
+    team_id: TEAM_ID,
+    guild_id: GUILD_ID,
+    event_type: eventType,
+    event_id: EVENT_ID,
+    event_title: 'Saturday Training',
+    event_description: Option.none(),
+    event_image_url: Option.none(),
+    event_start_at: START_AT,
+    event_end_at: Option.none(),
+    event_location: Option.none(),
+    event_location_url: Option.none(),
+    event_event_type: 'active',
+    discord_target_channel_id: Option.none(),
+    member_group_id: Option.none(),
+    discord_role_id: Option.none(),
+    claimed_by_member_id: Option.none(),
+    claimed_by_discord_id: Option.none(),
+    claimed_by_name: Option.none(),
+    claimed_by_nickname: Option.none(),
+    claimed_by_user_display_name: Option.none(),
+    claimed_by_username: Option.none(),
+    event_all_day: eventAllDay,
+    teams_payload: Option.none(),
+  });
+
+  for (const allDay of [true, false]) {
+    it.effect(
+      `constructs RsvpReminderEvent carrying all_day: ${String(allDay)} from event_all_day`,
+      () =>
+        Effect.Do.pipe(
+          Effect.bind('result', () => constructEvent(baseRow('rsvp_reminder', allDay))),
+          Effect.tap(({ result }) =>
+            Effect.sync(() => {
+              expect(result instanceof EventRpcEvents.RsvpReminderEvent).toBe(true);
+              expect((result as EventRpcEvents.RsvpReminderEvent).all_day).toBe(allDay);
+            }),
+          ),
+          Effect.asVoid,
+        ),
+    );
+
+    it.effect(
+      `constructs TrainingClaimRequestEvent carrying all_day: ${String(allDay)} from event_all_day`,
+      () =>
+        Effect.Do.pipe(
+          Effect.bind('result', () => constructEvent(baseRow('training_claim_request', allDay))),
+          Effect.tap(({ result }) =>
+            Effect.sync(() => {
+              expect(result instanceof EventRpcEvents.TrainingClaimRequestEvent).toBe(true);
+              expect((result as EventRpcEvents.TrainingClaimRequestEvent).all_day).toBe(allDay);
+            }),
+          ),
+          Effect.asVoid,
+        ),
+    );
+
+    it.effect(
+      `constructs TrainingClaimUpdateEvent carrying all_day: ${String(allDay)} from event_all_day`,
+      () =>
+        Effect.Do.pipe(
+          Effect.bind('result', () => constructEvent(baseRow('training_claim_update', allDay))),
+          Effect.tap(({ result }) =>
+            Effect.sync(() => {
+              expect(result instanceof EventRpcEvents.TrainingClaimUpdateEvent).toBe(true);
+              expect((result as EventRpcEvents.TrainingClaimUpdateEvent).all_day).toBe(allDay);
+            }),
+          ),
+          Effect.asVoid,
+        ),
+    );
+
+    it.effect(
+      `constructs UnclaimedTrainingReminderEvent carrying all_day: ${String(allDay)} from event_all_day`,
+      () =>
+        Effect.Do.pipe(
+          Effect.bind('result', () =>
+            constructEvent(baseRow('unclaimed_training_reminder', allDay)),
+          ),
+          Effect.tap(({ result }) =>
+            Effect.sync(() => {
+              expect(result instanceof EventRpcEvents.UnclaimedTrainingReminderEvent).toBe(true);
+              expect((result as EventRpcEvents.UnclaimedTrainingReminderEvent).all_day).toBe(
+                allDay,
+              );
+            }),
+          ),
+          Effect.asVoid,
+        ),
+    );
+
+    it.effect(
+      `constructs EventRosterApprovalRequestEvent carrying all_day: ${String(allDay)} from event_all_day`,
+      () =>
+        Effect.Do.pipe(
+          Effect.bind('result', () =>
+            constructEvent({
+              ...baseRow('event_roster_approval_request', allDay),
+              // Roster events overload several columns (events.ts:203-240); supply
+              // decodable values for the ones the roster branch reads.
+              discord_target_channel_id: Option.some('roster-evt-1'),
+              member_group_id: Option.some('roster-1'),
+              claimed_by_member_id: Option.some('member-1'),
+              claimed_by_discord_id: Option.none(),
+              claimed_by_name: Option.some('Alice'),
+              event_location: Option.none(),
+              discord_role_id: Option.none(),
+              event_description: Option.some('Tournament Squad'),
+            } as any),
+          ),
+          Effect.tap(({ result }) =>
+            Effect.sync(() => {
+              expect(result instanceof EventRpcEvents.EventRosterApprovalRequestEvent).toBe(true);
+              expect((result as EventRpcEvents.EventRosterApprovalRequestEvent).all_day).toBe(
+                allDay,
+              );
+            }),
+          ),
+          Effect.asVoid,
+        ),
+    );
+  }
+
   it.effect('constructs EventCancelledEvent from event_cancelled row', () =>
     Effect.Do.pipe(
       Effect.bind('result', () =>

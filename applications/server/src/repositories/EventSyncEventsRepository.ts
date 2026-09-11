@@ -67,6 +67,7 @@ const RosterInsertInput = Schema.Struct({
   claimed_by_member_id: Schema.OptionFromNullOr(TeamMember.TeamMemberId), // team_member_id (candidate)
   claimed_by_display_name: Schema.OptionFromNullOr(Schema.String), // candidate_display_name
   event_location: Schema.OptionFromNullOr(Schema.String), // overloaded: owners_thread_id
+  event_all_day: Schema.Boolean,
 });
 
 class GuildLookupResult extends Schema.Class<GuildLookupResult>('GuildLookupResult')({
@@ -327,6 +328,7 @@ const make = Effect.gen(function* () {
     endAt: Option.Option<DateTime.Utc>,
     location: Option.Option<string>,
     eventEventType: string,
+    allDay: boolean,
     discordTargetChannelId: Option.Option<Discord.Snowflake> = Option.none(),
     memberGroupId: Option.Option<GroupModel.GroupId> = Option.none(),
     discordRoleId: Option.Option<Discord.Snowflake> = Option.none(),
@@ -344,7 +346,7 @@ const make = Effect.gen(function* () {
       location,
       locationUrl,
       eventEventType,
-      false,
+      allDay,
       discordTargetChannelId,
       memberGroupId,
       discordRoleId,
@@ -395,6 +397,7 @@ const make = Effect.gen(function* () {
     location: Option.Option<string>,
     description: Option.Option<string>,
     discordTargetChannelId: Discord.Snowflake,
+    allDay: boolean,
     discordRoleId: Option.Option<Discord.Snowflake> = Option.none(),
     locationUrl: Option.Option<string> = Option.none(),
     ownerGroupId: Option.Option<GroupModel.GroupId> = Option.none(),
@@ -411,7 +414,7 @@ const make = Effect.gen(function* () {
       location,
       locationUrl,
       'training',
-      false,
+      allDay,
       Option.some(discordTargetChannelId),
       ownerGroupId,
       discordRoleId,
@@ -430,6 +433,7 @@ const make = Effect.gen(function* () {
     claimedByMemberId: Option.Option<TeamMember.TeamMemberId>,
     claimedByDisplayName: Option.Option<string>,
     eventStatus: string,
+    allDay: boolean,
     locationUrl: Option.Option<string> = Option.none(),
   ) =>
     lookupGuildId(teamId).pipe(
@@ -455,7 +459,7 @@ const make = Effect.gen(function* () {
               discord_role_id: claimDiscordMessageId,
               claimed_by_member_id: claimedByMemberId,
               claimed_by_display_name: claimedByDisplayName,
-              event_all_day: false,
+              event_all_day: allDay,
             }),
         }),
       ),
@@ -470,6 +474,7 @@ const make = Effect.gen(function* () {
     endAt: Option.Option<DateTime.Utc>,
     location: Option.Option<string>,
     discordTargetChannelId: Discord.Snowflake,
+    allDay: boolean,
     discordRoleId: Option.Option<Discord.Snowflake> = Option.none(),
     _claimDiscordChannelId: Option.Option<Discord.Snowflake> = Option.none(),
     _claimDiscordMessageId: Option.Option<Discord.Snowflake> = Option.none(),
@@ -498,7 +503,7 @@ const make = Effect.gen(function* () {
               discord_role_id: discordRoleId,
               claimed_by_member_id: Option.none(),
               claimed_by_display_name: Option.none(),
-              event_all_day: false,
+              event_all_day: allDay,
             }),
         }),
       ),
@@ -632,7 +637,7 @@ const make = Effect.gen(function* () {
         ${null}, ${input.event_start_at}, ${null}, ${input.event_location},
         ${null}, ${'roster'}, ${input.discord_target_channel_id},
         ${input.member_group_id}, ${input.discord_role_id},
-        ${input.claimed_by_member_id}, ${input.claimed_by_display_name}, ${false}
+        ${input.claimed_by_member_id}, ${input.claimed_by_display_name}, ${input.event_all_day}
       )
     `,
   });
@@ -664,6 +669,7 @@ const make = Effect.gen(function* () {
     ownersThreadId: Option.Option<Discord.Snowflake>,
     ownerChannelId: Option.Option<Discord.Snowflake>,
     rosterName: Option.Option<string>,
+    allDay: boolean,
   ) =>
     lookupGuildId(teamId).pipe(
       Effect.flatMap(
@@ -684,6 +690,7 @@ const make = Effect.gen(function* () {
               claimed_by_member_id: Option.some(teamMemberId),
               claimed_by_display_name: candidateDisplayName,
               event_location: ownersThreadId,
+              event_all_day: allDay,
             }),
         }),
       ),
@@ -722,6 +729,7 @@ const make = Effect.gen(function* () {
               claimed_by_member_id: Option.none(),
               claimed_by_display_name: Option.none(),
               event_location: ownersThreadId,
+              event_all_day: false,
             }),
         }),
       ),
@@ -758,6 +766,7 @@ const make = Effect.gen(function* () {
               claimed_by_member_id: Option.none(),
               claimed_by_display_name: Option.none(),
               event_location: ownersThreadId,
+              event_all_day: false,
             }),
         }),
       ),

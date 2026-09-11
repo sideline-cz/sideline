@@ -1,4 +1,5 @@
 import type { EventRpcEvents } from '@sideline/domain';
+import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
 import type { MessageCreateRequest } from 'dfx/types';
 import { DateTime, Effect, Layer, Option } from 'effect';
@@ -35,6 +36,7 @@ const makeEvent = (
     discord_channel_id: Option.some(CHANNEL_ID as any),
     member_group_id: Option.none(),
     discord_role_id: Option.none(),
+    all_day: false,
     ...overrides,
   }) as any;
 
@@ -232,5 +234,124 @@ describe('handleRsvpReminder — per-member personal channel link', () => {
     const description = dmCall?.[1].embeds?.[0]?.description ?? '';
     expect(description).toContain(`https://discord.com/channels/${GUILD_ID}/${CHANNEL_ID}`);
     expect(description).not.toContain(PERSONAL_CHANNEL_ID);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR 2 — event.all_day rendering (channel embed field + DM sentence).
+//
+// handleRsvpReminder.ts:54 must compose `formatEventWhen(...) (<t:S:R>)` for
+// the channel embed field, and branch the DM key on event.all_day between
+// bot_rsvp_reminder_dm and bot_rsvp_reminder_dm_all_day — the latter must NOT
+// carry the " · All day" marker inside its {when} (A1b). The `(<t:S:R>)`
+// relative suffix must survive for timed events either way.
+// ---------------------------------------------------------------------------
+
+describe('handleRsvpReminder — all_day rendering (PR 2)', () => {
+  const ALL_DAY_START_AT = DateTime.makeUnsafe('2026-07-15T12:00:00Z');
+  const ALL_DAY_EPOCH = 1784116800;
+  const TIMED_START_AT = DateTime.makeUnsafe('2026-05-02T14:00:00Z');
+  const TIMED_EPOCH = 1777730400;
+
+  const ONE_NON_RESPONDER = [
+    {
+      discord_id: Option.some(NON_RESPONDER_WITH_CHANNEL_ID as any),
+      name: Option.some('Alice'),
+      nickname: Option.none(),
+      username: Option.none(),
+      display_name: Option.none(),
+    },
+  ];
+
+  it('all-day: channel embed "When" field is exactly <t:S:D> · All day (<t:S:R>)', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(
+      handleRsvpReminder(makeEvent({ all_day: true, start_at: ALL_DAY_START_AT })),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    const channelCall = createMessageCalls.find(([channelId]) => channelId === CHANNEL_ID);
+    expect(channelCall).toBeDefined();
+    const whenField = channelCall?.[1].embeds?.[0]?.fields?.[0];
+    const marker = m.bot_embed_all_day({}, { locale: 'en' });
+    expect(whenField?.value).toBe(`<t:${ALL_DAY_EPOCH}:D> · ${marker} (<t:${ALL_DAY_EPOCH}:R>)`);
+  });
+
+  it('all-day: DM uses bot_rsvp_reminder_dm_all_day with {when} = <t:S:D> (<t:S:R>) — no marker', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc({ nonResponders: ONE_NON_RESPONDER });
+    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(
+      handleRsvpReminder(makeEvent({ all_day: true, start_at: ALL_DAY_START_AT })),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    const dmCall = createMessageCalls.find(([channelId]) => channelId === 'dm-channel-id');
+    expect(dmCall).toBeDefined();
+    const expectedWhen = `<t:${ALL_DAY_EPOCH}:D> (<t:${ALL_DAY_EPOCH}:R>)`;
+    const expectedDescription = m.bot_rsvp_reminder_dm_all_day(
+      {
+        title: 'Training Session',
+        when: expectedWhen,
+        link: `https://discord.com/channels/${GUILD_ID}/${CHANNEL_ID}`,
+      },
+      { locale: 'en' },
+    );
+    expect(dmCall?.[1].embeds?.[0]?.description).toBe(expectedDescription);
+  });
+
+  it('timed: channel embed "When" field is exactly <t:S:f> (<t:S:R>) — byte-identical baseline', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(
+      handleRsvpReminder(makeEvent({ all_day: false, start_at: TIMED_START_AT })),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    const channelCall = createMessageCalls.find(([channelId]) => channelId === CHANNEL_ID);
+    expect(channelCall).toBeDefined();
+    const whenField = channelCall?.[1].embeds?.[0]?.fields?.[0];
+    expect(whenField?.value).toBe(`<t:${TIMED_EPOCH}:f> (<t:${TIMED_EPOCH}:R>)`);
+  });
+
+  it('timed: DM uses bot_rsvp_reminder_dm with the same {when} as the channel field', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc({ nonResponders: ONE_NON_RESPONDER });
+    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(
+      handleRsvpReminder(makeEvent({ all_day: false, start_at: TIMED_START_AT })),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    const dmCall = createMessageCalls.find(([channelId]) => channelId === 'dm-channel-id');
+    expect(dmCall).toBeDefined();
+    const expectedWhen = `<t:${TIMED_EPOCH}:f> (<t:${TIMED_EPOCH}:R>)`;
+    const expectedDescription = m.bot_rsvp_reminder_dm(
+      {
+        title: 'Training Session',
+        when: expectedWhen,
+        link: `https://discord.com/channels/${GUILD_ID}/${CHANNEL_ID}`,
+      },
+      { locale: 'en' },
+    );
+    expect(dmCall?.[1].embeds?.[0]?.description).toBe(expectedDescription);
+  });
+
+  it('payload without all_day (decoding default) renders as timed and does not throw', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    const event = makeEvent({ start_at: TIMED_START_AT }) as any;
+    delete event.all_day;
+
+    await run(handleRsvpReminder(event), Layer.merge(rpcLayer, restLayer));
+
+    const channelCall = createMessageCalls.find(([channelId]) => channelId === CHANNEL_ID);
+    expect(channelCall).toBeDefined();
+    const whenField = channelCall?.[1].embeds?.[0]?.fields?.[0];
+    expect(whenField?.value).toBe(`<t:${TIMED_EPOCH}:f> (<t:${TIMED_EPOCH}:R>)`);
   });
 });

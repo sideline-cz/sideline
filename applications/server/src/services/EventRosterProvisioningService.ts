@@ -53,6 +53,7 @@ type OnRsvpParams = {
     readonly member_group_id: Option.Option<GroupModel.GroupId>;
     readonly title: string;
     readonly start_at: import('effect').DateTime.Utc;
+    readonly all_day: boolean;
   };
   readonly memberId: TeamMember.TeamMemberId;
   readonly discordUserId: Option.Option<Discord.Snowflake>;
@@ -308,6 +309,7 @@ const make = Effect.Do.pipe(
                                   owners_thread_id,
                                   owner_channel_id,
                                   Option.some(roster_name),
+                                  event.all_day,
                                 )
                                 .pipe(Effect.ignore),
                             ),

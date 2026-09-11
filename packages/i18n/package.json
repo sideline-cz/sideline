@@ -15,7 +15,8 @@
     "directory": "dist"
   },
   "scripts": {
-    "build": "paraglide-js compile --project ./project.inlang --outdir ./dist --emit-ts-declarations --strategy localStorage cookie preferredLanguage baseLocale && node scripts/pack.js"
+    "build": "paraglide-js compile --project ./project.inlang --outdir ./dist --emit-ts-declarations --strategy localStorage cookie preferredLanguage baseLocale && node scripts/pack.js",
+    "test": "vitest"
   },
   "exports": {
     "./messages": "./dist/messages.js",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@inlang/paraglide-js": "^2.24.1",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
   }
 }

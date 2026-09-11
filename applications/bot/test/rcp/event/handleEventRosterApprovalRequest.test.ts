@@ -9,6 +9,7 @@ import type {
   RosterModel,
   TeamMember,
 } from '@sideline/domain';
+import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { describe, expect, it } from 'vitest';
@@ -56,6 +57,7 @@ const makeApprovalRequestEvent = (
     owners_thread_id: Option.none(),
     owner_channel_id: Option.some(OWNER_CHANNEL_ID),
     roster_name: Option.some('Tournament Squad'),
+    all_day: false,
     ...overrides,
   }) as any;
 
@@ -443,5 +445,54 @@ describe('handleEventRosterApprovalCancel', () => {
     );
 
     expect(restCalls.deleteMessage).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR 2 — event.all_day must reach buildRosterApprovalMessage
+// (handleEventRosterApprovalRequest.ts:40 replaces the PR 1 literal
+// `allDay: false` with `event.all_day`).
+// ---------------------------------------------------------------------------
+
+describe('handleEventRosterApprovalRequest — all_day forwarding (PR 2)', () => {
+  it('all-day: "Event" field is exactly **{title}** — <t:S:D> · All day', async () => {
+    const { calls: restCalls, layer: restLayer } = makeRecordingRest();
+    const { layer: rpcLayer } = makeRecordingRpc();
+
+    const event = makeApprovalRequestEvent({
+      owners_thread_id: Option.none(),
+      all_day: true,
+      start_at: DateTime.makeUnsafe('2026-07-15T12:00:00Z'),
+    });
+
+    await Effect.runPromise(
+      handleEventRosterApprovalRequest(event).pipe(
+        Effect.provide(Layer.merge(restLayer, rpcLayer)),
+      ),
+    );
+
+    expect(restCalls.createMessage).toHaveLength(1);
+    const [, payload] = restCalls.createMessage[0] as [string, any];
+    const eventField = payload.embeds?.[0]?.fields?.[0];
+    const marker = m.bot_embed_all_day({}, { locale: 'en' });
+    expect(eventField?.value).toBe(`**Summer Tournament** — <t:1784116800:D> · ${marker}`);
+  });
+
+  it('timed (default): "Event" field is exactly **{title}** — <t:S:f>', async () => {
+    const { calls: restCalls, layer: restLayer } = makeRecordingRest();
+    const { layer: rpcLayer } = makeRecordingRpc();
+
+    const event = makeApprovalRequestEvent({ owners_thread_id: Option.none() });
+
+    await Effect.runPromise(
+      handleEventRosterApprovalRequest(event).pipe(
+        Effect.provide(Layer.merge(restLayer, rpcLayer)),
+      ),
+    );
+
+    expect(restCalls.createMessage).toHaveLength(1);
+    const [, payload] = restCalls.createMessage[0] as [string, any];
+    const eventField = payload.embeds?.[0]?.fields?.[0];
+    expect(eventField?.value).toBe('**Summer Tournament** — <t:4086583200:f>');
   });
 });
