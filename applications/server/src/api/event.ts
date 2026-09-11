@@ -11,6 +11,7 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
+import { eventAcceptsRsvp } from '~/utils/allDayRsvpWindow.js';
 
 const markPersonalMessagesDirtyBestEffort = (
   events: ServiceMap.Service.Shape<typeof EventsRepository>,
@@ -364,8 +365,9 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   location: event.location,
                   status: event.status,
                   createdByName: event.created_by_name,
-                  canEdit: canEdit && event.status === 'active',
-                  canCancel: canCancel && event.status === 'active',
+                  canEdit: canEdit && eventAcceptsRsvp(event, event.timezone, DateTime.nowUnsafe()),
+                  canCancel:
+                    canCancel && eventAcceptsRsvp(event, event.timezone, DateTime.nowUnsafe()),
                   seriesId: event.series_id,
                   seriesModified: event.series_modified,
                   ownerGroupId: event.owner_group_id,
@@ -411,7 +413,9 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
               existing.team_id !== teamId ? Effect.fail(notFound) : Effect.void,
             ),
             Effect.tap(({ existing }) =>
-              existing.status !== 'active' ? Effect.fail(notActive) : Effect.void,
+              !eventAcceptsRsvp(existing, existing.timezone, DateTime.nowUnsafe())
+                ? Effect.fail(notActive)
+                : Effect.void,
             ),
             // Check owner group access
             Effect.tap(({ existing, membership, isAdmin }) =>
@@ -539,9 +543,12 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   location: detail.location,
                   status: detail.status,
                   createdByName: detail.created_by_name,
-                  canEdit: hasPermission(membership, 'event:edit') && detail.status === 'active',
+                  canEdit:
+                    hasPermission(membership, 'event:edit') &&
+                    eventAcceptsRsvp(detail, detail.timezone, DateTime.nowUnsafe()),
                   canCancel:
-                    hasPermission(membership, 'event:cancel') && detail.status === 'active',
+                    hasPermission(membership, 'event:cancel') &&
+                    eventAcceptsRsvp(detail, detail.timezone, DateTime.nowUnsafe()),
                   seriesId: detail.series_id,
                   seriesModified: detail.series_modified,
                   ownerGroupId: detail.owner_group_id,
@@ -583,7 +590,9 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
               existing.team_id !== teamId ? Effect.fail(notFound) : Effect.void,
             ),
             Effect.tap(({ existing }) =>
-              existing.status !== 'active' ? Effect.fail(notActive) : Effect.void,
+              !eventAcceptsRsvp(existing, existing.timezone, DateTime.nowUnsafe())
+                ? Effect.fail(notActive)
+                : Effect.void,
             ),
             // Check owner group access
             Effect.tap(({ existing, membership, isAdmin }) =>

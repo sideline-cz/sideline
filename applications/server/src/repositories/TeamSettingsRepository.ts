@@ -3,6 +3,7 @@ import { Schemas } from '@sideline/effect-lib';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
+import { eventVisibleAt } from '~/repositories/eventVisibility.js';
 import {
   DEFAULT_CHANNEL_FORMAT,
   DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT,
@@ -321,11 +322,33 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // All three reminder-scheduling queries below replace BOTH the
+  // `status = 'active'` gate AND the `start_at > now` instant guard with the
+  // single shared `eventVisibleAt` fragment (plan §4.3/§14.1/§14.3) — relaxing
+  // only one half changes nothing (BL2): an all-day event's `start_at` is
+  // team-local midnight, always in the past by the time any same-day
+  // reminder window opens, so the instant half alone still rejects it; and
+  // the event has already flipped to `status = 'started'` by then, so the
+  // status half alone also still rejects it.
+  //
+  // `nowParam` MUST stay a bound query parameter, never text interpolated
+  // into `sql.unsafe`. Bind it once via a one-row CTE and reference it by
+  // name (`p.now_at`) everywhere `eventVisibleAt` needs a `now` EXPRESSION —
+  // the existing `DATE(... AT TIME ZONE ts.timezone)` scheduling clauses keep
+  // using `${nowParam}` directly, which is equally safe (each occurrence is
+  // its own bound parameter).
+  //
+  // All three use an INNER JOIN on `team_settings`, so `ts.timezone` is
+  // non-null — no `COALESCE` needed here (unlike the LEFT-JOIN read
+  // surfaces). An event whose team has no settings row is already invisible
+  // to these three queries today (the INNER join drops it), and stays so —
+  // unchanged behaviour, not a new gap.
   const _findEventsForReminderAt = (nowParam: string) =>
     SqlSchema.findAll({
       Request: Schema.Void,
       Result: EventNeedingReminder,
       execute: () => sql`
+        WITH p AS (SELECT ${nowParam}::timestamptz AS now_at)
         SELECT e.id AS event_id, e.team_id, e.title, e.start_at, e.event_type,
                e.owner_group_id, e.member_group_id,
                ts.reminders_channel_id, ts.timezone,
@@ -333,7 +356,8 @@ const make = Effect.gen(function* () {
                e.all_day
         FROM events e
         JOIN team_settings ts ON ts.team_id = e.team_id
-        WHERE e.status = 'active'
+        CROSS JOIN p
+        WHERE ${sql.unsafe(eventVisibleAt('e', 'ts.timezone', 'p.now_at'))}
           AND e.reminder_sent_at IS NULL
           AND ts.rsvp_reminders_enabled = TRUE
           AND DATE((${nowParam}::timestamptz) AT TIME ZONE ts.timezone)
@@ -342,7 +366,6 @@ const make = Effect.gen(function* () {
           AND ((${nowParam}::timestamptz) AT TIME ZONE ts.timezone)::time
               BETWEEN ts.rsvp_reminder_time
               AND ts.rsvp_reminder_time::time + INTERVAL '5 minutes'
-          AND e.start_at > (${nowParam}::timestamptz)
       `,
     });
 
@@ -351,6 +374,7 @@ const make = Effect.gen(function* () {
       Request: Schema.Void,
       Result: EventNeedingClaimRequest,
       execute: () => sql`
+        WITH p AS (SELECT ${nowParam}::timestamptz AS now_at)
         SELECT e.id AS event_id, e.team_id, e.title, e.start_at,
                e.end_at, e.location, e.description, e.event_type,
                e.owner_group_id, e.member_group_id,
@@ -358,10 +382,10 @@ const make = Effect.gen(function* () {
                e.all_day
         FROM events e
         JOIN team_settings ts ON ts.team_id = e.team_id
-        WHERE e.status = 'active'
+        CROSS JOIN p
+        WHERE ${sql.unsafe(eventVisibleAt('e', 'ts.timezone', 'p.now_at'))}
           AND e.event_type = 'training'
           AND e.claim_request_sent_at IS NULL
-          AND e.start_at > (${nowParam}::timestamptz)
           AND DATE(e.start_at AT TIME ZONE ts.timezone) - ts.claim_request_days_before
               <= DATE((${nowParam}::timestamptz) AT TIME ZONE ts.timezone)
       `,
@@ -372,6 +396,7 @@ const make = Effect.gen(function* () {
       Request: Schema.Void,
       Result: EventNeedingCoachingStatus,
       execute: () => sql`
+        WITH p AS (SELECT ${nowParam}::timestamptz AS now_at)
         SELECT e.id AS event_id, e.team_id, e.title, e.start_at,
                e.location, ts.timezone,
                e.owner_group_id,
@@ -382,11 +407,11 @@ const make = Effect.gen(function* () {
         JOIN team_settings ts ON ts.team_id = e.team_id
         LEFT JOIN team_members ctm ON ctm.id = e.claimed_by
         LEFT JOIN users u ON u.id = ctm.user_id
-        WHERE e.status = 'active'
+        CROSS JOIN p
+        WHERE ${sql.unsafe(eventVisibleAt('e', 'ts.timezone', 'p.now_at'))}
           AND e.event_type = 'training'
           AND e.coaching_status_sent_at IS NULL
           AND e.claimed_by IS NOT NULL
-          AND e.start_at > (${nowParam}::timestamptz)
           AND DATE(e.start_at AT TIME ZONE ts.timezone)
               = DATE((${nowParam}::timestamptz) AT TIME ZONE ts.timezone)
           AND ((${nowParam}::timestamptz) AT TIME ZONE ts.timezone)::time >= TIME '07:00'

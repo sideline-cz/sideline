@@ -18,6 +18,7 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
+import { eventAcceptsRsvp } from '~/utils/allDayRsvpWindow.js';
 import { isRsvpMessageRequiredAndMissing } from '~/utils/rsvpMessageRequired.js';
 import { projectRsvpResponseToLegacy } from '~/utils/rsvpWireProjection.js';
 
@@ -36,9 +37,6 @@ const checkGroupAccess = (
     .getDescendantMemberIds(groupId.value)
     .pipe(Effect.map((memberIds) => Array.contains(memberIds, memberId)));
 };
-
-const isEventPastDeadline = (startAt: DateTime.Utc): boolean =>
-  !DateTime.isLessThan(DateTime.nowUnsafe(), startAt);
 
 const markPersonalMessagesDirtyBestEffort = (
   events: ServiceMap.Service.Shape<typeof EventsRepository>,
@@ -153,7 +151,7 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
                 rsvps,
                 eventId,
                 membership.id,
-                event.status === 'active' && !isEventPastDeadline(event.start_at) && isGroupMember,
+                eventAcceptsRsvp(event, event.timezone, DateTime.nowUnsafe()) && isGroupMember,
                 Option.match(settings, {
                   onNone: () => 0,
                   onSome: (s) => s.min_players_threshold,
@@ -181,11 +179,18 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
             Effect.tap(({ event }) =>
               event.team_id !== teamId ? Effect.fail(notFound) : Effect.void,
             ),
+            // Cancelled stays `notFound` — the pre-existing vocabulary for this
+            // surface — while every other closed case (an all-day event past its
+            // last local day, or a timed event past its deadline) is
+            // `deadlinePassed` via `eventAcceptsRsvp`. Only the started + all-day
+            // case newly succeeds here.
             Effect.tap(({ event }) =>
-              event.status !== 'active' ? Effect.fail(notFound) : Effect.void,
+              event.status === 'cancelled' ? Effect.fail(notFound) : Effect.void,
             ),
             Effect.tap(({ event }) =>
-              isEventPastDeadline(event.start_at) ? Effect.fail(deadlinePassed) : Effect.void,
+              !eventAcceptsRsvp(event, event.timezone, DateTime.nowUnsafe())
+                ? Effect.fail(deadlinePassed)
+                : Effect.void,
             ),
             Effect.tap(({ event, membership }) =>
               checkGroupAccess(groups, membership.id, event.member_group_id).pipe(

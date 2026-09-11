@@ -3,6 +3,7 @@ import { Schemas } from '@sideline/effect-lib';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
+import { eventDayOrder, eventVisibleNow } from '~/repositories/eventVisibility.js';
 
 class PersonalEventMessageRow extends Schema.Class<PersonalEventMessageRow>(
   'PersonalEventMessageRow',
@@ -29,6 +30,14 @@ class MemberMessageRow extends Schema.Class<MemberMessageRow>('MemberMessageRow'
   personal_channel_id: Discord.Snowflake,
   discord_message_id: Discord.Snowflake,
   start_at: Schemas.DateTimeFromDate,
+  // Day-grouped ordering additions (plan §4.7). `local_date` MUST carry the
+  // explicit `::date::text` cast in the query below — a bare `::date` comes
+  // back as OID 1082 (a JS `Date`), which `Schema.String` rejects, and the
+  // resulting `SchemaError` surfaces to the bot as an `RpcClientError` that
+  // `reorderPersonalChannel.ts` swallows into `[]` — personal channels would
+  // silently stop reordering, forever, with no error logged anywhere.
+  all_day: Schema.Boolean,
+  local_date: Schema.String,
 }) {}
 
 const make = Effect.Do.pipe(
@@ -98,13 +107,16 @@ const make = Effect.Do.pipe(
       Request: Schema.Struct({ team_member_id: Schema.String }),
       Result: MemberMessageRow,
       execute: (input) => sql`
-        SELECT pem.event_id, pem.personal_channel_id, pem.discord_message_id, e.start_at
+        SELECT pem.event_id, pem.personal_channel_id, pem.discord_message_id, e.start_at,
+               e.all_day,
+               (e.start_at AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                   AS local_date
         FROM personal_event_messages pem
         JOIN events e ON e.id = pem.event_id
+        LEFT JOIN team_settings ts ON ts.team_id = e.team_id
         WHERE pem.team_member_id = ${input.team_member_id}
-          AND e.status = 'active'
-          AND e.start_at >= now()
-        ORDER BY e.start_at ASC
+          AND ${sql.unsafe(eventVisibleNow('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
+        ORDER BY ${sql.unsafe(eventDayOrder('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
       `,
     });
 

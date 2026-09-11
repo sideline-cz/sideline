@@ -6,7 +6,7 @@ import { DateTime, Effect, Layer, Option } from 'effect';
 import { HttpClient, HttpClientResponse, HttpRouter, HttpServer } from 'effect/unstable/http';
 import { RpcTest } from 'effect/unstable/rpc';
 import { SqlClient } from 'effect/unstable/sql';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiLive } from '~/api/index.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
 import { AchievementRoleMappingsRepository } from '~/repositories/AchievementRoleMappingsRepository.js';
@@ -202,6 +202,11 @@ type EventRecord = {
   owner_group_name: Option.Option<string>;
   member_group_id: Option.Option<string>;
   member_group_name: Option.Option<string>;
+  // PR 4 additions (plan §7.7e, BL1) — optional so every pre-existing fixture
+  // above is unchanged (`all_day` stays falsy/undefined, `timezone` stays
+  // undefined, exactly as today). Only the new all-day fixtures below set them.
+  all_day?: boolean;
+  timezone?: string;
 };
 
 let eventsStore: Map<Event.EventId, EventRecord>;
@@ -1466,6 +1471,167 @@ describe('Event RSVP API', () => {
 });
 
 // ============================================================
+// PR 4 — all-day RSVP window (plan §7.7e, BL1)
+// ============================================================
+//
+// `eventAcceptsRsvp` replaces `event.status === 'active' && !isEventPastDeadline(...)`
+// at `api/event-rsvp.ts:156,185,188`. All-day events stay RSVP-able through the
+// end of their last LOCAL day even though `status` flips to 'started' at
+// team-local midnight — but a CANCELLED all-day event must still be rejected
+// (with the existing `EventNotFound` vocabulary, unchanged), because the HTTP
+// side keeps an explicit `status === 'cancelled' → notFound` gate ahead of the
+// `eventAcceptsRsvp` check.
+//
+// Every fixture below pins `status` AND `all_day` AND `timezone` explicitly —
+// the BL2/BL1 trap the plan calls out repeatedly: a fixture that leaves
+// `status` implicit (defaulting to 'active') would go green while production
+// (where the event is really 'started' by the time anyone RSVPs) stays broken.
+//
+// Uses `vi.useFakeTimers({ toFake: ['Date'] })` — `isEventPastDeadline` /
+// `eventAcceptsRsvp` read `DateTime.nowUnsafe()`, which is `makeUtc(Date.now())`
+// under the hood (effect@4.0.0-beta.40's `internal/dateTime.js`), so faking
+// `Date` pins the instant the write-path predicate actually evaluates against.
+describe('PUT /rsvp — all-day RSVP window (PR 4, BL1)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const ALL_DAY_STARTED_TODAY = '00000000-0000-0000-0000-000000000090' as Event.EventId;
+  const ALL_DAY_STARTED_PASSED = '00000000-0000-0000-0000-000000000091' as Event.EventId;
+  const ALL_DAY_CANCELLED_TODAY = '00000000-0000-0000-0000-000000000092' as Event.EventId;
+  const ALL_DAY_NY = '00000000-0000-0000-0000-000000000093' as Event.EventId;
+
+  const seedAllDayEvent = (
+    id: Event.EventId,
+    status: Event.EventStatus,
+    startAtIso: string,
+    timezone: string,
+  ) => {
+    eventsStore.set(id, {
+      id,
+      team_id: TEST_TEAM_ID,
+      training_type_id: Option.none(),
+      event_type: 'tournament',
+      title: 'All-day Tournament',
+      description: Option.none(),
+      start_at: DateTime.makeUnsafe(startAtIso),
+      end_at: Option.none(),
+      location: Option.none(),
+      status,
+      created_by: TEST_ADMIN_MEMBER_ID,
+      training_type_name: Option.none(),
+      created_by_name: Option.some('Admin User'),
+      series_id: Option.none(),
+      series_modified: false,
+      discord_target_channel_id: Option.none(),
+      owner_group_id: Option.none(),
+      owner_group_name: Option.none(),
+      member_group_id: Option.none(),
+      member_group_name: Option.none(),
+      all_day: true,
+      timezone,
+    });
+  };
+
+  // 2026-07-15T00:00 CEST (+2) = 2026-07-14T22:00:00Z
+  const PRAGUE_ALL_DAY_START = '2026-07-14T22:00:00Z';
+
+  it('case 1: all-day, status=started, well within its own local day → 204 (fails today with RsvpDeadlinePassed)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-07-15T15:00:00Z')); // 17:00 CEST, same day
+    seedAllDayEvent(ALL_DAY_STARTED_TODAY, 'started', PRAGUE_ALL_DAY_START, 'Europe/Prague');
+
+    const response = await handler(
+      new Request(`${BASE}/${ALL_DAY_STARTED_TODAY}/rsvp`, {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer user-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response: 'yes', message: null }),
+      }),
+    );
+    expect(response.status).toBe(204);
+  });
+
+  it('case 2: all-day, status=started, 00:01 local NEXT day → 400 RsvpDeadlinePassed', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-07-15T22:01:00Z')); // 00:01 CEST next day
+    seedAllDayEvent(ALL_DAY_STARTED_PASSED, 'started', PRAGUE_ALL_DAY_START, 'Europe/Prague');
+
+    const response = await handler(
+      new Request(`${BASE}/${ALL_DAY_STARTED_PASSED}/rsvp`, {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer user-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response: 'yes', message: null }),
+      }),
+    );
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body._tag).toBe('RsvpDeadlinePassed');
+  });
+
+  it('case 5: all-day, status=cancelled, own local day → 404 EventNotFound (vocabulary unchanged)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-07-15T15:00:00Z'));
+    seedAllDayEvent(ALL_DAY_CANCELLED_TODAY, 'cancelled', PRAGUE_ALL_DAY_START, 'Europe/Prague');
+
+    const response = await handler(
+      new Request(`${BASE}/${ALL_DAY_CANCELLED_TODAY}/rsvp`, {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer user-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response: 'yes', message: null }),
+      }),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('case 7: all-day on America/New_York — boundary moves with the team (04:00Z next day, not 22:00Z)', async () => {
+    // 2026-07-15T00:00 EDT (-4) = 2026-07-15T04:00:00Z
+    const NY_START = '2026-07-15T04:00:00Z';
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // 03:59Z next day — still before the NY boundary (04:00Z next day).
+    vi.setSystemTime(new Date('2026-07-16T03:59:00Z'));
+    seedAllDayEvent(ALL_DAY_NY, 'started', NY_START, 'America/New_York');
+
+    const stillOpen = await handler(
+      new Request(`${BASE}/${ALL_DAY_NY}/rsvp`, {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer user-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response: 'yes', message: null }),
+      }),
+    );
+    expect(stillOpen.status).toBe(204);
+
+    vi.setSystemTime(new Date('2026-07-16T04:01:00Z'));
+    const closed = await handler(
+      new Request(`${BASE}/${ALL_DAY_NY}/rsvp`, {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer user-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response: 'no', message: null }),
+      }),
+    );
+    expect(closed.status).toBe(400);
+  });
+
+  it('case 8: timed, status=active, now === start_at EXACTLY → 204 (boundary is <=, not <)', async () => {
+    const startIso = '2026-07-15T12:00:00Z';
+    eventsStore.set(TEST_EVENT_ACTIVE, {
+      ...(eventsStore.get(TEST_EVENT_ACTIVE) as EventRecord),
+      start_at: DateTime.makeUnsafe(startIso),
+    });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(startIso));
+
+    const response = await handler(
+      new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer user-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response: 'yes', message: null }),
+      }),
+    );
+    expect(response.status).toBe(204);
+  });
+});
+
+// ============================================================
 // Late RSVP feature tests — Event/SubmitRsvp RPC
 // ============================================================
 //
@@ -1504,6 +1670,9 @@ type RpcEventRecord = {
   member_group_id: Option.Option<string>;
   member_group_name: Option.Option<string>;
   reminder_sent_at: Option.Option<DateTime.Utc>;
+  // PR 4 additions (plan §7.7e, BL1) — see the identical note on `EventRecord` above.
+  all_day?: boolean;
+  timezone?: string;
 };
 
 type RpcRsvpRecord = {
@@ -2399,4 +2568,200 @@ describe('Event/GetRsvpAttendees RPC — coming_later read projection', () => {
       );
     },
   );
+});
+
+// ============================================================
+// PR 4 — all-day RSVP window: Event/SubmitRsvp RPC side (plan §7.7e, BL1)
+// ============================================================
+//
+// Mirrors the HTTP-side "PUT /rsvp — all-day RSVP window" describe block
+// above, but through `Event/SubmitRsvp` / `Event/GetRsvpCounts`. The RPC
+// write path (`rpc/event/index.ts:425-426`) today rejects EVERY non-'active'
+// status; `allDayStillRsvpable`'s status guard
+// (`status === 'active' || status === 'started'`) is the ONLY thing that must
+// keep a CANCELLED all-day event closed here once that blanket rejection is
+// replaced by `!eventAcceptsRsvp(...)` — this is the exact TS/SQL-drift
+// hazard §4.5 exists to prevent, and it is why case 5 below expects
+// `RsvpDeadlinePassed` (the RPC side's vocabulary for "closed"), not
+// `EventNotFound` (which only the HTTP side keeps as an explicit early gate).
+
+const seedRpcAllDayEvent = (
+  id: Event.EventId,
+  status: Event.EventStatus,
+  startAtIso: string,
+  timezone: string,
+) => {
+  rpcEventsStore.set(id, {
+    id,
+    team_id: RPC_TEST_TEAM_ID,
+    training_type_id: Option.none(),
+    event_type: 'tournament' as Event.EventType,
+    title: 'All-day Tournament',
+    description: Option.none(),
+    start_at: DateTime.makeUnsafe(startAtIso),
+    end_at: Option.none(),
+    location: Option.none(),
+    status,
+    created_by: RPC_TEST_MEMBER_ID,
+    training_type_name: Option.none(),
+    created_by_name: Option.none(),
+    series_id: Option.none(),
+    series_modified: false,
+    discord_target_channel_id: Option.none(),
+    owner_group_id: Option.none(),
+    owner_group_name: Option.none(),
+    member_group_id: Option.none(),
+    member_group_name: Option.none(),
+    reminder_sent_at: Option.none(),
+    all_day: true,
+    timezone,
+  });
+};
+
+const RPC_ALL_DAY_PRAGUE_START = '2026-07-14T22:00:00Z'; // 2026-07-15T00:00 CEST
+
+describe('Event/SubmitRsvp RPC — all-day RSVP window (PR 4, BL1)', () => {
+  beforeEach(() => {
+    resetRpcStores();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('case 1: all-day, status=started, well within its own local day → succeeds', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-07-15T15:00:00Z'));
+    seedRpcAllDayEvent(RPC_TEST_EVENT_ID, 'started', RPC_ALL_DAY_PRAGUE_START, 'Europe/Prague');
+
+    const result = await Effect.runPromise(
+      makeSubmitRsvp({ response: 'yes' }).pipe(Effect.provide(RpcTestLayer)),
+    );
+    expect(result.canRsvp).toBe(true);
+  });
+
+  it('case 2: all-day, status=started, 00:01 local NEXT day → RsvpDeadlinePassed', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-07-15T22:01:00Z'));
+    seedRpcAllDayEvent(RPC_TEST_EVENT_ID, 'started', RPC_ALL_DAY_PRAGUE_START, 'Europe/Prague');
+
+    const exit = await Effect.runPromiseExit(
+      makeSubmitRsvp({ response: 'yes' }).pipe(Effect.provide(RpcTestLayer)),
+    );
+    expect(exit._tag).toBe('Failure');
+    if (exit._tag === 'Failure') {
+      expect(JSON.stringify(exit.cause)).toContain('RsvpDeadlinePassed');
+    }
+  });
+
+  it(
+    'case 5: all-day, status=cancelled, own local day → RsvpDeadlinePassed ' +
+      '(NOT the bare date-only `allDayStillRsvpable` hole — the status guard must still exclude cancelled)',
+    async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-07-15T15:00:00Z'));
+      seedRpcAllDayEvent(RPC_TEST_EVENT_ID, 'cancelled', RPC_ALL_DAY_PRAGUE_START, 'Europe/Prague');
+
+      const exit = await Effect.runPromiseExit(
+        makeSubmitRsvp({ response: 'yes' }).pipe(Effect.provide(RpcTestLayer)),
+      );
+      expect(exit._tag).toBe('Failure');
+      if (exit._tag === 'Failure') {
+        expect(JSON.stringify(exit.cause)).toContain('RsvpDeadlinePassed');
+      }
+    },
+  );
+
+  it('case 8: timed, status=active, now === start_at EXACTLY → succeeds (boundary is <=, not <)', async () => {
+    const startIso = '2026-07-15T12:00:00Z';
+    const existing = rpcEventsStore.get(RPC_TEST_EVENT_ID);
+    if (existing !== undefined) {
+      rpcEventsStore.set(RPC_TEST_EVENT_ID, {
+        ...existing,
+        start_at: DateTime.makeUnsafe(startIso),
+        status: 'active',
+      });
+    }
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(startIso));
+
+    const result = await Effect.runPromise(
+      makeSubmitRsvp({ response: 'yes' }).pipe(Effect.provide(RpcTestLayer)),
+    );
+    expect(result.canRsvp).toBe(true);
+  });
+});
+
+// ============================================================
+// PR 4 — case 9: `canRsvp` from HTTP `getRsvps` and RPC `getRsvpCounts` must
+// NEVER disagree with the write path, for the same event/instant. Note
+// `Event/GetRsvpCounts` (`rpc/event/index.ts:80`) has NO group-membership term
+// — that is why every all-day fixture in this file uses `member_group_id:
+// Option.none()`, so the HTTP side's extra `isGroupMember` term can never be
+// the thing that makes the two halves disagree.
+// ============================================================
+describe('canRsvp agreement — HTTP getRsvps vs RPC Event/GetRsvpCounts (PR 4, §7.7e case 9)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('both report canRsvp=true for an all-day event still on its own local day', async () => {
+    resetRpcStores();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-07-15T15:00:00Z'));
+
+    const eventId = '00000000-0000-0000-0000-000000000095' as Event.EventId;
+    eventsStore.set(eventId, {
+      id: eventId,
+      team_id: TEST_TEAM_ID,
+      training_type_id: Option.none(),
+      event_type: 'tournament',
+      title: 'All-day Tournament',
+      description: Option.none(),
+      start_at: DateTime.makeUnsafe(RPC_ALL_DAY_PRAGUE_START),
+      end_at: Option.none(),
+      location: Option.none(),
+      status: 'started',
+      created_by: TEST_ADMIN_MEMBER_ID,
+      training_type_name: Option.none(),
+      created_by_name: Option.some('Admin User'),
+      series_id: Option.none(),
+      series_modified: false,
+      discord_target_channel_id: Option.none(),
+      owner_group_id: Option.none(),
+      owner_group_name: Option.none(),
+      member_group_id: Option.none(),
+      member_group_name: Option.none(),
+      all_day: true,
+      timezone: 'Europe/Prague',
+    });
+    seedRpcAllDayEvent(RPC_TEST_EVENT_ID, 'started', RPC_ALL_DAY_PRAGUE_START, 'Europe/Prague');
+
+    const getResponse = await handler(
+      new Request(`${BASE}/${eventId}/rsvps`, { headers: { Authorization: 'Bearer user-token' } }),
+    );
+    const httpBody = await getResponse.json();
+
+    const getRsvpCountsRpc = Effect.scoped(
+      (RpcTest.makeClient(EventRpcGroup.EventRpcGroup) as Effect.Effect<any, never, any>).pipe(
+        Effect.flatMap(
+          (rpc: any) =>
+            rpc['Event/GetRsvpCounts']({ event_id: RPC_TEST_EVENT_ID }) as Effect.Effect<
+              EventRpcModels.RsvpCountsResult,
+              unknown,
+              never
+            >,
+        ),
+      ),
+    ).pipe(Effect.provide(RpcTestLayer)) as Effect.Effect<
+      EventRpcModels.RsvpCountsResult,
+      unknown,
+      never
+    >;
+
+    const rpcResult = await Effect.runPromise(getRsvpCountsRpc);
+
+    expect(httpBody.canRsvp).toBe(true);
+    expect(rpcResult.canRsvp).toBe(true);
+  });
 });

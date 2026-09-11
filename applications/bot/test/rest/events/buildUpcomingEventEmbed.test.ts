@@ -1,7 +1,8 @@
 import { EventRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { DateTime, Option } from 'effect';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { buildPersonalMessage } from '~/rest/events/buildPersonalEventMessage.js';
 import { buildUpcomingEventEmbed } from '~/rest/events/buildUpcomingEventEmbed.js';
 
 const FUTURE_START = DateTime.makeUnsafe('2099-06-01T18:00:00Z');
@@ -29,6 +30,7 @@ const makeEntry = (
     my_response_actual: Option.none(),
     my_message: Option.none(),
     all_day: false,
+    status: 'active',
     start_date: Option.none(),
     end_date: Option.none(),
     ...overrides,
@@ -600,5 +602,91 @@ describe('buildUpcomingEventEmbed', () => {
       const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
       expect((embeds[0] as any).image).toBeUndefined();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR 4 — the "Dnes" marker (plan §4.6, §7.7g). Driven by `entry.status`, NEVER
+// by a clock read: `status === 'started' && all_day` swaps the `<t:S:R>` line
+// for `m.bot_embed_today`. A renderer that reads `now()` instead would make
+// the personal-message hash (`buildPersonalEventMessage.ts`) time-dependent
+// and produce a spurious edit on every reconcile near the boundary.
+// ---------------------------------------------------------------------------
+
+describe('buildUpcomingEventEmbed — PR 4: the "Dnes" marker', () => {
+  it('case 1: all_day=true, status=active → description contains <t:S:R>, not the "Dnes" marker', () => {
+    const entry = makeEntry({
+      all_day: true,
+      status: 'active',
+      start_at: FUTURE_START,
+    } as any);
+    const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+    expect(embeds[0].description).toMatch(/<t:\d+:R>/);
+  });
+
+  it('case 2: all_day=true, status=started → description is exactly bot_embed_today, no <t:S:R>', () => {
+    const entry = makeEntry({
+      all_day: true,
+      status: 'started',
+      start_at: FUTURE_START,
+    } as any);
+    const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+    const description = embeds[0].description ?? '';
+    expect(description).toContain(m.bot_embed_today({}, { locale: 'en' }));
+    expect(description).not.toMatch(/<t:\d+:R>/);
+  });
+
+  it('case 3: all_day=false, status=active → unchanged baseline (<t:S:R> present)', () => {
+    const entry = makeEntry({
+      all_day: false,
+      status: 'active',
+      start_at: FUTURE_START,
+    } as any);
+    const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+    expect(embeds[0].description).toMatch(/<t:\d+:R>/);
+  });
+
+  it('case 4: the "Kdy" field is unchanged in both all-day states — the marker change must not leak into it', () => {
+    const active = makeEntry({ all_day: true, status: 'active', start_at: FUTURE_START } as any);
+    const started = makeEntry({ all_day: true, status: 'started', start_at: FUTURE_START } as any);
+    const activeEmbeds = buildUpcomingEventEmbed({ ...baseParams, entry: active }).embeds;
+    const startedEmbeds = buildUpcomingEventEmbed({ ...baseParams, entry: started }).embeds;
+    const whenField = (fields: ReadonlyArray<{ name: string; value: string }>) =>
+      fields.find((f) => f.name === m.bot_embed_when({}, { locale: 'en' }))?.value;
+    expect(whenField(activeEmbeds[0].fields ?? [])).toBe(whenField(startedEmbeds[0].fields ?? []));
+  });
+
+  it('case 5: hash stability — building the message twice, one hour apart, produces the same hash', () => {
+    const entry = makeEntry({ all_day: true, status: 'started', start_at: FUTURE_START } as any);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const first = buildPersonalMessage({
+      entry,
+      yesAttendees: [],
+      discordId: '111111111111111111' as any,
+      locale: 'en',
+    });
+    vi.setSystemTime(new Date('2026-01-01T01:00:00Z'));
+    const second = buildPersonalMessage({
+      entry,
+      yesAttendees: [],
+      discordId: '111111111111111111' as any,
+      locale: 'en',
+    });
+    vi.useRealTimers();
+    expect(second.hash).toBe(first.hash);
+  });
+
+  it('case 6: entry decoded WITHOUT status → defaults to active → <t:S:R> branch, no throw', () => {
+    // Simulate a payload from an older producer that omits `status` entirely —
+    // `Schema.withDecodingDefaultKey(() => 'active')` means the wire key is
+    // optional, but here we exercise the CONSTRUCTED entry directly (no actual
+    // decode step): omitting the field from the object literal is the same
+    // "field absent" shape a real decode would produce before the default
+    // applies. `all_day` still needs a value; the interesting omission is `status`.
+    const withoutStatus = makeEntry({ all_day: true, start_at: FUTURE_START });
+    expect(() => buildUpcomingEventEmbed({ ...baseParams, entry: withoutStatus })).not.toThrow();
+    const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry: withoutStatus });
+    expect(embeds[0].description).toMatch(/<t:\d+:R>/);
   });
 });

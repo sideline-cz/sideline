@@ -43,27 +43,38 @@ export const eventStartCronEffect = Effect.Do.pipe(
                   // Increment missed-RSVP counters immediately after active→started flip,
                   // before Discord resolution so a Discord failure can't cause the increment
                   // to be lost (the event won't reprocess since it's already started).
+                  //
+                  // DEFERRED entirely for all-day events (plan §4.8/§14.4/§15.4): `startEvent`'s
+                  // flip leaves `missed_rsvp_counted_at` NULL ("armed") for them, and the
+                  // deferred sweep below claims and increments once the event's last local
+                  // day is over — penalising a member at team-local midnight for not having
+                  // answered about an event they can still attend (and still RSVP to) would
+                  // be wrong.
                   Effect.tap(() =>
-                    eventsRsvpsRepo
-                      .incrementMissedForEventNonRespondersByEventId(
-                        event.id,
-                        event.team_id,
-                        event.member_group_id,
-                      )
-                      .pipe(
-                        Effect.catchCause((cause) =>
-                          Effect.logWarning(
-                            `EventStartCron: failed to increment missed RSVPs for event ${event.id}, continuing`,
-                            cause,
+                    event.all_day
+                      ? Effect.void
+                      : eventsRsvpsRepo
+                          .incrementMissedForEventNonRespondersByEventId(
+                            event.id,
+                            event.team_id,
+                            event.member_group_id,
+                          )
+                          .pipe(
+                            Effect.catchCause((cause) =>
+                              Effect.logWarning(
+                                `EventStartCron: failed to increment missed RSVPs for event ${event.id}, continuing`,
+                                cause,
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
                   ),
                   // Mark personal messages dirty immediately after the active→started
                   // flip, before Discord resolution/emit, so a Discord failure can't
                   // cause the mark to be lost (the event won't reprocess since it's
-                  // already started). The personal-events reconcile then removes the
-                  // started event from members' personal channels.
+                  // already started). For an all-day event this is what makes the
+                  // personal-events reconcile EDIT the message in place (picking up the
+                  // "Dnes" marker, plan §4.6) instead of deleting it (plan §14.5) —
+                  // always runs, for both branches.
                   Effect.tap(() =>
                     eventsRepo
                       .markEventPersonalMessagesDirty(event.id)
@@ -76,36 +87,48 @@ export const eventStartCronEffect = Effect.Do.pipe(
                         ),
                       ),
                   ),
-                  Effect.bind('discordRoleId', () =>
-                    event.event_type === 'training'
-                      ? resolveGroupRoleId(event.team_id, event.owner_group_id)
-                      : resolveGroupRoleId(event.team_id, event.member_group_id),
-                  ),
-                  Effect.bind('channel', () =>
-                    resolveReminderChannel(
-                      event.team_id,
-                      event.owner_group_id,
-                      event.reminders_channel_id,
-                    ),
-                  ),
-                  Effect.flatMap(({ discordRoleId, channel }) =>
-                    syncRepo.emitEventStarted(
-                      event.team_id,
-                      event.id,
-                      event.title,
-                      event.description,
-                      event.start_at,
-                      event.end_at,
-                      event.location,
-                      event.event_type,
-                      channel,
-                      event.member_group_id,
-                      discordRoleId,
-                      event.image_url,
-                      event.location_url,
-                      event.all_day,
-                      event.event_type === 'training' ? event.claimed_by : Option.none(),
-                    ),
+                  // The `event_started` emit — the "Právě začíná"/"Starting now" post — is
+                  // likewise DEFERRED for all-day events (plan §15.4): the flip at
+                  // team-local midnight is silent; the morning sweep below claims
+                  // `all_day_post_sent_at` and emits once, at the team's configured
+                  // local time, with the all-day-specific "Dnes: {title}" title
+                  // (`applications/bot/src/rcp/event/handleStarted.ts`).
+                  Effect.flatMap(() =>
+                    event.all_day
+                      ? Effect.void
+                      : Effect.Do.pipe(
+                          Effect.bind('discordRoleId', () =>
+                            event.event_type === 'training'
+                              ? resolveGroupRoleId(event.team_id, event.owner_group_id)
+                              : resolveGroupRoleId(event.team_id, event.member_group_id),
+                          ),
+                          Effect.bind('channel', () =>
+                            resolveReminderChannel(
+                              event.team_id,
+                              event.owner_group_id,
+                              event.reminders_channel_id,
+                            ),
+                          ),
+                          Effect.flatMap(({ discordRoleId, channel }) =>
+                            syncRepo.emitEventStarted(
+                              event.team_id,
+                              event.id,
+                              event.title,
+                              event.description,
+                              event.start_at,
+                              event.end_at,
+                              event.location,
+                              event.event_type,
+                              channel,
+                              event.member_group_id,
+                              discordRoleId,
+                              event.image_url,
+                              event.location_url,
+                              event.all_day,
+                              event.event_type === 'training' ? event.claimed_by : Option.none(),
+                            ),
+                          ),
+                        ),
                   ),
                   Effect.tap(() =>
                     Effect.logInfo(
@@ -125,6 +148,126 @@ export const eventStartCronEffect = Effect.Do.pipe(
         ),
       ),
       { concurrency: 1 },
+    ),
+  ),
+  // Deferred missed-RSVP sweep (plan §4.8.2/§14.4): all-day events whose last
+  // local day has passed but whose counter is still armed. Claim-then-increment
+  // in ONE transaction per event — "stamp after increment" would double-penalise
+  // every non-responder on a crash between the two; claiming first and skipping
+  // on a lost race is the safe direction.
+  Effect.tap(({ eventsRepo, eventsRsvpsRepo }) =>
+    eventsRepo.findAllDayEventsPastLastLocalDay(new Date()).pipe(
+      Effect.flatMap((pastDueEvents) =>
+        Effect.all(
+          Array.map(pastDueEvents, (event) =>
+            eventsRepo
+              .withTransaction(
+                Effect.Do.pipe(
+                  Effect.bind('claimed', () => eventsRepo.claimMissedRsvpCount(event.id)),
+                  Effect.tap(({ claimed }) =>
+                    Option.match(claimed, {
+                      onNone: () => Effect.void,
+                      onSome: () =>
+                        eventsRsvpsRepo.incrementMissedForEventNonRespondersByEventId(
+                          event.id,
+                          event.team_id,
+                          event.member_group_id,
+                        ),
+                    }),
+                  ),
+                ),
+              )
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning(
+                    `EventStartCron: deferred missed-RSVP sweep failed for event ${event.id}, continuing`,
+                    cause,
+                  ),
+                ),
+              ),
+          ),
+          { concurrency: 1 },
+        ),
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning(
+          'EventStartCron: deferred missed-RSVP sweep query failed, continuing',
+          cause,
+        ),
+      ),
+    ),
+  ),
+  // Deferred "Dnes" started-post sweep (plan §15.2): all-day events on their
+  // first local day, past the team's configured `all_day_post_time`, not yet
+  // posted. Same claim-then-act shape, one transaction per event.
+  Effect.tap(({ eventsRepo, syncRepo }) =>
+    eventsRepo.findAllDayEventsNeedingStartedPost(new Date()).pipe(
+      Effect.flatMap((dueEvents) =>
+        Effect.all(
+          Array.map(dueEvents, (event) =>
+            eventsRepo
+              .withTransaction(
+                Effect.Do.pipe(
+                  Effect.bind('claimed', () => eventsRepo.claimStartedPost(event.id)),
+                  Effect.flatMap(({ claimed }) =>
+                    Option.match(claimed, {
+                      onNone: () => Effect.void,
+                      onSome: () =>
+                        Effect.Do.pipe(
+                          Effect.bind('discordRoleId', () =>
+                            event.event_type === 'training'
+                              ? resolveGroupRoleId(event.team_id, event.owner_group_id)
+                              : resolveGroupRoleId(event.team_id, event.member_group_id),
+                          ),
+                          Effect.bind('channel', () =>
+                            resolveReminderChannel(
+                              event.team_id,
+                              event.owner_group_id,
+                              event.reminders_channel_id,
+                            ),
+                          ),
+                          Effect.flatMap(({ discordRoleId, channel }) =>
+                            syncRepo.emitEventStarted(
+                              event.team_id,
+                              event.id,
+                              event.title,
+                              event.description,
+                              event.start_at,
+                              event.end_at,
+                              event.location,
+                              event.event_type,
+                              channel,
+                              event.member_group_id,
+                              discordRoleId,
+                              event.image_url,
+                              event.location_url,
+                              event.all_day,
+                              event.event_type === 'training' ? event.claimed_by : Option.none(),
+                            ),
+                          ),
+                        ),
+                    }),
+                  ),
+                ),
+              )
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning(
+                    `EventStartCron: deferred all-day started-post sweep failed for event ${event.id}, continuing`,
+                    cause,
+                  ),
+                ),
+              ),
+          ),
+          { concurrency: 1 },
+        ),
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning(
+          'EventStartCron: deferred all-day started-post sweep query failed, continuing',
+          cause,
+        ),
+      ),
     ),
   ),
   Effect.tap(({ events }) =>

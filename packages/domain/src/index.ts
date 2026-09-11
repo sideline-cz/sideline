@@ -392,16 +392,12 @@ export * as EmailRpcModels from './rpc/email/EmailRpcModels.js';
 export * as EventRpcEvents from './rpc/event/EventRpcEvents.js';
 export * as EventRpcGroup from './rpc/event/EventRpcGroup.js';
 /**
- * The TRUE (unprojected) stored response, additive alongside the legacy
- * `my_response` above. `my_response` intentionally stays pinned to the
- * legacy 3-value vocabulary for wire safety (see `rsvpWireProjection.ts`),
- * but bot-side logic that must distinguish a real `coming_later` RSVP from a
- * legacy `maybe` (e.g. which message-management buttons to render) needs
- * the unprojected value. Uses `OptionFromOptionalKey` (not `OptionFromNullOr`)
- * so a rolling deploy where the bot updates before the server — and briefly
- * decodes a response from an older producer that omits this key entirely —
- * tolerates the missing key as `Option.none()` instead of a hard decode
- * failure.
+ * Drives the personal-message "Dnes"/"Today" marker (plan §4.6): an all-day event whose
+ * `status` has flipped to `'started'` is currently running, so the renderer swaps the
+ * relative `<t:S:R>` timestamp for a static "today" label instead. Defaulted on decode
+ * (not required on the wire) so a rolling deploy where the server hasn't shipped this
+ * field yet degrades to the pre-existing `<t:S:R>` rendering rather than a hard decode
+ * failure — see `TeamSettingsApi.ts:79` for the same `withDecodingDefaultKey` precedent.
  */
 export * as EventRpcModels from './rpc/event/EventRpcModels.js';
 export * as FinanceRpcEvents from './rpc/finance/FinanceRpcEvents.js';

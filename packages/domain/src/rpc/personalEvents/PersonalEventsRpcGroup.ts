@@ -63,6 +63,14 @@ export const PersonalEventsRpcGroup = RpcGroup.make(
         personal_channel_id: Snowflake,
         discord_message_id: Snowflake,
         start_at: Schemas.DateTimeFromIsoString,
+        // Day-grouped sort key additions (plan §4.7). Both defaulted on decode so a
+        // lagging server that hasn't shipped them yet degrades to the pre-existing
+        // start_at-only ordering instead of a hard decode failure — `local_date`'s
+        // empty-string default sorts before every real date, collapsing everything
+        // into one pseudo-day ordered by `start_at`, which is exactly today's
+        // behaviour.
+        all_day: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
+        local_date: Schema.String.pipe(Schema.withDecodingDefaultKey(() => '')),
       }),
     ),
   }),

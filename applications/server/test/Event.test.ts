@@ -79,6 +79,8 @@ const TEST_EVENT_2 = '00000000-0000-0000-0000-000000000061' as Event.EventId;
 const TEST_EVENT_SCOPED = '00000000-0000-0000-0000-000000000062' as Event.EventId;
 const TEST_EVENT_WITH_IMAGE = '00000000-0000-0000-0000-000000000063' as Event.EventId;
 const TEST_EVENT_OTHER_GROUP = '00000000-0000-0000-0000-000000000064' as Event.EventId;
+const TEST_EVENT_ALL_DAY_TODAY = '00000000-0000-0000-0000-000000000065' as Event.EventId;
+const TEST_EVENT_ALL_DAY_YESTERDAY = '00000000-0000-0000-0000-000000000066' as Event.EventId;
 const TEST_OTHER_GROUP_ID = '00000000-0000-0000-0000-000000000070' as GroupModel.GroupId;
 const TEST_TRAINING_TYPE_A = '00000000-0000-0000-0000-000000000050' as TrainingType.TrainingTypeId;
 const TEST_TRAINING_TYPE_B = '00000000-0000-0000-0000-000000000051' as TrainingType.TrainingTypeId;
@@ -250,6 +252,10 @@ type EventRecord = {
   member_group_name: Option.Option<string>;
   start_date: string;
   end_date: string;
+  // The team's own timezone, joined for free by `findEventByIdWithDetails`
+  // (`EventsRepository.ts`) — consumed by `eventAcceptsRsvp`'s all-day branch
+  // (`utils/allDayRsvpWindow.ts`, plan §14.5/S2's canEdit/canCancel gates).
+  timezone: string;
 };
 
 // Mirrors the server-side `::date::text` projection (plan §11.2/§11.3), but this
@@ -257,6 +263,34 @@ type EventRecord = {
 // is exactly right for these unit tests, none of which assert cross-timezone
 // behaviour (that's covered by the dedicated integration tests).
 const toDateOnly = (dt: DateTime.Utc): string => DateTime.formatIsoDateUtc(dt);
+
+// Fixtures whose `canEdit`/`canCancel` (or PATCH/cancel acceptance) is
+// exercised must stay in the future relative to whenever the suite actually
+// runs — `eventAcceptsRsvp`'s timed branch additionally requires
+// `now <= start_at` (api/event.ts's edit/cancel gates, plan §14.5/S2), so a
+// hardcoded past literal would fail these checks regardless of `status`.
+// Computed relative to `DateTime.nowUnsafe()` instead of a fixed calendar
+// date so the suite never goes stale.
+const daysFromNow = (days: number): DateTime.Utc => DateTime.add(DateTime.nowUnsafe(), { days });
+
+// Team-local (`Europe/Prague`) midnight of the day `daysOffset` away from
+// whenever the suite runs — the all-day anchor convention (plan §10). Used to
+// build a `status = 'started'` all-day fixture whose own local day is either
+// still live or already over, for the S2 canEdit/canCancel window test.
+const localMidnight = (daysOffset: number): DateTime.Utc => {
+  const zoned = DateTime.setZoneNamedUnsafe(DateTime.nowUnsafe(), 'Europe/Prague');
+  const { year, month, day } = DateTime.toParts(zoned);
+  const midnight = DateTime.setParts(zoned, {
+    year,
+    month,
+    day,
+    hour: 0,
+    minute: 0,
+    second: 0,
+    millisecond: 0,
+  });
+  return DateTime.add(DateTime.makeUnsafe(midnight.epochMilliseconds), { days: daysOffset });
+};
 
 let eventsStore: Map<Event.EventId, EventRecord>;
 
@@ -275,8 +309,8 @@ const resetStores = () => {
     title: 'Tuesday Training',
     description: Option.some('Weekly training session'),
     image_url: Option.none(),
-    start_at: DateTime.makeUnsafe('2026-03-10T18:00:00Z'),
-    end_at: Option.some(DateTime.makeUnsafe('2026-03-10T20:00:00Z')),
+    start_at: daysFromNow(30),
+    end_at: Option.some(DateTime.add(daysFromNow(30), { hours: 2 })),
     location: Option.some('Main Field'),
     location_url: Option.none(),
     status: 'active',
@@ -291,8 +325,9 @@ const resetStores = () => {
     member_group_id: Option.none(),
     owner_group_name: Option.none(),
     member_group_name: Option.none(),
-    start_date: '2026-03-10',
-    end_date: '2026-03-10',
+    start_date: toDateOnly(daysFromNow(30)),
+    end_date: toDateOnly(daysFromNow(30)),
+    timezone: 'Europe/Prague',
   });
   eventsStore.set(TEST_EVENT_2, {
     id: TEST_EVENT_2,
@@ -320,6 +355,7 @@ const resetStores = () => {
     member_group_name: Option.none(),
     start_date: '2026-03-15',
     end_date: '2026-03-15',
+    timezone: 'Europe/Prague',
   });
   eventsStore.set(TEST_EVENT_SCOPED, {
     id: TEST_EVENT_SCOPED,
@@ -329,8 +365,8 @@ const resetStores = () => {
     title: 'Scoped Training',
     description: Option.none(),
     image_url: Option.none(),
-    start_at: DateTime.makeUnsafe('2026-03-12T17:00:00Z'),
-    end_at: Option.some(DateTime.makeUnsafe('2026-03-12T19:00:00Z')),
+    start_at: daysFromNow(32),
+    end_at: Option.some(DateTime.add(daysFromNow(32), { hours: 2 })),
     location: Option.none(),
     location_url: Option.none(),
     status: 'active',
@@ -345,8 +381,9 @@ const resetStores = () => {
     member_group_id: Option.none(),
     owner_group_name: Option.none(),
     member_group_name: Option.none(),
-    start_date: '2026-03-12',
-    end_date: '2026-03-12',
+    start_date: toDateOnly(daysFromNow(32)),
+    end_date: toDateOnly(daysFromNow(32)),
+    timezone: 'Europe/Prague',
   });
   eventsStore.set(TEST_EVENT_WITH_IMAGE, {
     id: TEST_EVENT_WITH_IMAGE,
@@ -356,7 +393,7 @@ const resetStores = () => {
     title: 'Training With Image',
     description: Option.none(),
     image_url: Option.some('https://example.com/banner.png'),
-    start_at: DateTime.makeUnsafe('2026-03-20T18:00:00Z'),
+    start_at: daysFromNow(40),
     end_at: Option.none(),
     location: Option.none(),
     location_url: Option.none(),
@@ -372,8 +409,9 @@ const resetStores = () => {
     member_group_id: Option.none(),
     owner_group_name: Option.none(),
     member_group_name: Option.none(),
-    start_date: '2026-03-20',
-    end_date: '2026-03-20',
+    start_date: toDateOnly(daysFromNow(40)),
+    end_date: toDateOnly(daysFromNow(40)),
+    timezone: 'Europe/Prague',
   });
   // Event scoped to a member group the test user is NOT a part of. The mock
   // GroupsRepository.getDescendantMemberIds returns [], so checkGroupAccess
@@ -404,6 +442,70 @@ const resetStores = () => {
     member_group_name: Option.some('Other Group'),
     start_date: '2026-03-22',
     end_date: '2026-03-22',
+    timezone: 'Europe/Prague',
+  });
+  // S2 review finding: an all-day event silently flips to `status = 'started'`
+  // at team-local midnight (plan §10/§15), but must stay live for the REST of
+  // its own local day — `eventAcceptsRsvp`'s all-day branch, not a bare
+  // `status === 'active'` check, gates canEdit/canCancel (api/event.ts).
+  eventsStore.set(TEST_EVENT_ALL_DAY_TODAY, {
+    id: TEST_EVENT_ALL_DAY_TODAY,
+    team_id: TEST_TEAM_ID,
+    training_type_id: Option.none(),
+    event_type: 'tournament',
+    title: 'All-day Tournament (live today)',
+    description: Option.none(),
+    image_url: Option.none(),
+    start_at: localMidnight(0),
+    end_at: Option.none(),
+    location: Option.none(),
+    location_url: Option.none(),
+    status: 'started',
+    all_day: true,
+    created_by: TEST_ADMIN_MEMBER_ID,
+    training_type_name: Option.none(),
+    created_by_name: Option.some('Admin User'),
+    series_id: Option.none(),
+    series_modified: false,
+    discord_target_channel_id: Option.none(),
+    owner_group_id: Option.none(),
+    member_group_id: Option.none(),
+    owner_group_name: Option.none(),
+    member_group_name: Option.none(),
+    start_date: toDateOnly(localMidnight(0)),
+    end_date: toDateOnly(localMidnight(0)),
+    timezone: 'Europe/Prague',
+  });
+  // Same shape, but anchored to YESTERDAY's team-local midnight — its own
+  // local day is fully over, so it must no longer accept an edit/cancel even
+  // though `status` is still `'started'` (nothing flips it to `'cancelled'`).
+  eventsStore.set(TEST_EVENT_ALL_DAY_YESTERDAY, {
+    id: TEST_EVENT_ALL_DAY_YESTERDAY,
+    team_id: TEST_TEAM_ID,
+    training_type_id: Option.none(),
+    event_type: 'tournament',
+    title: 'All-day Tournament (ended yesterday)',
+    description: Option.none(),
+    image_url: Option.none(),
+    start_at: localMidnight(-1),
+    end_at: Option.none(),
+    location: Option.none(),
+    location_url: Option.none(),
+    status: 'started',
+    all_day: true,
+    created_by: TEST_ADMIN_MEMBER_ID,
+    training_type_name: Option.none(),
+    created_by_name: Option.some('Admin User'),
+    series_id: Option.none(),
+    series_modified: false,
+    discord_target_channel_id: Option.none(),
+    owner_group_id: Option.none(),
+    member_group_id: Option.none(),
+    owner_group_name: Option.none(),
+    member_group_name: Option.none(),
+    start_date: toDateOnly(localMidnight(-1)),
+    end_date: toDateOnly(localMidnight(-1)),
+    timezone: 'Europe/Prague',
   });
 };
 
@@ -619,6 +721,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       member_group_name: Option.none(),
       start_date: toDateOnly(input.start_at),
       end_date: toDateOnly(Option.getOrElse(input.end_at, () => input.start_at)),
+      timezone: 'Europe/Prague',
     };
     eventsStore.set(id, record);
     return Effect.succeed({
@@ -643,6 +746,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       member_group_id: Option.none(),
       start_date: record.start_date,
       end_date: record.end_date,
+      timezone: record.timezone,
     });
   },
   insertEvent: (input: {
@@ -685,6 +789,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       member_group_name: Option.none(),
       start_date: toDateOnly(input.startAt),
       end_date: toDateOnly(Option.getOrElse(input.endAt, () => input.startAt)),
+      timezone: 'Europe/Prague',
     };
     eventsStore.set(id, record);
     return Effect.succeed({
@@ -709,6 +814,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       member_group_id: Option.none(),
       start_date: record.start_date,
       end_date: record.end_date,
+      timezone: record.timezone,
     });
   },
   update: (input: {
@@ -758,6 +864,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       member_group_id: updated.member_group_id,
       start_date: updated.start_date,
       end_date: updated.end_date,
+      timezone: updated.timezone,
     });
   },
   updateEvent: (input: {
@@ -807,6 +914,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       member_group_id: updated.member_group_id,
       start_date: updated.start_date,
       end_date: updated.end_date,
+      timezone: updated.timezone,
     });
   },
   cancel: (id: Event.EventId) => {
@@ -1231,7 +1339,7 @@ describe('Events API', () => {
       expect(response.status).toBe(200);
       const body = await response.json();
       expect(body.canCreate).toBe(true);
-      expect(body.events).toHaveLength(4);
+      expect(body.events).toHaveLength(6);
     });
 
     it('returns 200 with canCreate:true for captain', async () => {
@@ -1250,7 +1358,7 @@ describe('Events API', () => {
       expect(response.status).toBe(200);
       const body = await response.json();
       expect(body.canCreate).toBe(false);
-      expect(body.events).toHaveLength(4);
+      expect(body.events).toHaveLength(6);
     });
   });
 
@@ -1825,6 +1933,85 @@ describe('Events API', () => {
       );
       expect(imageEvent).toBeDefined();
       expect(imageEvent?.imageUrl).toBe('https://example.com/banner.png');
+    });
+  });
+
+  // S2 review finding (plan §14.5): the all-day `active -> started` flip moved
+  // from noon UTC to team-local midnight, so a bare `status === 'active'` gate
+  // on canEdit/canCancel/PATCH/cancel would lock a captain out of TODAY's
+  // all-day event for its entire remaining local day. All four gates now use
+  // `eventAcceptsRsvp`, the same window the RSVP path already uses.
+  describe('all-day events stay editable/cancellable through their own local day (S2)', () => {
+    it('GET reports canEdit/canCancel true for a started all-day event still within its local day', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ALL_DAY_TODAY}`, {
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.status).toBe('started');
+      expect(body.canEdit).toBe(true);
+      expect(body.canCancel).toBe(true);
+    });
+
+    it('PATCH and cancel both succeed on a started all-day event still within its local day', async () => {
+      const patchResponse = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ALL_DAY_TODAY}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ title: 'Renamed live all-day event' }),
+        }),
+      );
+      expect(patchResponse.status).toBe(200);
+      const patchBody = await patchResponse.json();
+      expect(patchBody.title).toBe('Renamed live all-day event');
+
+      const cancelResponse = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ALL_DAY_TODAY}/cancel`, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(cancelResponse.status).toBe(204);
+    });
+
+    it('GET reports canEdit/canCancel false once a started all-day event is past its local day', async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ALL_DAY_YESTERDAY}`, {
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.status).toBe('started');
+      expect(body.canEdit).toBe(false);
+      expect(body.canCancel).toBe(false);
+    });
+
+    it('PATCH and cancel both fail (400) once a started all-day event is past its local day', async () => {
+      const patchResponse = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ALL_DAY_YESTERDAY}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ title: 'Should not apply' }),
+        }),
+      );
+      expect(patchResponse.status).toBe(400);
+
+      const cancelResponse = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ALL_DAY_YESTERDAY}/cancel`, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer admin-token' },
+        }),
+      );
+      expect(cancelResponse.status).toBe(400);
     });
   });
 });

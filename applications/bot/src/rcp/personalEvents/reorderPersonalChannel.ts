@@ -18,18 +18,38 @@ type MemberMessage = {
   readonly personal_channel_id: DiscordSchemas.Snowflake;
   readonly discord_message_id: DiscordSchemas.Snowflake;
   readonly start_at: DateTime.Utc;
+  readonly all_day: boolean;
+  readonly local_date: string;
 };
 
 /**
- * Order a member's personal messages the same way the global events channel is
- * ordered (see `sortEntriesForChannel`): personal channels only contain future
- * events, so they sort latest-start first — the soonest upcoming event ends up
- * at the bottom, nearest the input box. Ties break on event id.
+ * Order a member's personal messages the same way the other ascending surfaces are
+ * ordered (dashboard, `/event upcoming`, guild event list — see `eventDayOrder` on the
+ * server, plan §4.7), but REVERSED: personal channels only contain future events, so
+ * they sort latest-day-first — the soonest upcoming day ends up at the bottom, nearest
+ * the input box.
+ *
+ * The canonical ascending key is `(local_date, all_day ? 0 : 1, start_at, event_id)` —
+ * all-day events sort above that day's timed events, universal-calendar-convention
+ * style. This is exactly that key, reversed component-by-component: `local_date`
+ * descending, all-day LAST within its day (nearest the input box, the mirror image of
+ * "above the timed grid"), `start_at` descending, `event_id` descending as the final
+ * tiebreaker for two all-day events sharing the same date (they collide on every other
+ * column — §4.4.3's pagination-tiebreaker hazard, applied here to the reorder's own
+ * stability).
+ *
+ * Under the current (team-local-midnight) storage anchor, a same-day all-day event's
+ * `start_at` is already the day's earliest instant, so the `start_at`-descending
+ * component alone already places it last within its day for free — the `all_day`
+ * component only matters as a deterministic override, and the `event_id` component only
+ * matters when two all-day events land on the identical `start_at`.
  */
 const desiredOrder = Order.make<MemberMessage>((a, b) => {
+  if (a.local_date !== b.local_date) return a.local_date > b.local_date ? -1 : 1;
+  if (a.all_day !== b.all_day) return a.all_day ? 1 : -1;
   const t = DateTime.Order(b.start_at, a.start_at);
   if (t !== 0) return t;
-  return a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0;
+  return a.event_id > b.event_id ? -1 : a.event_id < b.event_id ? 1 : 0;
 });
 
 const reorderWithMessages = (
