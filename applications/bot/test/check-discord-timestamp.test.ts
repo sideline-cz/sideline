@@ -129,3 +129,95 @@ describe('check-discord-timestamp', () => {
     expect(result.status).toBe(0);
   });
 });
+
+// S4 review finding: rule 1 ("one builder of the token") does not catch a call site that
+// dutifully imports the shared `toDiscordTimestamp` primitive but still passes it a raw
+// (un-anchored) instant with a date-only style — exactly the bug class this whole guard
+// exists to prevent, one level removed. Two real sites had this bug and passed the
+// original guard; both are reproduced here verbatim from git history (pre-fix
+// `8d221b84:applications/bot/src/rest/events/buildEventEmbed.ts` and
+// `buildEventListEmbed.ts`) to prove rule 2 would have caught them.
+describe('check-discord-timestamp — rule 2 (no raw D/d style outside eventWhen.ts)', () => {
+  it("fails on a bare literal 'D' style applied to a raw instant (buildEventEmbed.ts, pre-fix)", () => {
+    const dir = fixture({
+      'rest/events/buildEventEmbed.ts':
+        "export const when = (startAt: number) => toDiscordTimestamp(startAt, 'D');\n",
+    });
+
+    const result = run(dir);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('buildEventEmbed.ts');
+    expect(result.stderr).toContain('raw instant outside');
+  });
+
+  it("fails when the style is a computed ternary that CONTAINS 'D' (buildEventListEmbed.ts, pre-fix)", () => {
+    const dir = fixture({
+      'rest/events/buildEventListEmbed.ts':
+        'export const startTs = (entry: { start_at: number; all_day: boolean }) => ' +
+        "toDiscordTimestamp(entry.start_at, entry.all_day ? 'D' : 'f');\n",
+    });
+
+    const result = run(dir);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('buildEventListEmbed.ts');
+  });
+
+  it('passes when the raw instant is wrapped in discordDateInstant(...) first', () => {
+    const dir = fixture({
+      'rest/events/handleSomeReminder.ts':
+        'export const when = (startDate: string, startAt: number) => ' +
+        "toDiscordTimestamp(discordDateInstant(startDate, startAt), 'D');\n",
+    });
+
+    const result = run(dir);
+
+    expect(result.status).toBe(0);
+  });
+
+  it('exempts eventWhen.ts itself, the one place allowed to build a raw D/d style', () => {
+    const dir = fixture({
+      'rest/events/eventWhen.ts':
+        'export const startInstant = (startDate: string, startAt: number) => ' +
+        "toDiscordTimestamp(discordDateInstant(startDate, startAt), 'D');\n" +
+        "export const raw = (startAt: number) => toDiscordTimestamp(startAt, 'D');\n",
+    });
+
+    const result = run(dir);
+
+    expect(result.status).toBe(0);
+  });
+
+  it("does not flag 'd'/'D' used as ordinary code text, only a quoted style literal", () => {
+    const dir = fixture({
+      'rest/events/somewhere.ts':
+        'export const label = (n: number) => `Day ${n}`;\n' +
+        "export const when = (dt: number) => toDiscordTimestamp(dt, 'f');\n",
+    });
+
+    const result = run(dir);
+
+    expect(result.status).toBe(0);
+  });
+
+  it('counts a raw D-style call to a DIFFERENT instant in the same expression as a second occurrence', () => {
+    const dir = fixture({
+      'rest/events/buildEventEmbed.ts':
+        'export const when = (startAt: number, endAt: number) => ' +
+        "`${toDiscordTimestamp(startAt, 'D')} — ${toDiscordTimestamp(endAt, 'D')}`;\n",
+    });
+
+    const result = run(dir);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('2 occurrences');
+  });
+
+  it('passes the real applications/bot/src tree against rule 2 as well', () => {
+    const result = run(REAL_BOT_SRC);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('no date-only style is rendered off a raw instant');
+  });
+});
