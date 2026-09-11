@@ -575,6 +575,28 @@ describe('handleStarted — all-day events (PR 1: render as a date, not a fake c
     expect(description).not.toContain('<t:1789473600:D>');
   });
 
+  // NOTE on case 4a: re-added here per PR 4 (§18 §15.5/§15.6 of the plan). It was
+  // deliberately parked out of PR 1 (see the header note above) because the i18n key
+  // `bot_event_started_post_title_all_day` did not exist yet and referencing a
+  // non-existent named export from `@sideline/i18n/messages` would either be a
+  // TS2551 compile error or (at vitest's esbuild-only runtime) a thrown
+  // "m.bot_event_started_post_title_all_day is not a function" — both acceptable
+  // RED states for TDD, but neither should be allowed to block PR 1 merging on its
+  // own. PR 4 revives the key (§15.6: `Dnes: {title}` / `Today: {title}`) and the
+  // `handleStarted.ts` all-day branch (§15.5) that selects it.
+  it('case 4a: all-day → title switches to bot_event_started_post_title_all_day', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+    const { calls: restCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(handleStarted(makeEvent({ all_day: true })), Layer.merge(rpcLayer, restLayer));
+
+    expect(restCalls.createMessage).toHaveLength(1);
+    const [, payload] = restCalls.createMessage[0] as [string, MessageCreateRequest];
+    expect(payload.embeds?.[0]?.title).toBe(
+      m.bot_event_started_post_title_all_day({ title: 'Saturday Match' }, { locale: 'en' }),
+    );
+  });
+
   it('case 4b (sibling): timed → title stays bot_event_started_post_title, byte-identical to today', async () => {
     const { layer: rpcLayer } = makeRecordingSyncRpc();
     const { calls: restCalls, layer: restLayer } = makeRecordingDiscordREST();

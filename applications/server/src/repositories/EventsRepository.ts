@@ -13,6 +13,12 @@ import { Schemas } from '@sideline/effect-lib';
 import { type DateTime, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
+import {
+  eventDayOrder,
+  eventEndOfLastLocalDay,
+  eventNotVisibleNow,
+  eventVisibleNow,
+} from '~/repositories/eventVisibility.js';
 
 class EventWithDetails extends Schema.Class<EventWithDetails>('EventWithDetails')({
   id: Event.EventId,
@@ -51,6 +57,13 @@ class EventWithDetails extends Schema.Class<EventWithDetails>('EventWithDetails'
   // schema would reject.
   start_date: Schema.String,
   end_date: Schema.String,
+  // The team's own timezone, `COALESCE`d against the same `'Europe/Prague'`
+  // fallback used everywhere else (plan §4.5). `EventWithDetails` is the
+  // `Result` of BOTH `findByIdWithDetails` and `findByTeamId` — both queries
+  // MUST select it, or the query missing it fails schema decode entirely.
+  // Consumed by `allDayRsvpWindow.ts#eventAcceptsRsvp` so every RSVP call site
+  // gets the team's timezone for free instead of a second lookup.
+  timezone: Schema.String,
 }) {}
 
 class EventRow extends Schema.Class<EventRow>('EventRow')({
@@ -142,7 +155,8 @@ const make = Effect.gen(function* () {
                        AS start_date,
                    (COALESCE(e.end_at, e.start_at)
                        AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
-                       AS end_date
+                       AS end_date,
+                   COALESCE(ts.timezone, 'Europe/Prague') AS timezone
             FROM events e
             LEFT JOIN training_types tt ON tt.id = e.training_type_id
             LEFT JOIN team_members tm ON tm.id = e.created_by
@@ -153,7 +167,7 @@ const make = Effect.gen(function* () {
             LEFT JOIN users cu ON cu.id = ctm.user_id
             LEFT JOIN team_settings ts ON ts.team_id = e.team_id
             WHERE e.team_id = ${teamId}
-            ORDER BY e.start_at ASC
+            ORDER BY ${sql.unsafe(eventDayOrder('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
           `,
   });
 
@@ -180,7 +194,8 @@ const make = Effect.gen(function* () {
                        AS start_date,
                    (COALESCE(e.end_at, e.start_at)
                        AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
-                       AS end_date
+                       AS end_date,
+                   COALESCE(ts.timezone, 'Europe/Prague') AS timezone
             FROM events e
             LEFT JOIN training_types tt ON tt.id = e.training_type_id
             LEFT JOIN team_members tm ON tm.id = e.created_by
@@ -267,11 +282,29 @@ const make = Effect.gen(function* () {
       sql`UPDATE events SET status = 'cancelled', updated_at = now() WHERE id = ${id}`,
   });
 
+  // The flip ARMS both deferred sweeps atomically, in the same statement
+  // (plan §4.8.1/§15.2): a timed event is stamped `now()` immediately (its
+  // increment/emit happen this same cron cycle, so both stamps must already
+  // read "done"); an all-day event is left `NULL` ("armed"), so the deferred
+  // missed-RSVP sweep and the deferred "Dnes" post sweep both know to pick it
+  // up later. Because "armed" (`NULL`) is written ONLY by this statement,
+  // a flip performed by OLD code (a rolling deploy, or a revert to
+  // pre-migration code) can never leave a row in the armed state — the
+  // migration's unconditional backfill already disarmed every pre-existing
+  // row, and old code's flip never re-arms it. No version detection needed.
   const start = SqlSchema.findOneOption({
     Request: Event.EventId,
     Result: Schema.Struct({ id: Event.EventId }),
     execute: (id) =>
-      sql`UPDATE events SET status = 'started', updated_at = now() WHERE id = ${id} AND status = 'active' RETURNING id`,
+      sql`
+        UPDATE events
+        SET status = 'started',
+            updated_at = now(),
+            missed_rsvp_counted_at = CASE WHEN all_day THEN NULL ELSE now() END,
+            all_day_post_sent_at   = CASE WHEN all_day THEN NULL ELSE now() END
+        WHERE id = ${id} AND status = 'active'
+        RETURNING id
+      `,
   });
 
   const findStartable = SqlSchema.findAll({
@@ -302,6 +335,101 @@ const make = Effect.gen(function* () {
       WHERE e.status = 'active'
         AND e.start_at <= NOW()
     `,
+  });
+
+  // The deferred missed-RSVP sweep (plan §4.8.2/§14.4): all-day events that
+  // are `started` and whose last local day has passed, but whose counter is
+  // still armed (`NULL`). `LEFT JOIN team_settings` + `COALESCE` is required,
+  // not optional — an INNER join would silently skip every event of a team
+  // with no `team_settings` row (§4.4.4). The `INTERVAL '7 days'` lower bound
+  // mirrors `findEndedTrainings`.
+  const findAllDayEventsPastLastLocalDayStmt = (nowParam: string) =>
+    SqlSchema.findAll({
+      Request: Schema.Void,
+      Result: Schema.Struct({
+        id: Event.EventId,
+        team_id: Team.TeamId,
+        member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
+      }),
+      execute: () => sql`
+        SELECT e.id, e.team_id, e.member_group_id
+        FROM events e
+        LEFT JOIN team_settings ts ON ts.team_id = e.team_id
+        WHERE e.all_day = TRUE
+          AND e.status = 'started'
+          AND e.missed_rsvp_counted_at IS NULL
+          AND (COALESCE(e.end_at, e.start_at) AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date
+              < ((${nowParam}::timestamptz) AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date
+          AND e.start_at > (${nowParam}::timestamptz) - INTERVAL '7 days'
+      `,
+    });
+
+  // Conditional claim: `WHERE ... IS NULL` makes this safe if two server
+  // replicas ever run the cron concurrently, and — combined with running
+  // this in the SAME transaction as the increment it gates — makes the whole
+  // "claim, then act" sequence atomic (plan §4.8.2). Never increment-then-
+  // stamp: a crash between the two double-penalises every non-responder.
+  const claimMissedRsvpCountStmt = SqlSchema.findOneOption({
+    Request: Event.EventId,
+    Result: Schema.Struct({ id: Event.EventId }),
+    execute: (id) =>
+      sql`UPDATE events SET missed_rsvp_counted_at = now() WHERE id = ${id} AND missed_rsvp_counted_at IS NULL RETURNING id`,
+  });
+
+  // The deferred "Dnes" started-post sweep (plan §15.2): all-day events that
+  // are `started`, still on their FIRST local day (the `::date` match against
+  // `start_at` — a multi-day event's day 2+ deliberately does not match, so
+  // the post never lies about "today"), whose local time-of-day has reached
+  // the team's configured `all_day_post_time`, and which have not posted yet.
+  // `LEFT JOIN team_settings` + `COALESCE` on BOTH the timezone and the post
+  // time — unlike the three reminder queries (which preserve an existing
+  // INNER join), a team with no `team_settings` row must still get this post
+  // (§4.4.4's argument, applied here because this is new behaviour, not
+  // preserved behaviour). Open-ended `>=` on the time-of-day, not a
+  // `BETWEEN`/5-minute window, so the post survives a short cron outage
+  // instead of silently dropping it (mirrors `_findEventsForCoachingStatusAt`).
+  const findAllDayEventsNeedingStartedPostStmt = (nowParam: string) =>
+    SqlSchema.findAll({
+      Request: Schema.Void,
+      Result: Schema.Struct({
+        id: Event.EventId,
+        team_id: Team.TeamId,
+        title: Schema.String,
+        description: Schema.OptionFromNullOr(Schema.String),
+        image_url: Schema.OptionFromNullOr(Schema.String),
+        start_at: Schemas.DateTimeFromDate,
+        end_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
+        location: Schema.OptionFromNullOr(Schema.String),
+        location_url: Schema.OptionFromNullOr(Schema.String),
+        event_type: Schema.String,
+        member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
+        owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
+        reminders_channel_id: Schema.OptionFromNullOr(Discord.Snowflake),
+        all_day: Schema.Boolean,
+        claimed_by: Schema.OptionFromNullOr(TeamMember.TeamMemberId),
+      }),
+      execute: () => sql`
+        SELECT e.id, e.team_id, e.title, e.description, e.image_url, e.start_at, e.end_at,
+               e.location, e.location_url, e.event_type,
+               e.member_group_id, e.owner_group_id,
+               ts.reminders_channel_id, e.all_day, e.claimed_by
+        FROM events e
+        LEFT JOIN team_settings ts ON ts.team_id = e.team_id
+        WHERE e.all_day = TRUE
+          AND e.status = 'started'
+          AND e.all_day_post_sent_at IS NULL
+          AND ((${nowParam}::timestamptz) AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date
+              = (e.start_at AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date
+          AND ((${nowParam}::timestamptz) AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::time
+              >= COALESCE(ts.all_day_post_time, TIME '08:00')
+      `,
+    });
+
+  const claimStartedPostStmt = SqlSchema.findOneOption({
+    Request: Event.EventId,
+    Result: Schema.Struct({ id: Event.EventId }),
+    execute: (id) =>
+      sql`UPDATE events SET all_day_post_sent_at = now() WHERE id = ${id} AND all_day_post_sent_at IS NULL RETURNING id`,
   });
 
   const findScopedTrainingTypeIds = SqlSchema.findAll({
@@ -472,23 +600,39 @@ const make = Effect.gen(function* () {
     `,
   });
 
-  const findEndedTrainings = SqlSchema.findAll({
-    Request: Schema.Void,
-    Result: Schema.Struct({
-      id: Event.EventId,
-      start_at: Schemas.DateTimeFromDate,
-      end_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
-    }),
-    execute: () => sql`
-      SELECT id, start_at, end_at
-      FROM events
-      WHERE event_type = 'training'
-        AND status IN ('active', 'started')
-        AND auto_logged_at IS NULL
-        AND COALESCE(end_at, start_at) < NOW()
-        AND COALESCE(end_at, start_at) > NOW() - INTERVAL '7 days'
+  // Parameterised exactly as `TeamSettingsRepository` does for its three
+  // reminder queries (plan §7.7a), so the "+1 local day" arithmetic below is
+  // testable without the wall clock. For a TIMED training, "ended" is still
+  // the plain instant comparison; for an ALL-DAY training, `start_at` is now
+  // a real team-local-midnight instant (not the old noon-UTC sentinel), so
+  // the plain comparison would fire the auto-log the INSTANT the event
+  // starts. Splice the shared `eventEndOfLastLocalDay` fragment (plan
+  // §14.1/§14.4) for the all-day branch so it stays "not yet ended" through
+  // the end of its last local day.
+  const findEndedTrainingsAt = (nowParam: string) =>
+    SqlSchema.findAll({
+      Request: Schema.Void,
+      Result: Schema.Struct({
+        id: Event.EventId,
+        start_at: Schemas.DateTimeFromDate,
+        end_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
+      }),
+      execute: () => sql`
+      SELECT e.id, e.start_at, e.end_at
+      FROM events e
+      LEFT JOIN team_settings ts ON ts.team_id = e.team_id
+      WHERE e.event_type = 'training'
+        AND e.status IN ('active', 'started')
+        AND e.auto_logged_at IS NULL
+        AND (
+          CASE WHEN e.all_day
+            THEN ${sql.unsafe(eventEndOfLastLocalDay('e', "COALESCE(ts.timezone, 'Europe/Prague')"))} <= (${nowParam}::timestamptz)
+            ELSE COALESCE(e.end_at, e.start_at) < (${nowParam}::timestamptz)
+          END
+        )
+        AND COALESCE(e.end_at, e.start_at) > (${nowParam}::timestamptz) - INTERVAL '7 days'
     `,
-  });
+    });
 
   const findUpcomingForDashboard = SqlSchema.findAll({
     Request: Schema.Struct({
@@ -519,9 +663,8 @@ const make = Effect.gen(function* () {
       LEFT JOIN event_rsvps er ON er.event_id = e.id AND er.team_member_id = ${input.team_member_id}
       LEFT JOIN team_settings ts ON ts.team_id = e.team_id
       WHERE e.team_id = ${input.team_id}
-        AND e.status = 'active'
-        AND e.start_at >= now()
-      ORDER BY e.start_at ASC
+        AND ${sql.unsafe(eventVisibleNow('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
+      ORDER BY ${sql.unsafe(eventDayOrder('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
     `,
   });
 
@@ -597,12 +740,13 @@ const make = Effect.gen(function* () {
                    COALESCE(SUM(CASE WHEN er.response = 'no' THEN 1 ELSE 0 END), 0)::int AS no_count,
                    COALESCE(SUM(CASE WHEN er.response IN ('maybe', 'coming_later') THEN 1 ELSE 0 END), 0)::int AS maybe_count
             FROM events e
+            JOIN teams t ON t.id = e.team_id
+            LEFT JOIN team_settings ts ON ts.team_id = t.id
             LEFT JOIN event_rsvps er ON er.event_id = e.id
-            WHERE e.team_id = (SELECT id FROM teams WHERE guild_id = ${input.guild_id})
-              AND e.status = 'active'
-              AND e.start_at >= now()
-            GROUP BY e.id
-            ORDER BY e.start_at ASC
+            WHERE t.guild_id = ${input.guild_id}
+              AND ${sql.unsafe(eventVisibleNow('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
+            GROUP BY e.id, ts.timezone
+            ORDER BY ${sql.unsafe(eventDayOrder('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
             LIMIT ${input.limit} OFFSET ${input.offset}
           `,
   });
@@ -678,15 +822,19 @@ const make = Effect.gen(function* () {
           `,
   });
 
+  // Paired with `findUpcomingByGuild` above (the page it counts) — the two
+  // MUST change together, or the count desyncs from the page (BL2's exact
+  // failure mode, plan §4.4/PR 4 task list).
   const countUpcomingByGuild = SqlSchema.findOneOption({
     Request: Schema.String,
     Result: Schema.Struct({ count: Schema.Number }),
     execute: (guildId) => sql`
             SELECT COUNT(*)::int AS count
-            FROM events
-            WHERE team_id = (SELECT id FROM teams WHERE guild_id = ${guildId})
-              AND status = 'active'
-              AND start_at >= now()
+            FROM events e
+            JOIN teams t ON t.id = e.team_id
+            LEFT JOIN team_settings ts ON ts.team_id = t.id
+            WHERE t.guild_id = ${guildId}
+              AND ${sql.unsafe(eventVisibleNow('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
           `,
   });
 
@@ -885,7 +1033,10 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
-  const findEndedTrainingsForAutoLog = () => findEndedTrainings(undefined).pipe(catchSqlErrors);
+  const findEndedTrainingsForAutoLogAt = (now: Date) =>
+    findEndedTrainingsAt(now.toISOString())(undefined).pipe(catchSqlErrors);
+
+  const findEndedTrainingsForAutoLog = () => findEndedTrainingsForAutoLogAt(new Date());
 
   const markEventSeriesModified = (eventId: Event.EventId) =>
     markModified(eventId).pipe(catchSqlErrors);
@@ -910,34 +1061,53 @@ const make = Effect.gen(function* () {
       sql`UPDATE events SET personal_messages_dirty_at = NULL WHERE id = ${input.id} AND personal_messages_dirty_at = ${input.dirty_at}`,
   });
 
-  // Mark every active, upcoming event for a team dirty so the personal-events
+  // Correlated scalar subselect for the team's timezone — NOT a join. Used by
+  // the two UPDATE statements below, neither of which otherwise touches
+  // `team_settings`; a scalar subselect is NULL-safe by construction (unlike
+  // an inner `UPDATE ... FROM team_settings`) without requiring a join at all
+  // (plan §4.4.4, mirrors `1791400000_anchor_all_day_to_team_midnight.ts`).
+  const teamSettingsTimezoneSubselect =
+    "COALESCE((SELECT ts.timezone FROM team_settings ts WHERE ts.team_id = e.team_id), 'Europe/Prague')";
+
+  // Mark every upcoming/visible event for a team dirty so the personal-events
   // reconcile loop (re)builds personal messages — e.g. to populate a member's
   // freshly-provisioned channel with their existing events. Only touches events
   // that are not already dirty, so in-flight reconciles are left undisturbed.
+  // Uses the shared `eventVisibleNow` predicate (plan PR 4 task 4.2) so a
+  // member provisioned DURING an all-day event's own local day still gets a
+  // message for it — the event is visible everywhere else already.
   const markTeamUpcomingPersonalMessagesDirty = SqlSchema.void({
     Request: Team.TeamId,
     execute: (teamId) =>
-      sql`UPDATE events SET personal_messages_dirty_at = date_trunc('milliseconds', now())
-          WHERE team_id = ${teamId}
-            AND status = 'active'
-            AND start_at >= now()
-            AND personal_messages_dirty_at IS NULL`,
+      sql`UPDATE events e SET personal_messages_dirty_at = date_trunc('milliseconds', now())
+          WHERE e.team_id = ${teamId}
+            AND ${sql.unsafe(eventVisibleNow('e', teamSettingsTimezoneSubselect))}
+            AND e.personal_messages_dirty_at IS NULL`,
   });
 
-  // Self-healing sweep: re-marks events that are no longer active/upcoming
-  // (status <> 'active' OR start_at in the past) but still hold
+  // Self-healing sweep: re-marks events that are no longer visible/upcoming
+  // (the exact NEGATION of `eventVisibleNow` — plan §4.4.4) but still hold
   // personal_event_messages rows, so the bot's personal-events reconcile
   // deletes those stale personal messages. Only touches events that aren't
   // already dirty, and is self-terminating — once the reconcile deletes the
   // personal_event_messages rows for an event, it no longer matches the
   // `IN (SELECT DISTINCT event_id FROM personal_event_messages)` filter.
+  //
+  // MUST use the correlated scalar subselect above, NOT
+  // `UPDATE events e ... FROM team_settings ts` — the latter is an INNER join
+  // and would leave every event of a team with no `team_settings` row
+  // permanently unswept, its stale personal messages never deleted, silently.
+  // Getting this wrong the other way (still treating a `started` all-day
+  // event on its own local day as stale) re-marks it dirty every cron cycle
+  // and the reconcile deletes the message PR 4 decided to keep — an infinite
+  // create/delete loop against the Discord API.
   const markStalePersonalMessagesDirtySchema = SqlSchema.void({
     Request: Schema.Void,
     execute: () => sql`
-        UPDATE events SET personal_messages_dirty_at = date_trunc('milliseconds', now())
-        WHERE id IN (SELECT DISTINCT event_id FROM personal_event_messages)
-          AND (status <> 'active' OR start_at < now())
-          AND personal_messages_dirty_at IS NULL`,
+        UPDATE events e SET personal_messages_dirty_at = date_trunc('milliseconds', now())
+        WHERE e.id IN (SELECT DISTINCT event_id FROM personal_event_messages)
+          AND ${sql.unsafe(eventNotVisibleNow('e', teamSettingsTimezoneSubselect))}
+          AND e.personal_messages_dirty_at IS NULL`,
   });
 
   const markSeriesFuturePersonalMessagesDirtySchema = SqlSchema.void({
@@ -1091,6 +1261,27 @@ const make = Effect.gen(function* () {
         }).pipe(catchSqlErrors),
     });
 
+  const findAllDayEventsPastLastLocalDay = (now: Date) =>
+    findAllDayEventsPastLastLocalDayStmt(now.toISOString())(undefined).pipe(catchSqlErrors);
+
+  const claimMissedRsvpCount = (eventId: Event.EventId) =>
+    claimMissedRsvpCountStmt(eventId).pipe(catchSqlErrors);
+
+  const findAllDayEventsNeedingStartedPost = (now: Date) =>
+    findAllDayEventsNeedingStartedPostStmt(now.toISOString())(undefined).pipe(catchSqlErrors);
+
+  const claimStartedPost = (eventId: Event.EventId) =>
+    claimStartedPostStmt(eventId).pipe(catchSqlErrors);
+
+  // Exposes `sql.withTransaction` to consumers that don't otherwise hold a
+  // `SqlClient` (e.g. `EventStartCron`'s deferred sweeps, plan §4.8.2/§15.2),
+  // so "claim, then act" can run as one atomic unit even when the "act" half
+  // (a missed-RSVP increment, or a started-post emit) is a call into a
+  // DIFFERENT repository/service. Both sides resolve the same underlying
+  // `SqlClient` service, so calls made inside `effect` participate in the
+  // same transaction regardless of which repository's closure they came from.
+  const withTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) => sql.withTransaction(effect);
+
   return {
     findUpcomingByGuildId,
     countUpcomingByGuildId,
@@ -1113,6 +1304,7 @@ const make = Effect.gen(function* () {
     markCoachingStatusSent,
     markTrainingAutoLogged,
     findEndedTrainingsForAutoLog,
+    findEndedTrainingsForAutoLogAt,
     markEventSeriesModified,
     cancelFutureInSeries,
     findUpcomingWithRsvp,
@@ -1129,6 +1321,11 @@ const make = Effect.gen(function* () {
     clearEventPersonalMessagesDirty,
     repointChannelEvents,
     findUnpostedUpcomingByChannel,
+    findAllDayEventsPastLastLocalDay,
+    claimMissedRsvpCount,
+    findAllDayEventsNeedingStartedPost,
+    claimStartedPost,
+    withTransaction,
   };
 });
 

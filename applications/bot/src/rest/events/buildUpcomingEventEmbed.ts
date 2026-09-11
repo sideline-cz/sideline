@@ -59,7 +59,19 @@ export const buildUpcomingEventEmbed = (params: {
   if (Option.isSome(entry.description)) {
     descParts.push(entry.description.value);
   }
-  descParts.push(toDiscordTimestamp(entry.start_at, 'R'));
+  // The "Dnes"/"Today" marker (plan §4.6) is keyed off `entry.status`, NEVER off a clock
+  // read: `status` flips exactly once, in the database, when the event actually starts,
+  // and `EventStartCron` already dirty-marks the personal message on that flip. A
+  // renderer that instead compared `now()` against the event's date would make this
+  // function's output — and therefore `buildPersonalEventMessage`'s hash — depend on the
+  // wall clock, producing a spurious edit on every reconcile pass near the boundary.
+  // A multi-day all-day event stays `'started'` for its whole run, so days 2..n also
+  // render "Dnes" — that is intended (the event genuinely is happening today), not a bug.
+  descParts.push(
+    entry.all_day && entry.status === 'started'
+      ? m.bot_embed_today({}, { locale })
+      : toDiscordTimestamp(entry.start_at, 'R'),
+  );
 
   const fields: Array<Discord.RichEmbedField> = [];
 

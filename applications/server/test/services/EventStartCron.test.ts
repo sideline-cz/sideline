@@ -104,6 +104,16 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
     staleSweepCalls++;
     return Effect.void;
   },
+  // PR 4 — the two deferred sweeps (plan §4.8.2/§15.2) always run once per
+  // cycle now; every fixture in this file schedules zero candidates for them,
+  // so these are empty-result stubs, not exercised behaviour (the deferred
+  // claim-then-act behaviour itself is covered against a real Postgres in
+  // `test/integration/services/EventStartCron.deferred.test.ts`).
+  findAllDayEventsPastLastLocalDay: () => Effect.succeed([]),
+  claimMissedRsvpCount: () => Effect.die(new Error('Not implemented')),
+  findAllDayEventsNeedingStartedPost: () => Effect.succeed([]),
+  claimStartedPost: () => Effect.die(new Error('Not implemented')),
+  withTransaction: (effect: Effect.Effect<unknown, unknown, unknown>) => effect,
   // Stubs for unused methods
   findEventsByTeamId: () => Effect.die(new Error('Not implemented')),
   findEventByIdWithDetails: () => Effect.die(new Error('Not implemented')),
@@ -356,6 +366,12 @@ describe('eventStartCronEffect', () => {
         staleSweepCalls++;
         return Effect.void;
       },
+
+      findAllDayEventsPastLastLocalDay: () => Effect.succeed([]),
+      claimMissedRsvpCount: () => Effect.die(new Error('Not implemented')),
+      findAllDayEventsNeedingStartedPost: () => Effect.succeed([]),
+      claimStartedPost: () => Effect.die(new Error('Not implemented')),
+      withTransaction: (effect: Effect.Effect<unknown, unknown, unknown>) => effect,
     } as any);
 
     const OrderTrackingSyncRepo = Layer.succeed(EventSyncEventsRepository, {
@@ -442,6 +458,12 @@ describe('eventStartCronEffect', () => {
           staleSweepCalls++;
           return Effect.void;
         },
+
+        findAllDayEventsPastLastLocalDay: () => Effect.succeed([]),
+        claimMissedRsvpCount: () => Effect.die(new Error('Not implemented')),
+        findAllDayEventsNeedingStartedPost: () => Effect.succeed([]),
+        claimStartedPost: () => Effect.die(new Error('Not implemented')),
+        withTransaction: (effect: Effect.Effect<unknown, unknown, unknown>) => effect,
       } as any);
 
       return eventStartCronEffect.pipe(
@@ -515,6 +537,12 @@ describe('eventStartCronEffect', () => {
         staleSweepCalls++;
         return Effect.void;
       },
+
+      findAllDayEventsPastLastLocalDay: () => Effect.succeed([]),
+      claimMissedRsvpCount: () => Effect.die(new Error('Not implemented')),
+      findAllDayEventsNeedingStartedPost: () => Effect.succeed([]),
+      claimStartedPost: () => Effect.die(new Error('Not implemented')),
+      withTransaction: (effect: Effect.Effect<unknown, unknown, unknown>) => effect,
     } as any);
 
     return eventStartCronEffect.pipe(
@@ -717,6 +745,12 @@ describe('eventStartCronEffect', () => {
           staleSweepCalls++;
           return Effect.void;
         },
+
+        findAllDayEventsPastLastLocalDay: () => Effect.succeed([]),
+        claimMissedRsvpCount: () => Effect.die(new Error('Not implemented')),
+        findAllDayEventsNeedingStartedPost: () => Effect.succeed([]),
+        claimStartedPost: () => Effect.die(new Error('Not implemented')),
+        withTransaction: (effect: Effect.Effect<unknown, unknown, unknown>) => effect,
       } as any);
 
       return eventStartCronEffect.pipe(
@@ -1016,6 +1050,12 @@ describe('eventStartCronEffect', () => {
           staleSweepCalls++;
           return Effect.void;
         },
+
+        findAllDayEventsPastLastLocalDay: () => Effect.succeed([]),
+        claimMissedRsvpCount: () => Effect.die(new Error('Not implemented')),
+        findAllDayEventsNeedingStartedPost: () => Effect.succeed([]),
+        claimStartedPost: () => Effect.die(new Error('Not implemented')),
+        withTransaction: (effect: Effect.Effect<unknown, unknown, unknown>) => effect,
       } as any);
 
       return eventStartCronEffect.pipe(
@@ -1070,6 +1110,12 @@ describe('eventStartCronEffect', () => {
           staleSweepCalls++;
           return Effect.void;
         },
+
+        findAllDayEventsPastLastLocalDay: () => Effect.succeed([]),
+        claimMissedRsvpCount: () => Effect.die(new Error('Not implemented')),
+        findAllDayEventsNeedingStartedPost: () => Effect.succeed([]),
+        claimStartedPost: () => Effect.die(new Error('Not implemented')),
+        withTransaction: (effect: Effect.Effect<unknown, unknown, unknown>) => effect,
       } as any);
 
       return eventStartCronEffect.pipe(
@@ -1129,6 +1175,12 @@ describe('eventStartCronEffect', () => {
           staleSweepCalls++;
           return Effect.void;
         },
+
+        findAllDayEventsPastLastLocalDay: () => Effect.succeed([]),
+        claimMissedRsvpCount: () => Effect.die(new Error('Not implemented')),
+        findAllDayEventsNeedingStartedPost: () => Effect.succeed([]),
+        claimStartedPost: () => Effect.die(new Error('Not implemented')),
+        withTransaction: (effect: Effect.Effect<unknown, unknown, unknown>) => effect,
       } as any);
 
       const DyingEmitSyncRepo = Layer.succeed(EventSyncEventsRepository, {
@@ -1205,6 +1257,12 @@ describe('eventStartCronEffect', () => {
           staleSweepCalls++;
           return Effect.void;
         },
+
+        findAllDayEventsPastLastLocalDay: () => Effect.succeed([]),
+        claimMissedRsvpCount: () => Effect.die(new Error('Not implemented')),
+        findAllDayEventsNeedingStartedPost: () => Effect.succeed([]),
+        claimStartedPost: () => Effect.die(new Error('Not implemented')),
+        withTransaction: (effect: Effect.Effect<unknown, unknown, unknown>) => effect,
       } as any);
 
       const DyingChannelMappingRepo = Layer.succeed(DiscordChannelMappingRepository, {
@@ -1343,6 +1401,12 @@ describe('eventStartCronEffect', () => {
         },
         markStalePersonalMessagesDirty: () =>
           Effect.die(new Error('Simulated stale-sweep failure')),
+
+        findAllDayEventsPastLastLocalDay: () => Effect.succeed([]),
+        claimMissedRsvpCount: () => Effect.die(new Error('Not implemented')),
+        findAllDayEventsNeedingStartedPost: () => Effect.succeed([]),
+        claimStartedPost: () => Effect.die(new Error('Not implemented')),
+        withTransaction: (effect: Effect.Effect<unknown, unknown, unknown>) => effect,
       } as any);
 
       return eventStartCronEffect.pipe(
@@ -1364,4 +1428,141 @@ describe('eventStartCronEffect', () => {
       );
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// PR 4 — all-day events skip the immediate increment/emit (plan §7.7f case 2,
+// §7.12 case 1, §15.4's table). This is pure per-event routing logic in
+// `EventStartCron.ts`'s body (not SQL), so the existing mock harness is the
+// right level for it — the transactional arm-on-flip/claim-then-act behaviour
+// itself is covered separately by
+// `applications/server/test/integration/services/EventStartCron.deferred.test.ts`
+// against a real Postgres.
+// ---------------------------------------------------------------------------
+
+describe('eventStartCronEffect — PR 4: all-day events defer the increment and the emit', () => {
+  it.effect('all-day event flips → increment is NOT called, emit is NOT called', () => {
+    eventsToStart = [
+      {
+        id: EVENT_ID_1,
+        team_id: TEAM_ID,
+        title: 'All-day Tournament',
+        description: Option.none(),
+        start_at: START_AT,
+        end_at: Option.none(),
+        location: Option.none(),
+        event_type: 'tournament',
+        all_day: true,
+        member_group_id: Option.none(),
+        discord_target_channel_id: Option.none(),
+        owner_group_id: Option.none(),
+        reminders_channel_id: Option.none(),
+        claimed_by: Option.none(),
+      },
+    ];
+
+    return eventStartCronEffect.pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          // The flip itself still happens (findStartable / startEvent is
+          // unedited by PR 4 — §15.4 "flip: at team-local midnight, unchanged").
+          expect(startedEvents).toHaveLength(1);
+          // But neither of the immediate per-event side effects the timed path
+          // gets should fire for an all-day event — both are deferred (§15.4's
+          // table: emit → the morning sweep; missed-RSVP increment → end of
+          // last local day).
+          expect(emittedStarted).toHaveLength(0);
+          expect(incrementedNonResponders).toHaveLength(0);
+        }),
+      ),
+      Effect.provide(MockProvideLayer),
+      Effect.asVoid,
+    );
+  });
+
+  it.effect(
+    'timed event flips (defensive control) → increment and emit still fire immediately, unchanged',
+    () => {
+      eventsToStart = [
+        {
+          id: EVENT_ID_1,
+          team_id: TEAM_ID,
+          title: 'Saturday Match',
+          description: Option.none(),
+          start_at: START_AT,
+          end_at: Option.none(),
+          location: Option.none(),
+          event_type: 'match',
+          all_day: false,
+          member_group_id: Option.none(),
+          discord_target_channel_id: Option.none(),
+          owner_group_id: Option.none(),
+          reminders_channel_id: Option.none(),
+          claimed_by: Option.none(),
+        },
+      ];
+
+      return eventStartCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(emittedStarted).toHaveLength(1);
+            expect(incrementedNonResponders).toHaveLength(1);
+          }),
+        ),
+        Effect.provide(MockProvideLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect('one all-day and one timed event in the same cycle are routed independently', () => {
+    eventsToStart = [
+      {
+        id: EVENT_ID_1,
+        team_id: TEAM_ID,
+        title: 'All-day Tournament',
+        description: Option.none(),
+        start_at: START_AT,
+        end_at: Option.none(),
+        location: Option.none(),
+        event_type: 'tournament',
+        all_day: true,
+        member_group_id: Option.none(),
+        discord_target_channel_id: Option.none(),
+        owner_group_id: Option.none(),
+        reminders_channel_id: Option.none(),
+        claimed_by: Option.none(),
+      },
+      {
+        id: EVENT_ID_2,
+        team_id: TEAM_ID,
+        title: 'Afternoon Match',
+        description: Option.none(),
+        start_at: START_AT,
+        end_at: Option.none(),
+        location: Option.none(),
+        event_type: 'match',
+        all_day: false,
+        member_group_id: Option.none(),
+        discord_target_channel_id: Option.none(),
+        owner_group_id: Option.none(),
+        reminders_channel_id: Option.none(),
+        claimed_by: Option.none(),
+      },
+    ];
+
+    return eventStartCronEffect.pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(startedEvents.map((e) => e.eventId)).toEqual(
+            expect.arrayContaining([EVENT_ID_1, EVENT_ID_2]),
+          );
+          expect(emittedStarted.map((e) => e.eventId)).toEqual([EVENT_ID_2]);
+          expect(incrementedNonResponders.map((e) => e.eventId)).toEqual([EVENT_ID_2]);
+        }),
+      ),
+      Effect.provide(MockProvideLayer),
+      Effect.asVoid,
+    );
+  });
 });

@@ -725,6 +725,7 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       my_response_actual: Option.none(),
       my_message: Option.none(),
       all_day: false,
+      status: 'active',
       start_date: Option.none(),
       end_date: Option.none(),
     });
@@ -754,6 +755,7 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       my_response_actual: Option.none(),
       my_message: Option.none(),
       all_day: false,
+      status: 'active',
       start_date: Option.none(),
       end_date: Option.none(),
     });

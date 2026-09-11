@@ -151,7 +151,14 @@ export const handleStarted = (event: EventRpcEvents.EventStartedEvent) =>
                   ...roleMention,
                   embeds: [
                     {
-                      title: m.bot_event_started_post_title({ title: event.title }, { locale }),
+                      // The team-local morning post title is deliberately different for
+                      // all-day events (plan §15.5/§15.6): the `active → started` flip
+                      // already happened silently at local midnight (§14.5), so by the
+                      // time this post fires the event is already under way — "Starting
+                      // now" would be a lie. Timed events keep the unchanged title.
+                      title: event.all_day
+                        ? m.bot_event_started_post_title_all_day({ title: event.title }, { locale })
+                        : m.bot_event_started_post_title({ title: event.title }, { locale }),
                       color: STARTED_POST_COLOR,
                       description: descParts.join('\n'),
                       fields,

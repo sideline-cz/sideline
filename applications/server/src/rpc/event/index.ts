@@ -32,6 +32,7 @@ import { EventRostersRepository } from '~/repositories/EventRostersRepository.js
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { eventDayOrder, eventVisibleNow } from '~/repositories/eventVisibility.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
@@ -39,6 +40,7 @@ import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
+import { eventAcceptsRsvp } from '~/utils/allDayRsvpWindow.js';
 import { isAttendingRsvpResponse } from '~/utils/rsvpAttendance.js';
 import { isRsvpMessageRequiredAndMissing } from '~/utils/rsvpMessageRequired.js';
 import { projectRsvpResponseToLegacy } from '~/utils/rsvpWireProjection.js';
@@ -77,7 +79,8 @@ const getRsvpCounts = (
         else if (c.response === 'no') noCount = c.count;
         else if (c.response === 'maybe' || c.response === 'coming_later') maybeCount += c.count;
       }
-      const canRsvp = event !== undefined && event.status === 'active';
+      const canRsvp =
+        event !== undefined && eventAcceptsRsvp(event, event.timezone, DateTime.nowUnsafe());
       return new EventRpcModels.RsvpCountsResult({ yesCount, noCount, maybeCount, canRsvp });
     }),
   );
@@ -422,8 +425,13 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
               Effect.flatMap(Options.toEffect(() => new EventRpcModels.RsvpEventNotFound())),
             ),
           ),
+          // This site used to reject EVERY non-'active' status. Now
+          // `!eventAcceptsRsvp(...)` is what stops a CANCELLED all-day event
+          // from becoming RSVP-able here — the status guard inside
+          // `allDayStillRsvpable` is mandatory (plan §4.5(a)). The error
+          // vocabulary for this surface is unchanged (`RsvpDeadlinePassed`).
           Effect.tap(({ event }) =>
-            event.status !== 'active'
+            !eventAcceptsRsvp(event, event.timezone, DateTime.nowUnsafe())
               ? Effect.fail(new EventRpcModels.RsvpDeadlinePassed())
               : Effect.void,
           ),
@@ -900,6 +908,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                 my_response_actual: Schema.OptionFromNullOr(EventRsvp.RsvpResponse),
                 my_message: Schema.OptionFromNullOr(Schema.String),
                 all_day: Schema.Boolean,
+                status: Schema.String,
                 start_date: Schema.String,
                 end_date: Schema.String,
               }),
@@ -916,6 +925,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                   e.location_url,
                   e.event_type,
                   e.all_day,
+                  e.status,
                   COALESCE(SUM(CASE WHEN er.response = 'yes' THEN 1 ELSE 0 END), 0)::int AS yes_count,
                   COALESCE(SUM(CASE WHEN er.response = 'no' THEN 1 ELSE 0 END), 0)::int AS no_count,
                   COALESCE(SUM(CASE WHEN er.response IN ('maybe', 'coming_later') THEN 1 ELSE 0 END), 0)::int AS maybe_count,
@@ -933,8 +943,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                   AND my_rsvp.team_member_id = ${input.team_member_id}
                 LEFT JOIN team_settings ts ON ts.team_id = e.team_id
                 WHERE e.team_id = ${input.team_id}
-                  AND e.status = 'active'
-                  AND e.start_at >= now()
+                  AND ${svc.sql.unsafe(eventVisibleNow('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
                   AND (
                     e.member_group_id IS NULL
                     OR EXISTS (
@@ -949,7 +958,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                     )
                   )
                 GROUP BY e.id, my_rsvp.response, my_rsvp.message, ts.timezone
-                ORDER BY e.start_at ASC
+                ORDER BY ${svc.sql.unsafe(eventDayOrder('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
                 LIMIT ${input.limit} OFFSET ${input.offset}
               `,
             })({
@@ -976,9 +985,9 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
               execute: (input) => svc.sql`
                 SELECT COUNT(DISTINCT e.id)::int AS count
                 FROM events e
+                LEFT JOIN team_settings ts ON ts.team_id = e.team_id
                 WHERE e.team_id = ${input.team_id}
-                  AND e.status = 'active'
-                  AND e.start_at >= now()
+                  AND ${svc.sql.unsafe(eventVisibleNow('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
                   AND (
                     e.member_group_id IS NULL
                     OR EXISTS (
@@ -1034,6 +1043,7 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
                       my_response_actual: row.my_response_actual,
                       my_message: row.my_message,
                       all_day: row.all_day,
+                      status: row.status,
                       start_date: Option.some(row.start_date),
                       end_date: Option.some(row.end_date),
                     }),

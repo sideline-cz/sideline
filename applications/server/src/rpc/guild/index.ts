@@ -22,6 +22,7 @@ import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsReposit
 import { DiscordRoleMappingRepository } from '~/repositories/DiscordRoleMappingRepository.js';
 import { DiscordRolesRepository } from '~/repositories/DiscordRolesRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { eventDayOrder, eventVisibleNow } from '~/repositories/eventVisibility.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { PendingGuildJoinsRepository } from '~/repositories/PendingGuildJoinsRepository.js';
@@ -1399,6 +1400,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 my_response_actual: Schema.OptionFromNullOr(EventRsvp.RsvpResponse),
                 my_message: Schema.OptionFromNullOr(Schema.String),
                 all_day: Schema.Boolean,
+                status: Schema.String,
                 start_date: Schema.String,
                 end_date: Schema.String,
               }),
@@ -1416,6 +1418,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     e.location_url,
                     e.event_type,
                     e.all_day,
+                    e.status,
                     COALESCE(SUM(CASE WHEN er.response = 'yes' THEN 1 ELSE 0 END), 0)::int AS yes_count,
                     COALESCE(SUM(CASE WHEN er.response = 'no' THEN 1 ELSE 0 END), 0)::int AS no_count,
                     COALESCE(SUM(CASE WHEN er.response IN ('maybe', 'coming_later') THEN 1 ELSE 0 END), 0)::int AS maybe_count,
@@ -1433,8 +1436,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     AND my_rsvp.team_member_id = ${input.team_member_id}
                   LEFT JOIN team_settings ts ON ts.team_id = e.team_id
                   WHERE e.team_id = ${input.team_id}
-                    AND e.status = 'active'
-                    AND e.start_at >= now()
+                    AND ${deps.sql.unsafe(eventVisibleNow('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
                     AND (
                       e.member_group_id IS NULL
                       OR EXISTS (
@@ -1449,7 +1451,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                       )
                     )
                   GROUP BY e.id, my_rsvp.response, my_rsvp.message, ts.timezone
-                  ORDER BY e.start_at ASC
+                  ORDER BY ${deps.sql.unsafe(eventDayOrder('e', "COALESCE(ts.timezone, 'Europe/Prague')"))}
                 `,
             })({ team_id: team.id, team_member_id: member.id }).pipe(
               Effect.catchTag(
@@ -1484,6 +1486,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                       my_response_actual: row.my_response_actual,
                       my_message: row.my_message,
                       all_day: row.all_day,
+                      status: row.status,
                       start_date: Option.some(row.start_date),
                       end_date: Option.some(row.end_date),
                     }),

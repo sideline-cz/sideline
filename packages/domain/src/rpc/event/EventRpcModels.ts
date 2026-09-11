@@ -191,6 +191,15 @@ export class UpcomingEventForUserEntry extends Schema.Class<UpcomingEventForUser
   no_count: Schema.Number,
   maybe_count: Schema.Number,
   all_day: Schema.Boolean,
+  /**
+   * Drives the personal-message "Dnes"/"Today" marker (plan §4.6): an all-day event whose
+   * `status` has flipped to `'started'` is currently running, so the renderer swaps the
+   * relative `<t:S:R>` timestamp for a static "today" label instead. Defaulted on decode
+   * (not required on the wire) so a rolling deploy where the server hasn't shipped this
+   * field yet degrades to the pre-existing `<t:S:R>` rendering rather than a hard decode
+   * failure — see `TeamSettingsApi.ts:79` for the same `withDecodingDefaultKey` precedent.
+   */
+  status: Schema.String.pipe(Schema.withDecodingDefaultKey(() => 'active')),
   my_response: Schema.OptionFromNullOr(Schema.Literals(['yes', 'no', 'maybe'])),
   /**
    * The TRUE (unprojected) stored response, additive alongside the legacy
