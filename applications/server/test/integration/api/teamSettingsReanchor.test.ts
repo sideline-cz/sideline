@@ -266,6 +266,29 @@ const readStartAt = (eventId: string) =>
     }),
   );
 
+const readPersonalMessagesDirtyAt = (eventId: string) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.flatMap((sql) =>
+      sql.unsafe<{ personal_messages_dirty_at: Date | null }>(
+        `SELECT personal_messages_dirty_at FROM events WHERE id = '${eventId}'`,
+      ),
+    ),
+    Effect.map((rows) => {
+      const row = rows.at(0);
+      if (!row) throw new Error(`Event ${eventId} not found`);
+      return row.personal_messages_dirty_at;
+    }),
+  );
+
+const setPersonalMessagesDirtyAt = (eventId: string, value: Date) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.flatMap((sql) =>
+      sql.unsafe(
+        `UPDATE events SET personal_messages_dirty_at = '${value.toISOString()}' WHERE id = '${eventId}'`,
+      ),
+    ),
+  );
+
 const HOST = 'http://localhost';
 
 const patchSettings = (teamId: Team.TeamId, body: Record<string, unknown>) =>
@@ -421,6 +444,97 @@ describe('team-settings timezone change re-anchors all-day events (PR 3, plan §
 
         const after = yield* readStartAt(anchoredId);
         expect(after).toBe('2026-07-14T22:00:00.000Z');
+      }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+// S5 review finding: re-anchoring a team's all-day events must also mark
+// their personal messages dirty, matching `markTeamUpcomingPersonalMessagesDirty`'s
+// `IS NULL` guard — otherwise every `<t:start_at:R>` already rendered into a
+// personal-channel message stays hours off until something else dirties the row.
+describe('team-settings timezone change marks re-anchored events personal-messages-dirty', () => {
+  it.effect(
+    'a timezone change marks a re-anchored all-day event dirty, but leaves an ' +
+      'unanchored sentinel and a timed event untouched',
+    () =>
+      Effect.gen(function* () {
+        const guildId = '330000000000000004' as Discord.Snowflake;
+        const { teamId, memberId } = yield* Effect.promise(() => setup(guildId));
+
+        yield* TeamSettingsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.upsert({
+              teamId,
+              eventHorizonDays: 14,
+              minPlayersThreshold: 0,
+              timezone: 'Europe/Prague',
+            }),
+          ),
+        );
+
+        const anchoredId = yield* seedEvent(teamId, memberId, {
+          allDay: true,
+          anchored: true,
+          startAtIso: '2026-07-14T22:00:00Z',
+        });
+        const sentinelId = yield* seedEvent(teamId, memberId, {
+          allDay: true,
+          anchored: false,
+          startAtIso: '2026-07-15T12:00:00Z',
+        });
+        const timedId = yield* seedEvent(teamId, memberId, {
+          allDay: false,
+          anchored: false,
+          startAtIso: '2026-07-15T18:00:00Z',
+        });
+
+        expect(yield* readPersonalMessagesDirtyAt(anchoredId)).toBeNull();
+
+        const response = yield* Effect.promise(() =>
+          patchSettings(teamId, { timezone: 'Asia/Tokyo' }),
+        );
+        expect(response.status).toBe(200);
+
+        expect(yield* readPersonalMessagesDirtyAt(anchoredId)).not.toBeNull();
+        expect(yield* readPersonalMessagesDirtyAt(sentinelId)).toBeNull();
+        expect(yield* readPersonalMessagesDirtyAt(timedId)).toBeNull();
+      }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect(
+    'does not clobber an already-dirty event with a fresher timestamp (IS NULL guard)',
+    () =>
+      Effect.gen(function* () {
+        const guildId = '330000000000000005' as Discord.Snowflake;
+        const { teamId, memberId } = yield* Effect.promise(() => setup(guildId));
+
+        yield* TeamSettingsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.upsert({
+              teamId,
+              eventHorizonDays: 14,
+              minPlayersThreshold: 0,
+              timezone: 'Europe/Prague',
+            }),
+          ),
+        );
+
+        const anchoredId = yield* seedEvent(teamId, memberId, {
+          allDay: true,
+          anchored: true,
+          startAtIso: '2026-07-14T22:00:00Z',
+        });
+
+        const alreadyDirtyAt = new Date('2020-01-01T00:00:00.000Z');
+        yield* setPersonalMessagesDirtyAt(anchoredId, alreadyDirtyAt);
+
+        const response = yield* Effect.promise(() =>
+          patchSettings(teamId, { timezone: 'Asia/Tokyo' }),
+        );
+        expect(response.status).toBe(200);
+
+        const after = yield* readPersonalMessagesDirtyAt(anchoredId);
+        expect(after?.toISOString()).toBe(alreadyDirtyAt.toISOString());
       }).pipe(Effect.provide(SeedLayer)),
   );
 });

@@ -325,7 +325,11 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                                        AT TIME ZONE ${upserted.timezone},
                           end_at   = CASE WHEN end_at IS NULL THEN NULL
                                           ELSE date_trunc('day', end_at AT TIME ZONE ${oldTz})
-                                                 AT TIME ZONE ${upserted.timezone} END
+                                                 AT TIME ZONE ${upserted.timezone} END,
+                          personal_messages_dirty_at = CASE
+                            WHEN personal_messages_dirty_at IS NULL
+                            THEN date_trunc('milliseconds', now())
+                            ELSE personal_messages_dirty_at END
                         WHERE team_id = ${teamId} AND all_day = TRUE AND all_day_anchored
                       `.pipe(Effect.asVoid),
                         ),
