@@ -90,11 +90,21 @@ export const DashboardApiLive = HttpApiBuilder.group(Api, 'dashboard', (handlers
             // Same `COALESCE(ts.timezone, 'Europe/Prague')` default as every SQL site
             // in the plan (§11.2) — a team with no `team_settings` row still gets a
             // sensible "today".
-            const teamTimezone = pipe(
+            const rawTeamTimezone = pipe(
               teamSettingsRow,
               Option.map((row) => row.timezone),
               Option.getOrElse(() => 'Europe/Prague'),
             );
+            // `team_settings.timezone` is free-form `TEXT` with no CHECK constraint
+            // (same caveat as `resolveZoned` in `api/event.ts` and `endOfLastLocalDay`
+            // in `utils/allDayRsvpWindow.ts`) — an invalid IANA id must not reach
+            // `Intl.DateTimeFormat` unguarded, since that throws a `RangeError`
+            // (a defect inside `Effect.map`, 500ing the whole dashboard) rather than
+            // a typed failure. Validate with `DateTime.zoneMakeNamed` first and fall
+            // back to the same `'Europe/Prague'` literal the column default uses.
+            const teamTimezone = Option.isSome(DateTime.zoneMakeNamed(rawTeamTimezone))
+              ? rawTeamTimezone
+              : 'Europe/Prague';
             const todayLocalDate = formatDateInTimeZone(now, teamTimezone);
 
             const toEvent = (
