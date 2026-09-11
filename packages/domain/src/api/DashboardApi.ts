@@ -25,6 +25,12 @@ export class DashboardUpcomingEvent extends Schema.Class<DashboardUpcomingEvent>
    * defaulted to `''` — see `EventApi.EventInfo.startDate`'s doc comment.
    */
   startDate: Schema.OptionFromOptionalKey(Schema.String),
+  /**
+   * Plan §16 PR 5 / §11.3. `false` is a safe, meaningful default for an old server that
+   * hasn't shipped the key yet — unlike `startDate`, there is no silent-failure sentinel
+   * risk here, so `withDecodingDefaultKey` (not `OptionFromOptionalKey`) is correct.
+   */
+  allDay: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
 }) {}
 
 export class DashboardActivitySummary extends Schema.Class<DashboardActivitySummary>(
@@ -44,6 +50,14 @@ export class DashboardResponse extends Schema.Class<DashboardResponse>('Dashboar
   awaitingRsvp: Schema.Array(DashboardUpcomingEvent),
   activitySummary: DashboardActivitySummary,
   myMemberId: TeamMemberId,
+  /**
+   * Team-local "today" (`YYYY-MM-DD`), plan §11.5(c). The web has no timezone of its
+   * own, so it cannot compute the operand `event.startDate` needs to be compared
+   * against for the "Dnes"/"Zítra" label; the server computes it once per request.
+   * `Option.none()` means an old server hasn't shipped the key yet — the reader then
+   * falls back to the browser's local date (today's behaviour), never a crash.
+   */
+  todayLocalDate: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
 export class Forbidden extends Schema.TaggedErrorClass<Forbidden>()('DashboardForbidden', {}) {}
