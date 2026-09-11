@@ -339,6 +339,12 @@ describe('EventStartCron — arm-on-flip stamps both deferral columns atomically
           assignPlayerRole(team.id, (nonResponderMember as any).id),
         ),
         Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+        // Pin the post time into the FUTURE (local). This case asserts that the
+        // midnight flip ALONE sets neither stamp; with the default 08:00 the
+        // morning post legitimately fires whenever the suite runs after 08:00
+        // team-local, which made the assertion depend on the wall clock.
+        Effect.bind('futurePostTime', () => localTimeOffsetHHMM('Europe/Prague', 60)),
+        Effect.tap(({ team, futurePostTime }) => setAllDayPostTime(team.id, futurePostTime)),
         Effect.bind('start', () => localMidnight('Europe/Prague', 0)),
         Effect.bind('event', ({ team, ownerMember, start }) =>
           insertEvent(team.id, (ownerMember as any).id, true, start),

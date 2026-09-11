@@ -455,18 +455,18 @@ describe('all-day anchor on write (PR 3, plan §12/§7.10)', () => {
   // Case 6 (= Part I §7.6 case 3, new expectation)
   it('6. PATCH { allDay: true } only, on a timed event → reanchorFromLocal, not anchorAllDay', async () => {
     const created = await post(
-      createPayload({ allDay: false, startAt: '2026-07-15T18:00:00Z' }),
+      createPayload({ allDay: false, startAt: '2030-07-15T18:00:00Z' }),
     ).then((r) => r.json());
     expect(created.allDay).toBe(false);
-    expect(created.startAt).toBe('2026-07-15T18:00:00.000Z');
+    expect(created.startAt).toBe('2030-07-15T18:00:00.000Z');
 
     const response = await patch(created.eventId, { allDay: true });
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.allDay).toBe(true);
     // 18:00Z = 20:00 local (CEST) on 15 July — still 15 July local, so local
-    // midnight of 15 July is the anchor: 2026-07-14T22:00:00Z.
-    expect(body.startAt).toBe('2026-07-14T22:00:00.000Z');
+    // midnight of 15 July is the anchor: 2030-07-14T22:00:00Z.
+    expect(body.startAt).toBe('2030-07-14T22:00:00.000Z');
   });
 
   // Case 7
@@ -482,11 +482,11 @@ describe('all-day anchor on write (PR 3, plan §12/§7.10)', () => {
 
   // Case 8 — the silent date-walk guard
   it('8. round trip: startDate read back and resaved as noon-UTC is byte-identical', async () => {
-    const created = await post(createPayload({ startAt: '2026-07-15T12:00:00Z' })).then((r) =>
+    const created = await post(createPayload({ startAt: '2030-07-15T12:00:00Z' })).then((r) =>
       r.json(),
     );
-    expect(created.startAt).toBe('2026-07-14T22:00:00.000Z');
-    expect(created.startDate).toBe('2026-07-15');
+    expect(created.startAt).toBe('2030-07-14T22:00:00.000Z');
+    expect(created.startDate).toBe('2030-07-15');
 
     // Simulate the web edit form: it works off `startDate` (a plain calendar
     // date string), and on save reconstructs the wire value as noon UTC of
@@ -532,36 +532,36 @@ describe('all-day anchor on write (PR 3, plan §12/§7.10)', () => {
   // Case 10 — regression guard: the fix must not touch timed events
   it('10. PATCH { title } on a TIMED event → start_at byte-identical', async () => {
     const created = await post(
-      createPayload({ allDay: false, startAt: '2026-07-15T18:00:00Z' }),
+      createPayload({ allDay: false, startAt: '2030-07-15T18:00:00Z' }),
     ).then((r) => r.json());
-    expect(created.startAt).toBe('2026-07-15T18:00:00.000Z');
+    expect(created.startAt).toBe('2030-07-15T18:00:00.000Z');
 
     const response = await patch(created.eventId, { title: 'Renamed' });
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.allDay).toBe(false);
-    expect(body.startAt).toBe('2026-07-15T18:00:00.000Z');
+    expect(body.startAt).toBe('2030-07-15T18:00:00.000Z');
   });
 
   // Case 11 — forces reanchorFromLocal's LOCAL date read, not anchorAllDay's UTC one
   it('11. PATCH { allDay: true }, timed event stored at 23:00Z (=01:00 next day local)', async () => {
     const created = await post(
-      createPayload({ allDay: false, startAt: '2026-07-15T23:00:00Z' }),
+      createPayload({ allDay: false, startAt: '2030-07-15T23:00:00Z' }),
     ).then((r) => r.json());
-    expect(created.startAt).toBe('2026-07-15T23:00:00.000Z');
+    expect(created.startAt).toBe('2030-07-15T23:00:00.000Z');
 
     const response = await patch(created.eventId, { allDay: true });
     expect(response.status).toBe(200);
     const body = await response.json();
     // 23:00Z = 01:00 CEST on 16 July local. Local midnight of 16 July is
-    // 2026-07-15T22:00:00Z. Reading the UTC date (15 July) would be a day wrong.
-    expect(body.startAt).toBe('2026-07-15T22:00:00.000Z');
+    // 2030-07-15T22:00:00Z. Reading the UTC date (15 July) would be a day wrong.
+    expect(body.startAt).toBe('2030-07-15T22:00:00.000Z');
   });
 
   // Case 12 — Option-of-Option: "explicitly cleared" must stay distinct from "absent"
   it('12. PATCH { endAt: null } clears end_at; start_at is untouched', async () => {
     const created = await post(
-      createPayload({ startAt: '2026-07-15T12:00:00Z', endAt: '2026-07-16T12:00:00Z' }),
+      createPayload({ startAt: '2030-07-15T12:00:00Z', endAt: '2030-07-16T12:00:00Z' }),
     ).then((r) => r.json());
     expect(created.endAt).not.toBeNull();
 
