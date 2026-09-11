@@ -41,6 +41,8 @@ export const handleTrainingClaimRequest = (event: EventRpcEvents.TrainingClaimRe
             teamId: event.team_id,
             eventId: event.event_id,
             locale,
+            // TODO: PR 2 replaces this with `event.all_day` once the payload carries it.
+            allDay: false,
           });
 
           // Create a new claim thread, persist it, and resolve the winning thread id.

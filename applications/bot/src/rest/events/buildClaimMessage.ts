@@ -3,26 +3,14 @@ import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
 import { DateTime, Option } from 'effect';
 import type { Locale } from '~/locale.js';
+import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
+import { formatEventWhen } from '~/rest/events/eventWhen.js';
 import { formatNameWithMention } from '../utils.js';
 import { locationDisplay } from './locationDisplay.js';
 
 const UNCLAIMED_COLOR = 0xed8936; // orange
 const CLAIMED_COLOR = 0x57f287; // green (matches EVENT_TYPE_COLORS.training)
 const CANCELLED_COLOR = 0xed4245; // red
-
-const toDiscordTimestamp = (
-  dt: DateTime.Utc,
-  style: 'D' | 'F' | 'R' | 'd' | 'f' | 't' = 'f',
-): string => {
-  const unix = Math.floor(Number(DateTime.toEpochMillis(dt)) / 1000);
-  return `<t:${unix}:${style}>`;
-};
-
-const isSameDay = (a: DateTime.Utc, b: DateTime.Utc): boolean => {
-  const pa = DateTime.toParts(a);
-  const pb = DateTime.toParts(b);
-  return pa.year === pb.year && pa.month === pb.month && pa.day === pb.day;
-};
 
 export type ClaimedByEntry = {
   readonly discord_id: Option.Option<string>;
@@ -44,6 +32,7 @@ export const buildClaimMessage = (opts: {
   teamId: string;
   eventId: string;
   locale: Locale;
+  allDay: boolean;
 }): {
   embeds: ReadonlyArray<Discord.RichEmbed>;
   components: ReadonlyArray<Discord.ActionRowComponentForMessageRequest>;
@@ -67,13 +56,16 @@ export const buildClaimMessage = (opts: {
   const fields: Array<Discord.RichEmbedField> = [];
 
   // When field
-  const startTs = toDiscordTimestamp(opts.startAt, 'f');
-  const when = Option.match(opts.endAt, {
-    onNone: () => startTs,
-    onSome: (endAt) => {
-      const endStyle = isSameDay(opts.startAt, endAt) ? 't' : 'f';
-      return `${startTs} — ${toDiscordTimestamp(endAt, endStyle)}`;
-    },
+  const when = formatEventWhen({
+    startAt: opts.startAt,
+    // ⚠ the all-day branch takes DATES, not instants. This supplies the UTC date of the
+    // (still noon-anchored) instant, which is correct under the current storage anchor; a
+    // later change replaces it with the payload's real `start_date`/`end_date`.
+    startDate: DateTime.formatIsoDateUtc(opts.startAt),
+    endAt: opts.endAt,
+    endDate: Option.map(opts.endAt, DateTime.formatIsoDateUtc),
+    allDay: opts.allDay,
+    locale,
   });
   fields.push({ name: m.bot_embed_when({}, { locale }), value: when, inline: false });
 

@@ -52,6 +52,8 @@ export const handleTrainingClaimUpdate = (event: EventRpcEvents.TrainingClaimUpd
             teamId: event.team_id,
             eventId: event.event_id,
             locale,
+            // TODO: PR 2 replaces this with `event.all_day` once the payload carries it.
+            allDay: false,
           });
 
           return rest

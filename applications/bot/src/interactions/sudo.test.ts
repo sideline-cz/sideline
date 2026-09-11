@@ -260,6 +260,11 @@ describe('SudoLeaveButton — sudo-leave:{subjectUserId}', () => {
     const updatePayload = JSON.stringify(restStub.updateMessage.mock.calls[0]);
     // Two "<t:" tokens: from and to.
     expect(updatePayload.match(/<t:/g)?.length).toBe(2);
+    // SF1 regression guard (all-day-discord-start-time-plan.md §4.1/§7.4): both tokens
+    // must stay style 'F' (weekday+long-date+time) — the shared `toDiscordTimestamp`
+    // primitive defaults to 'f', so these call sites must keep passing 'F' explicitly.
+    expect(updatePayload.match(/<t:\d+:F>/g)?.length).toBe(2);
+    expect(updatePayload).not.toMatch(/<t:\d+:f>/);
     expect(updatePayload).toContain('45m');
   });
 
@@ -280,6 +285,9 @@ describe('SudoLeaveButton — sudo-leave:{subjectUserId}', () => {
     );
     const updatePayload = JSON.stringify(restStub.updateMessage.mock.calls[0]);
     expect(updatePayload.match(/<t:/g)?.length).toBe(2);
+    // SF1 regression guard — see the comment on the equivalent assertion above.
+    expect(updatePayload.match(/<t:\d+:F>/g)?.length).toBe(2);
+    expect(updatePayload).not.toMatch(/<t:\d+:f>/);
   });
 
   it('non-admin clicks Leave → immediate ephemeral not-admin, no revoke, shared message untouched', async () => {

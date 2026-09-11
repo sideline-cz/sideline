@@ -5,6 +5,7 @@
 // claim message. Tests below cover only that remaining behavior.
 
 import type { EventRpcEvents } from '@sideline/domain';
+import * as m from '@sideline/i18n/messages';
 import { DiscordREST } from 'dfx/DiscordREST';
 import type { MessageCreateRequest } from 'dfx/types';
 
@@ -47,6 +48,7 @@ const makeEvent = (
     end_at: Option.none(),
     location: Option.none(),
     event_type: 'match',
+    all_day: false,
     member_group_id: Option.none(),
     discord_channel_id: Option.some(CHANNEL_ID as any),
     discord_role_id: Option.none(),
@@ -452,5 +454,150 @@ describe('handleStarted', () => {
 
     expect(rpcCalls.GetClaimInfo).toHaveLength(0);
     expect(restCalls.deleteMessage).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR 1 — all-day events render a date, not a fake noon clock time.
+// Plan: all-day-discord-start-time-plan.md §7.3 (Part I spec) + §18 §7.3 (v4 delta).
+//
+// NOTE on case 4a (all-day title): deferred to PR 4b, NOT part of PR 1.
+// §18's delta asserts the all-day title switches to `bot_event_started_post_title_all_day`
+// ("Dnes: {title}"). Per §15/§16 that key ships with the deferred team-local morning post
+// (PR 4 / PR 4b), not with PR 1's §5 file list. The case was written here first, then moved
+// out: referencing an i18n key that does not exist yet is a COMPILE error (TS2551), not a
+// failing assertion, so leaving it in place would make PR 1 unmergeable on its own.
+// The case is parked at scratchpad/deferred-case-4a.txt — re-add it with PR 4b.
+// Case 4b (the timed sibling) stays here: it guards byte-identity of the unchanged path.
+// ---------------------------------------------------------------------------
+describe('handleStarted — all-day events (PR 1: render as a date, not a fake clock time)', () => {
+  it('case 1: timed baseline is unchanged — description starts with exactly <t:1777651200:F>', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+    const { calls: restCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(
+      handleStarted(
+        makeEvent({
+          all_day: false,
+          start_at: DateTime.makeUnsafe('2026-05-01T16:00:00Z'),
+          end_at: Option.some(DateTime.makeUnsafe('2026-05-01T18:00:00Z')),
+        }),
+      ),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    expect(restCalls.createMessage).toHaveLength(1);
+    const [, payload] = restCalls.createMessage[0] as [string, MessageCreateRequest];
+    const description = payload.embeds?.[0]?.description ?? '';
+    expect(description.startsWith('<t:1777651200:F>')).toBe(true);
+  });
+
+  it('case 2: all-day, no end — description starts with exactly <t:1777636800:D> · All day, no F/f/R/t/d style', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+    const { calls: restCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(
+      handleStarted(
+        makeEvent({
+          all_day: true,
+          start_at: DateTime.makeUnsafe('2026-05-01T12:00:00Z'),
+          end_at: Option.none(),
+        }),
+      ),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    expect(restCalls.createMessage).toHaveLength(1);
+    const [, payload] = restCalls.createMessage[0] as [string, MessageCreateRequest];
+    const description = payload.embeds?.[0]?.description ?? '';
+    expect(description.startsWith('<t:1777636800:D> · All day')).toBe(true);
+    expect(description).not.toMatch(/<t:\d+:[FfRtd]>/);
+  });
+
+  it('case 3: all-day, multi-day — description starts with exactly <t:1777636800:D> — <t:1777809600:D> · All day', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+    const { calls: restCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(
+      handleStarted(
+        makeEvent({
+          all_day: true,
+          start_at: DateTime.makeUnsafe('2026-05-01T12:00:00Z'),
+          end_at: Option.some(DateTime.makeUnsafe('2026-05-03T12:00:00Z')),
+        }),
+      ),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    expect(restCalls.createMessage).toHaveLength(1);
+    const [, payload] = restCalls.createMessage[0] as [string, MessageCreateRequest];
+    const description = payload.embeds?.[0]?.description ?? '';
+    expect(description.startsWith('<t:1777636800:D> — <t:1777809600:D> · All day')).toBe(true);
+  });
+
+  it('case 4b (sibling): timed → title stays bot_event_started_post_title, byte-identical to today', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+    const { calls: restCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(handleStarted(makeEvent({ all_day: false })), Layer.merge(rpcLayer, restLayer));
+
+    expect(restCalls.createMessage).toHaveLength(1);
+    const [, payload] = restCalls.createMessage[0] as [string, MessageCreateRequest];
+    expect(payload.embeds?.[0]?.title).toBe(
+      m.bot_event_started_post_title({ title: 'Saturday Match' }, { locale: 'en' }),
+    );
+  });
+
+  it('case 5: the post still fires for all-day — exactly one createMessage call', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+    const { calls: restCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(handleStarted(makeEvent({ all_day: true })), Layer.merge(rpcLayer, restLayer));
+
+    expect(restCalls.createMessage).toHaveLength(1);
+  });
+
+  it('case 6: routing undisturbed — role mention content/allowed_mentions unchanged for all-day', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+    const { calls: restCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(
+      handleStarted(makeEvent({ all_day: true, discord_role_id: Option.some(ROLE_ID as any) })),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    expect(restCalls.createMessage).toHaveLength(1);
+    const [, payload] = restCalls.createMessage[0] as [string, MessageCreateRequest];
+    expect(payload.content).toBe(`<@&${ROLE_ID}>`);
+    expect(payload.allowed_mentions?.roles).toEqual([ROLE_ID]);
+  });
+
+  it('case 8: claim deletion still runs for all-day training events', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc({
+      'Event/GetClaimInfo': (_args: any) =>
+        Effect.succeed(
+          Option.some({
+            event_id: EVENT_ID,
+            event_type: 'training',
+            status: 'active',
+            claimed_by_member_id: Option.none(),
+            claimed_by_display_name: Option.none(),
+            claim_discord_channel_id: Option.some(CLAIM_THREAD_ID as any),
+            claim_discord_message_id: Option.some(CLAIM_MSG_ID as any),
+            claim_thread_id: Option.none(),
+          }),
+        ),
+    });
+    const { calls: restCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(
+      handleStarted(makeEvent({ all_day: true, event_type: 'training' })),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    expect(restCalls.deleteMessage).toHaveLength(1);
+    const [threadId, msgId] = restCalls.deleteMessage[0] as [string, string];
+    expect(threadId).toBe(CLAIM_THREAD_ID);
+    expect(msgId).toBe(CLAIM_MSG_ID);
   });
 });

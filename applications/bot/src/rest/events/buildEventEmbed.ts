@@ -4,6 +4,7 @@ import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
 import { Array, DateTime, Option, pipe } from 'effect';
 import type { Locale } from '~/locale.js';
+import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
 import { formatName } from '../utils.js';
 import { locationDisplay } from './locationDisplay.js';
 
@@ -23,14 +24,6 @@ const DEFAULT_COLOR = 0x99aab5;
 const CANCELLED_COLOR = 0xed4245;
 
 const STARTED_COLOR = 0xfee75c; // yellow
-
-const toDiscordTimestamp = (
-  dt: DateTime.Utc,
-  style: 'D' | 'F' | 'R' | 'd' | 'f' | 't' = 'f',
-): string => {
-  const unix = Math.floor(Number(DateTime.toEpochMillis(dt)) / 1000);
-  return `<t:${unix}:${style}>`;
-};
 
 const isSameDay = (a: DateTime.Utc, b: DateTime.Utc): boolean => {
   const pa = DateTime.toParts(a);

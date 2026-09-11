@@ -2,8 +2,9 @@ import type { PollRpcModels } from '@sideline/domain';
 import * as m from '@sideline/i18n/messages';
 import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
-import { DateTime, Option } from 'effect';
+import { Option } from 'effect';
 import type { Locale } from '~/locale.js';
+import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
 
 /** Discord blurple — open poll color */
 export const COLOR_OPEN = 0x5865f2;
@@ -104,10 +105,12 @@ export const buildPollEmbed = (
   Option.match(view.deadline, {
     onNone: () => undefined,
     onSome: (deadline) => {
-      const unixSeconds = Math.floor(DateTime.toEpochMillis(deadline) / 1000);
       descriptionParts.push(
         m.bot_poll_deadline_line(
-          { relative: `<t:${unixSeconds}:R>`, absolute: `<t:${unixSeconds}:f>` },
+          {
+            relative: toDiscordTimestamp(deadline, 'R'),
+            absolute: toDiscordTimestamp(deadline, 'f'),
+          },
           { locale },
         ),
       );

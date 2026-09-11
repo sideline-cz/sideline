@@ -4,6 +4,8 @@ import { UI } from 'dfx';
 import * as Discord from 'dfx/types';
 import { Array, DateTime, Option, pipe } from 'effect';
 import type { Locale } from '~/locale.js';
+import { toDiscordTimestamp } from '~/rest/discordTimestamp.js';
+import { formatEventWhen } from '~/rest/events/eventWhen.js';
 import { formatName } from '../utils.js';
 import { locationDisplay } from './locationDisplay.js';
 
@@ -17,20 +19,6 @@ const EVENT_TYPE_COLORS: Record<string, number> = {
 };
 
 const DEFAULT_COLOR = 0x99aab5;
-
-const toDiscordTimestamp = (
-  dt: DateTime.Utc,
-  style: 'D' | 'F' | 'R' | 'd' | 'f' | 't' = 'f',
-): string => {
-  const unix = Math.floor(Number(DateTime.toEpochMillis(dt)) / 1000);
-  return `<t:${unix}:${style}>`;
-};
-
-const isSameDay = (a: DateTime.Utc, b: DateTime.Utc): boolean => {
-  const pa = DateTime.toParts(a);
-  const pb = DateTime.toParts(b);
-  return pa.year === pb.year && pa.month === pb.month && pa.day === pb.day;
-};
 
 const buildYourRsvpValue = (
   myResponse: Option.Option<'yes' | 'no' | 'maybe'>,
@@ -75,21 +63,19 @@ export const buildUpcomingEventEmbed = (params: {
 
   const fields: Array<Discord.RichEmbedField> = [];
 
-  const when = entry.all_day
-    ? Option.match(entry.end_at, {
-        onNone: () => toDiscordTimestamp(entry.start_at, 'D'),
-        onSome: (endAt) =>
-          isSameDay(entry.start_at, endAt)
-            ? toDiscordTimestamp(entry.start_at, 'D')
-            : `${toDiscordTimestamp(entry.start_at, 'D')} — ${toDiscordTimestamp(endAt, 'D')}`,
-      })
-    : Option.match(entry.end_at, {
-        onNone: () => toDiscordTimestamp(entry.start_at, 'f'),
-        onSome: (endAt) => {
-          const endStyle = isSameDay(entry.start_at, endAt) ? 't' : 'f';
-          return `${toDiscordTimestamp(entry.start_at, 'f')} — ${toDiscordTimestamp(endAt, endStyle)}`;
-        },
-      });
+  const when = formatEventWhen({
+    startAt: entry.start_at,
+    // ⚠ the all-day branch takes DATES, not instants. This supplies the UTC date of the
+    // (still noon-anchored) instant, which is correct under the current storage anchor; a
+    // later change replaces it with the payload's real `start_date`/`end_date`.
+    // `DateTime.formatIsoDateUtc` is the repo idiom outside the web — do NOT reach for
+    // `formatUtcDate`, which lives in applications/web only.
+    startDate: DateTime.formatIsoDateUtc(entry.start_at),
+    endAt: entry.end_at,
+    endDate: Option.map(entry.end_at, DateTime.formatIsoDateUtc),
+    allDay: entry.all_day,
+    locale,
+  });
   fields.push({ name: m.bot_embed_when({}, { locale }), value: when, inline: false });
 
   Option.match(locationDisplay(entry.location, entry.location_url), {

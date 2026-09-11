@@ -5,15 +5,13 @@ import { Array, DateTime, Effect, Option, pipe, Schema } from 'effect';
 import type { Locale } from '~/locale.js';
 import { guildLocale } from '~/locale.js';
 import { YES_EMBED_LIMIT } from '~/rest/events/buildEventEmbed.js';
+import { formatEventWhenLong } from '~/rest/events/eventWhen.js';
 import { locationDisplay } from '~/rest/events/locationDisplay.js';
 import { formatNameWithMention, splitIntoFieldChunks } from '~/rest/utils.js';
 import { DfxGuild } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 const STARTED_POST_COLOR = 0xfee75c; // yellow
-
-const toDiscordTimestamp = (dt: DateTime.Utc, style: 'F' | 'R' | 'f' = 'F'): string =>
-  `<t:${Math.floor(Number(DateTime.toEpochMillis(dt)) / 1000)}:${style}>`;
 
 const parseGuild = (raw: unknown) =>
   Effect.try({
@@ -79,7 +77,22 @@ export const handleStarted = (event: EventRpcEvents.EventStartedEvent) =>
 
               const yesAttendeeNames = pipe(yesAttendees, Array.map(formatNameWithMention));
 
-              const descParts: string[] = [`${toDiscordTimestamp(event.start_at, 'F')}`];
+              const descParts: string[] = [
+                formatEventWhenLong({
+                  startAt: event.start_at,
+                  // ⚠ the all-day branch takes DATES, not instants (§11.4 of the plan). This
+                  // supplies the UTC date of the (still noon-anchored) instant, which is correct
+                  // under the current storage anchor; a later change replaces it with the
+                  // payload's real `start_date`. `DateTime.formatIsoDateUtc` is the repo idiom
+                  // outside the web (api/event-series.ts:117, EventHorizonCron.ts:39) — do NOT
+                  // reach for `formatUtcDate`, which lives in applications/web only.
+                  startDate: DateTime.formatIsoDateUtc(event.start_at),
+                  endAt: event.end_at,
+                  endDate: Option.map(event.end_at, DateTime.formatIsoDateUtc),
+                  allDay: event.all_day,
+                  locale,
+                }),
+              ];
               Option.match(locationDisplay(event.location, event.location_url), {
                 onNone: () => undefined,
                 onSome: (loc) => descParts.push(loc),
