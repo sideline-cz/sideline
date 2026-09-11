@@ -201,12 +201,13 @@ const make = Effect.gen(function* () {
             WITH inserted AS (
               INSERT INTO events (team_id, training_type_id, event_type, title, description,
                                   image_url, start_at, end_at, location, location_url, created_by, series_id,
-                                  owner_group_id, member_group_id, all_day)
+                                  owner_group_id, member_group_id, all_day, all_day_anchored)
               VALUES (${input.team_id}, ${input.training_type_id}, ${input.event_type},
                       ${input.title}, ${input.description}, ${input.image_url}, ${input.start_at},
                       ${input.end_at}, ${input.location}, ${input.location_url}, ${input.created_by},
                       ${input.series_id},
-                      ${input.owner_group_id}, ${input.member_group_id}, ${input.all_day})
+                      ${input.owner_group_id}, ${input.member_group_id}, ${input.all_day},
+                      ${input.all_day})
               RETURNING id, team_id, training_type_id, event_type, title, description,
                         image_url, start_at, end_at, location, location_url, status,
                         created_by, series_id, series_modified,
@@ -241,6 +242,7 @@ const make = Effect.gen(function* () {
                 owner_group_id = ${input.owner_group_id},
                 member_group_id = ${input.member_group_id},
                 all_day = ${input.all_day},
+                all_day_anchored = ${input.all_day},
                 updated_at = now()
               WHERE id = ${input.id}
               RETURNING id, team_id, training_type_id, event_type, title, description,
