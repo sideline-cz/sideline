@@ -42,7 +42,7 @@ import {
 import { Switch } from '~/components/ui/switch';
 import { Textarea } from '~/components/ui/textarea';
 import {
-  dateOnlyToUtc,
+  dateOnlyToUtcNoon,
   formatEventDateRange,
   formatLocalDate,
   formatLocalTime,
@@ -95,11 +95,11 @@ const buildPayload = (values: EventEditValues) => {
       ? Option.some(Schema.decodeSync(TrainingType.TrainingTypeId)(values.trainingTypeId))
       : Option.none();
   const startAt = values.allDay
-    ? dateOnlyToUtc(values.startDate)
+    ? dateOnlyToUtcNoon(values.startDate)
     : localToUtc(values.startDate, values.startTime);
   const endAt = values.allDay
     ? values.endDate
-      ? Option.some(dateOnlyToUtc(values.endDate))
+      ? Option.some(dateOnlyToUtcNoon(values.endDate))
       : Option.none()
     : values.endTime
       ? Option.some(localToUtc(values.endDate || values.startDate, values.endTime))
@@ -128,12 +128,28 @@ interface EventDateRangeProps {
   startAt: DateTime.Utc;
   endAt: Option.Option<DateTime.Utc>;
   allDay: boolean;
+  startDate: Option.Option<string>;
+  endDate: Option.Option<string>;
   labelStart: string;
   labelEnd: string;
 }
 
-const EventDateRange = ({ startAt, endAt, allDay, labelStart, labelEnd }: EventDateRangeProps) => {
-  const { startDate, startTime, end, sameDay } = formatEventDateRange(startAt, endAt, allDay);
+const EventDateRange = ({
+  startAt,
+  endAt,
+  allDay,
+  startDate: startDateOption,
+  endDate: endDateOption,
+  labelStart,
+  labelEnd,
+}: EventDateRangeProps) => {
+  const { startDate, startTime, end, sameDay } = formatEventDateRange(
+    startAt,
+    endAt,
+    allDay,
+    startDateOption,
+    endDateOption,
+  );
   const start = allDay ? startDate : `${startDate} ${startTime}`;
   if (sameDay) {
     return (
@@ -194,12 +210,15 @@ export function EventDetailPage({
       imageUrl: Option.getOrElse(eventDetail.imageUrl, () => ''),
       allDay: eventDetail.allDay,
       startDate: eventDetail.allDay
-        ? formatUtcDate(eventDetail.startAt)
+        ? Option.getOrElse(eventDetail.startDate, () => formatUtcDate(eventDetail.startAt))
         : formatLocalDate(eventDetail.startAt),
       startTime: eventDetail.allDay ? '' : formatLocalTime(eventDetail.startAt),
       endDate: Option.match(eventDetail.endAt, {
         onNone: () => '',
-        onSome: eventDetail.allDay ? formatUtcDate : formatLocalDate,
+        onSome: (e) =>
+          eventDetail.allDay
+            ? Option.getOrElse(eventDetail.endDate, () => formatUtcDate(e))
+            : formatLocalDate(e),
       }),
       endTime: eventDetail.allDay
         ? ''
@@ -801,6 +820,8 @@ export function EventDetailPage({
                   startAt={eventDetail.startAt}
                   endAt={eventDetail.endAt}
                   allDay={eventDetail.allDay}
+                  startDate={eventDetail.startDate}
+                  endDate={eventDetail.endDate}
                   labelStart={tr('event_startDate')}
                   labelEnd={tr('event_endDate')}
                 />

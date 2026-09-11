@@ -18,8 +18,14 @@ const CLAIM_MESSAGE_ID = '444444444444444444';
 
 const TIMED_START_AT = DateTime.makeUnsafe('2026-05-02T14:00:00Z');
 const TIMED_EPOCH = 1777730400;
-const ALL_DAY_START_AT = DateTime.makeUnsafe('2026-07-15T12:00:00Z');
-const ALL_DAY_EPOCH = 1784116800;
+// Team-local midnight anchor (a Prague event on 2026-07-15 is stored at
+// 2026-07-14T22:00:00Z, CEST +02:00), NOT the retired noon-UTC sentinel. `ALL_DAY_EPOCH`
+// (noon UTC of 15 July) only matches if the code reads `start_date`, not a UTC read of
+// `ALL_DAY_START_AT` (which would yield 2026-07-14 — one day early).
+const ALL_DAY_START_AT = DateTime.makeUnsafe('2026-07-14T22:00:00Z');
+const ALL_DAY_START_DATE = Option.some('2026-07-15');
+const ALL_DAY_EPOCH = 1784116800; // :D> uses discordDateInstant(start_date) = noon UTC of 15 July
+const ALL_DAY_START_AT_EPOCH = 1784066400; // :R> uses the raw start_at instant, unchanged
 
 const makeEvent = (
   overrides: Partial<EventRpcEvents.UnclaimedTrainingReminderEvent> = {},
@@ -40,6 +46,8 @@ const makeEvent = (
     claim_discord_channel_id: Option.none(),
     claim_discord_message_id: Option.none(),
     all_day: false,
+    start_date: Option.none(),
+    end_date: Option.none(),
     ...overrides,
   }) as any;
 
@@ -100,18 +108,45 @@ describe('handleUnclaimedTrainingReminder', () => {
     const { createMessageCalls, layer } = makeRecordingDiscordREST();
 
     await run(
-      handleUnclaimedTrainingReminder(makeEvent({ all_day: true, start_at: ALL_DAY_START_AT })),
+      handleUnclaimedTrainingReminder(
+        makeEvent({ all_day: true, start_at: ALL_DAY_START_AT, start_date: ALL_DAY_START_DATE }),
+      ),
       layer,
     );
 
     expect(createMessageCalls).toHaveLength(1);
     const [, payload] = createMessageCalls[0];
-    const expectedWhen = `<t:${ALL_DAY_EPOCH}:D> (<t:${ALL_DAY_EPOCH}:R>)`;
+    const expectedWhen = `<t:${ALL_DAY_EPOCH}:D> (<t:${ALL_DAY_START_AT_EPOCH}:R>)`;
     const expectedDescription = m.bot_claim_unclaimed_reminder_description_all_day(
       { when: expectedWhen },
       { locale: 'en' },
     );
     expect(payload.embeds?.[0]?.description).toBe(expectedDescription);
+  });
+
+  it('all-day regression (B1): description reads start_date, not a UTC read of start_at', async () => {
+    // A Prague all-day event on 2026-09-16, stored at team-local midnight. A UTC read of
+    // this instant yields 2026-09-15 — one day early, for every viewer east of UTC (the
+    // entire default fleet). Reading `start_date` yields the correct 2026-09-16.
+    const startAt = DateTime.makeUnsafe('2026-09-15T22:00:00Z');
+    const startDate = Option.some('2026-09-16');
+    const correctEpoch = 1789560000; // 2026-09-16T12:00:00Z
+    const wrongEpoch = 1789473600; // 2026-09-15T12:00:00Z (the bug's output)
+
+    const { createMessageCalls, layer } = makeRecordingDiscordREST();
+
+    await run(
+      handleUnclaimedTrainingReminder(
+        makeEvent({ all_day: true, start_at: startAt, start_date: startDate }),
+      ),
+      layer,
+    );
+
+    expect(createMessageCalls).toHaveLength(1);
+    const [, payload] = createMessageCalls[0];
+    const description = payload.embeds?.[0]?.description ?? '';
+    expect(description).toContain(`<t:${correctEpoch}:D>`);
+    expect(description).not.toContain(`<t:${wrongEpoch}:D>`);
   });
 
   it('timed: jump-link concatenation is appended verbatim when claim message ids are present', async () => {
@@ -143,6 +178,7 @@ describe('handleUnclaimedTrainingReminder', () => {
         makeEvent({
           all_day: true,
           start_at: ALL_DAY_START_AT,
+          start_date: ALL_DAY_START_DATE,
           claim_discord_channel_id: Option.some(CLAIM_CHANNEL_ID as any),
           claim_discord_message_id: Option.some(CLAIM_MESSAGE_ID as any),
         }),
@@ -152,7 +188,7 @@ describe('handleUnclaimedTrainingReminder', () => {
 
     expect(createMessageCalls).toHaveLength(1);
     const [, payload] = createMessageCalls[0];
-    const expectedWhen = `<t:${ALL_DAY_EPOCH}:D> (<t:${ALL_DAY_EPOCH}:R>)`;
+    const expectedWhen = `<t:${ALL_DAY_EPOCH}:D> (<t:${ALL_DAY_START_AT_EPOCH}:R>)`;
     const expectedJumpLink = `https://discord.com/channels/${GUILD_ID}/${CLAIM_CHANNEL_ID}/${CLAIM_MESSAGE_ID}`;
     const expectedDescription = `${m.bot_claim_unclaimed_reminder_description_all_day({ when: expectedWhen }, { locale: 'en' })}\n[${m.bot_claim_unclaimed_reminder_jump({}, { locale: 'en' })}](${expectedJumpLink})`;
     expect(payload.embeds?.[0]?.description).toBe(expectedDescription);

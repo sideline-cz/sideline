@@ -43,6 +43,8 @@ const makeUpcomingEvent = (myResponse: 'yes' | 'no' | 'maybe' | null) => ({
   description: Option.none(),
   image_url: Option.none(),
   all_day: false,
+  start_date: Option.none(),
+  end_date: Option.none(),
   my_response: Option.fromNullishOr(myResponse),
   my_response_actual: Option.fromNullishOr(myResponse),
   my_message: Option.none(),

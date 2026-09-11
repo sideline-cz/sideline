@@ -1399,6 +1399,8 @@ export const GuildsRpcLive = Effect.Do.pipe(
                 my_response_actual: Schema.OptionFromNullOr(EventRsvp.RsvpResponse),
                 my_message: Schema.OptionFromNullOr(Schema.String),
                 all_day: Schema.Boolean,
+                start_date: Schema.String,
+                end_date: Schema.String,
               }),
               execute: (input) =>
                 deps.sql`
@@ -1419,11 +1421,17 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     COALESCE(SUM(CASE WHEN er.response IN ('maybe', 'coming_later') THEN 1 ELSE 0 END), 0)::int AS maybe_count,
                     CASE WHEN my_rsvp.response = 'coming_later' THEN 'maybe' ELSE my_rsvp.response END AS my_response,
                     my_rsvp.response AS my_response_actual,
-                    my_rsvp.message AS my_message
+                    my_rsvp.message AS my_message,
+                    (e.start_at AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                        AS start_date,
+                    (COALESCE(e.end_at, e.start_at)
+                        AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date::text
+                        AS end_date
                   FROM events e
                   LEFT JOIN event_rsvps er ON er.event_id = e.id
                   LEFT JOIN event_rsvps my_rsvp ON my_rsvp.event_id = e.id
                     AND my_rsvp.team_member_id = ${input.team_member_id}
+                  LEFT JOIN team_settings ts ON ts.team_id = e.team_id
                   WHERE e.team_id = ${input.team_id}
                     AND e.status = 'active'
                     AND e.start_at >= now()
@@ -1440,7 +1448,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
                           AND gm.team_member_id = ${input.team_member_id}
                       )
                     )
-                  GROUP BY e.id, my_rsvp.response, my_rsvp.message
+                  GROUP BY e.id, my_rsvp.response, my_rsvp.message, ts.timezone
                   ORDER BY e.start_at ASC
                 `,
             })({ team_id: team.id, team_member_id: member.id }).pipe(
@@ -1476,6 +1484,8 @@ export const GuildsRpcLive = Effect.Do.pipe(
                       my_response_actual: row.my_response_actual,
                       my_message: row.my_message,
                       all_day: row.all_day,
+                      start_date: Option.some(row.start_date),
+                      end_date: Option.some(row.end_date),
                     }),
                 ),
                 total: rows.length,

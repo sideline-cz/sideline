@@ -26,7 +26,7 @@ import {
 } from '~/components/ui/select';
 import { Textarea } from '~/components/ui/textarea';
 import {
-  dateOnlyToUtc,
+  dateOnlyToUtcNoon,
   formatLocalDate,
   formatUtcTime,
   localToUtc,
@@ -199,8 +199,10 @@ export function TrainingTypeDetailPage({
             description: values.description ? Option.some(values.description) : Option.none(),
             frequency: values.frequency,
             daysOfWeek: values.daysOfWeek,
-            startDate: dateOnlyToUtc(values.startDate),
-            endDate: values.endDate ? Option.some(dateOnlyToUtc(values.endDate)) : Option.none(),
+            startDate: dateOnlyToUtcNoon(values.startDate),
+            endDate: values.endDate
+              ? Option.some(dateOnlyToUtcNoon(values.endDate))
+              : Option.none(),
             startTime: formatUtcTime(localToUtc(values.startDate, values.startTime)),
             endTime: values.endTime
               ? Option.some(formatUtcTime(localToUtc(values.startDate, values.endTime)))
@@ -292,7 +294,7 @@ export function TrainingTypeDetailPage({
               values.locationUrl ? Option.some(values.locationUrl) : Option.none(),
             ),
             endDate: Option.some(
-              values.endDate ? Option.some(dateOnlyToUtc(values.endDate)) : Option.none(),
+              values.endDate ? Option.some(dateOnlyToUtcNoon(values.endDate)) : Option.none(),
             ),
             ownerGroupId: Option.none(),
             memberGroupId: Option.none(),

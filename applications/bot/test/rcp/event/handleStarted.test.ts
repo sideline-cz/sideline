@@ -53,6 +53,8 @@ const makeEvent = (
     discord_channel_id: Option.some(CHANNEL_ID as any),
     discord_role_id: Option.none(),
     claimed_by_discord_id: Option.none(),
+    start_date: Option.none(),
+    end_date: Option.none(),
     ...overrides,
   }) as any;
 
@@ -500,7 +502,13 @@ describe('handleStarted — all-day events (PR 1: render as a date, not a fake c
       handleStarted(
         makeEvent({
           all_day: true,
-          start_at: DateTime.makeUnsafe('2026-05-01T12:00:00Z'),
+          // Team-local midnight anchor (a Prague event on 2026-05-01 is stored at
+          // 2026-04-30T22:00:00Z), NOT the retired noon-UTC sentinel. The byte-exact
+          // assertion below (<t:1777636800:D>, noon UTC of 1 May) only passes if the
+          // code reads `start_date`, not a UTC read of this instant (which would
+          // yield 2026-04-30 — one day early).
+          start_at: DateTime.makeUnsafe('2026-04-30T22:00:00Z'),
+          start_date: Option.some('2026-05-01'),
           end_at: Option.none(),
         }),
       ),
@@ -522,8 +530,11 @@ describe('handleStarted — all-day events (PR 1: render as a date, not a fake c
       handleStarted(
         makeEvent({
           all_day: true,
-          start_at: DateTime.makeUnsafe('2026-05-01T12:00:00Z'),
-          end_at: Option.some(DateTime.makeUnsafe('2026-05-03T12:00:00Z')),
+          // Team-local midnight anchor, same reasoning as case 2.
+          start_at: DateTime.makeUnsafe('2026-04-30T22:00:00Z'),
+          start_date: Option.some('2026-05-01'),
+          end_at: Option.some(DateTime.makeUnsafe('2026-05-02T22:00:00Z')),
+          end_date: Option.some('2026-05-03'),
         }),
       ),
       Layer.merge(rpcLayer, restLayer),
@@ -533,6 +544,35 @@ describe('handleStarted — all-day events (PR 1: render as a date, not a fake c
     const [, payload] = restCalls.createMessage[0] as [string, MessageCreateRequest];
     const description = payload.embeds?.[0]?.description ?? '';
     expect(description.startsWith('<t:1777636800:D> — <t:1777809600:D> · All day')).toBe(true);
+  });
+
+  it('case 2b (regression): reads start_date, not the UTC date of the team-local-midnight instant — proves B1 is fixed', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+    const { calls: restCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(
+      handleStarted(
+        makeEvent({
+          all_day: true,
+          // A Prague all-day event on 2026-09-16, stored at team-local midnight.
+          // A UTC read of this instant yields 2026-09-15 — one day early. Reading
+          // `start_date` (which the server derives in the team's own timezone)
+          // yields the correct 2026-09-16.
+          start_at: DateTime.makeUnsafe('2026-09-15T22:00:00Z'),
+          start_date: Option.some('2026-09-16'),
+          end_at: Option.none(),
+        }),
+      ),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    expect(restCalls.createMessage).toHaveLength(1);
+    const [, payload] = restCalls.createMessage[0] as [string, MessageCreateRequest];
+    const description = payload.embeds?.[0]?.description ?? '';
+    // 2026-09-16T12:00:00Z === 1789560000
+    expect(description.startsWith('<t:1789560000:D>')).toBe(true);
+    // NOT the UTC date of start_at (2026-09-15T12:00:00Z === 1789473600)
+    expect(description).not.toContain('<t:1789473600:D>');
   });
 
   it('case 4b (sibling): timed → title stays bot_event_started_post_title, byte-identical to today', async () => {

@@ -54,6 +54,8 @@ const makeEvent = (
     discord_role_id: Option.none(),
     owner_group_id: Option.some(OWNER_GROUP_ID as any),
     all_day: false,
+    start_date: Option.none(),
+    end_date: Option.none(),
     ...overrides,
   }) as any;
 
@@ -481,9 +483,14 @@ describe('handleTrainingClaimRequest — all_day forwarding (PR 2)', () => {
     const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
     const { layer: rpcLayer } = makeRecordingSyncRpc();
 
+    // Team-local midnight anchor (a Prague event on 2026-07-15 is stored at
+    // 2026-07-14T22:00:00Z, CEST +02:00), NOT the retired noon-UTC sentinel. The
+    // byte-exact assertion below (noon UTC of 15 July) only passes if the code reads
+    // `start_date`, not a UTC read of `start_at` (which would yield 2026-07-14).
     const event = makeEvent({
       all_day: true,
-      start_at: DateTime.makeUnsafe('2026-07-15T12:00:00Z'),
+      start_at: DateTime.makeUnsafe('2026-07-14T22:00:00Z'),
+      start_date: Option.some('2026-07-15'),
     });
     await run(handleTrainingClaimRequest(event), Layer.merge(rpcLayer, restLayer));
 
@@ -492,6 +499,27 @@ describe('handleTrainingClaimRequest — all_day forwarding (PR 2)', () => {
     const whenField = payload.embeds?.[0]?.fields?.[0];
     const marker = m.bot_embed_all_day({}, { locale: 'en' });
     expect(whenField?.value).toBe(`<t:1784116800:D> · ${marker}`);
+  });
+
+  it('all-day regression (B1): reads start_date, not a UTC read of start_at', async () => {
+    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
+    const { layer: rpcLayer } = makeRecordingSyncRpc();
+
+    // A Prague all-day event on 2026-09-16, stored at team-local midnight. A UTC read of
+    // this instant yields 2026-09-15 — one day early, for every viewer east of UTC (the
+    // entire default fleet). Reading `start_date` yields the correct 2026-09-16.
+    const event = makeEvent({
+      all_day: true,
+      start_at: DateTime.makeUnsafe('2026-09-15T22:00:00Z'),
+      start_date: Option.some('2026-09-16'),
+    });
+    await run(handleTrainingClaimRequest(event), Layer.merge(rpcLayer, restLayer));
+
+    expect(createMessageCalls).toHaveLength(1);
+    const [, payload] = createMessageCalls[0];
+    const whenField = payload.embeds?.[0]?.fields?.[0];
+    expect(whenField?.value).toContain('<t:1789560000:D>'); // 2026-09-16T12:00:00Z
+    expect(whenField?.value).not.toContain('<t:1789473600:D>'); // 2026-09-15T12:00:00Z
   });
 
   it('timed (default): claim embed "When" field is unchanged at <t:S:f>', async () => {

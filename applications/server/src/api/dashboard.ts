@@ -77,6 +77,7 @@ export const DashboardApiLive = HttpApiBuilder.group(Api, 'dashboard', (handlers
                 location: e.location,
                 locationUrl: e.location_url,
                 myRsvp: Option.map(e.my_rsvp, projectRsvpResponseToLegacy),
+                startDate: Option.some(e.start_date),
               });
 
             const toEpochMs = (dt: DateTime.Utc) => Number(DateTime.toEpochMillis(dt));

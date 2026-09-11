@@ -119,6 +119,17 @@ export class EventInfo extends Schema.Class<EventInfo>('EventInfo')({
   status: EventStatus,
   allDay: Schema.Boolean,
   seriesId: Schema.OptionFromNullOr(EventSeriesId),
+  /**
+   * Derived team-local calendar date (`YYYY-MM-DD`), projected server-side from
+   * `startAt`/`endAt` and the team's timezone (plan §11.2/§11.3). `Option.none()`
+   * means the key was entirely absent — an old server during a rolling deploy — and
+   * every reader must fall back to `formatUtcDate(startAt)`. Deliberately
+   * `OptionFromOptionalKey`, never a plain string defaulted to `''`: an empty-string
+   * sentinel would make the web calendar's `key >= startDate && key <= endDate`
+   * bucketing false for every real key and silently drop the event from the grid.
+   */
+  startDate: Schema.OptionFromOptionalKey(Schema.String),
+  endDate: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
 export class EventDetail extends Schema.Class<EventDetail>('EventDetail')({
@@ -145,6 +156,9 @@ export class EventDetail extends Schema.Class<EventDetail>('EventDetail')({
   ownerGroupName: Schema.OptionFromNullOr(Schema.String),
   memberGroupId: Schema.OptionFromNullOr(GroupId),
   memberGroupName: Schema.OptionFromNullOr(Schema.String),
+  /** See `EventInfo.startDate` above — same derived team-local projection (plan §11.3). */
+  startDate: Schema.OptionFromOptionalKey(Schema.String),
+  endDate: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
 export class EventListResponse extends Schema.Class<EventListResponse>('EventListResponse')({

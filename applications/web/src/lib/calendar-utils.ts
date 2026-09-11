@@ -38,10 +38,17 @@ function eventsForDay(
 ): ReadonlyArray<EventApi.EventInfo> {
   const key = localDateKey(date);
   return events.filter((e) => {
-    // All-day events span every calendar day from their (UTC) start through end date.
+    // All-day events span every calendar day from their start through end date.
+    // Prefer the server-derived team-local date (`startDate`/`endDate`, plan
+    // §11.2); fall back to `formatUtcDate` on the (noon-UTC) instant when the
+    // field is absent (an older server, §17) — never to `''`, which would make
+    // every comparison below false and silently drop the event from the grid.
     if (e.allDay) {
-      const start = formatUtcDate(e.startAt);
-      const end = Option.match(e.endAt, { onNone: () => start, onSome: formatUtcDate });
+      const start = Option.getOrElse(e.startDate, () => formatUtcDate(e.startAt));
+      const end = Option.match(e.endAt, {
+        onNone: () => start,
+        onSome: (endAt) => Option.getOrElse(e.endDate, () => formatUtcDate(endAt)),
+      });
       return key >= start && key <= end;
     }
     return isSameDay(new Date(DateTime.toEpochMillis(e.startAt)), date);

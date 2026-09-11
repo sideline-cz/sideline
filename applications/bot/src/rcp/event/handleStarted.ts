@@ -80,15 +80,23 @@ export const handleStarted = (event: EventRpcEvents.EventStartedEvent) =>
               const descParts: string[] = [
                 formatEventWhenLong({
                   startAt: event.start_at,
-                  // ⚠ the all-day branch takes DATES, not instants (§11.4 of the plan). This
-                  // supplies the UTC date of the (still noon-anchored) instant, which is correct
-                  // under the current storage anchor; a later change replaces it with the
-                  // payload's real `start_date`. `DateTime.formatIsoDateUtc` is the repo idiom
-                  // outside the web (api/event-series.ts:117, EventHorizonCron.ts:39) — do NOT
-                  // reach for `formatUtcDate`, which lives in applications/web only.
-                  startDate: DateTime.formatIsoDateUtc(event.start_at),
+                  // ⚠ the all-day branch takes DATES, not instants (§11.4 of the plan).
+                  // `event.start_date` is the team-local calendar date projected by the server;
+                  // fall back to the UTC date of `start_at` when an older server hasn't shipped
+                  // the field yet (rolling-deploy skew, §17.1 row 3). `DateTime.formatIsoDateUtc`
+                  // is the repo idiom outside the web (api/event-series.ts:117,
+                  // EventHorizonCron.ts:39) — do NOT reach for `formatUtcDate`, which lives in
+                  // applications/web only.
+                  startDate: Option.getOrElse(event.start_date, () =>
+                    DateTime.formatIsoDateUtc(event.start_at),
+                  ),
                   endAt: event.end_at,
-                  endDate: Option.map(event.end_at, DateTime.formatIsoDateUtc),
+                  // `end_date` is only meaningful when the event actually has an `end_at` (§11.4:
+                  // the caller derives the `Option` from `end_at`, not from `end_date`, which the
+                  // server always sends non-null). Same skew fallback as `startDate` above.
+                  endDate: Option.map(event.end_at, (endAt) =>
+                    Option.getOrElse(event.end_date, () => DateTime.formatIsoDateUtc(endAt)),
+                  ),
                   allDay: event.all_day,
                   locale,
                 }),

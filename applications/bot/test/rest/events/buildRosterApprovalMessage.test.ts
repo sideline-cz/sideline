@@ -19,6 +19,11 @@ const baseOpts = {
   eventId: EVENT_ID,
   eventTitle: 'Summer Tournament',
   startAt: DateTime.makeUnsafe('2099-07-01T10:00:00Z'),
+  // PR 3b (all-day-discord-start-time-plan.md §11.1 row B1-B5): `startDate` is a new
+  // required field on buildRosterApprovalMessage's opts, carrying the team-local calendar
+  // date derived server-side. Only meaningful for the all-day branch — a fixed UTC-date
+  // string here keeps every pre-existing (timed) test in this file byte-for-byte unchanged.
+  startDate: '2099-07-01',
   memberId: MEMBER_ID,
   candidateDiscordId: Option.some(DISCORD_USER_ID),
   candidateDisplayName: Option.some('Alice'),
@@ -192,10 +197,15 @@ describe('buildRosterApprovalMessage — cancelled state', () => {
 // PR 1 §7.4 — Event field: date, not a fake noon clock time, for all-day events.
 // Plan: all-day-discord-start-time-plan.md §7.4, builder tests for buildRosterApprovalMessage.
 // ---------------------------------------------------------------------------
-describe('buildRosterApprovalMessage — Event field with allDay (PR 1)', () => {
+describe('buildRosterApprovalMessage — Event field with allDay (PR 1 / PR 3b)', () => {
   const locale = 'en' as const;
   const ALL_DAY_MARKER = ` · ${m.bot_embed_all_day({}, { locale })}`;
   const NOON_JUL_15 = DateTime.makeUnsafe('2026-07-15T12:00:00Z'); // 1784116800
+  // Team-local midnight anchor (a Prague event on 2026-07-15 is stored at
+  // 2026-07-14T22:00:00Z, CEST +02:00), NOT the retired noon-UTC sentinel. The byte-exact
+  // assertion below only passes if the code reads `startDate`, not a UTC read of `startAt`
+  // (which would yield 2026-07-14 — one day early).
+  const MIDNIGHT_JUL_15 = DateTime.makeUnsafe('2026-07-14T22:00:00Z');
 
   it("allDay false → Event field is exactly **{title}** — <t:S:f> (today's output)", () => {
     const message = buildRosterApprovalMessage({
@@ -216,7 +226,8 @@ describe('buildRosterApprovalMessage — Event field with allDay (PR 1)', () => 
       ...baseOpts,
       status: 'pending',
       allDay: true,
-      startAt: NOON_JUL_15,
+      startAt: MIDNIGHT_JUL_15,
+      startDate: '2026-07-15',
     });
     const fields = message.embeds[0]?.fields ?? [];
     const eventField = fields.find(
@@ -225,5 +236,24 @@ describe('buildRosterApprovalMessage — Event field with allDay (PR 1)', () => 
     expect(eventField?.value).toBe(
       `**${baseOpts.eventTitle}** — <t:1784116800:D>${ALL_DAY_MARKER}`,
     );
+  });
+
+  it('all-day regression (B1): reads startDate, not a UTC read of startAt', () => {
+    // A Prague all-day event on 2026-09-16, stored at team-local midnight. A UTC read of
+    // this instant yields 2026-09-15 — one day early, for every viewer east of UTC (the
+    // entire default fleet). Reading `startDate` yields the correct 2026-09-16.
+    const message = buildRosterApprovalMessage({
+      ...baseOpts,
+      status: 'pending',
+      allDay: true,
+      startAt: DateTime.makeUnsafe('2026-09-15T22:00:00Z'),
+      startDate: '2026-09-16',
+    });
+    const fields = message.embeds[0]?.fields ?? [];
+    const eventField = fields.find(
+      (f) => f.name === m.bot_roster_approval_field_event({}, { locale }),
+    );
+    expect(eventField?.value).toContain('<t:1789560000:D>'); // 2026-09-16T12:00:00Z
+    expect(eventField?.value).not.toContain('<t:1789473600:D>'); // 2026-09-15T12:00:00Z
   });
 });

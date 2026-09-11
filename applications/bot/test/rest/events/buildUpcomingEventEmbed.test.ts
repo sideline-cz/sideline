@@ -29,6 +29,8 @@ const makeEntry = (
     my_response_actual: Option.none(),
     my_message: Option.none(),
     all_day: false,
+    start_date: Option.none(),
+    end_date: Option.none(),
     ...overrides,
   });
 
@@ -226,6 +228,91 @@ describe('buildUpcomingEventEmbed', () => {
       const fields = embeds[0].fields ?? [];
       expect(fields[0].value).toBe('<t:1784116800:f>');
       expect(fields[0].value).not.toContain(ALL_DAY_MARKER);
+    });
+  });
+
+  // PR 3b — row B0 of the plan's §11.1 audit: the highest-volume all-day render in the
+  // product (this embed feeds the personal-channel embed, `/event upcoming`, and the
+  // upcoming-RSVP re-render via `buildPersonalMessage`). The all-day branch of the
+  // "When" field must consume `entry.start_date`/`entry.end_date` (via
+  // `discordDateInstant`), not `DateTime.formatIsoDateUtc(entry.start_at)` — otherwise
+  // the field ships on the wire (added by the domain change) and is dead on arrival,
+  // and B0 shows the previous day to every viewer west of the team once the storage
+  // anchor moves (§16, §17.1 row 3).
+  //
+  // `UpcomingEventForUserEntry.start_date`/`end_date` don't exist on the domain schema
+  // yet, so these cases are expected to fail until PR 3b's domain change AND this
+  // file's call-site change both land.
+  describe('when field with all_day, start_date/end_date (PR 3b, row B0)', () => {
+    const ALL_DAY_MARKER = ` · ${m.bot_embed_all_day({}, { locale: 'en' })}`;
+    const NOON_JUL_15 = DateTime.makeUnsafe('2026-07-15T12:00:00Z'); // 1784116800
+    const NOON_JUL_17 = DateTime.makeUnsafe('2026-07-17T12:00:00Z'); // 1784289600
+
+    it('uses entry.start_date (not a UTC read of start_at) when the field is present', () => {
+      // A team east of UTC where the derived team-local date differs from the UTC
+      // date of the noon-UTC instant — the exact case the anchor move breaks, and
+      // the exact case that proves the embed reads `start_date`, not `start_at`.
+      const entry = makeEntry({
+        all_day: true,
+        start_at: NOON_JUL_15,
+        end_at: Option.none(),
+        start_date: Option.some('2026-07-16'),
+        end_date: Option.some('2026-07-16'),
+      });
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const fields = embeds[0].fields ?? [];
+      expect(fields[0].value).toBe(`<t:1784203200:D>${ALL_DAY_MARKER}`); // 2026-07-16T12:00:00Z
+      expect(fields[0].value).not.toContain('<t:1784116800:D>'); // NOT the raw start_at's UTC date
+    });
+
+    it('falls back to DateTime.formatIsoDateUtc(entry.start_at) when start_date is Option.none() (rolling-deploy skew, §17.1 row 3)', () => {
+      const entry = makeEntry({
+        all_day: true,
+        start_at: NOON_JUL_15,
+        end_at: Option.none(),
+        start_date: Option.none(),
+        end_date: Option.none(),
+      });
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const fields = embeds[0].fields ?? [];
+      // DateTime.formatIsoDateUtc(NOON_JUL_15) === '2026-07-15' → discordDateInstant
+      // anchors it back at 12:00:00Z of that date, i.e. the SAME epoch as start_at here.
+      expect(fields[0].value).toBe(`<t:1784116800:D>${ALL_DAY_MARKER}`);
+    });
+
+    it('anchor-neutral: the skew fallback is byte-identical to the non-skew (start_date present) render, under the noon-UTC sentinel', () => {
+      const skewEntry = makeEntry({
+        all_day: true,
+        start_at: NOON_JUL_15,
+        end_at: Option.none(),
+        start_date: Option.none(),
+        end_date: Option.none(),
+      });
+      const nonSkewEntry = makeEntry({
+        all_day: true,
+        start_at: NOON_JUL_15,
+        end_at: Option.none(),
+        start_date: Option.some('2026-07-15'),
+        end_date: Option.some('2026-07-15'),
+      });
+      const skewValue = (buildUpcomingEventEmbed({ ...baseParams, entry: skewEntry }).embeds[0]
+        .fields ?? [])[0].value;
+      const nonSkewValue = (buildUpcomingEventEmbed({ ...baseParams, entry: nonSkewEntry })
+        .embeds[0].fields ?? [])[0].value;
+      expect(skewValue).toBe(nonSkewValue);
+    });
+
+    it('multi-day range uses both start_date and end_date, not start_at/end_at', () => {
+      const entry = makeEntry({
+        all_day: true,
+        start_at: NOON_JUL_15,
+        end_at: Option.some(NOON_JUL_17),
+        start_date: Option.some('2026-07-16'),
+        end_date: Option.some('2026-07-18'),
+      });
+      const { embeds } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const fields = embeds[0].fields ?? [];
+      expect(fields[0].value).toBe(`<t:1784203200:D> — <t:1784376000:D>${ALL_DAY_MARKER}`);
     });
   });
 

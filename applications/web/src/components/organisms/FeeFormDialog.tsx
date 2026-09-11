@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from '~/components/ui/select';
 import { Textarea } from '~/components/ui/textarea';
-import { dateOnlyToUtc, formatLocalDate } from '~/lib/datetime.js';
+import { dateOnlyToUtcNoon, formatLocalDate } from '~/lib/datetime.js';
 import { parseAmount } from '~/lib/finance/parseAmount.js';
 import { tr } from '~/lib/translations.js';
 
@@ -65,7 +65,7 @@ interface FeeFormDialogProps {
 function parseDueAtField(value: string): Option.Option<DateTime.Utc> {
   const trimmed = value.trim();
   if (!trimmed) return Option.none();
-  return Option.some(dateOnlyToUtc(trimmed));
+  return Option.some(dateOnlyToUtcNoon(trimmed));
 }
 
 // ---------------------------------------------------------------------------

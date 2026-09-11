@@ -393,7 +393,13 @@ function WeekEventCard({
 }) {
   const color = getEventColor(event.eventType, Option.getOrNull(event.trainingTypeName), colorMap);
   const isCancelled = event.status === 'cancelled';
-  const { startTime, end } = formatEventDateRange(event.startAt, event.endAt, event.allDay);
+  const { startTime, end } = formatEventDateRange(
+    event.startAt,
+    event.endAt,
+    event.allDay,
+    event.startDate,
+    event.endDate,
+  );
   const timeLabel = event.allDay ? tr('event_allDayLabel') : startTime;
 
   return (

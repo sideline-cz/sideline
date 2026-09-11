@@ -725,6 +725,8 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       my_response_actual: Option.none(),
       my_message: Option.none(),
       all_day: false,
+      start_date: Option.none(),
+      end_date: Option.none(),
     });
 
     return Effect.sync(() => {
@@ -752,6 +754,8 @@ describe('GetUpcomingEventsForUser RPC — image_url field', () => {
       my_response_actual: Option.none(),
       my_message: Option.none(),
       all_day: false,
+      start_date: Option.none(),
+      end_date: Option.none(),
     });
 
     return Effect.sync(() => {

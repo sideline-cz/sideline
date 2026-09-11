@@ -31,7 +31,13 @@ import {
 import { Switch } from '~/components/ui/switch';
 import { Textarea } from '~/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/components/ui/tooltip';
-import { dateOnlyToUtc, formatEventDateRange, formatUtcTime, localToUtc } from '~/lib/datetime.js';
+import {
+  dateOnlyToUtcNoon,
+  formatEventDateRange,
+  formatUtcDate,
+  formatUtcTime,
+  localToUtc,
+} from '~/lib/datetime.js';
 import {
   DAY_ORDER,
   dayFullLabels,
@@ -208,11 +214,11 @@ export function EventsListPage({
       return;
     }
     const startAt = values.allDay
-      ? dateOnlyToUtc(values.startDate)
+      ? dateOnlyToUtcNoon(values.startDate)
       : localToUtc(values.startDate, values.startTime);
     const endAt = values.allDay
       ? values.endDate
-        ? dateOnlyToUtc(values.endDate)
+        ? dateOnlyToUtcNoon(values.endDate)
         : null
       : values.endTime
         ? localToUtc(values.endDate || values.startDate, values.endTime)
@@ -269,8 +275,10 @@ export function EventsListPage({
             description: values.description ? Option.some(values.description) : Option.none(),
             frequency: values.frequency,
             daysOfWeek: values.daysOfWeek,
-            startDate: dateOnlyToUtc(values.startDate),
-            endDate: values.endDate ? Option.some(dateOnlyToUtc(values.endDate)) : Option.none(),
+            startDate: dateOnlyToUtcNoon(values.startDate),
+            endDate: values.endDate
+              ? Option.some(dateOnlyToUtcNoon(values.endDate))
+              : Option.none(),
             startTime: formatUtcTime(localToUtc(values.startDate, values.startTime)),
             endTime: values.endTime
               ? Option.some(formatUtcTime(localToUtc(values.startDate, values.endTime)))
@@ -983,7 +991,18 @@ export function EventsListPage({
                     event.startAt,
                     event.endAt,
                     event.allDay,
+                    event.startDate,
+                    event.endDate,
                   );
+                  // All-day badge reads the server-derived team-local date
+                  // (falling back to `formatUtcDate` on the noon-UTC instant
+                  // for an older server, plan §17) rather than the instant
+                  // itself, so the badge never regresses to a UTC-shifted day.
+                  const badgeAt = event.allDay
+                    ? dateOnlyToUtcNoon(
+                        Option.getOrElse(event.startDate, () => formatUtcDate(event.startAt)),
+                      )
+                    : event.startAt;
                   return (
                     <Link
                       key={event.eventId}
@@ -994,16 +1013,17 @@ export function EventsListPage({
                       <div className='flex size-10 shrink-0 flex-col items-center justify-center rounded-md bg-muted text-xs'>
                         <span className='font-semibold leading-none'>
                           {event.allDay
-                            ? new Date(Number(DateTime.toEpochMillis(event.startAt))).getUTCDate()
-                            : new Date(Number(DateTime.toEpochMillis(event.startAt))).getDate()}
+                            ? new Date(Number(DateTime.toEpochMillis(badgeAt))).getUTCDate()
+                            : new Date(Number(DateTime.toEpochMillis(badgeAt))).getDate()}
                         </span>
                         <span className='text-muted-foreground leading-none mt-0.5'>
-                          {new Date(
-                            Number(DateTime.toEpochMillis(event.startAt)),
-                          ).toLocaleDateString(undefined, {
-                            month: 'short',
-                            ...(event.allDay ? { timeZone: 'UTC' } : {}),
-                          })}
+                          {new Date(Number(DateTime.toEpochMillis(badgeAt))).toLocaleDateString(
+                            undefined,
+                            {
+                              month: 'short',
+                              ...(event.allDay ? { timeZone: 'UTC' } : {}),
+                            },
+                          )}
                         </span>
                       </div>
                       <div className='min-w-0 flex-1'>

@@ -249,6 +249,8 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             my_response_actual: Option.some('yes'),
             my_message: Option.some('See you there'),
             all_day: false,
+            start_date: Option.none(),
+            end_date: Option.none(),
           }),
       ),
       Effect.let(
@@ -328,6 +330,8 @@ describe('GetUpcomingEventsForUser handler — result construction', () => {
             my_response_actual: Option.none(),
             my_message: Option.none(),
             all_day: false,
+            start_date: Option.none(),
+            end_date: Option.none(),
           }),
       ),
       Effect.tap(({ entry }) =>

@@ -20,17 +20,27 @@ export const formatLocalDate = (dt: DateTime.Utc): string => {
 };
 
 /**
- * Convert a date-only string (YYYY-MM-DD) to a UTC DateTime anchored at noon.
- * Using noon ensures the UTC calendar date matches the intended date for all
- * practical timezones (UTC-12 to UTC+12).
+ * A date-only value that carries no timezone meaning of its own — a payment date, a fee
+ * due date, an expense date, a recurrence-window bound. Anchored at noon UTC so its UTC
+ * calendar date matches the intended date for every practical offset. Read it back with
+ * `formatUtcDate`/`formatLocalDate` as today; nothing about these values changed.
+ *
+ * NOT for all-day events. Those are anchored to the TEAM's local midnight, by the SERVER
+ * (see applications/server/src/api/event.ts — plan §12). The web sends the same
+ * `T12:00:00Z` wire value it always did and the server re-anchors it; there is no
+ * client-side helper for the all-day case and there must not be one, because the browser
+ * does not reliably know the team's timezone at these call sites.
  */
-export const dateOnlyToUtc = (date: string): DateTime.Utc =>
+export const dateOnlyToUtcNoon = (date: string): DateTime.Utc =>
   DateTime.makeUnsafe(`${date}T12:00:00Z`);
 
 /**
  * Format a UTC DateTime as YYYY-MM-DD in UTC.
- * Used for all-day events, whose `start_at`/`end_at` are anchored at noon UTC so
- * their calendar date is stable across timezones — always read them in UTC.
+ * This is now only the rolling-deploy fallback for all-day events (plan §11.2/§17): when
+ * an older server hasn't shipped the derived team-local `startDate`/`endDate` yet, readers
+ * fall back to reading the (still noon-UTC-anchored) instant in UTC. Once every server has
+ * rolled out, all-day reads should go through the derived date string instead — do NOT
+ * treat this as "always read all-day values in UTC".
  */
 export const formatUtcDate = (dt: DateTime.Utc): string => {
   const d = new Date(Number(DateTime.toEpochMillis(dt)));
@@ -57,25 +67,34 @@ export const formatLocalTime = (dt: DateTime.Utc): string => {
  * - `sameDay` — `true` when there is no end OR the end falls on the same local
  *   calendar day as the start. Comparison is on LOCAL calendar date so an
  *   event that crosses midnight in the viewer's tz counts as multi-day.
+ *
+ * `startDateOption`/`endDateOption` are the server-derived team-local calendar
+ * dates (plan §11.2/§11.3, e.g. `EventInfo.startDate`/`endDate`). When present
+ * they are used as-is for the all-day branch; when `Option.none()` (an older
+ * server that hasn't shipped the field yet) the reader falls back to
+ * `formatUtcDate` on the corresponding instant — today's behaviour, not
+ * `formatLocalDate` — so a web-ahead-of-server rollout stays safe (plan §17).
  */
 export const formatEventDateRange = (
   startAt: DateTime.Utc,
   endAt: Option.Option<DateTime.Utc>,
   allDay = false,
+  startDateOption: Option.Option<string> = Option.none(),
+  endDateOption: Option.Option<string> = Option.none(),
 ): {
   startDate: string;
   startTime: string;
   end: Option.Option<string>;
   sameDay: boolean;
 } => {
-  // All-day events carry no meaningful time-of-day. Format/compare by UTC calendar
-  // date (their anchor is noon UTC) and never emit a time component.
+  // All-day events carry no meaningful time-of-day. Prefer the server-derived
+  // team-local calendar date; fall back to reading the (noon-UTC) instant.
   if (allDay) {
-    const startDate = formatUtcDate(startAt);
+    const startDate = Option.getOrElse(startDateOption, () => formatUtcDate(startAt));
     return Option.match(endAt, {
       onNone: () => ({ startDate, startTime: '', end: Option.none<string>(), sameDay: true }),
       onSome: (e) => {
-        const endDate = formatUtcDate(e);
+        const endDate = Option.getOrElse(endDateOption, () => formatUtcDate(e));
         const sameDay = startDate === endDate;
         return {
           startDate,
