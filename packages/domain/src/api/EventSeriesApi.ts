@@ -35,15 +35,17 @@ export class EventSeriesInfo extends Schema.Class<EventSeriesInfo>('EventSeriesI
   ownerGroupName: Schema.OptionFromNullOr(Schema.String),
   memberGroupId: Schema.OptionFromNullOr(GroupId),
   memberGroupName: Schema.OptionFromNullOr(Schema.String),
-  /**
-   * The team's `team_settings.timezone` — the zone `startTime`/`endTime` are wall-clock in — so
-   * the web can label inputs and format times without guessing the browser zone.
-   *
-   * `OptionFromOptionalKey`, matching `EventApi.EventDetail.timezone`: an old server during a
-   * rolling deploy omits the key rather than decode-failing the whole response. A REQUIRED field
-   * here would make a web-ahead-of-server rollout 404 the entire events and training-type pages
-   * (the decode error becomes `NotFound` via `warnAndCatchAll`), not just lose the label.
-   */
+  // The team's `team_settings.timezone` — the zone `startTime`/`endTime` are wall-clock in — so
+  // the web can label inputs and format times without guessing the browser zone.
+  //
+  // `OptionFromOptionalKey`, matching `EventApi.EventDetail.timezone`: an old server during a
+  // rolling deploy omits the key rather than decode-failing the whole response. A REQUIRED field
+  // here would make a web-ahead-of-server rollout 404 the entire events and training-type pages
+  // (the decode error becomes `NotFound` via `warnAndCatchAll`), not just lose the label.
+  //
+  // Line comments, not JSDoc: `pnpm codegen` hoists a module's first multi-line JSDoc onto the
+  // `export * as EventSeriesApi` re-export in `packages/domain/src/index.ts`, where a field-level
+  // note would read as documentation for the whole module.
   timezone: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
@@ -71,15 +73,17 @@ export class EventSeriesDetail extends Schema.Class<EventSeriesDetail>('EventSer
   memberGroupName: Schema.OptionFromNullOr(Schema.String),
   canEdit: Schema.Boolean,
   canCancel: Schema.Boolean,
-  /**
-   * The team's `team_settings.timezone` — the zone `startTime`/`endTime` are wall-clock in — so
-   * the web can label inputs and format times without guessing the browser zone.
-   *
-   * `OptionFromOptionalKey`, matching `EventApi.EventDetail.timezone`: an old server during a
-   * rolling deploy omits the key rather than decode-failing the whole response. A REQUIRED field
-   * here would make a web-ahead-of-server rollout 404 the entire events and training-type pages
-   * (the decode error becomes `NotFound` via `warnAndCatchAll`), not just lose the label.
-   */
+  // The team's `team_settings.timezone` — the zone `startTime`/`endTime` are wall-clock in — so
+  // the web can label inputs and format times without guessing the browser zone.
+  //
+  // `OptionFromOptionalKey`, matching `EventApi.EventDetail.timezone`: an old server during a
+  // rolling deploy omits the key rather than decode-failing the whole response. A REQUIRED field
+  // here would make a web-ahead-of-server rollout 404 the entire events and training-type pages
+  // (the decode error becomes `NotFound` via `warnAndCatchAll`), not just lose the label.
+  //
+  // Line comments, not JSDoc: `pnpm codegen` hoists a module's first multi-line JSDoc onto the
+  // `export * as EventSeriesApi` re-export in `packages/domain/src/index.ts`, where a field-level
+  // note would read as documentation for the whole module.
   timezone: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
