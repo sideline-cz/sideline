@@ -304,6 +304,9 @@ export function EventsListPage({
               values.memberGroupId && values.memberGroupId !== NONE_VALUE
                 ? Option.some(Schema.decodeSync(GroupModel.GroupId)(values.memberGroupId))
                 : Option.none(),
+            // `startTime`/`endTime` above are sent verbatim as the team's wall clock, so this
+            // payload's dialect is genuinely team-local.
+            timesAreTeamLocal: true,
           },
         }),
       ),

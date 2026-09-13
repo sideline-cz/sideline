@@ -41,6 +41,7 @@ const baseCreateSeriesPayload: Schema.Schema.Type<typeof EventSeriesApi.CreateEv
     locationUrl: Option.none(),
     ownerGroupId: Option.none(),
     memberGroupId: Option.none(),
+    timesAreTeamLocal: false,
   };
 
 // ---------------------------------------------------------------------------
@@ -106,12 +107,15 @@ describe('CreateEventSeriesRequest — encoding direction (regression for runtim
 // UpdateEventSeriesRequest — encoding direction
 // ---------------------------------------------------------------------------
 
-// In UpdateEventSeriesRequest every field is OptionFromOptional(T).
+// In UpdateEventSeriesRequest every field except `timesAreTeamLocal` is OptionFromOptional(T).
 // Option.none() = field absent from patch (encodes as key-absent).
 // Option.some(v) = field is in the patch.
 // For nullable inner fields, v is itself an Option<U>:
 //   Option.some(Option.none()) = clearing the field (encodes as null)
 //   Option.some(Option.some(v)) = setting to v (encodes as v)
+// `timesAreTeamLocal` is a plain `Schema.Boolean` (withDecodingDefaultKey), not Option-wrapped,
+// so it always encodes onto the wire, even for an otherwise-empty patch — the client always
+// declares the dialect of whatever times it is (not) sending.
 
 const emptySeriesPatch: Schema.Schema.Type<typeof EventSeriesApi.UpdateEventSeriesRequest> = {
   title: Option.none(),
@@ -125,14 +129,17 @@ const emptySeriesPatch: Schema.Schema.Type<typeof EventSeriesApi.UpdateEventSeri
   endDate: Option.none(),
   ownerGroupId: Option.none(),
   memberGroupId: Option.none(),
+  timesAreTeamLocal: false,
 };
 
 describe('UpdateEventSeriesRequest — encoding direction (regression for runtime crash)', () => {
-  it('empty patch encodes without crashing — all keys absent in output', () => {
-    // All outer Options are none → every field absent in wire form.
+  it('empty patch encodes without crashing — all Option-wrapped keys absent in output', () => {
+    // All outer Options are none → every Option-wrapped field absent in wire form.
+    // `timesAreTeamLocal` is not Option-wrapped, so it always encodes.
     // The filter must not crash when it sees undefined for location / locationUrl.
     const encoded = Schema.encodeSync(EventSeriesApi.UpdateEventSeriesRequest)(emptySeriesPatch);
-    expect(Object.keys(encoded)).toHaveLength(0);
+    expect(Object.keys(encoded)).toEqual(['timesAreTeamLocal']);
+    expect(encoded.timesAreTeamLocal).toBe(false);
   });
 
   it('form-shaped patch (every nullable field Option.some(Option.none())) encodes without crashing', () => {
@@ -151,6 +158,7 @@ describe('UpdateEventSeriesRequest — encoding direction (regression for runtim
       endDate: Option.some(Option.none()),
       ownerGroupId: Option.some(Option.none()),
       memberGroupId: Option.some(Option.none()),
+      timesAreTeamLocal: false,
     };
     const encoded = Schema.encodeSync(EventSeriesApi.UpdateEventSeriesRequest)(patch);
     expect(encoded.location).toBeNull();
@@ -200,5 +208,53 @@ describe('UpdateEventSeriesRequest — encoding direction (regression for runtim
     };
     const encoded = Schema.encodeSync(EventSeriesApi.UpdateEventSeriesRequest)(patch);
     expect(encoded.locationUrl).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// timesAreTeamLocal — decoding direction (Release N, plan §N.3 / test spec §N.d.6)
+// ---------------------------------------------------------------------------
+//
+// `timesAreTeamLocal` is `Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false))`,
+// NOT `Schema.OptionFromOptional` — the idiom the plan documents as the one that makes an
+// absent key decode to a plain default value rather than `Option.none()`, `undefined`, or a
+// decode failure. This is what makes a `v0.37.2` wire payload (built before this flag existed
+// at all, so it never sends the key) safe to decode: the field materializes as `false`, the
+// "UTC time-of-day" dialect every pre-#650 client always meant.
+
+describe('CreateEventSeriesRequest / UpdateEventSeriesRequest — timesAreTeamLocal decoding default', () => {
+  it('CreateEventSeriesRequest: a wire payload omitting timesAreTeamLocal (the v0.37.2 shape) decodes to false — not undefined, and without throwing', () => {
+    const encoded = Schema.encodeSync(EventSeriesApi.CreateEventSeriesRequest)(
+      baseCreateSeriesPayload,
+    );
+    expect('timesAreTeamLocal' in encoded).toBe(true);
+    // No cast (`as Record<string, unknown>`) needed to drop the key: `encoded`'s own type
+    // already requires `timesAreTeamLocal` as an own property, so `Object.entries`/
+    // `Object.fromEntries` — both untyped-key-safe — build the v0.37.2 wire shape instead.
+    const wire = Object.fromEntries(
+      Object.entries(encoded).filter(([key]) => key !== 'timesAreTeamLocal'),
+    );
+
+    let decoded: Schema.Schema.Type<typeof EventSeriesApi.CreateEventSeriesRequest> | undefined;
+    expect(() => {
+      decoded = Schema.decodeUnknownSync(EventSeriesApi.CreateEventSeriesRequest)(wire);
+    }).not.toThrow();
+    expect(decoded?.timesAreTeamLocal).toBe(false);
+    expect(decoded?.timesAreTeamLocal).not.toBeUndefined();
+  });
+
+  it('UpdateEventSeriesRequest: a wire payload omitting timesAreTeamLocal (the v0.37.2 shape) decodes to false — not undefined, and without throwing', () => {
+    const encoded = Schema.encodeSync(EventSeriesApi.UpdateEventSeriesRequest)(emptySeriesPatch);
+    expect('timesAreTeamLocal' in encoded).toBe(true);
+    const wire = Object.fromEntries(
+      Object.entries(encoded).filter(([key]) => key !== 'timesAreTeamLocal'),
+    );
+
+    let decoded: Schema.Schema.Type<typeof EventSeriesApi.UpdateEventSeriesRequest> | undefined;
+    expect(() => {
+      decoded = Schema.decodeUnknownSync(EventSeriesApi.UpdateEventSeriesRequest)(wire);
+    }).not.toThrow();
+    expect(decoded?.timesAreTeamLocal).toBe(false);
+    expect(decoded?.timesAreTeamLocal).not.toBeUndefined();
   });
 });

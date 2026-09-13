@@ -503,6 +503,7 @@ erDiagram
         TEXT description
         TIME start_time
         TIME end_time
+        BOOLEAN times_are_team_local
         TEXT location
         TEXT location_url
         TEXT frequency

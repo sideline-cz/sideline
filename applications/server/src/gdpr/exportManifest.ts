@@ -182,6 +182,9 @@ export const EXPORT_MANIFEST: ReadonlyArray<ExportedTable> = [
     reason:
       "The RSVP message is free text the person wrote. Attendance itself is part of other members' event history and stays.",
   }),
+  // Dumped raw, so `times_are_team_local` (Release N,
+  // `.work-plans/timezone-migration-deploy-window.md`) rides along automatically — it is a
+  // per-row storage-dialect marker about `start_time`/`end_time`, not personal data of its own.
   own('event_series', 'team_members', ['created_by'], authorship),
   own('events', 'team_members', ['created_by', 'claimed_by'], authorship),
   own('fee_assignments', 'team_members', ['team_member_id'], financial),

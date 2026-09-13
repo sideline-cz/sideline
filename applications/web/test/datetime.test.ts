@@ -262,7 +262,8 @@ describe('formatTimeInZone', () => {
 
   it('invalid IANA zone falls back to Europe/Prague instead of throwing', () => {
     // `team_settings.timezone` is free-form TEXT with no CHECK constraint (see the migration
-    // `1791600000_series_time_is_team_local.ts`), so a bad value can reach here. Unlike
+    // `1791700000_add_series_times_team_local_flag.ts`/`1791800000_series_time_is_team_local.ts`),
+    // so a bad value can reach here. Unlike
     // `Intl.DateTimeFormat`, which throws a `RangeError` for an unrecognised zone,
     // `DateTime.setZoneNamed` returns `None` and `formatTimeInZone` falls back to
     // 'Europe/Prague' — mirroring the server-side `resolveOccurrenceInstant` fallback for the

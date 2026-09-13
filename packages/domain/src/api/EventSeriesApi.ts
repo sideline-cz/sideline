@@ -95,14 +95,27 @@ const CreateEventSeriesRequestStruct = Schema.Struct({
   daysOfWeek: DaysOfWeek,
   startDate: Schemas.DateTimeFromIsoString,
   endDate: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
-  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
+  // `HH:MM` wall clock resolved to an instant per occurrence. Whether this is team-local
+  // or UTC depends on `timesAreTeamLocal` below, not unconditionally one or the other.
+  //
+  // Line comments, not JSDoc: see the note on `EventSeriesInfo.timezone` above —
+  // `pnpm codegen` hoists a module's first multi-line JSDoc onto the `export * as
+  // EventSeriesApi` re-export in `packages/domain/src/index.ts`.
   startTime: Schema.String,
-  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
+  // Same dialect note as `startTime` above.
   endTime: Schema.OptionFromNullOr(Schema.String),
   location: Schema.OptionFromNullOr(Schema.String),
   locationUrl: Schema.OptionFromOptionalNullOr(EventLocationUrl),
   ownerGroupId: Schema.OptionFromNullOr(GroupId),
   memberGroupId: Schema.OptionFromNullOr(GroupId),
+  // Declares the dialect of `startTime`/`endTime` in THIS payload — not the storage
+  // dialect of the row being written. `TRUE` = wall clock in the team's timezone;
+  // `FALSE` = UTC time-of-day. Defaults to `false` when the key is absent, because
+  // every client built before #650 sends UTC time-of-day without knowing this field
+  // exists at all; `withDecodingDefaultKey` (not `Schema.optionalWith`, which does not
+  // exist in the pinned `effect` version) is what makes an absent key decode to `false`
+  // rather than fail.
+  timesAreTeamLocal: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
 });
 export const CreateEventSeriesRequest = CreateEventSeriesRequestStruct.pipe(
   Schema.check(
@@ -120,15 +133,26 @@ const UpdateEventSeriesRequestStruct = Schema.Struct({
   trainingTypeId: Schema.OptionFromOptional(Schema.OptionFromNullOr(TrainingTypeId)),
   description: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schema.String)),
   daysOfWeek: Schema.OptionFromOptional(DaysOfWeek),
-  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
+  // `HH:MM` wall clock resolved to an instant per occurrence. Whether this is team-local
+  // or UTC depends on `timesAreTeamLocal` below, not unconditionally one or the other.
+  // Line comments, not JSDoc — see the note on the create request's `startTime` above.
   startTime: Schema.OptionFromOptional(Schema.String),
-  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
+  // Same dialect note as `startTime` above.
   endTime: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schema.String)),
   location: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schema.String)),
   locationUrl: Schema.OptionFromOptional(Schema.OptionFromNullOr(EventLocationUrl)),
   endDate: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString)),
   ownerGroupId: Schema.OptionFromOptional(Schema.OptionFromNullOr(GroupId)),
   memberGroupId: Schema.OptionFromOptional(Schema.OptionFromNullOr(GroupId)),
+  // Declares the dialect of `startTime`/`endTime` in THIS payload — not the storage
+  // dialect of the row being updated. `TRUE` = wall clock in the team's timezone;
+  // `FALSE` = UTC time-of-day. Defaults to `false` when the key is absent, because
+  // every client built before #650 sends UTC time-of-day without knowing this field
+  // exists at all; `withDecodingDefaultKey` (not `Schema.optionalWith`, which does not
+  // exist in the pinned `effect` version) is what makes an absent key decode to `false`
+  // rather than fail. The server applies this check only when `startTime`/`endTime` are
+  // themselves present in the payload — an omitted time is not asserting any dialect.
+  timesAreTeamLocal: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(() => false)),
 });
 export const UpdateEventSeriesRequest = UpdateEventSeriesRequestStruct.pipe(
   Schema.check(
@@ -156,11 +180,31 @@ export class EventSeriesNotActive extends Schema.TaggedErrorClass<EventSeriesNot
   {},
 ) {}
 
+// Raised when an UPDATE payload's declared time dialect (`timesAreTeamLocal`) does not match
+// the existing row's stored `times_are_team_local`. There is no create-side equivalent: a
+// create has no existing row to assert against, so its payload's declared dialect BECOMES the
+// new row's dialect instead (see `insertEventSeries` in `EventSeriesRepository.ts`) — only
+// `updateEventSeries` can raise this error. The server never translates between dialects on
+// behalf of a mismatched client — a wrong guess would silently shift `startTime`/`endTime` by
+// the team's offset, an error class strictly worse than a rejected write the caller can retry.
+// Only applies when the payload actually supplies `startTime`/`endTime` — see
+// `assertDialectMatches` in `applications/server/src/utils/seriesTimeDialect.ts`.
+//
+// Line comments, not JSDoc, same reason as the field notes above: `pnpm codegen` hoists a
+// module's first multi-line JSDoc onto the `export * as EventSeriesApi` re-export.
+export class EventSeriesTimeDialectMismatch extends Schema.TaggedErrorClass<EventSeriesTimeDialectMismatch>()(
+  'EventSeriesTimeDialectMismatch',
+  {},
+) {}
+
 export class EventSeriesApiGroup extends HttpApiGroup.make('eventSeries')
   .add(
     HttpApiEndpoint.post('createEventSeries', '/teams/:teamId/event-series', {
       success: EventSeriesInfo.pipe(HttpApiSchema.status(201)),
-      error: Forbidden.pipe(HttpApiSchema.status(403)),
+      // Create has no existing row to assert a dialect against — the payload's declared
+      // `timesAreTeamLocal` BECOMES the new row's dialect, so a create can never raise
+      // `EventSeriesTimeDialectMismatch`. Only `updateEventSeries` below can.
+      error: [Forbidden.pipe(HttpApiSchema.status(403))],
       payload: CreateEventSeriesRequest,
       params: { teamId: TeamId },
     }).middleware(AuthMiddleware),
@@ -189,6 +233,7 @@ export class EventSeriesApiGroup extends HttpApiGroup.make('eventSeries')
         Forbidden.pipe(HttpApiSchema.status(403)),
         EventSeriesNotFound.pipe(HttpApiSchema.status(404)),
         EventSeriesNotActive.pipe(HttpApiSchema.status(400)),
+        EventSeriesTimeDialectMismatch.pipe(HttpApiSchema.status(400)),
       ],
       payload: UpdateEventSeriesRequest,
       params: { teamId: TeamId, seriesId: EventSeriesId },

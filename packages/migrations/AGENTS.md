@@ -79,7 +79,7 @@ A migration that **reinterprets** already-stored values (converting a `TIME` tha
 
 Rules:
 
-1. **Add a `BOOLEAN NOT NULL DEFAULT FALSE` marker column to the table being reinterpreted**, in the same migration, via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`.
+1. **Add a `BOOLEAN NOT NULL DEFAULT FALSE` marker column to the table being reinterpreted**, via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` — either in the same migration as the conversion `UPDATE`, or in an earlier migration (both markers in this repo do the latter; see the references below).
 2. **Guard the `UPDATE` on `WHERE NOT <marker>` and set `<marker> = TRUE` in the SAME statement.** Guard and write must never be two statements — a crash between them leaves the row's state and its marker disagreeing.
 3. **Never drop the marker column** in a later migration. It is the only thing that makes the conversion safely re-runnable by hand against a partially-migrated database.
 4. **Never derive the guard from the data** (`WHERE start_time <> '00:00'`, `WHERE start_at <> date_trunc('day', start_at)`, or any other value predicate).
@@ -101,7 +101,7 @@ Effect.tap(
 ),
 ```
 
-References: `times_are_team_local` (`1791600000_series_time_is_team_local.ts`), `all_day_anchored` (`1791300000_add_all_day_anchored_flag.ts` + `1791400000_anchor_all_day_to_team_midnight.ts`).
+References: `times_are_team_local` (`1791700000_add_series_times_team_local_flag.ts` adds the marker column and converts nothing; the guarded conversion `UPDATE` lands separately in `1791800000_series_time_is_team_local.ts` — see `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock"), `all_day_anchored` (`1791300000_add_all_day_anchored_flag.ts` + `1791400000_anchor_all_day_to_team_midnight.ts`).
 
 ### Reading A Per-Team Setting Inside A Migration `UPDATE`
 
@@ -121,7 +121,7 @@ AT TIME ZONE COALESCE(
   'Europe/Prague')
 ```
 
-Reference: `1791600000_series_time_is_team_local.ts` (both statements). The JS/Postgres disagreement for DST-ambiguous wall clocks is documented in `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock".
+Reference: `1791800000_series_time_is_team_local.ts` (both statements) — that migration is NOT in the tree yet; it is the deferred half of the split described in `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock". No migration currently in `packages/migrations/src/before/` demonstrates the `pg_timezone_names` join: `1791400000_anchor_all_day_to_team_midnight.ts` uses the `COALESCE` scalar subselect of rule 1 WITHOUT the rule-2 join, so do not copy it as the complete pattern. The JS/Postgres disagreement for DST-ambiguous wall clocks is documented in `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock".
 
 ### Partial Indexes for Hot Filters
 

@@ -334,20 +334,26 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                       `.pipe(Effect.asVoid),
                         ),
                         // Timezone change also strands not-yet-materialized series
-                        // occurrences already in `events`: before this migration,
-                        // `event_series.start_time`/`end_time` were absolute UTC, so a
-                        // timezone change was a no-op for them. Now they are team-local
-                        // wall clock (`1791600000_series_time_is_team_local.ts`), so a
-                        // future, active, not-hand-edited occurrence must be re-derived
-                        // from the (unchanged) series wall-clock time, re-anchored on its
-                        // OLD-timezone calendar date but resolved in the NEW timezone —
-                        // otherwise already-materialized events keep the old instant
-                        // while the series regenerates new ones in the new zone, splitting
-                        // the team's calendar in two. Structurally the same recomputation
-                        // as the migration's Statement B, run here instead of waiting for
-                        // an operator to re-run a migration for every timezone edit.
-                        // Guards mirror Statement B's exactly: `series_id IS NOT NULL`
-                        // (only series-generated events have one — the join to
+                        // occurrences already in `events`: for a TEAM-LOCAL (`times_are_
+                        // team_local`) series, `event_series.start_time`/`end_time` are a
+                        // wall clock, so a future, active, not-hand-edited occurrence must be
+                        // re-derived from the (unchanged) series wall-clock time, re-anchored
+                        // on its OLD-timezone calendar date but resolved in the NEW timezone —
+                        // otherwise already-materialized events keep the old instant while the
+                        // series regenerates new ones in the new zone, splitting the team's
+                        // calendar in two. Structurally the same recomputation as the
+                        // conversion migration's Statement B (`1791800000`, Release N+1), run
+                        // here instead of waiting for an operator to re-run a migration for
+                        // every timezone edit.
+                        //
+                        // A FALSE (UTC-dialect, pre-#650) series stores an absolute UTC
+                        // time-of-day, so a team timezone change is a no-op for it — exactly
+                        // as it was before #650 — hence `AND es.times_are_team_local`
+                        // (Release N, `.work-plans/timezone-migration-deploy-window.md`
+                        // §N.2 item 5).
+                        //
+                        // Guards otherwise mirror Statement B's exactly: `series_id IS NOT
+                        // NULL` (only series-generated events have one — the join to
                         // `event_series` below encodes this), `NOT series_modified`
                         // (never clobber a captain's per-occurrence override),
                         // `status = 'active'` (leave cancelled/started events alone),
@@ -372,6 +378,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                           AND NOT e.series_modified
                           AND e.status = 'active'
                           AND e.start_at >= now()
+                          AND es.times_are_team_local
                       `.pipe(Effect.asVoid),
                         ),
                       ),

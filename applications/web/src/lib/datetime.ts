@@ -151,8 +151,8 @@ export const formatUtcTime = (dt: DateTime.Utc): string => {
  * `24:00` instead of `00:00` for local midnight from `Intl.DateTimeFormat` with `hour12: false`
  * — that never arises here).
  *
- * `tz` is user/DB-sourced free-form text (`team_settings.timezone` has no CHECK constraint —
- * see the migration `1791600000_series_time_is_team_local.ts`), so it can be invalid. Unlike
+ * `tz` is user/DB-sourced free-form text (`team_settings.timezone` has no CHECK constraint),
+ * so it can be invalid. Unlike
  * `Intl.DateTimeFormat`, which THROWS a `RangeError` for an unrecognised zone,
  * `DateTime.setZoneNamed` returns `None`; this falls back to `'Europe/Prague'`, mirroring the
  * server's `resolveOccurrenceInstant`/migration defence for the exact same bad-data case, on a

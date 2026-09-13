@@ -2180,7 +2180,7 @@ Returns the list of eligible members who have not yet submitted an RSVP. The lis
 
 Event series define recurrence rules. The `EventHorizonCron` runs daily and generates individual events from active series up to the team's event horizon.
 
-`startTime`/`endTime` are `HH:MM` **wall-clock in the team's own timezone** (`timezone` below, sourced from `team_settings.timezone`) — NOT UTC. A recurring "Tuesday 18:00" is a wall clock: the same values resolve to a different UTC instant per occurrence depending on the team's zone and time of year (DST), so clients must not treat these strings as UTC times-of-day.
+`startTime`/`endTime` are `HH:MM` strings whose dialect is **tagged by the request/response payload, not unconditional**. On create/update requests, `timesAreTeamLocal` (`boolean`, defaults to `false` if omitted) declares which dialect `startTime`/`endTime` are written in for *that payload*: `true` means wall-clock in the team's own timezone (`timezone` below, sourced from `team_settings.timezone`) — a recurring "Tuesday 18:00" wall clock resolves to a different UTC instant per occurrence depending on the team's zone and time of year (DST); `false` (the default, and what every client built before this field existed sends) means a UTC time-of-day. **On create, there is no existing row yet, so `timesAreTeamLocal` simply BECOMES the new series' stored dialect** — nothing is rejected. **On update**, the server rejects a request whose declared dialect does not match the *existing* series' own stored dialect rather than silently converting — see `EventSeriesTimeDialectMismatch` below (update only). Response payloads' `startTime`/`endTime` follow the series' own stored dialect (surfaced once the server starts returning `timesAreTeamLocal` on reads, in the release after the request-side field ships).
 
 #### Enums
 
@@ -2216,12 +2216,13 @@ Creates a new recurring event series.
 | `daysOfWeek` | `integer[]` | Yes | Days to schedule (0=Sun, 1–6 for Mon–Sat) |
 | `startDate` | `string` (ISO 8601) | Yes | Series start date |
 | `endDate` | `string \| null` | Yes | Series end date (null for open-ended) |
-| `startTime` | `string` | Yes | Start time as `HH:MM` wall-clock in the team's timezone, NOT UTC (e.g. `"14:30"`) |
-| `endTime` | `string \| null` | Yes | End time as `HH:MM` wall-clock in the team's timezone, NOT UTC (null if open-ended) |
+| `startTime` | `string` | Yes | Start time as `HH:MM`, dialect declared by `timesAreTeamLocal` below (e.g. `"14:30"`) |
+| `endTime` | `string \| null` | Yes | End time as `HH:MM`, same dialect as `startTime` (null if open-ended) |
 | `location` | `string \| null` | Yes | Location |
 | `locationUrl` | `string \| null` | No | Optional location URL (public `https://`, max 2048 chars); requires `location` to be non-empty |
 | `ownerGroupId` | `GroupId \| null` | Yes | Owner group ID |
 | `memberGroupId` | `GroupId \| null` | Yes | Member group ID |
+| `timesAreTeamLocal` | `boolean` | No (defaults `false`) | Declares the dialect of `startTime`/`endTime` **in this payload**: `true` = wall-clock in the team's own timezone; `false` = UTC time-of-day. There is no existing row to check on create, so this value BECOMES the new series' stored dialect — a create never fails with `EventSeriesTimeDialectMismatch`. |
 
 **Response:** `201 Created` — `EventSeriesInfo`
 
@@ -2237,7 +2238,7 @@ Creates a new recurring event series.
 | `status` | `EventSeriesStatus` | No | `"active"` or `"cancelled"` |
 | `trainingTypeId` | `TrainingTypeId \| null` | Yes | Training type ID |
 | `trainingTypeName` | `string \| null` | Yes | Training type name |
-| `startTime` | `string` | No | Start time, `HH:MM` wall-clock in the team's timezone (NOT UTC) |
+| `startTime` | `string` | No | Start time, `HH:MM` — dialect matches the series' own stored dialect (see `timesAreTeamLocal` on the request above; not yet echoed back on this response as of this release) |
 | `endTime` | `string \| null` | Yes | End time string |
 | `location` | `string \| null` | Yes | Location |
 | `locationUrl` | `string \| null` | Yes | Optional location URL (public `https://`, max 2048 chars) |
@@ -2245,13 +2246,15 @@ Creates a new recurring event series.
 | `ownerGroupName` | `string \| null` | Yes | Owner group name |
 | `memberGroupId` | `GroupId \| null` | Yes | Member group ID |
 | `memberGroupName` | `string \| null` | Yes | Member group name |
-| `timezone` | `string` | Yes | The team's IANA timezone that `startTime`/`endTime` are wall-clock in. Optional key: an older server mid-rollout omits it rather than failing the response decode. |
+| `timezone` | `string` | Yes | The team's IANA timezone (`team_settings.timezone`). `startTime`/`endTime` are wall-clock in this zone only when the series' own stored dialect is team-local; a series stored in the UTC dialect (the default — see `timesAreTeamLocal` above) still has UTC `startTime`/`endTime` regardless of this field, since the dialect itself is not yet echoed back on this response. Optional key: an older server mid-rollout omits it rather than failing the response decode. |
 
 **Errors:**
 
 | Tag | Status | When |
 |---|---|---|
 | `EventForbidden` | 403 | Missing `event:create` permission |
+
+Create never returns `EventSeriesTimeDialectMismatch` — there is no existing row to check `timesAreTeamLocal` against, so it always defines the new row's dialect instead of being validated against one. Only `PATCH` (below) can return this error.
 
 ---
 
@@ -2329,13 +2332,14 @@ Updates a series. Changes apply only to future generated events. All fields are 
 | `trainingTypeId` | `TrainingTypeId \| null` | No | Training type ID |
 | `description` | `string \| null` | No | Description |
 | `daysOfWeek` | `integer[]` | No | Days of week |
-| `startTime` | `string` | No | Start time, `HH:MM` wall-clock in the team's timezone (NOT UTC) |
-| `endTime` | `string \| null` | No | End time |
+| `startTime` | `string` | No | Start time as `HH:MM`, dialect declared by `timesAreTeamLocal` below. Omitted entirely means "leave the stored value alone" — no dialect is asserted for a field not sent. |
+| `endTime` | `string \| null` | No | End time as `HH:MM`, same dialect as `startTime` if sent |
 | `location` | `string \| null` | No | Location |
 | `locationUrl` | `string \| null` | No | Optional location URL (public `https://`, max 2048 chars); requires `location` to be non-empty when setting a URL |
 | `endDate` | `string \| null` | No | Series end date |
 | `ownerGroupId` | `GroupId \| null` | No | Owner group ID |
 | `memberGroupId` | `GroupId \| null` | No | Member group ID |
+| `timesAreTeamLocal` | `boolean` | No (defaults `false`) | Declares the dialect of `startTime`/`endTime` **in this payload**, same meaning as on create. Always present on the wire once encoded (it is not one of the optional-patch fields above), but only checked against the series' stored dialect when `startTime` is present, or `endTime` is present with an actual value — sending `endTime: null` to CLEAR the end time does not by itself assert a dialect either, since no time-of-day value is being asserted. A location-only edit (both time fields absent) asserts no dialect and is never rejected on this field's account. Mismatch when checked: `EventSeriesTimeDialectMismatch` (400). |
 
 **Response:** `200 OK` — `EventSeriesDetail`
 
@@ -2346,6 +2350,7 @@ Updates a series. Changes apply only to future generated events. All fields are 
 | `EventForbidden` | 403 | Missing `event:edit` permission |
 | `EventSeriesNotFound` | 404 | Series does not exist |
 | `EventSeriesCancelled` | 400 | Series is already cancelled |
+| `EventSeriesTimeDialectMismatch` | 400 | `startTime` and/or `endTime` are present and `timesAreTeamLocal` does not match the series' stored dialect; row is unchanged |
 
 ---
 
