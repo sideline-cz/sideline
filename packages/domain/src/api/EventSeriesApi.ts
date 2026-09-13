@@ -25,7 +25,9 @@ export class EventSeriesInfo extends Schema.Class<EventSeriesInfo>('EventSeriesI
   status: EventSeriesStatus,
   trainingTypeId: Schema.OptionFromNullOr(TrainingTypeId),
   trainingTypeName: Schema.OptionFromNullOr(Schema.String),
+  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
   startTime: Schema.String,
+  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
   endTime: Schema.OptionFromNullOr(Schema.String),
   location: Schema.OptionFromNullOr(Schema.String),
   locationUrl: Schema.OptionFromNullOr(Schema.String),
@@ -33,6 +35,16 @@ export class EventSeriesInfo extends Schema.Class<EventSeriesInfo>('EventSeriesI
   ownerGroupName: Schema.OptionFromNullOr(Schema.String),
   memberGroupId: Schema.OptionFromNullOr(GroupId),
   memberGroupName: Schema.OptionFromNullOr(Schema.String),
+  /**
+   * The team's `team_settings.timezone` — the zone `startTime`/`endTime` are wall-clock in — so
+   * the web can label inputs and format times without guessing the browser zone.
+   *
+   * `OptionFromOptionalKey`, matching `EventApi.EventDetail.timezone`: an old server during a
+   * rolling deploy omits the key rather than decode-failing the whole response. A REQUIRED field
+   * here would make a web-ahead-of-server rollout 404 the entire events and training-type pages
+   * (the decode error becomes `NotFound` via `warnAndCatchAll`), not just lose the label.
+   */
+  timezone: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
 export class EventSeriesDetail extends Schema.Class<EventSeriesDetail>('EventSeriesDetail')({
@@ -47,7 +59,9 @@ export class EventSeriesDetail extends Schema.Class<EventSeriesDetail>('EventSer
   status: EventSeriesStatus,
   trainingTypeId: Schema.OptionFromNullOr(TrainingTypeId),
   trainingTypeName: Schema.OptionFromNullOr(Schema.String),
+  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
   startTime: Schema.String,
+  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
   endTime: Schema.OptionFromNullOr(Schema.String),
   location: Schema.OptionFromNullOr(Schema.String),
   locationUrl: Schema.OptionFromNullOr(Schema.String),
@@ -57,6 +71,16 @@ export class EventSeriesDetail extends Schema.Class<EventSeriesDetail>('EventSer
   memberGroupName: Schema.OptionFromNullOr(Schema.String),
   canEdit: Schema.Boolean,
   canCancel: Schema.Boolean,
+  /**
+   * The team's `team_settings.timezone` — the zone `startTime`/`endTime` are wall-clock in — so
+   * the web can label inputs and format times without guessing the browser zone.
+   *
+   * `OptionFromOptionalKey`, matching `EventApi.EventDetail.timezone`: an old server during a
+   * rolling deploy omits the key rather than decode-failing the whole response. A REQUIRED field
+   * here would make a web-ahead-of-server rollout 404 the entire events and training-type pages
+   * (the decode error becomes `NotFound` via `warnAndCatchAll`), not just lose the label.
+   */
+  timezone: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
 const CreateEventSeriesRequestStruct = Schema.Struct({
@@ -67,7 +91,9 @@ const CreateEventSeriesRequestStruct = Schema.Struct({
   daysOfWeek: DaysOfWeek,
   startDate: Schemas.DateTimeFromIsoString,
   endDate: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
+  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
   startTime: Schema.String,
+  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
   endTime: Schema.OptionFromNullOr(Schema.String),
   location: Schema.OptionFromNullOr(Schema.String),
   locationUrl: Schema.OptionFromOptionalNullOr(EventLocationUrl),
@@ -90,7 +116,9 @@ const UpdateEventSeriesRequestStruct = Schema.Struct({
   trainingTypeId: Schema.OptionFromOptional(Schema.OptionFromNullOr(TrainingTypeId)),
   description: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schema.String)),
   daysOfWeek: Schema.OptionFromOptional(DaysOfWeek),
+  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
   startTime: Schema.OptionFromOptional(Schema.String),
+  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
   endTime: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schema.String)),
   location: Schema.OptionFromOptional(Schema.OptionFromNullOr(Schema.String)),
   locationUrl: Schema.OptionFromOptional(Schema.OptionFromNullOr(EventLocationUrl)),

@@ -4,6 +4,7 @@ import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { computeHorizonEnd, generateOccurrenceDates } from '~/services/RecurrenceService.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
+import { resolveOccurrenceInstant } from '~/utils/seriesOccurrence.js';
 
 export const eventHorizonCronEffect = Effect.Do.pipe(
   Effect.bind('seriesRepo', () => EventSeriesRepository.asEffect()),
@@ -37,8 +38,10 @@ export const eventHorizonCronEffect = Effect.Do.pipe(
         return Effect.all(
           Array.map(dates, (date) => {
             const dateStr = DateTime.formatIsoDateUtc(date);
-            const startAt = DateTime.makeUnsafe(`${dateStr}T${s.start_time}Z`);
-            const endAt = Option.map(s.end_time, (t) => DateTime.makeUnsafe(`${dateStr}T${t}Z`));
+            const startAt = resolveOccurrenceInstant(dateStr, s.start_time, s.team_timezone);
+            const endAt = Option.map(s.end_time, (t) =>
+              resolveOccurrenceInstant(dateStr, t, s.team_timezone),
+            );
             return eventsRepo
               .insertEvent({
                 teamId: s.team_id,

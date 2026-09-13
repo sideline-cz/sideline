@@ -23,6 +23,7 @@ type InsertedEvent = {
   eventId: Event.EventId;
   teamId: Team.TeamId;
   title: string;
+  startAt: DateTime.Utc;
 };
 
 type UpdatedDate = {
@@ -63,6 +64,7 @@ const makeActiveSeries = (
     location_url: Option.Option<string>;
     description: Option.Option<string>;
     created_by: TeamMember.TeamMemberId;
+    team_timezone: string;
   }> = {},
 ) => ({
   id: overrides.id ?? SERIES_ID,
@@ -83,6 +85,7 @@ const makeActiveSeries = (
   member_group_id: overrides.member_group_id ?? Option.none(),
   created_by: overrides.created_by ?? CREATED_BY,
   event_horizon_days: overrides.event_horizon_days ?? 30,
+  team_timezone: overrides.team_timezone ?? 'Europe/Prague',
 });
 
 // --- Mock layers ---
@@ -103,11 +106,20 @@ const makeMockEventSeriesRepository = (activeSeries: ReturnType<typeof makeActiv
   } as any);
 
 const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
-  insertEvent: (params: { teamId: Team.TeamId; title: string }) => {
+  insertEvent: (params: { teamId: Team.TeamId; title: string; startAt: DateTime.Utc }) => {
     insertCounter += 1;
     const eventId =
       `00000000-0000-0000-0000-0000000001${String(insertCounter).padStart(2, '0')}` as Event.EventId;
-    insertedEvents.push({ eventId, teamId: params.teamId, title: params.title });
+    // Capture the ACTUAL `startAt` the cron computed (via
+    // `resolveOccurrenceInstant`), not a hardcoded stand-in — this is what
+    // lets the DST regression tests below assert on the real materialized
+    // instant instead of a fixture value that ignores the series' timezone.
+    insertedEvents.push({
+      eventId,
+      teamId: params.teamId,
+      title: params.title,
+      startAt: params.startAt,
+    });
     return Effect.succeed({
       id: eventId,
       team_id: params.teamId,
@@ -115,7 +127,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
       training_type_id: Option.none(),
       event_type: 'training',
       description: Option.none(),
-      start_at: DateTime.makeUnsafe('2026-04-14T10:00:00Z'),
+      start_at: params.startAt,
       end_at: Option.none(),
       location: Option.none(),
       location_url: Option.none(),
@@ -281,4 +293,73 @@ describe('eventHorizonCronEffect', () => {
       Effect.asVoid,
     );
   });
+
+  // --- DST regression (end-to-end materialization path) ---
+  //
+  // Both series below are pinned to generate EXACTLY ONE occurrence, on a
+  // fixed calendar date, by setting `last_generated_date` to the day before
+  // the target Tuesday and `end_date` to the target Tuesday itself — this
+  // isolates the single materialized `startAt` instead of the open-ended
+  // "many Tuesdays between start_date and now+horizon" window the other
+  // tests above use. 2026-01-13 and 2026-07-14 are both Tuesdays.
+  it.effect(
+    'Prague series at 18:00, WINTER occurrence: materializes at 2026-01-13T17:00:00Z (CET, UTC+1)',
+    () => {
+      const series = makeActiveSeries({
+        start_time: '18:00:00',
+        team_timezone: 'Europe/Prague',
+        days_of_week: [2], // Tuesday
+        last_generated_date: Option.some(DateTime.makeUnsafe('2026-01-12T00:00:00Z')),
+        end_date: Option.some(DateTime.makeUnsafe('2026-01-13T00:00:00Z')),
+        event_horizon_days: 30,
+      });
+
+      return eventHorizonCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(insertedEvents).toHaveLength(1);
+            expect(insertedEvents[0].startAt.epochMilliseconds).toBe(
+              Date.parse('2026-01-13T17:00:00.000Z'),
+            );
+          }),
+        ),
+        Effect.provide(makeTestLayer([series])),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'THE SAME Prague series at 18:00, SUMMER occurrence: materializes at 2026-07-14T16:00:00Z (CEST, UTC+2) — one hour earlier in UTC than the winter case, same wall clock',
+    () => {
+      const series = makeActiveSeries({
+        start_time: '18:00:00',
+        team_timezone: 'Europe/Prague',
+        days_of_week: [2], // Tuesday
+        last_generated_date: Option.some(DateTime.makeUnsafe('2026-07-13T00:00:00Z')),
+        end_date: Option.some(DateTime.makeUnsafe('2026-07-14T00:00:00Z')),
+        event_horizon_days: 30,
+      });
+
+      return eventHorizonCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(insertedEvents).toHaveLength(1);
+            expect(insertedEvents[0].startAt.epochMilliseconds).toBe(
+              Date.parse('2026-07-14T16:00:00.000Z'),
+            );
+            // Non-vacuity: the pre-fix naive `${date}T18:00:00Z` materialization
+            // would have produced 18:00:00Z here (and in the winter test above),
+            // making the two cases indistinguishable from a bug that always
+            // stamps the UTC time-of-day literally. Assert they differ.
+            expect(insertedEvents[0].startAt.epochMilliseconds).not.toBe(
+              Date.parse('2026-07-14T18:00:00.000Z'),
+            );
+          }),
+        ),
+        Effect.provide(makeTestLayer([series])),
+        Effect.asVoid,
+      );
+    },
+  );
 });

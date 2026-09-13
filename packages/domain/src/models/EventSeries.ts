@@ -32,7 +32,9 @@ export class EventSeries extends Model.Class<EventSeries>('EventSeries')({
   training_type_id: Schema.OptionFromNullOr(TrainingTypeId),
   title: Schema.String,
   description: Schema.OptionFromNullOr(Schema.String),
+  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
   start_time: Schema.String,
+  /** `HH:MM` wall clock in the team's `team_settings.timezone`, resolved to an instant per occurrence. NOT UTC. */
   end_time: Schema.OptionFromNullOr(Schema.String),
   location: Schema.OptionFromNullOr(Schema.String),
   location_url: Schema.OptionFromNullOr(Schema.String),

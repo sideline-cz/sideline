@@ -60,6 +60,13 @@ function EventsRoute() {
       }
       trainingTypes={data.trainingTypes.trainingTypes}
       groups={data.groups}
+      // `EventListResponse.timezone` needs only membership (populated from a direct
+      // repository read server-side), unlike `getTeamSettings` which requires
+      // `team:manage` and would 403 for most captains who can create events. `None`
+      // (an older server during a rolling deploy) falls back to `undefined`, NOT a
+      // guessed zone: this value only labels which clock the time inputs are in, and
+      // naming the wrong zone is worse than naming none.
+      teamTimezone={Option.getOrUndefined(data.eventList.timezone)}
     />
   );
 }

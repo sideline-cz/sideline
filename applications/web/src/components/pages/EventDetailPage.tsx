@@ -46,8 +46,8 @@ import {
   formatEventDateRange,
   formatLocalDate,
   formatLocalTime,
+  formatTimeInZone,
   formatUtcDate,
-  formatUtcTime,
   localToUtc,
 } from '~/lib/datetime.js';
 import { eventStatusClasses, eventStatusLabels, eventTypeLabels } from '~/lib/event-labels';
@@ -203,6 +203,12 @@ export function EventDetailPage({
 
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
   const eventIdBranded = Schema.decodeSync(Event.EventId)(eventId);
+  // `eventDetail.timezone` is `OptionFromOptionalKey` — an older server mid-rollout simply omits
+  // the key rather than decode-failing the whole event detail. Fall back to the same default the
+  // server itself uses for a team with no `team_settings` row yet (see
+  // `applications/server/src/api/team-settings.ts`), so "save all future" still writes a sane
+  // wall-clock projection instead of silently guessing the browser's zone.
+  const teamTimezone = Option.getOrElse(eventDetail.timezone, () => 'Europe/Prague');
 
   const form = useForm<EventEditValues>({
     resolver: standardSchemaResolver(Schema.toStandardSchemaV1(EventEditSchema)),
@@ -325,10 +331,18 @@ export function EventDetailPage({
               values.description ? Option.some(values.description) : Option.none(),
             ),
             daysOfWeek: Option.none(),
-            startTime: Option.some(formatUtcTime(localToUtc(values.startDate, values.startTime))),
+            // This form value is browser-local for ONE occurrence, but it is being written back
+            // onto the SERIES-level wall-clock field, so it must be re-expressed in the team's
+            // zone first — unlike the plain per-occurrence write above, this is a genuine
+            // conversion, not a verbatim pass-through.
+            startTime: Option.some(
+              formatTimeInZone(localToUtc(values.startDate, values.startTime), teamTimezone),
+            ),
             endTime: Option.some(
               values.endTime
-                ? Option.some(formatUtcTime(localToUtc(values.startDate, values.endTime)))
+                ? Option.some(
+                    formatTimeInZone(localToUtc(values.startDate, values.endTime), teamTimezone),
+                  )
                 : Option.none(),
             ),
             location: Option.some(values.location ? Option.some(values.location) : Option.none()),
@@ -356,7 +370,7 @@ export function EventDetailPage({
     if (Option.isSome(result)) {
       router.invalidate();
     }
-  }, [form, teamIdBranded, eventDetail.seriesId, run, router]);
+  }, [form, teamIdBranded, eventDetail.seriesId, run, router, teamTimezone]);
 
   const handleSave = form.handleSubmit((values) => {
     if (!values.allDay && !values.startTime) {

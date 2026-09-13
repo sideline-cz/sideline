@@ -54,6 +54,7 @@ import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementConfig.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
+import { resolveOccurrenceInstant } from '~/utils/seriesOccurrence.js';
 import { MockChannelManagementLayers } from './mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
@@ -273,7 +274,72 @@ type EventRecord = {
 
 let eventsStore: Map<Event.EventId, EventRecord>;
 
+// --- DST-fix regression instrumentation ---
+//
+// `None` = "no team_settings row" (handler falls back to 'Europe/Prague'),
+// same convention `applications/server/test/api/eventAllDayAnchor.test.ts`
+// uses. Individual tests override this to prove the timezone that reaches
+// `updateFutureUnmodifiedInSeries` is the TEAM's configured zone, not a
+// hardcoded literal.
+let teamSettingsTimezoneOverride: Option.Option<string>;
+
+type CapturedUpdateFutureUnmodifiedCall = {
+  seriesId: EventSeries.EventSeriesId;
+  fromDate: Date;
+  fields: {
+    title: string;
+    trainingTypeId: Option.Option<string>;
+    description: Option.Option<string>;
+    startTime: string;
+    endTime: Option.Option<string>;
+    location: Option.Option<string>;
+    locationUrl: Option.Option<string>;
+    timezone: string;
+  };
+};
+let capturedUpdateFutureUnmodifiedCalls: CapturedUpdateFutureUnmodifiedCall[];
+
+/**
+ * Approximates what `EventsRepository#updateFutureUnmodifiedInSeries`'s real SQL does
+ * (`applications/server/src/repositories/EventsRepository.ts`):
+ * `((start_at AT TIME ZONE timezone)::date + start_time::time) AT TIME ZONE
+ * timezone` — i.e. re-derive the LOCAL calendar date the event already falls
+ * on in `timezone`, then re-apply `newStartTime` on that date in the same
+ * zone. Reusing `resolveOccurrenceInstant` (the SUT of
+ * `test/utils/seriesOccurrence.test.ts`) for the second half keeps this
+ * faithful for every case EXCEPT one.
+ *
+ * It genuinely DIVERGES from the SQL for a wall clock that falls in the DST-ambiguous
+ * repeated hour: `resolveOccurrenceInstant` uses the effect `DateTime` library's
+ * `"compatible"` disambiguation, which picks the EARLIER of the two instants, while
+ * Postgres's `AT TIME ZONE` picks the LATER one. Verified directly: for
+ * `2026-10-25 02:30` in `Europe/Prague` (the fall-back hour, repeated), the JS path here
+ * resolves to `2026-10-25T00:30:00Z` and the equivalent Postgres query resolves to
+ * `2026-10-25T01:30:00Z` — one hour apart. Neither `EventSeries.test.ts` nor
+ * `test/utils/seriesOccurrence.test.ts` exercises that specific ambiguous-hour input, so
+ * this divergence does not currently produce a false-passing assertion, but a future test
+ * that does pick an ambiguous wall clock must not expect this helper and the real SQL to
+ * agree. See the matching note on `resolveOccurrenceInstant`
+ * (`applications/server/src/utils/seriesOccurrence.ts`) and on the
+ * `updateFutureUnmodified` query below in `EventsRepository.ts` — keep all three
+ * consistent.
+ */
+const recomputeStartAt = (
+  startAt: DateTime.Utc,
+  newStartTime: string,
+  timezone: string,
+): DateTime.Utc => {
+  const zoned = Option.getOrElse(DateTime.setZoneNamed(startAt, timezone), () =>
+    DateTime.setZoneNamedUnsafe(startAt, 'Europe/Prague'),
+  );
+  const { year, month, day } = DateTime.toParts(zoned);
+  const dateStr = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return resolveOccurrenceInstant(dateStr, newStartTime, timezone);
+};
+
 const resetStores = () => {
+  teamSettingsTimezoneOverride = Option.none();
+  capturedUpdateFutureUnmodifiedCalls = [];
   seriesStore = new Map();
   seriesStore.set(TEST_SERIES_1, {
     id: TEST_SERIES_1,
@@ -586,7 +652,39 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   cancelFuture: () => Effect.void,
   cancelFutureInSeries: () => Effect.void,
   updateFutureUnmodified: () => Effect.void,
-  updateFutureUnmodifiedInSeries: () => Effect.void,
+  updateFutureUnmodifiedInSeries: (
+    seriesId: EventSeries.EventSeriesId,
+    fromDate: Date,
+    fields: CapturedUpdateFutureUnmodifiedCall['fields'],
+  ) => {
+    capturedUpdateFutureUnmodifiedCalls.push({ seriesId, fromDate, fields });
+    // Faithfully re-derive `start_at`/`end_at` the way the real SQL does
+    // (see `recomputeStartAt` above), for every unmodified event in the
+    // series — this is what lets a test assert on the resulting
+    // `eventsStore` entry instead of only on the call arguments.
+    for (const [id, event] of eventsStore) {
+      if (
+        Option.isSome(event.series_id) &&
+        event.series_id.value === seriesId &&
+        !event.series_modified
+      ) {
+        eventsStore.set(id, {
+          ...event,
+          title: fields.title,
+          training_type_id: fields.trainingTypeId,
+          description: fields.description,
+          location: fields.location,
+          location_url: fields.locationUrl,
+          start_at: recomputeStartAt(event.start_at, fields.startTime, fields.timezone),
+          end_at: Option.match(fields.endTime, {
+            onNone: () => Option.none<DateTime.Utc>(),
+            onSome: (t) => Option.some(recomputeStartAt(event.start_at, t, fields.timezone)),
+          }),
+        });
+      }
+    }
+    return Effect.void;
+  },
   markEventPersonalMessagesDirty: () => Effect.void,
   markSeriesFuturePersonalMessagesDirty: () => Effect.void,
 } as any);
@@ -862,7 +960,8 @@ const MockEventRsvpsRepositoryLayer = Layer.succeed(EventRsvpsRepository, {
 const MockTeamSettingsRepositoryLayer = Layer.succeed(TeamSettingsRepository, {
   _tag: 'api/TeamSettingsRepository',
   findByTeam: () => Effect.succeed(Option.none()),
-  findByTeamId: () => Effect.succeed(Option.none()),
+  findByTeamId: () =>
+    Effect.succeed(Option.map(teamSettingsTimezoneOverride, (timezone) => ({ timezone }) as any)),
   upsertSettings: () => Effect.succeed({ team_id: TEST_TEAM_ID, event_horizon_days: 30 }),
   upsert: () => Effect.succeed({ team_id: TEST_TEAM_ID, event_horizon_days: 30 }),
   getHorizon: () => Effect.succeed({ event_horizon_days: 30 }),
@@ -1463,6 +1562,111 @@ describe('Event Series API', () => {
       expect(response.status).toBe(200);
       const body = await response.json();
       expect(body.title).toBe('Captain Update No Type');
+    });
+  });
+
+  // The direct regression test for the ticket's second bug: the web read
+  // series times with TODAY's offset but wrote them with the series START
+  // DATE's offset, so editing a series' unrelated field (e.g. its location)
+  // silently moved every future training an hour later, compounding on each
+  // edit. On the server side, that requires (a) an unrelated-field PATCH to
+  // never move a materialized event's `start_at`, and (b)
+  // `updateFutureUnmodifiedInSeries` to receive the TEAM's actual configured
+  // timezone, not a hardcoded stand-in.
+  describe('PATCH — DST fix: unrelated-field edits do not silently reschedule events', () => {
+    const materializeEvent = (startAt: DateTime.Utc): Event.EventId => {
+      const eventId = crypto.randomUUID() as Event.EventId;
+      eventsStore.set(eventId, {
+        id: eventId,
+        team_id: TEST_TEAM_ID,
+        training_type_id: Option.none(),
+        event_type: 'training',
+        title: 'Weekly Training',
+        description: Option.some('Regular training'),
+        start_at: startAt,
+        end_at: Option.none(),
+        location: Option.some('Main Field'),
+        location_url: Option.none(),
+        status: 'active',
+        created_by: TEST_ADMIN_MEMBER_ID,
+        training_type_name: Option.none(),
+        created_by_name: Option.none(),
+        series_id: Option.some(TEST_SERIES_1),
+        series_modified: false,
+        discord_target_channel_id: Option.none(),
+        owner_group_id: Option.none(),
+        owner_group_name: Option.none(),
+        member_group_id: Option.none(),
+        member_group_name: Option.none(),
+      });
+      return eventId;
+    };
+
+    it('title-only PATCH does not change the materialized event start_at, and passes the TEAM timezone (not UTC) to updateFutureUnmodifiedInSeries', async () => {
+      // Southern-hemisphere January DST (NZDT, UTC+13) — deliberately NOT
+      // Prague, so a bug that hardcodes 'UTC' *or* one that hardcodes
+      // 'Europe/Prague' (the handler's own no-team-settings-row fallback)
+      // both recompute a DIFFERENT instant than the correct one below.
+      teamSettingsTimezoneOverride = Option.some('Pacific/Auckland');
+      // TEST_SERIES_1.start_time is '18:00:00'; 2026-01-13T05:00:00Z is
+      // exactly 18:00 local in Pacific/Auckland that day.
+      const originalStartAt = DateTime.makeUnsafe('2026-01-13T05:00:00Z');
+      const eventId = materializeEvent(originalStartAt);
+
+      const response = await handler(
+        new Request(`${BASE}/${TEST_SERIES_1}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ title: 'Renamed Only' }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.title).toBe('Renamed Only');
+
+      expect(capturedUpdateFutureUnmodifiedCalls).toHaveLength(1);
+      expect(capturedUpdateFutureUnmodifiedCalls[0]?.fields.timezone).toBe('Pacific/Auckland');
+      expect(capturedUpdateFutureUnmodifiedCalls[0]?.fields.timezone).not.toBe('UTC');
+      expect(capturedUpdateFutureUnmodifiedCalls[0]?.fields.timezone).not.toBe('Europe/Prague');
+      // The unrelated field is unchanged: startTime carried through untouched.
+      expect(capturedUpdateFutureUnmodifiedCalls[0]?.fields.startTime).toBe('18:00:00');
+
+      const updated = eventsStore.get(eventId);
+      expect(updated?.start_at.epochMilliseconds).toBe(originalStartAt.epochMilliseconds);
+      expect(updated?.title).toBe('Renamed Only');
+    });
+
+    it('location-only PATCH does not change the materialized event start_at', async () => {
+      // Default team (no team_settings row) falls back to 'Europe/Prague';
+      // exercise the summer/CEST side — the exact direction the ticket's
+      // report was about ("created in winter, misfires in summer").
+      const originalStartAt = DateTime.makeUnsafe('2026-07-14T16:00:00Z');
+      const eventId = materializeEvent(originalStartAt);
+
+      const response = await handler(
+        new Request(`${BASE}/${TEST_SERIES_1}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ location: 'New Field' }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.location).toBe('New Field');
+
+      expect(capturedUpdateFutureUnmodifiedCalls).toHaveLength(1);
+      expect(capturedUpdateFutureUnmodifiedCalls[0]?.fields.timezone).toBe('Europe/Prague');
+      expect(capturedUpdateFutureUnmodifiedCalls[0]?.fields.startTime).toBe('18:00:00');
+
+      const updated = eventsStore.get(eventId);
+      expect(updated?.start_at.epochMilliseconds).toBe(originalStartAt.epochMilliseconds);
+      expect(updated?.location).toEqual(Option.some('New Field'));
     });
   });
 

@@ -159,12 +159,31 @@ export class EventDetail extends Schema.Class<EventDetail>('EventDetail')({
   /** See `EventInfo.startDate` above — same derived team-local projection (plan §11.3). */
   startDate: Schema.OptionFromOptionalKey(Schema.String),
   endDate: Schema.OptionFromOptionalKey(Schema.String),
+  /**
+   * The event's team's `team_settings.timezone`, so the web can format
+   * `startAt`/`endAt` and label time inputs without guessing the browser
+   * zone. `OptionFromOptionalKey`, same as `startDate` above: an old server
+   * during a rolling deploy simply omits the key rather than decode-failing
+   * the whole event detail.
+   */
+  timezone: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
 export class EventListResponse extends Schema.Class<EventListResponse>('EventListResponse')({
   canCreate: Schema.Boolean,
   canViewAll: Schema.Boolean,
   events: Schema.Array(EventInfo),
+  /**
+   * The team's `team_settings.timezone` — added so the events LIST page can label its
+   * recurring-schedule time inputs without a second, separately-permissioned
+   * `getTeamSettings` call (that endpoint requires `team:manage`, which most captains who
+   * can create a series do NOT hold, so it 403s for the majority of this feature's users).
+   * This endpoint only requires membership, and every caller already fetches it for the
+   * event list itself. `OptionFromOptionalKey`, same reasoning as `EventInfo.startDate`: an
+   * old server during a rolling deploy simply omits the key rather than decode-failing the
+   * whole list.
+   */
+  timezone: Schema.OptionFromOptionalKey(Schema.String),
 }) {}
 
 const CreateEventRequestStruct = Schema.Struct({

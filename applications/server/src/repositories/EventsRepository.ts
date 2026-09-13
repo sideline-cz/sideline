@@ -697,18 +697,38 @@ const make = Effect.gen(function* () {
       end_time: Schema.OptionFromNullOr(Schema.String),
       location: Schema.OptionFromNullOr(Schema.String),
       location_url: Schema.OptionFromNullOr(Schema.String),
+      // The team's `team_settings.timezone` (COALESCE'd to 'Europe/Prague' by
+      // the caller) — series times are team-local wall clock, not UTC, so
+      // both the calendar-date extraction and the re-combination below must
+      // happen in the team's zone, not UTC.
+      //
+      // NOTE: `AT TIME ZONE` resolves a DST-ambiguous wall clock (the repeated hour on
+      // fall-back) to the LATER of its two instants. `resolveOccurrenceInstant`
+      // (`~/utils/seriesOccurrence.ts`), the JS-side equivalent used by
+      // `applications/server/test/EventSeries.test.ts`'s `recomputeStartAt` test helper,
+      // uses `"compatible"` disambiguation and picks the EARLIER one instead — the two
+      // genuinely disagree by one hour for that input (verified:
+      // `2026-10-25 02:30 Europe/Prague` -> `01:30Z` here vs `00:30Z` there). Keep this
+      // note, the one on `resolveOccurrenceInstant`, and the one on `recomputeStartAt`
+      // consistent if either side's disambiguation ever changes.
+      timezone: Schema.String,
     }),
     execute: (input) =>
       sql`UPDATE events SET
                 title = ${input.title},
                 training_type_id = ${input.training_type_id},
                 description = ${input.description},
-                start_at = ((start_at AT TIME ZONE 'UTC')::date + ${input.start_time}::time) AT TIME ZONE 'UTC',
-                end_at = CASE WHEN ${input.end_time}::time IS NOT NULL THEN ((start_at AT TIME ZONE 'UTC')::date + ${input.end_time}::time) AT TIME ZONE 'UTC' ELSE NULL END,
+                start_at = ((start_at AT TIME ZONE ${input.timezone})::date + ${input.start_time}::time) AT TIME ZONE ${input.timezone},
+                end_at = CASE WHEN ${input.end_time}::time IS NOT NULL THEN ((start_at AT TIME ZONE ${input.timezone})::date + ${input.end_time}::time) AT TIME ZONE ${input.timezone} ELSE NULL END,
                 location = ${input.location},
                 location_url = ${input.location_url},
                 updated_at = now()
               WHERE series_id = ${input.series_id}
+                -- NOTE: still UTC-dated, not team-local — out of scope for this
+                -- change (only the assignment above needs to be team-local to
+                -- fix the DST bug); a future-only edit whose UTC date rolls
+                -- over relative to the team-local date can under/over-select
+                -- by at most one boundary row.
                 AND (start_at AT TIME ZONE 'UTC')::date >= ${input.from_date}::date
                 AND series_modified = false
                 AND status = 'active'`,
@@ -1132,6 +1152,7 @@ const make = Effect.gen(function* () {
       endTime: Option.Option<string>;
       location: Option.Option<string>;
       locationUrl: Option.Option<string>;
+      timezone: string;
     },
   ) =>
     updateFutureUnmodified({
@@ -1144,6 +1165,7 @@ const make = Effect.gen(function* () {
       end_time: fields.endTime,
       location: fields.location,
       location_url: fields.locationUrl,
+      timezone: fields.timezone,
     }).pipe(catchSqlErrors);
 
   const markEventPersonalMessagesDirty = (eventId: Event.EventId) =>
