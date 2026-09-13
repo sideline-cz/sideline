@@ -42,8 +42,8 @@ src/
     ├── handleCreated.ts                — event_created handler
     ├── handleUpdated.ts                — event_updated handler
     ├── handleCancelled.ts              — event_cancelled handler
-    ├── handleStarted.ts                — event_started handler (updates embed, removes RSVP buttons)
-    ├── handleRsvpReminder.ts           — rsvp_reminder handler
+    ├── handleStarted.ts                — event_started handler (best-effort deletes the owners-thread training claim message; posts nothing)
+    ├── handleRsvpReminder.ts           — rsvp_reminder handler (DMs every non-responder; posts nothing to any channel)
     ├── handleTrainingClaimRequest.ts   — training_claim_request handler (posts claim embed into the persistent owners claim thread, saves message id back via Event/SaveClaimDiscordMessageId)
     ├── handleTrainingClaimUpdate.ts    — training_claim_update handler (edits existing claim embed in place)
     ├── handleUnclaimedTrainingReminder.ts — unclaimed_training_reminder handler (posts reminder pointing to claim message)
@@ -516,7 +516,24 @@ Event types: `event_created`, `event_updated`, `event_cancelled`, `event_started
 
 The `teams_generated` handler (`src/rcp/event/handleTeamsGenerated.ts`) posts the balanced-team breakdown embed (built by `src/rest/events/buildGeneratedTeamsEmbed.ts`) to `event.discord_target_channel_id`; it no-ops with a warning when that channel id is `None`. Its `teams` payload is decoded from the `event_sync_events.teams_payload` JSONB column (see "JSONB payload column on an outbox event type" in `applications/server/AGENTS.md`) — the bot does not recompute the assignment, it only renders the server-computed result.
 
-The `event_started` handler updates the Discord embed to remove RSVP buttons and rebuilds the embed with current RSVP counts. For its "Starting now" post, the mention is `event_type`-dependent: for a **training** it mentions the assigned coach via a `<@coach>` user mention (`event.claimed_by_discord_id` + `allowed_mentions.users`), falling back to the owners-group role mention + `bot_event_started_no_coach_warning` when no coach is claimed (and to the bare warning text when neither is resolvable); for **non-training** events it mentions `event.discord_role_id` (the member-group role) as before. Note `event.discord_role_id` is the OWNERS-group role for trainings and the MEMBER-group role otherwise — this overload is set server-side; see `applications/server/AGENTS.md` → "Overloaded payload fields on event sync events". The handler also best-effort deletes the owners-thread claim message (`Event/GetClaimInfo` → `rest.deleteMessage`, swallowing code 10008) when a training starts.
+The `event_started` handler posts nothing — the "Starting now" post (embed, attendee list, and the coach/role mention with its `bot_event_started_no_coach_warning` "nobody claimed this training" text) was removed; nothing is posted when an event starts. The handler's only remaining action is a best-effort deletion of the owners-thread claim message (`Event/GetClaimInfo` → `rest.deleteMessage`, swallowing code 10008) for training events. The `event_started` sync event still fires from `EventStartCron` on schedule — this claim-message deletion is its only remaining effect.
+
+The `rsvp_reminder` handler (`src/rcp/event/handleRsvpReminder.ts`) **only DMs non-responders** — the reminder-channel summary embed (RSVP counts, "Going" and non-responder name fields) was removed. It still calls `Event/GetRsvpReminderSummary`, but consumes ONLY `summary.nonResponders`; the `yesCount`/`noCount`/`maybeCount`/`yesAttendees` fields of that result are now unread by the bot. Each DM links the member to their own personal events channel, falling back to the event's reminder channel (`event.discord_channel_id` → guild `system_channel_id`) and finally to the bare `https://discord.com/channels/{guild_id}` guild link. A guild with no resolvable reminder channel MUST still DM every non-responder — never early-return on a missing channel id.
+
+#### Late-RSVP notice (`src/interactions/rsvp.ts`) — an interaction, not a sync event
+
+`postRsvpDiscordUpdates` is the only remaining Discord side effect of an RSVP button press. It posts the `bot_late_rsvp_notification` embed to the team's configured late-RSVP channel, and runs ONLY when both halves of this guard pass:
+
+```ts
+if (!counts.isLateRsvp || Option.isNone(counts.lateRsvpChannelId)) return Effect.void;
+```
+
+Rules:
+
+1. **Never re-derive "was this a change?" in the bot.** The bot has no access to the member's prior response. The change-vs-first-answer decision lives in `Event/SubmitRsvp` (`applications/server/src/rpc/event/index.ts`), which returns `lateRsvpChannelId: Some` only for a CHANGED answer — see `applications/server/AGENTS.md` → "Before/After State Detection in Upsert Handlers".
+2. **`lateRsvpChannelId: None` deliberately conflates two cases** — "no late-RSVP channel configured" and "not a change". Do not add a wire field to tell them apart; that reintroduces the rolling-deploy window the server-side gating exists to avoid.
+3. **Keep the `!counts.isLateRsvp` half of the guard** even though the server's gating makes it redundant. It is rolling-deploy defence against an older server that still returns `Some` for a first answer.
+4. **Do not narrow `isLateRsvp` server-side to mean "changed answer".** It stays the wider flag (it also drives the ephemeral `bot_rsvp_late_hint`), and this guard requires it `true` — narrowing it would silently stop every late-RSVP post.
 
 #### Roster-approval sync handlers (Event↔Roster Attendance)
 
@@ -964,7 +981,6 @@ Never pass `formatName`'s output into a thread name, channel name, or any other 
 This pattern is used in:
 - `buildEventEmbed.ts` — "Going" field (bold name only via `formatName`, no mention, comma-separated)
 - `buildAttendeesEmbed.ts` — attendee entries via `formatNameWithMention` (with optional message suffix)
-- `handleRsvpReminder.ts` — non-responder and yes-attendee lists via `formatNameWithMention`
 - `buildClaimMessage.ts` — Status field renders the claimer via `formatNameWithMention`; `claimedBy` is `Option<ClaimedByEntry>` where `ClaimedByEntry` is the canonical five-field identity-tuple
 
 When building new embed functions that display user names, always use `formatName` for the bold name portion and follow this priority: bold name first, mention as parenthetical supplement.

@@ -51,10 +51,3 @@ const timedWhen = (opts: EventWhen): string =>
 /** "Kdy" fields, reminder embeds. */
 export const formatEventWhen = (opts: EventWhen): string =>
   opts.allDay ? `${allDayDates(opts)} · ${allDayMarker(opts.locale)}` : timedWhen(opts);
-
-/** `handleStarted` ONLY. The timed branch deliberately ignores `endAt` — `handleStarted.ts`
- * has always emitted a single `<t:S:F>` with no end range, and that must stay byte-identical. */
-export const formatEventWhenLong = (opts: EventWhen): string =>
-  opts.allDay
-    ? `${allDayDates(opts)} · ${allDayMarker(opts.locale)}`
-    : toDiscordTimestamp(opts.startAt, 'F');

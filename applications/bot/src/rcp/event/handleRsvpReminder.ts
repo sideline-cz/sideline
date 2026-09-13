@@ -5,7 +5,6 @@ import { Array, DateTime, Effect, Option, pipe, Schema } from 'effect';
 import { guildLocale } from '~/locale.js';
 import { discordDateInstant, toDiscordTimestamp } from '~/rest/discordTimestamp.js';
 import { formatEventWhen } from '~/rest/events/eventWhen.js';
-import { formatNameWithMention, splitIntoFieldChunks } from '~/rest/utils.js';
 import { DfxGuild } from '~/schemas.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
@@ -17,6 +16,7 @@ export const handleRsvpReminder = (event: EventRpcEvents.RsvpReminderEvent) =>
   Effect.Do.pipe(
     Effect.bind('rpc', () => SyncRpc.asEffect()),
     Effect.bind('rest', () => DiscordREST.asEffect()),
+    // The reminder-channel summary post is gone (Task 2); only `nonResponders` is consumed now.
     Effect.bind('summary', ({ rpc }) =>
       rpc['Event/GetRsvpReminderSummary']({ event_id: event.event_id }),
     ),
@@ -37,18 +37,7 @@ export const handleRsvpReminder = (event: EventRpcEvents.RsvpReminderEvent) =>
       const channelId = Option.getOrUndefined(
         Option.orElse(event.discord_channel_id, () => guild.system_channel_id),
       );
-      if (!channelId) {
-        return Effect.logWarning(
-          `Guild ${event.guild_id} has no system channel, skipping RSVP reminder`,
-        );
-      }
       const locale = guildLocale({ guild_locale: guild.preferred_locale });
-
-      const nameFieldChunks = (entries: ReadonlyArray<string>, fieldName: string) =>
-        splitIntoFieldChunks(entries).map((value) => ({ name: fieldName, value, inline: false }));
-
-      const yesAttendeeNames = pipe(summary.yesAttendees, Array.map(formatNameWithMention));
-      const nonResponderNames = pipe(summary.nonResponders, Array.map(formatNameWithMention));
 
       // `RsvpReminderEvent` has no `end_at` field, so `endAt: Option.none()` is required here.
       // ⚠ the all-day branch takes DATES, not instants. `event.start_date` is the team-local
@@ -75,56 +64,20 @@ export const handleRsvpReminder = (event: EventRpcEvents.RsvpReminderEvent) =>
         ? `${toDiscordTimestamp(discordDateInstant(startDate, event.start_at), 'D')} (${toDiscordTimestamp(event.start_at, 'R')})`
         : whenText;
 
-      const fields = [
-        {
-          name: m.bot_embed_when({}, { locale }),
-          value: whenText,
-          inline: false,
-        },
-        {
-          name: m.bot_embed_rsvps({}, { locale }),
-          value: m.bot_embed_rsvp_summary(
-            {
-              yes: String(summary.yesCount),
-              no: String(summary.noCount),
-              maybe: String(summary.maybeCount),
-            },
-            { locale },
-          ),
-          inline: false,
-        },
-        ...nameFieldChunks(yesAttendeeNames, m.bot_embed_going({}, { locale })),
-        ...nameFieldChunks(nonResponderNames, m.rsvp_nonRespondersTitle({}, { locale })),
-      ];
-
-      const postChannel = rest
-        .createMessage(channelId, {
-          embeds: [
-            {
-              title: m.bot_rsvp_reminder_title({ title: event.title }, { locale }),
-              color: REMINDER_COLOR,
-              fields,
-            },
-          ],
-        })
-        .pipe(
-          Effect.tap((msg) =>
-            Effect.logInfo(
-              `Posted RSVP reminder for "${event.title}" to channel ${channelId}, message ${msg.id}`,
-            ),
-          ),
-          Effect.asVoid,
-        );
-
-      // Fall back to the reminder-channel link for members without a personal channel.
+      // Fall back to the reminder-channel link, and finally to the guild's channel list, for
+      // members without a personal channel and when no reminder channel is resolvable.
       const personalChannelByDiscordId = new Map(
         personalChannels.map((member) => [member.discord_id, member.personal_channel_id]),
       );
       const linkFor = (discordId: Discord.Snowflake) => {
         const personalChannelId = personalChannelByDiscordId.get(discordId);
-        return personalChannelId !== undefined
-          ? `https://discord.com/channels/${event.guild_id}/${personalChannelId}`
-          : `https://discord.com/channels/${event.guild_id}/${channelId}`;
+        if (personalChannelId !== undefined) {
+          return `https://discord.com/channels/${event.guild_id}/${personalChannelId}`;
+        }
+        if (channelId !== undefined) {
+          return `https://discord.com/channels/${event.guild_id}/${channelId}`;
+        }
+        return `https://discord.com/channels/${event.guild_id}`;
       };
 
       const dmNonResponders = pipe(
@@ -162,10 +115,8 @@ export const handleRsvpReminder = (event: EventRpcEvents.RsvpReminderEvent) =>
         ),
       );
 
-      const sendDms = Array.isReadonlyArrayEmpty(dmNonResponders)
+      return Array.isReadonlyArrayEmpty(dmNonResponders)
         ? Effect.void
         : Effect.all(dmNonResponders, { concurrency: 5 }).pipe(Effect.asVoid);
-
-      return Effect.all([postChannel, sendDms], { concurrency: 'unbounded' }).pipe(Effect.asVoid);
     }),
   );

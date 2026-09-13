@@ -22,6 +22,23 @@ const NON_RESPONDER_WITH_CHANNEL_ID = '600000000000000001';
 const NON_RESPONDER_WITHOUT_CHANNEL_ID = '600000000000000002';
 const PERSONAL_CHANNEL_ID = '700000000000000001';
 
+// A single seeded non-responder — used whenever a test needs the DM path to fire.
+// The channel-summary post (`postChannel`) is gone; the per-non-responder DM is the
+// only reminder that reaches Discord (see Task 2 of the training-notifications-fix plan).
+//
+// Note: no personal channel is seeded alongside this member (`personalChannels`
+// defaults to `[]`), so its DM link falls through to the reminders-channel /
+// guild-level fallback rather than the personal-channel branch.
+const ONE_NON_RESPONDER_SEED = [
+  {
+    discord_id: Option.some(NON_RESPONDER_WITH_CHANNEL_ID as any),
+    name: Option.some('Alice'),
+    nickname: Option.none(),
+    username: Option.none(),
+    display_name: Option.none(),
+  },
+];
+
 const makeEvent = (
   overrides: Partial<EventRpcEvents.RsvpReminderEvent> = {},
 ): EventRpcEvents.RsvpReminderEvent =>
@@ -91,6 +108,7 @@ const makeRecordingDiscordREST = (
   overrides: Partial<Record<string, (...args: any[]) => Effect.Effect<any>>> = {},
 ) => {
   const createMessageCalls: CreateMessageCall[] = [];
+  const createDmCalls: Array<{ recipient_id: string }> = [];
 
   const defaults: Record<string, (...args: any[]) => Effect.Effect<any>> = {
     createMessage: (...args: any[]) => {
@@ -102,7 +120,10 @@ const makeRecordingDiscordREST = (
         preferred_locale: 'en-US',
         system_channel_id: SYSTEM_CHANNEL_ID,
       }),
-    createDm: () => Effect.succeed({ id: 'dm-channel-id' }),
+    createDm: (...args: any[]) => {
+      createDmCalls.push(args[0]);
+      return Effect.succeed({ id: 'dm-channel-id' });
+    },
   };
 
   const layer = Layer.succeed(
@@ -115,7 +136,7 @@ const makeRecordingDiscordREST = (
     }),
   );
 
-  return { createMessageCalls, layer };
+  return { createMessageCalls, createDmCalls, layer };
 };
 
 const run = (
@@ -128,8 +149,8 @@ const run = (
 // ---------------------------------------------------------------------------
 
 describe('handleRsvpReminder — no member-group role mention', () => {
-  it('does NOT include role mention in content when discord_role_id is Some', async () => {
-    const { layer: rpcLayer } = makeRecordingSyncRpc();
+  it('does NOT include role mention in the DM content when discord_role_id is Some', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc({ nonResponders: ONE_NON_RESPONDER_SEED });
     const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
 
     await run(
@@ -137,14 +158,14 @@ describe('handleRsvpReminder — no member-group role mention', () => {
       Layer.merge(rpcLayer, restLayer),
     );
 
-    expect(createMessageCalls.length).toBeGreaterThanOrEqual(1);
-    const [_channelId, payload] = createMessageCalls[0];
-    const content = payload.content ?? '';
+    const dmCall = createMessageCalls.find(([channelId]) => channelId === 'dm-channel-id');
+    expect(dmCall).toBeDefined();
+    const content = dmCall?.[1].content ?? '';
     expect(content).not.toContain('<@&');
   });
 
-  it('does NOT include role mention in content when discord_role_id is None', async () => {
-    const { layer: rpcLayer } = makeRecordingSyncRpc();
+  it('does NOT include role mention in the DM content when discord_role_id is None', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc({ nonResponders: ONE_NON_RESPONDER_SEED });
     const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
 
     await run(
@@ -152,14 +173,14 @@ describe('handleRsvpReminder — no member-group role mention', () => {
       Layer.merge(rpcLayer, restLayer),
     );
 
-    expect(createMessageCalls.length).toBeGreaterThanOrEqual(1);
-    const [_channelId, payload] = createMessageCalls[0];
-    const content = payload.content ?? '';
+    const dmCall = createMessageCalls.find(([channelId]) => channelId === 'dm-channel-id');
+    expect(dmCall).toBeDefined();
+    const content = dmCall?.[1].content ?? '';
     expect(content).not.toContain('<@&');
   });
 
-  it('does NOT set allowed_mentions.roles when discord_role_id is Some', async () => {
-    const { layer: rpcLayer } = makeRecordingSyncRpc();
+  it('does NOT set allowed_mentions.roles on the DM when discord_role_id is Some', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc({ nonResponders: ONE_NON_RESPONDER_SEED });
     const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
 
     await run(
@@ -167,9 +188,9 @@ describe('handleRsvpReminder — no member-group role mention', () => {
       Layer.merge(rpcLayer, restLayer),
     );
 
-    expect(createMessageCalls.length).toBeGreaterThanOrEqual(1);
-    const [_channelId, payload] = createMessageCalls[0];
-    const roles = payload.allowed_mentions?.roles ?? [];
+    const dmCall = createMessageCalls.find(([channelId]) => channelId === 'dm-channel-id');
+    expect(dmCall).toBeDefined();
+    const roles = dmCall?.[1].allowed_mentions?.roles ?? [];
     expect(roles).toHaveLength(0);
   });
 });
@@ -270,26 +291,6 @@ describe('handleRsvpReminder — all_day rendering (PR 2)', () => {
     },
   ];
 
-  it('all-day: channel embed "When" field is exactly <t:S:D> · All day (<t:S:R>)', async () => {
-    const { layer: rpcLayer } = makeRecordingSyncRpc();
-    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
-
-    await run(
-      handleRsvpReminder(
-        makeEvent({ all_day: true, start_at: ALL_DAY_START_AT, start_date: ALL_DAY_START_DATE }),
-      ),
-      Layer.merge(rpcLayer, restLayer),
-    );
-
-    const channelCall = createMessageCalls.find(([channelId]) => channelId === CHANNEL_ID);
-    expect(channelCall).toBeDefined();
-    const whenField = channelCall?.[1].embeds?.[0]?.fields?.[0];
-    const marker = m.bot_embed_all_day({}, { locale: 'en' });
-    expect(whenField?.value).toBe(
-      `<t:${ALL_DAY_EPOCH}:D> · ${marker} (<t:${ALL_DAY_START_AT_EPOCH}:R>)`,
-    );
-  });
-
   it('all-day: DM uses bot_rsvp_reminder_dm_all_day with {when} = <t:S:D> (<t:S:R>) — no marker', async () => {
     const { layer: rpcLayer } = makeRecordingSyncRpc({ nonResponders: ONE_NON_RESPONDER });
     const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
@@ -315,7 +316,7 @@ describe('handleRsvpReminder — all_day rendering (PR 2)', () => {
     expect(dmCall?.[1].embeds?.[0]?.description).toBe(expectedDescription);
   });
 
-  it('all-day regression (B1): embed field and DM sentence read start_date, not a UTC read of start_at', async () => {
+  it('all-day regression (B1): DM sentence reads start_date, not a UTC read of start_at', async () => {
     // A Prague all-day event on 2026-09-16, stored at team-local midnight. A UTC read of
     // this instant yields 2026-09-15 — one day early, for every viewer east of UTC (the
     // entire default fleet). Reading `start_date` yields the correct 2026-09-16.
@@ -332,30 +333,10 @@ describe('handleRsvpReminder — all_day rendering (PR 2)', () => {
       Layer.merge(rpcLayer, restLayer),
     );
 
-    const channelCall = createMessageCalls.find(([channelId]) => channelId === CHANNEL_ID);
-    const whenField = channelCall?.[1].embeds?.[0]?.fields?.[0];
-    expect(whenField?.value).toContain(`<t:${correctEpoch}:D>`);
-    expect(whenField?.value).not.toContain(`<t:${wrongEpoch}:D>`);
-
     const dmCall = createMessageCalls.find(([channelId]) => channelId === 'dm-channel-id');
     const description = dmCall?.[1].embeds?.[0]?.description ?? '';
     expect(description).toContain(`<t:${correctEpoch}:D>`);
     expect(description).not.toContain(`<t:${wrongEpoch}:D>`);
-  });
-
-  it('timed: channel embed "When" field is exactly <t:S:f> (<t:S:R>) — byte-identical baseline', async () => {
-    const { layer: rpcLayer } = makeRecordingSyncRpc();
-    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
-
-    await run(
-      handleRsvpReminder(makeEvent({ all_day: false, start_at: TIMED_START_AT })),
-      Layer.merge(rpcLayer, restLayer),
-    );
-
-    const channelCall = createMessageCalls.find(([channelId]) => channelId === CHANNEL_ID);
-    expect(channelCall).toBeDefined();
-    const whenField = channelCall?.[1].embeds?.[0]?.fields?.[0];
-    expect(whenField?.value).toBe(`<t:${TIMED_EPOCH}:f> (<t:${TIMED_EPOCH}:R>)`);
   });
 
   it('timed: DM uses bot_rsvp_reminder_dm with the same {when} as the channel field', async () => {
@@ -382,7 +363,7 @@ describe('handleRsvpReminder — all_day rendering (PR 2)', () => {
   });
 
   it('payload without all_day (decoding default) renders as timed and does not throw', async () => {
-    const { layer: rpcLayer } = makeRecordingSyncRpc();
+    const { layer: rpcLayer } = makeRecordingSyncRpc({ nonResponders: ONE_NON_RESPONDER });
     const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
 
     const event = makeEvent({ start_at: TIMED_START_AT }) as any;
@@ -390,9 +371,101 @@ describe('handleRsvpReminder — all_day rendering (PR 2)', () => {
 
     await run(handleRsvpReminder(event), Layer.merge(rpcLayer, restLayer));
 
-    const channelCall = createMessageCalls.find(([channelId]) => channelId === CHANNEL_ID);
-    expect(channelCall).toBeDefined();
-    const whenField = channelCall?.[1].embeds?.[0]?.fields?.[0];
-    expect(whenField?.value).toBe(`<t:${TIMED_EPOCH}:f> (<t:${TIMED_EPOCH}:R>)`);
+    const dmCall = createMessageCalls.find(([channelId]) => channelId === 'dm-channel-id');
+    expect(dmCall).toBeDefined();
+    const expectedWhen = `<t:${TIMED_EPOCH}:f> (<t:${TIMED_EPOCH}:R>)`;
+    const expectedDescription = m.bot_rsvp_reminder_dm(
+      {
+        title: 'Training Session',
+        when: expectedWhen,
+        link: `https://discord.com/channels/${GUILD_ID}/${CHANNEL_ID}`,
+      },
+      { locale: 'en' },
+    );
+    expect(dmCall?.[1].embeds?.[0]?.description).toBe(expectedDescription);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The reminder-dispatch summary post is gone (Task 2 of the
+// training-notifications-fix plan): the per-non-responder DM is now the only
+// reminder that reaches Discord. Nothing should ever be posted to the
+// reminder channel (`event.discord_channel_id` / the guild system channel).
+// ---------------------------------------------------------------------------
+
+describe('handleRsvpReminder — no reminder-channel summary post', () => {
+  it('posts nothing to the reminder channel; exactly one DM goes out for one non-responder', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc({ nonResponders: ONE_NON_RESPONDER_SEED });
+    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(handleRsvpReminder(makeEvent()), Layer.merge(rpcLayer, restLayer));
+
+    expect(createMessageCalls.find(([channelId]) => channelId === CHANNEL_ID)).toBeUndefined();
+    expect(
+      createMessageCalls.find(([channelId]) => channelId === SYSTEM_CHANNEL_ID),
+    ).toBeUndefined();
+    const dmCalls = createMessageCalls.filter(([channelId]) => channelId === 'dm-channel-id');
+    expect(dmCalls).toHaveLength(1);
+  });
+
+  it('sends zero Discord messages when there are no non-responders', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc({ nonResponders: [] });
+    const { createMessageCalls, createDmCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(handleRsvpReminder(makeEvent()), Layer.merge(rpcLayer, restLayer));
+
+    expect(createMessageCalls).toHaveLength(0);
+    expect(createDmCalls).toHaveLength(0);
+  });
+
+  it('still sends DMs when no channel is resolvable (no discord_channel_id, no guild system channel), using the guild-level link', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc({ nonResponders: ONE_NON_RESPONDER_SEED });
+    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST({
+      getGuild: (_guildId: any) =>
+        Effect.succeed({
+          preferred_locale: 'en-US',
+          system_channel_id: null,
+        }),
+    });
+
+    await run(
+      handleRsvpReminder(makeEvent({ discord_channel_id: Option.none() })),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    const dmCall = createMessageCalls.find(([channelId]) => channelId === 'dm-channel-id');
+    expect(dmCall).toBeDefined();
+    const description = dmCall?.[1].embeds?.[0]?.description ?? '';
+    // Pin the bare guild form. A plain `toContain` of the guild id would also match the
+    // channel-link form (`.../{guild}/{channel}`), so match the closing paren of the
+    // markdown link to prove the fallback really bottomed out at the guild level.
+    expect(description).toContain(`(https://discord.com/channels/${GUILD_ID})`);
+  });
+
+  it('sends exactly one DM per non-responder that has a linked discord_id', async () => {
+    const { layer: rpcLayer } = makeRecordingSyncRpc({
+      nonResponders: [
+        {
+          discord_id: Option.some(NON_RESPONDER_WITH_CHANNEL_ID as any),
+          name: Option.some('Alice'),
+          nickname: Option.none(),
+          username: Option.none(),
+          display_name: Option.none(),
+        },
+        {
+          discord_id: Option.none(),
+          name: Option.some('No Discord Link'),
+          nickname: Option.none(),
+          username: Option.none(),
+          display_name: Option.none(),
+        },
+      ],
+    });
+    const { createMessageCalls, layer: restLayer } = makeRecordingDiscordREST();
+
+    await run(handleRsvpReminder(makeEvent()), Layer.merge(rpcLayer, restLayer));
+
+    const dmCalls = createMessageCalls.filter(([channelId]) => channelId === 'dm-channel-id');
+    expect(dmCalls).toHaveLength(1);
   });
 });

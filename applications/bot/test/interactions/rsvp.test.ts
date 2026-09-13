@@ -3,6 +3,14 @@
 // (GetDiscordMessageId + buildEventEmbed + updateMessage are gone). Personal
 // channel messages refresh via the server-side dirty-mark instead. The only
 // remaining Discord-side effect is the late-RSVP notice.
+//
+// The changed-answer-only decision (training-notifications-fix plan, Task 1)
+// lives ENTIRELY server-side: `applications/server/src/rpc/event/index.ts`
+// only resolves `lateRsvpChannelId` to `Some` when a prior response existed
+// and differs from the new one. This module's guard (`postRsvpDiscordUpdates`
+// dropping the post whenever `lateRsvpChannelId` is `None`) is unchanged
+// defense-in-depth — it does not itself distinguish "no channel configured"
+// from "not a change".
 
 import {
   Discord as DomainDiscord,
@@ -179,6 +187,12 @@ describe('postRsvpDiscordUpdates', () => {
     expect(calls.createMessage[0]?.channelId).toBe(LATE_RSVP_CHANNEL_ID);
   });
 
+  // Server-side contract test: the server withholds `lateRsvpChannelId` (rather than the
+  // bot deciding) whenever an RSVP is a FIRST answer after the reminder, not a changed one —
+  // see `applications/server/src/rpc/event/index.ts` (`isLateRsvpChange` gates
+  // `findLateRsvpChannelId`). From the bot's point of view this is indistinguishable from "no
+  // channel configured": both arrive as `lateRsvpChannelId: Option.none()`, and this module
+  // must drop the post either way.
   it('late RSVP with no configured channel: no Discord calls at all', async () => {
     const calls = makeCallTracker();
     const rest = makeRest(calls);

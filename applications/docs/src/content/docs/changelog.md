@@ -5,6 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-13 — Fewer Discord notifications: RSVP reminders and event-start posts
+
+Three Discord notification changes, all aimed at cutting noise that wasn't earning its keep:
+
+- **The late-RSVP channel notice now only fires when someone changes their mind.** Previously it also posted the first time a member answered after the reminder went out — even if that was their only answer. Now it stays quiet unless a member switches their answer to something different after already responding once.
+- **RSVP reminders are DM-only.** The summary that used to be posted to the reminders channel (who's going, who hasn't answered) is gone. The direct message each non-responder already received is still sent — it's now the only reminder.
+- **Nothing is posted when an event starts.** The "Starting now" announcement — including the coach @-mention and the "no coach claimed this training" warning — has been removed. Training claim threads still get cleaned up automatically when the session begins.
+
+If your team relied on the reminders-channel summary or the start-of-event post to spot who hadn't responded, check the [Notifications guide](/guides/notifications/) for what changed.
+
 ## 2026-09-10 — Download your own data
 
 **Profile → Download your data** gives you everything Sideline holds about you as a JSON file, immediately. Until now this was a request handled by a person.

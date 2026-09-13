@@ -50,10 +50,11 @@ Click a different button — Yes, No, or Coming later. The new answer overwrites
 
 ### Why didn't I get a Discord notification?
 
-Common causes:
+RSVP reminders are sent as a direct message, not a channel post. Common causes:
 
-- The bot doesn't have permission to @-mention you in the reminders channel.
-- You have Discord notifications turned off for that channel.
+- Your Discord account isn't linked to your Sideline profile, so the bot doesn't know who to DM.
+- Your Discord privacy settings block DMs from server members (see [What happens if I have Discord DMs disabled?](#what-happens-if-i-have-discord-dms-disabled) above).
+- You already RSVPed — reminders only go to members who haven't responded yet.
 - Your team has reminders disabled in their notification settings.
 
 ### Can I hide events from groups I'm not in?

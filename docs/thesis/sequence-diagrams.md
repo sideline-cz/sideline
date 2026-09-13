@@ -393,7 +393,7 @@ sequenceDiagram
 
 ## 7. Event Started (Cron)
 
-The `EventStartCron` runs every minute (`* * * * *`). On each tick it first runs a best-effort, once-per-cycle self-healing sweep (`markStalePersonalMessagesDirty`) that re-marks any event which is no longer `active`/upcoming but still holds `personal_event_messages` rows and isn't already dirty — a backstop for events missed by a prior cycle's per-event mark below. It then queries for `active` events whose `start_at` timestamp is in the past, atomically transitions each to `started` status, marks the event's `personal_messages_dirty_at` (so the personal-events reconcile worker removes the finished event from members' personal channels), and emits an `event_started` row in the `event_sync_events` outbox. The bot's Event Sync worker picks up the event and runs two actions in parallel: it posts a fresh "Starting now" announcement to the team's configured reminders channel (or the guild system channel as a fallback), and — for training events — best-effort deletes the training's claim-board message. As of the remove-global-events-board release there is no shared-board embed to edit in place and no channel reorder or `recoverDeletedMessages` recovery step; those were removed along with the shared events board.
+The `EventStartCron` runs every minute (`* * * * *`). On each tick it first runs a best-effort, once-per-cycle self-healing sweep (`markStalePersonalMessagesDirty`) that re-marks any event which is no longer `active`/upcoming but still holds `personal_event_messages` rows and isn't already dirty — a backstop for events missed by a prior cycle's per-event mark below. It then queries for `active` events whose `start_at` timestamp is in the past, atomically transitions each to `started` status, marks the event's `personal_messages_dirty_at` (so the personal-events reconcile worker removes the finished event from members' personal channels), and emits an `event_started` row in the `event_sync_events` outbox. The bot's Event Sync worker picks up the event; nothing is posted for the event starting — the "Starting now" announcement (embed, attendee list, coach/role mention and its "nobody claimed this training" warning) was removed. The handler's only remaining action is, for training events, a best-effort deletion of the training's claim-board message. As of the remove-global-events-board release there is no shared-board embed to edit in place and no channel reorder or `recoverDeletedMessages` recovery step; those were removed along with the shared events board.
 
 ```mermaid
 sequenceDiagram
@@ -439,17 +439,13 @@ sequenceDiagram
     DB-->>Bot: [event_started event, ...]
 
     loop For each event_started event
-        Note over Bot: handleStarted — two actions run in parallel.<br/>As of the remove-global-events-board release there is no shared-board<br/>embed to edit or reorder; the finished event disappears from personal<br/>channels separately, via `personal_messages_dirty_at` and the<br/>personal-events reconcile worker (see Event Creation diagrams above).
-        par "Starting now" announcement
-            Bot->>DB: RPC Event/GetYesAttendeesForEmbed {event_id, member_group_id}
-            Bot->>Discord: GET /guilds/{guild_id} (preferred locale, falls back to system channel)
-            Discord-->>Bot: Guild {preferred_locale, system_channel_id}
-            Note over Bot: Build yellow "Starting now: {title}" embed;<br/>@-mentions the claimed coach (training) or member-group role (other events)
-            Bot->>Discord: POST /channels/{reminders_channel_or_system_channel}/messages
-        and Best-effort claim-message cleanup (training only)
+        Note over Bot: handleStarted — posts nothing. The only remaining action is a<br/>best-effort claim-message deletion for training events. The finished event<br/>disappears from personal channels separately, via `personal_messages_dirty_at`<br/>and the personal-events reconcile worker (see Event Creation diagrams above).
+        alt Training event
             Bot->>DB: RPC Event/GetClaimInfo {event_id}
             DB-->>Bot: EventClaimInfo (thread + message IDs, if any)
             Bot->>Discord: DELETE claim-thread message (10008 errors silently swallowed)
+        else Non-training event
+            Note over Bot: No Discord action
         end
 
         Bot->>DB: RPC Event/MarkEventProcessed {id}

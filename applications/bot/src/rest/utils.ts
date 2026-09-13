@@ -70,29 +70,6 @@ export const formatNameWithMention = (entry: {
 export const EMBED_FIELD_VALUE_LIMIT = 1024;
 
 /**
- * Splits entry strings into chunks where each chunk joined by `, ` fits within `limit`
- * characters. Use this to paginate a long list across multiple Discord embed fields.
- */
-export const splitIntoFieldChunks = (
-  entries: ReadonlyArray<string>,
-  limit: number = EMBED_FIELD_VALUE_LIMIT,
-): ReadonlyArray<string> => {
-  const chunks: string[] = [];
-  let current = '';
-  for (const entry of entries) {
-    const candidate = current ? `${current}, ${entry}` : entry;
-    if (candidate.length > limit) {
-      if (current) chunks.push(current);
-      current = entry;
-    } else {
-      current = candidate;
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks;
-};
-
-/**
  * Joins entry strings with `, `, truncating with a localised "…and N more" suffix if the
  * joined result would exceed `limit` characters. Keeps the output safe for Discord embed
  * field values (max 1024 chars), which would otherwise cause `createMessage` to fail for

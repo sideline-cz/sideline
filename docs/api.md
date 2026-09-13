@@ -442,7 +442,7 @@ Returns the team's current settings.
 | `maxMissedRsvps` | `integer` | No | Consecutive missed-RSVP threshold; built-in Players whose `missed_rsvps` counter reaches this value stop receiving reminder DMs and are excluded from the non-responder list (range 1–50; default 4) |
 | `claimRequestDaysBefore` | `integer` | No | Days before a training the coach claim-board message is posted (0 = on the training day; range 0–30) |
 | `rsvpReminderTime` | `string` | No | Time of day the RSVP reminder fires (HH:MM in the team's timezone, e.g. `18:00`) |
-| `remindersChannelId` | `Snowflake \| null` | Yes | Discord channel where reminders and event-start announcements are posted; falls back to the event's owner-group channel if unset |
+| `remindersChannelId` | `Snowflake \| null` | Yes | Discord channel used as the fallback deep-link target in reminder DMs; reminders themselves are DM-only and nothing is posted when an event starts |
 | `timezone` | `string` | No | IANA timezone name used for scheduling reminders and cron jobs (e.g. `Europe/Prague`) |
 | `discordChannelTraining` | `Snowflake \| null` | Yes | Default Discord channel for training events |
 | `discordChannelMatch` | `Snowflake \| null` | Yes | Default Discord channel for match events |

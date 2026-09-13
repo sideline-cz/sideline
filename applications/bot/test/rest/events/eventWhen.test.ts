@@ -15,12 +15,7 @@
 
 import { DateTime, Option } from 'effect';
 import { describe, expect, it } from 'vitest';
-import {
-  type EventWhen,
-  formatEventWhen,
-  formatEventWhenLong,
-  isSameUtcDay,
-} from '~/rest/events/eventWhen.js';
+import { type EventWhen, formatEventWhen, isSameUtcDay } from '~/rest/events/eventWhen.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures — epoch seconds pre-computed and asserted literally, per the plan.
@@ -176,50 +171,6 @@ describe('formatEventWhen', () => {
     const nonSkewWhen = makeWhen({ startAt: NOON_JUL_15, allDay: true });
     expect(formatEventWhen(skewFallbackWhen)).toBe(formatEventWhen(nonSkewWhen));
     expect(formatEventWhen(skewFallbackWhen)).toBe(`<t:1784116800:D>${AD_EN}`);
-  });
-});
-
-describe('formatEventWhenLong', () => {
-  // #11 — timed, no end
-  it('timed, no end → <t:S:F>', () => {
-    expect(formatEventWhenLong(makeWhen({ startAt: START_16, allDay: false }))).toBe(
-      '<t:1784131200:F>',
-    );
-  });
-
-  // #12 — timed, WITH end → end is IGNORED; byte-identical to today's handleStarted.ts:82.
-  // This is the single most likely regression: handleStarted must never grow an end range.
-  it('timed, WITH end → end is ignored, byte-identical to <t:S:F> alone', () => {
-    expect(
-      formatEventWhenLong(
-        makeWhen({ startAt: START_16, endAt: Option.some(END_18_SAME_DAY), allDay: false }),
-      ),
-    ).toBe('<t:1784131200:F>');
-  });
-
-  // #13 — all-day, no end
-  it('all-day, no end → <t:S:D> · All day', () => {
-    expect(formatEventWhenLong(makeWhen({ startAt: NOON_JUL_15, allDay: true }))).toBe(
-      `<t:1784116800:D>${AD_EN}`,
-    );
-  });
-
-  // #14 — all-day, multi-day
-  it('all-day, multi-day → <t:S:D> — <t:E:D> · All day', () => {
-    expect(
-      formatEventWhenLong(
-        makeWhen({ startAt: NOON_JUL_15, endAt: Option.some(NOON_JUL_17), allDay: true }),
-      ),
-    ).toBe(`<t:1784116800:D> — <t:1784289600:D>${AD_EN}`);
-  });
-
-  // Regression guard for the long formatter too — same invariant as formatEventWhen.
-  it('all-day output never uses F/f/R/t/d styles', () => {
-    const out = formatEventWhenLong(
-      makeWhen({ startAt: NOON_JUL_15, endAt: Option.some(NOON_JUL_17), allDay: true }),
-    );
-    expect(out).not.toMatch(/<t:\d+:[FfRtd]>/);
-    expect(out).toMatch(/^<t:\d+:D>(?: — <t:\d+:D>)? · .+$/);
   });
 });
 
