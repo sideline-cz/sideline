@@ -123,6 +123,15 @@ export class GroupNameAlreadyTaken extends Schema.TaggedErrorClass<GroupNameAlre
   {},
 ) {}
 
+// Mirrors `RoleApi.RoleNotFound` — `assignGroupRole`'s payload references a `roleId` that
+// either doesn't exist or belongs to a different team than `groupId`. Previously reused
+// `GroupNotFound` here (the group itself was never the problem, the role reference was),
+// which was misleading; this gives the role-not-found case its own 404 variant.
+export class RoleNotFound extends Schema.TaggedErrorClass<RoleNotFound>()(
+  'GroupRoleNotFound',
+  {},
+) {}
+
 export class GroupApiGroup extends HttpApiGroup.make('group')
   .add(
     HttpApiEndpoint.get('listGroups', '/teams/:teamId/groups', {
@@ -217,6 +226,7 @@ export class GroupApiGroup extends HttpApiGroup.make('group')
       error: [
         Forbidden.pipe(HttpApiSchema.status(403)),
         GroupNotFound.pipe(HttpApiSchema.status(404)),
+        RoleNotFound.pipe(HttpApiSchema.status(404)),
       ],
       payload: AssignGroupRoleRequest,
       params: { teamId: TeamId, groupId: GroupId },

@@ -76,9 +76,15 @@ const TEST_USER_ID = '00000000-0000-0000-0000-000000000001' as Auth.UserId;
 const TEST_TEAM_ID = '00000000-0000-0000-0000-000000000010' as Team.TeamId;
 const TEST_MEMBER_ID = '00000000-0000-0000-0000-000000000020' as TeamMember.TeamMemberId;
 const TEST_MEMBER_NO_DISCORD_ID = '00000000-0000-0000-0000-000000000021' as TeamMember.TeamMemberId;
+// Regression fixture for the group-linking fix: a member who holds the role being
+// unassigned BOTH directly (member_roles) AND through a group. Deleting the direct
+// `member_roles` row must not emit `role_unassigned` / `role_removed` if the member
+// still effectively holds the role via the group.
+const TEST_MEMBER_GROUP_ROLE_ID = '00000000-0000-0000-0000-000000000022' as TeamMember.TeamMemberId;
 const TEST_ROLE_ID = '00000000-0000-0000-0000-000000000040' as Role.RoleId;
 const GUILD_ID = '999999999999999999' as Discord.Snowflake;
 const MEMBER_DISCORD_ID = '111111111111111111' as Discord.Snowflake;
+const GROUP_MEMBER_DISCORD_ID = '222222222222222222' as Discord.Snowflake;
 
 const ADMIN_PERMISSIONS: readonly Role.Permission[] = ['role:manage', 'role:view'];
 
@@ -220,6 +226,20 @@ const rosterEntry = (memberId: TeamMember.TeamMemberId, discordId: string) =>
     active: true,
   });
 
+// Simulates the effective-roles-after-the-write query a fixed `unassignRole` must
+// consult: keyed by member id, the roles that member STILL effectively holds (e.g.
+// through a group) after the direct `member_roles` row has been deleted. Defaults to
+// empty (nothing retained) for any member not explicitly configured by a test.
+let effectiveRolesAfterUnassign = new Map<
+  TeamMember.TeamMemberId,
+  ReadonlyArray<{ role_id: Role.RoleId; role_name: string }>
+>();
+
+// Simulates `findEffectiveRoleIdsForMember` dying with a defect (what `catchSqlErrors`
+// turns a `SqlError` into) — regression for the guard degrading instead of 500ing the
+// captain's already-committed `unassignRole` (fix/role-linking review blocker 5).
+let effectiveRolesLookupShouldDie = false;
+
 const makeTeamMembersRepositoryLayer = () =>
   Layer.succeed(TeamMembersRepository, {
     addMember: () => Effect.die(new Error('Not implemented')),
@@ -231,7 +251,10 @@ const makeTeamMembersRepositoryLayer = () =>
     findByUser: () => Effect.succeed([]),
     findRosterByTeam: () => Effect.succeed([]),
     findTeamMembersWithNames: () => Effect.succeed([]),
-    findEffectiveRoleIdsForMember: () => Effect.die(new Error('Not exercised in this test file')),
+    findEffectiveRoleIdsForMember: (memberId: TeamMember.TeamMemberId) =>
+      effectiveRolesLookupShouldDie
+        ? Effect.die(new Error('boom'))
+        : Effect.succeed(effectiveRolesAfterUnassign.get(memberId) ?? []),
     findMembershipByDiscordAndTeam: () => Effect.succeed(Option.none()),
     findRosterMemberByIds: (teamId: Team.TeamId, memberId: TeamMember.TeamMemberId) => {
       if (teamId !== TEST_TEAM_ID) return Effect.succeed(Option.none());
@@ -239,6 +262,8 @@ const makeTeamMembersRepositoryLayer = () =>
         return Effect.succeed(Option.some(rosterEntry(memberId, MEMBER_DISCORD_ID)));
       if (memberId === TEST_MEMBER_NO_DISCORD_ID)
         return Effect.succeed(Option.some(rosterEntry(memberId, '')));
+      if (memberId === TEST_MEMBER_GROUP_ROLE_ID)
+        return Effect.succeed(Option.some(rosterEntry(memberId, GROUP_MEMBER_DISCORD_ID)));
       return Effect.succeed(Option.none());
     },
     deactivateMemberByIds: () => Effect.die(new Error('Not implemented')),
@@ -326,10 +351,18 @@ const MockTeamsRepositoryLayer = Layer.succeed(TeamsRepository, {
   findByGuildId: () => Effect.succeed(Option.none()),
 } as any);
 
+// Records every notification insert so tests can assert a `role_removed` notification
+// was (or was NOT) created without needing a real NotificationsRepository.
+type RecordedNotification = { readonly type: string; readonly userId: Auth.UserId };
+let recordedNotifications: RecordedNotification[] = [];
+
 const MockNotificationsRepositoryLayer = Layer.succeed(NotificationsRepository, {
   findByUserId: () => Effect.succeed([]),
   findByUser: () => Effect.succeed([]),
-  insert: () => Effect.void,
+  insert: (_teamId: Team.TeamId, userId: Auth.UserId, type: string) => {
+    recordedNotifications.push({ type, userId });
+    return Effect.void;
+  },
   insertBulk: () => Effect.void,
   markAsRead: () => Effect.void,
   markAllAsRead: () => Effect.void,
@@ -473,6 +506,9 @@ beforeEach(() => {
   recordedEvents = [];
   emitShouldFail = false;
   rolesStore = [{ id: TEST_ROLE_ID, team_id: TEST_TEAM_ID, name: 'Coach', is_built_in: false }];
+  recordedNotifications = [];
+  effectiveRolesAfterUnassign = new Map();
+  effectiveRolesLookupShouldDie = false;
 });
 
 const authHeaders = { Authorization: 'Bearer admin-token' };
@@ -497,6 +533,58 @@ describe('role.ts — root cause D: role sync event emission', () => {
   });
 
   it('unassignRole emits a role_unassigned event', async () => {
+    const response = await handler(
+      new Request(
+        `http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/roles/${TEST_ROLE_ID}`,
+        {
+          method: 'DELETE',
+          headers: authHeaders,
+        },
+      ),
+    );
+
+    expect(response.status).toBe(204);
+    expect(recordedEvents).toContainEqual({
+      type: 'role_unassigned',
+      roleId: TEST_ROLE_ID,
+      memberId: TEST_MEMBER_ID,
+      discordId: MEMBER_DISCORD_ID,
+    });
+  });
+
+  // Regression for the group-linking fix (confirmed defect: `unassignRole` in
+  // `api/role.ts` emits `role_unassigned` + a `role_removed` notification
+  // unconditionally, even when the member still effectively holds the role through a
+  // group after the direct `member_roles` row is deleted).
+  it('unassignRole does NOT emit role_unassigned or notify when the member still holds the role via a group', async () => {
+    effectiveRolesAfterUnassign.set(TEST_MEMBER_GROUP_ROLE_ID, [
+      { role_id: TEST_ROLE_ID, role_name: 'Coach' },
+    ]);
+
+    const response = await handler(
+      new Request(
+        `http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_GROUP_ROLE_ID}/roles/${TEST_ROLE_ID}`,
+        {
+          method: 'DELETE',
+          headers: authHeaders,
+        },
+      ),
+    );
+
+    expect(response.status).toBe(204);
+    // Today, `unassignRole` never consults the effective-roles-after-write state at
+    // all, so this unconditionally emits — this assertion fails until the fix lands.
+    expect(recordedEvents.filter((e) => e.type === 'role_unassigned')).toHaveLength(0);
+    expect(recordedNotifications.filter((n) => n.type === 'role_removed')).toHaveLength(0);
+  });
+
+  // Regression for review blocker 5 (fix/role-linking): a DB blip on the post-delete
+  // "still held effectively?" re-check must degrade to the pre-guard behaviour (treat
+  // as not-still-held → still emit), not 500 the captain — `unassignRole`'s own DELETE
+  // already committed by the time this re-check runs.
+  it('unassignRole still succeeds and emits when the post-delete effective-roles re-check fails', async () => {
+    effectiveRolesLookupShouldDie = true;
+
     const response = await handler(
       new Request(
         `http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}/roles/${TEST_ROLE_ID}`,

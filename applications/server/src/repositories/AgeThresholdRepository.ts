@@ -10,6 +10,7 @@ import { Schemas, SqlErrors } from '@sideline/effect-lib';
 import { Effect, Layer, type Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
+import { effectiveRolesFrom } from '~/repositories/effectiveRoles.js';
 
 export class AgeThresholdAlreadyExistsError extends Schema.TaggedErrorClass<AgeThresholdAlreadyExistsError>()(
   'AgeThresholdAlreadyExistsError',
@@ -153,11 +154,13 @@ const make = Effect.gen(function* () {
                (SELECT string_agg(gm.group_id::text, ',')
                 FROM group_members gm WHERE gm.team_member_id = tm.id), ''
              ) AS group_ids,
-              (SELECT count(*)
-                FROM member_roles mr
-                JOIN roles r ON r.id = mr.role_id
-                WHERE mr.team_member_id = tm.id
-                AND r.name = 'Admin') > 0 AS is_admin
+              EXISTS (
+                -- Effective (member_roles ∪ group-inherited), not direct-only — a member
+                -- who is Admin exclusively through a group must still be exempt from
+                -- age-threshold auto-assignment. See effectiveRoles.ts's header comment.
+                SELECT 1 FROM ${sql.unsafe(effectiveRolesFrom('tm'))} eff
+                WHERE eff.name = 'Admin' AND eff.is_built_in = true
+              ) AS is_admin
       FROM team_members tm
       JOIN users u ON u.id = tm.user_id
       WHERE tm.team_id = ${teamId} AND tm.active = true

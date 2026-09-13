@@ -1,9 +1,11 @@
 import type { Roster } from '@sideline/domain';
 import { Option } from 'effect';
 import { Calendar } from 'lucide-react';
+import { EffectiveRolesList } from '~/components/molecules/EffectiveRolesList.js';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Badge } from '~/components/ui/badge';
 import { useFormatDate } from '~/hooks/useFormatDate.js';
+import { resolveEffectiveRoles } from '~/lib/roles/resolveEffectiveRoles.js';
 import { tr } from '~/lib/translations.js';
 
 interface MemberSummaryHeaderProps {
@@ -20,7 +22,7 @@ export function MemberSummaryHeader({
   const { formatMonthYear } = useFormatDate();
   const displayName = player.displayName;
   const initials = displayName.slice(0, 2).toUpperCase();
-  const [primaryRole, ...extraRoles] = player.roleNames;
+  const effectiveRoles = resolveEffectiveRoles(player);
   const joinedDate = formatMonthYear(new Date(player.joinedAt));
 
   return (
@@ -47,12 +49,7 @@ export function MemberSummaryHeader({
           <Calendar className='size-4' aria-hidden='true' />
           <span>{tr('members_joinedLabel', { date: joinedDate })}</span>
         </div>
-        {primaryRole !== undefined ? (
-          <div className='flex flex-wrap items-center gap-2'>
-            <Badge>{primaryRole}</Badge>
-            {extraRoles.length > 0 ? <Badge variant='outline'>+{extraRoles.length}</Badge> : null}
-          </div>
-        ) : null}
+        {effectiveRoles.length > 0 ? <EffectiveRolesList roles={effectiveRoles} /> : null}
         {canManageRoles ? (
           <div className='flex flex-col gap-1 text-sm text-muted-foreground'>
             <p className='font-medium text-foreground'>{tr('members_permissionsTitle')}</p>

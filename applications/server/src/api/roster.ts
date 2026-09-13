@@ -39,12 +39,25 @@ import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
 import { hexColorToDiscordInt } from '~/utils/hexColorToDiscordInt.js';
 import { reconcileRosterRoleExtras } from '~/utils/reconcileRosterRoleExtras.js';
 
+const toEffectiveRoles = (entry: RosterEntry) =>
+  entry.effective_roles.map(
+    (r) =>
+      new Roster.EffectiveRole({
+        roleId: r.role_id,
+        name: r.name,
+        isBuiltIn: r.is_built_in,
+        source: r.source,
+        groupNames: r.group_names,
+      }),
+  );
+
 const toRosterPlayer = (entry: RosterEntry) =>
   new Roster.RosterPlayer({
     memberId: entry.member_id,
     userId: entry.user_id,
     discordId: entry.discord_id,
     roleNames: entry.role_names,
+    effectiveRoles: toEffectiveRoles(entry),
     permissions: entry.permissions,
     name: entry.name,
     birthDate: entry.birth_date,
@@ -350,6 +363,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                     userId: entry.user_id,
                     discordId: entry.discord_id,
                     roleNames: entry.role_names,
+                    effectiveRoles: toEffectiveRoles(entry),
                     permissions: entry.permissions,
                     name: updated.name,
                     birthDate: Option.map(updated.birth_date, DateTime.formatIsoDateUtc),
@@ -402,8 +416,33 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                   ? Effect.fail(new Roster.Forbidden())
                   : Effect.void,
               ),
+              // Authz decision, NOT a display concern: `member` comes from
+              // `findRosterMemberByIds` (a group-blind roster DTO before the
+              // fix/role-linking change, and even after the fix it is still a display
+              // DTO) — `deactivateMemberAndCascade`'s "is this the last active manager"
+              // guard must never depend on that. Load the group-aware effective
+              // permission set from `findMembershipByIds` explicitly instead.
+              Effect.bind('targetMembership', ({ member }) =>
+                members.findMembershipByIds(teamId, member.user_id),
+              ),
+              // `member` above was already resolved from `findRosterMemberByIds` for this
+              // exact `(teamId, memberId)` pair, so `targetMembership` coming back `None`
+              // here is not a normal "not found" case — it means the membership row
+              // vanished (or `member.user_id` disagrees with it) between the two reads.
+              // This feeds a security guard (`memberHoldsManage` decides whether the
+              // last-active-manager check even runs), so an inconsistent/unknown state
+              // must refuse, not silently fail open as "not a manager".
+              Effect.bind('memberHoldsManage', ({ targetMembership }) =>
+                Option.match(targetMembership, {
+                  onNone: () =>
+                    LogicError.die(
+                      'deactivateMember: targetMembership not found for a member just resolved by findRosterMemberByIds',
+                    ),
+                  onSome: (m) => Effect.succeed(m.permissions.includes('team:manage')),
+                }),
+              ),
               Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
-              Effect.bind('cascadeResult', ({ member, sql }) =>
+              Effect.bind('cascadeResult', ({ member, memberHoldsManage, sql }) =>
                 deactivateMemberAndCascade(
                   {
                     sql,
@@ -423,7 +462,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                   },
                   teamId,
                   memberId,
-                  member.permissions.includes('team:manage'),
+                  memberHoldsManage,
                   member.discord_id,
                 ),
               ),

@@ -3,6 +3,7 @@ import { SqlErrors } from '@sideline/effect-lib';
 import { Array, Effect, Layer, type Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
+import { effectiveRolesFrom } from '~/repositories/effectiveRoles.js';
 
 export class RoleNameAlreadyTakenError extends Schema.TaggedErrorClass<RoleNameAlreadyTakenError>()(
   'RoleNameAlreadyTakenError',
@@ -140,11 +141,32 @@ const make = Effect.gen(function* () {
       sql`SELECT id, team_id, name, is_built_in FROM roles WHERE team_id = ${input.team_id} AND name = ${input.name} AND is_archived = false`,
   });
 
+  // Effective holder count — `member_roles` (direct) UNION group-inherited, deduped, and
+  // (per the archived-group decision in `effectiveRoles.ts`) excluding holders reached
+  // only through an archived group. Consumed by `deleteRole`'s `RoleInUse` guard
+  // (`api/role.ts`) — a role granted only through a group used to report zero holders,
+  // letting it be archived while it kept granting.
+  //
+  // The only caller compares this to `0`, so the outer shape is a top-level `EXISTS`
+  // (not a `COUNT`) — Postgres can stop at the FIRST matching `team_members` row instead
+  // of unconditionally visiting every one of the team's members to produce an exact
+  // count nobody asked for (`COUNT(DISTINCT tm.id)` was also redundant on top of that:
+  // `tm.id` is the PK, so once the row is selected at all it can't repeat). The `CASE`
+  // keeps the column an `int` — same wire shape / decode as before — despite the
+  // boolean-shaped query underneath.
   const countMembersForRole = SqlSchema.findOne({
     Request: Role.RoleId,
     Result: Schema.Struct({ count: Schema.Number }),
-    execute: (roleId) =>
-      sql`SELECT COUNT(*)::int AS count FROM member_roles WHERE role_id = ${roleId}`,
+    execute: (roleId) => sql`
+      SELECT (CASE WHEN EXISTS (
+        SELECT 1
+        FROM team_members tm
+        WHERE tm.team_id = (SELECT team_id FROM roles WHERE id = ${roleId})
+          AND EXISTS (
+            SELECT 1 FROM ${sql.unsafe(effectiveRolesFrom('tm'))} er WHERE er.role_id = ${roleId}
+          )
+      ) THEN 1 ELSE 0 END)::int AS count
+    `,
   });
 
   const initTeamRoles = SqlSchema.void({

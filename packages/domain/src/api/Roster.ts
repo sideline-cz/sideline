@@ -3,7 +3,7 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/ht
 import { AuthMiddleware } from '~/api/Auth.js';
 import { HexColor, SyncRoleMembersResult } from '~/api/GroupApi.js';
 import { Snowflake } from '~/models/Discord.js';
-import { Permission } from '~/models/Role.js';
+import { Permission, RoleId } from '~/models/Role.js';
 import { RosterId } from '~/models/RosterModel.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
@@ -18,11 +18,35 @@ export class BackfillRosterRolesResult extends Schema.Class<BackfillRosterRolesR
   remainingCount: Schema.Number,
 }) {}
 
+/**
+ * One role effectively held by a roster player, tagged with how it was granted:
+ * `'direct'` (a `member_roles` row), `'inherited'` (via a `role_groups` group, possibly
+ * through an ancestor group), or `'both'` (both at once — see `RosterPlayer.effectiveRoles`).
+ */
+export class EffectiveRole extends Schema.Class<EffectiveRole>('EffectiveRole')({
+  roleId: RoleId,
+  name: Schema.String,
+  isBuiltIn: Schema.Boolean,
+  source: Schema.Literals(['direct', 'inherited', 'both']),
+  /** Groups granting this role; empty for `source: 'direct'`. */
+  groupNames: Schema.Array(Schema.String),
+}) {}
+
 export class RosterPlayer extends Schema.Class<RosterPlayer>('RosterPlayer')({
   memberId: TeamMemberId,
   userId: UserId,
   discordId: Schema.String,
   roleNames: Schema.Array(Schema.String),
+  /**
+   * Provenance for each role in `roleNames`: `'direct'` (a `member_roles` row), `'inherited'`
+   * (via a `role_groups` group, possibly through an ancestor group), or `'both'` — the member
+   * holds it directly AND via a group, so removing the direct grant alone does not revoke it.
+   * `roleNames` remains the flat effective list read by existing call sites; `effectiveRoles`
+   * is strictly additive. `Schema.withDecodingDefaultKey` keeps old payloads that omit this
+   * key decoding cleanly (see `packages/domain/AGENTS.md`, precedents `EventApi.ts` `allDay`
+   * and `GuildRpcGroup.ts` `is_community_enabled`).
+   */
+  effectiveRoles: Schema.Array(EffectiveRole).pipe(Schema.withDecodingDefaultKey(() => [])),
   permissions: Schema.Array(Permission),
   name: Schema.OptionFromNullOr(Schema.String),
   birthDate: Schema.OptionFromNullOr(Schema.String),

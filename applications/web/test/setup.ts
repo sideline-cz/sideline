@@ -22,6 +22,44 @@ if (typeof globalThis.cancelAnimationFrame === 'undefined') {
   globalThis.cancelAnimationFrame = (handle: number): void => clearTimeout(handle);
 }
 
+// Polyfill matchMedia for jsdom (used by useIsMobile, resolveStoredTheme.ts,
+// preMountGuard.ts and use-pwa-install.ts). jsdom does not implement it, but every
+// real browser does, so callers are written to call it unguarded; individual tests
+// that need specific match results (e.g. resolveStoredTheme.test.ts,
+// AppCrashFallback.test.tsx) override `window.matchMedia` themselves.
+if (typeof window.matchMedia !== 'function') {
+  window.matchMedia = (query: string): MediaQueryList => {
+    const listeners = new Set<EventListenerOrEventListenerObject>();
+    const mql: MediaQueryList = {
+      matches: false,
+      media: query,
+      onchange: null,
+      // Deprecated pre-`EventTarget` API — unused by this codebase (which calls
+      // `addEventListener`/`removeEventListener`, see `use-mobile.ts`) but required by the
+      // `MediaQueryList` type.
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: (_type: string, listener: EventListenerOrEventListenerObject | null) => {
+        if (listener !== null) listeners.add(listener);
+      },
+      removeEventListener: (_type: string, listener: EventListenerOrEventListenerObject | null) => {
+        if (listener !== null) listeners.delete(listener);
+      },
+      dispatchEvent: (event: Event): boolean => {
+        for (const listener of listeners) {
+          if (typeof listener === 'function') {
+            listener(event);
+          } else {
+            listener.handleEvent(event);
+          }
+        }
+        return true;
+      },
+    };
+    return mql;
+  };
+}
+
 // Ensure localStorage is available in jsdom tests (needed by @sideline/i18n/runtime).
 //
 // The fallback must be a WORKING in-memory store, not a no-op. It used to stub `setItem` as

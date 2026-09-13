@@ -225,14 +225,23 @@ const make = Effect.gen(function* () {
       sql`SELECT id, team_id, parent_id, name, emoji, color FROM groups WHERE parent_id = ${groupId} AND is_archived = false`,
   });
 
+  // Cycle guard: `groups.parent_id` has no DB-level acyclicity constraint (see
+  // `effectiveRoles.ts`'s header for the same decision made there), and this walk is
+  // ALSO `moveGroup`'s own cycle check (`api/group.ts`'s `getAncestorIds` call) — the one
+  // thing that's supposed to stop a cycle from being created in the first place. Without
+  // the `depth < 32` guard, a corrupted parent chain would hang this query forever,
+  // which would also make `moveGroup` unusable to fix it.
   const findAncestors = SqlSchema.findAll({
     Request: GroupModel.GroupId,
     Result: GroupRow,
     execute: (groupId) => sql`
             WITH RECURSIVE ancestors AS (
-              SELECT parent_id AS id FROM groups WHERE id = ${groupId} AND parent_id IS NOT NULL
+              SELECT parent_id AS id, 0 AS depth FROM groups WHERE id = ${groupId} AND parent_id IS NOT NULL
               UNION ALL
-              SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
+              SELECT g.parent_id, a.depth + 1
+              FROM groups g
+              JOIN ancestors a ON g.id = a.id
+              WHERE g.parent_id IS NOT NULL AND a.depth < 32
             )
             SELECT g.id, g.team_id, g.parent_id, g.name, g.emoji, g.color FROM groups g JOIN ancestors a ON g.id = a.id
           `,

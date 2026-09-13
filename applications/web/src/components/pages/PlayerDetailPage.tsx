@@ -12,10 +12,11 @@ import type {
 } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import { Option, Schema } from 'effect';
-import { Pencil, UserMinus, X } from 'lucide-react';
+import { ExternalLink, Pencil, UserMinus, Users, X } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import { RoleBadge } from '~/components/molecules/RoleBadge.js';
 import { SyncRolesButton } from '~/components/molecules/SyncRolesButton.js';
 import { AchievementsGridI18n } from '~/components/organisms/AchievementsGrid.js';
 import { ActivityLogList } from '~/components/organisms/ActivityLogList';
@@ -47,6 +48,7 @@ import {
   FormMessage,
 } from '~/components/ui/form';
 import { Input } from '~/components/ui/input';
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '~/components/ui/popover';
 import {
   Select,
   SelectContent,
@@ -54,7 +56,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '~/components/ui/select';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '~/components/ui/tooltip';
 import { useFormatDate } from '~/hooks/useFormatDate.js';
+import { resolveEffectiveRoles } from '~/lib/roles/resolveEffectiveRoles.js';
+import { sortEffectiveRoles } from '~/lib/roles/role-order.js';
 import { tr } from '~/lib/translations.js';
 
 const isNotFutureDate = Schema.makeFilter<string>((value) => {
@@ -179,6 +184,20 @@ export function PlayerDetailPage({
 }: PlayerDetailPageProps) {
   const { formatDate } = useFormatDate();
   const isInactive = !player.active;
+
+  // Every group in the team the viewer knows about (their own groups + everything they could
+  // still add the member to) — the only source of `name -> groupId` this page has for building
+  // a link to the group that GRANTED an inherited role (`Roster.EffectiveRole.groupNames` carries
+  // only names, not ids). Only populated when `canManageGroups` (see `members.$memberId.tsx`),
+  // which is exactly when the forwarding link below is rendered.
+  const groupNameToId = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const group of [...memberGroups, ...assignableGroups]) {
+      map.set(group.name, group.groupId);
+    }
+    return map;
+  }, [memberGroups, assignableGroups]);
+
   const getDefaultValues = React.useCallback(
     () => ({
       name: Option.getOrNull(player.name),
@@ -414,6 +433,9 @@ export function PlayerDetailPage({
             <RolesSection
               player={player}
               canManageRoles={canManageRoles && !isInactive}
+              canManageGroups={canManageGroups}
+              teamId={teamId}
+              groupNameToId={groupNameToId}
               availableRoles={availableRoles}
               onAssignRole={onAssignRole}
               onUnassignRole={onUnassignRole}
@@ -692,12 +714,18 @@ function DirtyFieldLabel({ label, dirty }: { label: string; dirty: boolean }) {
 function RolesSection({
   player,
   canManageRoles,
+  canManageGroups,
+  teamId,
+  groupNameToId,
   availableRoles,
   onAssignRole,
   onUnassignRole,
 }: {
   player: Roster.RosterPlayer;
   canManageRoles: boolean;
+  canManageGroups: boolean;
+  teamId: string;
+  groupNameToId: ReadonlyMap<string, string>;
   availableRoles: ReadonlyArray<RoleApi.RoleInfo>;
   onAssignRole: (roleId: string) => Promise<void>;
   onUnassignRole: (roleId: string) => Promise<void>;
@@ -705,7 +733,18 @@ function RolesSection({
   const [selectedRoleId, setSelectedRoleId] = React.useState('');
   const [assigning, setAssigning] = React.useState(false);
 
-  const assignableRoles = availableRoles.filter((r) => !player.roleNames.includes(r.name));
+  // Sorted with the same comparator `EffectiveRolesList` uses, so a member's badges appear in
+  // one order everywhere (roster row, summary header, this section) instead of the detail page
+  // showing raw query order.
+  const effectiveRoles = sortEffectiveRoles(resolveEffectiveRoles(player, availableRoles));
+  // Keyed on `roleId` (not `name` — name matching is fragile and gets worse once inherited
+  // roles join the effective set), and filtered against the FULL effective set so a role
+  // already shown as a badge (direct OR inherited) never also appears in "assign a role".
+  const effectiveRoleIds = new Set(effectiveRoles.map((role) => role.roleId));
+  const assignableRoles = availableRoles.filter((role) => !effectiveRoleIds.has(role.roleId));
+  const hasInheritedRole = effectiveRoles.some(
+    (role) => role.source === 'inherited' || role.source === 'both',
+  );
 
   const handleAssign = React.useCallback(async () => {
     if (!selectedRoleId) return;
@@ -717,31 +756,55 @@ function RolesSection({
 
   return (
     <div>
-      {player.roleNames.length === 0 ? (
+      {effectiveRoles.length === 0 ? (
         <p className='text-muted-foreground'>{tr('roles_noRoles')}</p>
       ) : (
-        <div className='flex flex-wrap gap-2 mb-4'>
-          {player.roleNames.map((roleName) => {
-            const roleInfo = availableRoles.find((r) => r.name === roleName);
-            return (
-              <Badge key={roleName} variant='secondary' className='gap-1 py-1'>
-                {roleName}
-                {canManageRoles && roleInfo ? (
-                  <RemoveMembershipControl
-                    ariaLabel={tr('roles_removeAria', { role: roleName })}
-                    confirmTitle={tr('roles_removeRoleConfirmTitle')}
-                    confirmDescription={tr('roles_removeRoleConfirmDescription', {
-                      role: roleName,
-                    })}
-                    confirmConfirm={tr('roles_removeRoleConfirm')}
-                    cancelLabel={tr('roles_removeRoleCancel')}
-                    onConfirm={() => onUnassignRole(roleInfo.roleId)}
-                  />
-                ) : null}
-              </Badge>
-            );
-          })}
-        </div>
+        <>
+          <div className='flex flex-wrap gap-1 mb-2'>
+            {effectiveRoles.map((role) => {
+              // `'both'` keeps its remove control — the member holds it directly TOO, and
+              // removing that direct grant is a real state change, unlike a purely
+              // `'inherited'` role (removing a `member_roles` row that does not exist).
+              const canRemoveDirectly = role.source === 'direct' || role.source === 'both';
+              return (
+                <div key={role.roleId} className='flex items-center gap-1'>
+                  <RoleBadge role={role} />
+                  {canManageRoles && canRemoveDirectly ? (
+                    <RemoveMembershipControl
+                      ariaLabel={tr('roles_removeAria', { role: role.name })}
+                      confirmTitle={tr('roles_removeRoleConfirmTitle')}
+                      confirmDescription={
+                        role.source === 'both'
+                          ? tr('roles_removeRoleStillInheritedDescription', {
+                              role: role.name,
+                              group: role.groupNames[0] ?? '',
+                            })
+                          : tr('roles_removeRoleConfirmDescription', { role: role.name })
+                      }
+                      confirmConfirm={tr('roles_removeRoleConfirm')}
+                      cancelLabel={tr('roles_removeRoleCancel')}
+                      onConfirm={() => onUnassignRole(role.roleId)}
+                    />
+                  ) : canManageRoles && role.source === 'inherited' ? (
+                    <InheritedRoleForwardControl
+                      teamId={teamId}
+                      roleName={role.name}
+                      groupNames={role.groupNames}
+                      groupNameToId={groupNameToId}
+                      canManageGroups={canManageGroups}
+                    />
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+          {canManageRoles && hasInheritedRole ? (
+            <p className='mb-4 flex items-center gap-1.5 text-xs text-muted-foreground'>
+              <Users className='size-3 shrink-0' aria-hidden='true' />
+              {tr('roles_inheritedLegend')}
+            </p>
+          ) : null}
+        </>
       )}
       {canManageRoles && assignableRoles.length > 0 ? (
         <div className='flex gap-2 items-end'>
@@ -758,6 +821,114 @@ function RolesSection({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Replaces the remove (`X`) control for a PURELY `inherited` role — never a disabled `X`, which
+ * would say "you lack permission" (false: the captain IS allowed to remove it, just not from
+ * this screen). Instead, an `ExternalLink` forwards to the group that grants it, gated on
+ * `group:manage` (a viewer who cannot manage groups sees no button at all — nothing is missing,
+ * because nothing is actionable). With 2+ granting groups, the single icon button becomes a
+ * `Popover` listing one link per group.
+ */
+function InheritedRoleForwardControl({
+  teamId,
+  roleName,
+  groupNames,
+  groupNameToId,
+  canManageGroups,
+}: {
+  teamId: string;
+  roleName: string;
+  groupNames: ReadonlyArray<string>;
+  groupNameToId: ReadonlyMap<string, string>;
+  canManageGroups: boolean;
+}) {
+  if (!canManageGroups) return null;
+
+  const links = groupNames
+    .map((name) => {
+      const groupId = groupNameToId.get(name);
+      return groupId ? { name, groupId } : undefined;
+    })
+    .filter((group): group is { name: string; groupId: string } => group !== undefined);
+
+  // Degraded data (a data race between group deletion and page load, or the granting group is
+  // outside the viewer's known group list): no attribution to forward to, so render nothing —
+  // never a link to `undefined`.
+  if (links.length === 0) return null;
+
+  if (links.length === 1) {
+    const group = links[0];
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              asChild
+              type='button'
+              variant='ghost'
+              size='icon'
+              className='ml-1 size-6 text-muted-foreground hover:text-foreground'
+            >
+              <Link to='/teams/$teamId/groups/$groupId' params={{ teamId, groupId: group.groupId }}>
+                <ExternalLink className='size-3' aria-hidden='true' />
+                <span className='sr-only'>
+                  {tr('roles_manageInGroupAria', { role: roleName, group: group.name })}
+                </span>
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{tr('roles_manageInGroupTooltip', { group: group.name })}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon'
+          className='ml-1 size-6 text-muted-foreground hover:text-foreground'
+        >
+          <ExternalLink className='size-3' aria-hidden='true' />
+          <span className='sr-only'>
+            {tr('roles_manageInGroupAria', {
+              role: roleName,
+              group: links.map((group) => group.name).join(tr('common_listSeparator')),
+            })}
+          </span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align='start' className='w-56 p-2'>
+        <PopoverTitle className='mb-1 px-1 text-sm'>
+          {tr('roles_grantedByGroupsTitle')}
+        </PopoverTitle>
+        <ul className='flex flex-col gap-1'>
+          {links.map((group) => (
+            <li key={group.groupId}>
+              <Button
+                asChild
+                variant='link'
+                size='sm'
+                className='h-auto justify-start px-1 text-xs'
+              >
+                <Link
+                  to='/teams/$teamId/groups/$groupId'
+                  params={{ teamId, groupId: group.groupId }}
+                >
+                  {group.name}
+                </Link>
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
   );
 }
 

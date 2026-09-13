@@ -7,10 +7,12 @@
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Event, GroupModel, Team, TeamMember, User } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option } from 'effect';
+import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
@@ -20,6 +22,7 @@ const TestLayer = Layer.mergeAll(
   EventRsvpsRepository.Default,
   EventsRepository.Default,
   GroupsRepository.Default,
+  RolesRepository.Default,
   TeamMembersRepository.Default,
   TeamsRepository.Default,
   UsersRepository.Default,
@@ -414,5 +417,105 @@ describe('EventRsvpsRepository — coming_later persistence', () => {
       ),
       Effect.provide(TestLayer),
     ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Regression: findNonRespondersByEventId / incrementMissedForEventNonResponders gate
+// eligibility on `r.name = 'Player' AND r.is_built_in = true` via a DIRECT
+// `member_roles` join only. A member who holds the built-in Player role exclusively
+// through a group (`group_members` → `role_groups`) is invisible to both queries.
+// Fails today.
+// ---------------------------------------------------------------------------
+
+const seedPlayerViaGroup = (team: { id: Team.TeamId }, memberId: TeamMember.TeamMemberId) =>
+  Effect.Do.pipe(
+    Effect.tap(() =>
+      RolesRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.seedTeamRolesWithPermissions(team.id)),
+      ),
+    ),
+    Effect.bind('playerRole', () =>
+      RolesRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.findRoleByTeamAndName(team.id, 'Player')),
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.fail(new Error('Player role not found')),
+            onSome: Effect.succeed,
+          }),
+        ),
+      ),
+    ),
+    Effect.bind('group', () => createGroup(team.id, 'Squad')),
+    Effect.tap(({ playerRole, group }) =>
+      RolesRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.assignRoleToGroup(playerRole.id, group.id)),
+      ),
+    ),
+    Effect.tap(({ group }) => addGroupMember(group.id, memberId)),
+  );
+
+describe('EventRsvpsRepository — group-inherited Player role', () => {
+  it.effect('findNonRespondersByEventId includes a member whose Player role is group-derived', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('220000000000000001', 'owner-group-player-1')),
+      Effect.bind('userId', () => createUser('220000000000000002', 'group-player-member-1')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('221010101010101010' as Discord.Snowflake, ownerId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.tap(({ team, member }) => seedPlayerViaGroup(team, member.id)),
+      Effect.bind('event', ({ team, member }) => createEvent(team.id, member.id)),
+      Effect.bind('nonResponders', ({ event, team }) =>
+        EventRsvpsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findNonRespondersByEventId(event.id, team.id)),
+        ),
+      ),
+      Effect.tap(({ nonResponders, member }) =>
+        Effect.sync(() => {
+          const ids = nonResponders.map((r) => r.team_member_id);
+          expect(ids).toContain(member.id);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    'incrementMissedForEventNonResponders increments a member whose Player role is group-derived',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('220000000000000011', 'owner-group-player-2')),
+        Effect.bind('userId', () => createUser('220000000000000012', 'group-player-member-2')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('221020202020202020' as Discord.Snowflake, ownerId),
+        ),
+        Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+        Effect.tap(({ team, member }) => seedPlayerViaGroup(team, member.id)),
+        Effect.bind('event', ({ team, member }) => createEvent(team.id, member.id)),
+        Effect.tap(({ event, team }) =>
+          EventRsvpsRepository.asEffect().pipe(
+            Effect.andThen((repo) =>
+              repo.incrementMissedForEventNonRespondersByEventId(event.id, team.id, Option.none()),
+            ),
+          ),
+        ),
+        Effect.bind('missedRsvpsRows', ({ member }) =>
+          SqlClient.SqlClient.asEffect().pipe(
+            Effect.andThen(
+              (sql) =>
+                sql<{ missed_rsvps: number }>`
+                  SELECT missed_rsvps FROM team_members WHERE id = ${member.id}
+                `,
+            ),
+          ),
+        ),
+        Effect.tap(({ missedRsvpsRows }) =>
+          Effect.sync(() => {
+            expect(missedRsvpsRows[0]?.missed_rsvps).toBe(1);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
   );
 });

@@ -594,6 +594,25 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                   ),
                 ),
               ),
+              // Mirrors `role.ts`'s `assignRole` guard (`role.team_id !== teamId` →
+              // `RoleNotFound`) — without it, `role_groups(role_id, group_id)` could link a
+              // role from a completely different team, silently granting every member of
+              // this group whatever permissions that foreign role carries.
+              // `GroupApi.RoleNotFound` mirrors `RoleApi.RoleNotFound` — the group itself
+              // was found fine, it's the role reference that's invalid.
+              Effect.bind('_role', () =>
+                roles.findRoleById(payload.roleId).pipe(
+                  Effect.flatMap(
+                    Option.match({
+                      onNone: () => Effect.fail(new GroupApi.RoleNotFound()),
+                      onSome: (r) =>
+                        r.team_id !== teamId
+                          ? Effect.fail(new GroupApi.RoleNotFound())
+                          : Effect.succeed(r),
+                    }),
+                  ),
+                ),
+              ),
               Effect.tap(() => roles.assignRoleToGroup(payload.roleId, groupId)),
               Effect.asVoid,
             ),
@@ -646,7 +665,13 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                   ),
                 ),
               ),
-              // Validate no circular refs if moving to a new parent
+              // Validate no circular refs if moving to a new parent.
+              // KNOWN GAP (out of scope for fix/role-linking, filed separately): this
+              // check-then-act has no transaction/row lock around it, so two concurrent
+              // `moveGroup` calls can each pass this guard against the pre-move tree and
+              // still jointly create a cycle once both `UPDATE`s land. `getAncestorIds`
+              // itself is depth-guarded (see `GroupsRepository.ts`) so a resulting cycle
+              // won't hang future reads, but the cycle would still exist.
               Effect.tap(() =>
                 Option.match(payload.parentId, {
                   onNone: () => Effect.void,

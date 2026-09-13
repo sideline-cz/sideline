@@ -320,11 +320,40 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
               role.team_id !== teamId ? Effect.fail(new RoleApi.RoleNotFound()) : Effect.void,
             ),
             Effect.tap(() => members.unassignRole(memberId, roleId)),
+            // Guard (fix/role-linking): the DELETE above only removes the DIRECT
+            // `member_roles` row. A member who ALSO holds this role through a group
+            // (`group_members` → group ancestry → `role_groups`) still effectively holds
+            // it afterwards — deleting the direct grant alone did not revoke anything,
+            // so neither the Discord sync event nor the "role removed" notification
+            // should fire. Re-check the effective set AFTER the delete and skip both
+            // when the role is still held. A member holding it directly only (the
+            // common case) has nothing left after the delete, so this still emits.
+            //
+            // `findEffectiveRoleIdsForMember` pipes `catchSqlErrors`, which turns a
+            // `SqlError` into a `LogicError` DEFECT, not a typed failure — a plain
+            // `Effect.bind` here would let a DB blip on this read-only re-check 500 the
+            // whole request even though `unassignRole` above already committed. That
+            // violates the exact rule the comment below cites (a sync-queue write must
+            // never fail the captain's actual role removal) one step earlier: this
+            // re-check must never fail it either. Degrade to the pre-guard behaviour —
+            // treat the role as no-longer-held (so the emit/notification still fire) —
+            // on any defect from the re-check, logging it for visibility.
+            Effect.bind('stillHeldEffectively', ({ targetMember }) =>
+              members.findEffectiveRoleIdsForMember(targetMember.member_id).pipe(
+                Effect.map((rows) => rows.some((row) => row.role_id === roleId)),
+                Effect.catchDefect((defect) =>
+                  Effect.logWarning(
+                    'unassignRole: failed re-checking effective roles after delete — treating as not-still-held',
+                    defect,
+                  ).pipe(Effect.as(false)),
+                ),
+              ),
+            ),
             // Root cause D: enqueue the Discord sync event. Best-effort tap — a sync-queue write
             // must never fail the captain's actual role removal (AGENTS.md error-handling rule 6).
             // Skipped when the member has no discord_id — nothing to propagate to Discord.
-            Effect.tap(({ targetMember, role }) =>
-              targetMember.discord_id
+            Effect.tap(({ targetMember, role, stillHeldEffectively }) =>
+              targetMember.discord_id && !stillHeldEffectively
                 ? roleSyncEvents
                     .emitRoleUnassigned(
                       teamId,
@@ -340,20 +369,22 @@ export const RoleApiLive = HttpApiBuilder.group(Api, 'role', (handlers) =>
                     )
                 : Effect.void,
             ),
-            Effect.tap(({ targetMember, role }) =>
-              notifications
-                .insert(
-                  teamId,
-                  targetMember.user_id,
-                  'role_removed',
-                  `Role "${role.name}" removed`,
-                  `You have been removed from the "${role.name}" role.`,
-                )
-                .pipe(
-                  Effect.catchTag('NoSuchElementError', (e) =>
-                    Effect.logWarning('Failed to create role-removed notification', e),
-                  ),
-                ),
+            Effect.tap(({ targetMember, role, stillHeldEffectively }) =>
+              stillHeldEffectively
+                ? Effect.void
+                : notifications
+                    .insert(
+                      teamId,
+                      targetMember.user_id,
+                      'role_removed',
+                      `Role "${role.name}" removed`,
+                      `You have been removed from the "${role.name}" role.`,
+                    )
+                    .pipe(
+                      Effect.catchTag('NoSuchElementError', (e) =>
+                        Effect.logWarning('Failed to create role-removed notification', e),
+                      ),
+                    ),
             ),
             Effect.asVoid,
           ),

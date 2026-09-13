@@ -1,8 +1,10 @@
 import type { Roster } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import { Option } from 'effect';
+import { EffectiveRolesList } from '~/components/molecules/EffectiveRolesList.js';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Button } from '~/components/ui/button';
+import { resolveEffectiveRoles } from '~/lib/roles/resolveEffectiveRoles.js';
 import { tr } from '~/lib/translations.js';
 
 interface PlayerRowProps {
@@ -15,7 +17,12 @@ interface PlayerRowProps {
 
 export function PlayerRow({ player, teamId, canEdit, canRemove, onDeactivate }: PlayerRowProps) {
   const displayName = player.displayName;
-  const roleLabel = player.roleNames.join(', ') || '—';
+  // A member in several groups can now reach 6+ effective role names — render through
+  // `EffectiveRolesList` (with a fixed, layout-appropriate limit) instead of an unbounded
+  // `join(', ')`, which grew the row without bound. Ordering is the same `sortEffectiveRoles`
+  // used by the member detail header, so the badge shown at a low limit is the member's
+  // highest built-in role rather than an alphabetical accident.
+  const effectiveRoles = resolveEffectiveRoles(player);
   const jerseyNumber = player.jerseyNumber.pipe(
     Option.map((v) => `#${v}`),
     Option.getOrElse(() => '—'),
@@ -37,12 +44,24 @@ export function PlayerRow({ player, teamId, canEdit, canRemove, onDeactivate }: 
           <div className='min-w-0'>
             <p className='font-medium truncate'>{displayName}</p>
             {/* Role shown inline on mobile since other columns are hidden */}
-            <p className='text-xs text-muted-foreground md:hidden'>{roleLabel}</p>
+            <div className='md:hidden'>
+              {effectiveRoles.length > 0 ? (
+                <EffectiveRolesList roles={effectiveRoles} limit={1} className='text-xs' />
+              ) : (
+                <p className='text-xs text-muted-foreground'>{tr('members_fieldEmpty')}</p>
+              )}
+            </div>
           </div>
         </div>
       </td>
       <td className='hidden md:table-cell py-2 px-4'>{jerseyNumber}</td>
-      <td className='hidden md:table-cell py-2 px-4'>{roleLabel}</td>
+      <td className='hidden md:table-cell max-w-[16rem] py-2 px-4'>
+        {effectiveRoles.length > 0 ? (
+          <EffectiveRolesList roles={effectiveRoles} limit={2} />
+        ) : (
+          tr('members_fieldEmpty')
+        )}
+      </td>
       {canEdit || canRemove ? (
         <td className='py-2 px-4'>
           <div className='flex gap-2 flex-wrap'>
