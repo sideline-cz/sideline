@@ -243,6 +243,9 @@ type SeriesRecord = {
   owner_group_name: Option.Option<string>;
   member_group_id: Option.Option<string>;
   member_group_name: Option.Option<string>;
+  // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2/§N.c):
+  // `TRUE` = wall clock in the team's timezone; `FALSE` = UTC time-of-day.
+  times_are_team_local: boolean;
 };
 
 let seriesStore: Map<EventSeries.EventSeriesId, SeriesRecord>;
@@ -363,6 +366,11 @@ const resetStores = () => {
     owner_group_name: Option.none(),
     member_group_id: Option.none(),
     member_group_name: Option.none(),
+    // TRUE (team-local) so every PRE-EXISTING test using TEST_SERIES_1 (in particular the
+    // "PATCH — DST fix" block below, which asserts the TEAM zone reaches
+    // `updateFutureUnmodifiedInSeries`) keeps its original meaning unchanged. The new
+    // Release-N dialect tests below use their OWN series ids for the `false` case.
+    times_are_team_local: true,
   });
 
   eventsStore = new Map();
@@ -730,6 +738,9 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       owner_group_name: Option.none(),
       member_group_id: input.member_group_id ?? Option.none(),
       member_group_name: Option.none(),
+      // Matches the real DB column default (`1791700000_add_series_times_team_local_flag.ts`,
+      // Release N): nothing on this write path names the column, so it's always FALSE.
+      times_are_team_local: false,
     };
     seriesStore.set(id, record);
     return Effect.succeed({
@@ -750,6 +761,7 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       discord_target_channel_id: record.discord_target_channel_id,
       owner_group_id: record.owner_group_id,
       member_group_id: record.member_group_id,
+      times_are_team_local: record.times_are_team_local,
     });
   },
   insertEventSeries: (input: {
@@ -767,6 +779,7 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
     createdBy: string;
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
+    timesAreTeamLocal: boolean;
   }) => {
     const id = crypto.randomUUID() as EventSeries.EventSeriesId;
     const record: SeriesRecord = {
@@ -791,6 +804,14 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       owner_group_name: Option.none(),
       member_group_id: input.memberGroupId ?? Option.none(),
       member_group_name: Option.none(),
+      // Fix 1 (`.work-plans/timezone-migration-deploy-window.md`, superseding an earlier
+      // draft of §N.1/§N.2): the real `insertEventSeries` now names this column explicitly,
+      // writing `payload.timesAreTeamLocal` straight through — there is no existing row on
+      // create to assert a dialect against, so the payload's declaration BECOMES the new
+      // row's dialect. Mirrored here rather than hardcoded, so `createEventSeries`'s handler
+      // is exercised exactly as it will be reading `inserted.times_are_team_local` back off a
+      // real `RETURNING` clause (N.2, item 2) for BOTH values, not just the DB default.
+      times_are_team_local: input.timesAreTeamLocal,
     };
     seriesStore.set(id, record);
     return Effect.succeed({
@@ -811,6 +832,7 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       discord_target_channel_id: record.discord_target_channel_id,
       owner_group_id: record.owner_group_id,
       member_group_id: record.member_group_id,
+      times_are_team_local: record.times_are_team_local,
     });
   },
   findByTeamId: (teamId: string) => {
@@ -1668,6 +1690,281 @@ describe('Event Series API', () => {
       expect(updated?.start_at.epochMilliseconds).toBe(originalStartAt.epochMilliseconds);
       expect(updated?.location).toEqual(Option.some('New Field'));
     });
+  });
+
+  // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2 item 4, §N.c):
+  // `updateEventSeries` must pass `seriesSqlZone(teamZone, existing.times_are_team_local)` to
+  // `updateFutureUnmodifiedInSeries`, NOT the team zone unconditionally — a FALSE series stores
+  // an absolute UTC time-of-day, so its materialized occurrences must be re-derived in UTC, same
+  // as before #650. Expected to FAIL until `event-series.ts`'s `updateEventSeries` handler reads
+  // `existing.times_are_team_local` and branches through `seriesTimeDialect.seriesSqlZone`
+  // instead of passing `teamZone` unconditionally.
+  describe('PATCH — Release N: series time dialect determines the timezone passed to updateFutureUnmodifiedInSeries', () => {
+    const seedDialectSeries = (id: EventSeries.EventSeriesId, timesAreTeamLocal: boolean) => {
+      const base = seriesStore.get(TEST_SERIES_1);
+      if (!base) throw new Error('TEST_SERIES_1 not seeded');
+      seriesStore.set(id, { ...base, id, times_are_team_local: timesAreTeamLocal });
+    };
+
+    it('a FALSE (UTC-dialect) series passes timezone: "UTC" to updateFutureUnmodifiedInSeries, even though the team has its own configured zone', async () => {
+      const seriesId = '00000000-0000-0000-0000-000000000075' as EventSeries.EventSeriesId;
+      seedDialectSeries(seriesId, false);
+      // A real, non-UTC team zone is configured — proves 'UTC' is not just "the fallback
+      // for no team_settings row" but the deliberate FALSE-dialect value.
+      teamSettingsTimezoneOverride = Option.some('Europe/Prague');
+
+      const response = await handler(
+        new Request(`${BASE}/${seriesId}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ title: 'Renamed (FALSE dialect)' }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(capturedUpdateFutureUnmodifiedCalls).toHaveLength(1);
+      expect(capturedUpdateFutureUnmodifiedCalls[0]?.fields.timezone).toBe('UTC');
+      expect(capturedUpdateFutureUnmodifiedCalls[0]?.fields.timezone).not.toBe('Europe/Prague');
+    });
+
+    it('a TRUE (team-local) series passes the TEAM zone to updateFutureUnmodifiedInSeries, not UTC', async () => {
+      const seriesId = '00000000-0000-0000-0000-000000000076' as EventSeries.EventSeriesId;
+      seedDialectSeries(seriesId, true);
+      teamSettingsTimezoneOverride = Option.some('Pacific/Auckland');
+
+      const response = await handler(
+        new Request(`${BASE}/${seriesId}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ title: 'Renamed (TRUE dialect)' }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(capturedUpdateFutureUnmodifiedCalls).toHaveLength(1);
+      expect(capturedUpdateFutureUnmodifiedCalls[0]?.fields.timezone).toBe('Pacific/Auckland');
+      expect(capturedUpdateFutureUnmodifiedCalls[0]?.fields.timezone).not.toBe('UTC');
+    });
+  });
+
+  // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.3, "Test Specification →
+  // Release N" §N.d): the payload dialect flag `timesAreTeamLocal` at the API boundary.
+  //
+  // CREATE and UPDATE are deliberately NOT symmetric here. Create has no existing row to assert
+  // a dialect against, so it never rejects — the payload's declared `timesAreTeamLocal` BECOMES
+  // the new row's dialect, written explicitly by `insertEventSeries`. ONLY update rejects on
+  // mismatch, because an update's storage dialect is the existing row's, which is already fixed.
+  describe('Release N: payload dialect flag (timesAreTeamLocal) at the API boundary', () => {
+    const seedFalseDialectSeries = (id: EventSeries.EventSeriesId) => {
+      const base = seriesStore.get(TEST_SERIES_1);
+      if (!base) throw new Error('TEST_SERIES_1 not seeded');
+      seriesStore.set(id, { ...base, id, times_are_team_local: false, start_time: '18:00:00' });
+    };
+
+    it(
+      'N.d.1 — create with the dialect flag ABSENT (the v0.37.2 wire shape) against FALSE ' +
+        'storage: stored VERBATIM, row marked FALSE, occurrences materialize at the literal ' +
+        '`${date}T${time}Z` instant for every date, including across the March DST boundary ' +
+        '(THE v0.37.2 COMPATIBILITY TEST — the most important test in the release)',
+      async () => {
+        // `createPayload` (defined above) never included `timesAreTeamLocal` — it already IS
+        // the v0.37.2 shape a client built before this flag existed sends.
+        expect('timesAreTeamLocal' in createPayload).toBe(false);
+
+        const response = await handler(
+          new Request(BASE, {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer admin-token',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(createPayload),
+          }),
+        );
+        expect(response.status).toBe(201);
+        const body = await response.json();
+
+        const stored = seriesStore.get(body.seriesId);
+        expect(stored?.times_are_team_local).toBe(false);
+        expect(stored?.start_time).toBe('18:00'); // stored verbatim — no conversion applied
+
+        const materialized = Array.from(eventsStore.values()).filter(
+          (e) => Option.isSome(e.series_id) && e.series_id.value === body.seriesId,
+        );
+        // daysOfWeek [2] (Tuesday), 2026-03-03 (a Tuesday) .. 2026-03-31 inclusive: five
+        // Tuesdays. 2026-03-29 is the EU spring-forward date, so a team-local (TRUE-dialect)
+        // materialization would produce 17:00Z for the first four and 16:00Z for the last —
+        // this assertion is what would catch a regression that ignores the FALSE dialect and
+        // resolves through the team-local branch instead.
+        const expectedEpochMs = [
+          '2026-03-03T18:00:00.000Z',
+          '2026-03-10T18:00:00.000Z',
+          '2026-03-17T18:00:00.000Z',
+          '2026-03-24T18:00:00.000Z',
+          '2026-03-31T18:00:00.000Z',
+        ]
+          .map((iso) => Date.parse(iso))
+          .sort();
+        expect(materialized.map((e) => e.start_at.epochMilliseconds).sort()).toEqual(
+          expectedEpochMs,
+        );
+      },
+    );
+
+    it(
+      'N.d.2 — create with timesAreTeamLocal: true: ACCEPTED, row marked TRUE, ' +
+        'startTime/endTime stored VERBATIM (corrected post-review — Fix 1: there is no ' +
+        "existing row on create to reject against; the payload DEFINES the new row's dialect)",
+      async () => {
+        const response = await handler(
+          new Request(BASE, {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer admin-token',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ ...createPayload, timesAreTeamLocal: true }),
+          }),
+        );
+        expect(response.status).toBe(201);
+        const body = await response.json();
+
+        const stored = seriesStore.get(body.seriesId);
+        expect(stored?.times_are_team_local).toBe(true);
+        expect(stored?.start_time).toBe(createPayload.startTime); // verbatim — no conversion
+      },
+    );
+
+    it(
+      'N.d.2b — the stored times_are_team_local marker always equals exactly what the ' +
+        "create payload declared, for BOTH values — the property `1791800000`'s Statement A " +
+        'guard needs once Release N can write TRUE as well as FALSE (Fix 1)',
+      async () => {
+        const responses = await Promise.all(
+          [false, true].map((timesAreTeamLocal) =>
+            handler(
+              new Request(BASE, {
+                method: 'POST',
+                headers: {
+                  Authorization: 'Bearer admin-token',
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ ...createPayload, timesAreTeamLocal }),
+              }),
+            ).then((response) => response.json()),
+          ),
+        );
+
+        expect(seriesStore.get(responses[0].seriesId)?.times_are_team_local).toBe(false);
+        expect(seriesStore.get(responses[1].seriesId)?.times_are_team_local).toBe(true);
+      },
+    );
+
+    it('N.d.3 — update with the dialect flag ABSENT on a FALSE row: verbatim, 200', async () => {
+      const seriesId = '00000000-0000-0000-0000-000000000080' as EventSeries.EventSeriesId;
+      seedFalseDialectSeries(seriesId);
+
+      const response = await handler(
+        new Request(`${BASE}/${seriesId}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer admin-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ title: 'Renamed, dialect flag absent' }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(seriesStore.get(seriesId)?.start_time).toBe('18:00:00');
+      expect(seriesStore.get(seriesId)?.times_are_team_local).toBe(false);
+    });
+
+    it(
+      'N.d.4 — update with timesAreTeamLocal: true AND a startTime on a FALSE row: REJECTED, ' +
+        'row unchanged',
+      async () => {
+        const seriesId = '00000000-0000-0000-0000-000000000081' as EventSeries.EventSeriesId;
+        seedFalseDialectSeries(seriesId);
+
+        const response = await handler(
+          new Request(`${BASE}/${seriesId}`, {
+            method: 'PATCH',
+            headers: {
+              Authorization: 'Bearer admin-token',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ startTime: '19:00', timesAreTeamLocal: true }),
+          }),
+        );
+        expect(response.status).toBe(400);
+        expect(seriesStore.get(seriesId)?.start_time).toBe('18:00:00');
+      },
+    );
+
+    it(
+      'N.d.4b — a caller who is BOTH inactive AND dialect-mismatched gets ' +
+        'EventSeriesNotActive, not EventSeriesTimeDialectMismatch: the active check ' +
+        'short-circuits ahead of the dialect check. Both errors are HTTP 400, so status ' +
+        'alone cannot pin this ordering — read the tag.',
+      async () => {
+        const seriesId = '00000000-0000-0000-0000-000000000082' as EventSeries.EventSeriesId;
+        seedFalseDialectSeries(seriesId);
+        const seeded = seriesStore.get(seriesId);
+        if (!seeded) throw new Error('seed failed');
+        seriesStore.set(seriesId, { ...seeded, status: 'cancelled' });
+
+        const response = await handler(
+          new Request(`${BASE}/${seriesId}`, {
+            method: 'PATCH',
+            headers: {
+              Authorization: 'Bearer admin-token',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ startTime: '19:00', timesAreTeamLocal: true }),
+          }),
+        );
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({ _tag: 'EventSeriesNotActive' });
+        expect(seriesStore.get(seriesId)?.start_time).toBe('18:00:00');
+      },
+    );
+
+    it(
+      'N.d.5 — update with timesAreTeamLocal: true but startTime/endTime BOTH ABSENT (a ' +
+        'location-only edit) on a FALSE row: ACCEPTED, start_time unchanged. RELABELED ' +
+        'post-review: this is a SERVER-CONTRACT test, not a "location-only edits keep working" ' +
+        'guarantee for any real client — no shipped client sends this exact payload shape ' +
+        "(`v0.37.2` sends `startTime` unconditionally on every series write, per the plan's " +
+        'Risks section). It still matters as THE FALLBACK-VALUE HAZARD TEST: the dialect check ' +
+        'must sit inside the payload Option, BEFORE `Option.getOrElse(payload.startTime, () => ' +
+        'existing.start_time)` — a PATCH that omits the time is not asserting any dialect for a ' +
+        'value it never sent, which a hypothetical sparse-patch client (or a future refactor) ' +
+        'would rely on.',
+      async () => {
+        const seriesId = '00000000-0000-0000-0000-000000000082' as EventSeries.EventSeriesId;
+        seedFalseDialectSeries(seriesId);
+
+        const response = await handler(
+          new Request(`${BASE}/${seriesId}`, {
+            method: 'PATCH',
+            headers: {
+              Authorization: 'Bearer admin-token',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ location: 'New Field', timesAreTeamLocal: true }),
+          }),
+        );
+        expect(response.status).toBe(200);
+        expect(seriesStore.get(seriesId)?.start_time).toBe('18:00:00');
+        expect(seriesStore.get(seriesId)?.times_are_team_local).toBe(false);
+        expect(seriesStore.get(seriesId)?.location).toEqual(Option.some('New Field'));
+      },
+    );
   });
 
   describe('POST /teams/:teamId/event-series/:seriesId/cancel', () => {

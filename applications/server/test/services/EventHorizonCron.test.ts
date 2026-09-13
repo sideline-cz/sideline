@@ -65,6 +65,11 @@ const makeActiveSeries = (
     description: Option.Option<string>;
     created_by: TeamMember.TeamMemberId;
     team_timezone: string;
+    // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2): defaults `true`
+    // so every PRE-EXISTING test in this file (written when `EventHorizonCron` called
+    // `resolveOccurrenceInstant` unconditionally, i.e. always team-local) keeps its
+    // original meaning unchanged. Only the new `false`-row case below overrides this.
+    times_are_team_local: boolean;
   }> = {},
 ) => ({
   id: overrides.id ?? SERIES_ID,
@@ -82,6 +87,7 @@ const makeActiveSeries = (
   last_generated_date: overrides.last_generated_date ?? Option.none<DateTime.Utc>(),
   training_type_id: overrides.training_type_id ?? Option.none(),
   owner_group_id: overrides.owner_group_id ?? Option.none(),
+  times_are_team_local: overrides.times_are_team_local ?? true,
   member_group_id: overrides.member_group_id ?? Option.none(),
   created_by: overrides.created_by ?? CREATED_BY,
   event_horizon_days: overrides.event_horizon_days ?? 30,
@@ -354,6 +360,89 @@ describe('eventHorizonCronEffect', () => {
             // stamps the UTC time-of-day literally. Assert they differ.
             expect(insertedEvents[0].startAt.epochMilliseconds).not.toBe(
               Date.parse('2026-07-14T18:00:00.000Z'),
+            );
+          }),
+        ),
+        Effect.provide(makeTestLayer([series])),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  // --- Release N regression (`.work-plans/timezone-migration-deploy-window.md` §N.2/§N.c) ---
+  //
+  // A `times_are_team_local = false` series is Release N's "every row is FALSE, every branch
+  // takes the UTC path, no data is rewritten" invariant in action: its `start_time` is a UTC
+  // time-of-day (the pre-#650 semantics), not a team-local wall clock, so it must materialize
+  // at the literal `${dateStr}T${time}Z` instant regardless of `team_timezone` — exactly the
+  // SAME Prague/summer fixture as the TRUE case immediately above, so the only variable is the
+  // flag. This is expected to FAIL until `EventHorizonCron.ts` reads `s.times_are_team_local`
+  // and dispatches through `seriesTimeDialect.resolveSeriesOccurrenceInstant` instead of calling
+  // `resolveOccurrenceInstant` unconditionally.
+  it.effect(
+    'Release N: a FALSE (UTC-dialect) Prague series at 18:00 materializes at 2026-07-14T18:00:00Z — NOT 16:00Z — because a FALSE row is never team-local, DST or no DST',
+    () => {
+      const series = makeActiveSeries({
+        start_time: '18:00:00',
+        team_timezone: 'Europe/Prague',
+        times_are_team_local: false,
+        days_of_week: [2], // Tuesday
+        last_generated_date: Option.some(DateTime.makeUnsafe('2026-07-13T00:00:00Z')),
+        end_date: Option.some(DateTime.makeUnsafe('2026-07-14T00:00:00Z')),
+        event_horizon_days: 30,
+      });
+
+      return eventHorizonCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(insertedEvents).toHaveLength(1);
+            expect(insertedEvents[0].startAt.epochMilliseconds).toBe(
+              Date.parse('2026-07-14T18:00:00.000Z'),
+            );
+            // Non-vacuity: the TRUE case (same wall clock, same date, same zone,
+            // immediately above) resolves to 16:00Z. If a regression made the cron
+            // ignore the flag and always take the team-local branch, this FALSE-row
+            // fixture would silently produce the SAME instant as the TRUE one.
+            expect(insertedEvents[0].startAt.epochMilliseconds).not.toBe(
+              Date.parse('2026-07-14T16:00:00.000Z'),
+            );
+          }),
+        ),
+        Effect.provide(makeTestLayer([series])),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  // Fix 4 (review): the FALSE-dialect regression above only covered the SUMMER half of the
+  // winter/summer DST pair the TRUE case gets both halves of — leaving the entire "a FALSE row
+  // is identical to v0.49.3" claim resting on one test in this file. This is the WINTER
+  // counterpart, same fixture shape as the winter TRUE test above, `times_are_team_local: false`.
+  it.effect(
+    'Release N: a FALSE (UTC-dialect) Prague series at 18:00, WINTER occurrence: materializes at 2026-01-13T18:00:00Z — NOT 17:00Z — because a FALSE row is never team-local, DST or no DST',
+    () => {
+      const series = makeActiveSeries({
+        start_time: '18:00:00',
+        team_timezone: 'Europe/Prague',
+        times_are_team_local: false,
+        days_of_week: [2], // Tuesday
+        last_generated_date: Option.some(DateTime.makeUnsafe('2026-01-12T00:00:00Z')),
+        end_date: Option.some(DateTime.makeUnsafe('2026-01-13T00:00:00Z')),
+        event_horizon_days: 30,
+      });
+
+      return eventHorizonCronEffect.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            expect(insertedEvents).toHaveLength(1);
+            expect(insertedEvents[0].startAt.epochMilliseconds).toBe(
+              Date.parse('2026-01-13T18:00:00.000Z'),
+            );
+            // Non-vacuity: the TRUE winter case above resolves to 17:00Z. If a regression
+            // made the cron ignore the flag and always take the team-local branch, this
+            // FALSE-row fixture would silently produce the SAME instant as the TRUE one.
+            expect(insertedEvents[0].startAt.epochMilliseconds).not.toBe(
+              Date.parse('2026-01-13T17:00:00.000Z'),
             );
           }),
         ),

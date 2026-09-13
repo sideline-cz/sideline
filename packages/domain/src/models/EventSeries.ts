@@ -44,6 +44,8 @@ export class EventSeries extends Model.Class<EventSeries>('EventSeries')({
   end_date: Schema.OptionFromNullOr(Schema.instanceOf(Date)),
   owner_group_id: Schema.OptionFromNullOr(GroupId),
   member_group_id: Schema.OptionFromNullOr(GroupId),
+  /** `TRUE` = `start_time`/`end_time` are wall clock in the team's timezone; `FALSE` = UTC time-of-day (the pre-#650 semantics). */
+  times_are_team_local: Schema.Boolean,
   status: Model.FieldExcept(['update'])(EventSeriesStatus),
   created_by: TeamMemberId,
   created_at: Model.DateTimeInsertFromDate,

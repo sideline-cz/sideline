@@ -21,6 +21,10 @@ class EventSeriesRow extends Schema.Class<EventSeriesRow>('EventSeriesRow')({
   status: EventSeries.EventSeriesStatus,
   owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
+  // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2): the row's storage
+  // dialect, read back from `RETURNING` rather than assumed from the DB column default — the
+  // site that keeps working unchanged once the default flips at N+1.
+  times_are_team_local: Schema.Boolean,
 }) {}
 
 class EventSeriesWithDetails extends Schema.Class<EventSeriesWithDetails>('EventSeriesWithDetails')(
@@ -45,6 +49,9 @@ class EventSeriesWithDetails extends Schema.Class<EventSeriesWithDetails>('Event
     owner_group_name: Schema.OptionFromNullOr(Schema.String),
     member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
     member_group_name: Schema.OptionFromNullOr(Schema.String),
+    // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2): the row's storage
+    // dialect — `TRUE` = wall clock in the team's timezone, `FALSE` = UTC time-of-day.
+    times_are_team_local: Schema.Boolean,
   },
 ) {}
 
@@ -74,6 +81,10 @@ class EventSeriesForGeneration extends Schema.Class<EventSeriesForGeneration>(
   // everywhere else. Reuses the `team_settings` join already required for
   // `event_horizon_days`, so this is not a second join.
   team_timezone: Schema.String,
+  // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2): the row's storage
+  // dialect — determines which branch of `seriesTimeDialect.resolveSeriesOccurrenceInstant`
+  // `EventHorizonCron` takes for this series.
+  times_are_team_local: Schema.Boolean,
 }) {}
 
 const EventSeriesInsertInput = Schema.Struct({
@@ -92,6 +103,12 @@ const EventSeriesInsertInput = Schema.Struct({
   created_by: Schema.String,
   owner_group_id: Schema.OptionFromNullOr(Schema.String),
   member_group_id: Schema.OptionFromNullOr(Schema.String),
+  // Release N (`.work-plans/timezone-migration-deploy-window.md`): on create there is no
+  // existing row to assert a dialect against, so the payload's declared dialect BECOMES the new
+  // row's dialect — named explicitly here rather than left to the column's `DEFAULT FALSE`,
+  // which only exists for writers that predate this column entirely (a still-running `v0.49.3`
+  // server during the N rollout).
+  times_are_team_local: Schema.Boolean,
 });
 
 const EventSeriesUpdateInput = Schema.Struct({
@@ -119,16 +136,16 @@ const make = Effect.gen(function* () {
             INSERT INTO event_series (team_id, training_type_id, title, description,
                                       start_time, end_time, location, location_url, frequency,
                                       days_of_week, start_date, end_date, created_by,
-                                      owner_group_id, member_group_id)
+                                      owner_group_id, member_group_id, times_are_team_local)
             VALUES (${input.team_id}, ${input.training_type_id}, ${input.title},
                     ${input.description}, ${input.start_time}, ${input.end_time},
                     ${input.location}, ${input.location_url}, ${input.frequency}, ${input.days_of_week},
                     ${input.start_date}, ${input.end_date}, ${input.created_by},
-                    ${input.owner_group_id}, ${input.member_group_id})
+                    ${input.owner_group_id}, ${input.member_group_id}, ${input.times_are_team_local})
             RETURNING id, team_id, training_type_id, title, description,
                       start_time, end_time, location, location_url, frequency,
                       days_of_week, start_date, end_date, status,
-                      owner_group_id, member_group_id
+                      owner_group_id, member_group_id, times_are_team_local
           `,
   });
 
@@ -141,7 +158,8 @@ const make = Effect.gen(function* () {
                    es.days_of_week, es.start_date, es.end_date, es.status,
                    tt.name AS training_type_name, es.last_generated_date,
                    es.owner_group_id, og.name AS owner_group_name,
-                   es.member_group_id, mg.name AS member_group_name
+                   es.member_group_id, mg.name AS member_group_name,
+                   es.times_are_team_local
             FROM event_series es
             LEFT JOIN training_types tt ON tt.id = es.training_type_id
             LEFT JOIN groups og ON og.id = es.owner_group_id
@@ -160,7 +178,8 @@ const make = Effect.gen(function* () {
                    es.days_of_week, es.start_date, es.end_date, es.status,
                    tt.name AS training_type_name, es.last_generated_date,
                    es.owner_group_id, og.name AS owner_group_name,
-                   es.member_group_id, mg.name AS member_group_name
+                   es.member_group_id, mg.name AS member_group_name,
+                   es.times_are_team_local
             FROM event_series es
             LEFT JOIN training_types tt ON tt.id = es.training_type_id
             LEFT JOIN groups og ON og.id = es.owner_group_id
@@ -180,7 +199,8 @@ const make = Effect.gen(function* () {
                    es.owner_group_id, es.member_group_id,
                    es.created_by,
                    COALESCE(ts.event_horizon_days, 30) AS event_horizon_days,
-                   COALESCE(ts.timezone, 'Europe/Prague') AS team_timezone
+                   COALESCE(ts.timezone, 'Europe/Prague') AS team_timezone,
+                   es.times_are_team_local
             FROM event_series es
             LEFT JOIN team_settings ts ON ts.team_id = es.team_id
             WHERE es.status = 'active'
@@ -218,7 +238,7 @@ const make = Effect.gen(function* () {
             RETURNING id, team_id, training_type_id, title, description,
                       start_time, end_time, location, location_url, frequency,
                       days_of_week, start_date, end_date, status,
-                      owner_group_id, member_group_id
+                      owner_group_id, member_group_id, times_are_team_local
           `,
   });
 
@@ -244,6 +264,7 @@ const make = Effect.gen(function* () {
     createdBy,
     ownerGroupId = Option.none(),
     memberGroupId = Option.none(),
+    timesAreTeamLocal,
   }: {
     teamId: Team.TeamId;
     trainingTypeId: Option.Option<string>;
@@ -260,6 +281,9 @@ const make = Effect.gen(function* () {
     createdBy: string;
     ownerGroupId?: Option.Option<string>;
     memberGroupId?: Option.Option<string>;
+    // The payload's declared dialect BECOMES the new row's dialect — there is no existing
+    // row to assert against on create. See `EventSeriesInsertInput`'s doc comment.
+    timesAreTeamLocal: boolean;
   }) =>
     insertSeries({
       team_id: teamId,
@@ -277,6 +301,7 @@ const make = Effect.gen(function* () {
       created_by: createdBy,
       owner_group_id: ownerGroupId,
       member_group_id: memberGroupId,
+      times_are_team_local: timesAreTeamLocal,
     }).pipe(catchSqlErrors);
 
   const findSeriesByTeamId = (teamId: Team.TeamId) => findByTeamId(teamId).pipe(catchSqlErrors);

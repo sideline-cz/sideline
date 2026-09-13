@@ -7,6 +7,7 @@
 3. [Environment Variables](#3-environment-variables)
 4. [Background Cron Jobs](#4-background-cron-jobs)
 5. [Database Operations](#5-database-operations)
+   - [5.4 Migrations, Deploy Skew, and Rollback](#54-migrations-deploy-skew-and-rollback)
 6. [CI/CD Pipelines](#6-cicd-pipelines)
 7. [Monitoring and Observability](#7-monitoring-and-observability)
 8. [Local Development Setup](#8-local-development-setup)
@@ -16,7 +17,7 @@
 
 ## 1. Architecture Overview
 
-Sideline is composed of five containerized services backed by a PostgreSQL 17 database. All services are built with Docker and orchestrated via Docker Compose. In production the stack runs on a VPS managed by Coolify.
+Sideline is composed of five containerized services backed by a PostgreSQL 17 database. All services are built with Docker and orchestrated via Docker Compose. In production the stack is deployed via **MajNet**, a GitOps platform that renders per-app overlays from `sideline-cz/ops` (see `.claude/skills/deploy/SKILL.md`), not a Coolify-managed VPS.
 
 ```
 Internet ──► Proxy (nginx :80)
@@ -361,6 +362,10 @@ export PREVIEW_DB_NAME_MAIN="sideline-preview.majksa.net"
 ```bash
 export PREVIEW_DB_PASSWORD=<password>
 ```
+
+### 5.4 Migrations, Deploy Skew, and Rollback
+
+Migrations run at server boot — `MigrateBefore` in `run.ts` runs before the app and health layers start, so a container does not begin serving until its own migrations have applied. MajNet production is **blue-green with one container per app**: the new container boots and migrates while the old container is still serving, with no drain, stop, or scale-to-zero step in either the ops overlay (`apps/<app>/production.yaml` carries only `digest`/`image`/`env`/`secrets`/`health`/`resources`) or the CLI (`majnet deploy` is `promote | merge | close | rollback | restart | progress`) — per `majnet agent-guide` → "Roll back a bad deploy": "the blue-green deploy keeps the old container alive through a failed rollout." A migration must therefore be safe for the immediately-previous image to keep running against; when a schema/semantics change cannot be made safe for that image, split it across two releases so the previous image is the tolerant one — see `1791700000_add_series_times_team_local_flag.ts` (adds the flag, changes no behavior) followed by `1791800000_series_time_is_team_local.ts` (converts, once every image that can be alive in the same deploy window already understands the flag) as the worked example. Migrations are forward-only: `majnet deploy rollback` reverts the digest, not the data.
 
 ---
 

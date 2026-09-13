@@ -13,7 +13,11 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { computeHorizonEnd, generateOccurrenceDates } from '~/services/RecurrenceService.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
-import { resolveOccurrenceInstant } from '~/utils/seriesOccurrence.js';
+import {
+  assertDialectMatches,
+  resolveSeriesOccurrenceInstant,
+  seriesSqlZone,
+} from '~/utils/seriesTimeDialect.js';
 
 const forbidden = new EventApi.Forbidden();
 const notFound = new EventSeriesApi.EventSeriesNotFound();
@@ -105,6 +109,13 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                 createdBy: membership.id,
                 ownerGroupId: resolvedGroups.ownerGroupId,
                 memberGroupId: resolvedGroups.memberGroupId,
+                // Create has no existing row to assert a dialect against, so the payload's
+                // declared dialect BECOMES the new row's dialect — written explicitly rather
+                // than left to the column's `DEFAULT FALSE`. See `insertEventSeries`'s doc
+                // comment in `EventSeriesRepository.ts` for why this must not fall back to the
+                // default. (Update, by contrast, does assert — see `assertDialectMatches` in
+                // `updateEventSeries` below.)
+                timesAreTeamLocal: payload.timesAreTeamLocal,
               }),
             ),
             Effect.bind('horizonDays', () => teamSettings.getHorizonDays(teamId)),
@@ -126,9 +137,22 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
               Effect.all(
                 Array.map(dates, (date) => {
                   const dateStr = DateTime.formatIsoDateUtc(date);
-                  const startAt = resolveOccurrenceInstant(dateStr, inserted.start_time, teamZone);
+                  // `inserted.times_are_team_local` is read back from the `RETURNING` clause,
+                  // not assumed from the DB default — the site that stays correct unchanged
+                  // once that default flips at Release N+1.
+                  const startAt = resolveSeriesOccurrenceInstant(
+                    dateStr,
+                    inserted.start_time,
+                    teamZone,
+                    inserted.times_are_team_local,
+                  );
                   const endAt = Option.map(inserted.end_time, (t) =>
-                    resolveOccurrenceInstant(dateStr, t, teamZone),
+                    resolveSeriesOccurrenceInstant(
+                      dateStr,
+                      t,
+                      teamZone,
+                      inserted.times_are_team_local,
+                    ),
                   );
                   return events
                     .insertEvent({
@@ -341,8 +365,43 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
             Effect.tap(({ existing }) =>
               existing.team_id !== teamId ? Effect.fail(notFound) : Effect.void,
             ),
+            // TWO checks in ONE pipe step, sequenced with `Effect.andThen`: this handler
+            // already uses all 20 of `pipe`'s typed overload slots, so they cannot each have
+            // their own `Effect.tap`. The `andThen` (rather than a nested ternary) is what keeps
+            // the precedence legible: the status check short-circuits first, so a caller who is
+            // BOTH editing a non-active series AND declaring the wrong dialect gets
+            // `EventSeriesNotActive`, not `EventSeriesTimeDialectMismatch`. Do not reorder them.
+            // Note that both errors are HTTP 400, so a status-code-only test cannot tell the two
+            // apart — the ordering has to be read off this code.
+            //
+            // Check 2 (Release N, §N.3) rejects a payload whose declared time dialect disagrees
+            // with the dialect the row is actually stored in, rather than silently translating
+            // between the two. Both checks sit BEFORE the `checkGroupAccess`/`checkCoachScoping`/
+            // `checkTrainingTypeOwnerGroup` permission checks below because they are pure,
+            // side-effect-free structural validations of the request itself (same class as the
+            // `locationUrl`-requires-`location` check further down), independent of who is making
+            // it. There is no create-side counterpart to check 2: create has no existing row to
+            // assert against, so its payload's dialect simply becomes the new row's.
+            //
+            // Check 2 applies ONLY when the payload actually supplies a time, and that gate is
+            // evaluated here, BEFORE `resolved.startTime`/`resolved.endTime` below fall back to
+            // `existing.start_time`/`existing.end_time` for an omitted field. A location-only
+            // PATCH asserts no dialect for a value it never sent and must pass through untouched,
+            // even though `timesAreTeamLocal` always encodes on the wire (it is not
+            // `Option`-wrapped — see `EventSeriesApi.ts`).
+            //
+            // `payload.endTime` is `Option<Option<string>>`, so the gate is
+            // `Option.exists(payload.endTime, Option.isSome)` and not `Option.isSome`: the outer
+            // `Some` covers both "set a new end time" and "clear the end time to `null`"
+            // (`Some(None)`), and a clear supplies no time-of-day to declare a dialect for.
             Effect.tap(({ existing }) =>
-              existing.status !== 'active' ? Effect.fail(notActive) : Effect.void,
+              Effect.andThen(
+                existing.status !== 'active' ? Effect.fail(notActive) : Effect.void,
+                () =>
+                  Option.isSome(payload.startTime) || Option.exists(payload.endTime, Option.isSome)
+                    ? assertDialectMatches(payload.timesAreTeamLocal, existing.times_are_team_local)
+                    : Effect.void,
+              ),
             ),
             // Check owner group access
             Effect.tap(({ existing, membership, isAdmin }) =>
@@ -436,7 +495,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                 memberGroupId: resolved.memberGroupId,
               }),
             ),
-            Effect.tap(({ resolved, teamZone }) =>
+            Effect.tap(({ existing, resolved, teamZone }) =>
               events.updateFutureUnmodifiedInSeries(seriesId, new Date(), {
                 title: resolved.title,
                 trainingTypeId: resolved.trainingTypeId,
@@ -445,7 +504,20 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                 endTime: resolved.endTime,
                 location: resolved.location,
                 locationUrl: resolved.locationUrl,
-                timezone: teamZone,
+                // Release N (§N.2 item 4): a FALSE (UTC-dialect) series' materialized
+                // occurrences must be re-derived in UTC, not the team zone — `seriesSqlZone`
+                // yields `'UTC'` for that case, and the team's own zone for a TRUE one. With
+                // `tz = 'UTC'`, `EventsRepository.updateFutureUnmodified`'s
+                // `((start_at AT TIME ZONE ${tz})::date + ${time}::time) AT TIME ZONE ${tz}` is
+                // *semantically* (not character-) identical to the pre-#650 SQL.
+                //
+                // Note `EventsRepository.ts`'s corresponding `WHERE (start_at AT TIME ZONE
+                // 'UTC')::date >= …` predicate still hardcodes `'UTC'` — #650 converted the
+                // `SET` clause and not the predicate. The two agree whenever `tz` resolves to
+                // `'UTC'`, i.e. for every FALSE row; that pre-existing #650 mismatch only
+                // matters for a TRUE-dialect series, which this release can only produce via an
+                // explicit `timesAreTeamLocal: true` create. Out of scope here.
+                timezone: seriesSqlZone(teamZone, existing.times_are_team_local),
               }),
             ),
             Effect.tap(() =>
@@ -475,13 +547,25 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                       return Effect.all(
                         Array.map(newDates, (date) => {
                           const dateStr = DateTime.formatIsoDateUtc(date);
-                          const startAt = resolveOccurrenceInstant(
+                          // Deliberately pairs `existing.times_are_team_local` with the
+                          // already-stale `existing.start_time` this site reads (a
+                          // pre-existing #650 bug, out of scope here: `existing` is captured
+                          // before `series.updateEventSeries` above may have changed
+                          // `start_time`). Don't "fix" one without the other — both are
+                          // photographs of the row from before this request's own update.
+                          const startAt = resolveSeriesOccurrenceInstant(
                             dateStr,
                             existing.start_time,
                             teamZone,
+                            existing.times_are_team_local,
                           );
                           const endAt = Option.map(existing.end_time, (t) =>
-                            resolveOccurrenceInstant(dateStr, t, teamZone),
+                            resolveSeriesOccurrenceInstant(
+                              dateStr,
+                              t,
+                              teamZone,
+                              existing.times_are_team_local,
+                            ),
                           );
                           return events
                             .insertEvent({

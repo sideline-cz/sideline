@@ -45,7 +45,7 @@
 // not observable through query results — see the comment on that test).
 
 import { describe, expect, it } from '@effect/vitest';
-import type { Discord, Team, TeamMember, User } from '@sideline/domain';
+import type { Discord, EventSeries, Team, TeamMember, User } from '@sideline/domain';
 import { TeamSettingsApi } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { HttpRouter, HttpServer } from 'effect/unstable/http';
@@ -299,7 +299,7 @@ const setPersonalMessagesDirtyAt = (eventId: string, value: Date) =>
 const seedSeries = (
   teamId: Team.TeamId,
   createdBy: TeamMember.TeamMemberId,
-  opts: { startTime: string; endTime?: string },
+  opts: { startTime: string; endTime?: string; timesAreTeamLocal?: boolean },
 ) =>
   EventSeriesRepository.asEffect().pipe(
     Effect.andThen((repo) =>
@@ -316,9 +316,32 @@ const seedSeries = (
         startDate: DateTime.makeUnsafe('2026-01-06T00:00:00Z'),
         endDate: Option.none(),
         createdBy,
+        // Fix 1 (`.work-plans/timezone-migration-deploy-window.md`): `insertEventSeries` now
+        // writes this explicitly rather than relying on the DB column default. Defaults `false`
+        // here to preserve every existing caller's behavior — tests that need a `TRUE` row
+        // still go through `markSeriesTimesAreTeamLocal` afterwards, matching Release N's own
+        // create handler, which does not have a "start `TRUE` then flip" path either.
+        timesAreTeamLocal: opts.timesAreTeamLocal ?? false,
       }),
     ),
     Effect.map((series) => series.id as string),
+  );
+
+/**
+ * Release N (`.work-plans/timezone-migration-deploy-window.md` §N.1/§N.2): patches
+ * `event_series.times_are_team_local` via raw SQL, bypassing the repository — Release N's
+ * `insertEventSeries` never names this column (it relies on the DB column default, which is
+ * FALSE this release), so this is the ONLY way to seed a TRUE-marked row here, mirroring
+ * `seedEvent`'s established "insert via repo, then patch the column the repo does not expose"
+ * pattern.
+ */
+const markSeriesTimesAreTeamLocal = (seriesId: string, timesAreTeamLocal: boolean) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.flatMap((sql) =>
+      sql.unsafe(
+        `UPDATE event_series SET times_are_team_local = ${timesAreTeamLocal} WHERE id = '${seriesId}'`,
+      ),
+    ),
   );
 
 /**
@@ -624,12 +647,25 @@ describe('team-settings timezone change marks re-anchored events personal-messag
   );
 });
 
-// Review finding: before `1791600000_series_time_is_team_local.ts`, series times were
-// absolute UTC, so a team timezone change was a no-op for series-generated events. Now
-// `event_series.start_time`/`end_time` are team-local wall clock, so a timezone change must
+// Review finding: series times used to be absolute UTC unconditionally, so a team timezone
+// change was a no-op for series-generated events. As of the two-release split,
+// `event_series.start_time`/`end_time` carry a PER-ROW dialect (`times_are_team_local`), and
+// only a team-local row's occurrences need re-deriving on a timezone change — hence the
+// `AND es.times_are_team_local` guard this suite pins. For such a row the change must
 // also re-derive already-materialized, future, active, not-hand-edited series events —
 // otherwise they keep their old instant while the series regenerates new occurrences in the
 // new zone, splitting the team's calendar in two.
+//
+// Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2 item 5, §N.c): this
+// re-anchor is gated on `es.times_are_team_local` — a FALSE series stores an absolute UTC
+// time-of-day, so a team timezone change must be a no-op for it, exactly as it was before
+// #650. Every test below EXCEPT the new FALSE-dialect one explicitly marks its series TRUE
+// (via `markSeriesTimesAreTeamLocal`, since Release N's `insertEventSeries` never writes the
+// column itself — see that helper's doc comment) so they keep testing what they always tested
+// — `series_modified`/cancelled/past guards, and the re-anchor formula itself — rather than
+// incidentally passing (or, for the first test, incidentally FAILING) because of the new FALSE
+// default. Expected to FAIL until `team-settings.ts`'s re-anchor `UPDATE` gets `AND
+// es.times_are_team_local` added to its `WHERE`.
 describe('team-settings timezone change re-anchors materialized SERIES events', () => {
   it.effect(
     'changing Europe/Prague → Asia/Tokyo re-anchors a future, active, unmodified series ' +
@@ -654,6 +690,7 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
           startTime: '18:00:00',
           endTime: '20:00:00',
         });
+        yield* markSeriesTimesAreTeamLocal(seriesId, true);
         // 2026-12-01T17:00Z = 18:00 Prague (CET, winter, UTC+1) — matches the series' own
         // wall-clock time, as a correctly-materialized occurrence would.
         const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
@@ -693,6 +730,7 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
       );
 
       const seriesId = yield* seedSeries(teamId, memberId, { startTime: '18:00:00' });
+      yield* markSeriesTimesAreTeamLocal(seriesId, true);
       const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
         startAtIso: '2026-12-01T17:00:00Z',
         seriesModified: true,
@@ -724,6 +762,7 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
       );
 
       const seriesId = yield* seedSeries(teamId, memberId, { startTime: '18:00:00' });
+      yield* markSeriesTimesAreTeamLocal(seriesId, true);
       const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
         startAtIso: '2026-12-01T17:00:00Z',
         status: 'cancelled',
@@ -755,6 +794,7 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
       );
 
       const seriesId = yield* seedSeries(teamId, memberId, { startTime: '18:00:00' });
+      yield* markSeriesTimesAreTeamLocal(seriesId, true);
       const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
         startAtIso: '2020-01-01T17:00:00Z',
       });
@@ -766,5 +806,105 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
 
       expect(yield* readStartAt(eventId)).toBe('2020-01-01T17:00:00.000Z');
     }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect(
+    'Release N: a FALSE (UTC-dialect) series — a timezone change is a NO-OP for its ' +
+      'materialized occurrence, exactly as it was before #650 (the invariant the plan restates: ' +
+      '"every row is FALSE, every branch takes the UTC path")',
+    () =>
+      Effect.gen(function* () {
+        const guildId = '330000000000000014' as Discord.Snowflake;
+        const { teamId, memberId } = yield* Effect.promise(() => setup(guildId));
+
+        yield* TeamSettingsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.upsert({
+              teamId,
+              eventHorizonDays: 14,
+              minPlayersThreshold: 0,
+              timezone: 'Europe/Prague',
+            }),
+          ),
+        );
+
+        const seriesId = yield* seedSeries(teamId, memberId, {
+          startTime: '18:00:00',
+          endTime: '20:00:00',
+        });
+        // No `markSeriesTimesAreTeamLocal` call — `times_are_team_local` defaults FALSE
+        // (Release N's DB column default; `insertEventSeries` never names the column itself).
+        const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
+          startAtIso: '2026-12-01T17:00:00Z',
+          endAtIso: '2026-12-01T19:00:00Z',
+        });
+
+        expect(yield* readPersonalMessagesDirtyAt(eventId)).toBeNull();
+
+        const response = yield* Effect.promise(() =>
+          patchSettings(teamId, { timezone: 'Asia/Tokyo' }),
+        );
+        expect(response.status).toBe(200);
+
+        // NOT re-derived — a FALSE series' `start_time` is an absolute UTC time-of-day, so the
+        // team's timezone is irrelevant to it. Contrast with the TRUE-dialect test above, which
+        // re-anchors this exact same fixture to 2026-12-01T09:00:00.000Z.
+        expect(yield* readStartAt(eventId)).toBe('2026-12-01T17:00:00.000Z');
+        expect(yield* readPersonalMessagesDirtyAt(eventId)).toBeNull();
+      }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+// Fix 3 (review of `.work-plans/timezone-migration-deploy-window.md`): §N.2 item 4's claim that
+// `EventsRepository.updateFutureUnmodified`'s `AT TIME ZONE ${tz}` with a BOUND `tz = 'UTC'` is
+// semantically identical to the pre-#650 SQL LITERAL `AT TIME ZONE 'UTC'` was previously asserted
+// only against `fields.timezone === 'UTC'` on the in-memory mock repository in
+// `test/EventSeries.test.ts` — nothing executed the real expression against Postgres. The
+// non-obvious risk a mock cannot see: `AT TIME ZONE $1` with an untyped bind sits between
+// `timezone(text, timestamptz)` and `timezone(interval, timestamptz)` in Postgres's overload
+// resolution; it resolves to `text` here, but that is an inference OUTCOME given a `'UTC'` string
+// parameter, not the literal the pre-#650 code had. This test runs the exact repository call the
+// `PATCH /teams/:teamId/event-series/:seriesId` handler makes for a FALSE-dialect series
+// (`seriesSqlZone` yields `'UTC'`) against real Postgres and asserts the resulting instant.
+describe("Fix 3: updateFutureUnmodifiedInSeries with a bound tz = 'UTC' matches the pre-#650 literal SQL", () => {
+  it.effect(
+    "a FALSE-dialect series' future unmodified occurrence is re-derived at the UTC-literal instant",
+    () =>
+      Effect.gen(function* () {
+        const guildId = '330000000000000015' as Discord.Snowflake;
+        const { teamId, memberId } = yield* Effect.promise(() => setup(guildId));
+
+        const seriesId = yield* seedSeries(teamId, memberId, { startTime: '18:00:00' });
+        // No `markSeriesTimesAreTeamLocal` call — stays FALSE, exactly what `seriesSqlZone`
+        // requires to bind `tz = 'UTC'` in the real handler.
+        const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
+          startAtIso: '2026-06-01T18:00:00Z',
+        });
+
+        yield* EventsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.updateFutureUnmodifiedInSeries(
+              seriesId as EventSeries.EventSeriesId,
+              new Date(0),
+              {
+                title: 'Weekly Training',
+                trainingTypeId: Option.none(),
+                description: Option.none(),
+                startTime: '19:00:00',
+                endTime: Option.none(),
+                location: Option.none(),
+                locationUrl: Option.none(),
+                timezone: 'UTC',
+              },
+            ),
+          ),
+        );
+
+        // Pre-#650: `((start_at AT TIME ZONE 'UTC')::date + '19:00:00'::time) AT TIME ZONE
+        // 'UTC'` on a `2026-06-01T18:00:00Z` row is exactly `2026-06-01T19:00:00Z` — the literal
+        // date-preserving, time-swapping behavior a UTC-dialect series has always had. A bound
+        // `$1` resolving to the wrong overload (or erroring) would not produce this.
+        expect(yield* readStartAt(eventId)).toBe('2026-06-01T19:00:00.000Z');
+      }).pipe(Effect.provide(SeedLayer)),
   );
 });
