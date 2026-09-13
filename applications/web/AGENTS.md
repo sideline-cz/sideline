@@ -1123,7 +1123,8 @@ Rules:
 2. **Trust the server's `isActive` flag.** The `WeeklyChallengeView` returned by the server includes an `isActive: boolean` field that is the result of `currentTeamMondayDateString(teamTz) === weekStartDateString(row.week_start_date, teamTz)` evaluated server-side. The web client renders the row as "active" iff `view.isActive === true` — no client-side recomputation.
 3. **For string-comparison "is row X this week?" inside web code, compare ISO date strings, never `Date` instances.** `row.weekStartDate.split('T')[0] === serverProvidedCurrentMonday` is the correct shape. `new Date(row.weekStartDate).getTime() === new Date(serverProvidedCurrentMonday).getTime()` is wrong — it re-introduces the browser-TZ interpretation.
 4. **Inside `MondayPicker` and any other "is this Monday selectable?" component, identify Mondays via `Intl.DateTimeFormat('en-CA', { timeZone: teamTz, weekday: 'short' })`,** NOT `date.getDay() === 1`. The `getDay()` form reads the captain's browser timezone; a Monday in Prague is a Sunday in LA at the wrong hour. Reference: `applications/web/src/components/molecules/MondayPicker.tsx` (`isDisabled` callback builds `tzParts` via `Intl.DateTimeFormat` with `timeZone: teamTz` before any weekday/range comparison).
-5. **The team timezone arrives as a prop or loader-data field;** never read `Intl.DateTimeFormat().resolvedOptions().timeZone` (browser timezone) as a substitute. If the team's timezone is unknown at the call site, that is a bug in the loader, not a reason to fall back to browser-local.
+5. **The team timezone arrives as a prop or loader-data field;** never read `Intl.DateTimeFormat().resolvedOptions().timeZone` (browser timezone) as a substitute. If the team's timezone is unknown at the call site, that is a bug in the loader, not a reason to fall back to browser-local. It is carried on the wire by `EventApi.EventDetail.timezone`, `EventApi.EventListResponse.timezone` and `EventSeriesApi.EventSeriesInfo`/`EventSeriesDetail.timezone` — all `OptionFromOptionalKey`, so an older server mid-rollout omits the key instead of decode-failing the response. Resolve the `Option` with `Option.getOrElse(..., () => 'Europe/Prague')` (the server's own default for a team with no `team_settings` row) when the value drives a write, or omit the affected label entirely when it only drives display.
+6. **`event_series` times are team-local wall clock, not UTC — do not convert them on the way in or out.** `startTime`/`endTime` on every `EventSeriesApi` request and response are `HH:MM[:SS]` in the team's zone (see `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock"), so a `<input type='time'>` value is sent **verbatim** and a stored value is rendered **verbatim** (trim seconds with `.slice(0, 5)`). Never wrap either direction in `localToUtc`/`formatUtcTime`. The single exception is projecting a per-occurrence instant back onto a series-level field ("save all future occurrences" in `EventDetailPage.tsx`): use `formatTimeInZone(instant, teamTimezone)` from `~/lib/datetime.ts`, which reads the TEAM's zone, not the viewer's, and falls back to `'Europe/Prague'` for an invalid zone instead of throwing the way `Intl.DateTimeFormat` does.
 
 ### `window.focus` → `router.invalidate()` For Calendar-Boundary Pages
 
@@ -1214,6 +1215,26 @@ describe('MyComponent', () => {
 - Use `await import(...)` (dynamic import) for the component after `vi.mock` calls — this ensures mocks are applied before module evaluation.
 - Test files live in `applications/web/test/` with `.test.tsx` extension.
 - Use `@testing-library/react` (`render`, `screen`, `fireEvent`) for DOM assertions.
+
+### Timezone-Dependent Tests
+
+`vitest.config.ts` sets `env: { TZ: process.env.TZ ?? 'UTC' }`, so the suite runs in **UTC** unless the caller exports `TZ` explicitly. UTC has no DST: a test that reads a browser-local `Date` part greens in CI and on the author's machine and fails on a colleague's. `.github/workflows/check.yml` therefore runs a second `Test (Europe/Helsinki)` leg over the web project only — UTC+2 with EU DST rules, the zone that discriminates against the CET assumptions most of this code was written under.
+
+Rules:
+
+1. **No web test may assume the ambient timezone.** A test whose assertions depend on a wall-clock offset MUST pin its zone. A test that does not depend on one MUST pass under both UTC and `Europe/Helsinki`.
+2. **Pin with `withTz(tz, fn)` from `applications/web/test/tz.ts`.** Never hand-roll the save/mutate/restore: assigning the saved value back when `TZ` was unset stores the STRING `'undefined'`, which is not a valid zone, so the process silently falls back to UTC — permanently, because `process.env` is not reset between test files sharing a worker, making later files' effective zone depend on file order. `withTz` deletes the key instead.
+3. **A file where every test needs the SAME zone pins it once in `beforeAll` and restores in `afterAll` with the same delete-if-previously-unset discipline** (reference: `test/datetime.test.ts`, pinned to `Europe/Prague`). A file whose tests each need a DIFFERENT zone is a separate file using `withTz` per test (reference: `test/datetime.localToUtc.dst.test.ts`, `test/datetime.formatUtcDate.test.ts`).
+4. **Every DST test must be non-vacuous** — it must assert something that FAILS under a wrong zone. Assert a UTC-side value (`formatUtcTime(dt)`) or an epoch delta that differs from naive wall-clock arithmetic (`2026-10-25 00:30 → 03:30` local in Prague is 3 wall-clock hours but 4 real hours). A pair of local-side assertions alone passes vacuously under UTC.
+5. **Verify the transition DATE matches the zone being pinned.** EU zones switch on the last Sundays of March and October (2026: `2026-03-29`, `2026-10-25`); US zones switch on the second Sunday of March and the first Sunday of November (2026: `2026-03-08`, `2026-11-01`). A "DST" case dated to the other continent's transition crosses nothing and asserts nothing.
+6. **The spring-forward gap is at a fixed INSTANT, not a fixed wall clock.** It lands on 02:00 local at UTC+1 and on 03:00 local at UTC+2, so a wall-clock time that exists in Prague can be missing in Helsinki and normalize an hour forward. Assert the zone's own gap, never a shared "the gap is 02:00" assumption.
+7. **Sweep locally before pushing** anything touching `src/lib/datetime.ts` or a component that formats times:
+
+```bash
+TZ=Europe/Helsinki pnpm vitest run --project=@sideline/web   # the CI leg, locally
+TZ=America/New_York pnpm vitest run --project=@sideline/web  # negative-offset sweep
+```
+
 
 ## Crash Recovery & Error Fallbacks
 

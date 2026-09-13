@@ -541,12 +541,13 @@ Recurring event schedules. The `EventHorizonCron` generates individual `events` 
 | `end_date` | DATE | — | — |
 | `last_generated_date` | DATE | — | — |
 | `status` | TEXT | NOT NULL, CHECK (`'active'`, `'cancelled'`) | `'active'` |
+| `times_are_team_local` | BOOLEAN | NOT NULL | `FALSE` |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 | `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
 **Indexes**: `idx_event_series_team` on `(team_id)`
 
-**Notes**: `end_date` was made nullable in migration `1741600000` when the rolling horizon model was introduced. `days_of_week` replaced the single `day_of_week INTEGER` column in migration `1742400000`, allowing a series to recur on multiple days per week. `location_url` is an optional public `https://` URL attached to the location text; requires `location` to be non-empty (added in migration `1746100000`).
+**Notes**: `end_date` was made nullable in migration `1741600000` when the rolling horizon model was introduced. `days_of_week` replaced the single `day_of_week INTEGER` column in migration `1742400000`, allowing a series to recur on multiple days per week. `location_url` is an optional public `https://` URL attached to the location text; requires `location` to be non-empty (added in migration `1746100000`). `start_time`/`end_time` are `HH:MM[:SS]` **wall-clock in the team's own `team_settings.timezone`** (NOT UTC), resolved to an instant per occurrence by `EventHorizonCron`/`resolveOccurrenceInstant` — matching how `rsvp_reminder_time`/`rules_quiz_time` already work. This was not always true: before migration `1791600000_series_time_is_team_local`, these columns were (incorrectly) treated as a UTC time-of-day, which meant a series materialized an hour off from what the captain typed for half the year in any DST-observing zone. `times_are_team_local` was added by that migration as an idempotency guard — `TRUE` once a row's `start_time`/`end_time` have been converted to the new team-local semantics; the column is never dropped since it is the only thing that makes the one-time conversion UPDATE safely re-runnable by hand. The same migration also re-anchors any already-materialized future, non-hand-edited `events` rows generated from a series so they reflect the corrected wall clock.
 
 ---
 
@@ -2021,6 +2022,7 @@ All 109 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1790300013 | `add_event_channel_moved_event_type` | Drops and re-adds the `event_sync_events.event_type` CHECK constraint to include `'event_channel_moved'`. Emitted by `updateTeamSettings` when `discord_events_channel_id` changes; reuses `discord_target_channel_id` (new channel) and `discord_role_id` (old channel); `event_id` is set to the nil UUID sentinel. |
 | 1790300016 | `rename_rsvp_maybe_to_coming_later` | Drops and re-adds the `event_rsvps.response` CHECK constraint to permit both `'maybe'` and the new `'coming_later'` value. Historical `'maybe'` rows are left untouched this release; converting them and dropping `'maybe'` from the constraint is deferred to a follow-up. |
 | 1790400000 | `create_rules_progress` | Creates `rules_attempts` (id PK, user_id FK → users CASCADE, mode TEXT CHECK `'practice'/'exam'`, packages INT[], started_at, finished_at nullable, score/total INT CHECK ≥ 0, created_at); index `idx_rules_attempts_user` on `(user_id, finished_at DESC, id DESC)`. Creates `rules_scenario_results` (attempt_id FK → rules_attempts CASCADE, scenario_id TEXT, correct BOOLEAN, steps JSONB; PK (attempt_id, scenario_id)) with no additional index — the PK covers the mastery read's `attempt_id` lookup. |
+| 1791600000 | `series_time_is_team_local` | Adds `times_are_team_local BOOLEAN NOT NULL DEFAULT FALSE` to `event_series` as an idempotency guard, never dropped. Converts `event_series.start_time`/`end_time` from (incorrectly) UTC time-of-day to team-local wall-clock, anchored at each series' own `start_date` (a correlated scalar subselect against `team_settings.timezone`, falling back to `'Europe/Prague'` for a missing or Postgres-unrecognised zone). Also re-anchors already-materialized future, `active`, not-`series_modified` `events` rows generated from a series onto the corrected wall-clock time, and stamps their `personal_messages_dirty_at` so Discord personal-channel messages re-render with the fix. |
 
 ### After Migrations (seed data)
 
@@ -2084,4 +2086,4 @@ Each pull request gets its own PostgreSQL database. On server startup, if `DATAB
 
 ### Rolling Event Horizon
 
-Instead of persisting all future occurrences of a recurring series, only events within a rolling window are materialised. The `EventHorizonCron` (runs daily at 3:00 AM) reads `team_settings.event_horizon_days` for each team and generates `events` rows up to that many days ahead from `event_series.last_generated_date`. The partial unique index `idx_events_series_date` prevents duplicate generation.
+Instead of persisting all future occurrences of a recurring series, only events within a rolling window are materialised. The `EventHorizonCron` (runs daily at 3:00 AM) reads `team_settings.event_horizon_days` for each team and generates `events` rows up to that many days ahead from `event_series.last_generated_date`. The partial unique index `idx_events_series_date` prevents duplicate generation. For each generated date, `event_series.start_time`/`end_time` (team-local wall-clock, see the `event_series` table notes above) are resolved to an instant via `resolveOccurrenceInstant` (`applications/server/src/utils/seriesOccurrence.ts`), using the team's own `team_settings.timezone` — not a fixed UTC offset — so the same wall-clock time produces the correct instant year-round regardless of DST.
