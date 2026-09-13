@@ -503,7 +503,7 @@ flowchart LR
         UC_CREATE_EVENT["Create Event\n(POST /teams/:teamId/events)\nrequires: event:create\ntitle · type · startAt · endAt\nlocation · trainingTypeId\ndiscordChannelId · ownerGroupId · memberGroupId"]
         UC_EDIT_EVENT["Edit Event\n(PATCH /teams/:teamId/events/:eventId)\nrequires: event:edit"]
         UC_CANCEL_EVENT["Cancel Event\n(POST /teams/:teamId/events/:eventId/cancel)\nrequires: event:cancel"]
-        UC_START_EVENT["Mark Event as Started\n(background scheduler)\ntransitions status: active → started\nincrements missed_rsvps for non-responding Players in member group\nremoves RSVP buttons in Discord\nfor trainings: @-mentions assigned coach (or owners role if unclaimed)\nfor other events: @-mentions member-group role"]
+        UC_START_EVENT["Mark Event as Started\n(background scheduler)\ntransitions status: active → started\nincrements missed_rsvps for non-responding Players in member group\nposts nothing to Discord\nfor trainings: deletes the owners-thread claim message"]
     end
 
     subgraph SERIES["Event Series (Recurring)"]
@@ -519,7 +519,7 @@ flowchart LR
         UC_GET_RSVPS["View RSVP List\n(GET /teams/:teamId/events/:eventId/rsvps)"]
         UC_SUBMIT_RSVP["Submit RSVP\n(PUT /teams/:teamId/events/:eventId/rsvp)\nresponse: yes / no / coming later\nmessage required for coming later"]
         UC_NON_RESPONDERS["View Non-Responders\n(GET /teams/:teamId/events/:eventId/rsvps/non-responders)\nbuilt-in Players with missed_rsvps < max_missed_rsvps"]
-        UC_RSVP_REMINDER["Send RSVP Reminder Notification\n(background scheduler)\nDMs and embed target Players with missed_rsvps < max_missed_rsvps"]
+        UC_RSVP_REMINDER["Send RSVP Reminder Notification\n(background scheduler)\nDM-only, targets Players with missed_rsvps < max_missed_rsvps"]
     end
 
     PL --> UC_LIST_EVENTS

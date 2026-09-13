@@ -2049,6 +2049,37 @@ describe('Event/SubmitRsvp RPC — late RSVP detection', () => {
     resetRpcStores();
   });
 
+  // Test helpers — reduce the setup boilerplate for the table of cases below.
+  // `isLateRsvp` and `lateRsvpChannelId` now answer different questions:
+  //  - isLateRsvp: reminder was sent, and this is a first answer OR a change (unchanged rule).
+  //  - lateRsvpChannelId: Some only when the reminder was sent AND a prior response existed
+  //    AND it differs from the new one, compared through `projectRsvpResponseToLegacy` so a
+  //    legacy `maybe` row hit with "Coming later" doesn't count as a change.
+  const markReminderSent = () => {
+    const event = rpcEventsStore.get(RPC_TEST_EVENT_ID);
+    if (event) {
+      rpcEventsStore.set(RPC_TEST_EVENT_ID, {
+        ...event,
+        reminder_sent_at: Option.some(DateTime.makeUnsafe('2099-12-30T10:00:00Z')),
+      });
+    }
+  };
+
+  const seedPriorRsvp = (response: EventRsvp.RsvpResponse) => {
+    const priorKey = `${RPC_TEST_EVENT_ID}:${RPC_TEST_MEMBER_ID}`;
+    rpcRsvpsStore.set(priorKey, {
+      id: crypto.randomUUID() as EventRsvp.EventRsvpId,
+      event_id: RPC_TEST_EVENT_ID,
+      team_member_id: RPC_TEST_MEMBER_ID,
+      response,
+      message: Option.none(),
+      member_name: Option.none(),
+      username: Option.none(),
+      nickname: Option.none(),
+      display_name: Option.none(),
+    });
+  };
+
   itEffect.effect('isLateRsvp = false when reminder has not been sent', () =>
     makeSubmitRsvp({ response: 'yes' }).pipe(
       Effect.tap((result) =>
@@ -2061,50 +2092,32 @@ describe('Event/SubmitRsvp RPC — late RSVP detection', () => {
     ),
   );
 
-  itEffect.effect('isLateRsvp = true for first-time RSVP after reminder was sent', () => {
-    // Mark the event as having had the reminder sent
-    const event = rpcEventsStore.get(RPC_TEST_EVENT_ID);
-    if (event) {
-      rpcEventsStore.set(RPC_TEST_EVENT_ID, {
-        ...event,
-        reminder_sent_at: Option.some(DateTime.makeUnsafe('2099-12-30T10:00:00Z')),
-      });
-    }
+  itEffect.effect(
+    // This is the core regression: a first-time RSVP after the reminder must still notify
+    // (isLateRsvp=true) while withholding the channel, since a first answer is not a change.
+    'first-time RSVP after reminder is isLateRsvp=true but lateRsvpChannelId stays None even when a channel is configured (a first answer is not a change)',
+    () => {
+      // Channel is configured...
+      rpcLateRsvpChannelId = Option.some(LATE_RSVP_CHANNEL_ID);
+      // ...but there is no prior response (prior: none, new: 'yes').
+      markReminderSent();
 
-    return makeSubmitRsvp({ response: 'yes' }).pipe(
-      Effect.tap((result) =>
-        Effect.sync(() => {
-          expect(result.isLateRsvp).toBe(true);
-        }),
-      ),
-      Effect.provide(RpcTestLayer),
-      Effect.asVoid,
-    );
-  });
+      return makeSubmitRsvp({ response: 'yes' }).pipe(
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result.isLateRsvp).toBe(true);
+            expect(Option.isNone(result.lateRsvpChannelId)).toBe(true);
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      );
+    },
+  );
 
   itEffect.effect('isLateRsvp = true when changing response after reminder was sent', () => {
-    // Pre-populate an existing RSVP with 'yes'
-    const priorKey = `${RPC_TEST_EVENT_ID}:${RPC_TEST_MEMBER_ID}`;
-    rpcRsvpsStore.set(priorKey, {
-      id: crypto.randomUUID() as EventRsvp.EventRsvpId,
-      event_id: RPC_TEST_EVENT_ID,
-      team_member_id: RPC_TEST_MEMBER_ID,
-      response: 'yes',
-      message: Option.none(),
-      member_name: Option.none(),
-      username: Option.none(),
-      nickname: Option.none(),
-      display_name: Option.none(),
-    });
-
-    // Mark the event as having had the reminder sent
-    const event = rpcEventsStore.get(RPC_TEST_EVENT_ID);
-    if (event) {
-      rpcEventsStore.set(RPC_TEST_EVENT_ID, {
-        ...event,
-        reminder_sent_at: Option.some(DateTime.makeUnsafe('2099-12-30T10:00:00Z')),
-      });
-    }
+    seedPriorRsvp('yes');
+    markReminderSent();
 
     // Submit a different response ('no' vs prior 'yes')
     return makeSubmitRsvp({ response: 'no' }).pipe(
@@ -2119,28 +2132,8 @@ describe('Event/SubmitRsvp RPC — late RSVP detection', () => {
   });
 
   itEffect.effect('isLateRsvp = false for same-response resubmission after reminder', () => {
-    // Pre-populate an existing RSVP with 'yes'
-    const priorKey = `${RPC_TEST_EVENT_ID}:${RPC_TEST_MEMBER_ID}`;
-    rpcRsvpsStore.set(priorKey, {
-      id: crypto.randomUUID() as EventRsvp.EventRsvpId,
-      event_id: RPC_TEST_EVENT_ID,
-      team_member_id: RPC_TEST_MEMBER_ID,
-      response: 'yes',
-      message: Option.none(),
-      member_name: Option.none(),
-      username: Option.none(),
-      nickname: Option.none(),
-      display_name: Option.none(),
-    });
-
-    // Mark the event as having had the reminder sent
-    const event = rpcEventsStore.get(RPC_TEST_EVENT_ID);
-    if (event) {
-      rpcEventsStore.set(RPC_TEST_EVENT_ID, {
-        ...event,
-        reminder_sent_at: Option.some(DateTime.makeUnsafe('2099-12-30T10:00:00Z')),
-      });
-    }
+    seedPriorRsvp('yes');
+    markReminderSent();
 
     // Resubmit same 'yes' response — should NOT be late
     return makeSubmitRsvp({ response: 'yes' }).pipe(
@@ -2155,21 +2148,15 @@ describe('Event/SubmitRsvp RPC — late RSVP detection', () => {
   });
 
   itEffect.effect(
-    'lateRsvpChannelId is returned when discord_channel_late_rsvp is configured and RSVP is late',
+    'lateRsvpChannelId is Some when a prior response ("yes") changes to a different one ("no") after the reminder and a channel is configured',
     () => {
       // Configure the late RSVP channel
       rpcLateRsvpChannelId = Option.some(LATE_RSVP_CHANNEL_ID);
+      // Prior response exists and differs from the new one.
+      seedPriorRsvp('yes');
+      markReminderSent();
 
-      // Mark the event as having had the reminder sent
-      const event = rpcEventsStore.get(RPC_TEST_EVENT_ID);
-      if (event) {
-        rpcEventsStore.set(RPC_TEST_EVENT_ID, {
-          ...event,
-          reminder_sent_at: Option.some(DateTime.makeUnsafe('2099-12-30T10:00:00Z')),
-        });
-      }
-
-      return makeSubmitRsvp({ response: 'yes' }).pipe(
+      return makeSubmitRsvp({ response: 'no' }).pipe(
         Effect.tap((result) =>
           Effect.sync(() => {
             expect(result.isLateRsvp).toBe(true);
@@ -2184,22 +2171,104 @@ describe('Event/SubmitRsvp RPC — late RSVP detection', () => {
   );
 
   itEffect.effect(
-    'lateRsvpChannelId = None when no late RSVP channel configured, even if RSVP is late',
+    'lateRsvpChannelId = None when no late RSVP channel configured, even though the response changed after the reminder',
     () => {
       // No late RSVP channel configured (rpcLateRsvpChannelId stays Option.none())
+      seedPriorRsvp('yes');
+      markReminderSent();
 
-      // Mark the event as having had the reminder sent
-      const event = rpcEventsStore.get(RPC_TEST_EVENT_ID);
-      if (event) {
-        rpcEventsStore.set(RPC_TEST_EVENT_ID, {
-          ...event,
-          reminder_sent_at: Option.some(DateTime.makeUnsafe('2099-12-30T10:00:00Z')),
-        });
-      }
-
-      return makeSubmitRsvp({ response: 'yes' }).pipe(
+      return makeSubmitRsvp({ response: 'no' }).pipe(
         Effect.tap((result) =>
           Effect.sync(() => {
+            expect(result.isLateRsvp).toBe(true);
+            expect(Option.isNone(result.lateRsvpChannelId)).toBe(true);
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  itEffect.effect(
+    'lateRsvpChannelId = None when the response changed but the reminder was never sent',
+    () => {
+      rpcLateRsvpChannelId = Option.some(LATE_RSVP_CHANNEL_ID);
+      seedPriorRsvp('yes');
+      // reminder_sent_at intentionally left as Option.none() (default from resetRpcStores)
+
+      return makeSubmitRsvp({ response: 'no' }).pipe(
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result.isLateRsvp).toBe(false);
+            expect(Option.isNone(result.lateRsvpChannelId)).toBe(true);
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  itEffect.effect(
+    'lateRsvpChannelId = None for a clearMessage-only resubmission of the same response after the reminder (message-only edit is not a change)',
+    () => {
+      rpcLateRsvpChannelId = Option.some(LATE_RSVP_CHANNEL_ID);
+      seedPriorRsvp('yes');
+      markReminderSent();
+
+      return makeSubmitRsvp({ response: 'yes', clearMessage: true }).pipe(
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result.isLateRsvp).toBe(false);
+            expect(Option.isNone(result.lateRsvpChannelId)).toBe(true);
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  itEffect.effect(
+    'lateRsvpChannelId is Some when a prior "no" changes to "coming_later" after the reminder',
+    () => {
+      rpcLateRsvpChannelId = Option.some(LATE_RSVP_CHANNEL_ID);
+      seedPriorRsvp('no');
+      markReminderSent();
+
+      return makeSubmitRsvp({
+        response: 'coming_later',
+        message: Option.some('running 10 late'),
+      }).pipe(
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result.isLateRsvp).toBe(true);
+            expect(Option.isSome(result.lateRsvpChannelId)).toBe(true);
+          }),
+        ),
+        Effect.provide(RpcTestLayer),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  itEffect.effect(
+    'lateRsvpChannelId = None when a legacy "maybe" prior is resubmitted as "coming_later" after the reminder (both project to "maybe" — not a real change)',
+    () => {
+      rpcLateRsvpChannelId = Option.some(LATE_RSVP_CHANNEL_ID);
+      seedPriorRsvp('maybe');
+      markReminderSent();
+
+      return makeSubmitRsvp({
+        response: 'coming_later',
+        message: Option.some('running 10 late'),
+      }).pipe(
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            // Raw comparison ('maybe' !== 'coming_later') would make isLateRsvp true, while the
+            // legacy-projected comparison makes isLateRsvpChange false. Asserting both booleans
+            // proves they genuinely diverge here — not just that the channel is withheld.
             expect(result.isLateRsvp).toBe(true);
             expect(Option.isNone(result.lateRsvpChannelId)).toBe(true);
           }),

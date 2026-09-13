@@ -559,8 +559,24 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
               (Option.isNone(upsertResult.priorResponse) ||
                 Option.exists(upsertResult.priorResponse, (r) => r !== response)),
           ),
-          Effect.bind('lateRsvpChannelId', ({ isLateRsvp }) =>
-            isLateRsvp
+          // The channel post announces CHANGED answers only — a first answer after the reminder
+          // is not a change, it is the answer the reminder asked for. `isLateRsvp` keeps the
+          // wider meaning for the ephemeral hint. Compare through the legacy projection so a
+          // legacy `maybe` row resubmitted as `coming_later` (both render as `rsvp_maybe`,
+          // "Coming later") doesn't count as a change.
+          Effect.let(
+            'isLateRsvpChange',
+            ({ event, upsertResult }) =>
+              Option.isSome(event.reminder_sent_at) &&
+              Option.exists(
+                upsertResult.priorResponse,
+                (r) => projectRsvpResponseToLegacy(r) !== projectRsvpResponseToLegacy(response),
+              ),
+          ),
+          // `Some` ⇔ channel configured AND this was a real change. Gating here rather than on a
+          // new wire field means the fix lands with the server deploy, not the bot.
+          Effect.bind('lateRsvpChannelId', ({ isLateRsvpChange }) =>
+            isLateRsvpChange
               ? svc.teamSettings.findLateRsvpChannelId(team_id)
               : Effect.succeed(Option.none<Discord.Snowflake>()),
           ),

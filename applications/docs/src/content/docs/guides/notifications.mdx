@@ -18,26 +18,18 @@ The exact timing is configurable per team from **Team settings → Notifications
 | **Days before** | How many days before the event start the reminder fires. Set to `0` to disable reminders entirely. |
 | **Time of day** | The local time (in the team's timezone) at which the reminder fires. Must be 23:54 or earlier. |
 | **Timezone** | An IANA timezone name (e.g. `Europe/Prague`, `America/New_York`) used to evaluate the reminder time. |
-| **Reminders channel** | The Discord channel where reminders are posted. If unset, the event owner-group's channel is used as a fallback. |
+| **Reminders channel** | Not used to post reminders — reminders are DM-only (see below). It only resolves the deep-link fallback included in a reminder DM when the member has no personal events channel to link to. |
 
 ## Where reminders go
 
-- **In Discord**, in the team's configured reminders channel (or the event's owner-group channel if no dedicated reminders channel is set).
-- Reminders are **one-off posts** — once the reminder is sent, the event is marked so it won't fire again.
+- Reminders are **DM-only**. The bot sends a direct message to each non-responder — nothing is posted to any Discord channel.
+- Reminders are **one-off sends** — once the reminder is sent, the event is marked so it won't fire again.
 
 ## Who gets pinged
 
 Only players who are members of the event's **member group** (and any of its sub-groups) who haven't RSVPed yet. Once someone clicks Yes / No / Coming later, they drop off the reminder list.
 
-The bot sends a direct message to each non-responder who has a linked Discord account, with a link to the event's voting message.
-
-## Event-start announcements
-
-When an event reaches its start time, the bot posts a fresh **"Starting now: \{title\}"** message to the same reminders channel. This announcement:
-
-- Lists everyone who said **Going**, filtered to the event's member group.
-- @-mentions the member group's Discord role.
-- Is separate from the in-place edit of the original event embed (which simply removes the RSVP buttons).
+The bot sends a direct message to each non-responder who has a linked Discord account. The DM links to that member's own personal events channel; if they don't have one, it falls back to the team's configured reminders channel, and finally to a generic link into the Discord server if neither is available.
 
 ## Disabling reminders
 
@@ -50,7 +42,7 @@ Per-team: from **Team settings → Notifications**, set **Days before** to `0`.
 ## Per-user preferences
 
 <Aside type="caution" title="Coming soon">
-  Per-user preferences (e.g. "don't @-mention me — send me a DM instead") are on the roadmap. For now, reminder settings are team-wide.
+  Per-user preferences (e.g. choosing your own reminder lead time) are on the roadmap. For now, reminder settings are team-wide.
 </Aside>
 
 ## See also

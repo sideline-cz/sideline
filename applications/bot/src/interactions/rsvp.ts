@@ -127,6 +127,19 @@ const modalValueOption = (
  * board itself was removed) — personal channel messages refresh via the
  * server-side dirty-mark instead. The only remaining Discord-side effect here
  * is the late-RSVP notice to the configured late-RSVP channel, if any.
+ *
+ * The change-vs-first-answer decision does NOT live here — it lives in
+ * `Event/SubmitRsvp` (applications/server/src/rpc/event/index.ts). The server
+ * returns `lateRsvpChannelId: Some` only when the member CHANGED an answer they
+ * had already given; a first answer after the reminder arrives as `None` and is
+ * dropped by the guard below. So `lateRsvpChannelId: None` means either "no late
+ * channel configured" or "not a change", and the bot deliberately cannot tell
+ * the two apart.
+ *
+ * The `!counts.isLateRsvp` half of the guard looks redundant against that — keep
+ * it. It is rolling-deploy defence: an older server still returns `Some` for a
+ * first answer, and `isLateRsvp` stays the wider flag because it also drives the
+ * ephemeral `bot_rsvp_late_hint`.
  */
 export const postRsvpDiscordUpdates = (params: {
   interaction: Discord.APIInteraction;

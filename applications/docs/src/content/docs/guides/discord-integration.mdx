@@ -23,8 +23,8 @@ See [Quick start for Admins](/quick-start/admins/#steps) for the full install fl
 
 You link Discord channels to Sideline for specific purposes:
 
-- **Reminders channel** (optional) — where RSVP reminders and event-start announcements are posted. If unset, the bot falls back to the event's owner-group channel.
-- **Late-RSVP channel** (optional) — where the bot posts a notification when a member RSVPs after the reminder has already been sent.
+- **Reminders channel** (optional) — RSVP reminders are sent by DM, not posted here. This setting only supplies the fallback link inside a reminder DM for a member without a personal events channel; if unset, the bot falls back to the event's owner-group channel.
+- **Late-RSVP channel** (optional) — where the bot posts a notification when a member **changes an answer they had already given**, after the reminder has already been sent. A first-ever answer after the reminder does not post here.
 - **Welcome channel** (optional) — where the bot posts a public welcome embed when a new member joins via an invite.
 - **System log channel** (optional) — a private captain-only channel where the bot logs every join (member, invite code, inviter, group). Keep it visible only to captains and admins.
 - **Achievement channel** (optional) — where the bot posts a congratulatory embed when a member earns an achievement. Select **None** to disable achievement notifications entirely. Teams that had a welcome channel configured before this setting was introduced default to posting to that welcome channel; you can change or clear the setting at any time.
@@ -123,12 +123,9 @@ The current claimer can click **Release** to give up the claim, returning the em
 
 If no one has claimed a training by the time the regular RSVP reminder fires, the bot posts an additional **unclaimed training reminder** to the owner group's channel, including a jump link back to the claim embed.
 
-When the training starts, the claim embed is automatically removed from the thread, and the bot posts a **"Starting now"** announcement to the reminders channel. For trainings:
+When the training starts, the claim embed is automatically removed from the thread. Nothing else is posted — the bot no longer announces that the training is starting.
 
-- If a coach claimed the training, the announcement **@-mentions the coach directly** (e.g. `<@CoachDiscordId>`).
-- If no coach claimed the training (or the claimer has no linked Discord account), the announcement **@-mentions the owners-group role** and includes the message "No coach claimed this training."
-
-On the day of the training, if the training has been claimed, the bot also posts a **"today's coach is X"** announcement to the training's owner-group channel so players know who is running the session.
+On the day of the training, if the training has been claimed, the bot posts a **"today's coach is X"** announcement to the training's owner-group channel so players know who is running the session.
 
 <Aside type="note" title="Who can claim?">
   Only members (including coaches in sub-groups) of the training's **owner group** can claim or release a training. The Claim button silently rejects everyone else.

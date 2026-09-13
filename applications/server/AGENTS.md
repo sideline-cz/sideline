@@ -638,14 +638,12 @@ Rules:
 
 ### Overloaded payload fields on event sync events (training vs non-training)
 
-Two `event_sync_events` payload fields carry **different semantics depending on `event_type`**. Both producer (cron/emitter) and consumer (bot handler) branch on `event_type === 'training'`; if you touch one side you MUST update the other, or trainings will mention the wrong role/group.
+One `event_sync_events` payload field still carries **different semantics depending on `event_type`**. The producer (cron/emitter) branches on `event_type === 'training'`; if you touch it you MUST check both branches, or trainings will carry the wrong role/group even though nothing currently reads the training branch.
 
 | Payload field | Non-training meaning | Training meaning | Producer | Consumer |
 |---------------|----------------------|------------------|----------|----------|
-| `event_started.discord_role_id` | MEMBER-group role (`resolveGroupRoleId(team_id, member_group_id)`) — pinged on "Starting now" | OWNERS-group role (`resolveGroupRoleId(team_id, owner_group_id)`) — used only as the no-coach fallback mention | `src/services/EventStartCron.ts` | `applications/bot/src/rcp/event/handleStarted.ts` |
+| `event_started.discord_role_id` | MEMBER-group role (`resolveGroupRoleId(team_id, member_group_id)`) | OWNERS-group role (`resolveGroupRoleId(team_id, owner_group_id)`) | `src/services/EventStartCron.ts` | **none** — `handleStarted.ts` no longer posts anything, so this field (and `claimed_by_discord_id`, also still emitted for trainings via `event.claimed_by`) is computed and stored but currently unread. Left in place deliberately: `EventStartCron` is otherwise unchanged (its emit still drives the claim-message-deletion consumer), and re-deriving these on a future consumer is cheaper than re-adding the JOIN/resolution logic from scratch. |
 | `training_claim_request.owner_group_id` | n/a (only emitted for trainings) | populated in `constructEvent` from the outbox row's `member_group_id` column (`owner_group_id: r.member_group_id`) | `src/rpc/event/events.ts` (`constructEvent`) | `applications/bot/src/rcp/event/handleTrainingClaimRequest.ts` |
-
-For `event_started`, `EventStartCron` additionally passes `event.claimed_by` (the assigned coach's `TeamMemberId`) to `emitEventStarted` ONLY for trainings; the JOIN in `findUnprocessedEvents` resolves it to `claimed_by_discord_id`, and the bot prefers a `<@coach>` user mention over the role mention. See the bot AGENTS.md "Training claim threads" note for the consumer rules.
 
 ### Two-surface event model: global shared channel + per-member personal channels
 
@@ -861,28 +859,68 @@ Reference: `src/utils/toCurrentUser.ts` (`Auth.CurrentUser.displayName`) and `sr
 
 ## Before/After State Detection in Upsert Handlers
 
-When an RPC handler must detect whether an upsert changed meaningful state (e.g. "was this RSVP submitted after a reminder?"), read the prior record **before** the upsert and compare afterward:
+When an RPC handler must detect whether an upsert changed meaningful state (e.g. "was this RSVP submitted after a reminder?"), don't `findOne` before and upsert after — that's two round trips with a race between them. Instead, capture the pre-write value in a CTE alongside the `INSERT ... ON CONFLICT`, so the prior state and the write happen atomically:
 
 ```typescript
-Effect.bind('priorRsvp', ({ member }) =>
-  rsvps.findRsvpByEventAndMember(event_id, member.id),
+// EventRsvpsRepository.upsert — the CTE snapshots the row before the upsert touches it
+const upsert = SqlSchema.findOne({
+  Request: UpsertInput,
+  Result: UpsertWithPriorResult, // { id, event_id, team_member_id, response, message, prior_response }
+  execute: (input) => sql`
+    WITH prior AS (
+      SELECT response AS prior_response
+      FROM event_rsvps
+      WHERE event_id = ${input.event_id} AND team_member_id = ${input.team_member_id}
+    )
+    INSERT INTO event_rsvps (event_id, team_member_id, response, message)
+    VALUES (${input.event_id}, ${input.team_member_id}, ${input.response}, ${input.message})
+    ON CONFLICT (event_id, team_member_id)
+    DO UPDATE SET response = ${input.response}, message = COALESCE(${input.message}, event_rsvps.message), updated_at = now()
+    RETURNING id, event_id, team_member_id, response, message,
+              (SELECT prior_response FROM prior) AS prior_response
+  `,
+});
+```
+
+The repository method maps that row to `{ row, priorResponse: Option<RsvpResponse> }` (see `EventRsvpsRepository.upsertRsvp`). The RPC handler then derives booleans from `upsertResult.priorResponse` in an `Effect.let` **after** the `Effect.bind` that performs the upsert:
+
+```typescript
+Effect.bind('upsertResult', ({ member }) =>
+  svc.rsvps.upsertRsvp(event_id, member.id, response, message, clearMessage),
 ),
-Effect.tap(({ member }) =>
-  rsvps.upsertRsvp(event_id, member.id, response, message),
-),
+// Reminder sent, and this is either a first answer or a change. Drives the ephemeral
+// "you answered late" hint — first-answer-after-reminder is still "late" from the
+// submitting member's point of view.
 Effect.let(
   'isLateRsvp',
-  ({ event, priorRsvp }) =>
+  ({ event, upsertResult }) =>
     Option.isSome(event.reminder_sent_at) &&
-    (Option.isNone(priorRsvp) ||
-      Option.exists(priorRsvp, (r) => r.response !== response)),
+    (Option.isNone(upsertResult.priorResponse) ||
+      Option.exists(upsertResult.priorResponse, (r) => r !== response)),
+),
+// Reminder sent, AND a prior response existed, AND it differs — narrower than
+// `isLateRsvp` on purpose. Gates the late-RSVP channel post, which should announce
+// changed minds, not first answers. Compare through `projectRsvpResponseToLegacy` so a
+// legacy `maybe` row resubmitted as `coming_later` (both render as `rsvp_maybe`,
+// "Coming later") isn't a change.
+Effect.let(
+  'isLateRsvpChange',
+  ({ event, upsertResult }) =>
+    Option.isSome(event.reminder_sent_at) &&
+    Option.exists(
+      upsertResult.priorResponse,
+      (r) => projectRsvpResponseToLegacy(r) !== projectRsvpResponseToLegacy(response),
+    ),
 ),
 ```
 
+Two booleans, not one, because they drive two different consumers that now want different answers: `isLateRsvp` is deliberately wide (feeds the ephemeral hint), `isLateRsvpChange` is deliberately narrow (feeds the channel-post lookup, e.g. `Effect.bind('lateRsvpChannelId', ({ isLateRsvpChange }) => isLateRsvpChange ? svc.teamSettings.findLateRsvpChannelId(team_id) : Effect.succeed(Option.none()))`). Gating the *lookup* rather than adding an `isLateRsvpChange` field to the RPC result means the fix takes effect the moment the server deploys, without waiting for bot pods on a rolling deploy — at the cost that a `None` channel id now means either "no channel configured" or "not a change" to any caller inspecting the result.
+
 Rules:
-1. Always `Effect.bind` the prior state **before** the `Effect.tap` that performs the upsert
-2. Use `Option.isNone` to detect first-time inserts vs `Option.exists` to detect changed values
-3. Derive the boolean in an `Effect.let` after the upsert so the write is not conditional on the check
+1. Prefer a CTE that snapshots pre-write state alongside the `INSERT ... ON CONFLICT` over a separate `findOne` + upsert — one round trip, no race window between reading and writing.
+2. Use `Option.isNone` on the prior-state field to detect first-time inserts vs `Option.exists` to detect changed values.
+3. Derive booleans in an `Effect.let` **after** the `Effect.bind` that performs the upsert, never before — the write must not be conditional on the derived state.
+4. When two consumers of "did this change?" want different answers (e.g. a wide ephemeral hint vs. a narrow notification gate), give them two named booleans instead of overloading one — don't let a single flag's meaning drift to satisfy a new caller.
 
 ## RSVP Has Two Write Surfaces — Apply Side Effects to Both
 
