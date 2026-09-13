@@ -69,6 +69,11 @@ class EventSeriesForGeneration extends Schema.Class<EventSeriesForGeneration>(
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   created_by: TeamMember.TeamMemberId,
   event_horizon_days: Schema.Number,
+  // The team's own timezone (plan: series times are team-local wall clock,
+  // not UTC) — `COALESCE`d against the same `'Europe/Prague'` fallback used
+  // everywhere else. Reuses the `team_settings` join already required for
+  // `event_horizon_days`, so this is not a second join.
+  team_timezone: Schema.String,
 }) {}
 
 const EventSeriesInsertInput = Schema.Struct({
@@ -174,7 +179,8 @@ const make = Effect.gen(function* () {
                    es.last_generated_date,
                    es.owner_group_id, es.member_group_id,
                    es.created_by,
-                   COALESCE(ts.event_horizon_days, 30) AS event_horizon_days
+                   COALESCE(ts.event_horizon_days, 30) AS event_horizon_days,
+                   COALESCE(ts.timezone, 'Europe/Prague') AS team_timezone
             FROM event_series es
             LEFT JOIN team_settings ts ON ts.team_id = es.team_id
             WHERE es.status = 'active'

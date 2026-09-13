@@ -121,7 +121,13 @@ export const formatEventDateRange = (
   });
 };
 
-/** Format a UTC DateTime as HH:mm in UTC (for storing time-of-day values). */
+/**
+ * Format a UTC DateTime as HH:mm in UTC.
+ * No longer the series write path (see `formatTimeInZone`) — `event_series.startTime`/`endTime`
+ * are team-local wall-clock strings now, not UTC times, so writing a series no longer goes
+ * through this. Kept for whatever genuinely needs a UTC instant's time-of-day (as opposed to
+ * a team-local wall clock); nothing in this codebase currently calls it outside tests.
+ */
 export const formatUtcTime = (dt: DateTime.Utc): string => {
   const d = new Date(Number(DateTime.toEpochMillis(dt)));
   const h = String(d.getUTCHours()).padStart(2, '0');
@@ -130,14 +136,32 @@ export const formatUtcTime = (dt: DateTime.Utc): string => {
 };
 
 /**
- * Convert a stored UTC time string (HH:MM) back to the browser's local time string.
- * Uses the current date's DST offset — best approximation for time-only values.
+ * Format a UTC DateTime as HH:mm in the GIVEN IANA timezone (not the browser's).
+ *
+ * This is the projection step for writing a single-occurrence override back onto a
+ * `event_series`-shaped wall-clock field (plan: startTime/endTime are now team-local wall
+ * clock, not UTC — see the module-level rationale in the callers). The browser only knows
+ * what instant the user picked; it must be re-expressed in the TEAM's zone, not the viewer's,
+ * because that is the zone the wall-clock string is defined in.
+ *
+ * Uses `DateTime.setZoneNamed`/`DateTime.toParts` (the same pattern the server-side
+ * `recomputeStartAt` test helper and `resolveOccurrenceInstant` use) rather than
+ * `Intl.DateTimeFormat`: `toParts` hands back `hour`/`minute` as plain numbers with no locale
+ * involved, so there is no `24:00`-for-midnight quirk to normalise (some ICU builds return
+ * `24:00` instead of `00:00` for local midnight from `Intl.DateTimeFormat` with `hour12: false`
+ * — that never arises here).
+ *
+ * `tz` is user/DB-sourced free-form text (`team_settings.timezone` has no CHECK constraint —
+ * see the migration `1791600000_series_time_is_team_local.ts`), so it can be invalid. Unlike
+ * `Intl.DateTimeFormat`, which THROWS a `RangeError` for an unrecognised zone,
+ * `DateTime.setZoneNamed` returns `None`; this falls back to `'Europe/Prague'`, mirroring the
+ * server's `resolveOccurrenceInstant`/migration defence for the exact same bad-data case, on a
+ * render/save path where throwing would be user-visible breakage.
  */
-export const utcTimeToLocal = (time: string): string => {
-  const today = new Date();
-  const y = today.getFullYear();
-  const mo = String(today.getMonth() + 1).padStart(2, '0');
-  const d = String(today.getDate()).padStart(2, '0');
-  const hhmm = time.slice(0, 5);
-  return formatLocalTime(DateTime.makeUnsafe(`${y}-${mo}-${d}T${hhmm}:00Z`));
+export const formatTimeInZone = (dt: DateTime.Utc, tz: string): string => {
+  const zoned = Option.getOrElse(DateTime.setZoneNamed(dt, tz), () =>
+    DateTime.setZoneNamedUnsafe(dt, 'Europe/Prague'),
+  );
+  const { hour, minute } = DateTime.toParts(zoned);
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 };

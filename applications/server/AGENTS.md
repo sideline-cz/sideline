@@ -931,6 +931,45 @@ A configurable per-team setting (e.g. `team_settings.max_missed_rsvps`, followin
 
 The default value MUST be identical in places 1, 4, and 5 (and in the read mapper's `onNone` branch), and the bounds MUST be identical in places 3 and 6. Reference end-to-end implementation: `max_missed_rsvps` (default `4`, bounds `1`–`50`).
 
+## Series Times Are Team-Local Wall Clock
+
+`event_series.start_time` and `event_series.end_time` are `HH:MM[:SS]` **wall-clock** values in the owning team's `team_settings.timezone` — **not** UTC times-of-day. Same convention as `team_settings.rules_quiz_time` and `team_settings.rsvp_reminder_time`; the conversion migration is `1791600000_series_time_is_team_local.ts`. A recurring "Tuesday 18:00" is a wall clock: no single UTC time-of-day equals 18:00 local all year, so any UTC interpretation is an hour wrong for half the year in every DST zone.
+
+Rules:
+
+1. **Never build an occurrence instant as `` `${dateStr}T${time}Z` ``** (or any other string that pins the series time to UTC). Always call `resolveOccurrenceInstant(dateStr, time, timezone)` from `src/utils/seriesOccurrence.ts`. It accepts both `HH:MM` and `HH:MM:SS` (a PG `TIME` column can come back with seconds), never throws, and falls back to `'Europe/Prague'` for an unparseable zone. Reference caller: `EventHorizonCron.ts`.
+2. **Every query that selects a series time must select the team's zone alongside it** as `COALESCE(ts.timezone, 'Europe/Prague') AS team_timezone`, reusing the `team_settings` join the query already has (see `EventSeriesRepository.findActiveForGeneration`). A series time without its zone is not interpretable — do not pass one to a caller on its own.
+3. **SQL that re-derives an occurrence instant must use the team's zone on BOTH sides of the round trip** — `((start_at AT TIME ZONE ${tz})::date + ${time}::time) AT TIME ZONE ${tz}`, never `AT TIME ZONE 'UTC'`. Reference: `EventsRepository.updateFutureUnmodified`, whose `timezone` field is required precisely so no caller can omit it.
+4. **`team_settings.timezone` is free-form `TEXT` with no `CHECK` constraint, so treat it as untrusted.** In TypeScript, `DateTime.makeZoned` returns `None` for an unknown zone — fall back to `'Europe/Prague'`, never throw on a cron or render path. In SQL, use the `pg_timezone_names` join described in `packages/migrations/AGENTS.md` → "Reading A Per-Team Setting Inside A Migration `UPDATE`".
+5. **A team-timezone change must re-anchor already-materialized future occurrences.** `src/api/team-settings.ts` re-derives `start_at`/`end_at` for events matching `series_id IS NOT NULL AND NOT series_modified AND status = 'active' AND start_at >= now()`, reading the calendar date in the OLD zone and resolving it in the NEW one. Keep those four guards identical to the migration's Statement B — they exist to avoid clobbering per-occurrence captain edits, cancelled events, and the past.
+
+### JS and Postgres Disagree On DST-Ambiguous Wall Clocks
+
+For a wall clock inside the **repeated hour** on fall-back, the two engines pick different instants:
+
+| Engine | Disambiguation | `2026-10-25 02:30 Europe/Prague` |
+|--------|----------------|----------------------------------|
+| `resolveOccurrenceInstant` (effect `DateTime`, `"compatible"`) | EARLIER occurrence | `00:30Z` |
+| Postgres `AT TIME ZONE` | LATER occurrence | `01:30Z` |
+
+Any feature that derives the same instant in both places (a repository query plus its TS-side equivalent, a migration plus the cron that regenerates the same rows) is off by one hour for that input. Do not "fix" either side in isolation: if either disambiguation changes, update the notes on `resolveOccurrenceInstant`, on `EventsRepository.updateFutureUnmodified`, and on `recomputeStartAt` in `test/EventSeries.test.ts` together.
+
+### Building A Zoned Instant From Calendar + Clock Parts
+
+Build the value directly from the wall-clock string:
+
+```typescript
+DateTime.makeZoned(`${date}T${hh}:${mm}:${ss}`, { timeZone, adjustForTimeZone: true });
+```
+
+**Never anchor at `` `${date}T00:00:00Z` `` and then `DateTime.setParts`.** Midnight UTC is the PREVIOUS day in every zone with a negative offset, so the anchor's day-of-month is 31 when `date` is the 1st; `setParts` assigns year → month → day, so a month with fewer than 31 days overflows before the day is corrected and the result lands a **month** late:
+
+```
+America/New_York, asked 2026-02-01 18:00 -> got 2026-03-01 18:00
+```
+
+It fails silently and only west of UTC. A test table of `Europe/Prague` / `UTC` / `Pacific/Auckland` passes anyway — **every test of a zoned-instant builder must include at least one negative-offset zone** (`America/New_York`, `America/Los_Angeles`) and at least one non-whole-hour zone (`Asia/Kathmandu` at UTC+5:45, `Australia/Lord_Howe` with a 30-minute DST step). Reference: `src/utils/seriesOccurrence.ts` and `test/utils/seriesOccurrence.test.ts`.
+
 ## Cron Jobs
 
 Cron jobs are long-running Effects that repeat on a schedule. Each cron is defined in `src/services/` and wired as a concurrent fiber in `run.ts`.

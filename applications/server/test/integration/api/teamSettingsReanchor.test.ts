@@ -54,6 +54,7 @@ import { SqlClient } from 'effect/unstable/sql';
 import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { TeamSettingsApiLive } from '~/api/team-settings.js';
 import { AuthMiddlewareLive } from '~/middleware/AuthMiddlewareLive.js';
+import { EventSeriesRepository } from '~/repositories/EventSeriesRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { SessionsRepository } from '~/repositories/SessionsRepository.js';
@@ -98,6 +99,7 @@ const RealRepos = Layer.mergeAll(
   RolesRepository.Default,
   TeamSettingsRepository.Default,
   EventsRepository.Default,
+  EventSeriesRepository.Default,
 );
 
 const TestLayer = HttpApiBuilder.layer(SmallApi).pipe(
@@ -287,6 +289,89 @@ const setPersonalMessagesDirtyAt = (eventId: string, value: Date) =>
         `UPDATE events SET personal_messages_dirty_at = '${value.toISOString()}' WHERE id = '${eventId}'`,
       ),
     ),
+  );
+
+// --- Series re-anchor helpers (S review finding: a timezone change must also
+// re-derive already-materialized SERIES events, not just all-day ones — see
+// the second `Effect.tap` added to `updateTeamSettings` in team-settings.ts) ---
+
+/** Seeds an `event_series` row with the given team-local wall-clock `startTime`/`endTime`. */
+const seedSeries = (
+  teamId: Team.TeamId,
+  createdBy: TeamMember.TeamMemberId,
+  opts: { startTime: string; endTime?: string },
+) =>
+  EventSeriesRepository.asEffect().pipe(
+    Effect.andThen((repo) =>
+      repo.insertEventSeries({
+        teamId,
+        trainingTypeId: Option.none(),
+        title: 'Weekly Training',
+        description: Option.none(),
+        startTime: opts.startTime,
+        endTime: opts.endTime ? Option.some(opts.endTime) : Option.none(),
+        location: Option.none(),
+        frequency: 'weekly',
+        daysOfWeek: [2],
+        startDate: DateTime.makeUnsafe('2026-01-06T00:00:00Z'),
+        endDate: Option.none(),
+        createdBy,
+      }),
+    ),
+    Effect.map((series) => series.id as string),
+  );
+
+/**
+ * Seeds a series-generated `events` row (`series_id` set) and, via raw SQL, stamps
+ * `series_modified`/`status` — `insertEvent` has no parameter for either, matching
+ * `seedEvent`'s established pattern of inserting through the repository then patching the
+ * columns the repository does not expose.
+ */
+const seedSeriesEvent = (
+  teamId: Team.TeamId,
+  createdBy: TeamMember.TeamMemberId,
+  seriesId: string,
+  opts: {
+    startAtIso: string;
+    endAtIso?: string;
+    seriesModified?: boolean;
+    status?: 'active' | 'cancelled';
+  },
+) =>
+  Effect.Do.pipe(
+    Effect.bind('inserted', () =>
+      EventsRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.insertEvent({
+            teamId,
+            eventType: 'training',
+            title: 'Weekly Training',
+            description: Option.none(),
+            startAt: DateTime.makeUnsafe(opts.startAtIso),
+            endAt: opts.endAtIso ? Option.some(DateTime.makeUnsafe(opts.endAtIso)) : Option.none(),
+            location: Option.none(),
+            ownerGroupId: Option.none(),
+            memberGroupId: Option.none(),
+            trainingTypeId: Option.none(),
+            seriesId: Option.some(seriesId),
+            createdBy,
+            allDay: false,
+          }),
+        ),
+      ),
+    ),
+    Effect.tap(({ inserted }) =>
+      SqlClient.SqlClient.asEffect().pipe(
+        Effect.flatMap((sql) =>
+          sql.unsafe(
+            `UPDATE events SET series_modified = ${opts.seriesModified ?? false}, status = '${
+              opts.status ?? 'active'
+            }' WHERE id = '${inserted.id}'`,
+          ),
+        ),
+      ),
+    ),
+    Effect.map(({ inserted }) => inserted.id as string),
   );
 
 const HOST = 'http://localhost';
@@ -536,5 +621,150 @@ describe('team-settings timezone change marks re-anchored events personal-messag
         const after = yield* readPersonalMessagesDirtyAt(anchoredId);
         expect(after?.toISOString()).toBe(alreadyDirtyAt.toISOString());
       }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+// Review finding: before `1791600000_series_time_is_team_local.ts`, series times were
+// absolute UTC, so a team timezone change was a no-op for series-generated events. Now
+// `event_series.start_time`/`end_time` are team-local wall clock, so a timezone change must
+// also re-derive already-materialized, future, active, not-hand-edited series events —
+// otherwise they keep their old instant while the series regenerates new occurrences in the
+// new zone, splitting the team's calendar in two.
+describe('team-settings timezone change re-anchors materialized SERIES events', () => {
+  it.effect(
+    'changing Europe/Prague → Asia/Tokyo re-anchors a future, active, unmodified series ' +
+      'event from the (unchanged) series wall-clock time, and marks it personal-messages-dirty',
+    () =>
+      Effect.gen(function* () {
+        const guildId = '330000000000000010' as Discord.Snowflake;
+        const { teamId, memberId } = yield* Effect.promise(() => setup(guildId));
+
+        yield* TeamSettingsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.upsert({
+              teamId,
+              eventHorizonDays: 14,
+              minPlayersThreshold: 0,
+              timezone: 'Europe/Prague',
+            }),
+          ),
+        );
+
+        const seriesId = yield* seedSeries(teamId, memberId, {
+          startTime: '18:00:00',
+          endTime: '20:00:00',
+        });
+        // 2026-12-01T17:00Z = 18:00 Prague (CET, winter, UTC+1) — matches the series' own
+        // wall-clock time, as a correctly-materialized occurrence would.
+        const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
+          startAtIso: '2026-12-01T17:00:00Z',
+          endAtIso: '2026-12-01T19:00:00Z',
+        });
+
+        expect(yield* readPersonalMessagesDirtyAt(eventId)).toBeNull();
+
+        const response = yield* Effect.promise(() =>
+          patchSettings(teamId, { timezone: 'Asia/Tokyo' }),
+        );
+        expect(response.status).toBe(200);
+
+        const after = yield* readStartAt(eventId);
+        // ((TIMESTAMPTZ '2026-12-01T17:00:00Z' AT TIME ZONE 'Europe/Prague')::date + TIME
+        //  '18:00:00') AT TIME ZONE 'Asia/Tokyo' — verified directly against Postgres 17.
+        expect(after).toBe('2026-12-01T09:00:00.000Z');
+        expect(yield* readPersonalMessagesDirtyAt(eventId)).not.toBeNull();
+      }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('leaves a HAND-EDITED (series_modified) occurrence untouched', () =>
+    Effect.gen(function* () {
+      const guildId = '330000000000000011' as Discord.Snowflake;
+      const { teamId, memberId } = yield* Effect.promise(() => setup(guildId));
+
+      yield* TeamSettingsRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.upsert({
+            teamId,
+            eventHorizonDays: 14,
+            minPlayersThreshold: 0,
+            timezone: 'Europe/Prague',
+          }),
+        ),
+      );
+
+      const seriesId = yield* seedSeries(teamId, memberId, { startTime: '18:00:00' });
+      const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
+        startAtIso: '2026-12-01T17:00:00Z',
+        seriesModified: true,
+      });
+
+      const response = yield* Effect.promise(() =>
+        patchSettings(teamId, { timezone: 'Asia/Tokyo' }),
+      );
+      expect(response.status).toBe(200);
+
+      expect(yield* readStartAt(eventId)).toBe('2026-12-01T17:00:00.000Z');
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('leaves a CANCELLED occurrence untouched', () =>
+    Effect.gen(function* () {
+      const guildId = '330000000000000012' as Discord.Snowflake;
+      const { teamId, memberId } = yield* Effect.promise(() => setup(guildId));
+
+      yield* TeamSettingsRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.upsert({
+            teamId,
+            eventHorizonDays: 14,
+            minPlayersThreshold: 0,
+            timezone: 'Europe/Prague',
+          }),
+        ),
+      );
+
+      const seriesId = yield* seedSeries(teamId, memberId, { startTime: '18:00:00' });
+      const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
+        startAtIso: '2026-12-01T17:00:00Z',
+        status: 'cancelled',
+      });
+
+      const response = yield* Effect.promise(() =>
+        patchSettings(teamId, { timezone: 'Asia/Tokyo' }),
+      );
+      expect(response.status).toBe(200);
+
+      expect(yield* readStartAt(eventId)).toBe('2026-12-01T17:00:00.000Z');
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('leaves a PAST occurrence untouched', () =>
+    Effect.gen(function* () {
+      const guildId = '330000000000000013' as Discord.Snowflake;
+      const { teamId, memberId } = yield* Effect.promise(() => setup(guildId));
+
+      yield* TeamSettingsRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          repo.upsert({
+            teamId,
+            eventHorizonDays: 14,
+            minPlayersThreshold: 0,
+            timezone: 'Europe/Prague',
+          }),
+        ),
+      );
+
+      const seriesId = yield* seedSeries(teamId, memberId, { startTime: '18:00:00' });
+      const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
+        startAtIso: '2020-01-01T17:00:00Z',
+      });
+
+      const response = yield* Effect.promise(() =>
+        patchSettings(teamId, { timezone: 'Asia/Tokyo' }),
+      );
+      expect(response.status).toBe(200);
+
+      expect(yield* readStartAt(eventId)).toBe('2020-01-01T17:00:00.000Z');
+    }).pipe(Effect.provide(SeedLayer)),
   );
 });

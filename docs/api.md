@@ -497,7 +497,7 @@ Updates the team's settings. All fields are optional; only provided fields are c
 | `claimRequestDaysBefore` | `integer` | No | 0–30 | Days before a training the coach claim-board message is posted; 0 posts on the training day |
 | `rsvpReminderTime` | `string` | No | Valid HH:MM, max `23:54` | Time of day the reminder fires in the team's timezone |
 | `remindersChannelId` | `Snowflake \| null` | No | — | Channel for reminders; null clears the field |
-| `timezone` | `string` | No | Valid IANA timezone | Team timezone (e.g. `Europe/Prague`) |
+| `timezone` | `string` | No | Valid IANA timezone | Team timezone (e.g. `Europe/Prague`). Changing it re-anchors future, active, not-hand-edited series-generated `events` rows so their `start_time`/`end_time` (team-local wall clock, see [Event Series](#10-event-series)) keep resolving to the same clock reading under the new zone, instead of silently drifting to whatever instant the old zone's offset produced. |
 | `discordChannelTraining` | `Snowflake \| null` | No | — | Channel for training events |
 | `discordChannelMatch` | `Snowflake \| null` | No | — | Channel for match events |
 | `discordChannelTournament` | `Snowflake \| null` | No | — | Channel for tournament events |
@@ -1965,6 +1965,7 @@ Members without the `team:manage` permission can only retrieve events belonging 
 | `ownerGroupName` | `string \| null` | Yes | Owner group name |
 | `memberGroupId` | `GroupId \| null` | Yes | Member group ID |
 | `memberGroupName` | `string \| null` | Yes | Member group name |
+| `timezone` | `string` | Yes | The team's IANA timezone, so clients can render `startAt`/`endAt` and label time inputs without guessing the browser zone. Optional key: an older server mid-rollout omits it rather than failing the response decode. |
 
 **Errors:**
 
@@ -2179,6 +2180,8 @@ Returns the list of eligible members who have not yet submitted an RSVP. The lis
 
 Event series define recurrence rules. The `EventHorizonCron` runs daily and generates individual events from active series up to the team's event horizon.
 
+`startTime`/`endTime` are `HH:MM` **wall-clock in the team's own timezone** (`timezone` below, sourced from `team_settings.timezone`) — NOT UTC. A recurring "Tuesday 18:00" is a wall clock: the same values resolve to a different UTC instant per occurrence depending on the team's zone and time of year (DST), so clients must not treat these strings as UTC times-of-day.
+
 #### Enums
 
 **RecurrenceFrequency:** `"weekly"`, `"biweekly"`
@@ -2213,8 +2216,8 @@ Creates a new recurring event series.
 | `daysOfWeek` | `integer[]` | Yes | Days to schedule (0=Sun, 1–6 for Mon–Sat) |
 | `startDate` | `string` (ISO 8601) | Yes | Series start date |
 | `endDate` | `string \| null` | Yes | Series end date (null for open-ended) |
-| `startTime` | `string` | Yes | Start time (e.g. `"14:30"`) |
-| `endTime` | `string \| null` | Yes | End time (null if open-ended) |
+| `startTime` | `string` | Yes | Start time as `HH:MM` wall-clock in the team's timezone, NOT UTC (e.g. `"14:30"`) |
+| `endTime` | `string \| null` | Yes | End time as `HH:MM` wall-clock in the team's timezone, NOT UTC (null if open-ended) |
 | `location` | `string \| null` | Yes | Location |
 | `locationUrl` | `string \| null` | No | Optional location URL (public `https://`, max 2048 chars); requires `location` to be non-empty |
 | `ownerGroupId` | `GroupId \| null` | Yes | Owner group ID |
@@ -2234,7 +2237,7 @@ Creates a new recurring event series.
 | `status` | `EventSeriesStatus` | No | `"active"` or `"cancelled"` |
 | `trainingTypeId` | `TrainingTypeId \| null` | Yes | Training type ID |
 | `trainingTypeName` | `string \| null` | Yes | Training type name |
-| `startTime` | `string` | No | Start time string |
+| `startTime` | `string` | No | Start time, `HH:MM` wall-clock in the team's timezone (NOT UTC) |
 | `endTime` | `string \| null` | Yes | End time string |
 | `location` | `string \| null` | Yes | Location |
 | `locationUrl` | `string \| null` | Yes | Optional location URL (public `https://`, max 2048 chars) |
@@ -2242,6 +2245,7 @@ Creates a new recurring event series.
 | `ownerGroupName` | `string \| null` | Yes | Owner group name |
 | `memberGroupId` | `GroupId \| null` | Yes | Member group ID |
 | `memberGroupName` | `string \| null` | Yes | Member group name |
+| `timezone` | `string` | Yes | The team's IANA timezone that `startTime`/`endTime` are wall-clock in. Optional key: an older server mid-rollout omits it rather than failing the response decode. |
 
 **Errors:**
 
@@ -2325,7 +2329,7 @@ Updates a series. Changes apply only to future generated events. All fields are 
 | `trainingTypeId` | `TrainingTypeId \| null` | No | Training type ID |
 | `description` | `string \| null` | No | Description |
 | `daysOfWeek` | `integer[]` | No | Days of week |
-| `startTime` | `string` | No | Start time |
+| `startTime` | `string` | No | Start time, `HH:MM` wall-clock in the team's timezone (NOT UTC) |
 | `endTime` | `string \| null` | No | End time |
 | `location` | `string \| null` | No | Location |
 | `locationUrl` | `string \| null` | No | Optional location URL (public `https://`, max 2048 chars); requires `location` to be non-empty when setting a URL |

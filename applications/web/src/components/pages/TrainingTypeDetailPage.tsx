@@ -25,13 +25,7 @@ import {
   SelectValue,
 } from '~/components/ui/select';
 import { Textarea } from '~/components/ui/textarea';
-import {
-  dateOnlyToUtcNoon,
-  formatLocalDate,
-  formatUtcTime,
-  localToUtc,
-  utcTimeToLocal,
-} from '~/lib/datetime';
+import { dateOnlyToUtcNoon, formatLocalDate } from '~/lib/datetime';
 import { DISCORD_CHANNEL_TYPE_TEXT } from '~/lib/discord';
 import { DAY_ORDER, dayFullLabels, dayShortLabels, sortDays } from '~/lib/event-labels';
 import { toGroupOptions } from '~/lib/group-options';
@@ -203,10 +197,10 @@ export function TrainingTypeDetailPage({
             endDate: values.endDate
               ? Option.some(dateOnlyToUtcNoon(values.endDate))
               : Option.none(),
-            startTime: formatUtcTime(localToUtc(values.startDate, values.startTime)),
-            endTime: values.endTime
-              ? Option.some(formatUtcTime(localToUtc(values.startDate, values.endTime)))
-              : Option.none(),
+            // event_series.startTime/endTime are team-local wall-clock strings (not UTC), so the
+            // value the captain typed into the time input is sent verbatim — no conversion.
+            startTime: values.startTime,
+            endTime: values.endTime ? Option.some(values.endTime) : Option.none(),
             location: values.location ? Option.some(values.location) : Option.none(),
             locationUrl: values.locationUrl ? Option.some(values.locationUrl) : Option.none(),
             ownerGroupId: Option.none(),
@@ -258,8 +252,10 @@ export function TrainingTypeDetailPage({
           onNone: () => '',
           onSome: formatLocalDate,
         }),
-        startTime: utcTimeToLocal(s.startTime),
-        endTime: Option.match(s.endTime, { onNone: () => '', onSome: utcTimeToLocal }),
+        // s.startTime/s.endTime are already team-local wall-clock strings — render verbatim,
+        // just trimming the seconds a PG TIME column may carry (HH:MM:SS -> HH:MM).
+        startTime: s.startTime.slice(0, 5),
+        endTime: Option.match(s.endTime, { onNone: () => '', onSome: (v) => v.slice(0, 5) }),
         location: Option.getOrElse(s.location, () => ''),
         locationUrl: Option.getOrElse(s.locationUrl, () => ''),
       });
@@ -283,12 +279,10 @@ export function TrainingTypeDetailPage({
               values.description ? Option.some(values.description) : Option.none(),
             ),
             daysOfWeek: Option.some(values.daysOfWeek),
-            startTime: Option.some(formatUtcTime(localToUtc(values.startDate, values.startTime))),
-            endTime: Option.some(
-              values.endTime
-                ? Option.some(formatUtcTime(localToUtc(values.startDate, values.endTime)))
-                : Option.none(),
-            ),
+            // Verbatim, same reasoning as the create path above — these are team-local
+            // wall-clock strings, not UTC.
+            startTime: Option.some(values.startTime),
+            endTime: Option.some(values.endTime ? Option.some(values.endTime) : Option.none()),
             location: Option.some(values.location ? Option.some(values.location) : Option.none()),
             locationUrl: Option.some(
               values.locationUrl ? Option.some(values.locationUrl) : Option.none(),
@@ -324,6 +318,19 @@ export function TrainingTypeDetailPage({
   };
 
   const activeSeries = series.filter((s) => s.status === 'active');
+
+  // `startTime`/`endTime` are wall-clock in the team's timezone (`EventSeriesInfo.timezone`), so
+  // label the time inputs with it — otherwise a captain has no way to tell which clock they are
+  // setting. Every series for a team shares the same zone, so any loaded one is a valid source.
+  //
+  // Deliberately NOT defaulted to 'Europe/Prague'. The label asserts which clock the captain is
+  // setting, and a confidently wrong zone is worse than none — so when it is unknown (no schedule
+  // yet, or an older server mid-rollout omitting the optional field) the suffix is omitted
+  // instead. The WRITE is unaffected either way: the server resolves the wall clock against the
+  // team's real timezone regardless of what the label said.
+  const teamTimezone =
+    series[0] === undefined ? undefined : Option.getOrUndefined(series[0].timezone);
+  const tzSuffix = teamTimezone === undefined ? '' : ` (${teamTimezone})`;
 
   return (
     <div>
@@ -467,9 +474,10 @@ export function TrainingTypeDetailPage({
                           {s.daysOfWeek.map((d) => dayShortLabels[d]()).join(', ')}
                         </td>
                         <td className='py-2 px-4 text-muted-foreground'>
-                          {utcTimeToLocal(s.startTime)}
+                          {/* Verbatim team-local wall clock, trimming any PG TIME seconds. */}
+                          {s.startTime.slice(0, 5)}
                           {s.endTime.pipe(
-                            Option.map((v) => ` - ${utcTimeToLocal(v)}`),
+                            Option.map((v) => ` - ${v.slice(0, 5)}`),
                             Option.getOrElse(() => ''),
                           )}
                         </td>
@@ -628,7 +636,10 @@ export function TrainingTypeDetailPage({
                         {...scheduleForm.register('startTime')}
                         render={({ field }) => (
                           <FormItem className='flex-1'>
-                            <FormLabel>{tr('event_startTime')}</FormLabel>
+                            <FormLabel>
+                              {tr('event_startTime')}
+                              {tzSuffix}
+                            </FormLabel>
                             <FormControl>
                               <Input {...field} type='time' />
                             </FormControl>
@@ -640,7 +651,10 @@ export function TrainingTypeDetailPage({
                         {...scheduleForm.register('endTime')}
                         render={({ field }) => (
                           <FormItem className='flex-1'>
-                            <FormLabel>{tr('event_endTime')}</FormLabel>
+                            <FormLabel>
+                              {tr('event_endTime')}
+                              {tzSuffix}
+                            </FormLabel>
                             <FormControl>
                               <Input {...field} type='time' />
                             </FormControl>

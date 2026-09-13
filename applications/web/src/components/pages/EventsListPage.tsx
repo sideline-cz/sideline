@@ -35,7 +35,6 @@ import {
   dateOnlyToUtcNoon,
   formatEventDateRange,
   formatUtcDate,
-  formatUtcTime,
   localToUtc,
 } from '~/lib/datetime.js';
 import {
@@ -120,6 +119,14 @@ interface EventsListPageProps {
   onShowAllGroupsChange: (value: boolean) => void;
   trainingTypes: ReadonlyArray<TrainingTypeApi.TrainingTypeInfo>;
   groups: ReadonlyArray<GroupApi.GroupInfo>;
+  /**
+   * The team's `team_settings.timezone`, used to label the recurring-schedule time inputs —
+   * their `startTime`/`endTime` are wall-clock in this zone, not UTC. Comes from the loader
+   * (never guess the browser's timezone here, see `applications/web/AGENTS.md`).
+   */
+  /** The team's IANA zone, when known. Undefined when it could not be read (see the
+   *  events.index loader) — the label is then omitted rather than asserting a wrong zone. */
+  teamTimezone?: string | undefined;
 }
 
 export function EventsListPage({
@@ -131,7 +138,11 @@ export function EventsListPage({
   onShowAllGroupsChange,
   trainingTypes,
   groups,
+  teamTimezone,
 }: EventsListPageProps) {
+  // Label the recurring-schedule time inputs with the clock they are interpreted in, but only
+  // when that is actually known — see the prop's doc comment.
+  const tzSuffix = teamTimezone === undefined ? '' : ` (${teamTimezone})`;
   const run = useRun();
   const router = useRouter();
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
@@ -279,10 +290,10 @@ export function EventsListPage({
             endDate: values.endDate
               ? Option.some(dateOnlyToUtcNoon(values.endDate))
               : Option.none(),
-            startTime: formatUtcTime(localToUtc(values.startDate, values.startTime)),
-            endTime: values.endTime
-              ? Option.some(formatUtcTime(localToUtc(values.startDate, values.endTime)))
-              : Option.none(),
+            // event_series.startTime/endTime are team-local wall-clock strings (not UTC), so the
+            // value the captain typed into the time input is sent verbatim — no conversion.
+            startTime: values.startTime,
+            endTime: values.endTime ? Option.some(values.endTime) : Option.none(),
             location: values.location ? Option.some(values.location) : Option.none(),
             locationUrl: values.locationUrl ? Option.some(values.locationUrl) : Option.none(),
             ownerGroupId:
@@ -796,7 +807,10 @@ export function EventsListPage({
                           {...seriesForm.register('startTime')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_startTime')}</FormLabel>
+                              <FormLabel>
+                                {tr('event_startTime')}
+                                {tzSuffix}
+                              </FormLabel>
                               <FormControl>
                                 <Input {...field} type='time' />
                               </FormControl>
@@ -808,7 +822,10 @@ export function EventsListPage({
                           {...seriesForm.register('endTime')}
                           render={({ field }) => (
                             <FormItem className='flex-1'>
-                              <FormLabel>{tr('event_endTime')}</FormLabel>
+                              <FormLabel>
+                                {tr('event_endTime')}
+                                {tzSuffix}
+                              </FormLabel>
                               <FormControl>
                                 <Input {...field} type='time' />
                               </FormControl>

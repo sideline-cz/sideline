@@ -56,6 +56,26 @@ jobs:
       - run: pnpm test
         env:
           NODE_OPTIONS: --max_old_space_size=8192
+  test-tz:
+    # The whole suite otherwise runs in UTC, which has no DST — so a test that reads a local
+    # `Date` part greens here and fails on a developer's machine. That is exactly how the DST
+    # cases in `applications/web/test/datetime.test.ts` shipped broken: they assume UTC+1, and
+    # UTC+2 moves the spring-forward gap onto 03:30 so it normalizes to 04:30.
+    #
+    # Europe/Helsinki is UTC+2 with EU DST rules, which is the discriminating case. Web only:
+    # that is where browser-local formatting lives, and it keeps the leg cheap.
+    name: Test (Europe/Helsinki)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install dependencies
+        uses: ./.github/actions/setup
+      - run: pnpm build
+      - run: pnpm vitest run --project=@sideline/web
+        env:
+          TZ: Europe/Helsinki
+          NODE_OPTIONS: --max_old_space_size=8192
   integration-test:
     name: Integration Test
     runs-on: ubuntu-latest

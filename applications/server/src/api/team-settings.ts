@@ -333,6 +333,47 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                         WHERE team_id = ${teamId} AND all_day = TRUE AND all_day_anchored
                       `.pipe(Effect.asVoid),
                         ),
+                        // Timezone change also strands not-yet-materialized series
+                        // occurrences already in `events`: before this migration,
+                        // `event_series.start_time`/`end_time` were absolute UTC, so a
+                        // timezone change was a no-op for them. Now they are team-local
+                        // wall clock (`1791600000_series_time_is_team_local.ts`), so a
+                        // future, active, not-hand-edited occurrence must be re-derived
+                        // from the (unchanged) series wall-clock time, re-anchored on its
+                        // OLD-timezone calendar date but resolved in the NEW timezone —
+                        // otherwise already-materialized events keep the old instant
+                        // while the series regenerates new ones in the new zone, splitting
+                        // the team's calendar in two. Structurally the same recomputation
+                        // as the migration's Statement B, run here instead of waiting for
+                        // an operator to re-run a migration for every timezone edit.
+                        // Guards mirror Statement B's exactly: `series_id IS NOT NULL`
+                        // (only series-generated events have one — the join to
+                        // `event_series` below encodes this), `NOT series_modified`
+                        // (never clobber a captain's per-occurrence override),
+                        // `status = 'active'` (leave cancelled/started events alone),
+                        // `start_at >= now()` (leave the past alone).
+                        Effect.tap((upserted) =>
+                          oldTz === upserted.timezone
+                            ? Effect.void
+                            : sql`
+                        UPDATE events e
+                        SET start_at = ((e.start_at AT TIME ZONE ${oldTz})::date + es.start_time)
+                                         AT TIME ZONE ${upserted.timezone},
+                            end_at   = CASE WHEN es.end_time IS NULL THEN NULL
+                                            ELSE ((e.end_at AT TIME ZONE ${oldTz})::date + es.end_time)
+                                                   AT TIME ZONE ${upserted.timezone} END,
+                            personal_messages_dirty_at = CASE
+                              WHEN e.personal_messages_dirty_at IS NULL
+                              THEN date_trunc('milliseconds', now())
+                              ELSE e.personal_messages_dirty_at END
+                        FROM event_series es
+                        WHERE e.series_id = es.id
+                          AND e.team_id = ${teamId}
+                          AND NOT e.series_modified
+                          AND e.status = 'active'
+                          AND e.start_at >= now()
+                      `.pipe(Effect.asVoid),
+                        ),
                       ),
                     )
                     .pipe(catchSqlErrors),

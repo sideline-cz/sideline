@@ -73,6 +73,56 @@ Rules:
 
 Reference: `1789300000_improve_coach_assigning.ts` backfills `claim_request_sent_at` and `coaching_status_sent_at`.
 
+### Reinterpreting Stored Values: Guard On A Fact Column, Never On The Value
+
+A migration that **reinterprets** already-stored values (converting a `TIME` that was treated as UTC into a team-local wall clock, re-anchoring a `TIMESTAMPTZ` to team-local midnight) is not idempotent by nature: running it twice shifts the value twice. A value-based guard cannot fix this — it cannot distinguish "not converted yet" from "already converted", because every clock/instant value is reachable both before and after conversion for *some* timezone, and a UTC+0 team's value is identical either way.
+
+Rules:
+
+1. **Add a `BOOLEAN NOT NULL DEFAULT FALSE` marker column to the table being reinterpreted**, in the same migration, via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`.
+2. **Guard the `UPDATE` on `WHERE NOT <marker>` and set `<marker> = TRUE` in the SAME statement.** Guard and write must never be two statements — a crash between them leaves the row's state and its marker disagreeing.
+3. **Never drop the marker column** in a later migration. It is the only thing that makes the conversion safely re-runnable by hand against a partially-migrated database.
+4. **Never derive the guard from the data** (`WHERE start_time <> '00:00'`, `WHERE start_at <> date_trunc('day', start_at)`, or any other value predicate).
+
+```typescript
+Effect.tap(
+  () => sql`
+    ALTER TABLE event_series
+      ADD COLUMN IF NOT EXISTS times_are_team_local BOOLEAN NOT NULL DEFAULT FALSE
+  `,
+),
+Effect.tap(
+  () => sql`
+    UPDATE event_series es
+    SET start_time = /* ...conversion... */,
+        times_are_team_local = TRUE
+    WHERE NOT es.times_are_team_local
+  `,
+),
+```
+
+References: `times_are_team_local` (`1791600000_series_time_is_team_local.ts`), `all_day_anchored` (`1791300000_add_all_day_anchored_flag.ts` + `1791400000_anchor_all_day_to_team_midnight.ts`).
+
+### Reading A Per-Team Setting Inside A Migration `UPDATE`
+
+Migrations that re-derive a column from `team_settings` (timezone, horizon days) must read that setting with a **correlated scalar subselect wrapped in `COALESCE`**, never `UPDATE ... FROM team_settings`.
+
+1. **`UPDATE ... FROM team_settings` is an INNER JOIN.** Every row whose team has no `team_settings` row is silently skipped — no error, no count difference anyone checks, and those rows stay unconverted forever. A `COALESCE((SELECT ...), '<default>')` subselect converts them using the documented default instead.
+2. **When the setting is an IANA timezone used in `AT TIME ZONE`, join `pg_timezone_names`.** `team_settings.timezone` is free-form `TEXT` with no `CHECK` constraint, and `AT TIME ZONE '<garbage>'` raises `ERROR: time zone "..." not recognized`, which fails the migration transaction. `MigrateBefore` runs inside server boot (`applications/server/src/run.ts`), so one bad row anywhere in the table means the container never starts — for every team, not just that one. The join makes an unrecognised value return no row, so `COALESCE` falls back.
+3. **`COALESCE` alone is not the guard.** It only substitutes for a NULL (missing row); a non-NULL garbage string passes straight through to `AT TIME ZONE`. Both defences are required together.
+4. **Use `'Europe/Prague'` as the timezone fallback** — the same default the `team_settings.timezone` column carries and the same one `resolveOccurrenceInstant` uses (`applications/server/src/utils/seriesOccurrence.ts`), so SQL and application code agree on invalid-zone behaviour.
+5. **`pg_timezone_names.name` matching is case-sensitive.** `n.name = ts.timezone` rejects `europe/prague` and falls back. The app only ever writes canonical IANA casing, so do not switch to `ILIKE` — that would silently normalise a wrong-but-similar value instead of falling back.
+
+```sql
+AT TIME ZONE COALESCE(
+  (SELECT ts.timezone FROM team_settings ts
+     JOIN pg_timezone_names n ON n.name = ts.timezone
+   WHERE ts.team_id = es.team_id),
+  'Europe/Prague')
+```
+
+Reference: `1791600000_series_time_is_team_local.ts` (both statements). The JS/Postgres disagreement for DST-ambiguous wall clocks is documented in `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock".
+
 ### Partial Indexes for Hot Filters
 
 When a cron or query repeatedly scans a table for rows matching a stable predicate (e.g. "active unclaimed trainings for team X"), prefer a partial index over a full index. Use `CREATE INDEX IF NOT EXISTS ... WHERE ...`:

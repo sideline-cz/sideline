@@ -153,11 +153,26 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                     checkGroupAccess(groups, membership.id, e.member_group_id),
                   );
             }),
+            // Only membership is required here (unlike `getTeamSettings`, gated on
+            // `team:manage`) — this is a direct repository read, not the HTTP endpoint, so
+            // the majority of captains who can create events but cannot manage settings
+            // still get a real zone to label their time inputs with.
+            Effect.bind('teamZone', () =>
+              teamSettings.findByTeamId(teamId).pipe(
+                Effect.map(
+                  Option.match({
+                    onNone: () => 'Europe/Prague',
+                    onSome: (s) => s.timezone,
+                  }),
+                ),
+              ),
+            ),
             Effect.map(
-              ({ filteredList, canCreate, canViewAll }) =>
+              ({ filteredList, canCreate, canViewAll, teamZone }) =>
                 new EventApi.EventListResponse({
                   canCreate,
                   canViewAll,
+                  timezone: Option.some(teamZone),
                   events: Array.map(
                     filteredList,
                     (e) =>
@@ -377,6 +392,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   allDay: event.all_day,
                   startDate: Option.some(event.start_date),
                   endDate: Option.some(event.end_date),
+                  timezone: Option.some(event.timezone),
                 }),
             ),
           ),
@@ -558,6 +574,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   allDay: detail.all_day,
                   startDate: Option.some(detail.start_date),
                   endDate: Option.some(detail.end_date),
+                  timezone: Option.some(detail.timezone),
                 }),
             ),
             Effect.catchTag(

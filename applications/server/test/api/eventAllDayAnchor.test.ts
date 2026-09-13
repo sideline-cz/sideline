@@ -106,6 +106,7 @@ type EventRecord = {
   member_group_name: Option.Option<string>;
   start_date: string;
   end_date: string;
+  timezone: string;
 };
 
 let eventsStore: Map<Event.EventId, EventRecord>;
@@ -283,6 +284,7 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
         Option.getOrElse(input.endAt, () => input.startAt),
         tz,
       ),
+      timezone: tz,
     };
     eventsStore.set(id, record);
     return Effect.succeed(record);

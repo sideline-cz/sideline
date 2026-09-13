@@ -13,6 +13,7 @@ import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
 import { computeHorizonEnd, generateOccurrenceDates } from '~/services/RecurrenceService.js';
 import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
+import { resolveOccurrenceInstant } from '~/utils/seriesOccurrence.js';
 
 const forbidden = new EventApi.Forbidden();
 const notFound = new EventSeriesApi.EventSeriesNotFound();
@@ -36,6 +37,16 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
             ),
             Effect.tap(({ membership }) =>
               requirePermission(membership, 'event:create', forbidden),
+            ),
+            Effect.bind('teamZone', () =>
+              teamSettings.findByTeamId(teamId).pipe(
+                Effect.map(
+                  Option.match({
+                    onNone: () => 'Europe/Prague',
+                    onSome: (s) => s.timezone,
+                  }),
+                ),
+              ),
             ),
             Effect.let('isAdmin', ({ membership }) => hasPermission(membership, 'team:manage')),
             Effect.tap(({ membership, isAdmin }) =>
@@ -111,13 +122,13 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                 endDate: effectiveEnd,
               }),
             ),
-            Effect.tap(({ inserted, dates, membership }) =>
+            Effect.tap(({ inserted, dates, membership, teamZone }) =>
               Effect.all(
                 Array.map(dates, (date) => {
                   const dateStr = DateTime.formatIsoDateUtc(date);
-                  const startAt = DateTime.makeUnsafe(`${dateStr}T${inserted.start_time}Z`);
+                  const startAt = resolveOccurrenceInstant(dateStr, inserted.start_time, teamZone);
                   const endAt = Option.map(inserted.end_time, (t) =>
-                    DateTime.makeUnsafe(`${dateStr}T${t}Z`),
+                    resolveOccurrenceInstant(dateStr, t, teamZone),
                   );
                   return events
                     .insertEvent({
@@ -164,7 +175,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
               series.updateLastGeneratedDate(inserted.id, effectiveEnd),
             ),
             Effect.map(
-              ({ inserted }) =>
+              ({ inserted, teamZone }) =>
                 new EventSeriesApi.EventSeriesInfo({
                   seriesId: inserted.id,
                   teamId: inserted.team_id,
@@ -184,6 +195,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                   ownerGroupName: Option.none(),
                   memberGroupId: inserted.member_group_id,
                   memberGroupName: Option.none(),
+                  timezone: Option.some(teamZone),
                 }),
             ),
             Effect.catchTag(
@@ -198,8 +210,18 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
             Effect.tap(({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
+            Effect.bind('teamZone', () =>
+              teamSettings.findByTeamId(teamId).pipe(
+                Effect.map(
+                  Option.match({
+                    onNone: () => 'Europe/Prague',
+                    onSome: (s) => s.timezone,
+                  }),
+                ),
+              ),
+            ),
             Effect.bind('list', () => series.findSeriesByTeamId(teamId)),
-            Effect.map(({ list }) =>
+            Effect.map(({ list, teamZone }) =>
               Array.map(
                 list,
                 (s) =>
@@ -222,6 +244,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                     ownerGroupName: s.owner_group_name,
                     memberGroupId: s.member_group_id,
                     memberGroupName: s.member_group_name,
+                    timezone: Option.some(teamZone),
                   }),
               ),
             ),
@@ -235,6 +258,16 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
             ),
             Effect.let('canEdit', ({ membership }) => hasPermission(membership, 'event:edit')),
             Effect.let('canCancel', ({ membership }) => hasPermission(membership, 'event:cancel')),
+            Effect.bind('teamZone', () =>
+              teamSettings.findByTeamId(teamId).pipe(
+                Effect.map(
+                  Option.match({
+                    onNone: () => 'Europe/Prague',
+                    onSome: (s) => s.timezone,
+                  }),
+                ),
+              ),
+            ),
             Effect.bind('found', () =>
               series.findSeriesById(seriesId).pipe(
                 Effect.flatMap(
@@ -249,7 +282,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
               found.team_id !== teamId ? Effect.fail(notFound) : Effect.void,
             ),
             Effect.map(
-              ({ found, canEdit, canCancel }) =>
+              ({ found, canEdit, canCancel, teamZone }) =>
                 new EventSeriesApi.EventSeriesDetail({
                   seriesId: found.id,
                   teamId: found.team_id,
@@ -272,6 +305,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                   memberGroupName: found.member_group_name,
                   canEdit: canEdit && found.status === 'active',
                   canCancel: canCancel && found.status === 'active',
+                  timezone: Option.some(teamZone),
                 }),
             ),
           ),
@@ -283,6 +317,16 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
             Effect.tap(({ membership }) => requirePermission(membership, 'event:edit', forbidden)),
+            Effect.bind('teamZone', () =>
+              teamSettings.findByTeamId(teamId).pipe(
+                Effect.map(
+                  Option.match({
+                    onNone: () => 'Europe/Prague',
+                    onSome: (s) => s.timezone,
+                  }),
+                ),
+              ),
+            ),
             Effect.let('isAdmin', ({ membership }) => hasPermission(membership, 'team:manage')),
             Effect.bind('existing', () =>
               series.findSeriesById(seriesId).pipe(
@@ -392,7 +436,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                 memberGroupId: resolved.memberGroupId,
               }),
             ),
-            Effect.tap(({ resolved }) =>
+            Effect.tap(({ resolved, teamZone }) =>
               events.updateFutureUnmodifiedInSeries(seriesId, new Date(), {
                 title: resolved.title,
                 trainingTypeId: resolved.trainingTypeId,
@@ -401,6 +445,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                 endTime: resolved.endTime,
                 location: resolved.location,
                 locationUrl: resolved.locationUrl,
+                timezone: teamZone,
               }),
             ),
             Effect.tap(() =>
@@ -408,7 +453,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                 .markSeriesFuturePersonalMessagesDirty(seriesId, new Date())
                 .pipe(Effect.ignore),
             ),
-            Effect.tap(({ existing, resolved, membership }) =>
+            Effect.tap(({ existing, resolved, membership, teamZone }) =>
               teamSettings.getHorizonDays(teamId).pipe(
                 Effect.flatMap((horizonDays) => {
                   const effectiveEnd = computeHorizonEnd({
@@ -430,9 +475,13 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                       return Effect.all(
                         Array.map(newDates, (date) => {
                           const dateStr = DateTime.formatIsoDateUtc(date);
-                          const startAt = DateTime.makeUnsafe(`${dateStr}T${existing.start_time}Z`);
+                          const startAt = resolveOccurrenceInstant(
+                            dateStr,
+                            existing.start_time,
+                            teamZone,
+                          );
                           const endAt = Option.map(existing.end_time, (t) =>
-                            DateTime.makeUnsafe(`${dateStr}T${t}Z`),
+                            resolveOccurrenceInstant(dateStr, t, teamZone),
                           );
                           return events
                             .insertEvent({
@@ -476,7 +525,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
               ),
             ),
             Effect.map(
-              ({ detail, membership }) =>
+              ({ detail, membership, teamZone }) =>
                 new EventSeriesApi.EventSeriesDetail({
                   seriesId: detail.id,
                   teamId: detail.team_id,
@@ -500,6 +549,7 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                   canEdit: hasPermission(membership, 'event:edit') && detail.status === 'active',
                   canCancel:
                     hasPermission(membership, 'event:cancel') && detail.status === 'active',
+                  timezone: Option.some(teamZone),
                 }),
             ),
             Effect.catchTag(
