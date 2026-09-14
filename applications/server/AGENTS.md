@@ -2028,6 +2028,18 @@ Rules:
 3. **Cast the mock object with `as never`** (matching the existing files) — the repository's `ServiceMap.Service` tag carries a private brand that cannot be reconstructed in test code.
 4. **Mock objects must build the canonical domain model via its constructor, not as a plain camelCase literal.** `new WeeklyChallenge.WeeklyChallengeView({ challenge: new WeeklyChallenge.WeeklyChallenge({ ... }), completedMemberIds: [], isActive: false })` — NOT `{ challenge: { id: '...', weekStartDate: '...' }, ... }`. The HTTP handler encodes the response through the schema; a string-shaped literal fails encoding and tempts a "fix" that bypasses schema encoding entirely. Build mocks via the same constructors the production code uses.
 
+### Clock-Derived Time-Of-Day Fixtures Must Be Clamped Into The Local Day
+
+An integration-test fixture computed from the real clock as `now() ± N minutes` is **not** deterministic: near a day boundary the shift wraps into the neighbouring day, and a `TIME`-of-day comparison then reads the wrapped value as being on the opposite side of `now`. `EventStartCron`'s "Dnes" sweep (`EventsRepository.findAllDayEventsNeedingStartedPost`) compares `(now AT TIME ZONE tz)::time >= COALESCE(ts.all_day_post_time, TIME '08:00')`, so an unclamped `now + 60 minutes` sampled at 23:30 local yielded `00:30`, which reads as ALREADY PAST — the "must not post yet" cases fired and the suite flaked nightly.
+
+Rules:
+
+1. **Clamp every `now ± N` time-of-day fixture to the current local day inside the same SQL statement.** A forward offset crossing into the next day saturates at the literal `'24:00:00'` — a legal Postgres `TIME` value that no real `now_local::time` can ever reach, so it is strictly in the future; a backward offset crossing into the previous day saturates at `'00:00:00'`, which every instant of that day is at or past. Reference: `localTimeOffsetClampedToDay` in `applications/server/test/integration/services/EventStartCron.deferred.test.ts`.
+2. **Only the SIGN of the offset survives the clamp, never its magnitude** — never use such a helper to probe a sub-hour boundary. `localTimeOffsetClampedToDay(tz, -1)` silently returns `'00:00:00'` during the first minute of the local day.
+3. **Two clocks are in play: the cron reads JS `new Date()`, the fixtures read Postgres `now()`.** Keep offsets at ≥ 1 minute, and when asserting against a FIXED boundary (e.g. the 08:00 fallback post time) leave a ≥ 5-second guard band on each side to absorb the gap between the two samples.
+4. **Never write a one-sided `if (nowLocal >= boundary) expect(...)` guard** — that form silently asserts nothing for the whole complementary window. Assert both sides of the boundary and leave only the guard band unasserted.
+5. **Clamping does not make a run that straddles local midnight safe.** The sweep's other half, `now_local::date = start_at_local::date`, is fed by a separate `localMidnight` read; closing that gap requires an injectable instant in `eventStartCronEffect`, which does not exist today.
+
 ## Config-Gated External Service Provider (Real vs Deterministic Stub)
 
 An external integration that is **optional** in some environments (missing API key in dev/preview, present in production) is modelled as a single `ServiceMap.Service` whose `Default` layer chooses a real or a stub implementation at construction time, based on config. The service interface is the same either way, so consumers never branch on "is it configured".
