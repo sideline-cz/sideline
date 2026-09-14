@@ -115,6 +115,42 @@ export const InviteApiLive = HttpApiBuilder.group(Api, 'invite', (handlers) =>
                     onSome: (role) => members.assignRole(membership.id, role.id),
                   }),
             ),
+            // The invite's `group_id` is AUTHORITATIVE here. `Guild/RegisterMember` also binds
+            // the group, but only by RE-RESOLVING the acceptance, which misses when Discord has
+            // deleted the one-use invite AND the member joins outside
+            // `findRecentByUserAndGuildWithContext`'s 15-minute window, or when they never
+            // authorised `guilds.join` and join by hand days later. Today they never land in the
+            // group at all — not even on the roster.
+            //
+            // `findGroupById` (NOT the invite row) is the liveness check: `invites.findByCode`
+            // is `SELECT * FROM team_invites` with no join to `groups`, so `invite.group_id` can
+            // still point at an ARCHIVED group, whereas both acceptance-context queries filter
+            // `is_archived = false` and the Discord path therefore refuses to write it.
+            // `findGroupById` carries that same filter, so both paths agree.
+            //
+            // Deliberately NO Discord-side emits here: the member is not in the guild yet, so
+            // `member_added` / `role_assigned` would target a non-member and fail at the bot.
+            // Both fire on the join itself (`applyInviteGroup`); that write is `ON CONFLICT DO
+            // NOTHING`, so this one costs it nothing.
+            //
+            // Both calls are `E = never` after `catchSqlErrors`, i.e. a failure is a DEFECT that
+            // kills the join after the membership and Player role are committed but before the
+            // acceptance row exists — the same exposure the `assignRole` tap above already has.
+            // Acceptable at two writes; do not grow this tap further without a transaction.
+            Effect.tap(({ invite, membership }) =>
+              Option.match(invite.group_id, {
+                onNone: () => Effect.void,
+                onSome: (groupId) =>
+                  groups.findGroupById(groupId).pipe(
+                    Effect.flatMap(
+                      Option.match({
+                        onNone: () => Effect.void,
+                        onSome: () => groups.addMemberById(groupId, membership.id),
+                      }),
+                    ),
+                  ),
+              }),
+            ),
             Effect.bind('grantedScopes', ({ user }) =>
               oauthConnections.getGrantedScopes(user.id, 'discord'),
             ),
