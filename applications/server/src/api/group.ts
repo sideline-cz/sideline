@@ -1,4 +1,4 @@
-import { Auth, DisplayName, GroupApi } from '@sideline/domain';
+import { Auth, DisplayName, GroupApi, type GroupModel, type Team } from '@sideline/domain';
 import { LogicError, Options } from '@sideline/effect-lib';
 import { Array, Effect, Match, Option, pipe, Result } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
@@ -22,6 +22,37 @@ import {
   DEFAULT_ROLE_FORMAT,
 } from '~/utils/applyDiscordFormat.js';
 import { hexColorToDiscordInt } from '~/utils/hexColorToDiscordInt.js';
+
+type GroupRowLike = {
+  readonly id: GroupModel.GroupId;
+  readonly team_id: Team.TeamId;
+  readonly parent_id: Option.Option<GroupModel.GroupId>;
+  readonly name: string;
+  readonly emoji: Option.Option<string>;
+  readonly color: Option.Option<string>;
+};
+
+/**
+ * Pure row -> DTO map for `GroupApi.GroupInfo`. `memberCount` and
+ * `discordChannelProvisioning` vary across call sites (read paths compute
+ * them, create/move paths pass `0`/`true` or a freshly-queried set), so they
+ * are explicit parameters rather than baked into the row shape.
+ */
+export const toGroupInfo = (
+  row: GroupRowLike,
+  memberCount: number,
+  discordChannelProvisioning: boolean,
+): GroupApi.GroupInfo =>
+  new GroupApi.GroupInfo({
+    groupId: row.id,
+    teamId: row.team_id,
+    parentId: row.parent_id,
+    name: row.name,
+    emoji: row.emoji,
+    color: row.color,
+    memberCount,
+    discordChannelProvisioning,
+  });
 
 const forbidden = new GroupApi.Forbidden();
 
@@ -66,19 +97,8 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
               ),
               Effect.map(({ list, provisioningIds }) => {
                 const provisioningSet = new Set(provisioningIds);
-                return Array.map(
-                  list,
-                  (g) =>
-                    new GroupApi.GroupInfo({
-                      groupId: g.id,
-                      teamId: g.team_id,
-                      parentId: g.parent_id,
-                      name: g.name,
-                      emoji: g.emoji,
-                      color: g.color,
-                      memberCount: g.member_count,
-                      discordChannelProvisioning: provisioningSet.has(g.id),
-                    }),
+                return Array.map(list, (g) =>
+                  toGroupInfo(g, g.member_count, provisioningSet.has(g.id)),
                 );
               }),
             ),
@@ -110,19 +130,8 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
               ),
               Effect.map(({ memberGroups, provisioningIds }) => {
                 const provisioningSet = new Set(provisioningIds);
-                return Array.map(
-                  memberGroups,
-                  (g) =>
-                    new GroupApi.GroupInfo({
-                      groupId: g.id,
-                      teamId: g.team_id,
-                      parentId: g.parent_id,
-                      name: g.name,
-                      emoji: g.emoji,
-                      color: g.color,
-                      memberCount: g.member_count,
-                      discordChannelProvisioning: provisioningSet.has(g.id),
-                    }),
+                return Array.map(memberGroups, (g) =>
+                  toGroupInfo(g, g.member_count, provisioningSet.has(g.id)),
                 );
               }),
             ),
@@ -178,19 +187,7 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                   discordRoleColor,
                 );
               }),
-              Effect.map(
-                ({ group }) =>
-                  new GroupApi.GroupInfo({
-                    groupId: group.id,
-                    teamId: group.team_id,
-                    parentId: group.parent_id,
-                    name: group.name,
-                    emoji: group.emoji,
-                    color: group.color,
-                    memberCount: 0,
-                    discordChannelProvisioning: true,
-                  }),
-              ),
+              Effect.map(({ group }) => toGroupInfo(group, 0, true)),
               Effect.catchTag('GroupNameAlreadyTakenError', () =>
                 Effect.fail(new GroupApi.GroupNameAlreadyTaken()),
               ),
@@ -333,18 +330,8 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
               }),
               Effect.bind('memberCount', () => groups.getMemberCount(groupId)),
               Effect.bind('provisioningIds', () => channelSync.hasUnprocessedForGroups([groupId])),
-              Effect.map(
-                ({ updated, memberCount, provisioningIds }) =>
-                  new GroupApi.GroupInfo({
-                    groupId: updated.id,
-                    teamId: updated.team_id,
-                    parentId: updated.parent_id,
-                    name: updated.name,
-                    emoji: updated.emoji,
-                    color: updated.color,
-                    memberCount,
-                    discordChannelProvisioning: provisioningIds.length > 0,
-                  }),
+              Effect.map(({ updated, memberCount, provisioningIds }) =>
+                toGroupInfo(updated, memberCount, provisioningIds.length > 0),
               ),
               Effect.catchTag('GroupNameAlreadyTakenError', () =>
                 Effect.fail(new GroupApi.GroupNameAlreadyTaken()),
@@ -690,18 +677,8 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
               Effect.bind('updated', () => groups.moveGroup(groupId, payload.parentId)),
               Effect.bind('memberCount', () => groups.getMemberCount(groupId)),
               Effect.bind('provisioningIds', () => channelSync.hasUnprocessedForGroups([groupId])),
-              Effect.map(
-                ({ updated, memberCount, provisioningIds }) =>
-                  new GroupApi.GroupInfo({
-                    groupId: updated.id,
-                    teamId: updated.team_id,
-                    parentId: updated.parent_id,
-                    name: updated.name,
-                    emoji: updated.emoji,
-                    color: updated.color,
-                    memberCount,
-                    discordChannelProvisioning: provisioningIds.length > 0,
-                  }),
+              Effect.map(({ updated, memberCount, provisioningIds }) =>
+                toGroupInfo(updated, memberCount, provisioningIds.length > 0),
               ),
               Effect.catchTag(
                 'NoSuchElementError',
