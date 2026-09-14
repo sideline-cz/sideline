@@ -19,9 +19,16 @@ Invoke each specialist agent directly via the Agent tool from the main thread �
 
 Invoke the `/agile-coach` agent to:
 - Find the active sprint
-- Select the next bug or story (pass `$ARGUMENTS` if the user specified a story)
+- Select the next bug or story (pass `$ARGUMENTS` if the user specified a story), **skipping any
+  item already claimed by another session** — i.e. whose `Claude session` property is non-empty
 - Update all statuses to In Progress
+- **Stamp this session** into the item's `Claude session` property, so no other `/work` or
+  `/worktree` run picks it up
 - Create a feature branch
+
+This is the phase that claims the ticket. When `/work` is launched inside a worktree by
+`/worktree`, `$ARGUMENTS` is the ticket's page ID — the agile-coach fetches it directly and stamps
+*this* worktree agent's session, which is the session actually doing the work.
 
 Review the agile-coach's work summary before proceeding.
 
@@ -42,6 +49,10 @@ Invoke the `/ship` skill to commit, push, open a PR, verify CI, and address revi
 ### Phase 4: Done
 
 Invoke the `/agile-coach` agent to update final statuses.
+
+If the PR has been merged, the agile-coach also **clears the `Claude session`** on the story/bug —
+the item is no longer owned by a session. If the PR is only open/in review, leave the session
+stamped so the ticket stays claimed.
 
 Present the final state:
 - PR URL
