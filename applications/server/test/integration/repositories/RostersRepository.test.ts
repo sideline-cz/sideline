@@ -1,7 +1,9 @@
 import { describe, expect, it } from '@effect/vitest';
-import type { Discord, Team, User } from '@sideline/domain';
+import type { Discord, GroupModel, Role, Team, User } from '@sideline/domain';
 import { Effect, Layer, Option } from 'effect';
 import { beforeEach } from 'vitest';
+import { GroupsRepository } from '~/repositories/GroupsRepository.js';
+import { RolesRepository } from '~/repositories/RolesRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
@@ -9,6 +11,8 @@ import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
 
 const TestLayer = Layer.mergeAll(
+  GroupsRepository.Default,
+  RolesRepository.Default,
   RostersRepository.Default,
   TeamMembersRepository.Default,
   TeamsRepository.Default,
@@ -309,6 +313,87 @@ describe('RostersRepository.findRosterIdsByMember', () => {
       Effect.tap(({ rosterIds }) =>
         Effect.sync(() => {
           expect(rosterIds).toHaveLength(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Regression: findMemberEntries' `role_names` must include group-inherited roles.
+//
+// This query's `permissions` column ALREADY unions in `group_members` → recursive
+// `groups.parent_id` ancestry → `role_groups` (see the `all_perms` subquery), but its
+// `role_names` column only ever looked at direct `member_roles` rows. That means a
+// roster listing a member's roles and permissions could disagree with itself: a
+// permission shown as granted with no role name to explain it. Fails today.
+// ---------------------------------------------------------------------------
+
+const createGroup = (
+  teamId: Team.TeamId,
+  name: string,
+  parentId: Option.Option<GroupModel.GroupId> = Option.none(),
+) =>
+  GroupsRepository.asEffect().pipe(
+    Effect.andThen((repo) =>
+      repo.insertGroup(teamId, name, parentId, Option.none(), Option.none()),
+    ),
+  );
+
+const createRoleWithPermissions = (
+  teamId: Team.TeamId,
+  name: string,
+  permissions: ReadonlyArray<Role.Permission>,
+) =>
+  RolesRepository.asEffect().pipe(
+    Effect.andThen((repo) =>
+      repo
+        .insertRole(teamId, name)
+        .pipe(Effect.tap((role) => repo.setRolePermissions(role.id, permissions))),
+    ),
+  );
+
+describe('RostersRepository.findMemberEntriesById — group-inherited roles', () => {
+  it.effect('role_names includes group-inherited roles and agrees with permissions', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('950000000000000001', 'group-role-roster-member')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('951010101010101010' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.bind('roster', ({ team }) => createRoster(team.id)),
+      Effect.tap(({ roster, member }) =>
+        RostersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.addMemberById(roster.id, member.id)),
+        ),
+      ),
+      Effect.bind('group', ({ team }) => createGroup(team.id, 'Coaches')),
+      Effect.bind('coachRole', ({ team }) =>
+        createRoleWithPermissions(team.id, 'Coach', ['member:edit', 'roster:manage']),
+      ),
+      Effect.tap(({ coachRole, group }) =>
+        RolesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.assignRoleToGroup(coachRole.id, group.id)),
+        ),
+      ),
+      Effect.tap(({ group, member }) =>
+        GroupsRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.addMemberById(group.id, member.id)),
+        ),
+      ),
+      Effect.bind('entries', ({ roster }) =>
+        RostersRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findMemberEntriesById(roster.id)),
+        ),
+      ),
+      Effect.tap(({ entries }) =>
+        Effect.sync(() => {
+          expect(entries).toHaveLength(1);
+          const entry = entries[0];
+          expect(entry?.role_names).toContain('Coach');
+          expect(entry?.permissions).toContain('member:edit');
+          expect(entry?.permissions).toContain('roster:manage');
         }),
       ),
       Effect.provide(TestLayer),

@@ -100,6 +100,11 @@ export * as RequestFilters from './api/RequestFilters.js';
 
 export * as RoleApi from './api/RoleApi.js';
 
+/**
+ * One role effectively held by a roster player, tagged with how it was granted:
+ * `'direct'` (a `member_roles` row), `'inherited'` (via a `role_groups` group, possibly
+ * through an ancestor group), or `'both'` (both at once — see `RosterPlayer.effectiveRoles`).
+ */
 export * as Roster from './api/Roster.js';
 
 /**

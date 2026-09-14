@@ -2,6 +2,7 @@ import { Discord, RosterModel, Team, TeamMember } from '@sideline/domain';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
+import { effectiveRolesAggLateral } from '~/repositories/effectiveRoles.js';
 import { RosterEntry } from '~/repositories/TeamMembersRepository.js';
 
 class RosterWithCount extends Schema.Class<RosterWithCount>('RosterWithCount')({
@@ -105,37 +106,15 @@ const make = Effect.gen(function* () {
     execute: (id) => sql`DELETE FROM rosters WHERE id = ${id}`,
   });
 
+  // `effectiveRolesAggLateral` (see `effectiveRoles.ts`'s header) — one evaluation of
+  // the recursive ancestor walk per roster row via a single `LEFT JOIN LATERAL`,
+  // instead of three separate correlated scalar subqueries for the same `tm` row.
   const findMemberEntries = SqlSchema.findAll({
     Request: RosterMemberEntriesInput,
     Result: RosterEntry,
     execute: (input) => sql`
       SELECT tm.id AS member_id, tm.user_id, u.discord_id,
-             COALESCE(
-               (SELECT string_agg(DISTINCT r.name, ',' ORDER BY r.name)
-                FROM member_roles mr JOIN roles r ON r.id = mr.role_id
-                WHERE mr.team_member_id = tm.id), ''
-             ) AS role_names,
-             COALESCE(
-               (SELECT string_agg(DISTINCT perm, ',') FROM (
-                 SELECT rp.permission AS perm
-                 FROM member_roles mr JOIN role_permissions rp ON rp.role_id = mr.role_id
-                 WHERE mr.team_member_id = tm.id
-                 UNION
-                 SELECT rp.permission AS perm
-                 FROM group_members gm
-                 JOIN LATERAL (
-                   WITH RECURSIVE ancestors AS (
-                     SELECT gm.group_id AS id
-                     UNION ALL
-                     SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
-                   )
-                   SELECT id FROM ancestors
-                 ) anc ON true
-                 JOIN role_groups rg ON rg.group_id = anc.id
-                 JOIN role_permissions rp ON rp.role_id = rg.role_id
-                 WHERE gm.team_member_id = tm.id
-               ) all_perms), ''
-             ) AS permissions,
+             eff.role_names, eff.permissions, eff.effective_roles,
              u.name, u.birth_date::text AS birth_date, u.gender, tm.jersey_number,
              u.username, u.avatar, u.discord_nickname, u.discord_display_name,
              to_char(tm.joined_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS joined_at,
@@ -143,6 +122,7 @@ const make = Effect.gen(function* () {
       FROM roster_members rmb
       JOIN team_members tm ON tm.id = rmb.team_member_id
       JOIN users u ON u.id = tm.user_id
+      ${sql.unsafe(effectiveRolesAggLateral('tm'))}
       WHERE rmb.roster_id = ${input.roster_id}
     `,
   });

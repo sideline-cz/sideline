@@ -384,7 +384,7 @@ Many-to-many junction placing team members in groups. Previously named `subgroup
 
 #### `role_groups`
 
-Many-to-many junction associating roles with groups, restricting role visibility and applicability within a group context.
+Many-to-many junction granting a role to every member of a group.
 
 | Column | Type | Constraints | Default |
 |---|---|---|---|
@@ -394,6 +394,8 @@ Many-to-many junction associating roles with groups, restricting role visibility
 **Primary Key**: `(role_id, group_id)`
 
 **Indexes**: `idx_role_groups_group` on `(group_id)`
+
+**Notes**: A team member's **effective roles** are `member_roles` (direct grants) UNION the roles reachable via `group_members` → a recursive walk up `groups.parent_id` (the member's group and all its ancestors) → `role_groups` — implemented once in `applications/server/src/repositories/effectiveRoles.ts` and used by every roster/member/RSVP-eligibility read (see that file's header and `applications/server/AGENTS.md`). Archiving a group (`groups.is_archived = true`) severs inheritance: the ancestor walk refuses to walk past an archived group, so an archived group in the middle of a chain also cuts off roles granted by groups further up. Removing a member's *direct* `member_roles` row does not revoke a role still held via a group (`source: 'both'` in `Roster.RosterPlayer.effectiveRoles`).
 
 ---
 
@@ -421,7 +423,7 @@ Rules that automatically assign team members to a group based on automatic group
 
 **Indexes**: `idx_age_threshold_rules_team` on `(team_id)`
 
-**Notes**: Originally used `role_id` as the target; reworked to use `group_id` in migration `1741100000`. Gender criterion and composite unique constraint added in migration `1747400000`. `required_group_id` added in migration `1747500000`; when set, only members who are already in that group qualify for the rule. The FK uses `ON DELETE CASCADE`, so deleting a group also deletes any rules that reference it as a required group.
+**Notes**: Originally used `role_id` as the target; reworked to use `group_id` in migration `1741100000`. Gender criterion and composite unique constraint added in migration `1747400000`. `required_group_id` added in migration `1747500000`; when set, only members who are already in that group qualify for the rule. The FK uses `ON DELETE CASCADE`, so deleting a group also deletes any rules that reference it as a required group. Members holding the built-in `Admin` role — directly or via a group (see `role_groups`'s Notes) — are exempt from automatic assignment/removal.
 
 ---
 

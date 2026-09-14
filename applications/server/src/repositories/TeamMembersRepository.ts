@@ -3,6 +3,12 @@ import { LogicError, Schemas, SqlErrors } from '@sideline/effect-lib';
 import { Effect, Layer, Option, pipe, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
+import {
+  effectivePermissionsAgg,
+  effectiveRoleNamesAgg,
+  effectiveRolesAggLateral,
+  effectiveRolesFrom,
+} from '~/repositories/effectiveRoles.js';
 
 export class MemberAlreadyExistsError extends Schema.TaggedErrorClass<MemberAlreadyExistsError>()(
   'MemberAlreadyExistsError',
@@ -63,12 +69,34 @@ export class MembershipWithDiscordState extends Schema.Class<MembershipWithDisco
   members_backfilled_at: Schema.OptionFromNullOr(Schema.DateTimeUtcFromDate),
 }) {}
 
+// One row of `effectiveRolesAggLateral`'s `effective_roles` jsonb array — see
+// `effectiveRoles.ts`'s header.
+// node-pg parses `jsonb` columns into plain JS values automatically, so this decodes
+// the aggregate directly with no JSON string parsing (same precedent as
+// `DashboardLayoutsRepository.ts`).
+export class RosterEffectiveRoleRow extends Schema.Class<RosterEffectiveRoleRow>(
+  'RosterEffectiveRoleRow',
+)({
+  role_id: Role.RoleId,
+  name: Schema.String,
+  is_built_in: Schema.Boolean,
+  source: Schema.Literals(['direct', 'inherited', 'both']),
+  group_names: Schema.Array(Schema.String),
+}) {}
+
 export class RosterEntry extends Schema.Class<RosterEntry>('RosterEntry')({
   member_id: TeamMember.TeamMemberId,
   user_id: User.UserId,
   discord_id: Discord.Snowflake,
   role_names: Schemas.ArrayFromSplitString(),
   permissions: pipe(Schemas.ArrayFromSplitString(), Schema.decodeTo(Schema.Array(Role.Permission))),
+  // `withConstructorDefault` (not `withDecodingDefaultKey`) — the real SQL row always
+  // carries this column (the aggregate COALESCEs to `'[]'::jsonb`), so decode
+  // never needs a default; the default exists purely so hand-built test fixtures that
+  // predate this field (`new RosterEntry({...})`) keep constructing without it.
+  effective_roles: Schema.Array(RosterEffectiveRoleRow).pipe(
+    Schema.withConstructorDefault(() => Option.some([])),
+  ),
   name: Schema.OptionFromNullOr(Schema.String),
   birth_date: Schema.OptionFromNullOr(Schema.String),
   gender: Schema.OptionFromNullOr(User.Gender),
@@ -135,45 +163,8 @@ const make = Effect.gen(function* () {
     Result: MembershipWithRole,
     execute: (input) =>
       sql`SELECT tm.id, tm.team_id, tm.user_id, tm.active,
-                   COALESCE(
-                     (SELECT string_agg(DISTINCT name, ',' ORDER BY name) FROM (
-                       SELECT r.name FROM member_roles mr JOIN roles r ON r.id = mr.role_id WHERE mr.team_member_id = tm.id
-                       UNION
-                       SELECT r.name FROM group_members gm
-                       JOIN LATERAL (
-                         WITH RECURSIVE ancestors AS (
-                           SELECT gm.group_id AS id
-                           UNION ALL
-                           SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
-                         )
-                         SELECT id FROM ancestors
-                       ) anc ON true
-                       JOIN role_groups rg ON rg.group_id = anc.id
-                       JOIN roles r ON r.id = rg.role_id
-                       WHERE gm.team_member_id = tm.id
-                     ) all_roles), ''
-                   ) AS role_names,
-                   COALESCE(
-                     (SELECT string_agg(DISTINCT perm, ',') FROM (
-                       SELECT rp.permission AS perm
-                       FROM member_roles mr JOIN role_permissions rp ON rp.role_id = mr.role_id
-                       WHERE mr.team_member_id = tm.id
-                       UNION
-                       SELECT rp.permission AS perm
-                       FROM group_members gm
-                       JOIN LATERAL (
-                         WITH RECURSIVE ancestors AS (
-                           SELECT gm.group_id AS id
-                           UNION ALL
-                           SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
-                         )
-                         SELECT id FROM ancestors
-                       ) anc ON true
-                       JOIN role_groups rg ON rg.group_id = anc.id
-                       JOIN role_permissions rp ON rp.role_id = rg.role_id
-                       WHERE gm.team_member_id = tm.id
-                     ) all_perms), ''
-                   ) AS permissions
+                   ${sql.unsafe(effectiveRoleNamesAgg('tm'))} AS role_names,
+                   ${sql.unsafe(effectivePermissionsAgg('tm'))} AS permissions
             FROM team_members tm
             WHERE tm.team_id = ${input.team_id}
               AND tm.user_id = ${input.user_id}
@@ -185,45 +176,8 @@ const make = Effect.gen(function* () {
     Result: MembershipWithRole,
     execute: (input) =>
       sql`SELECT tm.id, tm.team_id, tm.user_id, tm.active,
-                   COALESCE(
-                     (SELECT string_agg(DISTINCT name, ',' ORDER BY name) FROM (
-                       SELECT r.name FROM member_roles mr JOIN roles r ON r.id = mr.role_id WHERE mr.team_member_id = tm.id
-                       UNION
-                       SELECT r.name FROM group_members gm
-                       JOIN LATERAL (
-                         WITH RECURSIVE ancestors AS (
-                           SELECT gm.group_id AS id
-                           UNION ALL
-                           SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
-                         )
-                         SELECT id FROM ancestors
-                       ) anc ON true
-                       JOIN role_groups rg ON rg.group_id = anc.id
-                       JOIN roles r ON r.id = rg.role_id
-                       WHERE gm.team_member_id = tm.id
-                     ) all_roles), ''
-                   ) AS role_names,
-                   COALESCE(
-                     (SELECT string_agg(DISTINCT perm, ',') FROM (
-                       SELECT rp.permission AS perm
-                       FROM member_roles mr JOIN role_permissions rp ON rp.role_id = mr.role_id
-                       WHERE mr.team_member_id = tm.id
-                       UNION
-                       SELECT rp.permission AS perm
-                       FROM group_members gm
-                       JOIN LATERAL (
-                         WITH RECURSIVE ancestors AS (
-                           SELECT gm.group_id AS id
-                           UNION ALL
-                           SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
-                         )
-                         SELECT id FROM ancestors
-                       ) anc ON true
-                       JOIN role_groups rg ON rg.group_id = anc.id
-                       JOIN role_permissions rp ON rp.role_id = rg.role_id
-                       WHERE gm.team_member_id = tm.id
-                     ) all_perms), ''
-                   ) AS permissions
+                   ${sql.unsafe(effectiveRoleNamesAgg('tm'))} AS role_names,
+                   ${sql.unsafe(effectivePermissionsAgg('tm'))} AS permissions
             FROM team_members tm
             JOIN users u ON u.id = tm.user_id
             WHERE tm.team_id = ${input.team_id}
@@ -267,32 +221,23 @@ const make = Effect.gen(function* () {
     role_name: Schema.String,
   });
 
-  // Sibling of findMembershipQuery's role_names aggregation — same UNION/LATERAL/RECURSIVE body
-  // (member_roles UNION roles inherited through group_members → recursive group ancestry →
-  // role_groups), but returns one (role_id, role_name) row per effective role instead of a
-  // string_agg. Used by syncMemberDiscordRoles.ts to compute the "desired" role set. Do not
-  // refactor findMembershipQuery to share this — the shapes are different call sites.
+  // Built directly on `effectiveRolesFrom` (see that file's header) — the same shared
+  // fragment `findMembershipQuery`'s `role_names`/`permissions` aggregates use, just
+  // projected as one (role_id, role_name) row per effective role instead of a
+  // string_agg. This used to be a hand-rolled ancestor walk with none of the fragment's
+  // `is_archived` / `team_id` / depth-guard filters — that divergence is exactly what let
+  // an archived group keep granting a role here after the roster and the "still held?"
+  // guard in `api/role.ts`'s `unassignRole` (both on the fragment) had already revoked
+  // it. Used by `syncMemberDiscordRoles.ts` / `reconcileMemberDiscordRoles.ts` to compute
+  // the "desired" role set and by `unassignRole`'s post-delete re-check.
   const findEffectiveRoleIdsForMemberQuery = SqlSchema.findAll({
     Request: Schema.String,
     Result: EffectiveRoleRow,
     execute: (teamMemberId) => sql`
-      SELECT DISTINCT combined.id AS role_id, combined.name AS role_name
-      FROM (
-        SELECT r.id, r.name FROM member_roles mr JOIN roles r ON r.id = mr.role_id WHERE mr.team_member_id = ${teamMemberId}
-        UNION
-        SELECT r.id, r.name FROM group_members gm
-        JOIN LATERAL (
-          WITH RECURSIVE ancestors AS (
-            SELECT gm.group_id AS id
-            UNION ALL
-            SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
-          )
-          SELECT id FROM ancestors
-        ) anc ON true
-        JOIN role_groups rg ON rg.group_id = anc.id
-        JOIN roles r ON r.id = rg.role_id
-        WHERE gm.team_member_id = ${teamMemberId}
-      ) combined
+      SELECT er.role_id AS role_id, er.name AS role_name
+      FROM team_members tm
+      JOIN LATERAL ${sql.unsafe(effectiveRolesFrom('tm'))} er ON true
+      WHERE tm.id = ${teamMemberId}
     `,
   });
 
@@ -305,45 +250,8 @@ const make = Effect.gen(function* () {
     execute: (userId) =>
       sql`SELECT tm.id, tm.team_id, tm.user_id, tm.active, tm.discord_joined_at,
                    bg.members_backfilled_at,
-                   COALESCE(
-                     (SELECT string_agg(DISTINCT name, ',' ORDER BY name) FROM (
-                       SELECT r.name FROM member_roles mr JOIN roles r ON r.id = mr.role_id WHERE mr.team_member_id = tm.id
-                       UNION
-                       SELECT r.name FROM group_members gm
-                       JOIN LATERAL (
-                         WITH RECURSIVE ancestors AS (
-                           SELECT gm.group_id AS id
-                           UNION ALL
-                           SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
-                         )
-                         SELECT id FROM ancestors
-                       ) anc ON true
-                       JOIN role_groups rg ON rg.group_id = anc.id
-                       JOIN roles r ON r.id = rg.role_id
-                       WHERE gm.team_member_id = tm.id
-                     ) all_roles), ''
-                   ) AS role_names,
-                   COALESCE(
-                     (SELECT string_agg(DISTINCT perm, ',') FROM (
-                       SELECT rp.permission AS perm
-                       FROM member_roles mr JOIN role_permissions rp ON rp.role_id = mr.role_id
-                       WHERE mr.team_member_id = tm.id
-                       UNION
-                       SELECT rp.permission AS perm
-                       FROM group_members gm
-                       JOIN LATERAL (
-                         WITH RECURSIVE ancestors AS (
-                           SELECT gm.group_id AS id
-                           UNION ALL
-                           SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
-                         )
-                         SELECT id FROM ancestors
-                       ) anc ON true
-                       JOIN role_groups rg ON rg.group_id = anc.id
-                       JOIN role_permissions rp ON rp.role_id = rg.role_id
-                       WHERE gm.team_member_id = tm.id
-                     ) all_perms), ''
-                   ) AS permissions
+                   ${sql.unsafe(effectiveRoleNamesAgg('tm'))} AS role_names,
+                   ${sql.unsafe(effectivePermissionsAgg('tm'))} AS permissions
             FROM team_members tm
             LEFT JOIN teams t ON t.id = tm.team_id
             LEFT JOIN bot_guilds bg ON bg.guild_id = t.guild_id
@@ -352,27 +260,24 @@ const make = Effect.gen(function* () {
 
   const findByUser = (userId: string) => findByUserQuery(userId).pipe(catchSqlErrors);
 
+  // `effectiveRolesAggLateral` (see `effectiveRoles.ts`'s header) evaluates the
+  // recursive ancestor walk ONCE per roster row via a single `LEFT JOIN LATERAL`,
+  // instead of splicing its three aggregates (`role_names` / `permissions` /
+  // `effective_roles`) as separate correlated scalar subqueries (each its own
+  // `WITH RECURSIVE` materialization) for the same `tm` row.
   const findRosterByTeamQuery = SqlSchema.findAll({
     Request: Schema.String,
     Result: RosterEntry,
     execute: (teamId) => sql`
       SELECT tm.id as member_id, tm.user_id, u.discord_id,
-             COALESCE(
-               (SELECT string_agg(DISTINCT r.name, ',' ORDER BY r.name)
-                FROM member_roles mr JOIN roles r ON r.id = mr.role_id
-                WHERE mr.team_member_id = tm.id), ''
-             ) AS role_names,
-             COALESCE(
-               (SELECT string_agg(DISTINCT rp.permission, ',')
-                FROM member_roles mr JOIN role_permissions rp ON rp.role_id = mr.role_id
-                WHERE mr.team_member_id = tm.id), ''
-             ) AS permissions,
+             eff.role_names, eff.permissions, eff.effective_roles,
              u.name, u.birth_date::text AS birth_date, u.gender, tm.jersey_number,
              u.username, u.avatar, u.discord_nickname, u.discord_display_name,
              to_char(tm.joined_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS joined_at,
              tm.active AS active
       FROM team_members tm
       JOIN users u ON u.id = tm.user_id
+      ${sql.unsafe(effectiveRolesAggLateral('tm'))}
       WHERE tm.team_id = ${teamId} AND tm.active = true
     `,
   });
@@ -384,22 +289,14 @@ const make = Effect.gen(function* () {
     Result: RosterEntry,
     execute: (input) => sql`
       SELECT tm.id as member_id, tm.user_id, u.discord_id,
-             COALESCE(
-               (SELECT string_agg(DISTINCT r.name, ',' ORDER BY r.name)
-                FROM member_roles mr JOIN roles r ON r.id = mr.role_id
-                WHERE mr.team_member_id = tm.id), ''
-             ) AS role_names,
-             COALESCE(
-               (SELECT string_agg(DISTINCT rp.permission, ',')
-                FROM member_roles mr JOIN role_permissions rp ON rp.role_id = mr.role_id
-                WHERE mr.team_member_id = tm.id), ''
-             ) AS permissions,
+             eff.role_names, eff.permissions, eff.effective_roles,
              u.name, u.birth_date::text AS birth_date, u.gender, tm.jersey_number,
              u.username, u.avatar, u.discord_nickname, u.discord_display_name,
              to_char(tm.joined_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS joined_at,
              tm.active AS active
       FROM team_members tm
       JOIN users u ON u.id = tm.user_id
+      ${sql.unsafe(effectiveRolesAggLateral('tm'))}
       WHERE tm.team_id = ${input.team_id} AND tm.id = ${input.member_id}
         AND (${input.include_inactive} OR tm.active = true)
     `,
@@ -637,6 +534,13 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  // Last-active-manager guard consulted by `deactivateMemberAndCascade` — built on
+  // `effectiveRolesFrom` (see that file's header) rather than a second hand-rolled
+  // ancestor walk, so it agrees with the roster on which members effectively hold
+  // `team:manage` (archived-group holders excluded, cycle-guarded). Before this it was
+  // its own ad hoc walk that never joined `groups` on the group-inherited path at all,
+  // so an archived group could still count as an active manager here — the exact
+  // failure this guard exists to prevent.
   const hasOtherActiveManagerQuery = SqlSchema.findOne({
     Request: Schema.Struct({
       team_id: Schema.String,
@@ -650,33 +554,11 @@ const make = Effect.gen(function* () {
         WHERE tm.team_id = ${input.team_id}
           AND tm.active = true
           AND tm.id != ${input.exclude_member_id}::uuid
-          AND (
-            -- direct member_roles path
-            EXISTS (
-              SELECT 1
-              FROM member_roles mr
-              JOIN role_permissions rp ON rp.role_id = mr.role_id
-              WHERE mr.team_member_id = tm.id
-                AND rp.permission = 'team:manage'
-            )
-            OR
-            -- group-inherited path (group_members → ancestor groups → role_groups → role_permissions)
-            EXISTS (
-              SELECT 1
-              FROM group_members gm
-              JOIN LATERAL (
-                WITH RECURSIVE ancestors AS (
-                  SELECT gm.group_id AS id
-                  UNION ALL
-                  SELECT g.parent_id FROM groups g JOIN ancestors a ON g.id = a.id WHERE g.parent_id IS NOT NULL
-                )
-                SELECT id FROM ancestors
-              ) anc ON true
-              JOIN role_groups rg ON rg.group_id = anc.id
-              JOIN role_permissions rp ON rp.role_id = rg.role_id
-              WHERE gm.team_member_id = tm.id
-                AND rp.permission = 'team:manage'
-            )
+          AND EXISTS (
+            SELECT 1
+            FROM ${sql.unsafe(effectiveRolesFrom('tm'))} er
+            JOIN role_permissions rp ON rp.role_id = er.role_id
+            WHERE rp.permission = 'team:manage'
           )
       ) AS has_manager
     `,

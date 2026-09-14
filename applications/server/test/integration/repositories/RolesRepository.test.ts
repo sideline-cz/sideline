@@ -1,15 +1,20 @@
 import { describe, expect, it } from '@effect/vitest';
-import type { Discord, Team, User } from '@sideline/domain';
+import type { Discord, GroupModel, Team, TeamMember, User } from '@sideline/domain';
 import { Role } from '@sideline/domain';
 import { Effect, Layer, Option } from 'effect';
+import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
+import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RolesRepository } from '~/repositories/RolesRepository.js';
+import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
 
 const TestLayer = Layer.mergeAll(
+  GroupsRepository.Default,
   RolesRepository.Default,
+  TeamMembersRepository.Default,
   TeamsRepository.Default,
   UsersRepository.Default,
 ).pipe(Layer.provideMerge(TestPgClient));
@@ -234,4 +239,211 @@ describe('RolesRepository', () => {
       Effect.provide(TestLayer),
     );
   });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: getMemberCountForRole (countMembersForRole) must count group-inherited
+// holders, not just direct `member_roles` rows. Fails today — a role granted only
+// through a group counts as having zero holders.
+// ---------------------------------------------------------------------------
+
+const addTeamMember = (teamId: Team.TeamId, userId: User.UserId) =>
+  TeamMembersRepository.asEffect().pipe(
+    Effect.andThen((repo) =>
+      repo.addMember({ team_id: teamId, user_id: userId, active: true, joined_at: undefined }),
+    ),
+    Effect.map((tm) => tm.id),
+  );
+
+const createGroup = (
+  teamId: Team.TeamId,
+  name: string,
+  parentId: Option.Option<GroupModel.GroupId> = Option.none(),
+) =>
+  GroupsRepository.asEffect().pipe(
+    Effect.andThen((repo) =>
+      repo.insertGroup(teamId, name, parentId, Option.none(), Option.none()),
+    ),
+    Effect.map((g) => g.id),
+  );
+
+const addMemberToGroup = (groupId: GroupModel.GroupId, memberId: TeamMember.TeamMemberId) =>
+  GroupsRepository.asEffect().pipe(Effect.andThen((repo) => repo.addMemberById(groupId, memberId)));
+
+const assignRoleDirect = (memberId: TeamMember.TeamMemberId, roleId: Role.RoleId) =>
+  TeamMembersRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.assignRole(memberId, roleId)),
+  );
+
+describe('RolesRepository.getMemberCountForRole — group-inherited holders', () => {
+  it.effect('counts a holder who has the role only via a group', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('960000000000000001', 'count-role-owner')),
+      Effect.bind('memberUserId', () => createUser('960000000000000002', 'count-role-member')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('961010101010101010' as Discord.Snowflake, ownerId),
+      ),
+      Effect.bind('coachRole', ({ team }) =>
+        RolesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.insertRole(team.id, 'Coach')),
+        ),
+      ),
+      Effect.bind('group', ({ team }) => createGroup(team.id, 'Coaches')),
+      Effect.tap(({ coachRole, group }) =>
+        RolesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.assignRoleToGroup(coachRole.id, group)),
+        ),
+      ),
+      Effect.bind('memberId', ({ team, memberUserId }) => addTeamMember(team.id, memberUserId)),
+      Effect.tap(({ memberId, group }) => addMemberToGroup(group, memberId)),
+      Effect.bind('count', ({ coachRole }) =>
+        RolesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.getMemberCountForRole(coachRole.id)),
+        ),
+      ),
+      Effect.tap(({ count }) =>
+        Effect.sync(() => {
+          expect(count).toBe(1);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('does not double-count a member holding the role both directly and via a group', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('960000000000000011', 'count-role-owner-2')),
+      Effect.bind('memberUserId', () => createUser('960000000000000012', 'count-role-member-2')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('961020202020202020' as Discord.Snowflake, ownerId),
+      ),
+      Effect.bind('coachRole', ({ team }) =>
+        RolesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.insertRole(team.id, 'Coach')),
+        ),
+      ),
+      Effect.bind('group', ({ team }) => createGroup(team.id, 'Coaches')),
+      Effect.tap(({ coachRole, group }) =>
+        RolesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.assignRoleToGroup(coachRole.id, group)),
+        ),
+      ),
+      Effect.bind('memberId', ({ team, memberUserId }) => addTeamMember(team.id, memberUserId)),
+      Effect.tap(({ memberId, group }) => addMemberToGroup(group, memberId)),
+      Effect.tap(({ memberId, coachRole }) => assignRoleDirect(memberId, coachRole.id)),
+      Effect.bind('count', ({ coachRole }) =>
+        RolesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.getMemberCountForRole(coachRole.id)),
+        ),
+      ),
+      Effect.tap(({ count }) =>
+        Effect.sync(() => {
+          expect(count).toBe(1);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('does not count a holder reached only through an archived group', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('960000000000000021', 'count-role-owner-3')),
+      Effect.bind('memberUserId', () => createUser('960000000000000022', 'count-role-member-3')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('961030303030303030' as Discord.Snowflake, ownerId),
+      ),
+      Effect.bind('coachRole', ({ team }) =>
+        RolesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.insertRole(team.id, 'Coach')),
+        ),
+      ),
+      Effect.bind('group', ({ team }) => createGroup(team.id, 'Coaches')),
+      Effect.tap(({ coachRole, group }) =>
+        RolesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.assignRoleToGroup(coachRole.id, group)),
+        ),
+      ),
+      Effect.bind('memberId', ({ team, memberUserId }) => addTeamMember(team.id, memberUserId)),
+      Effect.tap(({ memberId, group }) => addMemberToGroup(group, memberId)),
+      Effect.tap(({ group }) =>
+        GroupsRepository.asEffect().pipe(Effect.andThen((repo) => repo.archiveGroupById(group))),
+      ),
+      Effect.bind('count', ({ coachRole }) =>
+        RolesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.getMemberCountForRole(coachRole.id)),
+        ),
+      ),
+      Effect.tap(({ count }) =>
+        Effect.sync(() => {
+          expect(count).toBe(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  // Coverage gap 5 (post-fix/role-linking review): edge cases the migration to
+  // `effectiveRolesFrom` (an `EXISTS`, correlated on `roles.team_id`) had no coverage
+  // for.
+  it.effect('returns 0 for a role id that does not exist at all', () =>
+    Effect.Do.pipe(
+      Effect.bind('count', () => {
+        const fakeRoleId = '00000000-0000-0000-0000-0000000000fe' as Role.RoleId;
+        return RolesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.getMemberCountForRole(fakeRoleId)),
+        );
+      }),
+      Effect.tap(({ count }) =>
+        Effect.sync(() => {
+          expect(count).toBe(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('a member_roles row belonging to a DIFFERENT team is not counted as a holder', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerAId', () => createUser('960000000000000031', 'count-role-owner-a')),
+      Effect.bind('ownerBId', () => createUser('960000000000000032', 'count-role-owner-b')),
+      Effect.bind('teamA', ({ ownerAId }) =>
+        createTeam('961040404040404040' as Discord.Snowflake, ownerAId),
+      ),
+      Effect.bind('teamB', ({ ownerBId }) =>
+        createTeam('961050505050505050' as Discord.Snowflake, ownerBId),
+      ),
+      Effect.bind('coachRole', ({ teamA }) =>
+        RolesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.insertRole(teamA.id, 'Coach')),
+        ),
+      ),
+      // A member of an ENTIRELY different team (teamB) with a `member_roles` row
+      // pointing at teamA's role — not reachable through the normal API (which always
+      // scopes role assignment to the target member's own team), but exactly the shape
+      // `countMembersForRole`'s `tm.team_id = (SELECT team_id FROM roles ...)` scoping
+      // must reject regardless of how the row got there.
+      Effect.bind('foreignMemberId', ({ teamB, ownerBId }) => addTeamMember(teamB.id, ownerBId)),
+      Effect.tap(({ foreignMemberId, coachRole }) =>
+        SqlClient.SqlClient.asEffect().pipe(
+          Effect.andThen(
+            (sql) => sql`
+                INSERT INTO member_roles (team_member_id, role_id)
+                VALUES (${foreignMemberId}, ${coachRole.id})
+              `,
+          ),
+        ),
+      ),
+      Effect.bind('count', ({ coachRole }) =>
+        RolesRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.getMemberCountForRole(coachRole.id)),
+        ),
+      ),
+      Effect.tap(({ count }) =>
+        Effect.sync(() => {
+          expect(count).toBe(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
 });

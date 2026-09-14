@@ -45,6 +45,14 @@ pnpm -C ./applications/web dlx shadcn@latest add button
 - `<select>` → `<Select>` from `components/ui/select` (fixed enums) or `<SearchableSelect>` from `components/atoms/SearchableSelect` (dynamic data)
 - `<label>` (in forms) → `<FormLabel>` from `components/ui/form`
 
+### Interactive Triggers: `Badge` Is a `<span>`, Tooltips Do Not Open On Touch
+
+Rules:
+
+1. **Never attach a click/keyboard handler — or a Radix `asChild` trigger — to `<Badge>`.** `components/ui/badge.tsx` renders a bare `<span>`: not focusable, not in the tab order, not announced as a control. An interactive badge-shaped affordance (e.g. the `+n` overflow chip in `EffectiveRolesList.tsx`) MUST be a real `<Button>` styled to look like a badge, never a `Badge` with an `onClick`.
+2. **A disclosure that must work on touch uses `<Popover>`, never `<Tooltip>`.** Radix tooltips open on hover/focus only and never open on a tap, so touch users get nothing. Use `<Tooltip>` only for supplementary text that is ALSO reachable another way (e.g. an `sr-only` label on the same control); use `<Popover>` whenever the disclosed content is the only route to the information or to an action. Reference: `EffectiveRolesList.tsx` (`+n` → `Popover`), `PlayerDetailPage.tsx` `InheritedRoleForwardControl` (one granting group → `Tooltip` beside an `sr-only` label on the link; 2+ groups → `Popover` listing one link per group).
+3. **Encode a state distinction on a badge through at least two non-colour channels plus the accessible name.** Colour alone disappears under forced-colors mode, greyscale and screen readers. `RoleBadge.tsx` marks a group-inherited role with a dashed border (shape), a leading `Users` icon (`aria-hidden`) and an `aria-label` naming the granting group(s).
+
 ### Date Inputs — `DatePicker`
 
 For any user-editable calendar date (event date, activity-log date, fee due date, expense spent-at date), use `<DatePicker>` from `~/components/ui/date-picker` — never the native `<input type='date'>`. The component is a Popover + Calendar combo that uses `date-fns` for locale-aware display and emits a canonical `YYYY-MM-DD` string via `onChange`.
@@ -1035,6 +1043,7 @@ Reusable label maps and option builders live in `src/lib/`. Always import from t
 | `src/lib/clipboard.ts` | `copyToClipboard(text): Promise<boolean>` | Any "copy to clipboard" button (invite links, minted onboarding URLs, calendar subscription URLs) |
 | `src/lib/finance/` | `formatMoney`, `parseAmount`, `sortAssignments`, `computeKpis`, `pickDominantCurrency` | Finance pages, payment dialogs, "My Payments" page, dashboard banner, balance dashboard |
 | `src/lib/rules/palette.ts` | `LEVEL_ACCENT`, `RULES_ACCENT`, `VERDICT` | Every `Rules*` organism, `TeamRulesPage` — see "Rules Trainer Colours" below |
+| `src/lib/roles/` | `resolveEffectiveRoles` (`resolveEffectiveRoles.ts`), `sortEffectiveRoles` (`role-order.ts`) | `RoleBadge`, `EffectiveRolesList`, `PlayerDetailPage`, `PlayerRow`, `MemberSummaryHeader` — see "Effective Roles In The UI — `src/lib/roles/`" below |
 
 ### Rules Trainer Colours — `palette.ts` Only
 
@@ -1104,10 +1113,21 @@ When a component needs non-trivial derived data (sorting, KPI computation, parsi
 Rules:
 
 1. **One exported pure function per file.** The file name matches the function name (`sortAssignments.ts` exports `sortAssignments`).
-2. **No React, no `tr()`, no `useRun`, no `ApiClient`.** Helpers in `src/lib/<feature>/` are framework-free — they only import from `effect` and other pure helpers. This keeps them testable under Vitest's default Node environment (no jsdom needed).
+2. **No React, no `tr()`, no `useRun`, no `ApiClient`.** Helpers in `src/lib/<feature>/` are framework-free — they only import from `effect` and other pure helpers. This keeps them testable under Vitest's default Node environment (no jsdom needed). The ONE permitted exception is `getLocale()` from `@sideline/i18n/runtime`, and only to feed a locale into `Intl` / `String.prototype.localeCompare` (reference: `src/lib/roles/role-order.ts`) — never to look up a message.
 3. **Define a local mirror type instead of importing from `@sideline/domain`** when the helper consumes a model shape (e.g. `FeeAssignmentView`). The mirror keeps the helper decoupled from the domain package's compile cycle and lets the test stub data with plain object literals. See `sortAssignments.ts` (`type FeeAssignmentView = { ... }`).
 4. **Co-locate `<name>.test.ts` next to `<name>.ts`.** The test file imports the function directly and tests with plain object literals — no `render`, no `screen`, no mocks. `vitest.config.ts` already includes `src/**/*.test.ts` in the project glob.
 5. **Call helpers from components/pages, not from loaders.** Loaders return raw API data; the page/component runs the helper to derive sorted/KPI'd views on each render.
+
+### Effective Roles In The UI — `src/lib/roles/`
+
+Every surface that renders a member's roles (roster row, member summary header, player detail) MUST derive its list through `resolveEffectiveRoles(player, availableRoles?)` and render each entry with `<RoleBadge>`. Never map `player.roleNames` to badges directly — that loses the `direct` / `inherited` / `both` provenance the server now sends on `Roster.RosterPlayer.effectiveRoles`. Prefer `<EffectiveRolesList roles={...} limit={n}>` for a read-only wrapping list: it applies `sortEffectiveRoles` itself and collapses the overflow into a `+n` `Popover`, so its callers MUST NOT pre-sort. Call `sortEffectiveRoles` directly only when rendering `<RoleBadge>` yourself (reference: `PlayerDetailPage.tsx` `RolesSection`, which interleaves per-role remove/forward controls).
+
+Rules:
+
+1. **`resolveEffectiveRoles` is the only place that handles the empty/absent `effectiveRoles` fallback.** The field is additive (`Schema.withDecodingDefaultKey(() => [])` — see `packages/domain/AGENTS.md`), so an older payload or a pre-existing test fixture yields `[]`; the helper then treats every `roleNames` entry as `source: 'direct'` with no group attribution, resolving the real `roleId`/`isBuiltIn` from `availableRoles` when the caller supplies it. Do not re-implement that fallback in a component.
+2. **`sortEffectiveRoles` orders built-in before custom, built-ins by the FIXED rank Admin > Captain > Treasurer > Player, and custom roles by `localeCompare`.** Never sort by permission count (permissions are per-team editable, so badge order would differ between teams) and never sort by `source` (the dashed border and icon already carry that distinction).
+3. **A role whose `source` is `'inherited'` gets no remove control.** Deleting the direct `member_roles` row would be a no-op the server refuses to sync; render a link to the granting group instead (`InheritedRoleForwardControl`, gated on `group:manage`). A `'both'` role KEEPS its remove control — the direct grant is real — but its confirm copy must say the role stays via the group (`roles_removeRoleStillInheritedDescription`).
+4. **Filter the "assign a role" select against the full effective set by `roleId`, not by `name`.** `PlayerDetailPage`'s `RolesSection` builds `effectiveRoleIds` from the resolved list so a role already shown as an inherited badge is never also offered for assignment.
 
 ## Time-Sensitive Data: Timezone Correctness, Stale-Response Toggles, Focus Refetch
 
@@ -1214,6 +1234,7 @@ describe('MyComponent', () => {
 - Always mock `~/lib/translations.js` (the `tr` export) with `vi.mock` before importing the component under test. Never mock `@sideline/i18n/messages` — web code does not import it directly.
 - Use `await import(...)` (dynamic import) for the component after `vi.mock` calls — this ensures mocks are applied before module evaluation.
 - Test files live in `applications/web/test/` with `.test.tsx` extension.
+- `test/setup.ts` polyfills `window.matchMedia` (jsdom does not implement it; `useIsMobile`, `resolveStoredTheme.ts`, `preMountGuard.ts` and `use-pwa-install.ts` all call it unguarded). Its stub always reports `matches: false`. Do NOT add a per-file `matchMedia` stub unless the test needs a specific match result — then override `window.matchMedia` inside that test and restore it afterwards.
 - Use `@testing-library/react` (`render`, `screen`, `fireEvent`) for DOM assertions.
 
 ### Timezone-Dependent Tests

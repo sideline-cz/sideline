@@ -5,6 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-13 — Fix: group-granted roles now show up and count
+
+Roles assigned to a **group** (rather than to a member directly) were silently invisible everywhere except the group's own settings page — a member's profile and the roster didn't show them, and their permissions weren't applied. This is fixed:
+
+- A member's profile and roster row now show every role they hold, including ones granted through a group they belong to (or any parent of that group). Group-granted roles are shown with a dashed outline and the granting group's name, and count toward that member's permissions like any other role.
+- You can't remove a group-granted role from the member's profile directly — a link next to it takes you to the group so you can manage it there instead.
+- **Archiving a group now revokes the roles it granted.** If a member only held a role through an archived group, they lose it (and the corresponding Discord role, if applicable).
+
+If your team relies on group-level roles to grant permissions (e.g. "everyone in the Coaches group gets `event:create`"), those permissions are now actually enforced everywhere they should have been all along.
+
 ## 2026-09-13 — Fewer Discord notifications: RSVP reminders and event-start posts
 
 Three Discord notification changes, all aimed at cutting noise that wasn't earning its keep:

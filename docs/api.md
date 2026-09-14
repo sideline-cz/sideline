@@ -616,8 +616,9 @@ Lists all active members of a team with their profile and role information.
 | `memberId` | `TeamMemberId` | No | Team member ID |
 | `userId` | `UserId` | No | User ID |
 | `discordId` | `string` | No | Discord user snowflake |
-| `roleNames` | `string[]` | No | Assigned role names |
-| `permissions` | `Permission[]` | No | Aggregated permissions |
+| `roleNames` | `string[]` | No | Effective role names — direct `member_roles` grants plus roles inherited from the member's group(s) and their ancestor groups |
+| `effectiveRoles` | `EffectiveRole[]` | No | Per-role provenance for `roleNames`: `{ roleId, name, isBuiltIn, source, groupNames }` where `source` is `'direct'`, `'inherited'`, or `'both'`, and `groupNames` lists the granting group(s) (empty for `'direct'`). Defaults to `[]` when absent, so older producers stay compatible. |
+| `permissions` | `Permission[]` | No | Aggregated permissions from all effective roles (direct and group-inherited) |
 | `name` | `string \| null` | Yes | Display name |
 | `birthDate` | `string \| null` | Yes | Birth date |
 | `gender` | `"male" \| "female" \| "other" \| null` | Yes | Gender |
@@ -1256,7 +1257,7 @@ Updates a custom role's name and/or permissions. Cannot update built-in roles.
 
 #### `DELETE /teams/:teamId/roles/:roleId`
 
-Deletes a custom role. Cannot delete built-in roles or roles currently assigned to members.
+Deletes a custom role. Cannot delete built-in roles or roles currently held by any member — directly (`member_roles`) or via a group.
 
 **Auth:** Bearer token (AuthMiddleware)
 **Required Permission:** `role:manage`
@@ -1277,7 +1278,7 @@ Deletes a custom role. Cannot delete built-in roles or roles currently assigned 
 | `RoleForbidden` | 403 | Missing `role:manage` permission |
 | `RoleNotFound` | 404 | Role does not exist |
 | `CannotModifyBuiltIn` | 400 | Attempted to delete a built-in role |
-| `RoleInUse` | 409 | Role is currently assigned to one or more members |
+| `RoleInUse` | 409 | Role is currently held by one or more members, directly or via a group |
 
 ---
 
@@ -1315,7 +1316,7 @@ Assigns a role to a team member.
 
 #### `DELETE /teams/:teamId/members/:memberId/roles/:roleId`
 
-Unassigns a role from a team member.
+Unassigns a role from a team member. Removes only the member's **direct** grant (`member_roles`) — if the member still effectively holds the role through a group they belong to, they keep it, and no Discord role-sync event or `role_removed` notification is emitted (there is nothing to revoke or notify about).
 
 **Auth:** Bearer token (AuthMiddleware)
 **Required Permission:** `role:manage`
@@ -1619,6 +1620,7 @@ Assigns a role to a group. All group members will inherit this role's permission
 |---|---|---|
 | `GroupForbidden` | 403 | Missing `team:manage` permission |
 | `GroupNotFound` | 404 | Group does not exist |
+| `GroupRoleNotFound` | 404 | `roleId` does not exist, or belongs to a different team than `groupId` |
 
 ---
 
@@ -7064,6 +7066,7 @@ The following table consolidates all error tags across all API groups.
 | `RoleNotFound` | 404 | Role | Role does not exist |
 | `MemberNotFound` | 404 | Role | Team member does not exist |
 | `GroupNotFound` | 404 | Group | Group does not exist |
+| `GroupRoleNotFound` | 404 | Group | `roleId` does not exist, or belongs to a different team than `groupId` |
 | `AgeThresholdGroupNotFound` | 404 | Age Threshold | Target group (`groupId`) or required group (`requiredGroupId`) does not exist or belongs to a different team |
 | `GroupMemberNotFound` | 404 | Group | Member not found in the group context |
 | `EventNotFound` | 404 | Event | Event does not exist |
@@ -7087,7 +7090,7 @@ The following table consolidates all error tags across all API groups.
 | `GroupNameAlreadyTaken` | 409 | Group | A group with this name already exists |
 | `TrainingTypeNameAlreadyTaken` | 409 | Training Type | A training type with this name exists |
 | `AgeThresholdAlreadyExists` | 409 | Age Threshold | A rule already exists for this group |
-| `RoleInUse` | 409 | Role | Role is currently assigned to members |
+| `RoleInUse` | 409 | Role | Role is currently held by members, directly or via a group |
 | `AlreadyMember` | 409 | Invite | User is already a member of the team |
 | `AchievementForbidden` | 403 | Achievement | Not a team member or missing `team:manage` permission |
 | `AchievementNotFound` | 404 | Achievement | Built-in achievement slug does not exist |

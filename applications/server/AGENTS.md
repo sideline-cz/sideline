@@ -150,6 +150,53 @@ Rules:
 
 Reference: `PollsRepository.removeOptions`, integration coverage in `applications/server/test/integration/repositories/PollsRepository.test.ts`.
 
+### Effective Roles Are Derived In Exactly One Place (`effectiveRoles.ts`)
+
+A team member's **effective roles** are the roles held via `member_roles` (direct) UNION the roles reachable through `group_members` → a recursive walk UP `groups.parent_id` (the member's group plus every ancestor) → `role_groups`. Every query that answers "which roles does this member hold?", "which permissions does this member hold?", or "does this member hold role/permission X?" MUST build that set by splicing a fragment from `applications/server/src/repositories/effectiveRoles.ts` with `sql.unsafe(...)` — the same technique as `eventVisibility.ts`. NEVER hand-write the UNION / `JOIN LATERAL` / `WITH RECURSIVE` walk inline again: six call sites each carried their own copy and three of them only ever read the direct half, which is the bug this fragment exists to make unrepeatable.
+
+| Export | Splice site | Produces |
+|--------|-------------|----------|
+| `effectiveRolesFrom(tm)` | after `FROM`, after `JOIN LATERAL`, or inside an `EXISTS`/scalar subquery | a parenthesised derived table, one row per effective role: `(role_id, name, is_built_in, team_id, source, group_names)`, already deduped per `role_id` |
+| `effectiveRoleNamesAgg(tm)` | in the `SELECT` list | comma-joined role names ordered by name, `''` when none |
+| `effectivePermissionsAgg(tm)` | in the `SELECT` list | comma-joined deduped permissions, `''` when none |
+| `effectiveRolesAggLateral(tm)` | after the `FROM`/`JOIN` clauses | `LEFT JOIN LATERAL (...) eff ON true` exposing `eff.role_names`, `eff.permissions`, `eff.effective_roles` (jsonb) |
+
+`tm` is the alias of a `team_members` row already in scope, chosen in source — never a runtime value, so there is no injection surface. `source` is `'direct'`, `'inherited'` or `'both'`; `'both'` means removing the direct `member_roles` row alone does NOT revoke the role.
+
+Rules:
+
+1. **Splice a correlated fragment with `JOIN LATERAL ... ON true`, never a plain `JOIN`.** `effectiveRolesFrom('tm')` references `tm.id` and `tm.team_id`, and a plain `JOIN` onto a derived table cannot see a sibling FROM-clause alias — Postgres rejects it with `invalid reference to FROM-clause entry for table "tm"`. Inside a scalar subquery or `EXISTS` (`SELECT 1 FROM ${sql.unsafe(effectiveRolesFrom('tm'))} er ...`) the correlation is already legal and needs no `LATERAL`.
+2. **A query that needs two or three of `role_names` / `permissions` / `effective_roles` for the same `tm` row MUST use `effectiveRolesAggLateral`,** not two or three standalone aggregates. `effectiveRolesFrom` contains a `WITH RECURSIVE`, which Postgres always materializes and never dedupes across sibling references, so N standalone aggregates re-run the ancestor walk N times per outer row. `effectiveRolesAggLateral` wraps ONE `WITH ... AS MATERIALIZED` evaluation and derives all three from it. Its column names match the standalone aggregates exactly, so it is a drop-in replacement.
+3. **Archiving a group severs role inheritance — keep the `is_archived = false AND team_id = ${tm}.team_id` filter inside the RECURSIVE TERM.** An archived ancestor stops the walk, so nothing above it grants either. Do NOT "simplify" this by moving the filter to the final join only: that would let an archived group's own ancestors keep granting, and it would disagree with `GroupsRepository.findDescendantMembersWithDiscordIdByGroupId` — the query that decides Discord channel membership — which applies the same filter inside its own recursive term. Role inheritance and channel membership MUST agree. The `deleteGroup` handler (`src/api/group.ts`) only calls `GroupsRepository.archiveGroupById` — `UPDATE groups SET is_archived = true`, never a delete of `group_members` / `role_groups` rows — so this filter is the only thing that revokes a deleted group's grants.
+4. **`string_agg(DISTINCT x, sep ORDER BY y)` requires `y` to be a member of the `DISTINCT` argument list.** Do not reorder `effectiveRoleNamesAgg`'s `ORDER BY er.name` to e.g. `is_built_in DESC, name` — that is a Postgres syntax error, not a style choice. When an aggregate's `ORDER BY` and `DISTINCT` sets must differ, aggregate over a `SELECT DISTINCT` subquery instead.
+
+Reference: fragment `src/repositories/effectiveRoles.ts`; call sites `TeamMembersRepository.ts` (`findMembershipQuery`, `findMembershipByDiscordQuery`, `findByUserQuery`, `findEffectiveRoleIdsForMemberQuery`, `findRosterByTeamQuery`, `findRosterMemberQuery`, `hasOtherActiveManagerQuery`), `RostersRepository.findMemberEntries`, `RolesRepository.countMembersForRole`, `EventRsvpsRepository` (both non-responder queries), `AgeThresholdRepository.findMembersForAutoAssignmentQuery`. Integration coverage: `test/integration/repositories/effectiveRolesProvenance.test.ts`, `TeamMembersRepository.groupRoles.test.ts`, `middleGroupArchivedChain.test.ts`.
+
+### Recursive `groups.parent_id` Walks Must Carry a `depth < 32` Guard
+
+`groups.parent_id` has NO database-level acyclicity constraint, and `moveGroup`'s application-level cycle check is check-then-act with no transaction or row lock around it (a known, separately-filed gap — see the comment in `src/api/group.ts`), so a cycle is constructible. An unguarded `WITH RECURSIVE` walk over `groups.parent_id` then loops forever and pins a connection until the statement timeout.
+
+Every recursive CTE over `groups.parent_id` you ADD or EDIT — ancestor direction or descendant direction — MUST carry a `depth` column and terminate its recursive term with `AND a.depth < 32` (example: the ancestor walk in `src/repositories/effectiveRoles.ts`):
+
+```sql
+WITH RECURSIVE ancestors AS (
+  SELECT gm.group_id AS id, 0 AS depth
+  UNION ALL
+  SELECT anc_g.parent_id, a.depth + 1
+  FROM groups anc_g
+  JOIN ancestors a ON anc_g.id = a.id
+  WHERE anc_g.parent_id IS NOT NULL
+    AND anc_g.is_archived = false
+    AND anc_g.team_id = ${tm}.team_id
+    AND a.depth < 32
+)
+```
+
+Rules:
+
+1. **The guard is required even on the query that PREVENTS cycles.** `GroupsRepository.findAncestors` backs `getAncestorIds`, which is `moveGroup`'s cycle check (`src/api/group.ts`); unguarded, an already-corrupted chain would hang the one operation an operator needs to repair it.
+2. **Guarded today:** the ancestor walk in `src/repositories/effectiveRoles.ts` and `GroupsRepository.findAncestors`. **Not yet guarded:** the `descendant_groups` / `descendants` walks in `GroupsRepository.ts`, `EventRsvpsRepository.ts`, `PersonalEventChannelsRepository.ts`, `src/rpc/event/index.ts`, `src/rpc/guild/index.ts`. Add the guard to any of those the next time you touch one — do not leave a walk you edited unguarded.
+
 ### Repository Pattern
 
 Construct repositories by starting from `SqlClient.SqlClient.pipe(Effect.bindTo('sql'), ...)`. Use `Effect.bind` for effectful dependencies and `Effect.let` for pure method definitions. End with `Bind.remove` to strip internals.
@@ -325,6 +372,8 @@ When API handlers create/delete resources that need Discord sync:
 1. Perform the primary operation (e.g. insert group)
 2. Call `repo.emitIfGuildLinked(teamId, eventType, ...)` — looks up `guild_id` from `teams` table; if linked, inserts event row; if not, no-op
 3. Wrap emission in `Effect.catchAllDefect(() => Effect.void)` so sync failures never break the primary operation. Use `Effect.catchAllDefect` (not `Effect.catchAll`) because repository methods convert SQL/parse errors to defects via `catchSqlErrors`. Always log before catching with `Effect.tapDefect`
+4. **Emit only when the primary operation actually changed the state the bot mirrors.** A `DELETE`/`UPDATE` that matched nothing, or that removed one of several grants that all map to the same Discord state, MUST NOT emit — the bot applies the event unconditionally and would drive Discord out of sync with the database. `src/api/role.ts` `unassignRole` deletes only the DIRECT `member_roles` row, so after the delete it re-reads `findEffectiveRoleIdsForMember(memberId)` and skips BOTH `emitRoleUnassigned` and the `role_removed` notification when the member still holds the role through a group. Without that check, clicking remove on an inherited role stripped the member's real Discord role while Sideline still considered them to hold it.
+5. **A post-write re-check that gates an emit must never fail the write that already committed.** Repository reads pipe `catchSqlErrors`, which turns a `SqlError` into a DEFECT, so a plain `Effect.bind` would 500 a request whose primary write already succeeded. Wrap the re-check in `Effect.catchDefect(...)` that logs a warning and falls back to the pre-guard behaviour (`unassignRole` falls back to "not still held", i.e. it emits). Regression coverage: `test/api/role.emit.test.ts`, `test/integration/api/roleUnassignArchivedGroup.test.ts`.
 
 ### Adding an `event_sync_events` Event Type — Five Synchronized Places
 
@@ -948,11 +997,11 @@ Rules:
 
 ## The Shared Non-Responder Query Filters to Below-Threshold Built-in Players
 
-`EventRsvpsRepository.findNonRespondersByEventId(eventId, teamId, memberGroupId, maxMissedRsvps = 4)` is the single source of truth for "who still needs to RSVP". Both the reminder count surfaces (web `submitRsvp` non-responder list and `Event/GetRsvpBoard`) and the increment query (`incrementMissedForEventNonResponders`) apply the **same three eligibility filters**: `tm.active = true`, an `EXISTS` on the built-in **Player** role (`r.name = 'Player' AND r.is_built_in = true`), and (for the read path) `tm.missed_rsvps < max_missed_rsvps`. A member who has missed `max_missed_rsvps` consecutive RSVPs drops off the reminder list until they respond and `resetMissedRsvps` clears the streak.
+`EventRsvpsRepository.findNonRespondersByEventId(eventId, teamId, memberGroupId, maxMissedRsvps = 4)` is the single source of truth for "who still needs to RSVP". Both the reminder count surfaces (web `submitRsvp` non-responder list and `Event/GetRsvpBoard`) and the increment query (`incrementMissedForEventNonResponders`) apply the **same three eligibility filters**: `tm.active = true`, an `EXISTS` on the **effective** built-in **Player** role (`member_roles` UNION group-inherited via `group_members` → group ancestry → `role_groups` — see `effectiveRoles.ts`; `eff.name = 'Player' AND eff.is_built_in = true`), and (for the read path) `tm.missed_rsvps < max_missed_rsvps`. A member who has missed `max_missed_rsvps` consecutive RSVPs drops off the reminder list until they respond and `resetMissedRsvps` clears the streak.
 
 Rules:
 1. **Resolve `maxMissedRsvps` from `team_settings.max_missed_rsvps`, defaulting to `4` when settings are absent** — `Option.match(settings, { onNone: () => 4, onSome: (s) => s.max_missed_rsvps })`. Both call sites (`src/api/event-rsvp.ts`, `src/rpc/event/index.ts`) `Effect.bind` the settings first, then pass the resolved number.
-2. **The built-in-Player `EXISTS` filter must stay identical** between the read query and the increment query — they target the same population, so a divergence would increment a counter for a member who never appears in the reminder list (or vice versa).
+2. **The built-in-Player `EXISTS` filter must stay identical** between the read query and the increment query — they target the same population, so a divergence would increment a counter for a member who never appears in the reminder list (or vice versa). Both build it from the shared `effectiveRolesFrom` fragment (`src/repositories/effectiveRoles.ts`) rather than reimplementing the group walk inline, for the same reason.
 
 ## Adding a Team Setting End-to-End
 
@@ -1505,6 +1554,7 @@ Rules:
 3. **The JOIN must filter on the scope column with `=`, never with `IN (...)`.** Each request has exactly one `teamId` from the path; do not accept arrays.
 4. **For directly-scoped tables (the resource table itself has `team_id`)**, the equivalent is `findByIdScoped(id, teamId)` with `WHERE id = $1 AND team_id = $2` — see the "Team-Scoped Resources With Global Rows" section above. Use whichever variant matches the table's schema; never expose a bare `findById` to handlers.
 5. **Bulk-insert / batch operations must apply the same scope inside SQL.** Example: `FeeAssignmentsRepository.bulkInsert` filters candidate members via `JOIN team_members tm ON tm.id = v.member_id JOIN fees f ON f.id = ${feeId} WHERE tm.team_id = f.team_id` — a member id supplied by the caller that belongs to a different team is silently dropped by the JOIN, never inserted.
+6. **A resource id arriving in the request PAYLOAD needs the same team check as one in the path, and its own error tag.** `GroupApi.assignGroupRole` takes `groupId` from the path and `roleId` from the payload; the handler loads the role and fails `GroupApi.RoleNotFound` (404) when it is missing or `role.team_id !== teamId`. Without that guard, `role_groups(role_id, group_id)` could link a role owned by another team and grant every member of the group that team's permissions. Give the payload-referenced resource its OWN `<Resource>NotFound` variant mirroring the owning API's (`GroupApi.RoleNotFound`, tag `'GroupRoleNotFound'`, alongside `RoleApi.RoleNotFound`) — reusing the path resource's `GroupNotFound` misreports which reference was invalid. Regression coverage: `test/integration/api/groupAssignRoleCrossTeam.test.ts`.
 
 ## HTTP API Error Tags: `Forbidden` vs `Protected` vs `<Resource>NotFound`
 
@@ -1615,9 +1665,31 @@ Rules:
 
 The cascade guards the "team must keep ≥1 active manager" invariant with `SELECT pg_advisory_xact_lock(hashtext(${teamId}))` as the FIRST statement inside `sql.withTransaction(...)`. Without it, two managers leaving simultaneously could both pass `hasOtherActiveManager` (each still sees the other as active) and both deactivate, orphaning the team with zero managers. The lock serializes all cascades for the same team so the count check and the deactivation are effectively one atomic step. When you add any transaction whose correctness depends on a "count of rows satisfying X across the team" check that a concurrent transaction could invalidate, acquire the same per-team `pg_advisory_xact_lock(hashtext(teamId))` before the check.
 
-### "Does member hold permission X" Checks Must Mirror `findMembershipByIds`
+### "Does Member Hold Permission X" Checks Must Splice `effectiveRolesFrom`
 
-`TeamMember.permissions` is derived from TWO paths: (1) **direct** — `member_roles → role_permissions`; and (2) **group-inherited** — `group_members → (member's group AND all ancestor groups) → role_groups → role_permissions`. Any query that answers "does this member hold permission X?" MUST check BOTH paths, exactly as `findMembershipByIds` does. `TeamMembersRepository.hasOtherActiveManager` is the reference: its SQL has a direct `EXISTS` branch and a group-inherited `EXISTS` branch (with a recursive ancestor CTE) OR'd together. A narrower check (e.g. direct-only) would silently mis-guard — it would report "no other manager" for a team whose only other manager inherits `team:manage` through a group, and then wrongly deactivate the last real manager. When mirroring this for any other permission check, always replicate the full direct + group-inherited derivation.
+`TeamMember.permissions` is derived from TWO paths: (1) **direct** — `member_roles → role_permissions`; and (2) **group-inherited** — `group_members → (member's group AND all ancestor groups) → role_groups → role_permissions`. Any query that answers "does this member hold permission X?" MUST derive both paths by splicing `effectiveRolesFrom('tm')` and joining `role_permissions` onto its `role_id` — see "Effective Roles Are Derived In Exactly One Place (`effectiveRoles.ts`)" above. Never write a direct-only check, and never copy the ancestor walk into a second query.
+
+`TeamMembersRepository.hasOtherActiveManagerQuery` is the reference:
+
+```sql
+AND EXISTS (
+  SELECT 1
+  FROM ${sql.unsafe(effectiveRolesFrom('tm'))} er
+  JOIN role_permissions rp ON rp.role_id = er.role_id
+  WHERE rp.permission = 'team:manage'
+)
+```
+
+A direct-only check reports "no other manager" for a team whose only other manager inherits `team:manage` through a group, and then wrongly deactivates the last real manager. A hand-copied ancestor walk is no safer: this query's own copy never joined `groups` on the inherited path, so an archived group still counted as an active manager — the exact failure the guard exists to prevent.
+
+### Authorization Decisions Must Read a Membership Query, Never a Roster DTO
+
+`RosterEntry` / `Roster.RosterPlayer` (returned by `findRosterByTeam`, `findRosterMemberByIds`) are **display** DTOs. Never branch a security guard on their `permissions` or `roleNames`, even when the handler already holds a roster row for the member. Load the decision input from `TeamMembersRepository.findMembershipByIds(teamId, userId)`.
+
+Rules:
+
+1. **Bind the membership explicitly next to the guard.** `src/api/roster.ts` `deactivateMember` binds `targetMembership` from `findMembershipByIds`, derives `memberHoldsManage` from it, and passes THAT into `deactivateMemberAndCascade`. It previously passed `member.permissions.includes('team:manage')` off the roster DTO; while that DTO's `permissions` were group-blind, the last-active-manager guard silently never ran for a group-inherited manager and the team's last manager could be deactivated.
+2. **An absent membership for a member the handler already resolved is an impossible state — `LogicError.die`, never fall through to "no permission".** Failing open there would skip the guard entirely, which is worse than a 500.
 
 ## PATCH Payload Merge: `Option.getOrElse` Over `Option.match`
 

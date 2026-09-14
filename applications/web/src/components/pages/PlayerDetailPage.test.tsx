@@ -642,6 +642,102 @@ describe('PlayerDetailPage — role removal confirmation', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Regression tests for the "role linking doesn't work" bug (fix/role-linking):
+// a role held ONLY through group inheritance cannot be removed by deleting a
+// `member_roles` row that does not exist — the remove (X) control must not offer
+// that action at all for a purely `inherited` role. A role held BOTH directly and
+// via a group (`source: 'both'`) DOES still have a direct grant to remove, so it
+// keeps its remove control.
+// ---------------------------------------------------------------------------
+
+const rolesWithPlayerAndCoach: ReadonlyArray<{
+  roleId: string;
+  teamId: string;
+  name: string;
+  isBuiltIn: boolean;
+  permissionCount: number;
+}> = [
+  { roleId: 'role-player', teamId: TEAM_ID, name: 'Player', isBuiltIn: true, permissionCount: 1 },
+  { roleId: 'role-coach', teamId: TEAM_ID, name: 'Coach', isBuiltIn: false, permissionCount: 2 },
+];
+
+describe('PlayerDetailPage — remove control gating for inherited roles', () => {
+  it('an inherited role shows NO remove control, while a direct role keeps its remove control', () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        availableRoles={rolesWithPlayerAndCoach as any}
+        player={
+          makePlayer({
+            roleNames: ['Player', 'Coach'],
+            effectiveRoles: [
+              {
+                roleId: 'role-player',
+                name: 'Player',
+                isBuiltIn: true,
+                source: 'direct',
+                groupNames: [],
+              },
+              {
+                roleId: 'role-coach',
+                name: 'Coach',
+                isBuiltIn: false,
+                source: 'inherited',
+                groupNames: ['Leadership'],
+              },
+            ],
+          }) as any
+        }
+        canEdit={false}
+        canManageRoles={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+      />,
+    );
+
+    // Exactly one remove control — for the direct 'Player' role — not two.
+    expect(screen.getAllByRole('button', { name: /remove/i })).toHaveLength(1);
+  });
+
+  it('a role held both directly and via a group (source: "both") keeps its remove control', () => {
+    render(
+      <PlayerDetailPage
+        {...(baseProps as any)}
+        availableRoles={rolesWithPlayerAndCoach as any}
+        player={
+          makePlayer({
+            roleNames: ['Player', 'Coach'],
+            effectiveRoles: [
+              {
+                roleId: 'role-player',
+                name: 'Player',
+                isBuiltIn: true,
+                source: 'direct',
+                groupNames: [],
+              },
+              {
+                roleId: 'role-coach',
+                name: 'Coach',
+                isBuiltIn: false,
+                source: 'both',
+                groupNames: ['Leadership'],
+              },
+            ],
+          }) as any
+        }
+        canEdit={false}
+        canManageRoles={true}
+        isOwnProfile={false}
+        activityStats={makeActivityStats() as any}
+      />,
+    );
+
+    // Both roles keep their remove control — 'Coach' still has a direct grant.
+    expect(screen.getAllByRole('button', { name: /remove/i })).toHaveLength(2);
+  });
+});
+
 describe('PlayerDetailPage — form dirty/validation gating', () => {
   it('pristine form → Save button is disabled', async () => {
     render(

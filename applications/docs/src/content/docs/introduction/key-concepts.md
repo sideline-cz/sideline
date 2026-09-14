@@ -19,7 +19,7 @@ A subdivision within a team's roster — "first team", "reserves", "under-17s", 
 
 ## Role
 
-Permissions attached to a person within a team. Built-in roles are `player`, `captain`, `admin`, and `treasurer`. Roles control what actions are allowed (creating events, editing roster, changing team settings, managing fees).
+Permissions attached to a person within a team. Built-in roles are `player`, `captain`, `admin`, and `treasurer`. Roles control what actions are allowed (creating events, editing roster, changing team settings, managing fees). A role can also be attached directly to a member, or granted to a whole [group](#group) — every member of that group (and any of its sub-groups) then holds the role too, shown on their profile as "inherited". Archiving a group revokes the roles it granted.
 
 ## Event
 

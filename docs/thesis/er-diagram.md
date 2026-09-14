@@ -376,7 +376,7 @@ erDiagram
 
 ### Groups
 
-`groups` are hierarchical sub-divisions of a team (e.g. age brackets, skill tiers). They support self-referential parent/child nesting via `parent_id`. `group_members` links team members to groups. `age_threshold_rules` define automatic group assignment criteria (age range, gender, required pre-existing group membership, or any combination); all criteria on a rule must match simultaneously (AND semantics). `role_groups` associates roles with groups, restricting which roles are visible or applicable within a group context.
+`groups` are hierarchical sub-divisions of a team (e.g. age brackets, skill tiers). They support self-referential parent/child nesting via `parent_id`. `group_members` links team members to groups. `age_threshold_rules` define automatic group assignment criteria (age range, gender, required pre-existing group membership, or any combination); all criteria on a rule must match simultaneously (AND semantics). `role_groups` grants a role to every member of a group; a member's *effective* roles are their direct `member_roles` grants plus every role granted to their group or any ancestor of it (a recursive walk up `parent_id`), so a role attached to a top-level group is inherited by members of all its descendant groups too. Archiving a group breaks this chain: the walk stops at an archived group, so it (and any of its own ancestors) stop granting roles to descendants below it.
 
 ```mermaid
 erDiagram
@@ -1401,7 +1401,7 @@ erDiagram
 | `groups` | Hierarchical sub-divisions of a team (e.g. age brackets, skill tiers). |
 | `group_members` | Many-to-many junction placing team members in groups. |
 | `age_threshold_rules` | Rules that automatically assign members to a group based on automatic group criteria (age range, gender, required pre-existing group membership, or any combination). |
-| `role_groups` | Many-to-many junction associating roles with groups. |
+| `role_groups` | Many-to-many junction granting a role to every member of a group (and, recursively, its descendant groups). |
 | `training_types` | Named categories for training activities, optionally restricted by group and role. |
 | `role_training_types` | Many-to-many junction controlling which roles can access a training type. |
 | `events` | Individual scheduled occurrences (training, match, tournament, etc.). |

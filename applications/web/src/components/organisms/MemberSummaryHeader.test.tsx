@@ -1,11 +1,19 @@
-// TDD mode — tests written BEFORE MemberSummaryHeader.tsx exists.
-// These tests WILL FAIL until:
-//   - applications/web/src/components/organisms/MemberSummaryHeader.tsx is implemented
+// TDD mode — regression tests for the "role linking doesn't work" bug (fix/role-linking).
+//
+// `MemberSummaryHeader.tsx:23` used to do
+//   const [primaryRole, ...extraRoles] = player.roleNames;
+// and rendered ONLY `primaryRole` as a badge plus a "+{n}" overflow indicator for
+// everything else — inventing a "primary role" concept that was really just whichever
+// role name sorted/arrived first. Effective roles have no inherent ordering or
+// privilege; a member with `['Captain', 'Striker']` is equally "Captain" and "Striker",
+// and hiding one behind a "+1" pill actively hid real information (e.g. a coach who
+// cannot see that a player also holds a group-inherited role).
 //
 // Component contract:
 //   function MemberSummaryHeader(props: {
 //     player: Roster.RosterPlayer;
 //     canManageRoles: boolean;
+//     isInactive?: boolean;
 //   }): JSX.Element
 //
 // Behaviour:
@@ -13,7 +21,15 @@
 //   - jerseyNumber Some(n) → "#{n}"; None → no "#" (em-dash or nothing)
 //   - avatar Some → <img> with Discord CDN src containing discordId; None → initials fallback
 //   - joinedAt → a joined label/text is rendered (via tr('members_joinedLabel', { date }))
-//   - roleNames[0] rendered as primary badge; "+{n}" indicator when more roles exist
+//   - EVERY entry in roleNames is rendered as its own visible badge — no "primary role"
+//     and no "+{n}" overflow indicator hiding any of them
+//   - When `player.effectiveRoles` marks a role's `source` as `'inherited'` or `'both'`,
+//     that role's badge carries `data-role-source={source}` (a hook for visual
+//     "inherited" styling) AND an `aria-label` that names the role AND the granting
+//     group(s) (`entry.groupNames`), so the provenance is available to assistive tech
+//     and not conveyed by color/style alone. Roles with `source: 'direct'` (or players
+//     with no `effectiveRoles` data at all — the additive/back-compat default) need
+//     neither attribute.
 //   - permissions list rendered ONLY when canManageRoles is true
 
 import { render, screen } from '@testing-library/react';
@@ -31,6 +47,9 @@ vi.mock('~/lib/translations.js', () => ({
       members_joinedLabel: 'Joined {date}',
       members_permissionsTitle: 'Permissions',
       members_inactiveBadge: 'Inactive',
+      roles_inheritedFromGroup: 'Inherited from group {group}',
+      roles_inheritedFromGroups: 'Inherited from groups {group}',
+      roles_inheritedSrSuffix: ', inherited from a group',
     };
     const template = map[key] ?? key;
     if (!params) return template;
@@ -88,11 +107,20 @@ const { MemberSummaryHeader } = await import('~/components/organisms/MemberSumma
 // Fixture helpers
 // ---------------------------------------------------------------------------
 
+type EffectiveRoleFixture = {
+  roleId: string;
+  name: string;
+  isBuiltIn: boolean;
+  source: 'direct' | 'inherited' | 'both';
+  groupNames: ReadonlyArray<string>;
+};
+
 type RosterPlayerFixture = {
   memberId: string;
   userId: string;
   discordId: string;
   roleNames: ReadonlyArray<string>;
+  effectiveRoles: ReadonlyArray<EffectiveRoleFixture>;
   permissions: ReadonlyArray<string>;
   name: Option.Option<string>;
   birthDate: Option.Option<string>;
@@ -110,6 +138,7 @@ function makePlayer(overrides: Partial<RosterPlayerFixture> = {}): RosterPlayerF
     userId: 'user-1',
     discordId: '1234567890',
     roleNames: ['Captain'],
+    effectiveRoles: [],
     permissions: ['member:view'],
     name: Option.some('Alice Doe'),
     birthDate: Option.none(),
@@ -184,14 +213,18 @@ describe('MemberSummaryHeader', () => {
     expect(screen.getByText(/Joined/)).not.toBeNull();
   });
 
-  it('roleNames with multiple roles → primary badge + "+1" indicator', () => {
+  // Rewritten (was: "roleNames with multiple roles → primary badge + '+1' indicator").
+  // That pinned the bug: only the first role name was visible, the rest were hidden
+  // behind a "+1" pill. There is no "primary" effective role — every entry in
+  // `roleNames` must be individually visible.
+  it('roleNames with multiple roles → every role is rendered as its own visible badge, none hidden', () => {
     const player = makePlayer({ roleNames: ['Captain', 'Striker'] });
     render(<MemberSummaryHeader player={player as never} canManageRoles={false} />);
 
     expect(screen.getByText('Captain')).not.toBeNull();
-    expect(screen.getByText(/\+1/)).not.toBeNull();
-    // Secondary role name should not be rendered as its own visible badge text
-    expect(screen.queryByText('Striker')).toBeNull();
+    expect(screen.getByText('Striker')).not.toBeNull();
+    // No "+n" overflow indicator hiding any role — there is nothing left to hide.
+    expect(screen.queryByText(/^\+\d+$/)).toBeNull();
   });
 
   it('roleNames with a single role → no "+n" overflow indicator', () => {
@@ -200,6 +233,54 @@ describe('MemberSummaryHeader', () => {
 
     expect(screen.getByText('Captain')).not.toBeNull();
     expect(screen.queryByText(/^\+\d+$/)).toBeNull();
+  });
+
+  // Test 20 (fix/role-linking test spec): all effective roles render as badges, none
+  // visually privileged as "the" role.
+  it('all effective roles render as badges — none visually privileged as "the" role', () => {
+    const player = makePlayer({ roleNames: ['Captain', 'Host', 'Hráč'] });
+    render(<MemberSummaryHeader player={player as never} canManageRoles={false} />);
+
+    expect(screen.getByText('Captain')).not.toBeNull();
+    expect(screen.getByText('Host')).not.toBeNull();
+    expect(screen.getByText('Hráč')).not.toBeNull();
+    expect(screen.queryByText(/^\+\d+$/)).toBeNull();
+  });
+
+  // Test 21 (fix/role-linking test spec): a role marked `inherited` in `effectiveRoles`
+  // carries the inherited treatment and its group attribution is available to
+  // assistive tech, not conveyed by color/style alone.
+  it('an inherited effective role carries inherited treatment and group attribution for assistive tech', () => {
+    const player = makePlayer({
+      roleNames: ['Captain', 'Host'],
+      effectiveRoles: [
+        {
+          roleId: 'role-captain',
+          name: 'Captain',
+          isBuiltIn: false,
+          source: 'direct',
+          groupNames: [],
+        },
+        {
+          roleId: 'role-host',
+          name: 'Host',
+          isBuiltIn: false,
+          source: 'inherited',
+          groupNames: ['Leadership'],
+        },
+      ],
+    });
+    render(<MemberSummaryHeader player={player as never} canManageRoles={false} />);
+
+    const directBadge = screen.getByText('Captain').closest('[data-slot="badge"]');
+    expect(directBadge?.getAttribute('data-role-source')).not.toBe('inherited');
+
+    const inheritedBadge = screen.getByText('Host').closest('[data-slot="badge"]');
+    expect(inheritedBadge).not.toBeNull();
+    expect(inheritedBadge?.getAttribute('data-role-source')).toBe('inherited');
+    const accessibleLabel = inheritedBadge?.getAttribute('aria-label') ?? '';
+    expect(accessibleLabel).toContain('Host');
+    expect(accessibleLabel).toContain('Leadership');
   });
 
   it('canManageRoles=true → permissions list is visible', () => {
