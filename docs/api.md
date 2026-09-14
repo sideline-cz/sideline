@@ -3199,7 +3199,7 @@ Returns information about an invite code. This endpoint does not require authent
 
 #### `POST /invite/:code/join`
 
-Joins a team using an invite code. The authenticated user becomes a new member of the team with default (Player) role.
+Joins a team using an invite code. The authenticated user becomes a new member of the team with default (Player) role. If the invite is group-scoped (`groupId` was set when the invite was created), the member is also added to that group immediately (`group_members`); the invite's `group_id` is authoritative for this write, independent of whatever group binding the Discord-join path (`Guild/RegisterMember`) later resolves from the accepted invite.
 
 **Auth:** Bearer token (AuthMiddleware)
 

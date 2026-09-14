@@ -5,6 +5,13 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-14 — Fix: invites that add you to a group now actually do
+
+Two related bugs in group-scoped invite links (the kind captains create for a specific group, not just the team) are fixed:
+
+- **Joining through the invite link now gives you the group's Discord role right away.** Previously, a new member's Discord role for the group they were invited into could be missing entirely, or only show up after the bot next reconnected — and for most groups (any group without a role explicitly linked in Sideline's settings) it never showed up at all. This applies when you join the Discord server shortly after accepting; if you join much later, a captain may still need to use the group's "Sync role members" button. This needs an up-to-date bot to take effect on your server.
+- **Accepting the invite now puts you in the group even if you join Discord much later.** If you accepted an invite but didn't join the Discord server within about 15 minutes, you previously ended up on the team but not in the group it was meant to add you to.
+
 ## 2026-09-13 — Fix: group-granted roles now show up and count
 
 Roles assigned to a **group** (rather than to a member directly) were silently invisible everywhere except the group's own settings page — a member's profile and the roster didn't show them, and their permissions weren't applied. This is fixed:
