@@ -79,6 +79,16 @@ export const env = createEnv({
       Schemas.Optional(() => ''),
       Schema.toStandardSchemaV1,
     ),
+    // Kill switch for the read-only in-app AI assistant (plan `.work-plans/ai-app-interaction.md`
+    // §10). Same reasoning as `DISCORD_JOIN_ENFORCEMENT_ENABLED` above: a RAW `Schema.String`, not
+    // `Schema.Literals`, because a value this flag doesn't recognise must degrade the flag to
+    // "disabled" and log a warning, never fail server boot — a `Schema.Literals` env value that
+    // fails boot is the worst possible property for an incident lever.
+    // `parseAiChatEnabled` does the real parsing, permissively, outside schema validation.
+    AI_CHAT_ENABLED: Schema.String.pipe(
+      Schemas.Optional(() => ''),
+      Schema.toStandardSchemaV1,
+    ),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
@@ -124,3 +134,29 @@ export const parseDiscordJoinEnforcementEnabled = (raw: string): boolean => {
 export const discordJoinEnforcementEnabled = parseDiscordJoinEnforcementEnabled(
   env.DISCORD_JOIN_ENFORCEMENT_ENABLED,
 );
+
+const AI_CHAT_ENABLED_TRUTHY = new Set(['true', '1', 'yes', 'on']);
+const AI_CHAT_ENABLED_FALSY = new Set(['false', '0', 'no', 'off', '']);
+
+/**
+ * Permissive, case-insensitive parsing for the `AI_CHAT_ENABLED` incident lever — deliberately
+ * outside `createEnv`'s schema validation (see `env.ts`'s `AI_CHAT_ENABLED` field), modelled
+ * verbatim on `parseDiscordJoinEnforcementEnabled` above. An unrecognised value defaults to
+ * disabled (the safe direction) and logs a warning rather than throwing, so a typo degrades to
+ * "the assistant stays off" instead of "the server does not start".
+ */
+export const parseAiChatEnabled = (raw: string): boolean => {
+  const normalized = raw.trim().toLowerCase();
+  if (AI_CHAT_ENABLED_TRUTHY.has(normalized)) return true;
+  if (AI_CHAT_ENABLED_FALSY.has(normalized)) return false;
+  console.warn(
+    `AI_CHAT_ENABLED=${JSON.stringify(raw)} is not a recognised boolean value ` +
+      '(expected one of true/false/1/0/yes/no/on/off, case-insensitive) — defaulting to disabled.',
+  );
+  return false;
+};
+
+// Default `''` = disabled, so the assistant does not go live on deploy. See
+// `AiChatEnabledConfig` (the injectable wrapper `capabilities`/`chat` handlers consume) and
+// `ChatAgent.respond`'s `degradedReason: 'disabled'` short-circuit.
+export const aiChatEnabled = parseAiChatEnabled(env.AI_CHAT_ENABLED);

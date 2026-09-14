@@ -73,10 +73,13 @@ import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
+import { AiChatEnabledConfig } from '~/services/AiChatEnabledConfig.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementConfig.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
+import { LlmClient } from '~/services/LlmClient.js';
+import { MockChatAgentLayer, MockChatRateLimiterLayer } from './mocks/aiChatMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
 import { MockEventRosterLayers } from './mocks/eventRosterMocks.js';
@@ -809,6 +812,10 @@ const buildLazyHealLayer = (inFlightGroups: GroupModel.GroupId[] = []) => {
     .pipe(Layer.provide(MockEventRosterLayers))
     .pipe(Layer.provide(BotInfoStore.Default))
     .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
+    .pipe(Layer.provide(MockChatAgentLayer))
+    .pipe(Layer.provide(MockChatRateLimiterLayer))
+    .pipe(Layer.provide(AiChatEnabledConfig.Default))
+    .pipe(Layer.provide(LlmClient.Default))
     .pipe(
       Layer.provide(
         Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),

@@ -5,6 +5,7 @@ import { ActivityLogApiLive } from '~/api/activity-logs.js';
 import { ActivityStatsApiLive } from '~/api/activity-stats.js';
 import { ActivityTypeApiLive } from '~/api/activity-type.js';
 import { AgeThresholdApiLive } from '~/api/age-threshold.js';
+import { AiChatApiLive } from '~/api/ai-chat.js';
 import { Api } from '~/api/api.js';
 import { AuthApiLive } from '~/api/auth.js';
 import { ChannelApiLive } from '~/api/channel.js';
@@ -61,6 +62,7 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
     Layer.provide(OnboardingApiLive),
   )
   .pipe(
+    Layer.provide(AiChatApiLive),
     Layer.provide(GlobalAdminApiLive),
     Layer.provide(PlayerRatingApiLive),
     Layer.provide(TeamGenerationApiLive),
