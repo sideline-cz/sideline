@@ -65,6 +65,10 @@ Money received against a fee assignment. Payments are recorded by admins or trea
 
 A shared goal set by a captain for a single ISO week (Monday–Sunday). A challenge has a **kind** (Házecí / throwing or Sportovní / sport), a title, and an optional description. Each member marks their own completion during the active week. At most one challenge can exist per team per week. See the [Weekly challenges guide](/guides/weekly-challenges/) for instructions.
 
+## AI assistant
+
+A read-only chat panel, scoped to one team, that answers questions about the team's own events, training types, members, groups, and rosters. It respects the asking member's own permissions exactly — it never shows data that member couldn't already see elsewhere in the app — and it cannot create, edit, or delete anything. See the [AI assistant guide](/guides/ai-assistant/).
+
 ## Email forwarding
 
 An opt-in feature that routes inbound emails to a Discord channel. When a new email arrives, Sideline generates an AI summary and posts an approval request to a private coach channel. A coach reviews the summary — editing it on the **Email detail page** if needed — then approves or rejects it from Discord. Approved emails post the summary; rejected emails post the original text. All attached files are stored and downloadable from the Email detail page. See the [Email forwarding guide](/guides/email-forwarding/) for setup instructions.

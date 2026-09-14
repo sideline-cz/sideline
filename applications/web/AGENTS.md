@@ -282,7 +282,7 @@ Rules:
 **Always use Shadcn Form (`components/ui/form`) with React Hook Form and Effect Schema** for any form that collects user input. The single exception is a page whose cards each carry their own Save button — see "Pages With Several Independent Save Buttons — `useCardForm`" below; nothing else may opt out.
 
 ```typescript
-import { effectTsResolver } from '@hookform/resolvers/effect-ts';
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import { Effect, Option, Schema } from 'effect';
 import { useForm } from 'react-hook-form';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../ui/form';
@@ -299,7 +299,7 @@ type MyFormValues = Schema.Schema.Type<typeof MyFormSchema>;
 function MyForm({ onSuccess }: { onSuccess: () => void }) {
   const run = useRun();
   const form = useForm({
-    resolver: effectTsResolver(MyFormSchema),
+    resolver: standardSchemaResolver(Schema.toStandardSchemaV1(MyFormSchema)),
     mode: 'onChange',
     defaultValues: { name: '' },
   });
@@ -352,11 +352,11 @@ function MyForm({ onSuccess }: { onSuccess: () => void }) {
 
 ### Form Key Rules
 
-- Use `effectTsResolver(MySchema)` from `@hookform/resolvers/effect-ts` — **not** `standardSchemaResolver`, not zod, not yup
-- Do **not** wrap the schema in `Schema.standardSchemaV1(...)` — pass it directly
+- Use `standardSchemaResolver(Schema.toStandardSchemaV1(MySchema))` from `@hookform/resolvers/standard-schema` — **not** zod, not yup, and **not** `effectTsResolver` from `@hookform/resolvers/effect-ts`. All 22 `resolver:` call sites in `applications/web/src` use `standardSchemaResolver`; `@hookform/resolvers/effect-ts` has **zero** usages in this repo. (This bullet previously mandated `effectTsResolver` and was wrong.)
+- Always wrap the schema in `Schema.toStandardSchemaV1(...)` — `standardSchemaResolver` takes a Standard Schema v1 value, not a raw Effect `Schema`
 - Use transforming schemas (`NumberFromString`, `optionalWith({ as: 'Option' })`, `NonEmptyString`)
 - `type FormValues = Schema.Schema.Type<typeof MySchema>` is the decoded/transformed type
-- Do **not** pass explicit generics to `useForm<MyFormValues>(...)` — let `effectTsResolver` infer
+- Do **not** pass explicit generics to `useForm<MyFormValues>(...)` — let `standardSchemaResolver` infer
 - Spread `{...form.register('fieldName')}` on `<FormField>` — do **not** use `control={form.control} name='fieldName'`
 - Use `form.formState.isSubmitting` for loading state — no manual `submitting` state
 - For `<Select>`, use `onValueChange={field.onChange}` and `value={field.value}` — do **not** spread `{...field}` directly
@@ -904,6 +904,31 @@ Rules:
 5. **Adding a new translation key**: add it to `messages/en.json` AND `messages/cs.json` in `@sideline/i18n`, run `pnpm codegen` and `pnpm build` so `messagesByKey` picks it up, then call `tr('my_new_key', { param: value })`. Do not call `m.my_new_key(...)` from web code.
 6. **Before adding a scoped key (e.g. `my_payments_kpi_*`, `<feature>_kpi_*`), grep for an existing key with the same English string** in `packages/i18n/messages/en.json`. If a generic key exists (e.g. `finance_kpi_outstanding = "Outstanding"`, `finance_kpi_overdue = "Overdue"`) and your component needs the same string, **reuse the generic key** — do not create `my_payments_kpi_outstanding` as a duplicate. The check is `grep -i '"<english string>"' packages/i18n/messages/en.json`. Reference: `MyPaymentsPage` reuses `finance_kpi_outstanding` and `finance_kpi_overdue` instead of minting `my_payments_kpi_outstanding` / `_overdue`.
 
+### Closed-Union Copy Comes From An Explicit `Record`, Never A Computed Key
+
+When a wire value is a **closed union of string literals** (`AiChatApi.DegradedReason`, `EntityRef['kind']`, an event status), resolve its copy through an explicit `Record<Union, () => string>` of literal `tr('…')` calls — the `src/lib/event-labels.ts:13` idiom. Never build the key: `` tr(`assistant_degraded_${reason}`) `` is banned.
+
+```typescript
+// ✗ Bad — invisible to lib/staticTrKeys.test.ts, prints the raw key on a miss
+export const label = (reason: DegradedReason) => tr(`assistant_degraded_${reason}`);
+
+// ✓ Good — every key is a literal the guard test can resolve
+export const degradedReasonLabels: Record<DegradedReason, () => string> = {
+  not_configured: () => tr('assistant_degraded_notConfigured'),
+  disabled: () => tr('assistant_degraded_disabled'),
+  provider_error: () => tr('assistant_degraded_providerError'),
+  too_many_steps: () => tr('assistant_degraded_tooManySteps'),
+  empty_answer: () => tr('assistant_degraded_emptyAnswer'),
+};
+```
+
+Rules:
+
+1. **`tr()` never throws on an unknown key** — it `console.warn`s and returns the raw key string, so a computed key that misses ships `assistant_degraded_not_configured` to the user's screen and passes CI.
+2. **`src/lib/staticTrKeys.test.ts` only sees literal first arguments.** A computed key is skipped by construction, so the guard cannot catch the miss. An explicit `Record` puts every key back under the guard.
+3. **The wire literals and the key names are allowed to differ** — the wire union is `snake_case` (`not_configured`) while the i18n keys are `camelCase` (`assistant_degraded_notConfigured`). A template literal would therefore miss **every** branch, not just one. Reference: `src/lib/assistant/entityRoutes.ts`.
+4. **Declare the map as `Record<Union, () => string>`**, not `Partial<Record<…>>` — adding a literal to the domain union must then fail the web build until the copy exists.
+
 ### Locale Persistence
 
 - **Authenticated users**: `locale` column on `users` table. Updated via `PATCH /auth/me/locale`.
@@ -1044,6 +1069,7 @@ Reusable label maps and option builders live in `src/lib/`. Always import from t
 | `src/lib/finance/` | `formatMoney`, `parseAmount`, `sortAssignments`, `computeKpis`, `pickDominantCurrency` | Finance pages, payment dialogs, "My Payments" page, dashboard banner, balance dashboard |
 | `src/lib/rules/palette.ts` | `LEVEL_ACCENT`, `RULES_ACCENT`, `VERDICT` | Every `Rules*` organism, `TeamRulesPage` — see "Rules Trainer Colours" below |
 | `src/lib/roles/` | `resolveEffectiveRoles` (`resolveEffectiveRoles.ts`), `sortEffectiveRoles` (`role-order.ts`) | `RoleBadge`, `EffectiveRolesList`, `PlayerDetailPage`, `PlayerRow`, `MemberSummaryHeader` — see "Effective Roles In The UI — `src/lib/roles/`" below |
+| `src/lib/assistant/` | `parseAnswer` (`parseAnswer.ts`), `buildHistory` (`history.ts`), `ENTITY_ROUTE`/`entityKindLabels`/`degradedReasonLabels` (`entityRoutes.ts`) | `AssistantPage`, `AssistantConversation`, `AssistantAnswer`, `AssistantResultCard` — see "AI Assistant Client Rules — `src/lib/assistant/`" below |
 
 ### Rules Trainer Colours — `palette.ts` Only
 
@@ -1128,6 +1154,19 @@ Rules:
 2. **`sortEffectiveRoles` orders built-in before custom, built-ins by the FIXED rank Admin > Captain > Treasurer > Player, and custom roles by `localeCompare`.** Never sort by permission count (permissions are per-team editable, so badge order would differ between teams) and never sort by `source` (the dashed border and icon already carry that distinction).
 3. **A role whose `source` is `'inherited'` gets no remove control.** Deleting the direct `member_roles` row would be a no-op the server refuses to sync; render a link to the granting group instead (`InheritedRoleForwardControl`, gated on `group:manage`). A `'both'` role KEEPS its remove control — the direct grant is real — but its confirm copy must say the role stays via the group (`roles_removeRoleStillInheritedDescription`).
 4. **Filter the "assign a role" select against the full effective set by `roleId`, not by `name`.** `PlayerDetailPage`'s `RolesSection` builds `effectiveRoleIds` from the resolved list so a role already shown as an inherited badge is never also offered for assignment.
+
+### AI Assistant Client Rules — `src/lib/assistant/`
+
+The assistant surface (`routes/(authenticated)/teams/$teamId/assistant.tsx` → `AssistantPage` → `AssistantConversation`) renders **model-authored prose** and server-authored entity data. The separation is the whole security model: the model chooses which server-held entity a sentence cites, never the facts shown on the card.
+
+Rules:
+
+1. **Model prose is rendered as React text nodes only.** No markdown renderer, no `dangerouslySetInnerHTML`, ever — `AssistantAnswer` emits `{segment.text}` inside `<p>`. Adding a markdown dependency to render model output is a real XSS surface.
+2. **`parseAnswer`'s marker grammar must stay byte-identical to the server's**: `/\[\[ref:([a-z0-9]{4})\]\]/`, matching `applications/server/src/services/ai/refTokens.ts` (minting) and `ChatAgent.ts` (stripping). A near-miss (wrong length, uppercase, internal whitespace) is not a marker and survives as literal text.
+3. **A `ref` segment whose token is absent from the turn's `references` renders `null`** — never the raw `[[ref:xxxx]]` text, and never a link to a guessed position. Tokens are valid **only for the turn that produced them**; rebuild the `token -> position` map per turn from that turn's `references` (`useMemo` over `references` in `AssistantAnswer`), never across turns.
+4. **`buildHistory` (`src/lib/assistant/history.ts`) mirrors the server's truncation constants exactly** — `HISTORY_CHAR_BUDGET = 8000` and `HISTORY_MAX_MESSAGES = 20` match `ChatAgent.ts`'s `HISTORY_CHAR_BUDGET` and `AiChatApi.ChatRequest`'s 20-message cap. Change one side and you must change the other in the same PR, or the UI silently disagrees with the model about what it saw.
+5. **Gate the surface on the server's `getCapabilities.enabled`, never on a locally-inferred flag.** When it is `false`, `AssistantPage` replaces the log and composer entirely — never a disabled input box.
+6. **Route to an entity through `ENTITY_ROUTE` (`entityRoutes.ts`), declared `as const satisfies Record<EntityRef['kind'], string>`.** The literal route strings must survive for TanStack Router's typed `<Link to>`; a widened `string` return forces an `as never` cast at every call site.
 
 ## Time-Sensitive Data: Timezone Correctness, Stale-Response Toggles, Focus Refetch
 

@@ -5,6 +5,17 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-14 — New: AI assistant for asking about your team's data
+
+A new **Assistant** page lets you ask plain-language questions about your team's events, training types, members, groups, and rosters, and get an answer with clickable links to the exact things it's talking about.
+
+- Find it under **Assistant** in the team sidebar.
+- It's read-only — it can look things up but can't create, edit, or change anything.
+- It only ever shows you what you could already see elsewhere in the app; it never bypasses your permissions.
+- It's a deployment-wide setting rather than a per-team one — if it isn't enabled on your Sideline instance yet, the page explains that instead of showing the chat box.
+
+See the [AI assistant guide](/guides/ai-assistant/) for details.
+
 ## 2026-09-14 — Fix: invites that add you to a group now actually do
 
 Two related bugs in group-scoped invite links (the kind captains create for a specific group, not just the team) are fixed:

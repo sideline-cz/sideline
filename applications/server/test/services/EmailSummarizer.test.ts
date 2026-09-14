@@ -159,6 +159,9 @@ const makeFakeLlmClientLayer = (result: 'success' | 'fail') =>
       }
       return Effect.succeed({ short: 'FAKE SHORT', detailed: 'FAKE SUMMARY' });
     },
+    configured: true,
+    chatWithTools: () =>
+      Effect.succeed({ content: Option.some('FAKE'), toolCalls: [], finishReason: 'stop' }),
   } as never);
 
 const buildLayer = (llmResult: 'success' | 'fail' = 'success') =>

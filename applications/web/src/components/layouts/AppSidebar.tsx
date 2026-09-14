@@ -16,6 +16,7 @@ import {
   Settings,
   Shield,
   ShieldCheck,
+  Sparkles,
   Target,
   Trophy,
   UserCog,
@@ -122,6 +123,14 @@ function getTeamNavGroups(
           title: tr('rules_navTitle'),
           icon: BookOpen,
           to: '/teams/$teamId/rules',
+          params: { teamId },
+        },
+        {
+          // No `requiredPermission` — every member may ask; the server decides what they may
+          // see (assistant design §1, same precedent as `rules` above).
+          title: tr('assistant_navTitle'),
+          icon: Sparkles,
+          to: '/teams/$teamId/assistant',
           params: { teamId },
         },
       ],

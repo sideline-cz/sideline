@@ -61,6 +61,20 @@ RSVP reminders are sent as a direct message, not a channel post. Common causes:
 
 Events are only posted to the groups they target, so you should only see events you're actually invited to. If you're seeing extra posts, check with your captain — you may be assigned to groups you shouldn't be.
 
+## AI assistant
+
+### Can the assistant create or change things for me?
+
+No. The assistant is read-only — it can only answer questions about your team's events, training types, members, groups, and rosters. To create or change anything, use the normal pages (events, roster, groups, and so on).
+
+### Why doesn't the assistant show me a group/roster I know exists?
+
+The assistant only shows you what you could already see elsewhere in the app. If you don't have permission to view a group or roster, the assistant won't show it to you either — it isn't a way around your normal permissions.
+
+### Why do I see "The assistant isn't available"?
+
+The assistant is a deployment-wide setting, not something your team turns on itself — either it isn't enabled on your Sideline instance, or the host hasn't configured an AI provider yet. Ask whoever runs your instance if you'd like it enabled.
+
 ## Weekly challenges
 
 ### How do I mark a challenge done?

@@ -1,56 +1,24 @@
 // Static top-of-file imports only (per AGENTS.md "Test File Imports — Static Only").
 //
-// NOTE: These tests were written in TDD mode BEFORE the summarizeChannel
-// method was implemented.  The existing summarizeEmail / generateRatingInsight
-// / estimateRatingFromDescription methods are not re-tested here — only the
-// new summarizeChannel method is exercised.
-//
 // How the HTTP mock works:
-//   LlmClient's real provider calls `HttpClient.execute(request)` and the
-//   layer provides `FetchHttpClient.layer` internally.  To intercept the HTTP
-//   call in tests we replace `HttpClient.HttpClient` in the layer graph with a
-//   stub that returns a synthetic `HttpClientResponse`.  We achieve this by:
+//   `makeReal`'s shared `postChatCompletion` helper calls `httpClient.execute(request)`
+//   on the `HttpClient.HttpClient` INJECTED into `makeReal`'s closure from the
+//   outer layer graph — it never re-provides `FetchHttpClient.layer` internally
+//   (that used to be the case for `requestContent`/`summarizeEmail`/
+//   `estimateRatingFromDescription`, which made the real provider untestable
+//   without a network listener; see plan `.work-plans/ai-app-interaction.md` §6).
+//   To intercept the HTTP call in tests we build the real provider directly via
+//   the exported `makeReal(...)` with an explicit mock `HttpClient.HttpClient`
+//   layer (`makeLlmClientRealWithHttp`), per `applications/server/AGENTS.md` →
+//   "Config-Gated External Service Provider" rule 4.
 //
-//   1. Using `LlmClient.Default` (which calls `make`) and providing a custom
-//      `HttpClient.HttpClient` layer that overrides `FetchHttpClient.layer`.
-//      Because LlmClient.Default uses `Effect.provide(FetchHttpClient.layer)`
-//      INSIDE the requestContent function, and Effect resolves the innermost
-//      provider first, we must supply the mock at the outermost layer and
-//      ensure LlmClient injects it at the right scope — OR we test via
-//      `LlmClient.Default` with a mocked `env` so the stub path is taken.
-//
-//   2. For the "stub provider" (no API key configured) path: we rely on
-//      `LlmClient.Default` with the real env — in test environments
-//      `LLM_API_URL` and `LLM_API_KEY` are unset, so the stub path activates.
-//
-//   3. For the "real provider" path: we use a custom layer factory
-//      `makeLlmClientWithHttpStub` that constructs a mock `HttpClient` layer
-//      and provides it alongside a synthetic API URL + key so the real
-//      provider path is taken. The factory injects the mock client at the
-//      layer level using `HttpClient.HttpClient`.
-//
-//   The key constraint: `LlmClient.ts` currently calls
-//   `Effect.provide(FetchHttpClient.layer)` inside the effect returned by
-//   `requestContent`. This means the HTTP client is resolved per-request, not
-//   from the outer layer graph. To intercept it in tests we need to provide
-//   `HttpClient.HttpClient` at a level that overrides `FetchHttpClient.layer`.
-//   The implementer MUST expose the HTTP dependency via the outer effect graph
-//   (i.e. accept `HttpClient` from the outer `make` scope and NOT call
-//   `Effect.provide(FetchHttpClient.layer)` inside individual request methods)
-//   OR the implementer should change the implementation to use
-//   `Effect.provideServiceEffect(HttpClient.HttpClient, ...)` so the outer
-//   layer can override it.  The test is written assuming the implementer
-//   refactors `summarizeChannel` to NOT hard-code `FetchHttpClient.layer` so
-//   that `HttpClient.HttpClient` can be injected from outside (matching the
-//   pattern already present in the rest of the server codebase).
-//
-//   If the implementer keeps `Effect.provide(FetchHttpClient.layer)` inside
-//   `requestContent`, the real-provider tests will need adjustment.  The stub-
-//   provider tests remain valid regardless.
+//   For the "stub provider" (no API key configured) path: we rely on
+//   `LlmClient.Default` with the real env — in test environments
+//   `LLM_API_URL` and `LLM_API_KEY` are unset, so the stub path activates.
 
 import { it as itEffect } from '@effect/vitest';
 import { Effect, Layer, Redacted } from 'effect';
-import { FetchHttpClient, HttpClient, HttpClientResponse } from 'effect/unstable/http';
+import { HttpClient, HttpClientResponse } from 'effect/unstable/http';
 import { afterEach, describe, expect } from 'vitest';
 import { LlmClient, LlmError, makeReal } from '~/services/LlmClient.js';
 
@@ -126,35 +94,6 @@ const makeLlmClientRealWithHttp = (httpLayer: Layer.Layer<HttpClient.HttpClient>
       ),
     ),
   ).pipe(Layer.provide(httpLayer));
-
-// ---------------------------------------------------------------------------
-// Mock global-fetch factory
-// ---------------------------------------------------------------------------
-
-/**
- * `summarizeEmail` / `estimateRatingFromDescription` go through `requestContent`,
- * which internally calls `Effect.provide(FetchHttpClient.layer)` — an
- * outer-provided `HttpClient.HttpClient` mock (as used for `summarizeChannel`
- * above) cannot intercept these calls because the requirement is already
- * satisfied before it ever reaches the outer layer graph.
- *
- * `FetchHttpClient.layer`'s `HttpClient` implementation reads the underlying
- * `fetch` function from the `FetchHttpClient.Fetch` ServiceMap Reference at
- * CALL time (`fiber.getRef(Fetch)`), not at layer-construction time. Since
- * `Effect.provide(FetchHttpClient.layer)` never touches that Reference, an
- * outer `Effect.provideService(FetchHttpClient.Fetch, mockFetch)` still wins —
- * this lets us intercept the "hard-coded" real-provider HTTP call without a
- * network listener.
- */
-const makeMockFetch =
-  (responseBody: unknown, status = 200): typeof fetch =>
-  () =>
-    Promise.resolve(
-      new Response(JSON.stringify(responseBody), {
-        status,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
 
 // ---------------------------------------------------------------------------
 // Summarize channel input helpers
@@ -524,10 +463,10 @@ describe('LlmClient.summarizeChannel — real provider with mock HTTP', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests — summarizeEmail real provider (mocked global fetch)
+// Tests — summarizeEmail real provider (mock HttpClient, injected via makeReal)
 // ---------------------------------------------------------------------------
 
-describe('LlmClient.summarizeEmail — real provider (mocked global fetch)', () => {
+describe('LlmClient.summarizeEmail — real provider (mock HttpClient)', () => {
   itEffect.effect(
     'real provider success: HTTP returns valid JSON of the right shape → parsed short/detailed returned',
     () => {
@@ -543,10 +482,7 @@ describe('LlmClient.summarizeEmail — real provider (mocked global fetch)', () 
           },
         ],
       };
-      // The mock HttpClient layer is unused for summarizeEmail (it goes through the
-      // hard-coded FetchHttpClient.layer inside requestContent) but is still required
-      // to construct the real provider via makeLlmClientRealWithHttp.
-      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer({}));
+      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer(openAiResponse));
 
       return LlmClient.asEffect().pipe(
         Effect.flatMap((llm) =>
@@ -556,7 +492,6 @@ describe('LlmClient.summarizeEmail — real provider (mocked global fetch)', () 
             body: 'Unfortunately practice is cancelled due to rain.',
           }),
         ),
-        Effect.provideService(FetchHttpClient.Fetch, makeMockFetch(openAiResponse)),
         Effect.provide(llmLayer),
         Effect.tap((result) =>
           Effect.sync(() => {
@@ -575,7 +510,7 @@ describe('LlmClient.summarizeEmail — real provider (mocked global fetch)', () 
       const openAiResponse = {
         choices: [{ message: { content: 'This is not JSON at all, just prose.' } }],
       };
-      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer({}));
+      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer(openAiResponse));
 
       return LlmClient.asEffect().pipe(
         Effect.flatMap((llm) =>
@@ -585,7 +520,6 @@ describe('LlmClient.summarizeEmail — real provider (mocked global fetch)', () 
             body: 'Body content here',
           }),
         ),
-        Effect.provideService(FetchHttpClient.Fetch, makeMockFetch(openAiResponse)),
         Effect.provide(llmLayer),
         Effect.result,
         Effect.tap((result) =>
@@ -612,7 +546,7 @@ describe('LlmClient.summarizeEmail — real provider (mocked global fetch)', () 
     () => {
       // No choices in the response triggers requestContent's LlmError('LLM returned no choices').
       const openAiResponse = { choices: [] };
-      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer({}));
+      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer(openAiResponse));
 
       return LlmClient.asEffect().pipe(
         Effect.flatMap((llm) =>
@@ -622,7 +556,6 @@ describe('LlmClient.summarizeEmail — real provider (mocked global fetch)', () 
             body: 'Body content here',
           }),
         ),
-        Effect.provideService(FetchHttpClient.Fetch, makeMockFetch(openAiResponse)),
         Effect.provide(llmLayer),
         Effect.flip,
         Effect.tap((error) =>
@@ -637,10 +570,10 @@ describe('LlmClient.summarizeEmail — real provider (mocked global fetch)', () 
 });
 
 // ---------------------------------------------------------------------------
-// Tests — estimateRatingFromDescription real provider (mocked global fetch)
+// Tests — estimateRatingFromDescription real provider (mock HttpClient, injected via makeReal)
 // ---------------------------------------------------------------------------
 
-describe('LlmClient.estimateRatingFromDescription — real provider (mocked global fetch)', () => {
+describe('LlmClient.estimateRatingFromDescription — real provider (mock HttpClient)', () => {
   itEffect.effect(
     'real provider success: HTTP returns valid JSON of the right shape → parsed rating/rationale returned, generated: true',
     () => {
@@ -653,7 +586,7 @@ describe('LlmClient.estimateRatingFromDescription — real provider (mocked glob
           },
         ],
       };
-      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer({}));
+      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer(openAiResponse));
 
       return LlmClient.asEffect().pipe(
         Effect.flatMap((llm) =>
@@ -665,7 +598,6 @@ describe('LlmClient.estimateRatingFromDescription — real provider (mocked glob
             locale: 'en',
           }),
         ),
-        Effect.provideService(FetchHttpClient.Fetch, makeMockFetch(openAiResponse)),
         Effect.provide(llmLayer),
         Effect.tap((result) =>
           Effect.sync(() => {
@@ -686,7 +618,7 @@ describe('LlmClient.estimateRatingFromDescription — real provider (mocked glob
       const openAiResponse = {
         choices: [{ message: { content: JSON.stringify({ notARating: true }) } }],
       };
-      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer({}));
+      const llmLayer = makeLlmClientRealWithHttp(makeMockHttpClientLayer(openAiResponse));
 
       return LlmClient.asEffect().pipe(
         Effect.flatMap((llm) =>
@@ -698,7 +630,6 @@ describe('LlmClient.estimateRatingFromDescription — real provider (mocked glob
             locale: 'en',
           }),
         ),
-        Effect.provideService(FetchHttpClient.Fetch, makeMockFetch(openAiResponse)),
         Effect.provide(llmLayer),
         Effect.result,
         Effect.tap((result) =>

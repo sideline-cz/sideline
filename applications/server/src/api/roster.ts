@@ -39,7 +39,7 @@ import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
 import { hexColorToDiscordInt } from '~/utils/hexColorToDiscordInt.js';
 import { reconcileRosterRoleExtras } from '~/utils/reconcileRosterRoleExtras.js';
 
-const toEffectiveRoles = (entry: RosterEntry) =>
+export const toEffectiveRoles = (entry: RosterEntry) =>
   entry.effective_roles.map(
     (r) =>
       new Roster.EffectiveRole({
@@ -118,7 +118,7 @@ const resolveChannelName = (
     Option.fromNullishOr(allChannels.find((ch) => ch.channel_id === id)?.name),
   );
 
-const toRosterInfo = (
+export const toRosterInfo = (
   r: RosterModel.Roster,
   memberCount: number,
   allChannels: readonly ChannelLike[],

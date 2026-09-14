@@ -5,7 +5,7 @@ import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { Api } from '~/api/api.js';
 import { hasPermission, requireMembership, requirePermission } from '~/api/permissions.js';
 import { checkCoachScoping, checkGroupAccess, checkTrainingTypeOwnerGroup } from '~/api/scoping.js';
-import { EventsRepository } from '~/repositories/EventsRepository.js';
+import { EventsRepository, type EventWithDetails } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
@@ -24,6 +24,32 @@ const markPersonalMessagesDirtyBestEffort = (
         Effect.logWarning('Failed to mark personal messages dirty', cause),
       ),
     );
+
+/**
+ * Pure row -> DTO map for `EventApi.EventInfo`. `EventWithDetails` is the
+ * `Result` of BOTH `EventsRepository.findByTeamId` and `findByIdWithDetails`
+ * (see the comment on `EventWithDetails` in `EventsRepository.ts`), so this
+ * one function serves both.
+ */
+export const toEventInfo = (e: EventWithDetails): EventApi.EventInfo =>
+  new EventApi.EventInfo({
+    eventId: e.id,
+    teamId: e.team_id,
+    title: e.title,
+    eventType: e.event_type,
+    trainingTypeName: e.training_type_name,
+    description: e.description,
+    imageUrl: e.image_url,
+    locationUrl: e.location_url,
+    startAt: e.start_at,
+    endAt: e.end_at,
+    location: e.location,
+    status: e.status,
+    seriesId: e.series_id,
+    allDay: e.all_day,
+    startDate: Option.some(e.start_date),
+    endDate: Option.some(e.end_date),
+  });
 
 const forbidden = new EventApi.Forbidden();
 const notFound = new EventApi.EventNotFound();
@@ -173,28 +199,7 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   canCreate,
                   canViewAll,
                   timezone: Option.some(teamZone),
-                  events: Array.map(
-                    filteredList,
-                    (e) =>
-                      new EventApi.EventInfo({
-                        eventId: e.id,
-                        teamId: e.team_id,
-                        title: e.title,
-                        eventType: e.event_type,
-                        trainingTypeName: e.training_type_name,
-                        description: e.description,
-                        imageUrl: e.image_url,
-                        locationUrl: e.location_url,
-                        startAt: e.start_at,
-                        endAt: e.end_at,
-                        location: e.location,
-                        status: e.status,
-                        seriesId: e.series_id,
-                        allDay: e.all_day,
-                        startDate: Option.some(e.start_date),
-                        endDate: Option.some(e.end_date),
-                      }),
-                  ),
+                  events: Array.map(filteredList, toEventInfo),
                 }),
             ),
           ),

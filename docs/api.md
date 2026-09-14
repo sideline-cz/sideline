@@ -44,6 +44,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Player Rating](#33-player-rating)
    - [Team Generation](#34-team-generation)
    - [Rules Trainer](#35-rules-trainer)
+   - [AI Assistant](#36-ai-assistant)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -6759,6 +6760,102 @@ Ties are broken by `masteredCount`, then `teamMemberId`, giving a deterministic 
 
 ---
 
+### 36. AI Assistant
+
+**Source:** `packages/domain/src/api/AiChatApi.ts`
+**Prefix:** `/teams/:teamId/ai`
+
+A **read-only** conversational assistant, scoped to one team, that answers questions about the team's own events, training types, members, groups and rosters via LLM tool-calling over six team-scoped read tools (`current_datetime`, `list_events`, `list_training_types`, `list_groups`, `list_members`, `list_rosters`). It cannot create, edit, or delete anything — there is no write path. Backed by the same `LlmClient` used by email-forwarding summarization and the Player Rating AI features.
+
+**Every tool result is filtered through the calling user's own permissions** before it ever reaches the model: `list_groups` requires `group:manage`, `list_members` requires `member:view`, `list_rosters` requires `roster:view`, and `list_events` mirrors `GET /teams/:teamId/events`'s own group-visibility rules (a caller who cannot see a group's events cannot ask the assistant about them either, and a non-existent-or-invisible `eventId` reads back as "not found", never as a distinguishable 403). Members are returned as a bespoke allow-listed projection (display name, jersey number, roles, active status) — the assistant never sees or surfaces a member's Discord ID, username, birth date, gender, or raw permission grants.
+
+**Degradation, never 500.** Every failure path — the kill switch is off, no LLM is configured, the provider call fails, the tool-calling loop exhausts its step budget, or the model returns no usable content — resolves to `200 OK` with `generated: false` and a typed `degradedReason`. There is no error response for a degraded answer; `chat`'s only two declared errors are membership (`AiChatForbidden`) and rate limiting (`AiChatRateLimited`).
+
+**Rate limiting:** 20 chat turns / 10 minutes and 120 / day per user, enforced only when the assistant is enabled and configured (a disabled or unconfigured server never spends a caller's budget). See `docs/deployment.md`'s `AI_CHAT_ENABLED` row for the per-replica caveat.
+
+---
+
+#### `GET /teams/:teamId/ai/capabilities`
+
+Whether the assistant is available for this team right now, so the client can show the input box or a disabled state without spending a chat turn to find out.
+
+**Auth:** Bearer token (AuthMiddleware). Requires active team membership.
+
+**Params:** `teamId` — `TeamId`
+
+**Response:** `200 OK` — `Capabilities`
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | `boolean` | `true` only when `AI_CHAT_ENABLED` is on AND an LLM is configured (`LLM_API_URL` set) |
+
+**Errors:**
+
+| Error | Status | When |
+|---|---|---|
+| `AiChatForbidden` | 403 | The caller is not an active member of the team |
+
+---
+
+#### `POST /teams/:teamId/ai/chat`
+
+Submits the full visible conversation (client-side history, not server-persisted — there is no chat-history table) and returns the assistant's next turn.
+
+**Auth:** Bearer token (AuthMiddleware). Requires active team membership.
+
+**Params:** `teamId` — `TeamId`
+
+**Request Body:** `ChatRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `messages` | `ChatMessage[]` (1–20 items) | Yes | The conversation so far, oldest first. Only `role: 'user'` and `role: 'assistant'` are accepted — `tool`/`system` roles are rejected by the schema, not just ignored |
+
+`ChatMessage`:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `role` | `"user" \| "assistant"` | Yes | Who sent the message |
+| `content` | `string` (1–2000 chars) | Yes | Message text |
+
+**Response:** `200 OK` — `ChatResponse`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `answer` | `string` | No | The assistant's prose reply. Empty when `generated` is `false` |
+| `generated` | `boolean` | No | `false` on every degraded path (see below); `answer`/`references` are only meaningful when `true` |
+| `degradedReason` | `DegradedReason` | Yes | Present exactly when `generated` is `false`; absent otherwise |
+| `references` | `EntityRef[]` | No | The entities the answer cites, as typed view-model cards (up to 20 per turn) |
+
+`DegradedReason` — closed union, one of:
+
+| Value | Meaning |
+|---|---|
+| `not_configured` | No LLM is configured on this server |
+| `disabled` | `AI_CHAT_ENABLED` is off for this server |
+| `provider_error` | The LLM call failed, or any unexpected error was caught |
+| `too_many_steps` | The tool-calling loop exhausted its iteration budget before producing an answer |
+| `empty_answer` | The model returned no usable content |
+
+`EntityRef` — a discriminated union on `kind`, reusing the same per-entity schema each entity's own list endpoint returns wherever one already exists, plus an opaque 4-character `ref` token that the answer text cites inline as `[[ref:xxxx]]` (a marker the client strips and renders as a navigable card; any token not present in `references` is stripped as plain text):
+
+| `kind` | Extra fields | Notes |
+|---|---|---|
+| `event` | `event: EventInfo` | Same shape as `GET /teams/:teamId/events` rows |
+| `member` | `memberId`, `displayName`, `avatarUrl`, `jerseyNumber`, `roleNames`, `effectiveRoles`, `active` | Bespoke allow-listed projection — **not** `Roster.RosterPlayer`; no Discord ID, username, birth date, gender, or permissions |
+| `group` | `group: GroupInfo` | Same shape as `GET /teams/:teamId/groups` rows |
+| `roster` | `roster: RosterInfo` | Same shape as the Roster group's list endpoint |
+| `trainingType` | `trainingType: TrainingTypeInfo` | Same shape as `GET /teams/:teamId/training-types` rows |
+
+**Errors:**
+
+| Error | Status | When |
+|---|---|---|
+| `AiChatForbidden` | 403 | The caller is not an active member of the team |
+| `AiChatRateLimited` | 429 | The caller has exhausted the 20/10min or 120/day budget; carries `retryAfterSeconds` (whole seconds until the violated window resets) |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -7148,6 +7245,8 @@ The following table consolidates all error tags across all API groups.
 | `GlobalAdminLastAdminError` | 409 | Global Admin | Revoking would leave zero effective global admins |
 | `GlobalAdminSelfRevokeError` | 409 | Global Admin | Caller attempted to revoke their own admin status |
 | `GlobalAdminEnvManaged` | 409 | Global Admin | Target user's Discord ID is in the env allowlist and cannot be revoked via the API |
+| `AiChatForbidden` | 403 | AI Assistant | Not an active member of the team |
+| `AiChatRateLimited` | 429 | AI Assistant | Per-user chat rate limit exceeded (20/10min or 120/day); carries `retryAfterSeconds` |
 | `PlayerRatingForbidden` | 403 | Player Rating | Not a member of this team, or missing `member:edit` permission for write endpoints |
 | `PlayerRatingPlayerNotFound` | 404 | Player Rating | Member does not have a rating record in this team |
 | `PlayerRatingEventNotLoggable` | 409 | Player Rating | The event is not a training, is cancelled, or its `start_at` is more than 2 days in the past |

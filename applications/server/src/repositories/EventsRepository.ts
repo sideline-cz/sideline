@@ -20,7 +20,7 @@ import {
   eventVisibleNow,
 } from '~/repositories/eventVisibility.js';
 
-class EventWithDetails extends Schema.Class<EventWithDetails>('EventWithDetails')({
+export class EventWithDetails extends Schema.Class<EventWithDetails>('EventWithDetails')({
   id: Event.EventId,
   team_id: Team.TeamId,
   training_type_id: Schema.OptionFromNullOr(TrainingType.TrainingTypeId),

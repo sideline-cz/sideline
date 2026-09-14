@@ -11,6 +11,15 @@ export * as ActivityTypeApi from './api/ActivityTypeApi.js';
 export * as AgeThresholdApi from './api/AgeThresholdApi.js';
 
 /**
+ * The read-only in-app AI assistant (plan §3): one capabilities endpoint and one chat
+ * endpoint, team-scoped. `EntityRef` is the typed view-model union every card in the answer
+ * is rendered from — the model never controls a fact the user can act on, only which
+ * server-held entity is shown and which sentence mentions it. `degradedReason` is a closed
+ * union resolved client-side through a label map, never a sentinel embedded in `answer`.
+ */
+export * as AiChatApi from './api/AiChatApi.js';
+
+/**
  * Tri-state, and `'unknown'` renders NOTHING (PR-9 / CC-15, designer §3.6) — never a boolean.
  * A hard gate on an unknown signal bounces the entire existing user base (the day-one state for
  * every member of every team, since the bot has to observe guild membership before anyone can be

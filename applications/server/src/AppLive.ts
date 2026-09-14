@@ -82,7 +82,10 @@ import {
 import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
+import { AiChatEnabledConfig } from '~/services/AiChatEnabledConfig.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
+import { ChatAgent } from '~/services/ChatAgent.js';
+import { ChatRateLimiter } from '~/services/ChatRateLimiter.js';
 import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementConfig.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { EmailApprovalService } from '~/services/EmailApprovalService.js';
@@ -201,6 +204,11 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   Layer.provide(BotInfoStore.Default),
   Layer.provide(GlobalAdminAllowlist.Default),
   Layer.provide(DiscordJoinEnforcementConfig.Default),
+  Layer.provide(AiChatEnabledConfig.Default),
+  Layer.provide(ChatRateLimiter.Default),
+  Layer.provide(
+    ChatAgent.Default.pipe(Layer.provide(Repositories), Layer.provide(LlmClient.Default)),
+  ),
   Layer.provide(TranslationCache.Default),
   Layer.provide(
     Layer.merge(Repositories, EmailApprovalService.Default.pipe(Layer.provide(Repositories))),
