@@ -247,6 +247,53 @@ const make = Effect.gen(function* () {
           `,
   });
 
+  /**
+   * Archived-aware sibling of `findAncestors`. The `is_archived = false` / `team_id` predicates
+   * sit in the RECURSIVE TERM — so an archived ancestor SEVERS the chain and nothing above it is
+   * ever reached — AND on the final join, so the archived node's own row is excluded too. The
+   * SEVERING SEMANTICS here must match the ancestor walk in `repositories/effectiveRoles.ts`
+   * (see its header, decision 1): `reconcileMemberDiscordRoles` and the `member_added`
+   * channel-sync emit must agree about which ancestors still grant, or role sync and channel
+   * sync contradict each other on the same tree.
+   *
+   * The recursive term is textually identical to that walk. Two differences are deliberate and
+   * do NOT affect severing — do not "fix" them into a literal match:
+   *   1. The final join spells the predicates as a trailing `WHERE` rather than inside the
+   *      `JOIN … ON`. Identical for an inner join.
+   *   2. The `depth < 32` guard counts from a different seed. `effectiveRolesFrom` seeds the
+   *      member's OWN group at depth 0; this query seeds that group's PARENT at depth 0, so it
+   *      reaches one level further up a pathological chain. The seed matches `findAncestors`
+   *      above, which is the more useful consistency — both are ancestor queries over the same
+   *      shape, and 32 levels of subgroup nesting is already far beyond anything real.
+   *
+   * `findAncestors` above deliberately does NOT filter and must stay that way — `getAncestorIds`
+   * backs `moveGroup`'s cycle check (see that query's comment), which has to see archived nodes.
+   *
+   * The seed does not re-check the starting group itself; every caller has already resolved it
+   * through a query that filters `is_archived = false`.
+   */
+  const findActiveAncestors = SqlSchema.findAll({
+    Request: Schema.Struct({ group_id: GroupModel.GroupId, team_id: Team.TeamId }),
+    Result: GroupRow,
+    execute: ({ group_id, team_id }) => sql`
+            WITH RECURSIVE ancestors AS (
+              SELECT parent_id AS id, 0 AS depth FROM groups WHERE id = ${group_id} AND parent_id IS NOT NULL
+              UNION ALL
+              SELECT anc_g.parent_id, a.depth + 1
+              FROM groups anc_g
+              JOIN ancestors a ON anc_g.id = a.id
+              WHERE anc_g.parent_id IS NOT NULL
+                AND anc_g.is_archived = false
+                AND anc_g.team_id = ${team_id}
+                AND a.depth < 32
+            )
+            SELECT g.id, g.team_id, g.parent_id, g.name, g.emoji, g.color
+            FROM groups g
+            JOIN ancestors a ON g.id = a.id
+            WHERE g.is_archived = false AND g.team_id = ${team_id}
+          `,
+  });
+
   const findDescendantMembers = SqlSchema.findAll({
     Request: GroupModel.GroupId,
     Result: DescendantMemberRow,
@@ -355,6 +402,9 @@ const make = Effect.gen(function* () {
 
   const getAncestors = (groupId: GroupModel.GroupId) => findAncestors(groupId).pipe(catchSqlErrors);
 
+  const getActiveAncestors = (groupId: GroupModel.GroupId, teamId: Team.TeamId) =>
+    findActiveAncestors({ group_id: groupId, team_id: teamId }).pipe(catchSqlErrors);
+
   const getDescendantMemberIds = (groupId: GroupModel.GroupId) =>
     findDescendantMembers(groupId).pipe(
       Effect.map((rows) => rows.map((r) => r.team_member_id)),
@@ -412,6 +462,7 @@ const make = Effect.gen(function* () {
     getChildren,
     getAncestorIds,
     getAncestors,
+    getActiveAncestors,
     getDescendantMemberIds,
     findMembersWithDiscordIdByGroupId,
     findDescendantMembersWithDiscordIdByGroupId,

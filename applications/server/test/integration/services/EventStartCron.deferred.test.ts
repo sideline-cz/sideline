@@ -244,17 +244,45 @@ const assignPlayerRole = (teamId: string, memberId: string) =>
 
 const runCron = () => eventStartCronEffect.pipe(Effect.provide(TestLayer));
 
-/** Team-local `HH:MM` of `now() + minutesOffset` (may cross midnight — accepted
- * residual flake risk near the wrap, consistent with other relative-clock
- * fixtures in this codebase). Lets the "Dnes"-post timing tests set
- * `all_day_post_time` to a value that is deterministically before/after the
- * real current instant, without needing to control Postgres's own `now()`. */
-const localTimeOffsetHHMM = (tz: string, minutesOffset: number) =>
+/** Team-local time-of-day for `now() + minutesOffset`, CLAMPED to the current
+ * local day, for the "Dnes"-post timing cases: it yields an `all_day_post_time`
+ * that is on the correct side of the real current instant without needing to
+ * control the clock the cron reads.
+ *
+ * Only the SIGN of `minutesOffset` is guaranteed, not its magnitude — near the
+ * day edges the clamp wins. That clamp is the whole point: the sweep compares
+ * `now_local::time >= all_day_post_time`, so an unclamped `now + 60 minutes`
+ * wrapped past midnight (23:00-24:00 local) into a `00:xx` that reads as EARLIER
+ * than now, and the "future post time" cases fired instead of staying quiet.
+ * A forward offset now saturates at `24:00:00` — a legal `TIME` value that no
+ * real `now_local::time` can ever reach, so it is strictly in the future — and a
+ * backward offset saturates at `00:00:00`, which every `now` in that day is at
+ * or past. Do NOT use this to probe a sub-hour boundary:
+ * `localTimeOffsetClampedToDay(tz, -1)` silently becomes `00:00:00` during the
+ * first minute of the day.
+ *
+ * What this does NOT make deterministic: the sweep's other half,
+ * `now_local::date = start_at_local::date`, is fed by a separate `localMidnight`
+ * read, so a run that straddles local midnight (or the DST fall-back fold, where
+ * the local wall clock genuinely moves backwards) can still fail. Closing that
+ * needs an injectable instant in `eventStartCronEffect`, which currently reads
+ * JS `new Date()` while these fixtures read Postgres `now()` — two clocks, so
+ * don't tighten the offsets below a minute either. */
+const localTimeOffsetClampedToDay = (tz: string, minutesOffset: number) =>
   SqlClient.SqlClient.asEffect().pipe(
     Effect.andThen((sql) =>
-      sql.unsafe<{ t: string }>(
-        `SELECT to_char((now() AT TIME ZONE '${tz}') + INTERVAL '${minutesOffset} minutes', 'HH24:MI') AS t`,
-      ),
+      sql.unsafe<{ t: string }>(`
+        SELECT CASE
+                 WHEN shifted >= day_start + INTERVAL '1 day' THEN '24:00:00'
+                 WHEN shifted < day_start THEN '00:00:00'
+                 ELSE to_char(shifted, 'HH24:MI:SS.US')
+               END AS t
+        FROM (
+          SELECT date_trunc('day', local_now) AS day_start,
+                 local_now + INTERVAL '${minutesOffset} minutes' AS shifted
+          FROM (SELECT now() AT TIME ZONE '${tz}' AS local_now) n
+        ) s
+      `),
     ),
     Effect.map((rows) => rows[0]?.t),
   );
@@ -343,7 +371,7 @@ describe('EventStartCron — arm-on-flip stamps both deferral columns atomically
         // midnight flip ALONE sets neither stamp; with the default 08:00 the
         // morning post legitimately fires whenever the suite runs after 08:00
         // team-local, which made the assertion depend on the wall clock.
-        Effect.bind('futurePostTime', () => localTimeOffsetHHMM('Europe/Prague', 60)),
+        Effect.bind('futurePostTime', () => localTimeOffsetClampedToDay('Europe/Prague', 60)),
         Effect.tap(({ team, futurePostTime }) => setAllDayPostTime(team.id, futurePostTime)),
         Effect.bind('start', () => localMidnight('Europe/Prague', 0)),
         Effect.bind('event', ({ team, ownerMember, start }) =>
@@ -590,7 +618,7 @@ describe('EventStartCron — deferred "Dnes" started post (all-day, team-local m
       ),
       Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
       // 30 minutes from now, local — deterministically still in the future.
-      Effect.bind('futureTime', () => localTimeOffsetHHMM('Europe/Prague', 30)),
+      Effect.bind('futureTime', () => localTimeOffsetClampedToDay('Europe/Prague', 30)),
       Effect.tap(({ team, futureTime }) => setAllDayPostTime(team.id, futureTime)),
       Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
       Effect.bind('start', () => localMidnight('Europe/Prague', 0)),
@@ -625,7 +653,7 @@ describe('EventStartCron — deferred "Dnes" started post (all-day, team-local m
         ),
         Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
         // 30 minutes ago, local — deterministically already passed today.
-        Effect.bind('pastTime', () => localTimeOffsetHHMM('Europe/Prague', -30)),
+        Effect.bind('pastTime', () => localTimeOffsetClampedToDay('Europe/Prague', -30)),
         Effect.tap(({ team, pastTime }) => setAllDayPostTime(team.id, pastTime)),
         Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
         Effect.bind('start', () => localMidnight('Europe/Prague', 0)),
@@ -748,7 +776,7 @@ describe('EventStartCron — deferred "Dnes" started post (all-day, team-local m
         // case deterministically for a team whose local `now` is provably past
         // 08:00. Reuse a WITH-settings row purely to read the current Prague
         // local time-of-day, without giving the EVENT's own team a settings row.
-        Effect.bind('nowHHMM', () => localTimeOffsetHHMM('Europe/Prague', 0)),
+        Effect.bind('nowLocal', () => localTimeOffsetClampedToDay('Europe/Prague', 0)),
         Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
         Effect.bind('start', () => localMidnight('Europe/Prague', 0)),
         Effect.bind('event', ({ team, ownerMember, start }) =>
@@ -763,13 +791,18 @@ describe('EventStartCron — deferred "Dnes" started post (all-day, team-local m
         ),
         Effect.tap(() => runCron()),
         Effect.bind('emitted', ({ event }) => countStartedSyncEvents(event.id)),
-        Effect.tap(({ emitted, nowHHMM }) =>
+        Effect.tap(({ emitted, nowLocal }) =>
           Effect.sync(() => {
-            // Only assert the positive case when we can prove 08:00 has passed —
-            // skip (rather than falsely fail) when the suite happens to run
-            // before 08:00 Prague time.
-            if (nowHHMM >= '08:00') {
+            // Both sides of the fallback boundary are asserted, with a 5s guard
+            // band around 08:00 to absorb the gap between the Postgres `now()`
+            // this fixture read and the JS `new Date()` the cron reads a moment
+            // later. Only a run landing inside that 10-second band asserts
+            // nothing — the previous `>= 08:00` form silently asserted nothing
+            // for the whole 00:00–08:00 Prague window.
+            if (nowLocal >= '08:00:05') {
               expect(emitted).toBe(1);
+            } else if (nowLocal < '07:59:55') {
+              expect(emitted).toBe(0);
             }
           }),
         ),

@@ -36,6 +36,7 @@ const GUILD_ID = '999999999999999999' as Discord.Snowflake;
 const TEAM_ID = '00000000-0000-0000-0000-000000000010' as Team.TeamId;
 const OTHER_TEAM_ID = '00000000-0000-0000-0000-000000000099' as Team.TeamId;
 const GROUP_ID = '00000000-0000-0000-0000-000000000030' as GroupModel.GroupId;
+const PARENT_GROUP_ID = '00000000-0000-0000-0000-000000000031' as GroupModel.GroupId;
 const INVITER_DISCORD_ID = '111111111111111111' as Discord.Snowflake;
 const SYSTEM_LOG_CHANNEL_ID = '777777777777777777' as Discord.Snowflake;
 const WELCOME_CHANNEL_ID = '888888888888888888' as Discord.Snowflake;
@@ -62,6 +63,12 @@ const UNMANAGED_DISCORD_ROLE_ID = '500000000000000099' as Discord.Snowflake;
 const ADOPTED_ROLE_ID =
   '00000000-0000-0000-0000-000000000052' as import('@sideline/domain').Role.RoleId;
 const ADOPTED_DISCORD_ROLE_ID = '500000000000000003' as Discord.Snowflake;
+// A role linked to GROUP_ID (`role_groups`), exercised by the group-scoped-invite tests below —
+// U2 seeds `groupRoles` with it so the diff has something to assign once the group bind lands
+// before the role diff runs.
+const GROUP_ROLE_ID =
+  '00000000-0000-0000-0000-000000000053' as import('@sideline/domain').Role.RoleId;
+const GROUP_DISCORD_ROLE_ID = '500000000000000004' as Discord.Snowflake;
 
 // ---------------------------------------------------------------------------
 // In-memory stores (reset between tests)
@@ -108,6 +115,24 @@ let roleAssignedEvents: Array<{
 let roleUnassignedEvents: Array<typeof roleAssignedEvents extends Array<infer T> ? T : never>;
 let markMembersBackfilledCalls: Array<string>;
 let nextMemberId = 1;
+// Ordering probe (bug 3da93506): `addMemberById` pushes 'group-add', `findEffectiveRoleIdsForMember`
+// pushes 'role-diff' before returning — lets tests assert the group bind happened before the diff
+// ran, without coupling to timing.
+let callLog: Array<string>;
+// Records instead of swallows every `ChannelSyncEventsRepository` call — see the Proxy below.
+let channelSyncCalls: Array<{ method: string; args: Array<unknown> }>;
+// Flat group -> roles map, U2 ONLY. Deliberately flat: NO ancestor walk, NO `is_archived`
+// handling. This models only "a group membership contributes roles", which is all this file
+// needs to observe an ordering effect. The real rule (recursive `groups.parent_id` walk,
+// archived-ancestor severing, cycle guard) lives in `repositories/effectiveRoles.ts` and is
+// tested ONLY against a real database — see
+// `test/integration/repositories/TeamMembersRepository.groupRoles.test.ts` and
+// `middleGroupArchivedChain.test.ts`. Do not grow this into a second implementation of that
+// fragment.
+let groupRoles: Map<string, ReadonlyArray<{ role_id: string; role_name: string }>>;
+// Configurable recency fallback (`findRecentByUserAndGuildWithContext`), keyed by discord_id ->
+// invite code, looked up against `inviteContexts`. Needed by U5.
+let recentAcceptances: Map<string, string>;
 
 const seedActiveMember = (discordId: string, memberId: TeamMember.TeamMemberId) => {
   memberships.set(userIdForDiscordId(discordId), {
@@ -224,11 +249,22 @@ const resetStores = () => {
       discord_role_id: ADOPTED_DISCORD_ROLE_ID,
       adopted: true,
     },
+    {
+      id: 'mapping-group-role',
+      team_id: TEAM_ID,
+      role_id: GROUP_ROLE_ID,
+      discord_role_id: GROUP_DISCORD_ROLE_ID,
+      adopted: false,
+    },
   ];
   roleAssignedEvents = [];
   roleUnassignedEvents = [];
   markMembersBackfilledCalls = [];
   nextMemberId = 1;
+  callLog = [];
+  channelSyncCalls = [];
+  groupRoles = new Map([[GROUP_ID, [{ role_id: GROUP_ROLE_ID, role_name: 'Strikers Player' }]]]);
+  recentAcceptances = new Map();
 };
 
 beforeEach(resetStores);
@@ -341,8 +377,17 @@ const MockTeamMembersRepository = Layer.succeed(TeamMembersRepository, {
     return Effect.void;
   },
   hasOtherActiveManager: () => Effect.succeed(true),
-  findEffectiveRoleIdsForMember: (memberId: string) =>
-    Effect.succeed(effectiveRoles.get(memberId) ?? []),
+  findEffectiveRoleIdsForMember: (memberId: string) => {
+    callLog.push('role-diff');
+    const fromGroups = groupMembersAdded
+      .filter((g) => g.member_id === memberId)
+      .flatMap((g) => groupRoles.get(g.group_id) ?? []);
+    const merged = new Map<string, { role_id: string; role_name: string }>();
+    for (const role of [...(effectiveRoles.get(memberId) ?? []), ...fromGroups]) {
+      merged.set(role.role_id, role);
+    }
+    return Effect.succeed(Array.from(merged.values()));
+  },
   findGrantedRoleIds: (memberId: string) => Effect.succeed(grantedRoleIds.get(memberId) ?? []),
   recordRoleGrant: (memberId: string, roleId: string) => {
     grantedRoleIds.set(memberId, [...(grantedRoleIds.get(memberId) ?? []), roleId]);
@@ -367,6 +412,7 @@ const MockTeamMembersRepository = Layer.succeed(TeamMembersRepository, {
 
 const MockGroupsRepository = Layer.succeed(GroupsRepository, {
   addMemberById: (groupId: string, memberId: string) => {
+    callLog.push('group-add');
     groupMembersAdded.push({ group_id: groupId, member_id: memberId });
     return Effect.void;
   },
@@ -385,6 +431,13 @@ const MockGroupsRepository = Layer.succeed(GroupsRepository, {
     return Effect.succeed(Option.none());
   },
   getAncestorIds: () => Effect.succeed([]),
+  // Note: the method is `getActiveAncestors`, NOT `getAncestors`.
+  getActiveAncestors: (groupId: GroupModel.GroupId, _teamId: Team.TeamId) => {
+    if (groupId === GROUP_ID) {
+      return Effect.succeed([{ id: PARENT_GROUP_ID, name: 'Seniors' }]);
+    }
+    return Effect.succeed([]);
+  },
   getDescendantMemberIds: () => Effect.succeed([]),
   findGroupIdsByMember: () => Effect.succeed([]),
   removeAllForMember: () => Effect.void,
@@ -432,7 +485,17 @@ const MockInviteAcceptancesRepository = Layer.succeed(InviteAcceptancesRepositor
       }),
     );
   },
-  findRecentByUserAndGuildWithContext: () => Effect.succeed(Option.none()),
+  findRecentByUserAndGuildWithContext: (discordId: string, _guildId: string) => {
+    const code = recentAcceptances.get(discordId);
+    const ctx = code == null ? undefined : inviteContexts.get(code);
+    if (!ctx?.active) return Effect.succeed(Option.none());
+    return Effect.succeed(
+      Option.some({
+        ...ctx,
+        inviter_username: 'inviter-user',
+      }),
+    );
+  },
   create: () => Effect.die(new Error('Not implemented')),
   findById: () => Effect.succeed(Option.none()),
   findPending: () => Effect.succeed([]),
@@ -508,6 +571,11 @@ const MockRolesRepository = Layer.succeed(RolesRepository, {
     if (roleId === ADOPTED_ROLE_ID) {
       return Effect.succeed(
         Option.some({ id: ADOPTED_ROLE_ID, team_id: TEAM_ID, name: 'Adopted' }),
+      );
+    }
+    if (roleId === GROUP_ROLE_ID) {
+      return Effect.succeed(
+        Option.some({ id: GROUP_ROLE_ID, team_id: TEAM_ID, name: 'Strikers Player' }),
       );
     }
     return Effect.succeed(Option.none());
@@ -595,9 +663,20 @@ const TestLayer = GuildsRpcLive.pipe(
       Layer.succeed(DiscordRolesRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       Layer.succeed(SudoSessionsRepository, new Proxy({} as any, { get: () => () => Effect.void })),
       MockRostersRepository,
+      // Records instead of swallowing. Stays a Proxy so EVERY ChannelSyncEventsRepository method
+      // keeps existing — `deactivateMemberAndCascade` calls `emitRosterMemberRemoved` and
+      // `emitMemberRemoved` through this same layer, and the `Guild/RemoveMember` test below
+      // depends on them.
       Layer.succeed(
         ChannelSyncEventsRepository,
-        new Proxy({} as any, { get: () => () => Effect.void }),
+        new Proxy({} as any, {
+          get:
+            (_t, prop) =>
+            (...args: Array<unknown>) => {
+              channelSyncCalls.push({ method: String(prop), args });
+              return Effect.void;
+            },
+        }),
       ),
       Layer.succeed(PendingGuildJoinsRepository, {
         _tag: 'api/PendingGuildJoinsRepository',
@@ -1114,6 +1193,120 @@ describe('Guild/RegisterMember — PR-8 level-based role diff (CC-10)', () => {
           expect(teamMembersAdded.some((m) => m.user_id === userIdForDiscordId(discordId))).toBe(
             true,
           );
+        }),
+      ),
+    );
+  });
+});
+
+describe('Guild/RegisterMember — group-scoped invite binds the group before the role diff (bug 3da93506)', () => {
+  itEffect.effect("binds the invite's group before running the role diff", () => {
+    const discordId = '700000000000000001';
+    return callRegisterMember({
+      discord_id: discordId,
+      username: 'group-invite-member-1',
+      invite_code: Option.some(VALID_CODE_WITH_GROUP),
+      roles: [],
+      source: Option.some('member_add'),
+    }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(callLog).toContain('group-add');
+          expect(callLog).toContain('role-diff');
+          // `lastIndexOf` vs `indexOf`, deliberately: the property is that EVERY group bind
+          // precedes the FIRST diff, not merely that some one did. This payload passes
+          // `roles: []` so `setupNewMember`'s channel-mapping-derived `addMemberById` never
+          // fires today — but give this test a non-empty `roles` array later and `indexOf`
+          // would silently weaken to "some group-add came first" while still passing.
+          expect(callLog.lastIndexOf('group-add')).toBeLessThan(callLog.indexOf('role-diff'));
+        }),
+      ),
+    );
+  });
+
+  itEffect.effect("emits role_assigned for a Sideline role linked to the invite's group", () => {
+    const discordId = '700000000000000002';
+    return callRegisterMember({
+      discord_id: discordId,
+      username: 'group-invite-member-2',
+      invite_code: Option.some(VALID_CODE_WITH_GROUP),
+      roles: [],
+      source: Option.some('member_add'),
+    }).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(roleAssignedEvents).toHaveLength(1);
+          expect(roleAssignedEvents[0]?.roleId).toBe(GROUP_ROLE_ID);
+          expect(roleAssignedEvents[0]?.roleName).toBe('Strikers Player');
+          expect(roleAssignedEvents[0]?.discordUserId).toBe(discordId);
+          expect(roleUnassignedEvents).toHaveLength(0);
+        }),
+      ),
+    );
+  });
+
+  itEffect.effect(
+    "emits channel-sync member_added for the invite's group and its ancestors",
+    () => {
+      const discordId = '700000000000000003';
+      return callRegisterMember({
+        discord_id: discordId,
+        username: 'group-invite-member-3',
+        invite_code: Option.some(VALID_CODE_WITH_GROUP),
+        roles: [],
+        source: Option.some('member_add'),
+      }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            const memberId = memberships.get(userIdForDiscordId(discordId))?.id;
+            expect(memberId).toBeDefined();
+            const batches = channelSyncCalls.filter(
+              (call) => call.method === 'emitMembersAddedBatch',
+            );
+            expect(batches).toHaveLength(1);
+            const [firstBatch] = batches;
+            if (firstBatch == null) throw new Error('unreachable — length asserted above');
+            const [batchArg] = firstBatch.args as [
+              {
+                entries: ReadonlyArray<{
+                  groupId: string;
+                  teamMemberId: string;
+                  discordUserId: string;
+                }>;
+              },
+            ];
+            const { entries } = batchArg;
+            expect(entries.map((e) => e.groupId)).toEqual([GROUP_ID, PARENT_GROUP_ID]);
+            for (const entry of entries) {
+              expect(entry.teamMemberId).toBe(memberId);
+              expect(entry.discordUserId).toBe(discordId);
+            }
+          }),
+        ),
+      );
+    },
+  );
+
+  itEffect.effect('a cross-team invite code does not fall through to the recency fallback', () => {
+    const discordId = '700000000000000004';
+    recentAcceptances.set(discordId, VALID_CODE_WITH_GROUP);
+    return callRegisterMember({
+      discord_id: discordId,
+      username: 'cross-team-member',
+      invite_code: Option.some(CROSS_TEAM_CODE),
+      roles: [],
+      source: Option.some('member_add'),
+    }).pipe(
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          expect(Option.isSome(result)).toBe(true);
+          const meta = Option.getOrThrow(result);
+          expect(Option.isNone(meta.welcome)).toBe(true);
+          expect(groupMembersAdded).toHaveLength(0);
+          expect(channelSyncCalls.some((call) => call.method === 'emitMembersAddedBatch')).toBe(
+            false,
+          );
+          expect(roleAssignedEvents).toHaveLength(0);
         }),
       ),
     );

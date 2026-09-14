@@ -139,6 +139,10 @@ membersStore.set(`${TEST_TEAM_ID}:${TEST_ADMIN_ID}`, {
 
 const TEST_GROUP_ID = '00000000-0000-0000-0000-000000000040' as GroupModel.GroupId;
 const TEST_OTHER_TEAM_GROUP_ID = '00000000-0000-0000-0000-000000000041' as GroupModel.GroupId;
+// Stands in for an archived group: `MockGroupsRepositoryLayer.findGroupById` only resolves
+// `TEST_GROUP_ID`, so any other id (this one included) is "not found" the same way an archived
+// group is filtered out by the real `is_archived = false` predicate.
+const TEST_ARCHIVED_GROUP_ID = '00000000-0000-0000-0000-000000000042' as GroupModel.GroupId;
 
 type InviteRecord = {
   id: TeamInvite.TeamInviteId;
@@ -181,6 +185,19 @@ invitesStore.set('invite-with-group', {
   created_at: DateTime.nowUnsafe(),
   expires_at: Option.none(),
   group_id: Option.some(TEST_GROUP_ID),
+});
+// U4: group_id points at a group `MockGroupsRepositoryLayer.findGroupById` cannot resolve —
+// stands in for an archived group, the liveness check `findGroupById` (not the invite row) is
+// meant to catch.
+invitesStore.set('invite-with-archived-group', {
+  id: '00000000-0000-0000-0000-000000000033' as TeamInvite.TeamInviteId,
+  team_id: TEST_TEAM_ID,
+  code: 'invite-with-archived-group',
+  active: true,
+  created_by: TEST_ADMIN_ID,
+  created_at: DateTime.nowUnsafe(),
+  expires_at: Option.none(),
+  group_id: Option.some(TEST_ARCHIVED_GROUP_ID),
 });
 
 const MockDiscordOAuthLayer = Layer.succeed(DiscordOAuth, {
@@ -406,6 +423,10 @@ const MockRolesRepositoryLayer = Layer.succeed(RolesRepository, {
   unassignRoleFromGroup: () => Effect.void,
 } as any);
 
+// U4 (bug 3da93506): records `addMemberById` calls made through `MockGroupsRepositoryLayer`,
+// shared by all four `Layer.provide(MockGroupsRepositoryLayer)` sites in this file.
+const groupMembersAdded: Array<{ group_id: string; member_id: string }> = [];
+
 const MockGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
   _tag: 'api/GroupsRepository',
   findGroupsByTeamId: () => Effect.succeed([]),
@@ -431,12 +452,16 @@ const MockGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
   archiveGroupById: () => Effect.void,
   moveGroup: () => Effect.die(new Error('Not implemented')),
   findMembersByGroupId: () => Effect.succeed([]),
-  addMemberById: () => Effect.void,
+  addMemberById: (groupId: string, memberId: string) => {
+    groupMembersAdded.push({ group_id: groupId, member_id: memberId });
+    return Effect.void;
+  },
   removeMemberById: () => Effect.void,
   getRolesForGroup: () => Effect.succeed([]),
   getMemberCount: () => Effect.succeed(0),
   getChildren: () => Effect.succeed([]),
   getAncestorIds: () => Effect.succeed([]),
+  getActiveAncestors: () => Effect.succeed([]),
   getDescendantMemberIds: () => Effect.succeed([]),
 } as any);
 
@@ -498,11 +523,23 @@ const MockAgeCheckServiceLayer = Layer.succeed(AgeCheckService, {
   evaluate: () => Effect.succeed([]),
 } as any);
 
+// U4 (bug 3da93506): `joinViaInvite`'s group-add tap must never emit — the member is not in the
+// guild yet at accept time (see the tap's doc comment in `api/invite.ts`). Tracked with a plain
+// call count rather than per-event detail; U4 only needs "did this fire at all".
+let roleSyncEmitCallCount = 0;
+let channelSyncEmitCallCount = 0;
+
 const MockRoleSyncEventsRepositoryLayer = Layer.succeed(RoleSyncEventsRepository, {
   emitRoleCreated: () => Effect.void,
   emitRoleDeleted: () => Effect.void,
-  emitRoleAssigned: () => Effect.void,
-  emitRoleUnassigned: () => Effect.void,
+  emitRoleAssigned: () => {
+    roleSyncEmitCallCount += 1;
+    return Effect.void;
+  },
+  emitRoleUnassigned: () => {
+    roleSyncEmitCallCount += 1;
+    return Effect.void;
+  },
   findUnprocessed: () => Effect.succeed([]),
   markProcessed: () => Effect.void,
   markFailed: () => Effect.void,
@@ -511,8 +548,15 @@ const MockRoleSyncEventsRepositoryLayer = Layer.succeed(RoleSyncEventsRepository
 const MockChannelSyncEventsRepositoryLayer = Layer.succeed(ChannelSyncEventsRepository, {
   emitChannelCreated: () => Effect.void,
   emitChannelDeleted: () => Effect.void,
-  emitMemberAdded: () => Effect.void,
+  emitMemberAdded: () => {
+    channelSyncEmitCallCount += 1;
+    return Effect.void;
+  },
   emitMemberRemoved: () => Effect.void,
+  emitMembersAddedBatch: () => {
+    channelSyncEmitCallCount += 1;
+    return Effect.void;
+  },
   findUnprocessed: () => Effect.succeed([]),
   markProcessed: () => Effect.void,
   markFailed: () => Effect.void,
@@ -1252,6 +1296,56 @@ describe('Invite API', () => {
     // groupName and inviterName should be present
     expect(body.groupName).toBeDefined();
     expect(body.inviterName).toBeDefined();
+  });
+
+  // U4 (bug 3da93506): the invite's `group_id` is AUTHORITATIVE — `joinViaInvite` must write
+  // `group_members` itself rather than relying on `Guild/RegisterMember` re-resolving the
+  // acceptance later (see `api/invite.ts`'s doc comment on the group-add tap). No Discord-side
+  // emit belongs here: the member is not in the guild yet. FAILS before Task 3 — nothing calls
+  // `groups.addMemberById` from this handler today.
+  it('joinViaInvite inserts group_members for a live group-scoped invite and emits no Discord events', async () => {
+    const groupCallsBefore = groupMembersAdded.length;
+    const roleSyncCallsBefore = roleSyncEmitCallCount;
+    const channelSyncCallsBefore = channelSyncEmitCallCount;
+    const response = await handler(
+      new Request('http://localhost/invite/invite-with-group/join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer user-token' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const memberId = membersStore.get(`${TEST_TEAM_ID}:${TEST_USER_ID}`)?.id;
+    expect(memberId).toBeTruthy();
+    expect(groupMembersAdded.slice(groupCallsBefore)).toEqual([
+      { group_id: TEST_GROUP_ID, member_id: memberId },
+    ]);
+    expect(roleSyncEmitCallCount).toBe(roleSyncCallsBefore);
+    expect(channelSyncEmitCallCount).toBe(channelSyncCallsBefore);
+
+    // An archived group's invite inserts nothing — `MockGroupsRepositoryLayer.findGroupById`
+    // already returns `None` for anything but `TEST_GROUP_ID`, so this archived fixture is a
+    // new `group_id` the mock doesn't resolve, exactly as the real `is_archived = false` filter
+    // would leave it unresolved.
+    const groupCallsBeforeArchived = groupMembersAdded.length;
+    const archivedResponse = await handler(
+      new Request('http://localhost/invite/invite-with-archived-group/join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer user-token' },
+      }),
+    );
+    expect(archivedResponse.status).toBe(200);
+    expect(groupMembersAdded.length).toBe(groupCallsBeforeArchived);
+
+    // A non-group invite adds nothing.
+    const groupCallsBeforeNoGroup = groupMembersAdded.length;
+    const noGroupResponse = await handler(
+      new Request('http://localhost/invite/valid-invite/join', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer user-token' },
+      }),
+    );
+    expect(noGroupResponse.status).toBe(200);
+    expect(groupMembersAdded.length).toBe(groupCallsBeforeNoGroup);
   });
 });
 

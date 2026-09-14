@@ -19,18 +19,22 @@ Scan the active sprint and reconcile Notion statuses based on git/GitHub state a
 
 ## Steps
 
+> **Notion CLI:** resolve the binary first — `N=$(command -v notion || command -v ntn || echo /opt/homebrew/bin/ntn)`.
+> Commands below use the `notion` syntax (positional method, `--body`). If you resolved `ntn`
+> instead, translate to `-X <METHOD>` / `-d`. See the agile-coach agent for the full table.
+
 Follow these steps **in order**.
 
 ### 1. Find the active sprint
 
-Query the Sprints database (`/opt/homebrew/bin/ntn api /v1/data_sources/0bb5bd1a-500c-4b2c-b482-cc6be3986a81/query -d '{"page_size":100}'`) and find the sprint whose date range covers today (or the most recent one). Fetch it to get linked stories and bugs.
+Query the Sprints database (`$N api POST /v1/databases/a89cc7a7-ab1a-4e3f-945d-d42028c75f00/query --body '{"page_size":100}'`) and find the sprint whose date range covers today (or the most recent one). Fetch it to get linked stories and bugs.
 
 If no active sprint exists, tell the user and stop.
 
 ### 2. Gather sprint data
 
 For each story in the sprint:
-1. Fetch the story props via `/opt/homebrew/bin/ntn api /v1/pages/<id>` to get its status and linked tasks
+1. Fetch the story props via `$N api GET /v1/pages/<id>` to get its status and linked tasks
 2. Fetch each task to get its status
 
 Build a map of: `story → [tasks]` with statuses for each.
@@ -86,6 +90,25 @@ For each story in `In Progress`:
 - If parent epic is in `TODO`, mark it for `In Progress`
 - If parent milestone is in `TODO`, mark it for `In Progress`
 
+#### Rule 6: Release a stale `Claude session`
+
+`Claude session` is a `rich_text` property on Stories and Bugs holding the URL of the Claude session
+working the item. While it is non-empty, `/work` and `/worktree` will **not** pick that item up.
+
+For each story/bug in the sprint with a non-empty `Claude session`:
+- If the item is `Done` / `✅ Fixed`, or its PR has been merged, mark the session for **clearing** —
+  the work is finished and the claim is stale.
+- Otherwise leave it alone: an agent is presumably still working it.
+
+Clear with:
+
+```bash
+$N api PATCH /v1/pages/<id> --body '{"properties":{"Claude session":{"rich_text":[]}}}'
+```
+
+A sprint that looks empty to `/work` but still has open items is the symptom of stale claims — this
+rule is the repair.
+
 ### 6. Report proposed changes
 
 Present all proposed status changes to the user in a table:
@@ -97,13 +120,17 @@ Present all proposed status changes to the user in a table:
 | Story: ...   | In Progress   | In Review   | All tasks Done             |
 | Story: ...   | In Review     | In Test     | PR #42 merged              |
 | Epic: ...    | In Progress   | In Review   | All stories in Test/Done   |
+| Bug: ...     | session set   | session clear | PR #43 merged            |
 ```
 
 If no changes are needed, tell the user everything is in sync and stop.
 
 ### 7. Apply changes
 
-After the user confirms (or if no ambiguity exists), apply all updates via `/opt/homebrew/bin/ntn api /v1/pages/<id> -X PATCH -d '{"properties":{"Status":{"status":{"name":"<new-status>"}}}}'` (use `"select"` instead of `"status"` for Bugs), then read the page back to confirm.
+After the user confirms (or if no ambiguity exists), apply all updates via `$N api PATCH /v1/pages/<id> --body '{"properties":{"Status":{"select":{"name":"<new-status>"}}}}'`, then read the page back to confirm.
+
+Every `Status` in this workspace is a `select` — including Stories, Tasks and Epics. The CLI takes
+the HTTP method as a positional argument (`notion api PATCH <path> --body ...`); `-X`/`-d` fail.
 
 Only move *tasks* to `Done` automatically (per the lifecycle rules). Do **not** move stories, epics, or milestones to `Done` — those are set manually by the user.
 
