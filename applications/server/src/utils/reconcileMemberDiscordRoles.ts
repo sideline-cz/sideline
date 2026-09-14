@@ -17,18 +17,16 @@ import { MAX_ROLE_SYNC_EMISSIONS_PER_MEMBER } from '~/utils/syncMemberDiscordRol
  */
 export const MAX_ROLE_SYNC_EMISSIONS_PER_GUILD_RECONCILE = 200;
 
-export type ReconcileMemberRolesResult = {
-  readonly added: number;
-  readonly removed: number;
-  readonly skippedForCap: number;
-};
-
 /**
- * Atomically reserves up to `requested` units from a shared per-`ReconcileMembers`-call budget.
- * `Option.none()` (no budget — the direct `member_add`/`interaction` path, which only ever
- * touches one member) means unbounded: every unit requested is granted. `Ref.modify` makes the
- * reservation safe under the `concurrency: 5` fan-out `Guild/ReconcileMembers` runs member
- * effects at.
+ * Atomically reserves up to `requested` units from a shared per-call budget. `Option.none()` (no
+ * budget — the direct `member_add`/`interaction` path, which only ever touches one member) means
+ * unbounded: every unit requested is granted. `Ref.modify` makes the reservation safe under
+ * concurrent fan-out (e.g. `Guild/ReconcileMembers`'s `concurrency: 5` member loop).
+ *
+ * Deliberately module-private. `utils/syncGroupRoleMembers.ts`'s `applyGlobalCap` is a one-shot
+ * batch cap with per-`roleId` reservation, which cannot be expressed as this sequential `Ref`
+ * reservation — so it is a separate implementation on purpose, not a copy of this one, and there
+ * is nothing here worth sharing.
  */
 const reserveFromBudget = (budget: Option.Option<Ref.Ref<number>>, requested: number) =>
   Option.match(budget, {
@@ -39,6 +37,12 @@ const reserveFromBudget = (budget: Option.Option<Ref.Ref<number>>, requested: nu
         return [granted, remaining - granted] as const;
       }),
   });
+
+export type ReconcileMemberRolesResult = {
+  readonly added: number;
+  readonly removed: number;
+  readonly skippedForCap: number;
+};
 
 /**
  * Diffs one member's effective Sideline roles against their ACTUAL Discord roles (from the

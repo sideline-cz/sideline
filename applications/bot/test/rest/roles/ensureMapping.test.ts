@@ -20,6 +20,7 @@ import { DiscordREST } from 'dfx/DiscordREST';
 import { Effect, Layer, Logger, Option } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { ensureMapping } from '~/rest/roles/ensureMapping.js';
+import { GuildRolesCache } from '~/services/GuildRolesCache.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 // ---------------------------------------------------------------------------
@@ -218,8 +219,14 @@ const runEnsureMapping = (
   restLayer: Layer.Layer<DiscordREST>,
   extraLayer?: Layer.Layer<never>,
 ) => {
+  // A fresh `GuildRolesCache` per call, exactly like `ProcessorService` provides per tick — these
+  // tests each exercise exactly one `ensureMapping` call, so there's nothing for
+  // `createGuildRole`/`adoptExistingRole`'s `rolesCache.record` to keep in sync here (that
+  // cross-event behavior is covered by `guildRolesCacheStaleness.test.ts` and
+  // `handleAssigned.test.ts`); this just satisfies `GuildRolesCache` now being a dependency.
+  const cacheLayer = Layer.effect(GuildRolesCache, GuildRolesCache.make);
   const base = ensureMapping(TEAM_ID, ROLE_ID, GUILD_ID, ROLE_NAME).pipe(
-    Effect.provide(Layer.merge(rpcLayer, restLayer)),
+    Effect.provide(Layer.mergeAll(rpcLayer, restLayer, cacheLayer)),
   );
   return Effect.runPromise(extraLayer ? base.pipe(Effect.provide(extraLayer)) : base);
 };
