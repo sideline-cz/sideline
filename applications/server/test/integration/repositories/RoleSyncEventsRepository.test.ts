@@ -436,3 +436,98 @@ describe('TeamMembersRepository — findEffectiveRoleIdsForMember', () => {
     }).pipe(Effect.provide(TestLayer)),
   );
 });
+
+// TDD — regression tests for `fix/group-role-discord-sync`.
+//
+// `RoleSyncEventsRepository.emitRoleEventsBatch` does not exist yet — it is the multi-row batch
+// insert `syncGroupRoleMembers.ts` needs so one group operation costs one `lookupGuildId` + one
+// `INSERT` regardless of how many (member, role) pairs it touches, instead of N calls to
+// `emitRoleAssigned`/`emitRoleUnassigned` each re-running `lookupGuildId` on its own. Modelled on
+// `ChannelSyncEventsRepository._emitGroupMembersBatch`. Every test below is expected to FAIL until
+// `emitRoleEventsBatch` is added to `RoleSyncEventsRepository` — calling it today throws a
+// TypeError (`roleSyncEvents.emitRoleEventsBatch is not a function`).
+describe('RoleSyncEventsRepository — emitRoleEventsBatch', () => {
+  it.effect('writes N rows in one call, with the right guild_id and event_types', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('900000000000000030', 'batch-emit-1');
+      const team = yield* createTeam('900400000000000030' as Discord.Snowflake, userId);
+      const memberA = yield* addActiveMember(team.id, userId);
+      const userB = yield* createUser('900000000000000031', 'batch-emit-1b');
+      const memberB = yield* addActiveMember(team.id, userB);
+      const roles = yield* RolesRepository.asEffect();
+      const roleOne = yield* roles.insertRole(team.id, 'Batch One');
+      const roleTwo = yield* roles.insertRole(team.id, 'Batch Two');
+
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      yield* roleSyncEvents.emitRoleEventsBatch({
+        teamId: team.id,
+        entries: [
+          {
+            eventType: 'role_assigned',
+            roleId: roleOne.id,
+            roleName: roleOne.name,
+            teamMemberId: memberA.id,
+            discordUserId: '111111111111111111' as Discord.Snowflake,
+          },
+          {
+            eventType: 'role_unassigned',
+            roleId: roleTwo.id,
+            roleName: roleTwo.name,
+            teamMemberId: memberB.id,
+            discordUserId: '222222222222222222' as Discord.Snowflake,
+          },
+        ],
+      });
+
+      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
+      expect(unprocessed).toHaveLength(2);
+      const assigned = unprocessed.find(
+        (e: { event_type: string }) => e.event_type === 'role_assigned',
+      );
+      const unassigned = unprocessed.find(
+        (e: { event_type: string }) => e.event_type === 'role_unassigned',
+      );
+      expect(assigned?.role_id).toBe(roleOne.id);
+      expect(assigned?.guild_id).toBe('900400000000000030');
+      expect(unassigned?.role_id).toBe(roleTwo.id);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('an empty entries array writes nothing', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('900000000000000032', 'batch-emit-2');
+      const team = yield* createTeam('900400000000000031' as Discord.Snowflake, userId);
+
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      yield* roleSyncEvents.emitRoleEventsBatch({ teamId: team.id, entries: [] });
+
+      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
+      expect(unprocessed).toHaveLength(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('writes nothing for a team id that cannot be found (unlinked-team equivalent)', () =>
+    Effect.gen(function* () {
+      const nonExistentTeamId = '00000000-0000-0000-0000-0000000000aa' as Team.TeamId;
+      const fakeRoleId = '00000000-0000-0000-0000-0000000000ab' as Role.RoleId;
+      const fakeMemberId = '00000000-0000-0000-0000-0000000000ac' as TeamMember.TeamMemberId;
+
+      const roleSyncEvents = yield* RoleSyncEventsRepository.asEffect();
+      yield* roleSyncEvents.emitRoleEventsBatch({
+        teamId: nonExistentTeamId,
+        entries: [
+          {
+            eventType: 'role_assigned',
+            roleId: fakeRoleId,
+            roleName: 'Ghost',
+            teamMemberId: fakeMemberId,
+            discordUserId: '333333333333333333' as Discord.Snowflake,
+          },
+        ],
+      });
+
+      const unprocessed = yield* roleSyncEvents.findUnprocessed(10);
+      expect(unprocessed).toHaveLength(0);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});

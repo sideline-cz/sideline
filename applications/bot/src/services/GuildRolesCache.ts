@@ -9,6 +9,20 @@ export interface GuildRolesCacheService {
   readonly get: (
     guildId: Discord.Snowflake,
   ) => Effect.Effect<ReadonlyArray<AdoptableCandidateRole>, unknown, DiscordREST>;
+  /**
+   * Records a role that was just created (`createGuildRole`) or adopted (`adoptExistingRole`)
+   * mid-tick into `guildId`'s cached entry, so a LATER event in the same tick sees it via `get`
+   * without another `listGuildRoles` round-trip.
+   *
+   * A no-op when `guildId` has no cached entry yet — nothing has called `get` for this guild in
+   * this tick, so there's nothing stale to keep in sync; the eventual first `get` fetches fresh
+   * from Discord and already includes this role. Also a no-op if `role.id` is already present
+   * (idempotent against being invoked twice for the same role).
+   */
+  readonly record: (
+    guildId: Discord.Snowflake,
+    role: AdoptableCandidateRole,
+  ) => Effect.Effect<void>;
 }
 
 const makeCache: Effect.Effect<GuildRolesCacheService> = Effect.map(
@@ -25,6 +39,13 @@ const makeCache: Effect.Effect<GuildRolesCacheService> = Effect.map(
           );
         }),
       ),
+    record: (guildId, role) =>
+      Ref.update(cacheRef, (cache) => {
+        const hit = cache.get(guildId);
+        if (hit === undefined) return cache;
+        if (hit.some((existing) => existing.id === role.id)) return cache;
+        return new Map(cache).set(guildId, [...hit, role]);
+      }),
   }),
 );
 

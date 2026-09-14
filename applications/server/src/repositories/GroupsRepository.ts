@@ -274,14 +274,19 @@ const make = Effect.gen(function* () {
           `,
   });
 
+  // `fix/group-role-discord-sync`: added the `depth < 32` cycle guard per
+  // `applications/server/AGENTS.md` → "Recursive `groups.parent_id` Walks Must Carry a `depth < 32`
+  // Guard" — this walk was on that doc's "not yet guarded" list, and this change makes it
+  // load-bearing on six new group-role-sync paths (including `moveGroup`, the very operation that
+  // can create a cycle).
   const findDescendantMembersWithDiscordIdQuery = SqlSchema.findAll({
     Request: GroupModel.GroupId,
     Result: GroupMemberWithDiscordRow,
     execute: (groupId) => sql`
             WITH RECURSIVE descendants AS (
-              SELECT g.id, g.team_id FROM groups g WHERE g.id = ${groupId} AND g.is_archived = false
+              SELECT g.id, g.team_id, 0 AS depth FROM groups g WHERE g.id = ${groupId} AND g.is_archived = false
               UNION ALL
-              SELECT g.id, g.team_id FROM groups g JOIN descendants d ON g.parent_id = d.id WHERE g.is_archived = false AND g.team_id = d.team_id
+              SELECT g.id, g.team_id, d.depth + 1 FROM groups g JOIN descendants d ON g.parent_id = d.id WHERE g.is_archived = false AND g.team_id = d.team_id AND d.depth < 32
             )
             SELECT DISTINCT gm.team_member_id, u.discord_id AS discord_user_id
             FROM descendants d

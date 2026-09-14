@@ -1,6 +1,7 @@
 import { Discord, type Role, type Team } from '@sideline/domain';
 import { DiscordREST } from 'dfx/DiscordREST';
 import { Array as Arr, Cause, Effect, Option, pipe } from 'effect';
+import { GuildRolesCache } from '~/services/GuildRolesCache.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 import { type AdoptableCandidateRole, pickAdoptableRole } from './adoptableGuildRole.js';
 import { createGuildRole } from './createGuildRole.js';
@@ -80,6 +81,7 @@ const adoptExistingRole = (
   Effect.Do.pipe(
     Effect.bind('rpc', () => SyncRpc.asEffect()),
     Effect.bind('rest', () => DiscordREST.asEffect()),
+    Effect.bind('rolesCache', () => GuildRolesCache.asEffect()),
     Effect.bind('roles', ({ rest }) => rest.listGuildRoles(guildId)),
     /**
      * `getMyGuildMember` is `GET /users/@me/guilds/{id}/member`, which is
@@ -112,6 +114,21 @@ const adoptExistingRole = (
         role_id: roleId,
         discord_role_id: Discord.Snowflake.makeUnsafe(picked.id),
         adopted: true,
+      }),
+    ),
+    // Same reasoning as `createGuildRole`'s `rolesCache.record` call: a role adopted HERE,
+    // mid-tick, must be visible to a LATER event's `rolesCache.get(guildId)` read in the same
+    // tick. `picked.id`/`picked.position` come straight out of `roles` (the fresh read above) via
+    // `pickAdoptableRole`, and `permissions === '0'`/`managed === false` are exactly what that
+    // filter already guaranteed of `picked` — so this reconstructs the same candidate `roles`
+    // already contains, no re-fetch needed.
+    Effect.tap(({ rolesCache, picked }) =>
+      rolesCache.record(guildId, {
+        id: picked.id,
+        name: roleName,
+        permissions: '0',
+        position: picked.position,
+        managed: false,
       }),
     ),
     Effect.map(({ picked }) => Discord.Snowflake.makeUnsafe(picked.id)),
