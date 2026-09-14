@@ -277,6 +277,27 @@ Rules:
 3. **Tag classes are payload-bearing where it improves error UX.** `NameAlreadyTaken` carries the name (so the form field error reads "'gym' is already used"); `HasLogs` carries the count (so the dialog reads "Cannot delete — 12 logs reference this type"). Empty payloads (`{}`) are correct for purely categorical errors (`Forbidden`, `Protected`, `NotFound`).
 4. **Lifecycle-state errors get one tag per terminal state on the same resource.** When a resource has a non-trivial lifecycle (e.g. an onboarding token transitions `active → consumed | revoked | expired`), define one resource-prefixed tag per terminal state (`<Resource>TokenExpired` / `<Resource>TokenAlreadyConsumed` / `<Resource>TokenRevoked`) rather than collapsing into a single `<Resource>TokenInvalid`. The client renders distinct UI per state ("This link expired, ask for a new one" vs "This link was already used"), and the HTTP-status mapping is per-state (`410 Gone` for expired/revoked, `409 Conflict` for already-consumed, `404` only when the row does not exist at all). Reference: `packages/domain/src/api/OnboardingApi.ts` — `OnboardingTokenNotFound` (404), `OnboardingTokenExpired` (410), `OnboardingTokenRevoked` (410), `OnboardingTokenAlreadyConsumed` (409), plus `OnboardingWrongCaptain` (403) and `OnboardingGuildAlreadyClaimed` (409) for non-state preconditions on the same endpoint.
 
+## Degradable Endpoints: 200 + `generated: false` + A Closed `Reason` Union
+
+An endpoint whose backing service is **optional at deploy time** (kill switch off, no provider configured) must not model "unavailable" as an error tag. It returns 200 with a success payload carrying a `generated: Schema.Boolean` flag and a **closed union** reason. Reference: `packages/domain/src/api/AiChatApi.ts` — `ChatResponse { answer, generated, degradedReason, references }` with `DegradedReason = Schema.Literals([...])`.
+
+Rules:
+
+1. **`generated: false` and a `Some(reason)` are set together, always.** `degradedReason` is `Schema.OptionFromNullOr(DegradedReason)` and is present exactly when `generated === false`.
+2. **The reason is a closed `Schema.Literals` union of `snake_case` machine literals** — never free text, never an i18n key, and never a sentinel embedded in the human-facing field (`answer` is `''` on every degraded response). The client maps the literal through an explicit `Record` (see `applications/web/AGENTS.md` → "Closed-Union Copy Comes From An Explicit `Record`, Never A Computed Key").
+3. **Adding a literal to the union is a three-file change in one PR**: the union here, the client's label `Record`, and the `en`/`cs` message keys. A literal the client cannot render prints nothing to the user.
+4. **Reserve error tags for caller faults only.** On this contract that is `AiChatForbidden` (403, non-member) and `AiChatRateLimited` (429, payload `{ retryAfterSeconds: Schema.Int }`). Provider failures, defects and exhausted budgets are `degradedReason` values, not tags.
+
+### Model-Cited Entities Ship As A Typed `EntityRef` Union, Never As Model-Authored Facts
+
+When an LLM-backed response points at application entities, the wire carries a discriminated union of **server-built** view-model variants (`AiChatApi.EntityRef`, discriminated on `kind`, precedent `TeamGenerationApi.GenerationWarning`) plus an opaque per-turn `ref` token the prose cites. The model chooses *which* entity is shown; it never authors the fields.
+
+Rules:
+
+1. **Each variant reuses the entity's existing list schema** (`EventApi.EventInfo`, `GroupApi.GroupInfo`, `Roster.RosterInfo`, `TrainingTypeApi.TrainingTypeInfo`) so the assistant card and the entity's own list page cannot drift. Define a bespoke allow-listed projection **only** when the existing schema carries PII the surface must not ship — the `member` variant is the one such case (`Roster.RosterPlayer` carries `discordId`, `userId`, `username`, `birthDate`, `gender`, `permissions`).
+2. **`RefToken` is an opaque fixed-length random token (4 chars), not an index and not orderable.** An index-based marker survives into client-sent history and re-resolves against the *next* turn's `references` array, linking to the wrong entity with no adversary involved. The token is valid only for the turn that minted it.
+3. **Discriminate on `kind` with `Schema.Literal`, not `_tag`** — these are view-model variants, not tagged errors.
+
 ## RPC Folder Import Rule
 
 Files under `src/rpc/**` must import models from their concrete paths (e.g. `import * as Discord from '~/models/Discord.js'`), **not** via the barrel `~/index.js`. The barrel re-exports both `models/*` and `rpc/*`, and rpc files transitively pulled in through the barrel before their model dependencies finish initialising — at runtime this surfaces as `Cannot read properties of undefined (reading 'ast')` when a `Schema.TaggedClass` or `RpcGroup.make` references e.g. `Team.TeamId`. Always import models directly inside `src/rpc/**`.

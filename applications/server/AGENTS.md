@@ -494,7 +494,8 @@ Rules:
 2. **Every `success: Schema.Array(SomeDomainClass)` RPC needs an encode guard test.** Copy `test/rpc/RulesQuizPendingEventsEncode.test.ts` or `test/rpc/InvitePendingAcceptancesEncode.test.ts`: encode what the handler returns, and assert the **raw row is rejected**. That negative case is the whole point — without it, dropping the mapping makes the test pass again.
 3. **Export the row class** from its repository so the guard can construct one.
 4. **`scripts/check-rpc-encoding.mjs` now enforces this at lint time**, so a third occurrence cannot ship the way the second did. For every contract with `success: SomeDomainClass` — **`Rpc.make` and `HttpApiEndpoint` alike** — it asserts the server constructs one somewhere. **168 contracts today (49 RPC, 119 HTTP), all passing.** Validated twice by breaking a real case: against the commit before the invite fix it flags `[RPC] PendingAcceptances` alone, and removing the explicit `new Auth.DataExport(...)` flags `[HTTP] exportMyData` alone.
-5. **The guard is coarse on purpose and does not replace rule 2.** It checks that the class is built *somewhere* in the server, not that *every* handler for it does. HTTP routes were outside it until the export endpoint exposed the gap — the lesson being that a guard scoped to one contract kind is a guard with a hole. If one handler constructs `CarpoolView` correctly and another passes a row through, the guard stays quiet — the per-RPC encode tests are the finer net.
+5. **`Schema.Union` member selection is nominal too — a plain object that matches every field of a variant still fails to construct.** Building `new AiChatApi.ChatResponse({ references: [{ kind: 'event', ref: 'ab12', event: { ...plain fields } }] })` throws: the `event` variant's `event` field is `EventApi.EventInfo`, a `Schema.Class`, and union member selection checks nominal instance membership, not structural shape. **Test fixtures for union-typed wire responses MUST construct the real class** (`new EventApi.EventInfo({ ... })`). This cost two separate agents debugging time; references: `test/api/ai-chat.test.ts:1017`, `applications/web/test/AssistantConversation.test.tsx:198`.
+6. **The guard is coarse on purpose and does not replace rule 2.** It checks that the class is built *somewhere* in the server, not that *every* handler for it does. HTTP routes were outside it until the export endpoint exposed the gap — the lesson being that a guard scoped to one contract kind is a guard with a hole. If one handler constructs `CarpoolView` correctly and another passes a row through, the guard stays quiet — the per-RPC encode tests are the finer net.
 
 ### Outbox Failure Modes: Two-RPC Classification vs `attempts`-Counted Retry
 
@@ -2017,13 +2018,13 @@ Tests go in `test/` directory. When adding new repositories, add corresponding m
 
 Every test file that provides `ApiLive` (directly or transitively) MUST provide a layer for **every** service that any `HttpApiBuilder.group(...)` registered in `ApiLive` depends on — even services the test does not exercise. This covers both **repositories** (provide a `Mock<Repo>Layer`) and **non-repository services** (provide the service's own `.Default`, or a `Layer.succeed(Service, fake)` when the test needs to control its value). Adding a new group — or adding a new service dependency to an existing group's handler — without updating every existing `ApiLive`-providing test produces a missing-service runtime error at layer construction, not a compile error.
 
-> **Footgun (recurring):** wiring a new `ServiceMap.Service` into `ApiLive` (e.g. `GlobalAdminAllowlist` added one `Layer.provide(GlobalAdminAllowlist.Default)` to `AppLive.ts`) silently breaks **every** `ApiLive`-providing test suite at once — the `feat/manage-global-admins` change had to add `.pipe(Layer.provide(GlobalAdminAllowlist.Default))` to 34 test files. After adding any `Layer.provide(<NewService>.Default)` to `AppLive.ts` or `api/index.ts`, grep `Layer.provide(ApiLive)` / `Layer.provideMerge(ApiLive)` and the existing test layer composition (`Layer.provide(BotInfoStore.Default)` is a reliable anchor) and append the new provide to every match in the same PR.
+> **Footgun (recurring):** wiring a new `ServiceMap.Service` into `ApiLive` (e.g. `GlobalAdminAllowlist` added one `Layer.provide(GlobalAdminAllowlist.Default)` to `AppLive.ts`) silently breaks **every** `ApiLive`-providing test suite at once — the `feat/manage-global-admins` change had to add `.pipe(Layer.provide(GlobalAdminAllowlist.Default))` to 34 test files. After adding any `Layer.provide(<NewService>.Default)` to `AppLive.ts` or `api/index.ts`, run **`grep -rl ApiLive applications/server/test`** and append the new provide to every file it lists, in the same PR. Use that command, not `grep 'Layer.provide(ApiLive)'` / `grep 'Layer.provideMerge(ApiLive)'` — those two patterns return **zero** matches in this tree (the test files compose `ApiLive` through helpers and multi-line pipes), and trusting them has already cost time twice. The AI-assistant branch added `AiChatEnabledConfig`, `ChatRateLimiter` and `ChatAgent` to `AppLive.ts` and had to touch 43 test files as a result.
 
 Reference: `applications/server/test/mocks/weeklyChallengeMocks.ts` is the canonical noop-mock shape. Every method returns the type's safe empty value (`Effect.succeed(Option.none())`, `Effect.succeed([])`, `Effect.void`); methods whose success type is non-trivial (e.g. `create` returning a domain model) return `Effect.die(new Error('Mock<X>.create not implemented'))` so a test that accidentally exercises an unimplemented path fails loudly instead of returning a partially-constructed value.
 
 Rules:
 
-1. **When adding a new `HttpApiBuilder.group(...)` and wiring it into `ApiLive`,** create `test/mocks/<feature>Mocks.ts` exporting a `Mock<Repo>Layer` in the same PR, and add it to every test file that currently provides `ApiLive`. Grep `Layer.provideMerge(ApiLive)` and `Layer.provide(ApiLive)` to find the full call-site list.
+1. **When adding a new `HttpApiBuilder.group(...)` and wiring it into `ApiLive`,** create `test/mocks/<feature>Mocks.ts` exporting a `Mock<Repo>Layer` in the same PR, and add it to every test file that currently provides `ApiLive`. Find the full call-site list with `grep -rl ApiLive applications/server/test`. Reference: `test/mocks/aiChatMocks.ts` (added with the AI-assistant group).
 2. **Noop mocks use `Effect.succeed(<empty>)` for read methods and `Effect.die(...)` for non-trivial writes** (any method whose success type is a domain model, not `void`). Read methods that return `Option` succeed with `Option.none()`; read methods that return `ReadonlyArray` succeed with `[]`; void-returning writes succeed with `Effect.void`.
 3. **Cast the mock object with `as never`** (matching the existing files) — the repository's `ServiceMap.Service` tag carries a private brand that cannot be reconstructed in test code.
 4. **Mock objects must build the canonical domain model via its constructor, not as a plain camelCase literal.** `new WeeklyChallenge.WeeklyChallengeView({ challenge: new WeeklyChallenge.WeeklyChallenge({ ... }), completedMemberIds: [], isActive: false })` — NOT `{ challenge: { id: '...', weekStartDate: '...' }, ... }`. The HTTP handler encodes the response through the schema; a string-shaped literal fails encoding and tempts a "fix" that bypasses schema encoding entirely. Build mocks via the same constructors the production code uses.
@@ -2070,6 +2071,86 @@ Any free-text or user/player-derived value placed into a prompt is **untrusted**
 ### Seed-Only Guarded Upsert (`PlayerRatingsRepository.seedRating`)
 
 Setting an initial rating for an as-yet-unrated player is a **guarded upsert** that must never overwrite a rating earned through games: `INSERT … ON CONFLICT (team_id, team_member_id) DO UPDATE SET rating = EXCLUDED.rating WHERE player_ratings.games_played = 0`. It returns `Option<Row>` — `Option.none()` when the conflicting row already has `games_played > 0` (the `WHERE` blocked the update), which the `applySeedRating` handler maps to `SeedNotAllowed` (HTTP 409). A seed writes **no `player_rating_history` row** (it is not a game delta) and leaves `games_played`/`wins`/`losses`/`draws` at `0`, so the first calibration games (K=40) correct the estimate. Regression coverage: `test/integration/repositories/PlayerRatingsRepository.test.ts`.
+
+## Read-Only AI Assistant: `LlmClient` Transport vs `ChatAgent` Loop
+
+The in-app assistant (`GET/POST /teams/:teamId/ai/*`) is split across exactly three layers. Keep the split — each layer has a dependency rule that makes it testable in isolation.
+
+| Module | Owns | MUST NOT own |
+|--------|------|--------------|
+| `src/services/LlmClient.ts` | The config-gated transport: `chatWithTools(input): Effect<ChatWithToolsResult, LlmError>` (exactly ONE provider round-trip per call), the OpenAI-compatible wire encoding (`encodeChatMessage`), and the `configured: boolean` flag. | Iteration, tool dispatch, budgets, permissions, reference tokens, degradation. It imports nothing from `~/api/`, `~/repositories/` or `~/services/ai/`. |
+| `src/services/ChatAgent.ts` | The agent loop: iteration, tool dispatch (`executeTool`), per-turn budgets, reference-token minting, history seeding/truncation, and every `degradedReason`. | The HTTP wire shape, the kill switch, rate limiting. |
+| `src/api/ai-chat.ts` | Authorization, kill switch, rate limiting, `ToolContext` construction, `ChatAgentResult` → `AiChatApi.ChatResponse`. | Anything the model sees. |
+
+`src/services/ai/` holds the model-facing pieces both of the first two consume and neither owns: `registry.ts` (the `ALL_TOOLS` catalogue + `visibleTools`), `readTools.ts` (the executors), `jsonSchema.ts` (derived parameter schemas), `refTokens.ts` (token minting), `toolTypes.ts` (`ToolContext`, `ToolExecutionResult`, `makeCanSeeGroup`), `systemPrompt.ts`, `currentDatetime.ts`. Nothing in that folder may call the provider.
+
+Rules:
+
+1. **`LlmClient.configured` is the only honest source for "is an LLM configured."** It is `false` in `makeStub()` and `true` in `makeReal(...)`. Never re-derive it by re-reading `LLM_API_URL` at a call site.
+2. **`makeStub().chatWithTools` returns `STUB_UNAVAILABLE_MARKER` as its content, never a user-facing string.** `ChatAgent`'s `finish` recognises the sentinel and converts it to `degradedReason: 'not_configured'`. The marker must never leave the server.
+3. **`makeReal` executes against the INJECTED `httpClient`** passed into it — never `Effect.provide(FetchHttpClient.layer)` inline. An inline provide makes a mock `HttpClient` impossible to inject and was a real bug fixed on this path.
+4. **`chatWithTools` decodes the provider response through its own `ChatCompletionResponse` schema**, kept separate from `OpenAiResponseSchema` (used by `requestContent`). Never merge tool-call fields into `OpenAiResponseSchema`. Every field of an inbound provider response is `Schema.OptionFromOptionalNullOr` — a gateway that omits `content` entirely must still decode.
+5. **New read tools are registered in `src/services/ai/registry.ts` (`ALL_TOOLS`) and dispatched in `ChatAgent.ts`'s `executeTool` switch, in the same PR.** `executeTool` resolves the call name against the FULL `ALL_TOOLS` catalogue, not against this turn's filtered `tools` array.
+6. **Every executor's effect is `Effect<ToolExecutionResult>` — `E = never`.** Permission and not-found outcomes are encoded as data (`forbiddenResult(permission)` / `notFoundResult`), never raised.
+
+### The Agent Loop Is `Effect.suspend` Self-Recursion
+
+`ChatAgent.ts`'s `step(deps, ctx, state)` is a self-recursive `Effect.suspend` over an explicit `LoopState` record, bounded by `MAX_TOOL_ITERATIONS`. Do NOT try to replace it with a library loop combinator:
+
+- **`Effect.iterate` and `Effect.loop` do not exist** in `effect@4.0.0-beta.40`.
+- **`Effect.whileLoop` returns `Effect<void>`** (`node_modules/effect/dist/Effect.d.ts:1249`) and threads state only through a mutable closure variable — it cannot carry an accumulator, so it cannot express this loop.
+
+`flatMap` trampolines, so the recursion is stack-safe. This cost real time to rediscover twice; write a self-recursive `Effect.suspend` for any stateful bounded loop in this repo and move on.
+
+### Deriving Tool Parameter JSON Schemas (`services/ai/jsonSchema.ts`)
+
+A tool's `parameters` JSON Schema is **derived** from the Effect schema the executor decodes its arguments with — never hand-written. `registry.ts`'s `define(...)` calls `toToolParameters(schema)` eagerly, so the advertised schema and the accepted schema cannot drift.
+
+Rules:
+
+1. **`Schema.toJsonSchemaDocument(schema, { additionalProperties: false })`** — the option is `additionalProperties` (`boolean | JsonSchema`). There is no `additionalPropertiesStrategy` option on `ToJsonSchemaOptions`; passing one is silently ignored.
+2. **Never use `Schema.Number` in a tool parameter schema.** It emits a 4-branch `anyOf` that includes `"NaN"`/`"Infinity"` string enums, which no model reads correctly. Use `Schema.Int` (with `Schema.isBetween(...)`) or `Schema.Finite`.
+3. **A zero-parameter tool still needs a post-processor.** `Schema.Struct({})` at the document root emits `{"anyOf":[{"type":"object"},{"type":"array"}]}`; `toToolParameters` collapses it to `{ type: 'object', properties: {} }`. Do not special-case this at a call site.
+4. **Tool parameter schemas must be flat.** `toToolParameters` throws when the document carries `$ref`/`definitions` — no `Schema.suspend`, no shared or recursive schemas in tool parameters.
+5. **No tool parameter may carry `teamId`.** The team, the caller's permissions and the team's timezone come from `ToolContext`, resolved before the model is called. The JSON Schema's `additionalProperties: false` is a provider-facing HINT only; what actually drops a model-supplied `teamId` is `Schema.Struct` decoding in `ChatAgent.ts`'s `decodeAndRun`.
+
+### Two-Layer Permission Enforcement For AI Tools
+
+Every permission-gated tool is checked **twice**, and the two checks have different jobs:
+
+| Layer | Where | Purpose |
+|-------|-------|---------|
+| Advertise-time filter | `visibleTools(ctx)` (`services/ai/registry.ts`) | UX only — the model never learns a tool it cannot use exists. |
+| Execute-time re-check | `hasPermission(ctx.membership, '<perm>')` at the top of each executor in `services/ai/readTools.ts`, returning `forbiddenResult('<perm>')` | **The actual security boundary.** |
+
+Rules:
+
+1. **Never treat `visibleTools` as the boundary.** The PROVIDER — not a client — can emit a call for a name outside this turn's filtered array, or outside `ALL_TOOLS` entirely.
+2. **A tool's gate MUST be the same permission as the equivalent HTTP endpoint's gate.** `list_groups` shipped membership-gated while `GET /teams/:teamId/groups` requires `group:manage` — a real data leak caught in development. When adding a tool, open the endpoint it mirrors and copy the `requirePermission` argument verbatim.
+3. **A foreign id, or an id inside a group the caller cannot see, returns `notFoundResult`, never `forbiddenResult`** — `forbidden` would confirm the row exists.
+
+### Opaque Per-Turn Reference Tokens
+
+An answer cites an entity with a `[[ref:<token>]]` marker resolved against that turn's `references` array. `services/ai/refTokens.ts#mintToken` is the ONLY place a token that ships is minted; `ChatAgent.ts` re-mints every row into a fresh `used` set per turn.
+
+Rules:
+
+1. **A reference token MUST be opaque and random — never positional, never an index.** An index-based marker survives into the client-sent history and re-resolves against the NEXT turn's `references` array, linking to the wrong entity with no adversary involved.
+2. **The server and client marker grammars must agree exactly**: `/\[\[ref:([a-z0-9]{4})\]\]/` in `ChatAgent.ts` and in `applications/web/src/lib/assistant/parseAnswer.ts`. Changing one without the other silently renders markers as literal text.
+3. **Dedup by `entityKeyOf(ref)` (`"kind:id"`), never by the token** — the token is regenerated every turn, so it can never be the dedup key.
+4. **Strip every marker from inbound `role: 'assistant'` history before seeding the prompt** (`stripAllMarkers`), and strip unknown markers from the outbound answer (`stripUnknownMarkers`). A token from an earlier turn must never reach the model as an in-context example.
+
+### Config-Gated Degradation: 200 With `generated: false`
+
+Every AI path returns HTTP 200 with `generated: false` and a typed `degradedReason` from the closed union in `packages/domain/src/api/AiChatApi.ts` — never a 500, never a sentinel string inside `answer`.
+
+Rules:
+
+1. **`answer` never carries an i18n key or an error sentinel.** Degraded responses set `answer: ''` and put the machine-readable reason in `degradedReason`; the client resolves the copy (see `applications/web/AGENTS.md` → "Closed-Union Copy Comes From An Explicit `Record`, Never A Computed Key").
+2. **Adding a `DegradedReason` literal is a three-file change in one PR**: the union in `AiChatApi.ts`, `degradedReasonLabels` in `applications/web/src/lib/assistant/entityRoutes.ts`, and the `assistant_degraded_*` keys in `packages/i18n/messages/{en,cs}.json`. A literal the client cannot render prints nothing to the user.
+3. **`respond` wraps its whole body in `Effect.catchCause` to EARN `E = never`.** `Effect.catchTag('LlmError', …)` inside `step` does not catch defects (a throwing `JSON.stringify`, a `RangeError` from `Intl`, a synchronous throw in a repository call), and a defect on this path would be a 500 on a surface whose entire error contract is "two tags, no 500". Re-raise a cause that is interruption-only (`Cause.hasInterruptsOnly`) with `Effect.failCause(cause)` instead of degrading it — a client disconnect must stay cancelled.
+4. **The kill switch and "no LLM configured" both short-circuit BEFORE the rate limiter.** Handler ordering in `src/api/ai-chat.ts` is fixed and directly tested: membership → `aiChatEnabled && llm.configured` → `ChatRateLimiter.check` → `ChatAgent.respond`. Neither condition alone may spend a caller's rate-limit budget.
+5. **`ChatRateLimiter` is per-replica and in-memory by design** (`src/services/ChatRateLimiter.ts`, 20 turns / 10 min and 120 / day per `Auth.UserId`). The real cost bound is per-request (`MAX_TOOL_ITERATIONS`, `max_tokens`). Document any limit change in `docs/deployment.md`'s `AI_CHAT_ENABLED` row too.
 
 ## Injectable Env-Derived Config Service (Testable Allowlist)
 

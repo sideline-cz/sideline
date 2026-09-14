@@ -167,6 +167,34 @@ Typed errors automatically merge into unions. Handle specific errors with `Effec
 
 6. **`Effect.catchAllCause` does NOT exist** in the Effect 4 beta used by this repo. To handle a `Cause` (both typed failures and defects) — typically for "log everything, swallow, don't break the caller" — use `Effect.catchCause((cause) => Effect.logWarning('Context', cause))`. This is the correct pattern for **best-effort side effects** that must never fail their caller (e.g. firing achievement evaluation from an activity-log handler, emitting sync events alongside a primary write). Always log the `cause` before swallowing — never `Effect.catchCause(() => Effect.void)`.
 
+7. **Only `Effect.catchCause` EARNS an `E = never` signature — `Effect.catchTag` does not catch defects.** When a function's declared type is `Effect.Effect<A>` (no error channel) because its caller's contract forbids a 500, `catchTag`/`catch` on the known typed failures is not enough: a throwing `JSON.stringify`, a `RangeError` from `Intl`, or a synchronous throw inside a dependency still escapes as a defect. Wrap the whole body in `Effect.catchCause` and **re-raise an interruption-only cause** instead of degrading it, so a client disconnect stays cancelled:
+   ```typescript
+   Effect.catchCause((cause) =>
+     Cause.hasInterruptsOnly(cause)
+       ? Effect.failCause(cause)
+       : Effect.logError('Context').pipe(
+           Effect.annotateLogs({ cause: Cause.pretty(cause) }),
+           Effect.as(fallbackValue),
+         ),
+   )
+   ```
+   Reference: `ChatAgent.respond` (`applications/server/src/services/ChatAgent.ts`).
+
+### Stateful Loops — `Effect.suspend` Self-Recursion
+
+**`Effect.iterate` and `Effect.loop` do not exist** in `effect@4.0.0-beta.40`, and **`Effect.whileLoop` returns `Effect<void>`** (`node_modules/effect/dist/Effect.d.ts:1249`) — it threads state only through a mutable closure variable, so it cannot carry an accumulator. Write a bounded loop that carries state as a self-recursive `Effect.suspend` over an explicit state record:
+
+```typescript
+const step = (state: LoopState): Effect.Effect<Result> =>
+  Effect.suspend(() =>
+    state.iteration >= MAX_ITERATIONS
+      ? Effect.succeed(fallback(state))
+      : doWork(state).pipe(Effect.flatMap((next) => step(next))),
+  );
+```
+
+`flatMap` trampolines, so this is stack-safe. Reference: `ChatAgent.ts`'s tool-calling loop (`applications/server/src/services/ChatAgent.ts`). Verify the combinator exists in `node_modules/effect/dist/Effect.d.ts` before reaching for it — this one has been rediscovered the hard way twice.
+
 ### Resource Management
 
 Use `Effect.acquireRelease` for automatic resource cleanup.
@@ -743,6 +771,8 @@ The `docs/thesis/` directory contains Mermaid diagrams and documentation for the
 | `competitive-analysis.md` | Adding major new features that change Sideline's competitive positioning |
 
 ---
+
+**Last Updated**: 2026-09-14 (Read-only in-app AI assistant `feat/ai-app-interaction`. domain: new `AiChatApi` contract (`GET/POST /teams/:teamId/ai/*`). root AGENTS.md → Effect-TS Patterns: new "Stateful Loops — `Effect.suspend` Self-Recursion" (`Effect.iterate`/`Effect.loop` do not exist in `effect@4.0.0-beta.40`, and `Effect.whileLoop` returns `Effect<void>` and cannot carry an accumulator — `node_modules/effect/dist/Effect.d.ts:1249`); Error Handling rule 7 — only `Effect.catchCause` EARNS an `E = never` signature (`catchTag` does not catch defects), re-raise an interruption-only cause with `Effect.failCause`. server AGENTS.md: new "Read-Only AI Assistant: `LlmClient` Transport vs `ChatAgent` Loop" — `LlmClient` is the config-gated transport (`chatWithTools`, `configured`, no app imports), `ChatAgent` owns iteration/dispatch/budgets/tokens/degradation, `src/api/ai-chat.ts` owns authz/kill-switch/rate-limit — plus subsections on the `Effect.suspend` loop, deriving tool parameter JSON Schemas (`Schema.toJsonSchemaDocument(schema, { additionalProperties: false })`, `Schema.Number` banned, empty-`Struct` `anyOf` collapse), two-layer permission enforcement (`visibleTools` is UX, each executor re-check is the boundary; a tool's gate must match the equivalent HTTP endpoint's gate), opaque per-turn reference tokens (never positional), and config-gated degradation (200 + `generated: false` + closed `degradedReason`). server AGENTS.md fixes: "HttpApi Mock-Layer Cascade" now says `grep -rl ApiLive applications/server/test` (the previously documented `Layer.provide(ApiLive)` / `Layer.provideMerge(ApiLive)` greps return zero matches); "`Schema.Class` Is Nominal" gained rule 5 — `Schema.Union` member selection is nominal too, so union-typed test fixtures must construct the real class. domain AGENTS.md: new "Degradable Endpoints: 200 + `generated: false` + A Closed `Reason` Union" and "Model-Cited Entities Ship As A Typed `EntityRef` Union". web AGENTS.md fixes/additions: the Forms section mandated `effectTsResolver`, which has ZERO usages in this repo — corrected to `standardSchemaResolver(Schema.toStandardSchemaV1(...))`, the convention at all 22 real call sites; new "Closed-Union Copy Comes From An Explicit `Record`, Never A Computed Key" and "AI Assistant Client Rules — `src/lib/assistant/`".)
 
 **Last Updated**: 2026-09-13 (Group-inherited role linking `fix/role-linking`. server AGENTS.md: new SQL-pattern section "Effective Roles Are Derived In Exactly One Place (`effectiveRoles.ts`)" — `member_roles` ∪ (`group_members` → recursive `groups.parent_id` ancestor walk → `role_groups`) now lives in one `sql.unsafe`-spliced fragment (`effectiveRolesFrom` / `effectiveRoleNamesAgg` / `effectivePermissionsAgg` / `effectiveRolesAggLateral`), following the `eventVisibility.ts` precedent; covers the `JOIN LATERAL ... ON true` requirement for a correlated derived table, the one-materialization lateral over N scalar subqueries, the deliberate "archiving a group severs inheritance" semantics (filter inside the RECURSIVE TERM, so it agrees with `findDescendantMembersWithDiscordIdByGroupId`), and the `string_agg(DISTINCT x ORDER BY y)` constraint. New section "Recursive `groups.parent_id` Walks Must Carry a `depth < 32` Guard" (no DB acyclicity constraint + TOCTOU `moveGroup` check = constructible cycle) listing which walks are guarded today. "Does member hold permission X" section rewritten to mandate the shared fragment instead of a hand-copied direct+group `EXISTS` pair. New section "Authorization Decisions Must Read a Membership Query, Never a Roster DTO" (the last-admin guard read `permissions` off a group-blind display DTO and silently skipped). Sync Event Pattern gained rules 4 and 5: never emit for a delete that changed nothing the bot mirrors (`unassignRole` re-checks effective roles post-delete), and a post-write re-check must `Effect.catchDefect` so it can't fail the committed write. "Cross-Tenant Resource Lookups" rule 6: payload-referenced ids need the same team check as path ids, with their own `<Resource>NotFound` tag (`GroupApi.RoleNotFound`). web AGENTS.md: new "Interactive Triggers: `Badge` Is a `<span>`, Tooltips Do Not Open On Touch" under Shadcn Components; new "Effective Roles In The UI — `src/lib/roles/`" (`resolveEffectiveRoles` + `sortEffectiveRoles`, inherited roles get a forward-to-group link instead of a remove control, assign-select filtered by `roleId`); `src/lib/` table row for `src/lib/roles/`; Pure-Helpers rule 2 now permits `getLocale()` solely for `Intl`/`localeCompare`; testing section notes the `window.matchMedia` polyfill in `test/setup.ts`.)
 

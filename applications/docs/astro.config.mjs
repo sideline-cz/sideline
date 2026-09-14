@@ -92,6 +92,10 @@ export default defineConfig({
               label: 'Weekly challenges',
               slug: 'guides/weekly-challenges',
             },
+            {
+              label: 'AI assistant',
+              slug: 'guides/ai-assistant',
+            },
           ],
         },
         {
