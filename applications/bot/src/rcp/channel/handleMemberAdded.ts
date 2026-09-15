@@ -1,6 +1,8 @@
 import type { ChannelRpcEvents } from '@sideline/domain';
 import { DiscordREST } from 'dfx';
 import { Effect, Option } from 'effect';
+import { clearStaleRoleOnUnknownRole } from '~/rcp/channel/channelUtils.js';
+import { isPermanentError } from '~/rcp/channel/ProcessorService.js';
 import { createRoleForChannel } from '~/rest/channels/createRoleForChannel.js';
 import { createRoleOnly } from '~/rest/channels/createRoleOnly.js';
 import { retryPolicy } from '~/rest/utils.js';
@@ -65,9 +67,10 @@ export const handleMemberAdded = (event: ChannelRpcEvents.GroupMemberAddedEvent)
       }),
     ),
     Effect.tap(({ rest, roleId }) =>
-      rest
-        .addGuildMemberRole(event.guild_id, event.discord_user_id, roleId)
-        .pipe(Effect.retry(retryPolicy)),
+      rest.addGuildMemberRole(event.guild_id, event.discord_user_id, roleId).pipe(
+        Effect.retry({ schedule: retryPolicy, while: (e) => !isPermanentError(e) }),
+        Effect.tapError((error) => clearStaleRoleOnUnknownRole(event, error)),
+      ),
     ),
     Effect.tap(({ roleId }) =>
       Effect.logInfo(

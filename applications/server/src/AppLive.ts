@@ -111,7 +111,10 @@ const RpcLive = RpcServer.layer(ObservableSyncRpcs).pipe(
   Layer.provide(RpcSerialization.layerNdjson),
 );
 
-const Repositories = Layer.mergeAll(
+// Exported (only `SqlClient.SqlClient` required) so operator CLI scripts under
+// `src/scripts/` — e.g. `backfillGroupRoleMembersCli.ts` — can provide the full
+// repository surface without re-wiring it by hand.
+export const Repositories = Layer.mergeAll(
   UsersRepository.Default,
   SessionsRepository.Default,
   TeamsRepository.Default,

@@ -32,8 +32,10 @@ const TEAM_ID = '00000000-0000-0000-0001-000000000010' as Team.TeamId;
 const GROUP_ID = '00000000-0000-0000-0001-000000000100' as GroupModel.GroupId;
 const MEMBER_ID_A = '00000000-0000-0000-0002-000000000001' as TeamMember.TeamMemberId;
 const MEMBER_ID_B = '00000000-0000-0000-0002-000000000002' as TeamMember.TeamMemberId;
+const MEMBER_ID_C = '00000000-0000-0000-0002-000000000003' as TeamMember.TeamMemberId;
 const DISCORD_USER_A = '111111111111111111' as Discord.Snowflake;
 const DISCORD_USER_B = '222222222222222222' as Discord.Snowflake;
+const DISCORD_USER_C = '333333333333333333' as Discord.Snowflake;
 const EXISTING_ROLE_ID = '555555555555555555' as Discord.Snowflake;
 const EXISTING_CHANNEL_ID = '666666666666666666' as Discord.Snowflake;
 const NEW_ROLE_ID = '777777777777777777' as Discord.Snowflake;
@@ -170,6 +172,7 @@ type RpcCallRecord = {
   UpsertMappingRoleOnly: unknown[];
   UpsertGroupChannel: unknown[];
   GetGroupMembers: unknown[];
+  ClearMappingRole: unknown[];
 };
 
 const makeRpc = (
@@ -185,6 +188,7 @@ const makeRpc = (
     UpsertMappingRoleOnly: [],
     UpsertGroupChannel: [],
     GetGroupMembers: [],
+    ClearMappingRole: [],
   };
 
   const members = opts.groupMembers ?? [];
@@ -209,6 +213,10 @@ const makeRpc = (
     'Channel/GetGroupMembers': (args: any) => {
       calls.GetGroupMembers.push(args);
       return Effect.succeed(members);
+    },
+    'Channel/ClearMappingRole': (args: any) => {
+      calls.ClearMappingRole.push(args);
+      return Effect.void;
     },
     'Channel/MarkEventProcessed': () => Effect.void,
     'Guild/UpsertChannel': () => Effect.void,
@@ -250,6 +258,12 @@ const runHandleCreated = (
 const TWO_MEMBERS: GroupMemberLike[] = [
   { team_member_id: MEMBER_ID_A, discord_user_id: DISCORD_USER_A },
   { team_member_id: MEMBER_ID_B, discord_user_id: DISCORD_USER_B },
+];
+
+const THREE_MEMBERS: GroupMemberLike[] = [
+  { team_member_id: MEMBER_ID_A, discord_user_id: DISCORD_USER_A },
+  { team_member_id: MEMBER_ID_B, discord_user_id: DISCORD_USER_B },
+  { team_member_id: MEMBER_ID_C, discord_user_id: DISCORD_USER_C },
 ];
 
 // ---------------------------------------------------------------------------
@@ -667,5 +681,373 @@ describe('handleCreated — Task 2: member backfill after role resolution', () =
     expect(restCalls.createGuildRole).toHaveLength(1);
     // Mapping still upserted
     expect(rpcCalls.UpsertMappingRoleOnly).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — §3.4 / §5.5 (BT1-BT3, BT5, BT6): Discord-10011 stale-role healing
+//
+// Mirrors the role-axis precedent in
+// `applications/bot/test/rcp/role/handleAssigned.test.ts` ("dangling mapping
+// cleanup on Discord's Unknown Role 10011"). Without these, the `tapError` in
+// `handleCreated.ts`'s per-member pipe ships as code that can never fire — every
+// server-side (§5.1-5.4) test would still pass, because `isUnknownRoleError` reads
+// the RAW error, not the `Cause` that `Exit.match`'s `onFailure` receives.
+// ---------------------------------------------------------------------------
+
+describe('handleCreated — §3.4: Discord-10011 stale-role healing (BT1-BT3, BT5, BT6)', () => {
+  const ONE_MEMBER: GroupMemberLike[] = [
+    { team_member_id: MEMBER_ID_A, discord_user_id: DISCORD_USER_A },
+  ];
+
+  it('BT1: addGuildMemberRole fails with 10011 (Unknown Role) → exactly one Channel/ClearMappingRole with the event team_id/group_id, and the event still completes', async () => {
+    const existingMapping: ChannelMappingLike = {
+      discord_channel_id: Option.none(),
+      discord_role_id: Option.some(EXISTING_ROLE_ID),
+    };
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc({
+      mappingForGroup: Option.some(existingMapping),
+      groupMembers: ONE_MEMBER,
+    });
+    const { layer: restLayer } = makeRest({
+      addGuildMemberRole: () => Effect.fail(makeErrorResponse(404, 10011)),
+    });
+
+    // Must resolve, not throw — the Exit.match swallow inside the per-member pipe is
+    // unchanged by the new tapError.
+    const result = await runHandleCreated(makeRoleOnlyCreatedEvent(), rpcLayer, restLayer);
+    expect(result).toBeUndefined();
+
+    expect(rpcCalls.ClearMappingRole).toHaveLength(1);
+    expect(rpcCalls.ClearMappingRole[0]).toMatchObject({
+      team_id: TEAM_ID,
+      group_id: GROUP_ID,
+    });
+  });
+
+  it('BT2: addGuildMemberRole fails with 10007 (Unknown Member — the member left) → zero Channel/ClearMappingRole; failure still swallowed and logged', async () => {
+    const existingMapping: ChannelMappingLike = {
+      discord_channel_id: Option.none(),
+      discord_role_id: Option.some(EXISTING_ROLE_ID),
+    };
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc({
+      mappingForGroup: Option.some(existingMapping),
+      groupMembers: ONE_MEMBER,
+    });
+    const { layer: restLayer } = makeRest({
+      addGuildMemberRole: () => Effect.fail(makeErrorResponse(404, 10007)),
+    });
+    const { messages, level: logLevels, layer: logLayer } = makeLogCapture();
+
+    const result = await runHandleCreated(
+      makeRoleOnlyCreatedEvent(),
+      rpcLayer,
+      restLayer,
+      logLayer,
+    );
+    expect(result).toBeUndefined();
+
+    // A departed member (10007) must never clear a live team-wide mapping.
+    expect(rpcCalls.ClearMappingRole).toHaveLength(0);
+
+    const warnCount = logLevels.filter((l) => l.toUpperCase().includes('WARN')).length;
+    expect(warnCount).toBeGreaterThan(0);
+    expect(messages.some((m) => m.includes('Failed to add role'))).toBe(true);
+  });
+
+  it('BT3: all grants succeed → zero Channel/ClearMappingRole', async () => {
+    const existingMapping: ChannelMappingLike = {
+      discord_channel_id: Option.none(),
+      discord_role_id: Option.some(EXISTING_ROLE_ID),
+    };
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc({
+      mappingForGroup: Option.some(existingMapping),
+      groupMembers: TWO_MEMBERS,
+    });
+    const { layer: restLayer } = makeRest();
+
+    await runHandleCreated(makeRoleOnlyCreatedEvent(), rpcLayer, restLayer);
+
+    expect(rpcCalls.ClearMappingRole).toHaveLength(0);
+  });
+
+  it('BT5: 10011 is a permanent error → addGuildMemberRole is called exactly once, not retried', async () => {
+    const existingMapping: ChannelMappingLike = {
+      discord_channel_id: Option.none(),
+      discord_role_id: Option.some(EXISTING_ROLE_ID),
+    };
+    const { layer: rpcLayer } = makeRpc({
+      mappingForGroup: Option.some(existingMapping),
+      groupMembers: ONE_MEMBER,
+    });
+    let addRoleCallCount = 0;
+    const { layer: restLayer } = makeRest({
+      addGuildMemberRole: () => {
+        addRoleCallCount++;
+        return Effect.fail(makeErrorResponse(404, 10011));
+      },
+    });
+
+    await runHandleCreated(makeRoleOnlyCreatedEvent(), rpcLayer, restLayer);
+
+    expect(addRoleCallCount).toBe(1);
+  });
+
+  it('BT6: Channel/ClearMappingRole itself fails → the handler outcome is unchanged (the event still completes, cleared best-effort)', async () => {
+    const existingMapping: ChannelMappingLike = {
+      discord_channel_id: Option.none(),
+      discord_role_id: Option.some(EXISTING_ROLE_ID),
+    };
+    const clearMappingRoleCalls: unknown[] = [];
+    const { layer: rpcLayer } = makeRpc(
+      {
+        mappingForGroup: Option.some(existingMapping),
+        groupMembers: ONE_MEMBER,
+      },
+      {
+        'Channel/ClearMappingRole': (args: any) => {
+          clearMappingRoleCalls.push(args);
+          return Effect.fail(new Error('RPC unavailable'));
+        },
+      },
+    );
+    const { layer: restLayer } = makeRest({
+      addGuildMemberRole: () => Effect.fail(makeErrorResponse(404, 10011)),
+    });
+
+    const result = await runHandleCreated(makeRoleOnlyCreatedEvent(), rpcLayer, restLayer);
+
+    // The handler must still complete successfully — the failing RPC error must be
+    // the one swallowed (clearStaleRoleOnUnknownRole's own Effect.catchCause), not
+    // let the original Discord error re-surface differently.
+    expect(result).toBeUndefined();
+    expect(clearMappingRoleCalls).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — Fix A: `roleGone` short-circuits the WHOLE member loop on 10011, not
+// just the failing member. BT1/BT5 above only ever use a single member, so they
+// cannot observe this: with one member there is nothing left to skip, and
+// `Channel/ClearMappingRole` firing "at most once" looks identical to "exactly
+// once, no cap needed" until a second/third member is in the loop.
+// ---------------------------------------------------------------------------
+
+describe('handleCreated — Fix A: 10011 short-circuits the rest of the member loop', () => {
+  it('10011 on the FIRST of three members: addGuildMemberRole called exactly once (members 2 and 3 skipped), Channel/ClearMappingRole exactly once', async () => {
+    const existingMapping: ChannelMappingLike = {
+      discord_channel_id: Option.none(),
+      discord_role_id: Option.some(EXISTING_ROLE_ID),
+    };
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc({
+      mappingForGroup: Option.some(existingMapping),
+      groupMembers: THREE_MEMBERS,
+    });
+    let addRoleCallCount = 0;
+    const addRoleCallArgs: unknown[][] = [];
+    // Overriding `addGuildMemberRole` bypasses `makeRest`'s own `calls` tracking
+    // (the override replaces the default entirely), so this test records args itself.
+    const { layer: restLayer } = makeRest({
+      addGuildMemberRole: (...args: any[]) => {
+        addRoleCallCount++;
+        addRoleCallArgs.push(args);
+        // Only ever called for member A — members B and C must be skipped entirely.
+        return Effect.fail(makeErrorResponse(404, 10011));
+      },
+    });
+
+    const result = await runHandleCreated(makeRoleOnlyCreatedEvent(), rpcLayer, restLayer);
+    expect(result).toBeUndefined();
+
+    // Zero further REST calls for members 2 and 3 — the whole point of the fix.
+    expect(addRoleCallCount).toBe(1);
+    const [, calledUserId] = addRoleCallArgs[0] as [string, string, string];
+    expect(calledUserId).toBe(DISCORD_USER_A);
+
+    // The clear fires at most once per event, not once per failing member.
+    expect(rpcCalls.ClearMappingRole).toHaveLength(1);
+  });
+
+  it('10011 on the SECOND of three members: member 1 attempted and succeeds, member 2 fails with 10011, member 3 is skipped — the flag is not only checked at index 0', async () => {
+    const existingMapping: ChannelMappingLike = {
+      discord_channel_id: Option.none(),
+      discord_role_id: Option.some(EXISTING_ROLE_ID),
+    };
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc({
+      mappingForGroup: Option.some(existingMapping),
+      groupMembers: THREE_MEMBERS,
+    });
+    let addRoleCallCount = 0;
+    const addRoleCallArgs: unknown[][] = [];
+    const { layer: restLayer } = makeRest({
+      addGuildMemberRole: (...args: any[]) => {
+        addRoleCallCount++;
+        addRoleCallArgs.push(args);
+        if (addRoleCallCount === 1) {
+          // Member A succeeds.
+          return Effect.void;
+        }
+        // Member B (the second call) hits the dead role.
+        return Effect.fail(makeErrorResponse(404, 10011));
+      },
+    });
+
+    const result = await runHandleCreated(makeRoleOnlyCreatedEvent(), rpcLayer, restLayer);
+    expect(result).toBeUndefined();
+
+    // Member A (success) + member B (10011) = 2 attempts; member C is skipped.
+    expect(addRoleCallCount).toBe(2);
+    const [, firstUserId] = addRoleCallArgs[0] as [string, string, string];
+    const [, secondUserId] = addRoleCallArgs[1] as [string, string, string];
+    expect(firstUserId).toBe(DISCORD_USER_A);
+    expect(secondUserId).toBe(DISCORD_USER_B);
+
+    // Still capped at exactly one clear for the whole event.
+    expect(rpcCalls.ClearMappingRole).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — Fix B: a single alertable `logError` when EVERY member's grant fails
+// permanently (e.g. 50013 / bot below the role in the hierarchy or missing
+// Manage Roles) — as opposed to N scattered `logWarning`s that nobody sees.
+// ---------------------------------------------------------------------------
+
+describe('handleCreated — Fix B: all-permanent-failures emits one alertable logError', () => {
+  it('(a) all three members fail 50013 permanently → exactly one logError naming the group and guild, and the event still completes', async () => {
+    const existingMapping: ChannelMappingLike = {
+      discord_channel_id: Option.none(),
+      discord_role_id: Option.some(EXISTING_ROLE_ID),
+    };
+    const { layer: rpcLayer } = makeRpc({
+      mappingForGroup: Option.some(existingMapping),
+      groupMembers: THREE_MEMBERS,
+    });
+    let addRoleCallCount = 0;
+    const { layer: restLayer } = makeRest({
+      addGuildMemberRole: () => {
+        addRoleCallCount++;
+        return Effect.fail(makeErrorResponse(403, 50013));
+      },
+    });
+    const { messages, level: logLevels, layer: logLayer } = makeLogCapture();
+
+    const result = await runHandleCreated(
+      makeRoleOnlyCreatedEvent(),
+      rpcLayer,
+      restLayer,
+      logLayer,
+    );
+    expect(result).toBeUndefined();
+
+    // No short-circuit — 50013 is not 10011, so all three members are attempted.
+    expect(addRoleCallCount).toBe(3);
+
+    const errorCount = logLevels.filter((l) => l.toUpperCase().includes('ERROR')).length;
+    expect(errorCount).toBe(1);
+    expect(
+      messages.some(
+        (m) =>
+          m.includes('All 3 member role grant(s)') &&
+          m.includes(String(GROUP_ID)) &&
+          m.includes(String(GUILD_ID)),
+      ),
+    ).toBe(true);
+  });
+
+  it('(b) some members fail 50013, some succeed → NO logError', async () => {
+    const existingMapping: ChannelMappingLike = {
+      discord_channel_id: Option.none(),
+      discord_role_id: Option.some(EXISTING_ROLE_ID),
+    };
+    const { layer: rpcLayer } = makeRpc({
+      mappingForGroup: Option.some(existingMapping),
+      groupMembers: THREE_MEMBERS,
+    });
+    let addRoleCallCount = 0;
+    const { layer: restLayer } = makeRest({
+      addGuildMemberRole: () => {
+        addRoleCallCount++;
+        // Members A and C fail permanently, member B succeeds.
+        return addRoleCallCount === 2 ? Effect.void : Effect.fail(makeErrorResponse(403, 50013));
+      },
+    });
+    const { level: logLevels, layer: logLayer } = makeLogCapture();
+
+    const result = await runHandleCreated(
+      makeRoleOnlyCreatedEvent(),
+      rpcLayer,
+      restLayer,
+      logLayer,
+    );
+    expect(result).toBeUndefined();
+    expect(addRoleCallCount).toBe(3);
+
+    const errorCount = logLevels.filter((l) => l.toUpperCase().includes('ERROR')).length;
+    expect(errorCount).toBe(0);
+  });
+
+  it('(c) empty member list → NO logError (guarded by members.length > 0, must not fire on the vacuous 0 === 0)', async () => {
+    const existingMapping: ChannelMappingLike = {
+      discord_channel_id: Option.none(),
+      discord_role_id: Option.some(EXISTING_ROLE_ID),
+    };
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc({
+      mappingForGroup: Option.some(existingMapping),
+      groupMembers: [],
+    });
+    const { calls: restCalls, layer: restLayer } = makeRest();
+    const { level: logLevels, layer: logLayer } = makeLogCapture();
+
+    const result = await runHandleCreated(
+      makeRoleOnlyCreatedEvent(),
+      rpcLayer,
+      restLayer,
+      logLayer,
+    );
+    expect(result).toBeUndefined();
+
+    expect(rpcCalls.GetGroupMembers).toHaveLength(1);
+    expect(restCalls.addGuildMemberRole).toHaveLength(0);
+
+    const errorCount = logLevels.filter((l) => l.toUpperCase().includes('ERROR')).length;
+    expect(errorCount).toBe(0);
+  });
+
+  it('(d) the 10011 early-exit path → NO all-permanent-failures logError (a dead role is a different, already-diagnosed situation)', async () => {
+    const existingMapping: ChannelMappingLike = {
+      discord_channel_id: Option.none(),
+      discord_role_id: Option.some(EXISTING_ROLE_ID),
+    };
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc({
+      mappingForGroup: Option.some(existingMapping),
+      groupMembers: THREE_MEMBERS,
+    });
+    let addRoleCallCount = 0;
+    const { layer: restLayer } = makeRest({
+      addGuildMemberRole: () => {
+        addRoleCallCount++;
+        return Effect.fail(makeErrorResponse(404, 10011));
+      },
+    });
+    const { messages, level: logLevels, layer: logLayer } = makeLogCapture();
+
+    const result = await runHandleCreated(
+      makeRoleOnlyCreatedEvent(),
+      rpcLayer,
+      restLayer,
+      logLayer,
+    );
+    expect(result).toBeUndefined();
+
+    // The 10011 short-circuit (Fix A) means only member 1 is ever attempted.
+    expect(addRoleCallCount).toBe(1);
+    expect(rpcCalls.ClearMappingRole).toHaveLength(1);
+
+    // No "all permanently failed" alert — clearStaleRoleOnUnknownRole already logged
+    // its own distinct warning for this case.
+    const errorCount = logLevels.filter((l) => l.toUpperCase().includes('ERROR')).length;
+    expect(errorCount).toBe(0);
+    expect(messages.some((m) => m.includes('All'))).toBe(false);
   });
 });

@@ -33,6 +33,14 @@ class PendingOnboardingSyncRow extends Schema.Class<PendingOnboardingSyncRow>(
   is_community_enabled: Schema.Boolean,
 }) {}
 
+class TeamIdRow extends Schema.Class<TeamIdRow>('TeamIdRow')({
+  id: Team.TeamId,
+}) {}
+
+class TeamCountRow extends Schema.Class<TeamCountRow>('TeamCountRow')({
+  count: Schema.Number,
+}) {}
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -255,6 +263,58 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  // Keyset pagination over `(created_at, id)` for the global-admin group-role backfill
+  // (Task 2.6): `after` is the last team id the operator was handed back as
+  // `nextAfter`, resolved to its `(created_at, id)` pair via the correlated
+  // subquery so the cursor stays an opaque `TeamId` on the wire. `None` starts from
+  // the beginning. There is no persisted "already visited" cursor server-side — the
+  // operator's next call carries it — so no migration is needed and no team is
+  // skipped or revisited as long as no team is deleted mid-walk.
+  const findTeamIdsAfterQuery = SqlSchema.findAll({
+    Request: Schema.Struct({
+      after: Schema.OptionFromNullOr(Team.TeamId),
+      limit: Schema.Number,
+    }),
+    Result: TeamIdRow,
+    execute: (input) => sql`
+      SELECT t.id
+      FROM teams t
+      WHERE ${
+        input.after === null
+          ? sql`true`
+          : sql`(t.created_at, t.id) > (SELECT created_at, id FROM teams WHERE id = ${input.after})`
+      }
+      ORDER BY t.created_at, t.id
+      LIMIT ${input.limit}
+    `,
+  });
+
+  const findTeamIdsAfter = (after: Option.Option<Team.TeamId>, limit: number) =>
+    findTeamIdsAfterQuery({ after, limit }).pipe(
+      Effect.map((rows) => rows.map((row) => row.id)),
+      catchSqlErrors,
+    );
+
+  const countTeamsAfterQuery = SqlSchema.findAll({
+    Request: Schema.OptionFromNullOr(Team.TeamId),
+    Result: TeamCountRow,
+    execute: (after) => sql`
+      SELECT COUNT(*)::int AS count
+      FROM teams t
+      WHERE ${
+        after === null
+          ? sql`true`
+          : sql`(t.created_at, t.id) > (SELECT created_at, id FROM teams WHERE id = ${after})`
+      }
+    `,
+  });
+
+  const countTeamsAfter = (after: Option.Option<Team.TeamId>) =>
+    countTeamsAfterQuery(after).pipe(
+      Effect.map((rows) => rows[0]?.count ?? 0),
+      catchSqlErrors,
+    );
+
   return {
     findById,
     insert,
@@ -269,6 +329,8 @@ const make = Effect.gen(function* () {
     markOnboardingSyncSkippedIfSyncing,
     flipPendingOnboardingSyncForGuild,
     getOnboardingRulesRoleIdByGuildId,
+    findTeamIdsAfter,
+    countTeamsAfter,
   };
 });
 

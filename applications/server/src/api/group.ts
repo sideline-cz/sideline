@@ -21,6 +21,7 @@ import {
   DEFAULT_CHANNEL_FORMAT,
   DEFAULT_ROLE_FORMAT,
 } from '~/utils/applyDiscordFormat.js';
+import { backfillGroupRoleMembers } from '~/utils/backfillGroupRoleMembers.js';
 import { hexColorToDiscordInt } from '~/utils/hexColorToDiscordInt.js';
 
 type GroupRowLike = {
@@ -1050,6 +1051,31 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                     ),
                   )
                   .pipe(catchSqlErrors),
+              ),
+            ),
+          )
+          // Re-emits the idempotent `channel_created` event for every already-provisioned
+          // group (channel + role both present) whose event queue has fully drained — the
+          // cohort-healing sweep for groups whose Discord channel role was never granted
+          // (bot down at the time, or the member joined outside the live path's reach). No
+          // remove-extras half: `syncRoleMembers` above already owns per-group removal.
+          // Same permission cluster as `syncRoleMembers` — admin-only bulk operation.
+          .handle('backfillGroupRoles', ({ params: { teamId } }) =>
+            Effect.Do.pipe(
+              Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
+              Effect.bind('membership', ({ currentUser }) =>
+                requireMembership(members, teamId, currentUser.id, forbidden),
+              ),
+              Effect.tap(({ membership }) =>
+                requirePermission(membership, 'group:manage', forbidden),
+              ),
+              Effect.bind('backfill', () => backfillGroupRoleMembers(teamId)),
+              Effect.map(
+                ({ backfill }) =>
+                  new GroupApi.BackfillGroupRolesResult({
+                    processedCount: backfill.processedCount,
+                    remainingCount: backfill.remainingCount,
+                  }),
               ),
             ),
           )

@@ -277,6 +277,23 @@ export const ChannelsRpcLive = Effect.Do.pipe(
       }) =>
         mappings.deleteByGroupId(team_id, group_id),
   ),
+  // Best-effort dangling-role cleanup on a Discord 10011 (Unknown Role): clears
+  // `discord_role_id` only, keeping `discord_channel_id` intact so the group is
+  // picked back up by `findGroupsMissingRole`'s `onSome` branch (existing channel,
+  // new role) rather than `onNone` (which would create a second channel). See
+  // `clearGroupRole`'s `discord_channel_id IS NOT NULL` gate.
+  Effect.let(
+    'Channel/ClearMappingRole',
+    ({ mappings }) =>
+      ({
+        team_id,
+        group_id,
+      }: {
+        readonly team_id: Team.TeamId;
+        readonly group_id: GroupModel.GroupId;
+      }) =>
+        mappings.clearGroupRole(team_id, group_id),
+  ),
 ).pipe(
   // Roster mapping RPCs
   Effect.let(
