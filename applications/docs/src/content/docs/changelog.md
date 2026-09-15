@@ -5,6 +5,10 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-15 — New: "Sync group roles with Discord" button to heal existing members
+
+Captains can now click **Sync group roles with Discord** on the groups page to re-check every group's Discord role against its actual members — including members of subgroups — and re-add anyone who's missing it. This fixes the *existing* cohort left behind by the late/manual-join issue below: members who were already in a group before that fix shipped, and never got the group's Discord role, are not automatically corrected by it. If a group's Discord role was deleted directly in Discord, this also detects that and clears the stale link so it can be re-created. One click processes up to 50 groups; if your team has more, click again. This does not remove anyone from a role — it only adds people who are missing one.
+
 ## 2026-09-15 — Fix: joining Discord late (or manually) now still gets you your group's role
 
 If you joined your team's Discord server manually, or more than about 15 minutes after accepting an invite, you could end up on the team and in the right group in Sideline, but never receive that group's Discord role — the only fix used to be a captain manually clicking "Sync role members" for that group. Now, the moment the bot sees you join, it checks every group you belong to (and their parent groups) and grants any Discord role you're missing. This needs an up-to-date bot to take effect on your server. It does not yet cover members who joined while the bot itself was offline for an extended period — a captain may still need to use "Sync role members" for those.

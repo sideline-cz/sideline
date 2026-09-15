@@ -1,10 +1,12 @@
 import type { ChannelRpcEvents } from '@sideline/domain';
 import { DiscordREST } from 'dfx/DiscordREST';
-import { Effect, Exit, Option } from 'effect';
+import { Effect, Exit, Option, Ref } from 'effect';
+import { clearStaleRoleOnUnknownRole } from '~/rcp/channel/channelUtils.js';
 import { isPermanentError } from '~/rcp/channel/ProcessorService.js';
 import { createChannelOnly } from '~/rest/channels/createChannelOnly.js';
 import { createRoleForChannel } from '~/rest/channels/createRoleForChannel.js';
 import { createRoleOnly } from '~/rest/channels/createRoleOnly.js';
+import { isUnknownRoleError } from '~/rest/discordErrors.js';
 import { retryPolicy } from '~/rest/utils.js';
 import { SyncRpc, type SyncRpcClient } from '~/services/SyncRpc.js';
 
@@ -138,24 +140,70 @@ export const handleCreated = (event: ChannelRpcEvents.GroupChannelCreatedEvent) 
     Effect.bind('members', ({ rpc }) =>
       rpc['Channel/GetGroupMembers']({ team_id: event.team_id, group_id: event.group_id }),
     ),
-    Effect.tap(({ rest, roleId, members }) =>
+    // `roleGone` short-circuits the loop the moment a member returns Unknown Role (10011): the
+    // mapped role no longer exists in the guild, so every remaining grant is a guaranteed
+    // failure. It also caps `Channel/ClearMappingRole` at one call per event instead of one per
+    // failing member — with `concurrency: 1` only the first member to hit 10011 can ever flip it,
+    // so no extra guarding is needed around the clear itself.
+    Effect.bind('roleGone', () => Ref.make(false)),
+    // Counts members whose grant failed with a permanent Discord error (e.g. 50013 / 403 — the
+    // bot lacks permission or sits below the role in the hierarchy). Used below to detect the
+    // "every member failed" case, which is worth one alertable `logError` instead of N scattered
+    // `logWarning`s.
+    Effect.bind('permanentFailureCount', () => Ref.make(0)),
+    Effect.tap(({ rest, roleId, members, roleGone, permanentFailureCount }) =>
       Effect.forEach(
         members,
         (member) =>
-          rest.addGuildMemberRole(event.guild_id, member.discord_user_id, roleId).pipe(
-            Effect.retry({ schedule: retryPolicy, while: (e) => !isPermanentError(e) }),
-            Effect.exit,
-            Effect.flatMap((exit) =>
-              Exit.match(exit, {
-                onSuccess: () => Effect.void,
-                onFailure: (cause) =>
-                  Effect.logWarning(
-                    `Failed to add role ${roleId} to member ${member.team_member_id} (discord user ${member.discord_user_id}): ${String(cause)}`,
+          Ref.get(roleGone).pipe(
+            Effect.flatMap((alreadyGone) =>
+              alreadyGone
+                ? Effect.void
+                : rest.addGuildMemberRole(event.guild_id, member.discord_user_id, roleId).pipe(
+                    Effect.retry({ schedule: retryPolicy, while: (e) => !isPermanentError(e) }),
+                    Effect.tapError((error) =>
+                      isUnknownRoleError(error)
+                        ? Ref.set(roleGone, true).pipe(
+                            Effect.andThen(clearStaleRoleOnUnknownRole(event, error)),
+                          )
+                        : Effect.void,
+                    ),
+                    Effect.tapError((error) =>
+                      isPermanentError(error)
+                        ? Ref.update(permanentFailureCount, (count) => count + 1)
+                        : Effect.void,
+                    ),
+                    Effect.exit,
+                    Effect.flatMap((exit) =>
+                      Exit.match(exit, {
+                        onSuccess: () => Effect.void,
+                        onFailure: (cause) =>
+                          Effect.logWarning(
+                            `Failed to add role ${roleId} to member ${member.team_member_id} (discord user ${member.discord_user_id}): ${String(cause)}`,
+                          ),
+                      }),
+                    ),
                   ),
-              }),
             ),
           ),
         { concurrency: 1 },
+      ),
+    ),
+    // If every attempted member failed with a permanent error (and the loop wasn't short-circuited
+    // by a stale/deleted role, which already logged its own distinct warning above), the whole
+    // team silently got nothing — that's alertable. Guarded on `members.length > 0` so an empty
+    // group never misfires this on vacuous truth.
+    Effect.tap(({ roleId, members, roleGone, permanentFailureCount }) =>
+      Effect.Do.pipe(
+        Effect.bind('gone', () => Ref.get(roleGone)),
+        Effect.bind('failures', () => Ref.get(permanentFailureCount)),
+        Effect.flatMap(({ gone, failures }) =>
+          !gone && members.length > 0 && failures === members.length
+            ? Effect.logError(
+                `All ${members.length} member role grant(s) for group ${event.group_id} in guild ${event.guild_id} failed permanently (role ${roleId}) — the bot likely lacks Manage Roles permission or its role sits below the target role in the Discord hierarchy`,
+              )
+            : Effect.void,
+        ),
       ),
     ),
     Effect.tap(({ roleId }) =>

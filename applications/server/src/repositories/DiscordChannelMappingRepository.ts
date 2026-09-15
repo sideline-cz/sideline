@@ -85,6 +85,11 @@ const ClearGroupChannelInput = Schema.Struct({
   group_id: GroupModel.GroupId,
 });
 
+const ClearGroupRoleInput = Schema.Struct({
+  team_id: Team.TeamId,
+  group_id: GroupModel.GroupId,
+});
+
 const InsertRosterInput = Schema.Struct({
   team_id: Team.TeamId,
   roster_id: RosterModel.RosterId,
@@ -207,6 +212,33 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // Gated on `discord_channel_id IS NOT NULL` so this can never put a mapping into
+  // the both-NULL state. A group a captain deliberately detached (`clearGroupChannel`)
+  // has `discord_channel_id = NULL` with `discord_role_id = Some`; clearing its role
+  // too would make it indistinguishable from an unprovisioned group, and since
+  // `create_discord_channel_on_group` defaults to `true`, the next
+  // `findGroupsMissingRole` sweep would create a Discord channel for a group somebody
+  // intentionally detached. The gate lives here, in the SQL, so no call site can
+  // forget it.
+  //
+  // Known, accepted consequence: `findActiveGroupsWithRole` below has no channel
+  // predicate, so a detached group (`discord_channel_id = NULL`, `discord_role_id =
+  // Some`) is still selected by the group-role member backfill and its
+  // `channel_created` re-emitted on every sweep; this gate makes clearing that
+  // dead role a no-op, so the re-emit repeats forever for that group. Narrow — a
+  // detached-but-still-has-a-role group is not expected to occur in normal captain
+  // flows — and non-destructive (the bot's handler reuses the existing role rather
+  // than erroring or creating a duplicate one), so this is left as-is rather than
+  // widening this gate with a channel predicate.
+  const clearGroupRoleMapping = SqlSchema.void({
+    Request: ClearGroupRoleInput,
+    execute: (input) => sql`
+      UPDATE discord_channel_mappings
+      SET discord_role_id = NULL
+      WHERE team_id = ${input.team_id} AND group_id = ${input.group_id} AND discord_channel_id IS NOT NULL
+    `,
+  });
+
   const insertRosterMapping = SqlSchema.void({
     Request: InsertRosterInput,
     execute: (input) => sql`
@@ -295,6 +327,12 @@ const make = Effect.gen(function* () {
       group_id: groupId,
     }).pipe(catchSqlErrors);
 
+  const clearGroupRole = (teamId: Team.TeamId, groupId: GroupModel.GroupId) =>
+    clearGroupRoleMapping({
+      team_id: teamId,
+      group_id: groupId,
+    }).pipe(catchSqlErrors);
+
   const deleteByGroupId = (teamId: Team.TeamId, groupId: GroupModel.GroupId) =>
     deleteByGroup({ team_id: teamId, group_id: groupId }).pipe(catchSqlErrors);
 
@@ -375,6 +413,62 @@ const make = Effect.gen(function* () {
       ORDER BY g.created_at
       LIMIT ${limit}
     `.pipe(Effect.flatMap(decodeGroupsMissingRole), catchSqlErrors);
+
+  // Selects already-provisioned groups (channel + role both present) whose
+  // `channel_created`/`channel_updated` event has fully drained, for the group-role
+  // MEMBER backfill sweep. This is the group analogue of `findActiveRostersWithRole`
+  // below, and it partitions cleanly against `findGroupsMissingRole` above (which
+  // needs `m.id IS NULL OR m.discord_role_id IS NULL`): no group is ever selected by
+  // both queries.
+  //
+  // Guard is `processed_at IS NULL` ONLY — do NOT add `AND e.error IS NULL` here
+  // (unlike `findGroupsMissingRole` above). A row with `processed_at IS NULL AND
+  // error IS NOT NULL` is a transient failure the bot still retries (see "Channel
+  // Sync Event Lifecycle" -> `markFailed`), so it is still mid-provision and must
+  // still block a duplicate re-emit.
+  //
+  // No `teams` join and no `guild_id` predicate: `teams.guild_id` is `NOT NULL` and
+  // UNIQUE, and both `groups.team_id` and `discord_channel_mappings.team_id` are
+  // `REFERENCES teams(id) ON DELETE CASCADE`, so a "team present but unlinked" state
+  // is unrepresentable and a deleted team removes every row this query could select.
+  // Do not "harden" this back in with a `teams` join.
+  const findActiveGroupsWithRole = (teamId: Team.TeamId, limit: number) =>
+    sql`
+      SELECT g.id AS group_id, g.team_id, g.name, g.emoji, g.color, m.discord_channel_id
+      FROM groups g
+      JOIN discord_channel_mappings m ON m.team_id = g.team_id AND m.group_id = g.id
+      WHERE g.team_id = ${teamId}
+        AND g.is_archived = false
+        AND m.discord_role_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM channel_sync_events e
+          WHERE e.group_id = g.id
+            AND e.event_type IN ('channel_created', 'channel_updated')
+            AND e.processed_at IS NULL
+        )
+      ORDER BY g.created_at, g.id
+      LIMIT ${limit}
+    `.pipe(Effect.flatMap(decodeGroupsMissingRole), catchSqlErrors);
+
+  const countActiveGroupsWithRole = (teamId: Team.TeamId) =>
+    sql`
+      SELECT COUNT(*)::int AS count
+      FROM groups g
+      JOIN discord_channel_mappings m ON m.team_id = g.team_id AND m.group_id = g.id
+      WHERE g.team_id = ${teamId}
+        AND g.is_archived = false
+        AND m.discord_role_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM channel_sync_events e
+          WHERE e.group_id = g.id
+            AND e.event_type IN ('channel_created', 'channel_updated')
+            AND e.processed_at IS NULL
+        )
+    `.pipe(
+      Effect.flatMap(decodeCountRow),
+      Effect.map((rows) => rows[0]?.count ?? 0),
+      catchSqlErrors,
+    );
 
   const findActiveRostersWithRole = (teamId: Team.TeamId, limit: number) =>
     sql`
@@ -512,12 +606,15 @@ const make = Effect.gen(function* () {
     insertRoleOnly,
     upsertGroupChannel,
     clearGroupChannel,
+    clearGroupRole,
     deleteByGroupId,
     findByRosterId,
     insertRoster,
     deleteByRosterId,
     findAllByTeam,
     findGroupsMissingRole,
+    findActiveGroupsWithRole,
+    countActiveGroupsWithRole,
     findActiveRostersWithRole,
     countActiveRostersWithRole,
     findActiveRoleIdsForReconcile,

@@ -1795,6 +1795,38 @@ Instructs the bot to create a Discord channel for the group and establish the ma
 
 ---
 
+#### `POST /teams/:teamId/groups/backfill-role-members`
+
+Team-wide, on-demand tool that re-emits the idempotent `channel_created` event for every non-archived group in the team that already has a Discord role and whose event queue has fully drained, causing the bot to re-add any missing members — including members of descendant subgroups — onto the group's Discord role. Powers the "Sync group roles with Discord" button on the groups page. Add-only: it does not remove members who hold the role but are no longer expected.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `group:manage`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** None
+
+**Response:** `200 OK` — `BackfillGroupRolesResult`
+
+| Field | Type | Description |
+|---|---|---|
+| `processedCount` | `number` | Number of groups whose sync event was emitted in this call (capped at 50 per call) |
+| `remainingCount` | `number` | Number of eligible groups not yet processed (non-zero when more than 50 groups qualify) |
+
+**Notes:** The backfill is batched — a maximum of 50 groups are processed per call. When `remainingCount > 0`, call the endpoint again to process the next batch. Only groups that already have both a Discord channel and a Discord role are eligible; groups with no role are skipped (this endpoint does not create missing roles — use `POST /teams/:teamId/groups/:groupId/create-channel` or the low-cadence backfill sweep for that). Groups that have an unprocessed channel sync event already queued are also excluded to avoid duplicate work. The sync runs asynchronously — the endpoint returns immediately after enqueuing.
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `Forbidden` | 403 | Missing `group:manage` permission or not a member of this team |
+
+---
+
 #### `GET /teams/:teamId/discord-channels`
 
 Lists all known Discord channels for the team's linked guild.
@@ -6008,7 +6040,7 @@ Declines a pending attendance request. The member is not added to the roster. Sa
 **Source:** `packages/domain/src/api/GlobalAdminApi.ts`
 **Prefix:** `/auth`
 
-Provides the global-admin management surface. All three endpoints require the caller to be a global admin (`isGlobalAdmin = true`). The effective admin set is the union of `users.is_global_admin = true` rows and the `APP_GLOBAL_ADMIN_DISCORD_IDS` env allowlist; env-managed entries cannot be revoked via the API.
+Provides the global-admin management surface. All endpoints require the caller to be a global admin (`isGlobalAdmin = true`). The effective admin set is the union of `users.is_global_admin = true` rows and the `APP_GLOBAL_ADMIN_DISCORD_IDS` env allowlist; env-managed entries cannot be revoked via the API.
 
 ---
 
@@ -6087,6 +6119,35 @@ Revokes global-admin status from a user by their internal `UserId`. Clears `user
 | `GlobalAdminSelfRevokeError` | 409 | Caller attempted to revoke their own admin status |
 | `GlobalAdminEnvManaged` | 409 | Target user's Discord ID is in `APP_GLOBAL_ADMIN_DISCORD_IDS`; env-managed admins cannot be revoked via the API |
 | `GlobalAdminLastAdminError` | 409 | Revoking this user would leave zero effective global admins (DB + env combined) |
+
+---
+
+#### `POST /auth/global-admins/group-role-member-backfill`
+
+Operator tool: walks the install-base-wide group-role member backfill one page at a time. Each call processes up to one team's worth of eligible groups (`TEAMS_PER_INVOCATION = 1`) and re-emits the idempotent `channel_created` event for each, so this is the team-scoped `POST /teams/:teamId/groups/backfill-role-members` endpoint's install-base-wide, resumable counterpart — intended for scripted or CLI-driven use (see the `backfill-group-role-members` script under `applications/server`), not a single click. There is deliberately no all-teams-at-once mode: see `applications/server/AGENTS.md` → "Group-role member backfill" for the fan-out reasoning.
+
+**Auth:** Bearer token (AuthMiddleware) + `isGlobalAdmin`
+
+**Request Body:** `GroupRoleBackfillRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `after` | `TeamId \| null` | No | Cursor from a previous call's `nextAfter`. Omit (or `null`) to start from the beginning. |
+
+**Response:** `200 OK` — `GroupRoleBackfillResult`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `processedCount` | `number` | No | Number of groups whose sync event was emitted for the team(s) visited this page |
+| `remainingCount` | `number` | No | Number of eligible groups not yet processed for the team(s) visited this page |
+| `remainingTeams` | `number` | No | Teams still left to visit after this page |
+| `nextAfter` | `TeamId \| null` | Yes | Cursor for the next call; `null` exactly when `remainingTeams` is `0` — the walk is complete |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `GlobalAdminForbidden` | 403 | Caller is not a global admin |
 
 ---
 

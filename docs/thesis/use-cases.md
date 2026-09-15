@@ -454,6 +454,7 @@ flowchart LR
         UC_DELETE_MAPPING["Remove Channel Mapping\n(DELETE /teams/:teamId/groups/:groupId/channel-mapping)"]
         UC_CREATE_CHANNEL["Create Discord Channel for Group\n(POST /teams/:teamId/groups/:groupId/create-channel)"]
         UC_LIST_DC_CHANNELS["List Available Discord Channels\n(GET /teams/:teamId/discord-channels)"]
+        UC_BACKFILL_GROUP_ROLES["Backfill All Group Role Members\n(POST /teams/:teamId/groups/backfill-role-members)\nrequires: group:manage · batched (limit 50)"]
     end
 
     subgraph AGE["Age Threshold Rules"]
@@ -479,6 +480,7 @@ flowchart LR
     AD --> UC_DELETE_MAPPING
     AD --> UC_CREATE_CHANNEL
     AD --> UC_LIST_DC_CHANNELS
+    AD --> UC_BACKFILL_GROUP_ROLES
     AD --> UC_LIST_AGE
     AD --> UC_CREATE_AGE
     AD --> UC_UPDATE_AGE
