@@ -36,6 +36,7 @@ import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
 import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
+import { emitMemberGroupChannelRoles } from '~/utils/emitMemberGroupChannelRoles.js';
 import {
   MAX_ROLE_SYNC_EMISSIONS_PER_GUILD_RECONCILE,
   type ReconcileMemberRolesResult,
@@ -416,9 +417,12 @@ export const GuildsRpcLive = Effect.Do.pipe(
       // `{ newMember, boundGroupIds }` destructure at the `reconcile` bind in
       // `registerMemberWithReconcile` — `Effect.Do` only exposes keys bound earlier, so hoisting
       // `reconcile` above `boundGroupIds` stops type-checking. This parameter is what gives that
-      // destructure a reason to exist. `noUnusedParameters` is off, so deleting the `logDebug`
-      // below would NOT error here — it would just make this parameter look dead, and "tidying"
-      // it away would silently take the guarantee with it. Don't.
+      // destructure a reason to exist. It is ALSO now a real, functional argument in its own
+      // right (bug fix-group-channel-discord-join, PR 1): passed straight through to
+      // `emitMemberGroupChannelRoles` below as `alreadyEmittedGroupIds`, so a group-scoped
+      // invite's own `member_added` emit (from `applyInviteGroup`, bound above this call) is
+      // never double-emitted by this function's own group-channel-role diff. Do not "tidy this
+      // away" — it now has two independent reasons to exist, not one.
       boundGroupIds: ReadonlyArray<GroupModel.GroupId>,
     ) =>
       Option.match(payload.source, {
@@ -427,7 +431,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
             `RegisterMember: no source on payload for discord_id ${payload.discord_id} in team ${team.id} ` +
               `(pre-PR-8 bot); skipping discord_joined_at + role diff`,
           ).pipe(Effect.as(Option.none<ReconcileMemberRolesResult>())),
-        onSome: () =>
+        onSome: (source) =>
           Effect.Do.pipe(
             Effect.tap(() =>
               (options.markDiscordJoined ?? true)
@@ -438,6 +442,45 @@ export const GuildsRpcLive = Effect.Do.pipe(
               Effect.logDebug(
                 `RegisterMember: diffing after ${boundGroupIds.length} invite-bound group binding(s)`,
               ),
+            ),
+            // bug fix-group-channel-discord-join (PR 1) — `GUILD_MEMBER_ADD` only. A member
+            // already active on the team who is only now sighted joining Discord (the reported
+            // bug) or joining past the invite-acceptance recency window gets their group's own
+            // Discord channel role here, independent of any invite. Gated on `source ===
+            // 'member_add'` — NOT run for `Guild/ReconcileMembers` (`source: 'reconcile'`),
+            // which would otherwise re-emit a whole page of already-active members' entire group
+            // trees on every bot reconnect (the N+1 fan-out §2 of the implementation plan
+            // rejects). A member first observed by reconcile (e.g. joined while the bot was
+            // disconnected past the gateway resume window) is left uncovered by this path today —
+            // see `applications/server/AGENTS.md`'s group-channel-role-sync section for that
+            // accepted gap, its trigger condition, and today's manual remedy.
+            // Auxiliary heal, must stay non-fatal: every repository call inside
+            // `emitMemberGroupChannelRoles` pipes `catchSqlErrors` (`Effect.die(LogicError)`), so a
+            // transient failure here is a DEFECT, not a typed error — despite the `never` error
+            // channel. Left unguarded, that defect would short-circuit this whole `Effect.tap` and
+            // skip `reconcileMemberDiscordRoles` plus the welcome message below, breaking
+            // pre-existing behavior for the sake of an additive fix. Same convention as
+            // `reapplyGroupGrants`'s wrap in `rpc/channel/index.ts:220-221` / `:245-246` (see
+            // `applications/server/AGENTS.md`: "a grant-reapply error is observability noise, not a
+            // reason to reject the role mapping").
+            Effect.tap(() =>
+              source === 'member_add'
+                ? emitMemberGroupChannelRoles(
+                    team,
+                    newMember,
+                    toSnowflake(payload.discord_id),
+                    payload.roles,
+                    boundGroupIds,
+                  ).pipe(
+                    Effect.catchCause((cause) =>
+                      Effect.logWarning('emitMemberGroupChannelRoles failed (non-fatal)', cause),
+                    ),
+                  )
+                : Effect.logDebug(
+                    `RegisterMember: source '${source}' !== 'member_add' for discord_id ${payload.discord_id} ` +
+                      `in team ${team.id}; skipping group-channel-role emit here (reconcile does not ` +
+                      `re-derive it — see AGENTS.md's accepted gap and today's manual "Sync role members" remedy)`,
+                  ),
             ),
             Effect.flatMap(() =>
               reconcileMemberDiscordRoles(

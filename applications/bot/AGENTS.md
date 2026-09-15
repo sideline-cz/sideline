@@ -396,7 +396,7 @@ Rules:
 
 #### Channel Backfill (self-healing role provisioning)
 
-Group→Discord-role provisioning is event-driven, so a group created BEFORE its team's guild was linked (or while the bot was down) can end up role-less forever — no `channel_created` event was ever emitted. `ChannelBackfillService` (`src/rcp/channel/BackfillService.ts`, wired in `src/rcp/channel/index.ts`) is the safety net: on each `slowPollLoop` (5min) tick it calls `Channel/BackfillMissingGroupRoles({ team_id: None, limit: None })`. The server finds non-archived groups whose mapping has no `discord_role_id` AND no unprocessed/un-errored `channel_created`/`channel_updated` event, then re-emits a provisioning `channel_created` event for each (see `applications/server/AGENTS.md` → "Group-role backfill and grant reapply").
+Group→Discord-role provisioning is event-driven, so a group whose `channel_created` event was never processed (bot down, bot not in the guild, or the row was marked permanently failed via `Channel/MarkEventPermanentlyFailed`) can end up role-less forever. The server always emits that event for a group whose team exists (`teams.guild_id` is `NOT NULL`), so the gap is in PROCESSING, not in emission. `ChannelBackfillService` (`src/rcp/channel/BackfillService.ts`, wired in `src/rcp/channel/index.ts`) is the safety net: on each `slowPollLoop` (5min) tick it calls `Channel/BackfillMissingGroupRoles({ team_id: None, limit: None })`. The server finds non-archived groups whose mapping has no `discord_role_id` AND no unprocessed/un-errored `channel_created`/`channel_updated` event, then re-emits a provisioning `channel_created` event for each (see `applications/server/AGENTS.md` → "Group-role backfill and grant reapply").
 
 Rules:
 
