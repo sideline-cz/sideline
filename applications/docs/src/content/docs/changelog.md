@@ -5,6 +5,10 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-15 — Fix: joining Discord late (or manually) now still gets you your group's role
+
+If you joined your team's Discord server manually, or more than about 15 minutes after accepting an invite, you could end up on the team and in the right group in Sideline, but never receive that group's Discord role — the only fix used to be a captain manually clicking "Sync role members" for that group. Now, the moment the bot sees you join, it checks every group you belong to (and their parent groups) and grants any Discord role you're missing. This needs an up-to-date bot to take effect on your server. It does not yet cover members who joined while the bot itself was offline for an extended period — a captain may still need to use "Sync role members" for those.
+
 ## 2026-09-14 — New: AI assistant for asking about your team's data
 
 A new **Assistant** page lets you ask plain-language questions about your team's events, training types, members, groups, and rosters, and get an answer with clickable links to the exact things it's talking about.

@@ -271,6 +271,13 @@ const make = Effect.gen(function* () {
    *
    * The seed does not re-check the starting group itself; every caller has already resolved it
    * through a query that filters `is_archived = false`.
+   *
+   * `findActiveGroupsWithAncestorsForMember` (below) walks the SAME shape from a different seed
+   * (a member's own `group_members` rows instead of one already-known group), for the same
+   * reason: it backs `emitMemberGroupChannelRoles`, which must agree with this query and with
+   * `effectiveRoles.ts` about which ancestors still grant. It seeds the member's OWN group at
+   * depth 0, one level short of this query's seed (that group's PARENT) — see its own header for
+   * why that difference is deliberate.
    */
   const findActiveAncestors = SqlSchema.findAll({
     Request: Schema.Struct({ group_id: GroupModel.GroupId, team_id: Team.TeamId }),
@@ -291,6 +298,70 @@ const make = Effect.gen(function* () {
             FROM groups g
             JOIN ancestors a ON g.id = a.id
             WHERE g.is_archived = false AND g.team_id = ${team_id}
+          `,
+  });
+
+  /**
+   * Backs `emitMemberGroupChannelRoles` (`utils/emitMemberGroupChannelRoles.ts`): the member's
+   * own non-archived `group_members` groups PLUS every active ancestor of each — the exact
+   * "desired" set the group-channel-role sync diffs `discord_channel_mappings.discord_role_id`
+   * against. The SEVERING SEMANTICS here MUST match `findActiveAncestors` above (see its header)
+   * and the ancestor walk in `repositories/effectiveRoles.ts` (see its header, decision 1): role
+   * sync and channel sync must never disagree about which ancestors still grant.
+   *
+   * `UNION ALL` in the recursive term plus a final `SELECT DISTINCT` — NOT `UNION` inside the
+   * CTE — because two DIFFERENT seed groups (the member can belong to more than one) can share
+   * an ancestor at two different depths; deduping inside the CTE would only catch an exact
+   * `(id, depth)` collision, not this cross-seed one. `depth < 32` is the same cycle guard every
+   * `groups.parent_id` walk in this codebase carries (`applications/server/AGENTS.md`, "Recursive
+   * `groups.parent_id` Walks Must Carry a `depth < 32` Guard").
+   *
+   * `JOIN team_members tm ON tm.id = gm.team_member_id AND tm.active = true` on the seed is a PK
+   * join (no row multiplication) that keeps this query from depending on
+   * `deactivateMemberCascade.ts`'s hard delete of `group_members` rows — an invariant held in a
+   * different file. A `group_members` row for a currently-inactive membership yields nothing.
+   *
+   * Seed depth note (mirrors `findActiveAncestors`'s header): this query seeds the member's OWN
+   * group at depth 0, so on a >32-deep chain it reaches one level further than
+   * `findActiveAncestors`, which seeds the PARENT at depth 0. Both are correct for what they walk
+   * — the seed choice here is dictated by starting from `group_members`, not from an
+   * already-resolved group id.
+   *
+   * `ORDER BY min(depth), name, id` — deterministic and NEAREST-FIRST. Without an `ORDER BY`,
+   * Postgres returns `reachable` in arbitrary order; `emitMemberGroupChannelRoles.ts`'s
+   * `MAX_GROUP_CHANNEL_EMISSIONS_PER_MEMBER` cap then truncates whatever `slice(0, …)` happens to
+   * land on — and unlike `reconcileMemberDiscordRoles`'s role diff, that truncation on this path
+   * is PERMANENT (this query only ever runs once, on the member's join), so an arbitrary order
+   * would nondeterministically and permanently lose groups for a member in >25 mapped, unheld
+   * groups. Ordering nearest-first means the member's own groups (depth 0) and closest ancestors
+   * are the ones kept when the cap bites, which is the more defensible loss. A group can be
+   * reached at more than one depth (two different seed groups sharing an ancestor at different
+   * depths — see the `UNION ALL` + outer `DISTINCT` note above), so this aggregates to that
+   * group's MINIMUM depth rather than `SELECT DISTINCT`, which cannot express "which depth to keep
+   * without picking a row nondeterministically" itself, and `DISTINCT ON (id)` is unusable here —
+   * it requires the `ORDER BY` to start with `id`, which would defeat depth-based ordering
+   * entirely.
+   */
+  const findActiveGroupsWithAncestorsForMemberQuery = SqlSchema.findAll({
+    Request: Schema.Struct({ member_id: TeamMember.TeamMemberId, team_id: Team.TeamId }),
+    Result: Schema.Struct({ id: GroupModel.GroupId, name: Schema.String }),
+    execute: ({ member_id, team_id }) => sql`
+            WITH RECURSIVE reachable AS (
+              SELECT g.id, g.name, g.parent_id, 0 AS depth
+              FROM group_members gm
+              JOIN team_members tm ON tm.id = gm.team_member_id AND tm.active = true
+              JOIN groups g ON g.id = gm.group_id
+              WHERE gm.team_member_id = ${member_id} AND g.is_archived = false AND g.team_id = ${team_id}
+              UNION ALL
+              SELECT anc.id, anc.name, anc.parent_id, r.depth + 1
+              FROM reachable r
+              JOIN groups anc ON anc.id = r.parent_id
+              WHERE r.depth < 32 AND anc.is_archived = false AND anc.team_id = ${team_id}
+            )
+            SELECT id, name
+            FROM reachable
+            GROUP BY id, name
+            ORDER BY min(depth), name, id
           `,
   });
 
@@ -405,6 +476,14 @@ const make = Effect.gen(function* () {
   const getActiveAncestors = (groupId: GroupModel.GroupId, teamId: Team.TeamId) =>
     findActiveAncestors({ group_id: groupId, team_id: teamId }).pipe(catchSqlErrors);
 
+  const findActiveGroupsWithAncestorsForMember = (
+    memberId: TeamMember.TeamMemberId,
+    teamId: Team.TeamId,
+  ) =>
+    findActiveGroupsWithAncestorsForMemberQuery({ member_id: memberId, team_id: teamId }).pipe(
+      catchSqlErrors,
+    );
+
   const getDescendantMemberIds = (groupId: GroupModel.GroupId) =>
     findDescendantMembers(groupId).pipe(
       Effect.map((rows) => rows.map((r) => r.team_member_id)),
@@ -463,6 +542,7 @@ const make = Effect.gen(function* () {
     getAncestorIds,
     getAncestors,
     getActiveAncestors,
+    findActiveGroupsWithAncestorsForMember,
     getDescendantMemberIds,
     findMembersWithDiscordIdByGroupId,
     findDescendantMembersWithDiscordIdByGroupId,

@@ -600,6 +600,8 @@ sequenceDiagram
     Note over Bot,REST: Asynchronously (Channel Sync Worker, ~5 s poll):<br/>Guild/RegisterMember's member_added event is picked up<br/>and the bot grants "First Team"'s Discord role via REST<br/>(group_member_added handler, see Discord Bot Reference)
 ```
 
+**Late or manual join.** This diagram assumes the invite code is still matched at `GUILD_MEMBER_ADD` time. If the new player instead joins the Discord server manually, or more than about 15 minutes after accepting the invite (past `invite_acceptances`' recency window), no invite context resolves and the steps above that bind the group and emit its `member_added` events do not run. `Guild/RegisterMember` closes that gap independently: for every `GUILD_MEMBER_ADD`-sourced call, it separately diffs the member's already-existing group memberships (and their active ancestors) against the Discord roles reported in the join payload, and emits `member_added` for whichever groups the member is missing the role for — regardless of whether an invite was matched this time. This does not run for members first observed via `Guild/ReconcileMembers` (e.g. a member who joined while the bot was disconnected past the gateway resume window); a captain's per-group "Sync role members" action remains the remedy for that cohort.
+
 ---
 
 ## 10. Invite and Join Team (web flow)
