@@ -62,7 +62,9 @@ class ReminderCandidateRow extends Schema.Class<ReminderCandidateRow>('ReminderC
   currency: Schema.String,
   amount_minor: Fee.AmountMinor,
   paid_minor: Fee.AmountMinor,
-  effective_due_at: Schema.Date,
+  // D15b/T10c — NULL for an 'assigned' candidate whose fee has no due date at all (the
+  // assigned_candidates branch deliberately does not filter `effective_due_at IS NOT NULL`).
+  effective_due_at: Schema.OptionFromNullOr(Schema.Date),
   kind: PaymentReminder.PaymentReminderKind,
 }) {}
 
@@ -325,6 +327,49 @@ const make = Effect.gen(function* () {
               BETWEEN ts.rsvp_reminder_time
               AND ts.rsvp_reminder_time::time + INTERVAL '5 minutes'
           )
+      ),
+      -- D15b/T10c — the 'assigned' reminder is a UNION ALL branch OUTSIDE the
+      -- 'rsvp_reminder_time' gate above: it fires immediately at assignment creation, not up to
+      -- 24h later. It deliberately does NOT require 'v.effective_due_at IS NOT NULL' — a
+      -- date-less fee is exactly the case an early QR helps most (migration 1792000003 dropped
+      -- the outbox's NOT NULL for this reason). Gated on an enabled bank-sync config so teams
+      -- that never connected Fio don't suddenly get a new DM family.
+      -- NOTE: never use backticks in this comment — the whole query is a template literal.
+      assigned_candidates AS (
+        SELECT
+          v.assignment_id,
+          tm.team_id,
+          t.guild_id,
+          u.discord_id AS user_discord_id,
+          v.fee_name,
+          v.currency,
+          v.due_minor AS amount_minor,
+          v.paid_minor,
+          v.effective_due_at,
+          'assigned' AS kind
+        FROM fee_assignment_status_v v
+        JOIN fee_assignments fa ON fa.id = v.assignment_id
+        JOIN fees f ON f.id = fa.fee_id
+        JOIN team_members tm ON tm.id = fa.team_member_id AND tm.active = true
+        JOIN users u ON u.id = tm.user_id
+        JOIN teams t ON t.id = tm.team_id
+        WHERE v.status IN ('pending', 'partial', 'overdue')
+          AND fa.stored_status != 'waived'
+          AND EXISTS (
+            SELECT 1 FROM bank_sync_config bsc
+            WHERE bsc.team_id = tm.team_id AND bsc.enabled = true
+          )
+      ),
+      all_candidates AS (
+        SELECT
+          assignment_id, team_id, guild_id, user_discord_id, fee_name, currency,
+          amount_minor, paid_minor, effective_due_at, kind
+        FROM candidates
+        UNION ALL
+        SELECT
+          assignment_id, team_id, guild_id, user_discord_id, fee_name, currency,
+          amount_minor, paid_minor, effective_due_at, kind
+        FROM assigned_candidates
       )
       SELECT
         c.assignment_id,
@@ -337,7 +382,7 @@ const make = Effect.gen(function* () {
         c.paid_minor,
         c.effective_due_at,
         c.kind
-      FROM candidates c
+      FROM all_candidates c
       WHERE c.kind IS NOT NULL
         AND NOT EXISTS (
           SELECT 1 FROM payment_reminders_sent prs

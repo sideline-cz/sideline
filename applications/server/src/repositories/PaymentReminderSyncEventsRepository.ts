@@ -15,7 +15,7 @@ class PaymentReminderSyncEventRow extends Schema.Class<PaymentReminderSyncEventR
   guild_id: Discord.Snowflake,
   assignment_id: FeeAssignment.FeeAssignmentId,
   kind: PaymentReminder.PaymentReminderKind,
-  effective_due_at: Schema.Date,
+  effective_due_at: Schema.OptionFromNullOr(Schema.Date),
   fee_name: Schema.String,
   currency: Fee.CurrencyCode,
   amount_minor: Fee.AmountMinor,

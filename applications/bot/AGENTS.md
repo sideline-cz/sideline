@@ -641,10 +641,12 @@ Syncs `payment_reminder_sync_events` rows to per-user DM embeds. The server's `P
 | Component | File |
 |-----------|------|
 | Domain event | `packages/domain/src/rpc/finance/FinanceRpcEvents.ts` (`PaymentReminderReadyEvent`) |
-| Kind literal | `packages/domain/src/models/PaymentReminder.ts` (`PaymentReminderKind`) |
+| Kind literal | `packages/domain/src/models/PaymentReminder.ts` (`PaymentReminderKind` — incl. `assigned`, fired once at assignment creation, T10c) |
 | Bot service | `src/rcp/finance/ProcessorService.ts` (`FinanceSyncService.processTick`, exported via `src/rcp/finance/index.ts`) |
-| Ready handler | `src/rcp/finance/handlePaymentReminderReady.ts` — `createDm` → `createMessage` → `Finance/MarkReminderSent` |
+| Ready handler | `src/rcp/finance/handlePaymentReminderReady.ts` — `createDm` → `createMessage` (with the QR attached, when one could be built) → `Finance/MarkReminderSent` |
 | Embed builder | `src/rcp/finance/buildPaymentReminderEmbed.ts` — `Match.value(kind).pipe(Match.when(...), Match.exhaustive)` over `PaymentReminderKind` |
+| QR fetch | `Finance/GetPaymentQr` (payload `{ assignment_id }`, success `{ spayd, png_base64, filename }`, error `FinanceQrUnavailable`) — wrapped into a Discord `File` by `src/rcp/finance/paymentQrAttachment.ts`, mirroring `clipAttachment` (`src/rest/rules/clips.ts`) |
+| SPAYD fallback-block reader | `src/rcp/finance/parseSpaydField.ts` — reads the account/amount/VS/message back out of the rendered `spayd` string for the "can't scan it? enter it by hand" block; NOT a general SPAYD parser (see its doc comment) |
 
 Event types: `payment_reminder_ready`. Uses standard `pollLoop` (5s).
 
@@ -652,7 +654,24 @@ Rules:
 
 1. **`Finance/MarkReminderSent` must run AFTER `createMessage` succeeds and BEFORE `Finance/MarkPaymentReminderProcessed`.** If the Discord call fails, the handler falls through to `Finance/MarkPaymentReminderFailed` via `Effect.catch` in `ProcessorService.processEvent` — `payment_reminders_sent` is NOT written, so the next cron tick can re-emit after the outbox row is processed.
 2. **Never write to `payment_reminders_sent` from the bot directly.** The bot only calls the RPC; the server handler owns the `INSERT ... ON CONFLICT DO NOTHING`.
-3. **`buildPaymentReminderEmbed` must remain pure** — no Effect, no `DiscordREST` calls, no i18n side effects. The embed copy is currently English-only and lives inline; do not add `tr()` or `m.*` imports without first adding `bot_payment_reminder_*` keys per the "Translation Source — Compiled Paraglide Only" rules above.
+3. **`buildPaymentReminderEmbed` must remain pure** — no Effect, no `DiscordREST` calls. Copy lives in `bot_payment_reminder_*` i18n keys (both `en` and `cs`); never hardcode a new user-facing string inline.
+4. **Never fail a reminder because the QR could not be fetched.** `handlePaymentReminderReady` catches both `FinanceQrUnavailable` and `RpcClientError` from `Finance/GetPaymentQr` and degrades to the text-only embed (no image, no fallback block, no VS field) — see `buildPaymentReminderEmbed`'s `Option<PaymentReminderQr>` parameter.
+5. **The QR payload (`spayd`'s `MSG`) is uppercase ASCII with no diacritics by design** (`@sideline/domain`'s `Spayd.ts`) — the fallback code block renders it VERBATIM, never re-accented; only the surrounding embed prose is full Czech. This is not a bug.
+
+### Bank Token Expiry (T10b — treasurer DM at T−14 / T−7 / T−1)
+
+A SEPARATE outbox family from the payment reminders above — `bank_token_expiry_events`, its own read/ack RPCs (`Finance/GetUnprocessedBankTokenExpiryEvents` / `MarkBankTokenExpiryProcessed` / `MarkBankTokenExpiryFailed`), and its own `Match.tag` dispatcher — because `payment_reminder_sync_events` is FK'd to `fee_assignments` with several NOT NULL columns this event has no equivalent for. The intended producer is a server-side `BankTokenExpiryCron` emitting one row per `(team, threshold)` when a connected Fio token is within 14/7/1 days of its 180-day expiry.
+
+**The consumer side below is complete; the producer is NOT.** Nothing in `applications/server/src` inserts into `bank_token_expiry_events` — `BankTokenExpiryEventsRepository` has read/ack methods only and says so in its header. So this handler never fires in production today. Two consequences for anyone touching it: do not "fix" the dead path by inventing an emitter shape (`BankTokenExpiryCron` is the agreed one), and note that `Finance/MarkBankTokenExpirySent` plus the `bank_token_expiry_sent` table exist server-side with **no caller and no reader** — wire them up when the cron lands rather than assuming the dedupe already works.
+
+| Component | File |
+|-----------|------|
+| Domain event | `packages/domain/src/rpc/finance/FinanceRpcEvents.ts` (`BankTokenExpiringEvent`) |
+| Bot dispatch | `src/rcp/finance/ProcessorService.ts` — Pass 2 of `FinanceSyncService.processTick`, chained onto Pass 1 (payment reminders) via `Effect.andThen`, mirroring the personalEvents ProcessorService's provision/reconcile passes |
+| Handler | `src/rcp/finance/handleBankTokenExpiring.ts` — `createDm` → `createMessage`; no "sent" ack step (the outbox row itself is the idempotency boundary, unlike payment reminders' `MarkReminderSent`) |
+| Embed builder | `src/rcp/finance/buildBankTokenExpiringEmbed.ts` — amber at T−14, red at T−7/T−1, matching the settings-page `expiringSoon` banner's own T−7 colour switch |
+
+Event types: `bank_token_expiring`. Polled every tick alongside payment reminders (still 5s via `pollLoop`).
 
 ### Email Sync (email posts → Discord embeds)
 

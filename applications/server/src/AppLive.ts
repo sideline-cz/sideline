@@ -14,6 +14,9 @@ import { AchievementSyncEventsRepository } from '~/repositories/AchievementSyncE
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js';
+import { BankSyncConfigRepository } from '~/repositories/BankSyncConfigRepository.js';
+import { BankTokenExpiryEventsRepository } from '~/repositories/BankTokenExpiryEventsRepository.js';
+import { BankTransactionsRepository } from '~/repositories/BankTransactionsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { CarpoolsRepository } from '~/repositories/CarpoolsRepository.js';
 import { ChannelEventDividersRepository } from '~/repositories/ChannelEventDividersRepository.js';
@@ -91,6 +94,7 @@ import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { EmailApprovalService } from '~/services/EmailApprovalService.js';
 import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
+import { FioSecretCrypto } from '~/services/FioSecretCrypto.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { LlmClient } from '~/services/LlmClient.js';
 import { TranslationCache } from '~/services/TranslationCache.js';
@@ -167,6 +171,9 @@ export const Repositories = Layer.mergeAll(
   ExpensesRepository.Default,
   PaymentReminderSyncEventsRepository.Default,
   PaymentRemindersSentRepository.Default,
+  BankSyncConfigRepository.Default,
+  BankTransactionsRepository.Default,
+  BankTokenExpiryEventsRepository.Default,
   CarpoolsRepository.Default,
   PollsRepository.Default,
   RulesAttemptsRepository.Default,
@@ -219,5 +226,6 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   Layer.provide(DiscordOAuth.Default),
   Layer.provide(LlmClient.Default),
   Layer.provide(EmailSecretCrypto.Default),
+  Layer.provide(FioSecretCrypto.Default),
   Layer.provide(FetchHttpClient.layer),
 );

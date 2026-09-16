@@ -59,7 +59,15 @@ The record that ties a specific fee to a specific member. An assignment tracks h
 
 ## Payment
 
-Money received against a fee assignment. Payments are recorded by admins or treasurers (anyone with `finance:record_payments`) and can be voided if entered in error. The voided record is kept for auditing. See the [Finances guide](/guides/finances/) for the full workflow.
+Money received against a fee assignment. Payments are recorded by admins or treasurers (anyone with `finance:record_payments`) and can be voided if entered in error. The voided record is kept for auditing. A payment can be recorded by hand (cash or bank transfer) or created automatically by matching a bank movement. See the [Finances guide](/guides/finances/) for the full workflow.
+
+## Variable symbol
+
+A short number (1–10 digits) attached to a member, used to identify their bank payments — the standard way Czech and Slovak bank transfers carry this information. Sideline uses it to automatically match a member's incoming bank payments to their fee assignments and to build their payment QR codes. Unique per team; a member with no variable symbol can't be auto-matched. See [Setting up variable symbols](/guides/finances/#setting-up-variable-symbols).
+
+## Bank movement
+
+One transaction read from a club's connected bank account (currently Fio banka only). Sideline imports movements automatically, tries to match each one to a member's outstanding fee by variable symbol, and queues anything it can't confidently match for a treasurer to resolve by hand. See [Connecting a bank account](/guides/finances/#connecting-a-bank-account-fio).
 
 ## Weekly challenge
 

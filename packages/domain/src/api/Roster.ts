@@ -52,6 +52,7 @@ export class RosterPlayer extends Schema.Class<RosterPlayer>('RosterPlayer')({
   birthDate: Schema.OptionFromNullOr(Schema.String),
   gender: Schema.OptionFromNullOr(Gender),
   jerseyNumber: Schema.OptionFromNullOr(Schema.Number),
+  variableSymbol: Schema.OptionFromNullOr(Schema.String),
   username: Schema.String,
   avatar: Schema.OptionFromNullOr(Schema.String),
   /** Resolved display name (profile name → Discord nickname → Discord display name → username). */
@@ -65,6 +66,7 @@ export const UpdatePlayerRequest = Schema.Struct({
   birthDate: Schema.OptionFromNullOr(Schema.String),
   gender: Schema.OptionFromNullOr(Gender),
   jerseyNumber: Schema.OptionFromNullOr(Schema.Number),
+  variableSymbol: Schema.OptionFromNullOr(Schema.String),
 });
 export type UpdatePlayerRequest = Schema.Schema.Type<typeof UpdatePlayerRequest>;
 
@@ -74,6 +76,18 @@ export class PlayerNotFound extends Schema.TaggedErrorClass<PlayerNotFound>()(
 ) {}
 
 export class Forbidden extends Schema.TaggedErrorClass<Forbidden>()('Forbidden', {}) {}
+
+/**
+ * D3 — the unique-per-team leading-zero-stripped variable symbol is already taken. Carries the
+ * holder so the client can render "Tento symbol už má Petra Svobodová" as a field-level error.
+ */
+export class VariableSymbolTaken extends Schema.TaggedErrorClass<VariableSymbolTaken>()(
+  'VariableSymbolTaken',
+  {
+    holderMemberId: TeamMemberId,
+    holderName: Schema.OptionFromNullOr(Schema.String),
+  },
+) {}
 
 export class ChannelAlreadyLinked extends Schema.TaggedErrorClass<ChannelAlreadyLinked>()(
   'ChannelAlreadyLinked',
@@ -164,6 +178,7 @@ export class RosterApiGroup extends HttpApiGroup.make('roster')
       error: [
         Forbidden.pipe(HttpApiSchema.status(403)),
         PlayerNotFound.pipe(HttpApiSchema.status(404)),
+        VariableSymbolTaken.pipe(HttpApiSchema.status(409)),
       ],
       payload: UpdatePlayerRequest,
       params: { teamId: TeamId, memberId: TeamMemberId },

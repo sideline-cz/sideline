@@ -51,6 +51,7 @@ import { DiscordOAuth, DiscordOAuthError } from '~/services/DiscordOAuth.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { LlmClient } from '~/services/LlmClient.js';
 import { MockChatAgentLayer, MockChatRateLimiterLayer } from './mocks/aiChatMocks.js';
+import { MockBankSyncLayers, MockGenericSqlClientLayer } from './mocks/bankSyncMocks.js';
 import { MockChannelManagementLayers } from './mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
@@ -582,6 +583,8 @@ const TestLayer = ApiLive.pipe(
   ),
   Layer.provide(MockAchievementAdminLayers),
 )
+  .pipe(Layer.provide(MockBankSyncLayers))
+  .pipe(Layer.provide(MockGenericSqlClientLayer))
   .pipe(Layer.provide(MockFinanceLayers))
   .pipe(Layer.provide(MockTranslationsLayers))
   .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
@@ -791,6 +794,8 @@ describe('Auth API — isGlobalAdmin flag on GET /auth/me (TDD: first registered
       ),
       Layer.provide(MockAchievementAdminLayers),
     )
+      .pipe(Layer.provide(MockBankSyncLayers))
+      .pipe(Layer.provide(MockGenericSqlClientLayer))
       .pipe(Layer.provide(MockFinanceLayers))
       .pipe(Layer.provide(MockTranslationsLayers))
       .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
@@ -1128,6 +1133,8 @@ describe('Auth API — removed-user behaviour (TDD: Handle removing user)', () =
       ),
       Layer.provide(MockAchievementAdminLayers),
     )
+      .pipe(Layer.provide(MockBankSyncLayers))
+      .pipe(Layer.provide(MockGenericSqlClientLayer))
       .pipe(Layer.provide(MockFinanceLayers))
       .pipe(Layer.provide(MockTranslationsLayers))
       .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
@@ -1542,6 +1549,8 @@ describe('Global admin read access', () => {
       ),
       Layer.provide(MockAchievementAdminLayers),
     )
+      .pipe(Layer.provide(MockBankSyncLayers))
+      .pipe(Layer.provide(MockGenericSqlClientLayer))
       .pipe(Layer.provide(MockFinanceLayers))
       .pipe(Layer.provide(MockTranslationsLayers))
       .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
@@ -1793,6 +1802,8 @@ describe('Auth API — requeueFailedForUser widening (TDD: PR-4 CC-6/S5)', () =>
     ),
     Layer.provide(MockAchievementAdminLayers),
   )
+    .pipe(Layer.provide(MockBankSyncLayers))
+    .pipe(Layer.provide(MockGenericSqlClientLayer))
     .pipe(Layer.provide(MockFinanceLayers))
     .pipe(Layer.provide(MockTranslationsLayers))
     .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))

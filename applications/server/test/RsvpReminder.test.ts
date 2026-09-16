@@ -49,6 +49,7 @@ import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { LlmClient } from '~/services/LlmClient.js';
 import { MockChatAgentLayer, MockChatRateLimiterLayer } from './mocks/aiChatMocks.js';
+import { MockBankSyncLayers } from './mocks/bankSyncMocks.js';
 import { MockChannelManagementLayers } from './mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
@@ -1048,6 +1049,7 @@ const TestLayer = ApiLive.pipe(
   ),
   Layer.provide(MockAchievementAdminLayers),
 )
+  .pipe(Layer.provide(MockBankSyncLayers))
   .pipe(Layer.provide(MockFinanceLayers))
   .pipe(Layer.provide(MockTranslationsLayers))
   .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))

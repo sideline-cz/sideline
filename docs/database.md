@@ -154,14 +154,15 @@ Membership record joining a user to a team, carrying per-team profile data.
 | `user_id` | UUID | NOT NULL, FK → `users(id)` ON DELETE CASCADE | — |
 | `active` | BOOLEAN | NOT NULL | `true` |
 | `jersey_number` | INTEGER | — | — |
+| `variable_symbol` | TEXT | CHECK (`~ '^[0-9]{1,10}$'`) | `NULL` |
 | `missed_rsvps` | INTEGER | NOT NULL | `0` |
 | `joined_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
-**Unique**: `(team_id, user_id)`
+**Unique**: `(team_id, user_id)`. Also `uq_team_members_team_variable_symbol` — a partial unique index on `(team_id, NULLIF(ltrim(variable_symbol, '0'), ''))` `WHERE variable_symbol IS NOT NULL`, so `"007"` and `"7"` collide as the same symbol within a team, while any number of members may have no symbol at all.
 
 **Indexes**: `idx_team_members_team_user` on `(team_id, user_id)`
 
-**Notes**: The original `role TEXT` column was replaced by the `member_roles` junction table across migrations `1740614400` and `1740700800`. `active` was added in migration `1740355200`. `jersey_number` was moved from `users` in migration `1740990000`; it can also be set from Discord via the `/complete` slash command (`Guild/CompleteMemberProfile` RPC → `TeamMembersRepository.setJerseyNumber`), alongside completing the profile. `missed_rsvps` added in migration `1790300000_add_team_members_missed_rsvps` — a consecutive count of events for which an invited Player did not respond. Incremented by `EventStartCron` when an active event transitions to `started` and the member (who holds the built-in `Player` role and belongs to the event's member group) has no `event_rsvps` row for that event. Reset to `0` by any RSVP submission (yes, no, maybe, or coming later).
+**Notes**: The original `role TEXT` column was replaced by the `member_roles` junction table across migrations `1740614400` and `1740700800`. `active` was added in migration `1740355200`. `jersey_number` was moved from `users` in migration `1740990000`; it can also be set from Discord via the `/complete` slash command (`Guild/CompleteMemberProfile` RPC → `TeamMembersRepository.setJerseyNumber`), alongside completing the profile. `missed_rsvps` added in migration `1790300000_add_team_members_missed_rsvps` — a consecutive count of events for which an invited Player did not respond. Incremented by `EventStartCron` when an active event transitions to `started` and the member (who holds the built-in `Player` role and belongs to the event's member group) has no `event_rsvps` row for that event. Reset to `0` by any RSVP submission (yes, no, maybe, or coming later). `variable_symbol` added in migration `1792000000_add_team_member_variable_symbol` — the bank payment variable symbol used to auto-match Fio transactions to this member's fee assignments and to build their SPAYD payment QR codes (see [12. Finance](#12-finance) and the Bank Sync section below). Set via `PATCH /teams/:teamId/members/:memberId` or the bulk `POST /teams/:teamId/members/variable-symbols/assign` endpoint — never written directly by the matcher.
 
 ---
 
@@ -1238,7 +1239,7 @@ Single-row counter used for cache invalidation. Incremented by the application (
 
 ### 12. Finance
 
-The Finance subsystem tracks fee definitions, per-member fee assignments, payment records, and team expenditures. A PostgreSQL trigger automatically maintains the denormalised `fee_assignments.paid_minor` column so the server never needs to aggregate payments on read. A computed view (`fee_assignment_status_v`) derives the displayed status from stored data. Payment reminders are delivered asynchronously via two additional tables: `payment_reminder_sync_events` (outbox for the bot's Finance Sync worker) and `payment_reminders_sent` (idempotency guard so a reminder is never delivered twice for the same assignment/kind pair). Team expenditures are tracked in the `expenses` table; every change is journalled into `expense_history` by a Postgres trigger.
+The Finance subsystem tracks fee definitions, per-member fee assignments, payment records, and team expenditures. A PostgreSQL trigger (`payments_finance_recompute`) automatically maintains the denormalised `fee_assignments.paid_minor` column, and — since the Fio bank-sync feature — `bank_transactions.match_state`, so the server never needs to aggregate payments on read. A computed view (`fee_assignment_status_v`) derives the displayed status from stored data. Payment reminders are delivered asynchronously via two additional tables: `payment_reminder_sync_events` (outbox for the bot's Finance Sync worker) and `payment_reminders_sent` (idempotency guard so a reminder is never delivered twice for the same assignment/kind pair). Team expenditures are tracked in the `expenses` table; every change is journalled into `expense_history` by a Postgres trigger. See the Bank Sync section below for the tables that extend this subsystem with Fio bank-transaction ingestion and matching.
 
 #### `fees`
 
@@ -1267,7 +1268,7 @@ A fee definition scoped to a team. Fees can be archived (soft-deleted) but never
 
 #### `fee_assignments`
 
-Assigns a fee to a specific team member, optionally overriding the amount or due date. The `paid_minor` column is maintained automatically by the `payments_recompute_paid_minor` trigger.
+Assigns a fee to a specific team member, optionally overriding the amount or due date. The `paid_minor` column is maintained automatically by the `payments_finance_recompute` trigger.
 
 | Column | Type | Constraints | Default |
 |---|---|---|---|
@@ -1307,13 +1308,15 @@ An individual payment against a fee assignment. Payments are never deleted; inst
 | `voided_at` | TIMESTAMPTZ | — | `NULL` |
 | `voided_by_user_id` | UUID | FK → `users(id)` ON DELETE RESTRICT | `NULL` |
 | `void_reason` | TEXT | — | `NULL` |
+| `bank_transaction_id` | UUID | FK → `bank_transactions(id)` ON DELETE RESTRICT | `NULL` |
+| `matched_by` | TEXT | CHECK (`'auto'`, `'manual'`) | `NULL` |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
 
-**Constraint**: `voided_at`, `voided_by_user_id`, and `void_reason` must all be `NULL` or all non-`NULL` (atomic void state).
+**Constraint**: `voided_at`, `voided_by_user_id`, and `void_reason` must all be `NULL` or all non-`NULL` (atomic void state). `payments_bank_match_pair`: `bank_transaction_id` and `matched_by` must both be `NULL` or both non-`NULL`. `payments_matched_by_values`: `matched_by IS NULL OR matched_by IN ('auto', 'manual')`.
 
-**Indexes**: `idx_payments_assignment_active` on `(fee_assignment_id) WHERE voided_at IS NULL`; `idx_payments_member` on `(team_member_id)`; `idx_payments_paid_at` on `(paid_at DESC)`
+**Indexes**: `idx_payments_assignment_active` on `(fee_assignment_id) WHERE voided_at IS NULL`; `idx_payments_member` on `(team_member_id)`; `idx_payments_paid_at` on `(paid_at DESC)`; `idx_payments_bank_transaction` on `(bank_transaction_id) WHERE bank_transaction_id IS NOT NULL`
 
-**Notes**: `amount_minor > 0` (not ≥ 0) — a zero-amount payment is rejected at the DB level. Voiding a payment triggers `payments_recompute_paid_minor` to recompute `fee_assignments.paid_minor`.
+**Notes**: `amount_minor > 0` (not ≥ 0) — a zero-amount payment is rejected at the DB level. Voiding a payment triggers `payments_finance_recompute` to recompute `fee_assignments.paid_minor` (and, when the voided payment was bank-matched, `bank_transactions.match_state`). `bank_transaction_id`/`matched_by` were added in migration `1792000002_create_bank_transactions` — set on a `payments` row created by the Fio matcher (`matched_by = 'auto'`) or through the manual match endpoint (`matched_by = 'manual'`); `NULL`/`NULL` for cash payments and any payment recorded before this feature. One bank transaction may be linked from several payments (a split match across multiple fees); one payment links to at most one bank transaction.
 
 ---
 
@@ -1340,9 +1343,16 @@ A read-only view that joins `fee_assignments` with `fees` to produce the compute
 
 ---
 
-#### `recompute_paid_minor` (trigger function)
+#### `payments_finance_recompute` (trigger function)
 
-A PostgreSQL trigger function attached to the `payments` table as `AFTER INSERT OR UPDATE OR DELETE`. After any payment write it calls `recompute_paid_minor(assignment_id)` which locks the assignment row and resets `paid_minor` to the sum of non-voided payments for that assignment. On `UPDATE` it also recomputes the old assignment if `fee_assignment_id` changed. This keeps `fee_assignments.paid_minor` always accurate without application-level coordination.
+A PostgreSQL trigger function attached to the `payments` table as `AFTER INSERT OR UPDATE OR DELETE` (trigger name `payments_finance_recompute`, replacing the earlier `payments_recompute_paid_minor` trigger — migration `1792000002_create_bank_transactions` drops the old trigger and installs this one under a new name; the old `recompute_paid_minor`-only function body is retained, unreferenced, so a rollback can recreate the old trigger).
+
+It owns **two** derived columns now, in a fixed lock order (`bank_transactions` before `fee_assignments`) to avoid deadlocking against the reverse order elsewhere:
+
+1. **`fee_assignments.paid_minor`** — unchanged behaviour: calls `recompute_paid_minor(assignment_id)`, which locks the assignment row and resets `paid_minor` to the sum of non-voided payments for that assignment. On `UPDATE` it also recomputes the old assignment if `fee_assignment_id` changed (locking the lower UUID first to avoid a self-deadlock between two concurrent re-points).
+2. **`bank_transactions.match_state`** — new. When a payment's `bank_transaction_id` is set (on `INSERT`, on `UPDATE` when it changes, or on `DELETE`), calls `recompute_bank_match_state(tx_id, void_suppress)`, which locks the transaction row and sets `match_state` to `unmatched` (no active payments), `matched` (sum of active payments ≥ the transaction's absolute amount), or `partially_matched` (some but not enough). Terminal states (`ignored`, `not_applicable`) are never overwritten. `void_suppress` is `true` exactly when a payment on a bank-matched transaction just transitioned from active to voided (covers `/unmatch`, `voidPayment`, and any future void path with one rule) — in that case the function also stamps `auto_match_suppressed = true` on the transaction under the same row lock, so the poller/rematch does not immediately re-credit the same movement.
+
+This keeps both columns always accurate without application-level coordination; application code must never write `fee_assignments.paid_minor` or `bank_transactions.match_state` directly.
 
 ---
 
@@ -1356,8 +1366,8 @@ Outbox table for the bot's Finance Sync worker. The `PaymentReminderCron` (serve
 | `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
 | `guild_id` | TEXT | NOT NULL | — |
 | `assignment_id` | UUID | NOT NULL, FK → `fee_assignments(id)` ON DELETE CASCADE | — |
-| `kind` | VARCHAR(32) | NOT NULL, one of `due_in_3d`, `due_today`, `overdue_3d`, `overdue_10d`, `overdue_21d` | — |
-| `effective_due_at` | TIMESTAMPTZ | NOT NULL | — |
+| `kind` | VARCHAR(32) | NOT NULL, one of `assigned`, `due_in_3d`, `due_today`, `overdue_3d`, `overdue_10d`, `overdue_21d` | — |
+| `effective_due_at` | TIMESTAMPTZ | — | `NULL` |
 | `fee_name` | TEXT | NOT NULL | — |
 | `currency` | CHAR(3) | NOT NULL | — |
 | `amount_minor` | BIGINT | NOT NULL | — |
@@ -1369,7 +1379,7 @@ Outbox table for the bot's Finance Sync worker. The `PaymentReminderCron` (serve
 
 **Indexes**: partial index `idx_payment_reminder_sync_events_unprocessed` on `(created_at) WHERE processed_at IS NULL` for efficient bot polling.
 
-**Notes**: Added in migration `1785000000_payment_reminders`. `processed_at` is `NULL` while the event is pending; set to `now()` on both success and failure (permanent failure semantics — failed events are not retried). The `PaymentReminderCron` guards against double-emission: it excludes assignments that already have an unprocessed row of the same `kind` in this table.
+**Notes**: Added in migration `1785000000_payment_reminders`. `processed_at` is `NULL` while the event is pending; set to `now()` on both success and failure (permanent failure semantics — failed events are not retried). The `PaymentReminderCron` guards against double-emission: it excludes assignments that already have an unprocessed row of the same `kind` in this table. The `assigned` kind (added by the Fio bank-sync feature, migration `1792000003_seed_assigned_reminder_sent`) fires once, immediately at assignment creation rather than on a due-date cadence, carries the payment QR, and is only emitted for teams with an enabled `bank_sync_config` row — it is not gated on `effective_due_at`, which is why that column was changed from `NOT NULL` to nullable in the same migration (a fee with no due date is exactly the case an early QR helps most). Migration `1792000003` also seeds `payment_reminders_sent` for every pre-existing `fee_assignments` row so upgrading a database with existing assignments does not blast a backlog of `assigned` DMs on first deploy; `PUT /teams/:teamId/bank-sync` performs the equivalent seed for a single team the first time it flips `enabled` from `false` to `true`.
 
 ---
 
@@ -1911,6 +1921,181 @@ One row per scenario within an attempt, holding the per-step verdicts. This is w
 
 ---
 
+### 19. Bank Sync (Fio)
+
+Extends the Finance subsystem ([12. Finance](#12-finance)) with Fio bank-transaction ingestion, variable-symbol-based auto-matching, and grant-audit export. `BankSyncPoller` (an hourly `Schedule.cron('0 * * * *')` job, mirroring `ImapPoller`'s per-team `Effect.exit` isolation and bounded concurrency) pulls new movements per team from the Fio "premium" JSON API, ingests them into `bank_transactions`, and runs the matcher inline. A matched movement becomes an ordinary `payments` row (`method: 'bank_transfer'`, `bank_transaction_id` set, `matched_by: 'auto'` or `'manual'`) — see the `payments` and `payments_finance_recompute` notes under Finance above.
+
+#### `bank_sync_config`
+
+One row per team (PK `team_id`), created on the first `PUT /teams/:teamId/bank-sync`. Holds the Fio account identity, the encrypted API token, the historical-backfill walk cursor, and status/backoff bookkeeping.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `team_id` | UUID | PK, FK → `teams(id)` ON DELETE CASCADE | — |
+| `provider` | TEXT | NOT NULL, CHECK (`'fio'`) | `'fio'` |
+| `enabled` | BOOLEAN | NOT NULL | `false` |
+| `auto_match_enabled` | BOOLEAN | NOT NULL | `true` |
+| `account_prefix` | TEXT | CHECK (`~ '^[0-9]{1,6}$'`) | `NULL` |
+| `account_number` | TEXT | CHECK (`~ '^[0-9]{2,10}$'`) | `NULL` |
+| `bank_code` | TEXT | CHECK (`~ '^[0-9]{4}$'`) | `NULL` |
+| `iban` | TEXT | — | `NULL` |
+| `currency` | CHAR(3) | NOT NULL | `'CZK'` |
+| `recipient_name` | TEXT | — | `NULL` |
+| `registered_id` | TEXT | CHECK (`~ '^[0-9]{8}$'`) | `NULL` |
+| `registered_address` | TEXT | — | `NULL` |
+| `bank_name` | TEXT | — | `NULL` |
+| `fio_token_encrypted` | TEXT | — | `NULL` |
+| `fio_token_created_at` | TIMESTAMPTZ | — | `NULL` |
+| `backfill_from` | DATE | — | `NULL` |
+| `backfill_cursor` | DATE | — | `NULL` |
+| `backfill_status` | TEXT | CHECK (`'running'`, `'complete'`, `'history_locked'`, `'budget'`, `'failed'`) | `NULL` |
+| `backfill_run_id` | UUID | — | `NULL` |
+| `last_synced_at` | TIMESTAMPTZ | — | `NULL` |
+| `last_success_at` | TIMESTAMPTZ | — | `NULL` |
+| `last_error_code` | TEXT | — | `NULL` |
+| `last_error_at` | TIMESTAMPTZ | — | `NULL` |
+| `consecutive_failure_count` | INTEGER | NOT NULL | `0` |
+| `next_attempt_at` | TIMESTAMPTZ | — | `NULL` |
+| `coverage_warning` | TEXT | — | `NULL` |
+| `poll_leased_until` | TIMESTAMPTZ | — | `NULL` |
+| `poll_leased_by` | TEXT | — | `NULL` |
+| `configured_by_user_id` | UUID | NOT NULL, FK → `users(id)` ON DELETE RESTRICT | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Constraint**: `NOT enabled OR (account_number IS NOT NULL AND bank_code IS NOT NULL AND recipient_name IS NOT NULL)` — an enabled config must be complete enough to poll, build an IBAN, and emit a SPAYD payload and a PDF header.
+
+**Indexes**: partial index `idx_bank_sync_config_pollable` on `(team_id) WHERE enabled = true AND fio_token_encrypted IS NOT NULL`.
+
+**Notes**: Added in migration `1792000001_create_bank_sync_config`. `fio_token_encrypted` holds the AES-256-GCM ciphertext (`v1.<iv>.<tag>.<ct>` base64url) produced by `FioSecretCrypto` (own key, `FIO_TOKEN_ENCRYPTION_KEY` — deliberately not shared with `EmailSecretCrypto`'s `EMAIL_IMAP_ENCRYPTION_KEY`, so a compromise of one secret does not compromise the other); the plaintext is never persisted and the API never returns it (`BankSyncConfigView.fioTokenSet: boolean` is the only signal). `iban` caches Fio's own `info.iban` for a cross-check display against the IBAN computed from `account_prefix`/`account_number`/`bank_code` (`CzIban.buildCzIban`) — the computed value, not this cached one, is authoritative for the SPAYD `ACC` field. `fio_token_created_at` is self-reported (Fio exposes no real token metadata); `tokenExpiresAt` in API responses is simply `fio_token_created_at + 180 days`. `backfill_*` columns track a detached historical-import fiber that walks backwards from `backfill_from` in bounded chunks, writing `backfill_cursor` after each chunk so a crash resumes rather than restarts. `poll_leased_until`/`poll_leased_by` implement a distributed lease so only one replica polls a given team at a time (paired with a 4-minute per-team call timeout and a 6-minute lease). GDPR note: this table is entirely excluded from personal-data exports (`skip`, not `redact`, in `applications/server/src/gdpr/exportManifest.ts`) — none of it is data *about* the treasurer who last saved it, only the club's own banking configuration; team deletion cascades and removes the row.
+
+---
+
+#### `fio_token_throttle`
+
+A per-token, cross-replica rate limit: at most one Fio API call per token every 30 seconds, regardless of which server replica is polling.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `token_fingerprint` | TEXT | PK | — |
+| `next_call_allowed_at` | TIMESTAMPTZ | NOT NULL | — |
+
+**Notes**: Added in migration `1792000001_create_bank_sync_config`. Not team-scoped and carries no FK — `token_fingerprint` is a hash of the token, not the token itself, so the row survives even if the underlying `bank_sync_config` is deleted or the token is rotated (it simply becomes an orphaned, harmless row).
+
+---
+
+#### `bank_statement_periods`
+
+One row per Fio `/periods` response the poller has successfully ingested — the coverage evidence a grant export checks against before allowing a CSV/PDF download.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE, PK (part 1) | — |
+| `date_start` | DATE | NOT NULL, PK (part 2) | — |
+| `date_end` | DATE | NOT NULL, PK (part 3) | — |
+| `opening_balance_minor` | BIGINT | NOT NULL | — |
+| `closing_balance_minor` | BIGINT | NOT NULL | — |
+| `currency` | CHAR(3) | NOT NULL | — |
+| `fetched_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Primary key**: `(team_id, date_start, date_end)`
+
+**Notes**: Added in migration `1792000001_create_bank_sync_config`. Used to derive `openingBalanceMinor`/`closingBalanceMinor` for an arbitrary export range (`bankCoverage.deriveBalanceBefore` anchors on the nearest recorded period at or before the date and walks forward through ingested movements — periods are not looked up directly, since an arbitrary `from`/`to` rarely lines up with a stored row) and to detect two kinds of problem: a **coverage gap** (a date range Fio was never successfully queried for) and a **period continuity violation** (a recorded period whose `opening_balance_minor + SUM(movements in range) ≠ closing_balance_minor`, meaning some movement is silently missing despite the period existing). Both surface in the CSV/PDF export flow.
+
+---
+
+#### `bank_transactions`
+
+One row per Fio bank movement, ingested idempotently on `(team_id, provider, fio_movement_id)`.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `provider` | TEXT | NOT NULL, CHECK (`'fio'`) | `'fio'` |
+| `fio_movement_id` | BIGINT | NOT NULL | — |
+| `fio_order_id` | TEXT | — | `NULL` |
+| `booked_on` | DATE | NOT NULL | — |
+| `amount_minor` | BIGINT | NOT NULL, CHECK (`<> 0`) | — |
+| `direction` | TEXT | GENERATED ALWAYS AS (`amount_minor < 0 ? 'outgoing' : 'incoming'`) STORED | — |
+| `currency` | CHAR(3) | NOT NULL | — |
+| `variable_symbol` | TEXT | — | `NULL` |
+| `constant_symbol` | TEXT | — | `NULL` |
+| `specific_symbol` | TEXT | — | `NULL` |
+| `counterparty_account` | TEXT | — | `NULL` |
+| `counterparty_bank_code` | TEXT | — | `NULL` |
+| `counterparty_name` | TEXT | — | `NULL` |
+| `counterparty_bank_name` | TEXT | — | `NULL` |
+| `counterparty_bic` | TEXT | — | `NULL` |
+| `payer_reference` | TEXT | — | `NULL` |
+| `message_for_recipient` | TEXT | — | `NULL` |
+| `user_identification` | TEXT | — | `NULL` |
+| `tx_type` | TEXT | — | `NULL` |
+| `entered_by` | TEXT | — | `NULL` |
+| `specification` | TEXT | — | `NULL` |
+| `comment` | TEXT | — | `NULL` |
+| `match_state` | TEXT | NOT NULL, CHECK (`'unmatched'`, `'partially_matched'`, `'matched'`, `'ignored'`, `'not_applicable'`) | `'unmatched'` |
+| `match_reason` | TEXT | CHECK, one of nine literals (see below) | `NULL` |
+| `match_evidence` | JSONB | — | `NULL` |
+| `auto_match_suppressed` | BOOLEAN | NOT NULL | `false` |
+| `ignored_reason` | TEXT | — | `NULL` |
+| `ignored_by_user_id` | UUID | FK → `users(id)` ON DELETE RESTRICT | `NULL` |
+| `resolution_kind` | TEXT | CHECK (`'other_income'`, `'not_relevant'`) | `NULL` |
+| `raw` | JSONB | NOT NULL | — |
+| `ingested_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Unique**: `(team_id, provider, fio_movement_id)` — re-ingesting the same movement is a no-op.
+
+**Constraints**: `match_state <> 'ignored' OR (ignored_reason IS NOT NULL AND ignored_by_user_id IS NOT NULL AND resolution_kind IS NOT NULL)`; `match_state = 'ignored' OR resolution_kind IS NULL` (the two constraints together make `resolution_kind` set if-and-only-if the row is ignored).
+
+**Indexes**: `idx_bank_transactions_team_booked` on `(team_id, booked_on DESC, id DESC)`; partial `idx_bank_transactions_queue` on `(team_id, booked_on DESC) WHERE match_state IN ('unmatched', 'partially_matched')`; partial `idx_bank_transactions_dup` on `(team_id, variable_symbol, amount_minor, booked_on) WHERE direction = 'incoming'` (duplicate-hint lookup).
+
+**`match_reason`** — exactly the nine literals of `BankTransactionMatchReason`, set only while `match_state` is `unmatched`/`partially_matched` (cleared once `matched`): `no_vs` (no VS at all), `no_member_for_vs` (VS present, no member owns it), `ambiguous_member` (defensive only — the unique index on `team_members` forbids two members sharing a VS), `amount_mismatch_under`, `overpayment`, `ambiguous_multiple_exact` (≥2 open assignments, more than one matches the amount exactly), `ambiguous_multiple_open` (≥2 open assignments, none matching exactly), `no_open_assignment`, `currency_mismatch`. `possible_duplicate` is deliberately **not** a member of this union — it is a hint carried inside `match_evidence` alongside `no_open_assignment`, surfaced via `idx_bank_transactions_dup`, never a reason of its own.
+
+**Notes**: Added in migration `1792000002_create_bank_transactions` (same migration adds `payments.bank_transaction_id`/`matched_by` and the `payments_finance_recompute` trigger — see [12. Finance](#12-finance)). `fio_movement_id` is `BIGINT` (Fio's `column22`, up to 11 digits) — never decoded as `int4`. `fio_order_id` (`column17`) is explicitly **not** unique and never used for reconciliation. `raw` holds the untouched Fio movement JSON and is excluded from every GDPR export disposition, same as `bank_sync_config`. `match_state` is trigger-maintained by `payments_finance_recompute`/`recompute_bank_match_state` — application code must never write it directly. `auto_match_suppressed` is set when a match on this transaction is manually undone (`/unmatch`) so the poller does not immediately re-credit the same movement; cleared by a subsequent manual match. GDPR note: excluded from personal-data exports — bank movements name non-member counterparties who never consented to appear in anyone's export; `ignored_by_user_id` is pseudonymised by scrubbing `users` rather than exporting the row.
+
+---
+
+#### `bank_token_expiry_events`
+
+Outbox for the T−14/T−7/T−1 Discord DM warning a treasurer that a connected Fio token is about to expire (`fio_token_created_at + 180 days`). Modelled on `payment_reminder_sync_events` but kept as its own table because it has no `fee_assignments` row to hang off.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `id` | UUID | PK | `gen_random_uuid()` |
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE | — |
+| `guild_id` | TEXT | NOT NULL | — |
+| `user_discord_id` | TEXT | NOT NULL | — |
+| `threshold_days` | INTEGER | NOT NULL (`14`, `7`, or `1`) | — |
+| `token_expires_at` | TIMESTAMPTZ | NOT NULL | — |
+| `created_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+| `processed_at` | TIMESTAMPTZ | — | `NULL` |
+| `error` | TEXT | — | `NULL` |
+
+**Indexes**: partial `idx_bank_token_expiry_events_unprocessed` on `(created_at) WHERE processed_at IS NULL`; partial unique `uq_bank_token_expiry_events_pending` on `(team_id, threshold_days) WHERE processed_at IS NULL` (at most one pending event per team per threshold at a time).
+
+**Notes**: Added in migration `1792000004_create_bank_token_expiry_events`. Written by the server's `BankTokenExpiryCron` (daily, `0 4 * * *` UTC), which scans `bank_sync_config` for enabled configs whose token sits at exactly T−14/T−7/T−1 days from `fio_token_created_at + 180d` and emits one row per `(team, threshold)` match, skipping any pair that already has a pending row (`uq_bank_token_expiry_events_pending`). Drained by the bot's Finance Sync worker (Pass 2), which DMs the treasurer and acks via `Finance/MarkBankTokenExpiryProcessed`/`Finance/MarkBankTokenExpiryFailed`.
+
+---
+
+#### `bank_token_expiry_sent`
+
+Idempotency guard: each threshold fires at most once per token generation.
+
+| Column | Type | Constraints | Default |
+|---|---|---|---|
+| `team_id` | UUID | NOT NULL, FK → `teams(id)` ON DELETE CASCADE, PK (part 1) | — |
+| `token_created_at` | TIMESTAMPTZ | NOT NULL, PK (part 2) | — |
+| `threshold_days` | INTEGER | NOT NULL, PK (part 3) | — |
+| `sent_at` | TIMESTAMPTZ | NOT NULL | `now()` |
+
+**Primary key**: `(team_id, token_created_at, threshold_days)`
+
+**Notes**: Added in migration `1792000004_create_bank_token_expiry_events`. Keying on `token_created_at` (not just `team_id`/`threshold_days`) means saving a replacement token re-arms all three thresholds automatically, with no manual reset needed. Written only by the bot's `Finance/MarkBankTokenExpirySent` RPC, after Discord accepts the DM — see the note on `bank_token_expiry_events` above about the currently-missing producer.
+
+---
+
 ## Migration History
 
 All 109 migration files in `packages/migrations/src/before/` plus 1 after-migration.
@@ -2026,6 +2211,11 @@ All 109 migration files in `packages/migrations/src/before/` plus 1 after-migrat
 | 1790400000 | `create_rules_progress` | Creates `rules_attempts` (id PK, user_id FK → users CASCADE, mode TEXT CHECK `'practice'/'exam'`, packages INT[], started_at, finished_at nullable, score/total INT CHECK ≥ 0, created_at); index `idx_rules_attempts_user` on `(user_id, finished_at DESC, id DESC)`. Creates `rules_scenario_results` (attempt_id FK → rules_attempts CASCADE, scenario_id TEXT, correct BOOLEAN, steps JSONB; PK (attempt_id, scenario_id)) with no additional index — the PK covers the mastery read's `attempt_id` lookup. |
 | 1791700000 | `add_series_times_team_local_flag` | Adds `times_are_team_local BOOLEAN NOT NULL DEFAULT FALSE` to `event_series` (`IF NOT EXISTS`), per-row: `TRUE` = wall clock in the team's timezone, `FALSE` = legacy UTC time-of-day. Converts nothing — a deliberate split from the conversion migration below, so the previous server image (which does not yet read this flag) stays safe to run alongside the new one during a rolling deploy. See `.work-plans/timezone-migration-deploy-window.md` for the two-release rationale. |
 | 1791800000 *(pending, follow-up release)* | `series_time_is_team_local` | Converts `event_series.start_time`/`end_time` from UTC time-of-day to team-local wall-clock for every `FALSE` row, anchored at each series' own `start_date` (a correlated scalar subselect against `team_settings.timezone`, falling back to `'Europe/Prague'` for a missing or Postgres-unrecognised zone), and sets `times_are_team_local = TRUE` in the same guarded `UPDATE` so it is safely re-runnable by hand. Also re-anchors already-materialized future, `active`, not-`series_modified` `events` rows generated from a series onto the corrected wall-clock time, and stamps their `personal_messages_dirty_at` so Discord personal-channel messages re-render with the fix. Flips the column's `DEFAULT` to `TRUE` as its final statement. Not yet in the tree as of this document's last update — do not search for this file until it ships. |
+| 1792000000 | `add_team_member_variable_symbol` | Adds `variable_symbol TEXT` (nullable, `CHECK (~ '^[0-9]{1,10}$')`) to `team_members`; creates the partial unique index `uq_team_members_team_variable_symbol` on `(team_id, NULLIF(ltrim(variable_symbol, '0'), ''))` `WHERE variable_symbol IS NOT NULL`. |
+| 1792000001 | `create_bank_sync_config` | Creates `bank_sync_config` (PK `team_id` FK → teams CASCADE; account identity, encrypted Fio token, backfill-walk cursor, status/backoff bookkeeping, and poll-lease columns — see the Bank Sync section below); partial index `idx_bank_sync_config_pollable`. Creates `fio_token_throttle` (PK `token_fingerprint`, `next_call_allowed_at`) — a per-token 30 s throttle shared across replicas. Creates `bank_statement_periods` (composite PK `(team_id, date_start, date_end)`, opening/closing balances, currency, `fetched_at`) — coverage evidence for the grant export. |
+| 1792000002 | `create_bank_transactions` | Creates `bank_transactions` (see the Bank Sync section below); indexes `idx_bank_transactions_team_booked`, the partial `idx_bank_transactions_queue`, and the partial `idx_bank_transactions_dup`. Adds `bank_transaction_id UUID` (FK → bank_transactions RESTRICT) and `matched_by TEXT` (CHECK `'auto'`/`'manual'`) to `payments`, plus constraints `payments_matched_by_values` and `payments_bank_match_pair`; index `idx_payments_bank_transaction`. Creates `recompute_bank_match_state(p_tx_id, p_void_suppress)` and replaces the payments trigger function/trigger with `payments_finance_recompute` (dropping `payments_recompute_paid_minor`) — see that function's notes under [12. Finance](#12-finance). |
+| 1792000003 | `seed_assigned_reminder_sent` | Seeds `payment_reminders_sent` with an `'assigned'` row for every pre-existing `fee_assignments` row (`ON CONFLICT DO NOTHING`), so upgrading a database with existing assignments does not retroactively fire the new `assigned` reminder for all of them. Drops `NOT NULL` from `payment_reminder_sync_events.effective_due_at` (the `assigned` kind is not due-date-gated). |
+| 1792000004 | `create_bank_token_expiry_events` | Creates `bank_token_expiry_events` (outbox for the T−14/T−7/T−1 Fio-token-expiry Discord DM, written by `BankTokenExpiryCron`; see the Bank Sync section below) with a partial unprocessed index and a partial unique index on `(team_id, threshold_days) WHERE processed_at IS NULL`. Creates `bank_token_expiry_sent` (idempotency guard, composite PK `(team_id, token_created_at, threshold_days)`). |
 
 ### After Migrations (seed data)
 
@@ -2050,6 +2240,7 @@ Three tables act as outbox queues for bot-server communication:
 | `discord_role_provision_events` | Role Provision | `builtin_achievement`, `custom_achievement` |
 | `payment_reminder_sync_events` | Finance Sync | `payment_reminder_ready` |
 | `email_post_sync_events` | Email Sync | `approval_request`, `post_summary`, `post_original` |
+| `bank_token_expiry_events` | Finance Sync (Pass 2) | `bank_token_expiring`, written daily by `BankTokenExpiryCron` — see the `bank_token_expiry_events` notes under [19. Bank Sync (Fio)](#19-bank-sync-fio) |
 
 The server inserts rows when the relevant domain action occurs. The bot polls `WHERE processed_at IS NULL ORDER BY created_at` and updates `processed_at` (and optionally `error`) when processing is complete. Partial indexes on `(created_at) WHERE processed_at IS NULL` make these polls efficient. Event data is denormalised into snapshot columns so that the bot's message content remains accurate even if the source row is subsequently modified.
 
@@ -2059,7 +2250,7 @@ The server inserts rows when the relevant domain action occurs. The bot polls `W
 
 ### Cascading Deletes
 
-Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events, fees, expenses, email_forwarding_config, email_messages, email_post_sync_events, player_ratings, player_rating_history, training_games, team_generation_config, personal_event_channels, personal_event_overflow_categories, sudo_sessions). Deletion of a `training_games` row cascades to its `training_game_participants` rows. Deletion of an `email_messages` row cascades to its `email_attachments` and `email_post_sync_events` rows. Fee deletion cascades to fee_assignments. Fee assignment deletion cascades to `payment_reminder_sync_events` and `payment_reminders_sent`. Expense deletion does not cascade to `expense_history` (no FK constraint on `expense_history.expense_id`). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, achievement_sync_events, and training_game_participants. Member deletion is blocked (`ON DELETE RESTRICT`) when any fee_assignment or payment row references the member. User deletion is blocked (`ON DELETE RESTRICT`) when any expense or expense_history row references the user. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`).
+Team deletion cascades to all child tables (team_members, team_invites, invite_acceptances, team_settings, roles, groups, training_types, events, event_series, rosters, notifications, discord_role_mappings, discord_channel_mappings, role_sync_events, channel_sync_events, event_sync_events, age_threshold_rules, activity_types, achievement_role_mappings, achievement_sync_events, achievement_settings, custom_achievements, discord_role_provision_events, fees, expenses, email_forwarding_config, email_messages, email_post_sync_events, player_ratings, player_rating_history, training_games, team_generation_config, personal_event_channels, personal_event_overflow_categories, sudo_sessions, bank_sync_config, bank_statement_periods, bank_transactions, bank_token_expiry_events, bank_token_expiry_sent). Deletion of a `training_games` row cascades to its `training_game_participants` rows. Deletion of an `email_messages` row cascades to its `email_attachments` and `email_post_sync_events` rows. Fee deletion cascades to fee_assignments. Fee assignment deletion cascades to `payment_reminder_sync_events` and `payment_reminders_sent`. Expense deletion does not cascade to `expense_history` (no FK constraint on `expense_history.expense_id`). Member deletion cascades to group_members, member_roles, roster_members, event_rsvps, activity_logs, earned_achievements, achievement_sync_events, and training_game_participants. Member deletion is blocked (`ON DELETE RESTRICT`) when any fee_assignment or payment row references the member. User deletion is blocked (`ON DELETE RESTRICT`) when any expense or expense_history row references the user. `invite_acceptances` rows are also deleted when the referenced `team_invites` row is deleted (ON DELETE CASCADE on `team_invite_id`) and when the referenced `users` row is deleted (ON DELETE CASCADE on `user_id`). A `bank_transactions` row is protected (`ON DELETE RESTRICT`) while any `payments` row still references it via `bank_transaction_id`. `fio_token_throttle` has no FK to any table — it is keyed on a token fingerprint hash and is not cleaned up by team or config deletion (an orphaned row is harmless).
 
 Role deletion uses `ON DELETE RESTRICT` on `member_roles` to prevent accidentally orphaning members. FK references from `role_sync_events.role_id` and `channel_sync_events.group_id` are stored as plain UUID (no FK constraint) so audit rows are retained after the referenced entity is deleted.
 

@@ -190,6 +190,7 @@ function makePlayer(overrides: Record<string, unknown> = {}) {
     birthDate: Option.none(),
     gender: Option.none(),
     jerseyNumber: Option.none(),
+    variableSymbol: Option.none(),
     username: 'alicedoe',
     avatar: Option.none(),
     displayName: 'Alice Doe',

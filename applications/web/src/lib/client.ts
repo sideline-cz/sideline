@@ -6,6 +6,7 @@ import {
   AgeThresholdApi,
   AiChatApi,
   Auth,
+  BankSyncApi,
   ChannelApi,
   DashboardApi,
   DashboardLayoutApi,
@@ -57,6 +58,7 @@ class ClientApi extends HttpApi.make('api')
   .add(AgeThresholdApi.AgeThresholdApiGroup)
   .add(AiChatApi.AiChatApiGroup)
   .add(Auth.AuthApiGroup)
+  .add(BankSyncApi.BankSyncApiGroup)
   .add(DashboardApi.DashboardApiGroup)
   .add(DashboardLayoutApi.DashboardLayoutApiGroup)
   .add(Invite.InviteApiGroup)

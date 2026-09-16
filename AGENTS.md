@@ -28,6 +28,22 @@ Each application follows an **AppLive + run.ts** pattern:
 
 The **migrations** package exports `MigratorLive` — a layer that only needs a `PgClient` and filesystem. Consumers provide their own `PgClient`, keeping the migration package decoupled from connection config.
 
+### Bank Sync (Fio) — Trigger-Owned Columns And One Lock Order
+
+The bank-sync subsystem ingests Fio movements (`applications/server/src/services/BankSyncPoller.ts`, hourly), matches them against `fee_assignments` (`services/BankTransactionMatcher.ts`), and exposes the queue, CSV and PDF at `src/api/bank-sync.ts`. Two invariants span the whole monorepo and are not visible from the call sites that violate them.
+
+**1. `payments_finance_recompute` (migration `packages/migrations/src/before/1792000002_create_bank_transactions.ts`) replaced `payments_recompute_paid_minor` and now owns two derived columns, not one.**
+
+| Column / value | Written by |
+|----------------|------------|
+| `fee_assignments.paid_minor` | the trigger only — never app code |
+| `bank_transactions.match_state` ∈ `unmatched` / `partially_matched` / `matched` | the trigger only, once the row exists. App code sets `match_state` at INSERT (`unmatched` for an incoming movement, `not_applicable` for an outgoing one) and never recomputes it afterwards. |
+| `bank_transactions.match_state` ∈ `ignored` / `not_applicable` | app code only — the treasurer's ignore/un-ignore — and every such UPDATE is guarded by `WHERE match_state IN (…)`. `recompute_bank_match_state` returns early on both states, so the trigger never overwrites a human decision; the un-ignore back to `unmatched` is the one app-side write of a trigger-owned value, and it is guarded by `WHERE match_state = 'ignored'`. |
+
+The trigger also stamps `bank_transactions.auto_match_suppressed = true` whenever a payment linked to a transaction transitions `voided_at IS NULL → NOT NULL`. That one rule is what stops the poller from silently re-creating, inside its next rolling window, a payment a treasurer deliberately reversed — including through the pre-existing `voidPayment` endpoint, which knows nothing about the bank tables. Do not move that stamp into an app-side void path; there is more than one.
+
+**2. Canonical lock order for every money write: `payments` (by `id ASC`) → `bank_transactions` → `fee_assignments` (by `id ASC`).** Both `BankTransactionMatcher.matchOne`/`unmatch` and `api/bank-sync.ts`'s manual match honour it. Violating it deadlocks (`40P01`) on a money operation, and Postgres reports it as an untyped `SqlError` — so the symptom is a failed payment, not a message naming a lock.
+
 ## Technology Stack
 
 - **TypeScript 5.6+** — Strict mode, NodeNext module resolution, ES2022 target
@@ -468,6 +484,58 @@ id from the highest that exists **at merge time**, not at branch time, and
 write it idempotently (`ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT
 EXISTS`) so a renumber stays safe for any database that already applied it.
 
+A `CREATE OR REPLACE FUNCTION` that **changes the argument count** does not
+replace the old function — Postgres treats a different arity as a distinct
+overload, so both survive and callers resolve unpredictably. When editing an
+unmerged migration to add a parameter, precede it with
+`DROP FUNCTION IF EXISTS <name>(<old arg types>)`.
+
+## A Backtick Inside a SQL Template Literal Ends the String
+
+Every `sql\`…\`` query in this repo is a JS template literal, so a backtick
+anywhere inside it — **including in a `--` comment** — terminates the string
+early. The rest of the query becomes JS, and the file explodes into syntax
+errors that point everywhere except the backtick.
+
+This has happened twice. Once it produced **223 type errors across the whole
+monorepo**, none of them in the offending file, presenting as "the repository's
+service type is `void`" in unrelated tests. Use single quotes when a SQL
+comment needs to quote an identifier:
+
+```ts
+// ✗ Bad — terminates the template literal
+sql`-- the \`assigned\` reminder fires outside the time gate`
+// ✓ Good
+sql`-- the 'assigned' reminder fires outside the time gate`
+```
+
+Nested backticks inside a `${}` interpolation hole are fine — the parser
+handles those correctly — but hoisting the value to a `const` above the query
+reads better and avoids provoking a false alarm during a grep.
+
+## `vi.stubGlobal('URL', …)` Breaks Vitest's Module Loader
+
+Replacing the global `URL` with a plain object (the usual way to spy on
+`createObjectURL` / `revokeObjectURL`) makes every **dynamic `import()` in that
+file** fail with `TypeError: URL is not a constructor`. Vite's module runner
+calls `new URL(...)` on the *global* to resolve a module's `file://` path, so
+the stub breaks the loader before the code under test ever runs. Reproduced
+with a zero-import module, so it is the stubbing pattern, not the subject.
+
+Spy on the real object instead — same assertions, no loader breakage:
+
+```ts
+// ✗ Bad — every `await import('./x.js')` in this file now throws
+vi.stubGlobal('URL', { ...URL, createObjectURL: mk, revokeObjectURL: rv });
+// ✓ Good
+vi.spyOn(URL, 'createObjectURL').mockImplementation(mk);
+vi.spyOn(URL, 'revokeObjectURL').mockImplementation(rv);
+```
+
+Type the mocks as `Mock<(obj: Blob | MediaSource) => string>` and
+`Mock<(url: string) => void>` so `mockImplementation` accepts them while the
+`toHaveBeenCalledWith` matchers still type-check.
+
 ## Common Tasks
 
 ```bash
@@ -786,6 +854,8 @@ The `docs/thesis/` directory contains Mermaid diagrams and documentation for the
 | `competitive-analysis.md` | Adding major new features that change Sideline's competitive positioning |
 
 ---
+
+**Last Updated**: 2026-09-16 (Fio bank transaction matching `feat/fio-transaction-matching`. New bank-sync subsystem: `bank_transactions` + `bank_sync_config` + `payments.bank_transaction_id`, an hourly `BankSyncPoller`, `BankTransactionMatcher`, CSV/PDF export, SPAYD QR. root AGENTS.md → Architecture: new "Bank Sync (Fio) — Trigger-Owned Columns And One Lock Order" — `payments_finance_recompute` (migration `1792000002`) REPLACED `payments_recompute_paid_minor` and now owns `fee_assignments.paid_minor` AND the payment-derived `bank_transactions.match_state` (app code may only set the human terminal states `ignored`/`not_applicable`, always guarded by `WHERE match_state IN (…)`), and stamps `auto_match_suppressed` on any active→voided payment transition, which is what stops the poller re-creating a deliberately reversed payment — including via the bank-unaware `voidPayment` endpoint; plus the canonical money-write lock order `payments` → `bank_transactions` → `fee_assignments`, each by `id ASC`, whose violation is a `40P01` surfacing as an untyped `SqlError`. root AGENTS.md also gained (authored separately): the `CREATE OR REPLACE FUNCTION` arity-overload trap under Migration IDs, "A Backtick Inside a SQL Template Literal Ends the String", and "`vi.stubGlobal('URL', …)` Breaks Vitest's Module Loader". server AGENTS.md: new "Fio API Client — The Token Is In The URL Path" (`HttpClient.TracerDisabledWhen` must be provided via `HttpClient.transform` on the client VALUE — the ref is read at execute time from the caller's fiber, so a construction-layer `Layer.provide` is silently ignored and the token lands in `url.full`; `TransportError` is nested inside `HttpClientError` so only `catchTag('HttpClientError')` + `catchCause` contains it, and the body decode must sit inside that boundary; the 30 s per-token throttle lives in SQL (`fio_token_throttle`) and returns a duration, never a timestamp, and must never run inside `sql.withTransaction`; a dead token returns a bodyless 500 with no 401/403, so 5xx is NEVER retried) and "PDF Fonts Must Be Vendored — pdfkit Corrupts Czech Silently" (WinAnsi renders `á é í ó ú ý š ž` but emits a malformed token for `č ď ě ň ř ť ů` and desynchronises the rest of the string with no exception, so a smoke test on the first set passes against a garbage document; vendored Noto Sans TTFs + `scripts/copy-assets.mjs` + `scripts/assert-dist.mjs`, because `tsc` does not copy `.ttf` and `node:25-slim` ships no fonts); plus rule 5 under "Consistent `FOR UPDATE` Lock Ordering" — locks a trigger takes on your behalf still count, so order the driving SELECT by the column the trigger will lock on (`unmatch` voids `ORDER BY fee_assignment_id ASC`, not by payment id). domain AGENTS.md → Pure Algorithm Modules: added `CzIban.ts` / `CzIco.ts` / `Spayd.ts` as reference implementations (imported by server, bot and web, which is why no second copy lives in `web/src/lib/finance/`) and rule 6 — checksum/wire-format modules must pin externally verified vectors and record their provenance, because vendor-published sample identifiers are routinely anonymised with un-recomputed check digits and fail their own checksum. web AGENTS.md: closed-union rule 5 — the icon/shape `Record`s keyed off a wire union are governed by the same exhaustiveness rule as the copy `Record` (`src/lib/finance/matchReasons.ts`, three parallel closed maps over the nine `BankTransaction.BankTransactionMatchReason` literals), and a carve-out in "Pure Helpers" rule 2 for closed-union lookup tables. bot AGENTS.md: the Bank Token Expiry section now describes a complete loop — `BankTokenExpiryCron` (daily, `0 4 * * *`) emits into `bank_token_expiry_events` at T-14/T-7/T-1 derived from `fio_token_created_at + 180 days`, writes `bank_token_expiry_sent` itself (the bot has no sent-ack for this family, unlike payment reminders), and an already-expired token stops firing because the day-difference equals a threshold exactly once as time moves forward.)
 
 **Last Updated**: 2026-09-15 (Group Discord channel role on late/manual join `fix/group-channel-discord-join`. root AGENTS.md → Effect-TS Patterns: new rule 8 — a callee's `E = never` is NOT a promise it cannot abort your chain, because `catchSqlErrors` DIES rather than fails; any auxiliary step spliced into an existing chain (self-heal, backfill emit, best-effort notification) MUST be wrapped in `Effect.catchCause` + `logWarning` at the call site. server AGENTS.md → "`Guild/RegisterMember` and Welcome Metadata" rule 6 (added by the implementer) gained three sub-rules: keep the `catchCause` wrap on `emitMemberGroupChannelRoles`; `MAX_GROUP_CHANNEL_EMISSIONS_PER_MEMBER = 25` is PERMANENTLY lossy (fires once on join, never re-derived) so `findActiveGroupsWithAncestorsForMember`'s `ORDER BY min(depth), name, id` must stay; `boundGroupIds` is now a functional `alreadyEmittedGroupIds` argument (duplicate-row suppression), which rule 2 previously called type-level-only. "Effective Roles Are Derived In Exactly One Place" rule 3: `findActiveGroupsWithAncestorsForMember` is now the FOURTH walk that must sever identically, and a new walk must ship an integration test ASSERTING set-equality with an existing walk, not just a header comment. Accuracy fixes: `teams.guild_id` is `NOT NULL` + `UNIQUE`, so `emitIfGuildLinked`'s `None` branch means the team ROW IS ABSENT, never "team exists but is unlinked" — the three backfill intros (server ×2, bot ×1) that blamed role-less groups/members on "created before the guild was linked" now blame unprocessed/permanently-failed events; and the roster backfill button invokes its endpoint ONCE per click (`RostersListPage.tsx:46-75`), it does not loop while `remainingCount > 0`.)
 

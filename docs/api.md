@@ -45,6 +45,7 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Team Generation](#34-team-generation)
    - [Rules Trainer](#35-rules-trainer)
    - [AI Assistant](#36-ai-assistant)
+   - [Bank Sync](#37-bank-sync)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -624,6 +625,7 @@ Lists all active members of a team with their profile and role information.
 | `birthDate` | `string \| null` | Yes | Birth date |
 | `gender` | `"male" \| "female" \| "other" \| null` | Yes | Gender |
 | `jerseyNumber` | `number \| null` | Yes | Jersey number |
+| `variableSymbol` | `string \| null` | Yes | Bank payment variable symbol (1–10 digits), unique per team on its leading-zero-stripped form. Used to auto-match incoming Fio bank transfers to this member's fee assignments (see [Bank Sync](#38-bank-sync)) and to build their payment QR codes. `null` means the member cannot yet be auto-matched. |
 | `username` | `string` | No | Discord username |
 | `avatar` | `string \| null` | Yes | Discord avatar hash |
 | `displayName` | `string` | No | Server-resolved display name. Precedence: profile name → Discord nickname → Discord display name → Discord username. Always non-empty. |
@@ -685,6 +687,7 @@ Updates a member's profile fields. All fields are optional.
 | `birthDate` | `string \| null` | No | Birth date ISO string (null clears) |
 | `gender` | `"male" \| "female" \| "other" \| null` | No | Gender (null clears) |
 | `jerseyNumber` | `number \| null` | No | Jersey number (null clears) |
+| `variableSymbol` | `string \| null` | No | Bank payment variable symbol, 1–10 digits (null clears). Must be unique within the team on its leading-zero-stripped form — `"007"` and `"7"` collide. |
 
 **Response:** `200 OK` — `RosterPlayer`
 
@@ -694,6 +697,7 @@ Updates a member's profile fields. All fields are optional.
 |---|---|---|
 | `Forbidden` | 403 | Missing `member:edit` permission |
 | `PlayerNotFound` | 404 | Member does not exist |
+| `VariableSymbolTaken` | 409 | `variableSymbol` (leading-zero-stripped) is already held by another active member of this team. The error carries `holderMemberId` and `holderName` so the client can name the conflicting member. |
 
 ---
 
@@ -6917,6 +6921,365 @@ Submits the full visible conversation (client-side history, not server-persisted
 
 ---
 
+### 37. Bank Sync
+
+**Source:** `packages/domain/src/api/BankSyncApi.ts`
+**Prefix:** `/teams/:teamId`
+
+Fio bank transaction ingestion, auto-matching, variable-symbol management, and grant-audit export. Extends the Finance subsystem ([23. Finance](#23-finance)) rather than replacing it — matched movements become ordinary `payments` rows with `method: 'bank_transfer'`, `bank_transaction_id` set, and `matched_by: 'auto' | 'manual'`.
+
+Two permission tiers, following the treasurer pattern:
+- `finance:manage_fees` — connect/edit the Fio account, test the connection, start a historical backfill.
+- `finance:record_payments` — view the bank-sync summary/queue, inspect a transaction, match/unmatch/ignore/unignore, bulk-resolve, trigger a manual rematch, and export. Named "ledger access" internally (`requireLedgerAccess`) because these endpoints expose the name, account number, and payment message of every payer, which is not roster-level information.
+- `member:edit` **or** `finance:manage_fees` — assign variable symbols (`suggestVariableSymbols` / `assignVariableSymbols`).
+- `getAssignmentQrPng` — any team member may fetch their own assignment's QR; a caller who is not the assignment's own member additionally needs `finance:record_payments`.
+
+**View types (response DTOs):**
+
+`BankSyncConfigView` — the team's Fio connection, never carrying the token itself.
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `teamId` | `TeamId` | No | Team ID |
+| `provider` | `'fio'` | No | Bank provider (only one supported) |
+| `enabled` | `boolean` | No | Whether polling/matching is active |
+| `autoMatchEnabled` | `boolean` | No | Whether the matcher may auto-create payments (when `false`, every match still lands in the queue for manual resolution) |
+| `accountPrefix` | `string \| null` | Yes | CZ bank account prefix (0–6 digits) |
+| `accountNumber` | `string \| null` | Yes | CZ bank account number (2–10 digits) |
+| `bankCode` | `string \| null` | Yes | 4-digit bank code (Fio is always `2010`) |
+| `computedIban` | `string \| null` | Yes | IBAN computed from `accountPrefix`/`accountNumber`/`bankCode` via `CzIban.buildCzIban` — never re-derived on the client |
+| `currency` | `string (3 chars)` | No | ISO 4217 currency code |
+| `recipientName` | `string \| null` | Yes | Printed on the QR and the PDF export header |
+| `registeredId` | `string \| null` | Yes | 8-digit IČO, printed on the PDF header |
+| `registeredAddress` | `string \| null` | Yes | Printed on the PDF header |
+| `bankName` | `string \| null` | Yes | Printed on the PDF header |
+| `fioTokenSet` | `boolean` | No | Whether an encrypted Fio API token is stored; the token itself is never returned |
+| `tokenCreatedAt` | `string \| null` (ISO 8601) | Yes | When the current token was saved (self-reported — Fio does not expose real token metadata) |
+| `tokenExpiresAt` | `string \| null` (ISO 8601) | Yes | `tokenCreatedAt + 180 days` |
+| `status` | `BankSyncStatusCode` | No | Six-rank status ladder computed server-side (see below); render as-is, never re-derive |
+| `expiringSoon` | `boolean` | No | `true` when `tokenExpiresAt` is within 14 days — additive, never suppressed by `status` (a token can be both expiring and failing) |
+| `backfillStatus` | `'running' \| 'complete' \| 'history_locked' \| 'budget' \| 'failed' \| null` | Yes | Progress of a detached historical-import fiber |
+| `backfillCursor` | `string \| null` | Yes | Date (`YYYY-MM-DD`) the backfill loop has walked back to |
+| `backfillRunId` | `string \| null` | Yes | ID of the current/last backfill run |
+| `lastSuccessAt` | `string \| null` (ISO 8601) | Yes | Last successful poll |
+| `lastAttemptAt` | `string \| null` (ISO 8601) | Yes | Last poll attempt, successful or not |
+| `lastAttemptFailed` | `boolean` | No | Whether the most recent attempt failed |
+| `coverageWarning` | `string \| null` | Yes | Set when a recorded statement period's balances don't reconcile against ingested movements |
+| `createdAt` / `updatedAt` | `string` (ISO 8601) | No | Row timestamps |
+
+`BankSyncStatusCode` values: `not_connected`, `misconfigured`, `invalid`, `activating`, `sync_failing`, `ok` (first-match-wins ladder — a transient Fio outage alone is never reported as `invalid`; that requires several consecutive failures over a multi-hour silence window). `misconfigured` means the server's `FIO_TOKEN_ENCRYPTION_KEY` is unset — the token is fine, nothing the treasurer can fix. `activating` covers the ~5 minutes Fio needs after a token is created before it accepts requests.
+
+`BankTransactionView` — a queue/list row.
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | `BankTransactionId` | No | Transaction ID |
+| `bookedOn` | `string` (`YYYY-MM-DD`) | No | Booking date |
+| `amountMinor` | `SignedAmountMinor` (integer, signed) | No | Signed amount; negative = outgoing |
+| `currency` | `string (3 chars)` | No | ISO 4217 currency code |
+| `direction` | `'incoming' \| 'outgoing'` | No | Derived from the sign of `amountMinor` |
+| `counterpartyName` / `counterpartyAccount` | `string \| null` | Yes | Payer identity as reported by Fio |
+| `variableSymbol` | `string \| null` | Yes | VS as reported by Fio (not normalised) |
+| `messageForRecipient` | `string \| null` | Yes | Free-text payment message |
+| `matchState` | `'unmatched' \| 'partially_matched' \| 'matched' \| 'ignored' \| 'not_applicable'` | No | Trigger-maintained (see [Database Schema § Bank Sync](database.md)) |
+| `matchReason` | one of nine literals, or `null` | Yes | Why auto-matching did not fully resolve this row; `null` once `matched` |
+| `resolutionKind` | `'other_income' \| 'not_relevant' \| null` | Yes | Only set when `matchState = 'ignored'` |
+| `duplicateOfTransactionId` | `BankTransactionId \| null` | Yes | Supporting hint on `no_open_assignment` — never its own `matchReason` |
+| `matchedMemberName` | `string \| null` | Yes | The member resolved from the VS, regardless of match outcome |
+| `ingestedAt` | `string` (ISO 8601) | No | When Sideline ingested this movement |
+
+`BankTransactionDetailView` extends the above with full counterparty/symbol fields (`counterpartyBankCode`, `counterpartyBankName`, `counterpartyBic`, `constantSymbol`, `specificSymbol`, `userIdentification`, `comment`, `ignoredReason`), `suggestedMemberNames` (accent-folded exact-name hints, never sufficient to auto-match), `resolvedMemberId`/`resolvedMemberName`, `candidateAssignments` (`BankTransactionCandidateAssignment[]` — open assignments the resolve dialog can allocate against), and `matchedPayments` (`BankTransactionMatchedPayment[]` — payments already linked to this transaction).
+
+`BankSyncSummaryView` — the queue's KPI header: `importedCount`, `pendingCount`, `matchedCount`, `ignoredCount`, `otherIncomeCount`, `autoMatchedLast30d`, `manuallyMatchedLast30d`, `membersWithoutVsCount`, `oldestPendingBookedOn`, `periodIncomeMinor`, `periodExpensesMinor`, `periodNetMinor`, `openingBalanceMinor`, `closingBalanceMinor`, `coverageGaps` (`BankSyncCoverageGap[]`), `periodContinuityViolations` (`BankSyncPeriodContinuityViolation[]`).
+
+---
+
+#### `GET /teams/:teamId/bank-sync`
+
+Returns the team's Fio connection settings and computed status.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:view`
+
+**Response:** `200 OK` — `BankSyncConfigView` (a default, all-unset view if the team never configured bank sync)
+
+**Errors:** `BankSyncForbidden` (403)
+
+---
+
+#### `PUT /teams/:teamId/bank-sync`
+
+Creates or updates the team's Fio connection settings.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:manage_fees`
+
+**Request Body:** `UpsertBankSyncConfigRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | `boolean` | Yes | Turn polling/matching on or off |
+| `auto_match_enabled` | `boolean` | Yes | Whether the matcher may auto-create payments |
+| `account_prefix` | `string \| null` | No | CZ account prefix |
+| `account_number` | `string` | Yes | CZ account number |
+| `bank_code` | `string` | Yes | 4-digit bank code |
+| `currency` | `string (3 chars)` | Yes | ISO 4217 currency code |
+| `recipient_name` | `string \| null` | No | Printed on the QR / PDF header |
+| `registered_id` | `string \| null` | No | 8-digit IČO |
+| `registered_address` | `string \| null` | No | Printed on the PDF header |
+| `bank_name` | `string \| null` | No | Printed on the PDF header |
+| `fio_token` | `string` | No | Write-only Fio API token. Omitted → the stored token is kept. Provided → encrypted with AES-256-GCM (`FIO_TOKEN_ENCRYPTION_KEY`) before storage; the plaintext is never persisted. |
+| `fio_token_created_at` | `string` (ISO 8601) | No | Self-reported token creation date (Fio exposes no real metadata); defaults to now if a token is provided without this field |
+
+**Response:** `200 OK` — `BankSyncConfigView`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `BankSyncForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `InvalidBankAccount` | 400 | `account_prefix`/`account_number`/`bank_code` do not form a valid CZ IBAN |
+
+**Side effect:** the first time `enabled` transitions from `false` to `true`, every existing `fee_assignments` row for the team is seeded into `payment_reminders_sent` under the `assigned` kind, so the new-fee QR reminder does not blast the whole club with a backlog on connect (see [23. Finance](#23-finance) and `PaymentReminderCron` in `deployment.md`).
+
+---
+
+#### `POST /teams/:teamId/bank-sync/test`
+
+Makes one live Fio API call to validate the stored token and account, without ingesting movements.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:manage_fees`
+
+**Response:** `200 OK` — `BankSyncTestResult` — `{ ok: boolean, message: string | null, accountIban: string | null }`. `accountIban` is Fio's own `info.iban`, for a cross-check display against the computed IBAN.
+
+**Errors:** `BankSyncForbidden` (403), `BankSyncNotConfigured` (404 — no config row exists yet)
+
+---
+
+#### `POST /teams/:teamId/bank-sync/backfill`
+
+Starts a detached historical-import run over `{ from, to }` (both `YYYY-MM-DD`). Fio only releases movements older than 90 days during a 10-minute unlock window the treasurer opens in Internetbanking; the run reports `history_locked` on `backfillStatus` if the window was not open.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:manage_fees`
+
+**Request Body:** `StartBackfillRequest` — `{ from: string, to: string }` (`YYYY-MM-DD`)
+
+**Response:** `202 Accepted` — `BankSyncBackfillStartedResult` — `{ backfillRunId: string }`
+
+**Errors:** `BankSyncForbidden` (403), `BankSyncNotConfigured` (404)
+
+---
+
+#### `GET /teams/:teamId/bank-sync/summary`
+
+Returns the matching queue's KPI header for an optional date range.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:view`
+
+**Query Parameters:** `from`, `to` (both optional, `YYYY-MM-DD`)
+
+**Response:** `200 OK` — `BankSyncSummaryView`
+
+**Errors:** `BankSyncForbidden` (403)
+
+---
+
+#### `GET /teams/:teamId/bank-transactions`
+
+Lists ingested bank movements, newest first.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Query Parameters (all optional):** `from`, `to` (`YYYY-MM-DD`), `state` (`BankTransactionMatchState`), `direction` (`'incoming' | 'outgoing'`), `reason` (`BankTransactionMatchReason`), `q` (free-text match against counterparty name)
+
+**Response:** `200 OK` — `BankTransactionView[]`
+
+**Errors:** `BankSyncForbidden` (403)
+
+---
+
+#### `GET /teams/:teamId/bank-transactions/:txId`
+
+Returns full detail for one transaction, including candidate assignments to match against and any payments already linked.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Response:** `200 OK` — `BankTransactionDetailView`
+
+**Errors:** `BankSyncForbidden` (403), `BankTransactionNotFound` (404)
+
+---
+
+#### `POST /teams/:teamId/bank-transactions/:txId/match`
+
+Manually assigns this transaction's amount to one or more open fee assignments, creating a `payments` row per allocation (`method: 'bank_transfer'`, `matched_by: 'manual'`).
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Request Body:** `MatchBankTransactionRequest` — `{ allocations: { assignmentId, amountMinor }[] }` (at least one). A single-element array is "assign to one member"; multiple elements is "split across several fees". Allocations are applied `ORDER BY id` under a row lock, never sorted client-side.
+
+**Response:** `200 OK` — `BankTransactionDetailView`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `BankSyncForbidden` | 403 | Missing `finance:record_payments` |
+| `BankTransactionNotFound` | 404 | Transaction does not exist |
+| `BankTransactionAlreadyMatched` | 409 | Transaction is `matched` (or terminal) already |
+| `AssignmentNotFound` | 404 | An `assignmentId` does not exist |
+| `AllocationExceedsTransaction` | 409 | The allocations, added to what is already recorded, exceed the transaction's absolute amount |
+| `DuplicateAllocationAssignment` | 400 | The same `assignmentId` appears twice in `allocations` |
+
+---
+
+#### `POST /teams/:teamId/bank-transactions/:txId/unmatch`
+
+Voids every payment linked to this transaction and returns it to the queue. The payment history is preserved (voided, not deleted) with the caller's name, timestamp, and reason for the audit trail.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Request Body:** `UnmatchBankTransactionRequest` — `{ reason: string }` (min length 3)
+
+**Response:** `200 OK` — `BankTransactionDetailView`
+
+**Errors:** `BankSyncForbidden` (403), `BankTransactionNotFound` (404)
+
+**Note:** unmatching sets `auto_match_suppressed = true` on the transaction, so the poller/rematch does not immediately re-credit the same movement to the same member.
+
+---
+
+#### `POST /teams/:teamId/bank-transactions/:txId/ignore`
+
+Marks a transaction as resolved without a payment — either genuine other club income, or not relevant to the ledger (e.g. a duplicate).
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Request Body:** `IgnoreBankTransactionRequest` — `{ kind: 'other_income' | 'not_relevant', reason: string }` (reason non-empty)
+
+**Response:** `200 OK` — `BankTransactionDetailView`
+
+**Errors:** `BankSyncForbidden` (403), `BankTransactionNotFound` (404), `BankTransactionAlreadyMatched` (409)
+
+---
+
+#### `POST /teams/:teamId/bank-transactions/:txId/unignore`
+
+Reverses an `ignore`, returning the transaction to the matching queue.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Response:** `200 OK` — `BankTransactionDetailView`
+
+**Errors:** `BankSyncForbidden` (403), `BankTransactionNotFound` (404), `BankTransactionAlreadyMatched` (409)
+
+---
+
+#### `POST /teams/:teamId/bank-transactions/bulk`
+
+Ignores several transactions at once with the same kind and reason.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Request Body:** `BulkResolveBankTransactionsRequest` — `{ txIds: BankTransactionId[], kind, reason }` (`txIds` non-empty)
+
+**Response:** `200 OK` — `BulkResolveResult` — `{ resolvedCount: number, skippedCount: number }` (a row already `matched`/terminal is skipped, not an error)
+
+**Errors:** `BankSyncForbidden` (403)
+
+---
+
+#### `POST /teams/:teamId/bank-transactions/rematch`
+
+Re-runs the auto-match engine over every unmatched transaction from the last 180 days. Held behind a 60-second distributed lease — a double-clicked or concurrent call while one run is in flight fails fast rather than double-crediting.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Response:** `200 OK` — `RematchResult` — `{ consideredCount, matchedCount, queuedCount }`
+
+**Errors:** `BankSyncForbidden` (403), `BankSyncNotConfigured` (404), `BankSyncBusy` (409 — a poll or another rematch already holds the lease)
+
+---
+
+#### `GET /teams/:teamId/bank-transactions/export.csv`
+
+Streams a semicolon-delimited CSV of movements in `{ from, to }`, formatted for Czech Excel (comma decimal separator, CRLF line endings, UTF-8 BOM).
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Query Parameters:** `from`, `to` (optional, `YYYY-MM-DD`), `acknowledgeGaps` (`'true' | 'false'`, default `false`)
+
+**Response:** `200 OK` — `text/csv; charset=utf-8` attachment (`vypis-{teamId}.csv`). Columns: Datum, Protistrana, Účet protistrany, Variabilní symbol, Zpráva pro příjemce, Částka, Měna, Stav přiřazení, Přiřazeno k, Poznámka.
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `BankSyncForbidden` | 403 | Missing `finance:record_payments` |
+| `ExportCoverageIncomplete` | 409 | The range is not fully covered by ingested statement periods (or a period's balances don't reconcile), and `acknowledgeGaps` was not `true`. Carries `gaps` and `continuityViolations` so the client can show what's missing and let the treasurer either narrow the range, backfill, or export anyway with `acknowledgeGaps=true` (a warning header, `x-export-coverage-gaps`, is still attached to the acknowledged response). |
+
+**Caveat:** Excel can silently drop leading zeros from the `Variabilní symbol` and `Účet protistrany` columns on open. The PDF export below is the authoritative document for a grant audit.
+
+---
+
+#### `GET /teams/:teamId/bank-transactions/export.pdf`
+
+Renders a formal PDF statement of movements in `{ from, to }`, with the club's recipient name, IČO, registered address, and computed IBAN in the header.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Query Parameters:** `from`, `to` (optional, `YYYY-MM-DD`), `docLabel` (optional free-text label printed in the header, e.g. a grant contract number)
+
+**Response:** `200 OK` — `application/pdf` attachment (`vypis-{teamId}.pdf`)
+
+**Errors:** `BankSyncForbidden` (403)
+
+Unlike the CSV export, the PDF never fails on coverage gaps — it prints a visible warning banner listing the missing periods instead.
+
+---
+
+#### `GET /teams/:teamId/members/variable-symbols/suggest`
+
+Proposes a `{year}{seq3}` variable symbol for every active member who does not have one yet, without writing anything.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `member:edit` or `finance:manage_fees`
+
+**Response:** `200 OK` — `VariableSymbolSuggestion[]` — `{ memberId, memberName, suggestedVariableSymbol }`
+
+**Errors:** `Forbidden` (403)
+
+---
+
+#### `POST /teams/:teamId/members/variable-symbols/assign`
+
+Applies a batch of variable-symbol assignments (typically the output of `suggest`, after treasurer review).
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `member:edit` or `finance:manage_fees`
+
+**Request Body:** `AssignVariableSymbolsRequest` — `{ assignments: { memberId, variableSymbol }[] }` (non-empty)
+
+**Response:** `200 OK` — `RosterPlayer[]` (the updated members)
+
+**Errors:** `Forbidden` (403), `VariableSymbolTaken` (409)
+
+---
+
+#### `GET /teams/:teamId/fees/:feeId/assignments/:assignmentId/qr.png`
+
+Renders a SPAYD payment QR code (PNG) for one fee assignment, sized to the assignment's outstanding balance.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** the caller is the assignment's own member, or holds `finance:record_payments` (the QR embeds a member's variable symbol, which is enough to deliberately mis-credit a payment to them)
+
+**Response:** `200 OK` — `image/png` bytes
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `BankSyncForbidden` | 403 | Caller is neither the assignment's own member nor holds `finance:record_payments` |
+| `BankSyncNotConfigured` | 404 | The team has no bank-sync configuration to build an IBAN from |
+| `AssignmentNotFound` | 404 | Assignment does not exist, or does not belong to `feeId`/`teamId` |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -7123,7 +7486,7 @@ Drains the `weekly_summary_sync_events` outbox. Each Sunday at 20:00 local team 
 
 #### Finance
 
-Handles the `/finance status` slash command and the payment reminder delivery pipeline.
+Handles the `/finance status` slash command, the payment reminder delivery pipeline, the payment QR image the bot attaches to a reminder DM, and the Fio-token-expiry DM outbox.
 
 | Method | Payload / Returns | Description |
 |---|---|---|
@@ -7132,10 +7495,19 @@ Handles the `/finance status` slash command and the payment reminder delivery pi
 | `Finance/MarkPaymentReminderProcessed` | `id` | Sets `processed_at = now()` on the outbox row after the bot successfully dispatches the DM. |
 | `Finance/MarkPaymentReminderFailed` | `id`, `error` | Sets `processed_at = now()` and records the error string. Failed events are not retried (permanent failure semantics). |
 | `Finance/MarkReminderSent` | `assignment_id`, `kind` | Inserts a row into `payment_reminders_sent` (PK `(assignment_id, kind)`). Only called after the Discord DM was accepted. Subsequent calls for the same pair are no-ops (idempotent upsert). |
+| `Finance/GetPaymentQr` | `assignment_id` → `PaymentQrResult` | Renders the SPAYD QR for an assignment's outstanding balance: `{ spayd, png_base64, filename }`. Called by `handlePaymentReminderReady.ts` before sending a reminder DM. Errors: `FinanceQrUnavailable` (no bank-sync config, no computable IBAN, or an un-renderable SPAYD payload) — the reminder is still sent, just without a QR. |
+| `Finance/GetUnprocessedBankTokenExpiryEvents` | `limit` → `UnprocessedBankTokenExpiryEvent[]` | Polls `bank_token_expiry_events` for rows where `processed_at IS NULL`. |
+| `Finance/MarkBankTokenExpiryProcessed` | `id` | Sets `processed_at = now()` on the outbox row. |
+| `Finance/MarkBankTokenExpiryFailed` | `id`, `error` | Sets `processed_at = now()` and records the error string. |
+| `Finance/MarkBankTokenExpirySent` | `team_id`, `token_created_at`, `threshold_days` | Inserts a row into `bank_token_expiry_sent` (idempotent upsert on `(team_id, token_created_at, threshold_days)`), keyed on `token_created_at` so a replacement token re-arms all three thresholds. |
 
 `GetMyStatusResult` shape: `{ groups: FinanceStatusCurrencyGroup[] }`. Each group: `{ currency, total_outstanding_minor, assignments: FinanceStatusAssignment[] }`. Each assignment: `{ assignment_id, fee_name, status, due_minor, paid_minor, effective_due_at }`.
 
-`UnprocessedPaymentReminderEvent` fields: `id`, `team_id`, `guild_id`, `assignment_id`, `kind` (`"due_in_3d" | "due_today" | "overdue_3d" | "overdue_10d" | "overdue_21d"`), `fee_name`, `effective_due_at`, `currency`, `amount_minor`, `paid_minor`, `user_discord_id`.
+`UnprocessedPaymentReminderEvent` fields: `id`, `team_id`, `guild_id`, `assignment_id`, `kind` (`"assigned" | "due_in_3d" | "due_today" | "overdue_3d" | "overdue_10d" | "overdue_21d"`), `fee_name`, `effective_due_at` (nullable — the `assigned` kind fires immediately at assignment creation and has no due date to render), `currency`, `amount_minor`, `paid_minor`, `user_discord_id`. The `assigned` kind is emitted by the existing `PaymentReminderCron` (not a new cron), gated on the team having an enabled bank-sync config, and carries the QR alongside a neutral "here's your new fee" message rather than a nag.
+
+`UnprocessedBankTokenExpiryEvent` (currently one variant, `bank_token_expiring`) fields: `id`, `team_id`, `guild_id`, `user_discord_id`, `days_until_expiry`.
+
+The producer is `BankTokenExpiryCron` (server-side, daily at `0 4 * * *` UTC — see `deployment.md`): it scans `bank_sync_config` for enabled configs whose token is exactly 14, 7, or 1 calendar day(s) from `fio_token_created_at + 180d`, emits one `bank_token_expiry_events` row per `(team, threshold)` match (idempotent — skipped if a pending row for that team/threshold already exists), and immediately writes `bank_token_expiry_sent` itself (there is no bot-side "sent" ack for this family, unlike payment reminders — the outbox row is the delivery idempotency boundary, and `bank_token_expiry_sent` is a separate, longer-lived guard against re-emitting the same threshold for the same token generation).
 
 ---
 
@@ -7320,3 +7692,13 @@ The following table consolidates all error tags across all API groups.
 | `TeamGenerationUnsupportedTeamCount` | 422 | Team Generation | Requested team count is outside the 2–20 range |
 | `TeamGenerationInsufficientPlayers` | 422 | Team Generation | Not enough RSVP-yes players to fill the requested number of teams |
 | `TeamGenerationDiscordPostFailed` | 502 | Team Generation | Bot-side Discord REST call failed |
+| `VariableSymbolTaken` | 409 | Roster, Bank Sync | The requested variable symbol (leading-zero-stripped) is already held by another active member of the team; carries `holderMemberId`/`holderName` |
+| `BankSyncForbidden` | 403 | Bank Sync | Missing `finance:view`/`finance:manage_fees`/`finance:record_payments` depending on the endpoint |
+| `BankSyncNotConfigured` | 404 | Bank Sync | No `bank_sync_config` row exists yet for this team |
+| `BankTransactionNotFound` | 404 | Bank Sync | Transaction does not exist, or belongs to a different team |
+| `BankTransactionAlreadyMatched` | 409 | Bank Sync | Transaction is already `matched` (or another terminal state) |
+| `AllocationExceedsTransaction` | 409 | Bank Sync | Requested allocations, plus what is already recorded, exceed the transaction's absolute amount |
+| `DuplicateAllocationAssignment` | 400 | Bank Sync | The same `assignmentId` appears more than once in one `match` request |
+| `BankSyncBusy` | 409 | Bank Sync | A poll or another `/rematch` already holds the distributed lease |
+| `InvalidBankAccount` | 400 | Bank Sync | `account_prefix`/`account_number`/`bank_code` do not form a valid CZ IBAN |
+| `ExportCoverageIncomplete` | 409 | Bank Sync | The CSV export range is not fully covered by ingested statement periods (or a period's balances don't reconcile), and `acknowledgeGaps` was not set; carries `gaps` and `continuityViolations` |

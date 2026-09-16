@@ -5,6 +5,18 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-16 — New: automatic bank-payment matching for Fio accounts
+
+Clubs banking with Fio banka can now connect their account so Sideline reads incoming payments automatically and matches them to member fees — no more reconciling a bank statement by hand.
+
+- **Connect your account** from **Team → Settings**, using a read-only ("Account monitoring") Fio API token. See the [Finances guide](/guides/finances/#connecting-a-bank-account-fio) for the full setup, including the historical-import window and what to do when your token is about to expire.
+- **Give members a variable symbol** — a short number Sideline uses to identify who a bank payment belongs to. A new banner on the Members page flags anyone missing one and offers to assign symbols to everyone at once.
+- **A new "Bank movements" page** lists everything imported from the bank. Anything that couldn't be matched automatically lands in a queue for a treasurer to resolve — assign it to a member, mark it as other club income, or mark it not relevant.
+- **Payment QR codes**: your Discord payment reminders and My Payments page can now show a scannable QR code for any outstanding fee, pre-filled with the club's account, the amount, and your variable symbol. You'll also get a DM as soon as a new fee is assigned to you, not just as it approaches its due date.
+- **CSV and PDF export** of bank movements for a grant report or an accountant, from the new page's Grant export tab.
+
+This feature is only available for Fio banka accounts today. Nothing changes for clubs that don't connect a bank account — fees, cash payments, and everything else continue to work exactly as before.
+
 ## 2026-09-15 — New: "Sync group roles with Discord" button to heal existing members
 
 Captains can now click **Sync group roles with Discord** on the groups page to re-check every group's Discord role against its actual members — including members of subgroups — and re-add anyone who's missing it. This fixes the *existing* cohort left behind by the late/manual-join issue below: members who were already in a group before that fix shipped, and never got the group's Discord role, are not automatically corrected by it. If a group's Discord role was deleted directly in Discord, this also detects that and clears the stale link so it can be re-created. One click processes up to 50 groups; if your team has more, click again. This does not remove anyone from a role — it only adds people who are missing one.
