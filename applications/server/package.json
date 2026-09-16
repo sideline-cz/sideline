@@ -39,8 +39,8 @@
     "arctic": "^3.7.0",
     "dfx": "1.0.11",
     "effect": "4.0.0-beta.40",
-    "imapflow": "^1.7.2",
-    "mailparser": "^3.9.15",
+    "imapflow": "^2.0.2",
+    "mailparser": "^3.9.26",
     "pdfkit": "0.20.2",
     "qrcode": "1.5.4"
   },
