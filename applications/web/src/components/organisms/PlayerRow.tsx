@@ -1,6 +1,7 @@
 import type { Roster } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import { Option } from 'effect';
+import { AlertTriangle } from 'lucide-react';
 import { EffectiveRolesList } from '~/components/molecules/EffectiveRolesList.js';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Button } from '~/components/ui/button';
@@ -15,6 +16,16 @@ interface PlayerRowProps {
   onDeactivate: (memberId: string) => void;
 }
 
+/** Missing VS is not neutral — icon + word, never colour alone (design §5.2). */
+function VariableSymbolMarker() {
+  return (
+    <span className='inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300'>
+      <AlertTriangle className='size-3' aria-hidden='true' />
+      {tr('members_vs_missing')}
+    </span>
+  );
+}
+
 export function PlayerRow({ player, teamId, canEdit, canRemove, onDeactivate }: PlayerRowProps) {
   const displayName = player.displayName;
   // A member in several groups can now reach 6+ effective role names — render through
@@ -27,6 +38,7 @@ export function PlayerRow({ player, teamId, canEdit, canRemove, onDeactivate }: 
     Option.map((v) => `#${v}`),
     Option.getOrElse(() => '—'),
   );
+  const hasVs = Option.isSome(player.variableSymbol);
 
   return (
     <tr className='border-b'>
@@ -43,16 +55,23 @@ export function PlayerRow({ player, teamId, canEdit, canRemove, onDeactivate }: 
           </Avatar>
           <div className='min-w-0'>
             <p className='font-medium truncate'>{displayName}</p>
-            {/* Role shown inline on mobile since other columns are hidden */}
-            <div className='md:hidden'>
-              {effectiveRoles.length > 0 ? (
-                <EffectiveRolesList roles={effectiveRoles} limit={1} className='text-xs' />
-              ) : (
+            {/* Role + VS shown inline on mobile since the desktop columns are hidden */}
+            <div className='sm:hidden flex items-center gap-2'>
+              {!hasVs && <VariableSymbolMarker />}
+              {effectiveRoles.length === 0 && (
                 <p className='text-xs text-muted-foreground'>{tr('members_fieldEmpty')}</p>
               )}
             </div>
+            <div className='md:hidden'>
+              {effectiveRoles.length > 0 ? (
+                <EffectiveRolesList roles={effectiveRoles} limit={1} className='text-xs' />
+              ) : null}
+            </div>
           </div>
         </div>
+      </td>
+      <td className='hidden sm:table-cell py-2 px-4 tabular-nums'>
+        {hasVs ? player.variableSymbol.value : <VariableSymbolMarker />}
       </td>
       <td className='hidden md:table-cell py-2 px-4'>{jerseyNumber}</td>
       <td className='hidden md:table-cell max-w-[16rem] py-2 px-4'>

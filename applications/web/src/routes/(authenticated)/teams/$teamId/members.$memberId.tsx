@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 import type { PlayerEditValues } from '~/components/pages/PlayerDetailPage';
 import { PlayerDetailPage } from '~/components/pages/PlayerDetailPage';
 import type { Client } from '~/lib/runtime';
-import { ApiClient, ClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
+import { ApiClient, ClientError, SilentClientError, useRun, warnAndCatchAll } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 
 export const Route = createFileRoute('/(authenticated)/teams/$teamId/members/$memberId')({
@@ -145,21 +145,39 @@ function MemberDetailRoute() {
     [run, router],
   );
 
+  const [vsConflict, setVsConflict] = React.useState<{
+    holderMemberId: string;
+    holderName: string | null;
+  } | null>(null);
+
   const handleSave = React.useCallback(
     async (values: PlayerEditValues) => {
+      setVsConflict(null);
       const result = await ApiClient.asEffect().pipe(
         Effect.flatMap((api) =>
           api.roster.updateMember({
             params: { teamId, memberId },
             payload: {
               name: Option.fromNullishOr(values.name),
+              variableSymbol: Option.fromNullishOr(values.variableSymbol),
               birthDate: values.birthDate ? Option.some(values.birthDate) : Option.none(),
               gender: Option.fromNullishOr(values.gender),
               jerseyNumber: Option.fromNullishOr(values.jerseyNumber),
             },
           }),
         ),
-        Effect.mapError(() => ClientError.make(tr('members_saveFailed'))),
+        // 409 VariableSymbolTaken renders as a field-level message under the input (a toast
+        // would vanish before the treasurer read the other member's name) — never a toast.
+        Effect.catchTag('VariableSymbolTaken', (e) => {
+          setVsConflict({
+            holderMemberId: e.holderMemberId,
+            holderName: Option.getOrNull(e.holderName),
+          });
+          return Effect.fail(new SilentClientError({ message: 'VariableSymbolTaken' }));
+        }),
+        Effect.mapError((e) =>
+          e._tag === 'SilentClientError' ? e : ClientError.make(tr('members_saveFailed')),
+        ),
         run({ success: tr('members_playerSaved') }),
       );
       if (Option.isSome(result)) {
@@ -417,6 +435,7 @@ function MemberDetailRoute() {
       teamMemberId={memberIdRaw}
       onRefresh={handleRefresh}
       onSave={handleSave}
+      variableSymbolConflict={vsConflict}
       onAssignRole={handleAssignRole}
       onUnassignRole={handleUnassignRole}
       onSyncDiscordRoles={handleSyncDiscordRoles}

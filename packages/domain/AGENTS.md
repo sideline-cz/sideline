@@ -13,7 +13,7 @@ src/
 
 ## Pure Algorithm Modules (`src/models/<Algorithm>.ts` + `test/<Algorithm>.test.ts`)
 
-A multi-step computation that several consumers must run identically (a rating update, a balanced-team assignment, a scoring/ranking pass) lives as a **pure algorithm module** in `src/models/` with a **paired unit test** at `packages/domain/test/<Algorithm>.test.ts`. Reference implementations: `src/models/Elo.ts` (← `test/Elo.test.ts`) and `src/models/TeamGenerator.ts` (← `test/TeamGenerator.test.ts`).
+A multi-step computation that several consumers must run identically (a rating update, a balanced-team assignment, a scoring/ranking pass) lives as a **pure algorithm module** in `src/models/` with a **paired unit test** at `packages/domain/test/<Algorithm>.test.ts`. Reference implementations: `src/models/Elo.ts` (← `test/Elo.test.ts`), `src/models/TeamGenerator.ts` (← `test/TeamGenerator.test.ts`), and the bank-sync trio `src/models/CzIban.ts` (Czech IBAN construction + the account modulo-11 checksum), `src/models/CzIco.ts` (the IČO checksum — a **different** algorithm from `CzIban`'s, with different weights and a different modulus) and `src/models/Spayd.ts` (the SPAYD v1.0 QR-payment string builder). The trio is imported by server, bot and web alike; that is the reason it lives here rather than a second copy in `applications/web/src/lib/finance/`.
 
 Rules:
 
@@ -22,6 +22,7 @@ Rules:
 3. **Document the algorithm in a module-level doc comment** — phases, cost/scoring function, normalization constants, and any term that is currently inert (e.g. `TeamGenerator`'s size weight under equal-size swaps). Constants that callers may tune are named exports (`SCALE_ELO`); internal-only thresholds stay module-private.
 4. **The paired test is required in the same PR** and asserts exact deterministic outputs (not just "ran without throwing") — including tie-breaking, boundary sizes, and warning emission. This is the only safety net since the module has no compile-time link to its consumers.
 5. **The server wraps the pure result into Effect at the call site**, never inside the module. Repository/API code calls the pure function and lifts failures/empty results into typed Effect errors itself.
+6. **A checksum or wire-format module pins externally verified vectors, and the doc comment records where they came from.** Sample identifiers printed in a vendor's own documentation or npm fixtures are frequently anonymised with **un-recomputed check digits** and fail their own checksum — adopting one as a test vector encodes the bug as the expected result. `CzIban.ts` names this trap explicitly (Fio's PDF and the `fiobank` package's fixtures both fail mod-97) and lists three recomputed vectors; `CzIco.ts` lists three with their intermediate sums.
 
 ## Model.Class
 

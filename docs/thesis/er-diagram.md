@@ -159,6 +159,15 @@ erDiagram
     rosters ||--o{ event_rosters : "linked via"
     rosters ||--o{ event_roster_requests : "tracks"
     team_members ||--o{ event_roster_requests : "requests"
+
+    teams ||--o| bank_sync_config : "configures"
+    teams ||--o{ bank_statement_periods : "covers"
+    teams ||--o{ bank_transactions : "ingests"
+    teams ||--o{ bank_token_expiry_events : "warns"
+    teams ||--o{ bank_token_expiry_sent : "tracks"
+    bank_transactions ||--o{ payments : "settled by"
+    users ||--o{ bank_sync_config : "configures"
+    users ||--o{ bank_transactions : "ignores"
 ```
 
 ---
@@ -250,6 +259,7 @@ erDiagram
         UUID user_id FK
         BOOLEAN active
         INTEGER jersey_number
+        TEXT variable_symbol UK
         INTEGER missed_rsvps
         TIMESTAMPTZ joined_at
     }
@@ -1009,6 +1019,8 @@ erDiagram
         TIMESTAMPTZ voided_at
         UUID voided_by_user_id FK
         TEXT void_reason
+        UUID bank_transaction_id FK
+        TEXT matched_by
         TIMESTAMPTZ created_at
     }
 
@@ -1068,6 +1080,129 @@ erDiagram
     users ||--o{ expenses : "creates"
     users ||--o{ expense_history : "performs"
     expenses ||--o{ expense_history : "journalled in"
+```
+
+---
+
+### Bank Sync (Fio)
+
+Extends Finance with Fio bank-transaction ingestion, variable-symbol-based auto-matching, and grant-audit export. `bank_sync_config` (one row per team) holds the account identity and the encrypted Fio API token; `fio_token_throttle` is a cross-replica per-token rate limit keyed on a token fingerprint hash (no FK to any table). `bank_statement_periods` records the balances Fio itself reported for a range, used to detect coverage gaps and continuity violations before allowing a grant export. `bank_transactions` holds each ingested movement; `match_state` is trigger-maintained by `payments_finance_recompute`/`recompute_bank_match_state` (the same trigger that maintains `fee_assignments.paid_minor` — see the Finance diagram above), and a matched movement is realised as an ordinary `payments` row with `bank_transaction_id` set and `matched_by` recording `auto` or `manual`. `bank_token_expiry_events` and `bank_token_expiry_sent` are a second outbox pair for a T−14/T−7/T−1 Discord DM warning of an expiring token, populated daily by `BankTokenExpiryCron`.
+
+```mermaid
+erDiagram
+    bank_sync_config {
+        UUID team_id PK
+        TEXT provider
+        BOOLEAN enabled
+        BOOLEAN auto_match_enabled
+        TEXT account_prefix
+        TEXT account_number
+        TEXT bank_code
+        TEXT iban
+        CHAR(3) currency
+        TEXT recipient_name
+        TEXT registered_id
+        TEXT registered_address
+        TEXT bank_name
+        TEXT fio_token_encrypted
+        TIMESTAMPTZ fio_token_created_at
+        DATE backfill_from
+        DATE backfill_cursor
+        TEXT backfill_status
+        UUID backfill_run_id
+        TIMESTAMPTZ last_synced_at
+        TIMESTAMPTZ last_success_at
+        TEXT last_error_code
+        TIMESTAMPTZ last_error_at
+        INTEGER consecutive_failure_count
+        TIMESTAMPTZ next_attempt_at
+        TEXT coverage_warning
+        TIMESTAMPTZ poll_leased_until
+        TEXT poll_leased_by
+        UUID configured_by_user_id FK
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    fio_token_throttle {
+        TEXT token_fingerprint PK
+        TIMESTAMPTZ next_call_allowed_at
+    }
+
+    bank_statement_periods {
+        UUID team_id FK "PK (part 1)"
+        DATE date_start "PK (part 2)"
+        DATE date_end "PK (part 3)"
+        BIGINT opening_balance_minor
+        BIGINT closing_balance_minor
+        CHAR(3) currency
+        TIMESTAMPTZ fetched_at
+    }
+
+    bank_transactions {
+        UUID id PK
+        UUID team_id FK
+        TEXT provider
+        BIGINT fio_movement_id
+        TEXT fio_order_id
+        DATE booked_on
+        BIGINT amount_minor
+        TEXT direction
+        CHAR(3) currency
+        TEXT variable_symbol
+        TEXT constant_symbol
+        TEXT specific_symbol
+        TEXT counterparty_account
+        TEXT counterparty_bank_code
+        TEXT counterparty_name
+        TEXT counterparty_bank_name
+        TEXT counterparty_bic
+        TEXT payer_reference
+        TEXT message_for_recipient
+        TEXT user_identification
+        TEXT tx_type
+        TEXT entered_by
+        TEXT specification
+        TEXT comment
+        TEXT match_state
+        TEXT match_reason
+        JSONB match_evidence
+        BOOLEAN auto_match_suppressed
+        TEXT ignored_reason
+        UUID ignored_by_user_id FK
+        TEXT resolution_kind
+        JSONB raw
+        TIMESTAMPTZ ingested_at
+        TIMESTAMPTZ updated_at
+    }
+
+    bank_token_expiry_events {
+        UUID id PK
+        UUID team_id FK
+        TEXT guild_id
+        TEXT user_discord_id
+        INTEGER threshold_days
+        TIMESTAMPTZ token_expires_at
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ processed_at
+        TEXT error
+    }
+
+    bank_token_expiry_sent {
+        UUID team_id FK "PK (part 1)"
+        TIMESTAMPTZ token_created_at "PK (part 2)"
+        INTEGER threshold_days "PK (part 3)"
+        TIMESTAMPTZ sent_at
+    }
+
+    teams ||--o| bank_sync_config : "configures"
+    teams ||--o{ bank_statement_periods : "covers"
+    teams ||--o{ bank_transactions : "ingests"
+    teams ||--o{ bank_token_expiry_events : "warns"
+    teams ||--o{ bank_token_expiry_sent : "tracks"
+    users ||--o{ bank_sync_config : "configures"
+    users ||--o{ bank_transactions : "ignores"
+    bank_transactions ||--o{ payments : "settled by"
 ```
 
 ---
@@ -1389,7 +1524,7 @@ erDiagram
 | `oauth_connections` | OAuth access and refresh tokens per user per provider (currently Discord only). |
 | `ical_tokens` | Long-lived secret token that enables unauthenticated iCal feed access per user. |
 | `teams` | Top-level organisational unit tied one-to-one with a Discord guild. |
-| `team_members` | Membership record joining a user to a team, carrying per-team profile data including a `missed_rsvps` counter that tracks consecutive events where an invited Player did not respond. |
+| `team_members` | Membership record joining a user to a team, carrying per-team profile data including a `missed_rsvps` counter that tracks consecutive events where an invited Player did not respond, and an optional `variable_symbol` (unique per team on its leading-zero-stripped form) used to auto-match Fio bank payments and build payment QR codes. |
 | `team_invites` | Invite codes that allow new users to join a specific team, optionally pre-assigning them to a group. |
 | `invite_acceptances` | One row per individual accept action; tracks the per-acceptance single-use Discord invite code generated by the bot. |
 | `team_settings` | One-to-one extension of teams holding configurable operational defaults, including `max_missed_rsvps` which controls the engagement threshold for RSVP reminders. |
@@ -1433,9 +1568,9 @@ erDiagram
 | `translation_overrides` | Global admin-managed overrides for compiled UI strings, keyed by translation key and locale. |
 | `fees` | Fee definitions scoped to a team. Soft-deletable via `archived_at`. |
 | `fee_assignments` | Per-member assignment of a fee, with optional amount and due date overrides. `paid_minor` is trigger-maintained. |
-| `payment_reminder_sync_events` | Outbox records for the bot's Finance Sync worker to send payment reminder DMs. Each row carries a snapshot of the assignment at emission time. |
+| `payment_reminder_sync_events` | Outbox records for the bot's Finance Sync worker to send payment reminder DMs. Each row carries a snapshot of the assignment at emission time. Six kinds, including `assigned` (fires once at assignment creation, no due date required — carries the payment QR). |
 | `payment_reminders_sent` | Idempotency guard: one row per (assignment, kind) pair written only after the reminder DM was successfully delivered. Prevents duplicate reminders on retry. |
-| `payments` | Individual payment records against a fee assignment. Voided (not deleted) when reversed. |
+| `payments` | Individual payment records against a fee assignment. Voided (not deleted) when reversed. `bank_transaction_id`/`matched_by` (`auto`/`manual`) link a payment to the Fio bank movement that settled it. |
 | `expenses` | Team expenditure records (pitch hire, travel, equipment, etc.). Hard-deleted; each write is journalled into `expense_history` by a Postgres trigger. |
 | `expense_history` | Append-only audit log for `expenses`. One row per insert/update/delete, capturing the full row snapshot as JSONB. `expense_id` is stored without a FK so history is retained after the expense is deleted. |
 | `translation_cache_version` | Single-row version counter incremented on every translation override write; used by the frontend for cache invalidation. |
@@ -1456,4 +1591,10 @@ erDiagram
 | `training_game_participants` | Junction table recording which team members participated in a training game round and their side (A or B). Unique on `(training_game_id, team_member_id)`. |
 | `rules_attempts` | One row per submitted Rules Trainer practice/exam attempt. User-scoped (no `team_id`); `score`/`total` are computed server-side by `scoreAttempt` from `@sideline/rules`. |
 | `rules_scenario_results` | One row per scenario attempted within a `rules_attempts` row. Composite PK `(attempt_id, scenario_id)`; `steps` is a JSONB array mirroring `@sideline/rules`'s `StepPick[]`. Feeds the on-read mastery computation. |
+| `bank_sync_config` | One row per team (PK `team_id`). Fio account identity, encrypted API token, historical-backfill cursor, and status/backoff bookkeeping. `enabled` gates polling and matching; `auto_match_enabled` gates whether the matcher may auto-create payments versus only queuing candidates. |
+| `fio_token_throttle` | Cross-replica, per-token (fingerprint-keyed) 30-second call rate limit for the Fio API. Not FK'd to any table. |
+| `bank_statement_periods` | Coverage evidence: one row per Fio `/periods` response successfully ingested, with opening/closing balances. Used to detect coverage gaps and continuity violations before a grant export. |
+| `bank_transactions` | One row per ingested Fio bank movement, unique on `(team_id, provider, fio_movement_id)`. `match_state` is trigger-maintained by `payments_finance_recompute`/`recompute_bank_match_state`. `match_reason` records why auto-matching did not fully resolve a row (one of nine literals). |
+| `bank_token_expiry_events` | Outbox for a T−14/T−7/T−1 Discord DM warning that a team's Fio token is about to expire. Written daily by `BankTokenExpiryCron`; drained by the bot's Finance Sync worker. |
+| `bank_token_expiry_sent` | Idempotency guard for `bank_token_expiry_events`, keyed on `(team_id, token_created_at, threshold_days)` so a replacement token re-arms all three thresholds. |
 | `team_generation_config` | One-to-one extension of `teams` holding the balancing weights (`weight_elo`, `weight_size`, `weight_gender`) and defaults (`default_team_count`, `max_iterations`) for the training team generator. Created lazily on the first write. |

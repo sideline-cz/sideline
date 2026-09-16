@@ -8,6 +8,7 @@ import type { Discord, FeeAssignment, Team } from '@sideline/domain';
 import {
   type Fee,
   FinanceRpcEvents as FinanceRpcEventsNS,
+  FinanceRpcModels,
   type PaymentReminder,
 } from '@sideline/domain';
 import { DiscordREST } from 'dfx/DiscordREST';
@@ -61,6 +62,8 @@ const makeEvent = (
 type RestCallRecord = {
   createDm: unknown[][];
   createMessage: unknown[][];
+  getGuild: unknown[][];
+  withFiles: unknown[][];
 };
 
 const makeRest = (
@@ -69,9 +72,11 @@ const makeRest = (
   const calls: RestCallRecord = {
     createDm: [],
     createMessage: [],
+    getGuild: [],
+    withFiles: [],
   };
 
-  const defaults: Record<string, (...args: any[]) => Effect.Effect<any, any, any>> = {
+  const defaults: Record<string, (...args: any[]) => any> = {
     createDm: (...args: any[]) => {
       calls.createDm.push(args);
       return Effect.succeed({ id: DM_CHANNEL_ID });
@@ -80,6 +85,20 @@ const makeRest = (
       calls.createMessage.push(args);
       return Effect.succeed({ id: 'msg-123' });
     },
+    // English `preferred_locale` so the embed copy stays English, matching every assertion
+    // below that was written against the pre-i18n English strings.
+    getGuild: (...args: any[]) => {
+      calls.getGuild.push(args);
+      return Effect.succeed({ preferred_locale: 'en-US', system_channel_id: null });
+    },
+    // `rest.withFiles(files)` returns a wrapper `(effect) => effect` — pass the wrapped effect
+    // straight through, same as the real dfx client does once the multipart body is built.
+    withFiles:
+      (...args: any[]) =>
+      (effect: Effect.Effect<any, any, any>) => {
+        calls.withFiles.push(args);
+        return effect;
+      },
   };
 
   const layer = Layer.succeed(
@@ -108,6 +127,17 @@ const makeSyncRpc = (
     'Finance/MarkReminderSent': [],
     'Finance/MarkPaymentReminderProcessed': [],
     'Finance/MarkPaymentReminderFailed': [],
+    'Finance/GetPaymentQr': [],
+  };
+
+  // Every test below predates T10's QR fetch, so the default degrades to "no QR" — a
+  // `FinanceQrUnavailable` failure, exactly like a team with no bank config — leaving the
+  // pre-existing text-only assertions unaffected. QR-specific tests override this explicitly.
+  const defaults: Record<string, (...args: any[]) => Effect.Effect<any, any, any>> = {
+    'Finance/GetPaymentQr': (...args: any[]) => {
+      calls['Finance/GetPaymentQr']?.push(args);
+      return Effect.fail(new FinanceRpcModels.FinanceQrUnavailable());
+    },
   };
 
   const layer = Layer.succeed(
@@ -115,7 +145,7 @@ const makeSyncRpc = (
     new Proxy({} as any, {
       get: (_target: unknown, prop: string) => {
         if (typeof prop !== 'string' || prop === 'then' || prop === 'catch') return undefined;
-        const fn = overrides[prop];
+        const fn = overrides[prop] ?? defaults[prop];
         if (fn) return fn;
         return (...args: any[]) => {
           if (!(prop in calls)) calls[prop] = [];
@@ -287,5 +317,67 @@ describe('handlePaymentReminderReady', () => {
     await runHandler(makeEvent(), restLayer, rpcLayer);
 
     expect(operationOrder).toEqual(['createDm', 'createMessage', 'MarkReminderSent']);
+  });
+
+  // -------------------------------------------------------------------------
+  // T10 — QR delivery
+  // -------------------------------------------------------------------------
+
+  // 1x1 transparent PNG — content is irrelevant, only base64-decodability is exercised.
+  const PNG_BASE64 =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  const SPAYD =
+    'SPD*1.0*ACC:CZ6508000000192000145399*AM:1500.00*CC:CZK*X-VS:2026014*MSG:PRISPEVEK PODZIM 2026 NOVAK*DT:20261031*';
+
+  it('attaches the QR file and adds the VS field + fallback block when Finance/GetPaymentQr succeeds', async () => {
+    const { calls, layer: restLayer } = makeRest();
+    const { layer: rpcLayer } = makeSyncRpc({
+      'Finance/GetPaymentQr': () =>
+        Effect.succeed(
+          new FinanceRpcModels.PaymentQrResult({
+            spayd: SPAYD,
+            png_base64: PNG_BASE64,
+            filename: 'qr-test.png',
+          }),
+        ),
+    });
+
+    await runHandler(makeEvent(), restLayer, rpcLayer);
+
+    expect(calls.withFiles).toHaveLength(1);
+    const [files] = calls.withFiles[0] as [File[]];
+    expect(files[0]?.name).toBe('qr-test.png');
+
+    const [, messageBody] = calls.createMessage[0] as [string, { embeds?: any[] }];
+    const embedText = JSON.stringify(messageBody);
+    // The QR payload's uppercase-ASCII MSG appears VERBATIM in the fallback block.
+    expect(embedText).toContain('PRISPEVEK PODZIM 2026 NOVAK');
+    expect(embedText).toContain('2026014'); // variable symbol, both as a field and in the fallback
+    expect(embedText).toContain('attachment://qr-test.png');
+  });
+
+  it('degrades to the text-only embed (no VS field, no image) when Finance/GetPaymentQr fails', async () => {
+    const { calls, layer: restLayer } = makeRest();
+    const { layer: rpcLayer } = makeSyncRpc(); // default: FinanceQrUnavailable
+
+    await runHandler(makeEvent(), restLayer, rpcLayer);
+
+    expect(calls.withFiles).toHaveLength(0);
+    const [, messageBody] = calls.createMessage[0] as [string, { embeds?: any[] }];
+    const embedText = JSON.stringify(messageBody);
+    expect(embedText).not.toContain('attachment://');
+  });
+
+  it('defaults to Czech when the guild locale lookup fails', async () => {
+    const { calls, layer: restLayer } = makeRest({
+      getGuild: () => Effect.fail(new Error('Discord HTTP 500 on getGuild')),
+    });
+    const { layer: rpcLayer } = makeSyncRpc();
+
+    await runHandler(makeEvent({ kind: 'due_today' }), restLayer, rpcLayer);
+
+    const [, messageBody] = calls.createMessage[0] as [string, { embeds?: any[] }];
+    const embedText = JSON.stringify(messageBody);
+    expect(embedText).toContain('Dnes je splatnost');
   });
 });

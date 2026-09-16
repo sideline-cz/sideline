@@ -8,6 +8,7 @@ import {
   Dumbbell,
   Hash,
   Home,
+  Landmark,
   Languages,
   Link2,
   Receipt,
@@ -207,6 +208,16 @@ function getTeamNavGroups(
           to: '/teams/$teamId/finances/expenses',
           params: { teamId },
           requiredPermission: 'finance:view' satisfies Role.Permission,
+        },
+        {
+          // Gated on `finance:record_payments`, not `finance:view` — this page lists the
+          // name, account number and payment message of everyone who paid the club
+          // (design §3.2), which is not roster-level information.
+          title: tr('bank_navTitle'),
+          icon: Landmark,
+          to: '/teams/$teamId/finances/bank',
+          params: { teamId },
+          requiredPermission: 'finance:record_payments' satisfies Role.Permission,
         },
       ],
     },

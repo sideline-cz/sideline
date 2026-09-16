@@ -57,6 +57,7 @@ import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { LlmClient } from '~/services/LlmClient.js';
 import { MockChatAgentLayer, MockChatRateLimiterLayer } from './mocks/aiChatMocks.js';
+import { MockBankSyncLayers } from './mocks/bankSyncMocks.js';
 import { MockChannelManagementLayers } from './mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
@@ -444,6 +445,8 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   assignRole: () => Effect.void,
   unassignRole: () => Effect.void,
   setJerseyNumber: () => Effect.void,
+  setVariableSymbol: () => Effect.void,
+  findByTeamAndVariableSymbol: () => Effect.succeed(Option.none()),
   findById: (id: TeamMember.TeamMemberId) => {
     const member = membersStore.get(id);
     return Effect.succeed(member ? Option.some({ active: member.active }) : Option.none());
@@ -986,6 +989,7 @@ const TestLayer = ApiLive.pipe(
   ),
   Layer.provide(MockAchievementAdminLayers),
 )
+  .pipe(Layer.provide(MockBankSyncLayers))
   .pipe(Layer.provide(MockFinanceLayers))
   .pipe(Layer.provide(MockTranslationsLayers))
   .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
@@ -1100,6 +1104,7 @@ describe('Members API', () => {
             birthDate: null,
             gender: null,
             jerseyNumber: null,
+            variableSymbol: null,
           }),
         }),
       );
@@ -1121,6 +1126,7 @@ describe('Members API', () => {
             birthDate: null,
             gender: null,
             jerseyNumber: null,
+            variableSymbol: null,
           }),
         }),
       );
@@ -2192,6 +2198,7 @@ const buildRcTestLayer = (
     ),
     Layer.provide(MockAchievementAdminLayers),
   )
+    .pipe(Layer.provide(MockBankSyncLayers))
     .pipe(Layer.provide(MockFinanceLayers))
     .pipe(Layer.provide(MockTranslationsLayers))
     .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))

@@ -59,6 +59,13 @@ export const env = createEnv({
     EMAIL_IMAP_ENCRYPTION_KEY: Schema.toStandardSchemaV1(
       Schema.OptionFromNullishOr(Schema.RedactedFromValue(Schema.NonEmptyString)),
     ),
+    // D2 — a SEPARATE key from EMAIL_IMAP_ENCRYPTION_KEY, exact same "Optional Secret That Fails
+    // On Use, Not On Boot" pattern: a missing/absent key never fails boot, only `FioSecretCrypto`
+    // use (`FioSecretKeyMissing`). Sharing a key with the email secret would mean a compromise of
+    // one is a compromise of both and neither ever gets rotated independently.
+    FIO_TOKEN_ENCRYPTION_KEY: Schema.toStandardSchemaV1(
+      Schema.OptionFromNullishOr(Schema.RedactedFromValue(Schema.NonEmptyString)),
+    ),
     LLM_MODEL: Schema.String.pipe(
       Schemas.Optional(() => 'gpt-4o-mini'),
       Schema.toStandardSchemaV1,

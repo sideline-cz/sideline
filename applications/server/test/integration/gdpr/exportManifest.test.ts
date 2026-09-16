@@ -11,10 +11,14 @@
 // fails until someone records a decision: export it, or exclude it and say why.
 
 import { describe, expect, it } from '@effect/vitest';
-import { Effect } from 'effect';
+import { Effect, Layer, Option } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
+import { buildExport } from '~/gdpr/buildExport.js';
 import { EXPORT_MANIFEST, NEVER_EXPORT_COLUMNS, SUBJECT_ERASURE } from '~/gdpr/exportManifest.js';
+import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { TestPgClient } from '../helpers.js';
+
+const UsersLayer = UsersRepository.Default.pipe(Layer.provideMerge(TestPgClient));
 
 interface ForeignKey {
   readonly table_name: string;
@@ -185,5 +189,60 @@ describe('GDPR export manifest', () => {
         expect(users?.placeholderColumns).toContain(column);
       }
     }).pipe(Effect.provide(TestPgClient)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// D12 / plan §7.2 test 174' — bank_sync_config and bank_transactions disposition guard.
+//
+// This REPLACES revision 3's test 174 ("must contain a `bank_sync_config.fio_token_encrypted`
+// redaction entry"), which would have required `own(...)` and turned the exact five-element
+// `NEVER_EXPORT_COLUMNS` literal above red. D12 chose `skip` over `own`+`redact`: the club's
+// account number, IBAN, IČO and registered address are not data ABOUT the treasurer either, so
+// NO column of `bank_sync_config` is ever exported — strictly stronger than redacting one column.
+// This guard makes a future flip to `{kind:'export'}` fail here, forcing the redaction to be
+// added in the SAME edit rather than silently reopening the credential-leak hole D12 closed.
+// ---------------------------------------------------------------------------
+
+describe("GDPR export manifest — bank-sync disposition guard (D12, test 174')", () => {
+  it("bank_sync_config's disposition is 'exclude' — the encrypted Fio token can never reach an export", () => {
+    const entry = EXPORT_MANIFEST.find((e) => e.table === 'bank_sync_config');
+    expect(entry).toBeDefined();
+    expect(entry?.disposition.kind).toBe('exclude');
+  });
+
+  it("bank_transactions's disposition is 'exclude' — non-member names/accounts and the raw JSONB never export", () => {
+    const entry = EXPORT_MANIFEST.find((e) => e.table === 'bank_transactions');
+    expect(entry).toBeDefined();
+    expect(entry?.disposition.kind).toBe('exclude');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plan §7.2 test 175 — a real export contains no fio_token_encrypted value and no
+// bank_transactions rows at all, for a treasurer who both configured bank sync and ignored a
+// transaction (so `bank_sync_config.configured_by_user_id` and
+// `bank_transactions.ignored_by_user_id` both point at them).
+// ---------------------------------------------------------------------------
+
+describe('GDPR export — bank-sync data never reaches a personal export (test 175)', () => {
+  it.effect(
+    "a treasurer's export contains no bank_sync_config.* key and no bank_transactions.* key, anywhere",
+    () =>
+      Effect.gen(function* () {
+        const usersRepo = yield* UsersRepository.asEffect();
+        const me = yield* usersRepo.upsertFromDiscord({
+          discord_id: '900000000000000099',
+          username: 'treasurer-export-test',
+          avatar: Option.none(),
+          discord_nickname: Option.none(),
+          discord_display_name: Option.none(),
+        });
+
+        const bundle = yield* buildExport(me.id);
+        const keys = Object.keys(bundle.data);
+        expect(keys.filter((k) => k.startsWith('bank_sync_config.'))).toEqual([]);
+        expect(keys.filter((k) => k.startsWith('bank_transactions.'))).toEqual([]);
+      }).pipe(Effect.provide(UsersLayer)),
   );
 });

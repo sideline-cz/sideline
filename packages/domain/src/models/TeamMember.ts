@@ -18,6 +18,10 @@ export class TeamMember extends Model.Class<TeamMember>('TeamMember')({
   user_id: UserId,
   active: Schema.Boolean,
   jersey_number: Model.FieldExcept(['insert'])(Schema.OptionFromNullOr(Schema.Number)),
+  // D3 — TEXT, CHECK (variable_symbol ~ '^[0-9]{1,10}$'), unique per team on the
+  // leading-zero-stripped form (packages/migrations). Mirrors jersey_number: never set on insert,
+  // always set afterwards via TeamMembersRepository.setVariableSymbol.
+  variable_symbol: Model.FieldExcept(['insert'])(Schema.OptionFromNullOr(Schema.String)),
   joined_at: Model.DateTimeInsertFromDate,
   // PR-8 (CC-10): tri-state ("have we ever observed this user in the guild"), NULL = unknown.
   // Written by `Guild/RegisterMember` (idempotent COALESCE) and `Guild/ReconcileMembers`, cleared

@@ -1837,35 +1837,54 @@ Failures are recorded via `RoleProvision/MarkFailed` (sets `processed_at`) and a
 
 **Service class:** `FinanceSyncService` (`applications/bot/src/rcp/finance/index.ts`)
 
+**Polling interval:** 5 seconds (`pollLoop` in `Bot.ts`). Since the Fio bank-sync feature, one tick runs **two passes** in sequence (`Effect.andThen`, `ProcessorService.ts`) rather than a single poll.
+
+#### Pass 1 — payment reminders (`payment_reminder_sync_events`)
+
 **Polling RPC:** `Finance/GetUnprocessedPaymentReminders`
 
-**Polling interval:** 5 seconds (`pollLoop` in `Bot.ts`).
-
-The server's `PaymentReminderCron` (every minute) finds fee assignments that have crossed a reminder cadence threshold and inserts rows into `payment_reminder_sync_events`. The Finance Sync worker drains this outbox and sends a Discord DM to the relevant member.
+The server's `PaymentReminderCron` (every minute) finds fee assignments that have crossed a reminder cadence threshold and inserts rows into `payment_reminder_sync_events`. This worker drains the outbox and sends a Discord DM to the relevant member.
 
 **Events processed:**
 
 | Event tag | Handler file | Discord action |
 |-----------|-------------|----------------|
-| `payment_reminder_ready` | `handlePaymentReminderReady.ts` | Opens a DM channel with the member via `discord.createDm`, posts a rich embed built by `buildPaymentReminderEmbed`, then calls `Finance/MarkReminderSent` to record successful delivery in `payment_reminders_sent`. |
+| `payment_reminder_ready` | `handlePaymentReminderReady.ts` | Resolves the guild's `preferred_locale` (falling back to Czech on any lookup failure — this feature is Czech-only, unlike the mixed-locale event/quiz flows), calls `Finance/GetPaymentQr` for the assignment's SPAYD QR, opens a DM channel via `discord.createDm`, posts a rich embed (`buildPaymentReminderEmbed`) with the QR image attached (when available) and a single "Moje platby" link button (`buildPaymentReminderComponents`, omitted if `WEB_URL` is unset), then calls `Finance/MarkReminderSent` to record successful delivery in `payment_reminders_sent`. |
 
-The embed colour and copy vary by cadence:
+The embed colour and copy vary by cadence — `due_in_3d`/`due_today` share the reminder's original two colours (blue/yellow); all three overdue kinds share one red "Payment overdue" title with day-count body copy. The Fio feature adds a sixth kind, `assigned`, fired once at assignment creation (not date-gated) with a neutral blue "here's your new fee" message rather than a nag:
 
 | Kind | Title | Embed colour |
 |---|---|---|
+| `assigned` | (new fee assigned) | Blue |
 | `due_in_3d` | Heads up — payment due soon | Blue |
 | `due_today` | Payment due today | Yellow |
-| `overdue_3d` | Payment overdue | Red |
-| `overdue_10d` | Payment overdue | Red |
-| `overdue_21d` | Payment overdue | Red |
+| `overdue_3d` / `overdue_10d` / `overdue_21d` | Payment overdue | Red |
 
-Each embed includes four fields: **Fee** (fee name), **Amount** (total charge), **Due** (due date as Discord timestamp), **Outstanding** (remaining unpaid amount).
+Fields: **Amount**, **Due**, **Variable symbol** (only present when a QR was built — read back out of the SPAYD payload's `X-VS` field, never recomputed), **Outstanding**. When a QR is attached, the description also gains a "can't scan it? enter it by hand" fallback block (account/amount/VS/message, parsed back out of the rendered SPAYD string by `parseSpaydField.ts`) and a warning that paying without a variable symbol delays matching. The QR's own text fields (message, uppercase-ASCII transliterated recipient name) are diacritic-free by SPAYD convention — this is expected, not a rendering bug — while the surrounding embed copy keeps full Czech diacritics.
+
+`Finance/GetPaymentQr` never fails the reminder: `FinanceQrUnavailable` (no bank-sync config, no computable IBAN, member has no variable symbol) and any RPC-level failure both degrade to the original text-only embed with no QR, exactly as before this feature.
 
 **Lifecycle RPCs:**
 - `Finance/MarkPaymentReminderProcessed` — called after each successful DM delivery (and after `Finance/MarkReminderSent` succeeds).
 - `Finance/MarkPaymentReminderFailed` — called on any error; sets `processed_at` and records the error string. Failed events are not automatically retried (permanent failure semantics).
 
 **Idempotency:** `Finance/MarkReminderSent` inserts into `payment_reminders_sent` with `PRIMARY KEY (assignment_id, kind)`. A reminder DM for a given assignment and kind is therefore sent at most once, even if the outbox row is retried or the bot restarts.
+
+#### Pass 2 — Fio token-expiry DM (`bank_token_expiry_events`)
+
+**Polling RPC:** `Finance/GetUnprocessedBankTokenExpiryEvents`
+
+A separate outbox table with its own read/ack RPCs, modelled on Pass 1 but not FK'd to `fee_assignments` (there is no assignment to hang a team-level "your bank token expires soon" warning off of).
+
+**Events processed:**
+
+| Event tag | Handler file | Discord action |
+|-----------|-------------|----------------|
+| `bank_token_expiring` | `handleBankTokenExpiring.ts` | Same guild-locale resolution as Pass 1, opens a DM with the treasurer, posts an embed (`buildBankTokenExpiringEmbed` — amber at T−14, red at T−7/T−1, matching the settings-page banner's own colour switch) with a "Bank connection" link button to the team's settings page, then acks via `Finance/MarkBankTokenExpiryProcessed`. |
+
+Unlike Pass 1, there is no bot-side "sent" idempotency step — the outbox row itself (`bank_token_expiry_events`) is the idempotency boundary; the bot only DMs and acks. `Finance/MarkBankTokenExpirySent` (writing `bank_token_expiry_sent`) is part of the RPC surface but is not called by the bot at all — the write happens server-side, directly from `BankTokenExpiryCron` (same process, no RPC hop needed), immediately after a successful `emit`.
+
+`bank_token_expiring` events are produced by the server's `BankTokenExpiryCron` (daily, `0 4 * * *` UTC — see `deployment.md`), which scans `bank_sync_config` for enabled configs whose token sits at exactly T−14/T−7/T−1 days from expiry and emits one outbox row per `(team, threshold)` match, skipping any `(team, threshold)` pair that already has a pending row.
 
 ---
 
@@ -2230,12 +2249,19 @@ As of the remove-global-events-board Release A, the bot no longer calls the shar
 | `Finance/MarkPaymentReminderProcessed` | `id` → `void` | Sets `processed_at = now()` after the reminder DM was successfully delivered. |
 | `Finance/MarkPaymentReminderFailed` | `id`, `error` → `void` | Sets `processed_at = now()` and records the error string. Failed events are not retried. |
 | `Finance/MarkReminderSent` | `assignment_id`, `kind` → `void` | Inserts into `payment_reminders_sent` (idempotent upsert on PK `(assignment_id, kind)`). Called only after the Discord DM was accepted. |
+| `Finance/GetPaymentQr` | `assignment_id` → `PaymentQrResult` | Renders `{ spayd, png_base64, filename }` for an assignment's outstanding balance. Errors: `FinanceQrUnavailable`. |
+| `Finance/GetUnprocessedBankTokenExpiryEvents` | `limit` → `UnprocessedBankTokenExpiryEvent[]` | Polls `bank_token_expiry_events` for rows where `processed_at IS NULL`, populated by the server's daily `BankTokenExpiryCron` (see "Pass 2" in the Finance Sync Worker section above). |
+| `Finance/MarkBankTokenExpiryProcessed` | `id` → `void` | Sets `processed_at = now()` on the outbox row. |
+| `Finance/MarkBankTokenExpiryFailed` | `id`, `error` → `void` | Sets `processed_at = now()` and records the error string. |
+| `Finance/MarkBankTokenExpirySent` | `team_id`, `token_created_at`, `threshold_days` → `void` | Inserts into `bank_token_expiry_sent` (idempotent upsert on PK `(team_id, token_created_at, threshold_days)`). |
 
 `GetMyStatusResult` shape: `{ groups: FinanceStatusCurrencyGroup[] }` where each group carries `{ currency, total_outstanding_minor, assignments: FinanceStatusAssignment[] }` and each assignment carries `{ assignment_id, fee_name, status, due_minor, paid_minor, effective_due_at }`.
 
 Status values: `pending`, `partial`, `paid`, `overdue`, `waived`.
 
-`UnprocessedPaymentReminderEvent` fields: `id`, `team_id`, `guild_id`, `assignment_id`, `kind` (`due_in_3d | due_today | overdue_3d | overdue_10d | overdue_21d`), `fee_name`, `effective_due_at`, `currency`, `amount_minor`, `paid_minor`, `user_discord_id`.
+`UnprocessedPaymentReminderEvent` fields: `id`, `team_id`, `guild_id`, `assignment_id`, `kind` (`assigned | due_in_3d | due_today | overdue_3d | overdue_10d | overdue_21d`), `fee_name`, `effective_due_at` (nullable — `assigned` has no due date), `currency`, `amount_minor`, `paid_minor`, `user_discord_id`.
+
+`UnprocessedBankTokenExpiryEvent` (one variant, `bank_token_expiring`) fields: `id`, `team_id`, `guild_id`, `user_discord_id`, `days_until_expiry`.
 
 ### PersonalEvents group (`PersonalEvents/`)
 

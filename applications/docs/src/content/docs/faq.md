@@ -34,7 +34,15 @@ If the app just shows a blank page with no recovery screen, reload your browser 
 
 ### Why did I get a payment reminder DM from the bot?
 
-Sideline sends a direct message on your Discord account when a fee assignment is approaching or past its due date. The five reminder points are: 3 days before due, on the due date itself, then at 3, 10, and 21 days overdue. Each reminder is sent once per threshold and stops automatically once the fee is paid or waived.
+Sideline sends a direct message on your Discord account as soon as a fee is assigned to you, and again when it's approaching or past its due date. The reminder points after assignment are: 3 days before due, on the due date itself, then at 3, 10, and 21 days overdue. Each reminder is sent once per threshold and stops automatically once the fee is paid or waived.
+
+### Why does the QR code / payment message in my reminder look weird — no accents, all uppercase?
+
+That's expected, not a bug. The text encoded *inside* a payment QR code follows a banking standard (SPAYD) that requires unaccented, uppercase characters — so "Příspěvek podzim 2026" becomes `PRISPEVEK PODZIM 2026` in the scannable code itself. The rest of the message around the QR code keeps normal Czech text with full diacritics.
+
+### I paid by bank transfer but my fee still shows as unpaid — why?
+
+Your club's Sideline instance matches bank payments to your fee using a **variable symbol** — a short number tied to your member profile. If you don't have one yet, paid without entering it, or your bank's app dropped/changed it, Sideline can't match the payment automatically and it sits in the treasurer's manual queue until they resolve it. Ask your treasurer to check your variable symbol is set, or to look for your payment in the bank movements queue.
 
 ### What happens if I have Discord DMs disabled?
 
@@ -122,3 +130,7 @@ No. If someone leaves your Discord server, their Sideline roster entry is archiv
 ### Can I use one Sideline account for multiple teams?
 
 Yes. One Discord account can be in any number of teams. The dashboard aggregates events across all of them.
+
+### My Fio bank connection stopped importing payments — what do I do?
+
+The most common cause is an expired token: Fio tokens last at most 180 days and only renew when someone signs in to Fio Internetbanking or Smartbanking. Open the bank connection card on your team's settings page — it explains exactly what's wrong (an expired/invalid token, a temporary Fio outage Sideline is already retrying, or a token still "activating" if you just created it) and what to do next. See [Connecting a bank account](/guides/finances/#connecting-a-bank-account-fio) for the full setup and troubleshooting steps.
