@@ -676,8 +676,11 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
               Effect.bind('fioTokenEncrypted', () =>
                 Option.match(payload.fio_token, {
                   onNone: () => Effect.succeed(Option.none<string>()),
-                  onSome: (redactedToken) =>
-                    crypto.encrypt(Redacted.value(redactedToken)).pipe(
+                  // The wire carries a plain string (Redacted cannot be encoded by a browser);
+                  // wrap it here, at the decode boundary, so nothing downstream ever handles the
+                  // bare token — same guarantee, applied where it is actually enforceable.
+                  onSome: (rawToken) =>
+                    crypto.encrypt(Redacted.value(Redacted.make(rawToken))).pipe(
                       Effect.map(Option.some),
                       Effect.catchTag('FioSecretKeyMissing', (e) =>
                         LogicError.die(`FIO_TOKEN_ENCRYPTION_KEY not configured: ${e.message}`),

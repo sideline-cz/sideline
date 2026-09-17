@@ -273,7 +273,12 @@ export const UpsertBankSyncConfigRequest = Schema.Struct({
   registered_id: Schema.OptionFromNullOr(Schema.String),
   registered_address: Schema.OptionFromNullOr(Schema.String),
   bank_name: Schema.OptionFromNullOr(Schema.String),
-  fio_token: Schema.OptionFromOptional(Schema.RedactedFromValue(Schema.NonEmptyString)),
+  // A PLAIN string on the wire, deliberately: `Redacted` is decode-only by design — Effect's
+  // serializer refuses to encode one — so a `RedactedFromValue` field here cannot be sent by the
+  // browser at all, and every save failed with "Cannot encode Redacted". The protection that
+  // matters is server-side (logs, spans, error causes), so the handler wraps this in `Redacted`
+  // the moment it decodes and carries it that way from then on.
+  fio_token: Schema.OptionFromOptional(Schema.NonEmptyString),
   fio_token_created_at: Schema.OptionFromOptional(Schemas.DateTimeFromIsoString),
 });
 export type UpsertBankSyncConfigRequest = Schema.Schema.Type<typeof UpsertBankSyncConfigRequest>;
