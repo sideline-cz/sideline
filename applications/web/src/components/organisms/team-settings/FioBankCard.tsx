@@ -290,6 +290,15 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
                   {errors.accountNumber && (
                     <p className='text-xs text-destructive mt-1'>{tr(errors.accountNumber)}</p>
                   )}
+                  {/*
+                    Fallback for any validation error whose field has no input of its own (the bank
+                    code is static text, so `errors.bankCode` had nowhere to render). Without this, a
+                    failing check aborts `handleSave` with no request and no message — the user sees
+                    a Save button that simply does nothing. Never let a blocking error be invisible.
+                  */}
+                  {errors.bankCode && (
+                    <p className='text-xs text-destructive mt-1'>{tr(errors.bankCode)}</p>
+                  )}
                   {Option.isSome(ibanPreview) && (
                     <p className='text-xs text-muted-foreground mt-1 tabular-nums'>
                       {tr('fio_account_preview', {

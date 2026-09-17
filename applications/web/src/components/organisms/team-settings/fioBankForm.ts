@@ -43,7 +43,12 @@ export const fioBankFormFrom = (config: Config): FioBankFormValues => ({
   autoMatchEnabled: config?.autoMatchEnabled ?? true,
   accountPrefix: Option.getOrElse(config?.accountPrefix ?? Option.none<string>(), () => ''),
   accountNumber: Option.getOrElse(config?.accountNumber ?? Option.none<string>(), () => ''),
-  bankCode: Option.getOrElse(config?.bankCode ?? Option.none<string>(), () => ''),
+  // Defaults to FIO_BANK_CODE, not '', for the same reason `bankName` defaults below: the card
+  // renders the bank code as static text (it is always Fio's 2010) and `handleSave` overrides it
+  // with the constant anyway. An empty default failed `validateFioBankForm`'s 4-digit check on
+  // EVERY first-time setup, and since there is no bank-code input there was nowhere to render
+  // `errors.bankCode` — so Save silently did nothing at all.
+  bankCode: Option.getOrElse(config?.bankCode ?? Option.none<string>(), () => FIO_BANK_CODE),
   currency: config?.currency ?? 'CZK',
   recipientName: Option.getOrElse(config?.recipientName ?? Option.none<string>(), () => ''),
   registeredId: Option.getOrElse(config?.registeredId ?? Option.none<string>(), () => ''),
