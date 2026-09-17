@@ -43,8 +43,9 @@
 //     (values: FioBankFormValues, extras: { readonly fioToken: Option.Option<string> })
 //       => BankSyncApi.UpsertBankSyncConfigRequest
 
-import { CzIban } from '@sideline/domain';
-import { Option } from 'effect';
+import type { BankSyncApi } from '@sideline/domain';
+import { BankSyncApi as BankSyncApiNs, CzIban } from '@sideline/domain';
+import { Effect, Option, Schema } from 'effect';
 import { describe, expect, it } from 'vitest';
 import {
   FIO_BANK_CODE,
@@ -291,5 +292,48 @@ describe('fioBankFormFrom', () => {
       fioToken: 'a-token',
     });
     expect(hasFioBankErrors(errors)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: the request must actually encode over the wire
+// ---------------------------------------------------------------------------
+
+/**
+ * `fio_token` was once `Schema.RedactedFromValue(...)`. `Redacted` is decode-only by design —
+ * Effect's serializer refuses to encode one — so every save failed client-side with
+ * "Cannot encode Redacted" and no request ever reached the server.
+ *
+ * Asserting the SHAPE `fioBankRequestFrom` returns is not enough to catch that; only encoding
+ * it through the real contract is. This is the browser's half of the round trip.
+ */
+describe('fioBankRequestFrom — encodes through the real API contract', () => {
+  const encode = (req: BankSyncApi.UpsertBankSyncConfigRequest) =>
+    Effect.runPromise(
+      Schema.encodeUnknownEffect(BankSyncApiNs.UpsertBankSyncConfigRequest)(req).pipe(
+        Effect.map(() => 'ok' as const),
+        Effect.catchCause((cause) => Effect.succeed(String(cause))),
+      ),
+    );
+
+  const build = (fioToken: Option.Option<string>): BankSyncApi.UpsertBankSyncConfigRequest => ({
+    fio_token: Option.none(),
+    ...fioBankRequestFrom(
+      {
+        ...fioBankFormFrom(null),
+        enabled: true,
+        accountNumber: '2703474850',
+        recipientName: 'Klub',
+      },
+      { fioToken },
+    ),
+  });
+
+  it('encodes when a new token is being sent', async () => {
+    expect(await encode(build(Option.some('a'.repeat(64))))).toBe('ok');
+  });
+
+  it('encodes when the stored token is left alone', async () => {
+    expect(await encode(build(Option.none()))).toBe('ok');
   });
 });

@@ -1,6 +1,6 @@
 import type { BankSyncApi } from '@sideline/domain';
 import { CzIban, CzIco, Fee } from '@sideline/domain';
-import { Option, Redacted, Schema } from 'effect';
+import { Option, Schema } from 'effect';
 
 /**
  * The primitive fields the Fio connection card's Save button owns.
@@ -175,7 +175,7 @@ export const fioBankRequestFrom = (
     onNone: () => base,
     onSome: (token): FioBankUpsertRequest => ({
       ...base,
-      fio_token: Option.some(Redacted.make(token)),
+      fio_token: Option.some(token),
     }),
   });
 };
