@@ -2115,6 +2115,34 @@ Rules:
 4. **Never write a one-sided `if (nowLocal >= boundary) expect(...)` guard** — that form silently asserts nothing for the whole complementary window. Assert both sides of the boundary and leave only the guard band unasserted.
 5. **Clamping does not make a run that straddles local midnight safe.** The sweep's other half, `now_local::date = start_at_local::date`, is fed by a separate `localMidnight` read; closing that gap requires an injectable instant in `eventStartCronEffect`, which does not exist today.
 
+The mirror-image failure mode — a date TYPED IN as a literal that ages past a `now`-gate — is the next section, "A Date Fixture On A Now-Gated Path Has A Silent Expiry Date".
+
+### A Date Fixture On A Now-Gated Path Has A Silent Expiry Date
+
+A test that drives an event through a write endpoint needs that event to still be **writable at the moment the suite runs**. `updateEvent` (`src/api/event.ts`) rejects a PATCH with `notActive` (`EventApi.EventNotActive`, HTTP 400) when `eventAcceptsRsvp(existing, existing.timezone, DateTime.nowUnsafe())` is false, and the all-day branch of that gate (`allDayStillRsvpable` in `src/utils/allDayRsvpWindow.ts`) goes false at the end of the event's last TEAM-LOCAL day. A hard-coded start date therefore carries an expiry date that nothing in the test names: `test/api/eventAllDayAnchor.test.ts` case 9 created its event at `'2026-09-16T12:00:00Z'`, so on 2026-09-17 all three of its PATCHes returned 400, the assertion reported `expected undefined to be '2026-09-15T22:00:00.000Z'` — the shape of an anchoring regression, not of an expired fixture — and the `Check → Test` CI job went red on every branch, `main` included.
+
+The sibling failure mode — a fixture computed FROM `now` that wraps across local midnight — is the preceding section, "Clock-Derived Time-Of-Day Fixtures Must Be Clamped Into The Local Day". Read both before writing any date fixture.
+
+These are the only event surfaces that consult `now`; every other event read and write is date-agnostic:
+
+| Surface | Handler | What an expired fixture does |
+| --- | --- | --- |
+| PATCH `/teams/:teamId/events/:eventId` | `updateEvent` (`src/api/event.ts`) | 400 `EventNotActive`; every field the test reads off the body is `undefined` |
+| POST `/teams/:teamId/events/:eventId/cancel` | `cancelEvent` (`src/api/event.ts`) | 400 `EventNotActive` instead of 204 |
+| POST RSVP (HTTP) | `submitRsvp` (`src/api/event-rsvp.ts`) | 400 `RsvpDeadlinePassed` |
+| `Event/SubmitRsvp` (RPC) | `src/rpc/event/index.ts` | fails with `RsvpDeadlinePassed` |
+| GET event / PATCH response bodies | `getEvent`, `updateEvent` (`src/api/event.ts`) | `canEdit` and `canCancel` silently flip to `false` |
+| GET RSVPs / `Event/GetRsvpCounts` | `getRsvps` (`src/api/event-rsvp.ts`), `src/rpc/event/index.ts` | `canRsvp` silently flips to `false` |
+
+Rules:
+
+1. **Choose the fixture by what the case ASSERTS, not by which HTTP verb it uses.** A case that asserts only a RELATIVE property (byte-identity of `start_at` across PATCHes, a status code, "this field did not move") builds its date from the clock. A case that asserts a LITERAL instant (`expect(body.startAt).toBe('2030-07-14T22:00:00.000Z')`) cannot: a clock-derived date lands on a different DST offset or a leap day from one run to the next, which changes the instant the anchor resolves to. Such a case keeps a fixed date.
+2. **The clock-derived form is `noonUtcOneYearFromNow()`** in `applications/server/test/api/eventAllDayAnchor.test.ts` — `` `${DateTime.formatIsoDateUtc(DateTime.add(DateTime.nowUnsafe(), { years: 1 }))}T12:00:00Z` ``, noon UTC of the same calendar day one year out, matching the wire value the web edit form sends. It guarantees exactly one thing: the event is in the future in every timezone. It guarantees NOTHING about which instant the event anchors to.
+3. **A fixed far-future date defers the expiry, it does not remove it.** Pick a date at least three years past the day the test is written; cases 6, 8, 10, 11 and 12 of `eventAllDayAnchor.test.ts` use `2030-07-15` for this reason. All five die in July 2030 — the timed ones (6, 10, 11) at their own `start_at` instant, the all-day ones (8, 12) at the end of their last Prague-local day — and must be rolled forward before then. Never call such a date "safe" — it is only "not yet expired".
+4. **`createEvent` (POST) reads no clock, so create-only cases keep past literals — do NOT roll them forward.** Cases 1–5, 7 and 13 of `eventAllDayAnchor.test.ts` deliberately create at `2026-07-15` (Prague CEST, New York EDT), `2026-01-15` (Prague CET) and `2026-09-06` (the Santiago spring-forward night, where local midnight does not exist); each of those dates IS the assertion — it selects the UTC offset the anchored `start_at` is checked against. Changing them to future dates destroys the cases.
+5. **Assert the endpoint's documented success status on every request whose body a later assertion reads** — 201 for `createEvent`, 200 for `updateEvent`, 204 for `cancelEvent`. Without `expect(response.status).toBe(200)` a gate rejection reaches the assertion as `undefined` in an unrelated field, and the failure names the wrong subsystem.
+6. **Pure functions and repository decode tests are exempt; read ENDPOINTS are not.** Embed builders, date-math helpers and repository decode tests never consult `now`, so a fixed literal there is deterministic and preferred. An HTTP or RPC read that returns `canEdit`, `canCancel` or `canRsvp` does consult `now` — a case asserting any of those three is `true` needs a future fixture exactly like a write case does.
+
 ## Config-Gated External Service Provider (Real vs Deterministic Stub)
 
 An external integration that is **optional** in some environments (missing API key in dev/preview, present in production) is modelled as a single `ServiceMap.Service` whose `Default` layer chooses a real or a stub implementation at construction time, based on config. The service interface is the same either way, so consumers never branch on "is it configured".
