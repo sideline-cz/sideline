@@ -5,6 +5,16 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-17 — Fix: "Test connection" on the Fio bank card now actually checks Fio
+
+The **Test connection** button on the Fio bank card previously only checked that the saved token could be decrypted on our end — it reported success even for a token that was expired, revoked, or never valid in the first place. It now makes one real check against Fio and reports what actually happened:
+
+- **Token rejected** — Fio didn't accept it; a **Replace token** shortcut and a link to Fio Internetbanking are shown right there.
+- **Too many requests** — Fio allows one check per token every 30 seconds; wait a moment and try again.
+- **History locked**, and **couldn't reach Fio** — kept distinct from a rejected token, so a temporary Fio hiccup doesn't send you chasing a new token you don't need.
+
+A successful test confirms the token only. The connection status shown above the button is a separate, longer-running check of the automatic hourly import, and can still show a problem right after a successful test — that's expected, not a bug.
+
 ## 2026-09-16 — New: automatic bank-payment matching for Fio accounts
 
 Clubs banking with Fio banka can now connect their account so Sideline reads incoming payments automatically and matches them to member fees — no more reconciling a bank statement by hand.

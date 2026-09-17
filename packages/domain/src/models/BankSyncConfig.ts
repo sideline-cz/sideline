@@ -49,7 +49,9 @@ export class BankSyncConfig extends Model.Class<BankSyncConfig>('BankSyncConfig'
   account_prefix: Schema.OptionFromNullOr(Schema.String),
   account_number: Schema.OptionFromNullOr(Schema.String),
   bank_code: Schema.OptionFromNullOr(Schema.String),
-  // Cached from Fio's `info.iban` — cross-check only, never authoritative over the computed IBAN.
+  // Meant to cache Fio's `info.iban` for a cross-check display, but nothing in the repo ever
+  // writes this column (read-only in SELECT_COLUMNS, `BankSyncConfigRepository.ts`) — it is
+  // currently always `None`.
   iban: Schema.OptionFromNullOr(Schema.String),
   currency: Schema.String,
 

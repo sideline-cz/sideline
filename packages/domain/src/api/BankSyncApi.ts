@@ -88,10 +88,42 @@ export class BankSyncConfigView extends Schema.Class<BankSyncConfigView>('BankSy
   updatedAt: Schemas.DateTimeFromIsoString,
 }) {}
 
+/**
+ * The outcome of ONE real `/periods` probe against Fio (`POST /teams/:teamId/bank-sync/test`).
+ *
+ * Deliberately NOT `BankSyncConfig.BankSyncStatusCode`: that ladder is a *longitudinal* judgement
+ * over many automatic polls (D11, `applications/server/src/services/bankSyncStatus.ts`) run over a
+ * 14-day window. This union is the verdict of a SINGLE attempt over a 2-day window made at the
+ * treasurer's request. The two can legitimately disagree; the copy owns that.
+ *
+ * There is no `'activating'` member: `decodeContained` (`FioApiClient.ts:164-181`) dispatches on
+ * STATUS CODE ALONE, every Fio error body is empty, and a not-yet-live token and a dead token both
+ * return a bodyless 500. Our only timestamp, `fio_token_created_at`, is a user-declared calendar
+ * date snapped to 12:00 UTC and settable into the future — asserting `'activating'` off it would
+ * tell a treasurer with a genuinely dead token to "wait", which is the worst possible failure.
+ */
+export const BankSyncTestStatus = Schema.Literals([
+  'ok',
+  'invalid',
+  'rate_limited',
+  'history_locked',
+  'unreachable',
+  'misconfigured',
+  'no_token',
+]);
+export type BankSyncTestStatus = typeof BankSyncTestStatus.Type;
+
 export class BankSyncTestResult extends Schema.Class<BankSyncTestResult>('BankSyncTestResult')({
+  /** Derived alias, ALWAYS `status === 'ok'`; never set independently. Kept because removing a
+   * required field from a success schema breaks decode on an in-flight old bundle. */
   ok: Schema.Boolean,
+  /** The field that carries meaning. */
+  status: BankSyncTestStatus,
+  /** @deprecated The server now always sends `null`. Human-facing copy is the client's, keyed off
+   * `status` (`packages/domain/AGENTS.md` degradable-endpoint rule 2). Removal ticket filed. */
   message: Schema.OptionFromNullOr(Schema.String),
-  /** Fio's own `info.iban`, for a cross-check display against `computedIban`. */
+  /** Fio's own `info.iban` from the probe's decoded statement (`services/fioColumns.ts:294`).
+   * `Some` only when `status === 'ok'` and Fio supplied it. Displayed, never compared. */
   accountIban: Schema.OptionFromNullOr(Schema.String),
 }) {}
 
