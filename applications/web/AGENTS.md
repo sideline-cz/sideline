@@ -45,6 +45,21 @@ pnpm -C ./applications/web dlx shadcn@latest add button
 - `<select>` → `<Select>` from `components/ui/select` (fixed enums) or `<SearchableSelect>` from `components/atoms/SearchableSelect` (dynamic data)
 - `<label>` (in forms) → `<FormLabel>` from `components/ui/form`
 
+### Cancelling a Hardcoded `role` — Use a Real Role, Never `role={undefined}`
+
+Several `components/ui/*` primitives hardcode an ARIA attribute **before** their `{...props}` spread — `alert.tsx` renders `<div data-slot='alert' role='alert' … {...props} />` — so passing the prop is the only way to override it, and `biome.json` excludes `applications/web/src/components/ui/*.tsx` from lint and format, which is why the hardcoded value never gets flagged there.
+
+**Override with an explicit valid role. `role={undefined}` is silently deleted by `pnpm format`.** `pnpm format` is `biome check --write --unsafe .`, and `lint/a11y/useValidAriaRole`'s unsafe fix is "Remove the invalid role attribute" — `role={undefined}` reads as an invalid role, so the attribute vanishes from the file and the primitive's hardcoded `role='alert'` comes back. The edit survives `tsc` (`pnpm check`) and the running app, then disappears on the next format run with no diff you asked for; `aria-*={undefined}` is *not* affected, so the failure looks arbitrary.
+
+```tsx
+// ✗ Bad — `pnpm format` deletes this prop; the component is `role='alert'` again
+<Alert role={undefined}>
+// ✓ Good — a real role the a11y rule accepts, and the override is stable
+<Alert variant='warning' role='presentation'>
+```
+
+Reference: `components/organisms/bank/FioTestResultAlert.tsx`. Its `role='presentation'` is load-bearing — the alert renders **inside** the permanently-mounted `role='status' aria-live='polite'` region owned by `FioBankCard.tsx`, and leaving the default `role='alert'` nests an implicitly assertive live region inside a polite one, double-announcing a result the user explicitly asked for. When a component must be announced, put the `aria-live` region on the always-mounted parent and strip the child's role — most screen readers only announce mutations made inside a region that already existed.
+
 ### Interactive Triggers: `Badge` Is a `<span>`, Tooltips Do Not Open On Touch
 
 Rules:

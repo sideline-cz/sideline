@@ -1,7 +1,7 @@
 import type { BankSyncApi } from '@sideline/domain';
 import { CzIban, Team } from '@sideline/domain';
 import { Effect, Option, Schema } from 'effect';
-import { AlertTriangle, ChevronRight, Landmark } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Landmark, Loader2 } from 'lucide-react';
 import React from 'react';
 import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
@@ -16,6 +16,7 @@ import { ApiClient, ClientError, useRun } from '~/lib/runtime';
 import { tr } from '~/lib/translations.js';
 import { BackfillDialog } from '../bank/BackfillDialog';
 import { FioStatusBlock } from '../bank/FioStatusBlock';
+import { FioTestResultAlert } from '../bank/FioTestResultAlert';
 import {
   FIO_BANK_CODE,
   fioBankFormFrom,
@@ -65,6 +66,7 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
   const [errors, setErrors] = React.useState<ReturnType<typeof validateFioBankForm>>({});
   const [saving, setSaving] = React.useState(false);
   const [retrying, setRetrying] = React.useState(false);
+  const [testResult, setTestResult] = React.useState<BankSyncApi.BankSyncTestResult | null>(null);
   const [helpOpen, setHelpOpen] = React.useState(
     config === null || config.status === 'not_connected' || config.status === 'invalid',
   );
@@ -135,20 +137,23 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
       setReplacingToken(false);
       setTokenCreatedAt(todayIsoDate());
       setErrors({});
+      setTestResult(null);
       onRefresh();
     }
   };
 
   const handleRetryNow = React.useCallback(async () => {
+    setTestResult(null); // a stale verdict must never be mistaken for the new one
     setRetrying(true);
-    await ApiClient.asEffect().pipe(
+    const result = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) =>
         api.bankSync.testBankSyncConfig({ params: { teamId: teamIdBranded } }),
       ),
-      Effect.mapError(() => ClientError.make(tr('fio_save_error'))),
+      Effect.mapError(() => ClientError.make(tr('fio_test_error'))),
       run({}),
     );
-    await refetchConfig();
+    setTestResult(Option.getOrNull(result));
+    if (Option.isSome(result) && result.value.status === 'ok') await refetchConfig();
     setRetrying(false);
   }, [teamIdBranded, run, refetchConfig]);
 
@@ -206,7 +211,51 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
               onReplaceToken={handleReplaceToken}
               onRetryNow={handleRetryNow}
               retrying={retrying}
+              saving={saving}
             />
+
+            {/*
+              Stable action row: this button must stay mounted with a fixed identity across the
+              whole test cycle (never conditionally rendered, never re-keyed) or focus drops to
+              `<body>` and the result is never announced in context.
+            */}
+            <div className='flex flex-wrap items-center gap-2'>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={() => void handleRetryNow()}
+                disabled={
+                  saving || retrying || tokenChanged || config === null || !config.fioTokenSet
+                }
+                aria-busy={retrying}
+              >
+                {retrying ? (
+                  <>
+                    <Loader2 className='size-4 mr-1.5 animate-spin' aria-hidden='true' />
+                    {tr('fio_test_pending')}
+                  </>
+                ) : (
+                  tr('fio_test_button')
+                )}
+              </Button>
+              {/* The probe would otherwise read the stale, already-saved token — the same verdict
+                  the user is trying to escape by pasting a new one — so explain the dead end
+                  rather than leaving the button silently disabled. */}
+              {tokenChanged && (
+                <p className='text-xs text-muted-foreground'>{tr('fio_test_unsavedTokenHint')}</p>
+              )}
+            </div>
+            {/*
+              Permanently mounted live region: most screen-reader/browser pairs only announce
+              mutations made *inside* an already-present `aria-live` region, so this `div` must
+              exist before `testResult` ever changes, not spring into being alongside it.
+            */}
+            <div role='status' aria-live='polite'>
+              {testResult && (
+                <FioTestResultAlert result={testResult} onReplaceToken={handleReplaceToken} />
+              )}
+            </div>
 
             <div className='flex items-start justify-between gap-4'>
               <div>
@@ -486,7 +535,7 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
                     variant='outline'
                     size='sm'
                     onClick={() => setBackfillOpen(true)}
-                    disabled={config === null}
+                    disabled={config === null || retrying}
                   >
                     {tr('fio_backfill_button')}
                   </Button>
@@ -495,7 +544,7 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
             </fieldset>
 
             <div className='flex items-center gap-3'>
-              <Button onClick={handleSave} disabled={saving || !hasChanges}>
+              <Button onClick={handleSave} disabled={saving || retrying || !hasChanges}>
                 {saving ? tr('profile_saving') : tr('profile_saveChanges')}
               </Button>
               {hasChanges && (

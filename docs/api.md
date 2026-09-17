@@ -7044,11 +7044,13 @@ Creates or updates the team's Fio connection settings.
 
 #### `POST /teams/:teamId/bank-sync/test`
 
-Makes one live Fio API call to validate the stored token and account, without ingesting movements.
+Issues one real, throttled Fio `/periods` probe (a 2-day window) to validate the stored token, without ingesting movements. This is a SINGLE-attempt verdict, not a re-check of the six-rank `BankSyncConfigView.status` ladder above — a successful probe clears the poller's exponential backoff (`next_attempt_at`) so a stuck retry schedule doesn't outlive a fixed token, but it never calls `recordSuccess`: it does not reset `last_error_code`/`last_success_at`/`consecutive_failure_count` or clear `coverage_warning`, because the probe's 2-day window is not evidence the poller's 14-day import actually works. The two can legitimately disagree.
 
 **Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:manage_fees`
 
-**Response:** `200 OK` — `BankSyncTestResult` — `{ ok: boolean, message: string | null, accountIban: string | null }`. `accountIban` is Fio's own `info.iban`, for a cross-check display against the computed IBAN.
+**Response:** `200 OK` — `BankSyncTestResult` — `{ ok: boolean, status: BankSyncTestStatus, message: string | null, accountIban: string | null }`. `ok` is a derived alias, always `status === 'ok'`. `message` is now always `null` (`@deprecated` — user-facing copy is client-side, keyed off `status`). `accountIban` is Fio's own `info.iban` from the probe's decoded statement, `Some` only when `status === 'ok'` and Fio supplied it.
+
+`BankSyncTestStatus` values: `'ok'`, `'invalid'` (Fio's bodyless HTTP 500 — a dead/expired/revoked token, the only documented dead-token signal), `'rate_limited'` (per-token throttle budget exceeded — answered immediately, without waiting out the throttle or burning a poller slot), `'history_locked'`, `'unreachable'` (a transport failure, or any other unexpected non-200/500, that is not itself a Fio verdict on the token — the poller records this distinctly as `last_error_code: 'unreachable'`, which does **not** count toward the `invalid` escalation the way `'fio_error'` does), `'misconfigured'` (server-side, e.g. `FIO_TOKEN_ENCRYPTION_KEY` unset — nothing the treasurer can fix), `'no_token'` (no token saved yet).
 
 **Errors:** `BankSyncForbidden` (403), `BankSyncNotConfigured` (404 — no config row exists yet)
 

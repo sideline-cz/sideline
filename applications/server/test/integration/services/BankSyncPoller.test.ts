@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from '@effect/vitest';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import * as TestClock from 'effect/testing/TestClock';
-import { HttpClient, HttpClientResponse } from 'effect/unstable/http';
+import { HttpClient, HttpClientError, HttpClientResponse } from 'effect/unstable/http';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { BankSyncConfigRepository } from '~/repositories/BankSyncConfigRepository.js';
@@ -28,6 +28,7 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { bankSyncPollerEffect } from '~/services/BankSyncPoller.js';
+import { computeBankSyncStatus } from '~/services/bankSyncStatus.js';
 import { FioSecretCrypto, makeWithKey } from '~/services/FioSecretCrypto.js';
 import {
   createFeeAndAssignment,
@@ -577,5 +578,98 @@ describe('BankSyncBackfill (126)', () => {
         }),
       ).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
     40_000,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T6/T7 — the FioUnreachable split's second consumer: BankSyncPoller (plan §3.2/§6.2, optional).
+// ---------------------------------------------------------------------------
+
+describe('BankSyncPoller — FioUnreachable split (T6/T7)', () => {
+  it.effect('T6 — a transport failure records last_error_code = unreachable', () =>
+    Effect.gen(function* () {
+      const { team } = yield* seedTeam('transport-unreachable');
+      const httpLayer = Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.fail(
+            new HttpClientError.HttpClientError({
+              reason: new HttpClientError.TransportError({
+                request,
+                cause: new Error('ECONNRESET'),
+              }),
+            }),
+          ),
+        ),
+      );
+
+      yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+
+      const sql = yield* SqlClient.SqlClient.asEffect();
+      const rows = yield* sql<{ last_error_code: string | null }>`
+        SELECT last_error_code FROM bank_sync_config WHERE team_id = ${team.id}
+      `;
+      expect(rows[0]?.last_error_code).toBe('unreachable');
+    }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
+  );
+
+  it.effect(
+    "T7 — 'unreachable' renders sync_failing, never invalid, even after repeated failures",
+    () =>
+      Effect.gen(function* () {
+        const { team } = yield* seedTeam('transport-unreachable-repeated');
+        const httpLayer = Layer.succeed(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({
+                  request,
+                  cause: new Error('ECONNRESET'),
+                }),
+              }),
+            ),
+          ),
+        );
+
+        yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+
+        const sql = yield* SqlClient.SqlClient.asEffect();
+        // Drive `consecutive_failure_count` past the D11 `invalid` rank's `>= 3` threshold AND
+        // push `last_error_at` outside the 6h silence window — if the rank fired off count alone
+        // (rather than requiring `isFioError` i.e. `last_error_code === 'fio_error'`), THIS is
+        // where it would wrongly promote to `invalid`.
+        yield* sql`
+          UPDATE bank_sync_config
+          SET consecutive_failure_count = 5, last_error_at = now() - interval '7 hours'
+          WHERE team_id = ${team.id}
+        `;
+
+        const rows = yield* sql<{
+          last_error_code: string | null;
+          consecutive_failure_count: number;
+          last_error_at: Date | null;
+          last_success_at: Date | null;
+          fio_token_created_at: Date | null;
+        }>`
+          SELECT last_error_code, consecutive_failure_count, last_error_at, last_success_at,
+                 fio_token_created_at
+          FROM bank_sync_config WHERE team_id = ${team.id}
+        `;
+        const row = rows[0]!;
+        expect(row.last_error_code).toBe('unreachable');
+
+        const result = computeBankSyncStatus({
+          hasToken: true,
+          lastErrorCode: Option.fromNullishOr(row.last_error_code),
+          lastErrorIsKeyMissing: row.last_error_code === 'key_missing',
+          consecutiveFailureCount: row.consecutive_failure_count,
+          lastErrorAt: Option.fromNullishOr(row.last_error_at?.getTime()),
+          lastSuccessAt: Option.fromNullishOr(row.last_success_at?.getTime()),
+          tokenCreatedAt: Option.fromNullishOr(row.fio_token_created_at?.getTime()),
+          now: Date.now(),
+        });
+        expect(result.status).toBe('sync_failing');
+      }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
   );
 });

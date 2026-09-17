@@ -59,7 +59,7 @@ import {
 } from 'effect/unstable/http';
 import { SqlClient } from 'effect/unstable/sql';
 import { afterEach, beforeEach, vi } from 'vitest';
-import { isFioUrl, makeReal, makeStub } from '~/services/FioApiClient.js';
+import { isFioUrl, makeReal, makeStub, tokenFingerprint } from '~/services/FioApiClient.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
 
 beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runPromise));
@@ -446,7 +446,9 @@ describe('FioApiClient — token containment (82)', () => {
   );
 
   // (b) transport failure -> typed Fio* error, Cause.pretty never contains the token
-  it.effect('a simulated transport failure produces a token-free Cause.pretty', () =>
+  // T5 — extends this same assertion (plan §6.1) with the tag check: a transport failure must
+  // surface as `FioUnreachable`, not `FioServerError` — the split this whole fix depends on.
+  it.effect('a simulated transport failure produces a token-free Cause.pretty (T5)', () =>
     Effect.gen(function* () {
       const client = yield* buildRealClient(
         makeMockHttpClientLayer((request) =>
@@ -462,6 +464,7 @@ describe('FioApiClient — token containment (82)', () => {
       );
       const exit = yield* Effect.exit(client.fetchPeriod(fetchInput()));
       expect(Exit.isFailure(exit)).toBe(true);
+      expect(getFailureTag(exit)).toBe('FioUnreachable');
       if (Exit.isFailure(exit)) {
         const pretty = Cause.pretty(exit.cause);
         expect(pretty).not.toContain(TEST_TOKEN);
@@ -582,5 +585,206 @@ describe('FioApiClient — makeStub() (84)', () => {
       const exit = yield* Effect.exit(stub.fetchPeriod(fetchInput()));
       expect(getFailureTag(exit)).toBe('FioNotConfigured');
     }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T1-T4 — the FioUnreachable / FioServerError split and the `retryRateLimited` knob
+// (plan `fix-bank-sync-test-connection-validation` §3.1 / §6.1). All five use
+// `throttleSeconds: 0` / `retryBase: '1 millis'` — sub-second cost.
+// ---------------------------------------------------------------------------
+
+describe('FioApiClient — FioUnreachable split & retryRateLimited (T1-T4)', () => {
+  it.effect('T1 — a transport failure -> FioUnreachable, not FioServerError', () =>
+    Effect.gen(function* () {
+      const client = yield* buildRealClient(
+        makeMockHttpClientLayer((request) =>
+          Effect.fail(
+            new HttpClientError.HttpClientError({
+              reason: new HttpClientError.TransportError({
+                request,
+                cause: new Error('ECONNRESET'),
+              }),
+            }),
+          ),
+        ),
+        { throttleSeconds: 0 },
+      );
+      const fiber = yield* Effect.forkChild(Effect.exit(client.fetchPeriod(fetchInput())));
+      yield* TestClock.adjust('1 second');
+      const exit = yield* Fiber.join(fiber);
+      expect(getFailureTag(exit)).toBe('FioUnreachable');
+    }).pipe(Effect.provide(TestPgClient)),
+  );
+
+  // T2 — THE regression guard for the whole fix: if the split ever accidentally caught 500s
+  // too, a dead token would report `unreachable` ("your token is probably fine") instead of
+  // `invalid`, and the shipped bug would still be live. Also re-pins the never-retry-a-5xx
+  // anti-hammer property alongside the new tag.
+  it.effect('T2 — HTTP 500 still -> FioServerError, exactly one call (the regression guard)', () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const client = yield* buildRealClient(
+        makeMockHttpClientLayer((request) => {
+          calls += 1;
+          return Effect.succeed(statusResponse(request, 500));
+        }),
+        { throttleSeconds: 0 },
+      );
+      const fiber = yield* Effect.forkChild(Effect.exit(client.fetchPeriod(fetchInput())));
+      yield* TestClock.adjust('1 second');
+      const exit = yield* Fiber.join(fiber);
+      expect(getFailureTag(exit)).toBe('FioServerError');
+      expect(calls).toBe(1);
+    }).pipe(Effect.provide(TestPgClient)),
+  );
+
+  // T2b — the actual regression guard for the B-2/coverage-gap review: a non-500 5xx (gateway
+  // timeout, maintenance blip, WAF throttle — anything the client hasn't special-cased) must NOT
+  // collapse back to `FioServerError`. Without this test, re-widening `decodeContained`'s
+  // `response.status === 500` check back to `response.status !== 200` ships the exact "revoke
+  // your good token" bug T2 exists to prevent, and nothing here would catch it — T2 only ever
+  // sends 500.
+  it.effect(
+    'T2b — HTTP 503 (a non-500 5xx) -> FioUnreachable, not FioServerError, exactly one call',
+    () =>
+      Effect.gen(function* () {
+        let calls = 0;
+        const client = yield* buildRealClient(
+          makeMockHttpClientLayer((request) => {
+            calls += 1;
+            return Effect.succeed(statusResponse(request, 503));
+          }),
+          { throttleSeconds: 0 },
+        );
+        const fiber = yield* Effect.forkChild(Effect.exit(client.fetchPeriod(fetchInput())));
+        yield* TestClock.adjust('1 second');
+        const exit = yield* Fiber.join(fiber);
+        expect(getFailureTag(exit)).toBe('FioUnreachable');
+        expect(calls).toBe(1);
+      }).pipe(Effect.provide(TestPgClient)),
+  );
+
+  it.effect('T3 — retryRateLimited: false -> exactly ONE request under a permanent 409', () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const client = yield* buildRealClient(
+        makeMockHttpClientLayer((request) => {
+          calls += 1;
+          return Effect.succeed(statusResponse(request, 409));
+        }),
+        { throttleSeconds: 0, retryBase: '1 millis', retryRateLimited: false },
+      );
+      const fiber = yield* Effect.forkChild(Effect.exit(client.fetchPeriod(fetchInput())));
+      yield* TestClock.adjust('1 second');
+      const exit = yield* Fiber.join(fiber);
+      expect(getFailureTag(exit)).toBe('FioRateLimited');
+      expect(calls).toBe(1);
+    }).pipe(Effect.provide(TestPgClient)),
+  );
+
+  // T4 — `retryRateLimited` defaults to `true` (the poller's resilience is untouched by this
+  // fix). Uses `TestClock.withLive` like the existing "409 forever" test above: driving the
+  // virtual clock through THREE successive real SQL-backed throttle reservations inside one
+  // retried fiber is unreliable (documented at the "409 forever" test), so this proves the same
+  // bounded-retry property against the real clock, with `retryBase` dialled down to keep the
+  // wall-clock cost in milliseconds.
+  it.effect('T4 — retryRateLimited defaults to true: exactly 3 calls (1 + Schedule.take(2))', () =>
+    TestClock.withLive(
+      Effect.gen(function* () {
+        let calls = 0;
+        const client = yield* buildRealClient(
+          makeMockHttpClientLayer((request) => {
+            calls += 1;
+            return Effect.succeed(statusResponse(request, 409));
+          }),
+          { throttleSeconds: 0, retryBase: '10 millis' },
+        );
+        const exit = yield* Effect.exit(client.fetchPeriod(fetchInput()));
+        expect(getFailureTag(exit)).toBe('FioRateLimited');
+        expect(calls).toBe(3);
+      }),
+    ).pipe(Effect.provide(TestPgClient)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// M-1 — `maxThrottleWaitSeconds` burns no slot (plan `fix-bank-sync-test-connection-validation`,
+// coverage gap review). Pins the core guarantee the atomic `WHERE`-guarded UPSERT exists for:
+// a caller with a wait budget that a busy slot cannot satisfy fails `FioRateLimited` WITHOUT
+// reserving anything — no HTTP call, and `next_call_allowed_at` untouched. The old read-then-
+// reserve design (`readThrottleWait`, now deleted) raced the reservation and could burn a slot on
+// a caller that only wanted an instant verdict, pushing a real hourly poll further out.
+// ---------------------------------------------------------------------------
+
+describe('FioApiClient — maxThrottleWaitSeconds burns no slot (M-1)', () => {
+  it.effect(
+    'a reservation beyond the budget fails FioRateLimited, makes zero HTTP calls, and leaves next_call_allowed_at unchanged',
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient.asEffect();
+        let calls = 0;
+        const httpLayer = makeMockHttpClientLayer((request) => {
+          calls += 1;
+          return Effect.succeed(jsonResponse(request, 200, validRawStatement));
+        });
+
+        // First call: a brand-new fingerprint always reserves regardless of budget (nothing to
+        // wait for yet) — this is the call that actually occupies the 30s slot the second call
+        // will find busy.
+        const firstClient = yield* buildRealClient(httpLayer);
+        yield* firstClient.fetchPeriod(fetchInput({ token: TEST_TOKEN }));
+        expect(calls).toBe(1);
+
+        const fingerprint = tokenFingerprint(Redacted.make(TEST_TOKEN));
+        const beforeRows = yield* sql<{ readonly next_call_allowed_at: Date }>`
+          SELECT next_call_allowed_at FROM fio_token_throttle WHERE token_fingerprint = ${fingerprint}
+        `;
+        const before = beforeRows[0]?.next_call_allowed_at;
+        expect(before).toBeDefined();
+
+        // Second call, SAME token: the slot reserved above is ~30s out — far beyond a 1s budget.
+        // The guarded UPSERT's conflict `WHERE` must leave the row untouched and return zero
+        // rows, failing `FioRateLimited` before ever reaching the HTTP call. `retryRateLimited:
+        // false` mirrors `/bank-sync/test`'s real pairing of these two options
+        // (`bank-sync.ts`'s `probeFio`) — without it, `fetchPeriod`'s default 409-style retry
+        // ladder (`Schedule.exponential('30 seconds', 2)`) would try to sleep a REAL 30s under
+        // the virtual `TestClock` this test never advances, hanging until vitest's own
+        // `testTimeout` kills it — a bug in this test, not in the implementation.
+        const budgetedClient = yield* buildRealClient(httpLayer, {
+          maxThrottleWaitSeconds: 1,
+          retryRateLimited: false,
+        });
+        const exit = yield* Effect.exit(
+          budgetedClient.fetchPeriod(fetchInput({ token: TEST_TOKEN })),
+        );
+        expect(getFailureTag(exit)).toBe('FioRateLimited');
+        // No slot burned means no HTTP call either — the count from the first call must be the
+        // final count.
+        expect(calls).toBe(1);
+
+        const afterRows = yield* sql<{ readonly next_call_allowed_at: Date }>`
+          SELECT next_call_allowed_at FROM fio_token_throttle WHERE token_fingerprint = ${fingerprint}
+        `;
+        expect(afterRows[0]?.next_call_allowed_at.getTime()).toBe(before?.getTime());
+      }).pipe(Effect.provide(TestPgClient)),
+  );
+
+  it.effect(
+    'a first-ever reservation for a fingerprint always succeeds regardless of the budget (nothing to wait for yet)',
+    () =>
+      Effect.gen(function* () {
+        let calls = 0;
+        const client = yield* buildRealClient(
+          makeMockHttpClientLayer((request) => {
+            calls += 1;
+            return Effect.succeed(jsonResponse(request, 200, validRawStatement));
+          }),
+          { maxThrottleWaitSeconds: 0 },
+        );
+        const result = yield* client.fetchPeriod(fetchInput({ token: OTHER_TOKEN }));
+        expect(result.movements).toEqual([]);
+        expect(calls).toBe(1);
+      }).pipe(Effect.provide(TestPgClient)),
   );
 });

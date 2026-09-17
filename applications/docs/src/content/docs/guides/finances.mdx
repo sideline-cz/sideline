@@ -127,6 +127,19 @@ Optionally, expand **Details for documents** to add the club's IČO and register
 
 Once connected, Sideline checks the account for new payments automatically, roughly once an hour.
 
+### Testing the connection
+
+Click **Test the connection** on the bank connection card at any time to check the saved token against Fio directly, instead of waiting for the next automatic check. The result tells you exactly what happened:
+
+- **Fio accepted the token** — the token itself is good. Note that this checks the token only; the connection status shown above the button reflects the automatic hourly import, which is a separate, longer-running check and can still show a problem even right after a successful test.
+- **Fio rejected the token** — it's expired, revoked, or was never valid. Generate a fresh one following the steps above; a **Replace token** shortcut is offered right there.
+- **Too many requests** — Fio limits how often the same token can be checked. Wait about 30 seconds and try again.
+- **The history is locked** or **couldn't reach Fio** — neither of these means the token is bad; try again in a moment.
+
+<Aside type="note" title="Test what you just pasted, not what's saved">
+  The test always checks the **saved** token. If you've pasted a new one but haven't clicked **Save Changes** yet, save first — otherwise the button is disabled with a hint explaining why.
+</Aside>
+
 ### Importing older movements
 
 By default, Fio only shares movements from the last 90 days. If you need older history — for example, to backfill a grant's reporting period — Fio requires you to explicitly unlock it first:

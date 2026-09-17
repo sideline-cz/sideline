@@ -20,6 +20,9 @@ interface FioStatusBlockProps {
   readonly onReplaceToken: () => void;
   readonly onRetryNow: () => void;
   readonly retrying: boolean;
+  /** A save is in flight — the retry probe must not run against the token that is about to be
+   * replaced by that save, so it is disabled the same way the standalone test button is. */
+  readonly saving?: boolean;
   /** Only known where the queue's KPI summary was already loaded (`BankTransactionsPage`) — the
    * settings card renders the status without it, so "ok" there shows the title alone. */
   readonly summary?: { readonly importedCount: number; readonly pendingCount: number };
@@ -48,6 +51,7 @@ export function FioStatusBlock({
   onReplaceToken,
   onRetryNow,
   retrying,
+  saving = false,
   summary,
 }: FioStatusBlockProps) {
   const { formatRelative } = useFormatDate();
@@ -122,7 +126,7 @@ export function FioStatusBlock({
               variant='outline'
               size='sm'
               onClick={onRetryNow}
-              disabled={retrying}
+              disabled={retrying || saving}
             >
               {tr('fio_status_activatingRetry')}
             </Button>
