@@ -75,6 +75,7 @@ describe("FeatureName", () => {
 **Rules:**
 - Use `it.effect` from `@effect/vitest`, not raw `it` with async — **except** in the two Effect-free packages, `packages/rules` and `packages/template-renderer`, where you must use plain `vitest` (`import { describe, expect, it } from 'vitest'`) with synchronous assertions. These packages have no `effect` dependency; importing `@effect/vitest` there fails to resolve. See the "Effect-free Packages" section of the root `AGENTS.md`.
 - Use `Effect.Do.pipe` pattern, not generators
+- **Never hard-code a date literal into a fixture that the code under test compares against the real clock** (`DateTime.nowUnsafe()`, `new Date()`, `Date.now()`, SQL `now()`) — it passes until that date arrives, then turns every branch red while naming the wrong subsystem. Derive the date from the clock when the case asserts a relative property; keep a fixed date at least three years out when it asserts a literal instant. See the "Date Fixtures On Now-Gated Paths Expire" section of the root `AGENTS.md`.
 - Test both success and error paths
 - Test edge cases identified by the hater
 
