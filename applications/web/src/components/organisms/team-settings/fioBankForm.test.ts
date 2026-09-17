@@ -47,6 +47,7 @@ import { CzIban } from '@sideline/domain';
 import { Option } from 'effect';
 import { describe, expect, it } from 'vitest';
 import {
+  FIO_BANK_CODE,
   type FioBankFormValues,
   fioBankFormFrom,
   fioBankRequestFrom,
@@ -268,6 +269,27 @@ describe('fioBankFormFrom', () => {
     expect(values.enabled).toBe(false);
     expect(values.accountPrefix).toBe('');
     expect(values.accountNumber).toBe('');
-    expect(values.bankCode).toBe('');
+    // NOT '' — an empty bank code fails validateFioBankForm's 4-digit check, which silently
+    // aborted every first-time save in production. The card shows the bank code as static text
+    // (always Fio's 2010) and handleSave overrides it with the constant regardless.
+    expect(values.bankCode).toBe(FIO_BANK_CODE);
+  });
+
+  // Regression: the two halves above were each tested in isolation and never composed —
+  // `validateFioBankForm`'s fixtures hardcoded bankCode: '2010', so nothing exercised the values
+  // a real first-time user actually starts from. That gap is what let the bug ship.
+  it('the defaults a first-time user starts from can actually be saved', () => {
+    const values: FioBankFormValues = {
+      ...fioBankFormFrom(null),
+      enabled: true,
+      accountNumber: '2703474850',
+      recipientName: 'Klub',
+    };
+    const errors = validateFioBankForm(values, {
+      fioTokenSet: false,
+      replacingToken: false,
+      fioToken: 'a-token',
+    });
+    expect(hasFioBankErrors(errors)).toBe(false);
   });
 });
