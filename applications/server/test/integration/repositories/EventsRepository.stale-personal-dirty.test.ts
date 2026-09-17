@@ -168,6 +168,13 @@ const setEventStartAtRelative = (eventId: string, interval: string) =>
     ),
   );
 
+// `createEvent` requires SOME startAtIso for the initial INSERT. This literal is a fixed,
+// permanently-past placeholder that is NEVER itself asserted on — every call site below
+// immediately repins the real, test-relevant start_at via `setEventStartAtRelative` (bound to
+// the DB's own clock), so no fixture in this suite embeds a hardcoded future-dated literal that
+// can invert once wall-clock time catches up to it (see the `2027-06-0N` rot this replaced).
+const PLACEHOLDER_START_AT_ISO = '2000-01-01T00:00:00Z';
+
 const setDirtyAt = (eventId: string, iso: string | null) =>
   SqlClient.SqlClient.asEffect().pipe(
     Effect.andThen((sql) =>
@@ -214,9 +221,13 @@ describe('EventsRepository — markStalePersonalMessagesDirty', () => {
           ),
         ),
         Effect.bind('event', ({ seed }) =>
-          createEvent(seed.team.id, seed.member.id, '2027-06-01T14:00:00Z'),
+          createEvent(seed.team.id, seed.member.id, PLACEHOLDER_START_AT_ISO),
         ),
         Effect.tap(({ event, seed }) => addPersonalEventMessageRow(event.id, seed.member.id, 1)),
+        // Stand-in for "upcoming" — `status` alone drives this case (`started` is never
+        // `active`), but keep the fixture forward-looking rather than embedding a literal
+        // that could invert against the real DB clock.
+        Effect.tap(({ event }) => setEventStartAtRelative(event.id, '1 day')),
         Effect.tap(({ event }) => setEventStatus(event.id, 'started')),
         Effect.tap(() => runSweep()),
         Effect.bind('dirtyAt', ({ event }) => getDirtyAt(event.id)),
@@ -239,9 +250,10 @@ describe('EventsRepository — markStalePersonalMessagesDirty', () => {
         ),
       ),
       Effect.bind('event', ({ seed }) =>
-        // Inserted with a future start_at, then rewound to the past below —
-        // insertEvent enforces no particular constraint on start_at.
-        createEvent(seed.team.id, seed.member.id, '2027-06-02T14:00:00Z'),
+        // Inserted with the placeholder, then rewound to a fixed past instant below —
+        // insertEvent enforces no particular constraint on start_at, and `2020-01-01` never
+        // rots because it only ever gets further into the past.
+        createEvent(seed.team.id, seed.member.id, PLACEHOLDER_START_AT_ISO),
       ),
       Effect.tap(({ event, seed }) => addPersonalEventMessageRow(event.id, seed.member.id, 2)),
       Effect.tap(({ event }) => setEventStartAt(event.id, '2020-01-01T00:00:00Z')),
@@ -266,8 +278,8 @@ describe('EventsRepository — markStalePersonalMessagesDirty', () => {
         ),
       ),
       Effect.bind('event', ({ seed }) =>
-        // Inserted with some start_at, then pinned relative to the DB clock below.
-        createEvent(seed.team.id, seed.member.id, '2027-06-03T14:00:00Z'),
+        // Inserted with the placeholder, then pinned relative to the DB clock below.
+        createEvent(seed.team.id, seed.member.id, PLACEHOLDER_START_AT_ISO),
       ),
       Effect.tap(({ event, seed }) => addPersonalEventMessageRow(event.id, seed.member.id, 3)),
       // status stays 'active' (default); start_at is always 1 day ahead of "now"
@@ -294,8 +306,10 @@ describe('EventsRepository — markStalePersonalMessagesDirty', () => {
         ),
       ),
       Effect.bind('event', ({ seed }) =>
-        createEvent(seed.team.id, seed.member.id, '2027-06-04T14:00:00Z'),
+        createEvent(seed.team.id, seed.member.id, PLACEHOLDER_START_AT_ISO),
       ),
+      // Stand-in for "upcoming" — see the comment on the first case in this describe block.
+      Effect.tap(({ event }) => setEventStartAtRelative(event.id, '1 day')),
       Effect.tap(({ event }) => setEventStatus(event.id, 'started')),
       // No personal_event_messages row for this event.
       Effect.tap(() => runSweep()),
@@ -319,9 +333,11 @@ describe('EventsRepository — markStalePersonalMessagesDirty', () => {
         ),
       ),
       Effect.bind('event', ({ seed }) =>
-        createEvent(seed.team.id, seed.member.id, '2027-06-05T14:00:00Z'),
+        createEvent(seed.team.id, seed.member.id, PLACEHOLDER_START_AT_ISO),
       ),
       Effect.tap(({ event, seed }) => addPersonalEventMessageRow(event.id, seed.member.id, 5)),
+      // Stand-in for "upcoming" — see the comment on the first case in this describe block.
+      Effect.tap(({ event }) => setEventStartAtRelative(event.id, '1 day')),
       Effect.tap(({ event }) => setEventStatus(event.id, 'started')),
       // Pre-set an existing dirty_at marker (simulating an in-flight reconcile).
       Effect.tap(({ event }) => setDirtyAt(event.id, '2025-01-01T00:00:00.000Z')),
