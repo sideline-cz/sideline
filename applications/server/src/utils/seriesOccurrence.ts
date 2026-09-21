@@ -53,10 +53,11 @@ const FALLBACK_ZONE = 'Europe/Prague';
  *
  * ## Invalid timezone
  *
- * Never throws. `team_settings.timezone` is free-form `TEXT` with no CHECK constraint, so a
- * migration/seed/operator write can leave a bad value there, and a cron that throws on one row
- * must not stop generating events for every other team. `makeZoned` returns `None` for a zone it
- * cannot parse, and the retry below is on the known-good `FALLBACK_ZONE`.
+ * Never throws. `team_settings.timezone` carries `team_settings_timezone_check`, but that CHECK
+ * only asserts Postgres can resolve the zone — `UTC+3` passes it and `makeZoned` still returns
+ * `None` — and rows written before `1792000005_team_settings_timezone_check.ts` were never
+ * checked at all. A cron that throws on one row must not stop generating events for every other
+ * team, so the retry below is on the known-good `FALLBACK_ZONE`.
  */
 export const resolveOccurrenceInstant = (
   dateStr: string,
