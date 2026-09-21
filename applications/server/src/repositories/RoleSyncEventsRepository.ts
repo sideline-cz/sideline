@@ -93,7 +93,7 @@ const make = Effect.gen(function* () {
       SELECT id, team_id, guild_id, event_type, role_id, role_name, team_member_id, discord_user_id
       FROM role_sync_events
       WHERE processed_at IS NULL
-      ORDER BY created_at ASC
+      ORDER BY created_at ASC, id ASC
       LIMIT ${limit}
     `,
   });
@@ -214,6 +214,46 @@ const make = Effect.gen(function* () {
       Option.some(discordUserId),
     );
 
+  // `utils/syncGroupRoleMembers.ts`'s batched before/after diff (`fix/group-role-discord-sync`):
+  // ONE `lookupGuildId` + ONE multi-row `INSERT` for a whole group operation's worth of
+  // (member, role) gains/losses, instead of N calls to `emitRoleAssigned`/`emitRoleUnassigned`
+  // each re-running `lookupGuildId` on its own. Modelled line-for-line on
+  // `ChannelSyncEventsRepository._emitGroupMembersBatch`. Preserves the same "unlinked team writes
+  // nothing" gate as `_emitIfGuildLinked` (single `lookupGuildId`, `onNone` → no-op).
+  const emitRoleEventsBatch = (input: {
+    readonly teamId: Team.TeamId;
+    readonly entries: ReadonlyArray<{
+      readonly eventType: 'role_assigned' | 'role_unassigned';
+      readonly roleId: Role.RoleId;
+      readonly roleName: string;
+      readonly teamMemberId: TeamMember.TeamMemberId;
+      readonly discordUserId: Discord.Snowflake;
+    }>;
+  }) => {
+    if (input.entries.length === 0) return Effect.void;
+    return lookupGuildId(input.teamId).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.void,
+          onSome: ({ guild_id }) =>
+            sql`
+              INSERT INTO role_sync_events (team_id, guild_id, event_type, role_id, role_name, team_member_id, discord_user_id)
+              VALUES ${sql.join(
+                ',',
+                false,
+              )(
+                input.entries.map(
+                  (e) =>
+                    sql`(${input.teamId}, ${guild_id}, ${e.eventType}, ${e.roleId}, ${e.roleName}, ${e.teamMemberId}, ${e.discordUserId})`,
+                ),
+              )}
+            `.pipe(Effect.asVoid),
+        }),
+      ),
+      catchSqlErrors,
+    );
+  };
+
   const findUnprocessed = (limit: number) => findUnprocessedEvents(limit).pipe(catchSqlErrors);
 
   // `tickStartedAt` is the bot-side start of the poll tick this event was drained in — see
@@ -276,6 +316,7 @@ const make = Effect.gen(function* () {
     emitRoleDeleted,
     emitRoleAssigned,
     emitRoleUnassigned,
+    emitRoleEventsBatch,
     findUnprocessed,
     markProcessed,
     markFailed,

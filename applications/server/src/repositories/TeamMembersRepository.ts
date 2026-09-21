@@ -270,6 +270,64 @@ const make = Effect.gen(function* () {
   const findEffectiveRoleIdsForMember = (teamMemberId: TeamMember.TeamMemberId) =>
     findEffectiveRoleIdsForMemberQuery(teamMemberId).pipe(catchSqlErrors);
 
+  const BatchEffectiveRoleRow = Schema.Struct({
+    team_member_id: TeamMember.TeamMemberId,
+    role_id: Role.RoleId,
+    role_name: Schema.String,
+  });
+
+  // Batched form of `findEffectiveRoleIdsForMemberQuery` above, for `utils/syncGroupRoleMembers.ts`
+  // (the group-shaped role-sync diff — `fix/group-role-discord-sync`): ONE query over MANY members
+  // instead of one `findEffectiveRoleIdsForMember` call per member, so a group operation's cost
+  // stays constant regardless of how many members it touches. Built on the SAME
+  // `effectiveRolesFrom` fragment (see "Effective Roles Are Derived In Exactly One Place" in
+  // `applications/server/AGENTS.md`) — never a second hand-rolled ancestor walk.
+  //
+  // Additionally joins `roles r ON r.id = er.role_id AND r.is_archived = false` —
+  // `effectiveRolesFrom` itself does not filter archived roles, while `RolesRepository.findRoleById`
+  // does (`RolesRepository.ts`). `findEffectiveRoleIdsForMemberQuery` above and
+  // `syncMemberDiscordRoles.ts` / `reconcileMemberDiscordRoles.ts` both skip a role whose
+  // `findRoleById` returns `None`; this join reproduces that same behaviour in one statement
+  // instead of a per-role lookup, which is why this method legitimately diverges from
+  // `findEffectiveRoleIdsForMemberQuery` for an archived role (see this repository's integration
+  // test `TeamMembersRepository.batchEffectiveRoles.test.ts`).
+  const findEffectiveRolesForMembersQuery = SqlSchema.findAll({
+    Request: Schema.Array(TeamMember.TeamMemberId),
+    Result: BatchEffectiveRoleRow,
+    execute: (memberIds) => sql`
+      SELECT tm.id AS team_member_id, er.role_id AS role_id, er.name AS role_name
+      FROM team_members tm
+      JOIN LATERAL ${sql.unsafe(effectiveRolesFrom('tm'))} er ON true
+      JOIN roles r ON r.id = er.role_id AND r.is_archived = false
+      WHERE tm.id IN ${sql.in(memberIds)}
+    `,
+  });
+
+  const findEffectiveRolesForMembers = (memberIds: ReadonlyArray<TeamMember.TeamMemberId>) => {
+    if (memberIds.length === 0) return Effect.succeed<Array<typeof BatchEffectiveRoleRow.Type>>([]);
+    return findEffectiveRolesForMembersQuery([...memberIds]).pipe(catchSqlErrors);
+  };
+
+  const GrantedRolePairRow = Schema.Struct({
+    team_member_id: TeamMember.TeamMemberId,
+    role_id: Role.RoleId,
+  });
+
+  // Batched form of `findGrantedRoleIds` below, for `utils/syncGroupRoleMembers.ts`'s anti-stripping
+  // gate over many members at once.
+  const findGrantedRolePairsForMembersQuery = SqlSchema.findAll({
+    Request: Schema.Array(TeamMember.TeamMemberId),
+    Result: GrantedRolePairRow,
+    execute: (memberIds) => sql`
+      SELECT team_member_id, role_id FROM member_role_grants WHERE team_member_id IN ${sql.in(memberIds)}
+    `,
+  });
+
+  const findGrantedRolePairsForMembers = (memberIds: ReadonlyArray<TeamMember.TeamMemberId>) => {
+    if (memberIds.length === 0) return Effect.succeed<Array<typeof GrantedRolePairRow.Type>>([]);
+    return findGrantedRolePairsForMembersQuery([...memberIds]).pipe(catchSqlErrors);
+  };
+
   const findByUserQuery = SqlSchema.findAll({
     Request: Schema.String,
     Result: MembershipWithDiscordState,
@@ -711,6 +769,8 @@ const make = Effect.gen(function* () {
     findRosterByTeam,
     findTeamMembersWithNames,
     findEffectiveRoleIdsForMember,
+    findEffectiveRolesForMembers,
+    findGrantedRolePairsForMembers,
     findMembershipByIds,
     findMembershipByDiscordAndTeam,
     findRosterMemberByIds,

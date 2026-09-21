@@ -6,12 +6,14 @@
 //   - Notification copy softened to "automatic group rules"
 
 import { afterEach, beforeEach, describe, expect, it } from '@effect/vitest';
-import type { Discord, GroupModel, Team, TeamMember, User } from '@sideline/domain';
+import type { Discord, GroupModel, Role, Team, TeamMember, User } from '@sideline/domain';
 import { Effect, Layer, Option } from 'effect';
 import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
+import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
+import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
 
 // ---------------------------------------------------------------------------
@@ -25,6 +27,7 @@ const GROUP_ID_REQUIRED = '00000000-0000-0000-0000-000000000032' as GroupModel.G
 const MEMBER_ID_1 = '00000000-0000-0000-0000-000000000020' as TeamMember.TeamMemberId;
 const USER_ID_1 = '00000000-0000-0000-0000-000000000001' as User.UserId;
 const DISCORD_ID = '111111111111111111' as Discord.Snowflake;
+const ROLE_ID_YOUTH = '00000000-0000-0000-0000-000000000040' as Role.RoleId;
 
 // Today: 2026-05-11 (from project context)
 const TODAY = new Date('2026-05-11T12:00:00Z');
@@ -74,11 +77,49 @@ const makeMember = (overrides: {
 let addedCalls: Array<{ groupId: GroupModel.GroupId; memberId: TeamMember.TeamMemberId }>;
 let removedCalls: Array<{ groupId: GroupModel.GroupId; memberId: TeamMember.TeamMemberId }>;
 let notificationInsertCalls: Array<{ content: string; type: string }>;
+// Captures every call AgeCheckService makes to any role-sync-shaped emit method.
+let roleSyncCalls: Array<{ method: string; args: unknown[] }>;
+
+type EmittedRoleSyncEntry = {
+  readonly eventType: 'role_assigned' | 'role_unassigned';
+  readonly roleId: Role.RoleId;
+  readonly roleName: string;
+  readonly teamMemberId: TeamMember.TeamMemberId;
+  readonly discordUserId: Discord.Snowflake;
+};
+// Every `emitRoleEventsBatch` call's `entries`, typed (unlike `roleSyncCalls` above, which exists
+// only to assert "some role-sync call happened" without depending on the exact shape) — used by
+// the tests under "group-role Discord sync" below to assert the actual `eventType`/`roleId`/
+// `teamMemberId` emitted, not just that SOME call fired (see blocker 4 of the
+// `fix/group-role-discord-sync` review: the earlier version of these tests mocked
+// `getRolesForGroup` to always return `[]`, so they passed even when production code did nothing).
+let emittedBatches: Array<ReadonlyArray<EmittedRoleSyncEntry>>;
+
+// Backing "ground truth" for the `TeamMembersRepository` mock's `findEffectiveRolesForMembers`.
+// `captureGroupRoleSnapshot` (called BEFORE `commitChanges`) reads `beforeRoles`;
+// `GroupsRepository.addMemberById`/`removeMemberById` (the write) flip `currentRoles` over to
+// `afterRoles` the moment the first group-membership change commits; `emitGroupRoleChanges`
+// (called AFTER `commitChanges`) then reads `afterRoles` — mirroring the real BEFORE/write/AFTER
+// ordering `AgeCheckService.evaluateTeam` enforces.
+type RoleRow = { readonly role_id: Role.RoleId; readonly role_name: string };
+let beforeRoles: Map<TeamMember.TeamMemberId, ReadonlyArray<RoleRow>>;
+let afterRoles: Map<TeamMember.TeamMemberId, ReadonlyArray<RoleRow>>;
+let currentRoles: Map<TeamMember.TeamMemberId, ReadonlyArray<RoleRow>>;
+let grantedPairs: Array<{
+  readonly team_member_id: TeamMember.TeamMemberId;
+  readonly role_id: Role.RoleId;
+}>;
 
 const resetStores = () => {
   addedCalls = [];
   removedCalls = [];
   notificationInsertCalls = [];
+  roleSyncCalls = [];
+  emittedBatches = [];
+  beforeRoles = new Map();
+  afterRoles = new Map();
+  currentRoles = beforeRoles;
+  grantedPairs = [];
 };
 
 // ---------------------------------------------------------------------------
@@ -103,10 +144,12 @@ const makeMockGroupsRepositoryLayer = () =>
   Layer.succeed(GroupsRepository, {
     addMemberById: (groupId: GroupModel.GroupId, memberId: TeamMember.TeamMemberId) => {
       addedCalls.push({ groupId, memberId });
+      currentRoles = afterRoles;
       return Effect.void;
     },
     removeMemberById: (groupId: GroupModel.GroupId, memberId: TeamMember.TeamMemberId) => {
       removedCalls.push({ groupId, memberId });
+      currentRoles = afterRoles;
       return Effect.void;
     },
     findGroupsByTeamId: () => Effect.succeed([]),
@@ -165,6 +208,60 @@ const makeMockChannelSyncEventsRepositoryLayer = () =>
     hasUnprocessedForRosters: () => Effect.succeed([]),
   } as any);
 
+const makeMockRoleSyncEventsRepositoryLayer = () =>
+  Layer.succeed(RoleSyncEventsRepository, {
+    emitRoleCreated: (...args: unknown[]) => {
+      roleSyncCalls.push({ method: 'emitRoleCreated', args });
+      return Effect.void;
+    },
+    emitRoleDeleted: (...args: unknown[]) => {
+      roleSyncCalls.push({ method: 'emitRoleDeleted', args });
+      return Effect.void;
+    },
+    emitRoleAssigned: (...args: unknown[]) => {
+      roleSyncCalls.push({ method: 'emitRoleAssigned', args });
+      return Effect.void;
+    },
+    emitRoleUnassigned: (...args: unknown[]) => {
+      roleSyncCalls.push({ method: 'emitRoleUnassigned', args });
+      return Effect.void;
+    },
+    emitRoleEventsBatch: (input: {
+      readonly teamId: Team.TeamId;
+      readonly entries: ReadonlyArray<EmittedRoleSyncEntry>;
+    }) => {
+      roleSyncCalls.push({ method: 'emitRoleEventsBatch', args: [input] });
+      emittedBatches.push(input.entries);
+      return Effect.void;
+    },
+    findUnprocessed: () => Effect.succeed([]),
+    markProcessed: () => Effect.void,
+    markFailed: () => Effect.void,
+  } as any);
+
+// `fix/group-role-discord-sync`: `AgeCheckService` now routes its role-sync emission through the
+// shared `captureGroupRoleSnapshot` / `emitGroupRoleChanges` diff (`utils/syncGroupRoleMembers.ts`),
+// which requires `TeamMembersRepository` for its before/after effective-roles reads and its
+// `member_role_grants` anti-stripping gate. This mock backs both with the mutable
+// `beforeRoles` / `currentRoles` / `afterRoles` / `grantedPairs` state declared above — adding it
+// here required no change to any other test body in this file (see the review's blocker 1: the
+// same pattern already applies to `RoleSyncEventsRepository` above).
+const makeMockTeamMembersRepositoryLayer = () =>
+  Layer.succeed(TeamMembersRepository, {
+    findEffectiveRolesForMembers: (memberIds: ReadonlyArray<TeamMember.TeamMemberId>) => {
+      const idSet = new Set(memberIds);
+      return Effect.succeed(
+        [...currentRoles.entries()]
+          .filter(([id]) => idSet.has(id))
+          .flatMap(([id, rows]) => rows.map((r) => ({ team_member_id: id, ...r }))),
+      );
+    },
+    findGrantedRolePairsForMembers: (memberIds: ReadonlyArray<TeamMember.TeamMemberId>) => {
+      const idSet = new Set(memberIds);
+      return Effect.succeed(grantedPairs.filter((p) => idSet.has(p.team_member_id)));
+    },
+  } as any);
+
 const buildTestLayer = (overrides: {
   rules?: ReturnType<typeof makeRule>[];
   members?: ReturnType<typeof makeMember>[];
@@ -174,6 +271,8 @@ const buildTestLayer = (overrides: {
     Layer.provide(makeMockGroupsRepositoryLayer()),
     Layer.provide(makeMockNotificationsRepositoryLayer()),
     Layer.provide(makeMockChannelSyncEventsRepositoryLayer()),
+    Layer.provide(makeMockRoleSyncEventsRepositoryLayer()),
+    Layer.provide(makeMockTeamMembersRepositoryLayer()),
   );
 
 const runEvaluate = (overrides: {
@@ -920,6 +1019,120 @@ describe('AgeCheckService.evaluate — notification copy', () => {
               /automatic group rules/i.test(n.content),
             );
             expect(withNeutralWording.length).toBeGreaterThan(0);
+          }),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Regression tests for `fix/group-role-discord-sync` (decision 5: AgeCheckService is in scope).
+// `AgeCheckService.ts`'s `commitChange` used to call `groups.addMemberById` / `removeMemberById`
+// directly with no role-sync emission at all — unlike the HTTP `addGroupMember` /
+// `removeGroupMember` handlers, the automatic age-based path had no equivalent. The removal
+// direction in particular was a live permissions leak: a member who aged out of a group kept
+// that group's Discord role forever, because nothing ever told the bot to take it away.
+//
+// `AgeCheckService` now routes through the shared before/after diff (`syncGroupRoleMembers.ts`),
+// so these tests assert the actual emitted `entries` (`eventType` / `roleId` / `teamMemberId`),
+// not just "some call happened" — see the review's blocker 4: the previous version of these tests
+// mocked `getRolesForGroup` to always return `[]`, making `entries` always `[]` and passing
+// regardless of what production code did.
+// ---------------------------------------------------------------------------
+
+describe('AgeCheckService.evaluate — group-role Discord sync (fix/group-role-discord-sync)', () => {
+  it.effect('automatic age-based group ADD emits role_assigned for the gained role', () => {
+    const rule = makeRule({ min_age: Option.some(10), max_age: Option.some(14) });
+    const member = makeMember({
+      birth_date: Option.some('2014-01-01'),
+      gender: Option.some('male'),
+    });
+    // Before: member holds no roles. After the group add commits, they gain `Youth` — attached
+    // to `GROUP_ID_BOYS`, the group this rule adds them to.
+    beforeRoles.set(MEMBER_ID_1, []);
+    afterRoles.set(MEMBER_ID_1, [{ role_id: ROLE_ID_YOUTH, role_name: 'Youth' }]);
+
+    return runEvaluate({ rules: [rule], members: [member] }).pipe(
+      Effect.tap((changes) =>
+        Effect.sync(() => {
+          expect(changes).toHaveLength(1);
+          expect(changes[0].action).toBe('added');
+          const entries = emittedBatches.flat();
+          expect(entries).toHaveLength(1);
+          expect(entries[0]).toMatchObject({
+            eventType: 'role_assigned',
+            roleId: ROLE_ID_YOUTH,
+            teamMemberId: MEMBER_ID_1,
+          });
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+
+  it.effect(
+    'automatic age-based group REMOVE emits role_unassigned for the lost role (the permissions-leak regression)',
+    () => {
+      const rule = makeRule({ min_age: Option.some(10), max_age: Option.some(14) });
+      // Age 15 — above max, but already in the group (ages out this evaluation).
+      const member = makeMember({
+        birth_date: Option.some('2011-01-01'),
+        gender: Option.some('male'),
+        group_ids: [GROUP_ID_BOYS],
+      });
+      // Before: member holds `Youth` (granted via `member_role_grants`, so the anti-stripping
+      // gate does not block the removal). After the group remove commits, they hold nothing.
+      beforeRoles.set(MEMBER_ID_1, [{ role_id: ROLE_ID_YOUTH, role_name: 'Youth' }]);
+      grantedPairs = [{ team_member_id: MEMBER_ID_1, role_id: ROLE_ID_YOUTH }];
+      afterRoles.set(MEMBER_ID_1, []);
+
+      return runEvaluate({ rules: [rule], members: [member] }).pipe(
+        Effect.tap((changes) =>
+          Effect.sync(() => {
+            expect(changes).toHaveLength(1);
+            expect(changes[0].action).toBe('removed');
+            const entries = emittedBatches.flat();
+            expect(entries).toHaveLength(1);
+            expect(entries[0]).toMatchObject({
+              eventType: 'role_unassigned',
+              roleId: ROLE_ID_YOUTH,
+              teamMemberId: MEMBER_ID_1,
+            });
+          }),
+        ),
+        Effect.asVoid,
+      );
+    },
+  );
+
+  it.effect(
+    'member ages out of group A but still holds the role via group B → no role_unassigned',
+    () => {
+      const rule = makeRule({ min_age: Option.some(10), max_age: Option.some(14) });
+      // Age 15 — above max, ages out of `GROUP_ID_BOYS` this evaluation. Also a member of
+      // `GROUP_ID_GIRLS` (standing in for a second group, e.g. "Juniors") which independently
+      // grants the SAME role — `GROUP_ID_GIRLS` carries no rule here, so it is untouched by
+      // `detectChanges` and the member stays in it across this evaluation.
+      const member = makeMember({
+        birth_date: Option.some('2011-01-01'),
+        gender: Option.some('male'),
+        group_ids: [GROUP_ID_BOYS, GROUP_ID_GIRLS],
+      });
+      // Before AND after: member holds `Youth` — lost from `GROUP_ID_BOYS`, but still granted
+      // through `GROUP_ID_GIRLS`, so the ground truth is unchanged by this evaluation's write.
+      beforeRoles.set(MEMBER_ID_1, [{ role_id: ROLE_ID_YOUTH, role_name: 'Youth' }]);
+      grantedPairs = [{ team_member_id: MEMBER_ID_1, role_id: ROLE_ID_YOUTH }];
+      afterRoles.set(MEMBER_ID_1, [{ role_id: ROLE_ID_YOUTH, role_name: 'Youth' }]);
+
+      return runEvaluate({ rules: [rule], members: [member] }).pipe(
+        Effect.tap((changes) =>
+          Effect.sync(() => {
+            expect(changes).toHaveLength(1);
+            expect(changes[0].action).toBe('removed');
+            // The role is still held (via `GROUP_ID_GIRLS`) — the shared diff must not strip it.
+            expect(emittedBatches.flat()).toHaveLength(0);
           }),
         ),
         Effect.asVoid,

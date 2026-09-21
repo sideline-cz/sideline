@@ -23,6 +23,7 @@ import {
 } from '~/utils/applyDiscordFormat.js';
 import { backfillGroupRoleMembers } from '~/utils/backfillGroupRoleMembers.js';
 import { hexColorToDiscordInt } from '~/utils/hexColorToDiscordInt.js';
+import { descendantTargets, withGroupRoleSync } from '~/utils/syncGroupRoleMembers.js';
 
 type GroupRowLike = {
   readonly id: GroupModel.GroupId;
@@ -370,7 +371,14 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
               ),
               Effect.bind('mapping', () => channelMappings.findByGroupId(teamId, groupId)),
               Effect.bind('settings', () => teamSettings.findByTeamId(teamId)),
-              Effect.tap(() => groups.archiveGroupById(groupId)),
+              Effect.tap(() =>
+                withGroupRoleSync(
+                  teamId,
+                  descendantTargets(groupId),
+                  { groupId, operation: 'deleteGroup' },
+                  groups.archiveGroupById(groupId),
+                ),
+              ),
               Effect.tap(({ existing, mapping, settings }) =>
                 Option.match(mapping, {
                   onNone: () => Effect.void,
@@ -466,7 +474,16 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                   ),
                 ),
               ),
-              Effect.tap(() => groups.addMemberById(groupId, payload.memberId)),
+              Effect.tap(({ _member }) =>
+                withGroupRoleSync(
+                  teamId,
+                  Effect.succeed([
+                    { teamMemberId: payload.memberId, discordUserId: _member.discord_id },
+                  ]),
+                  { groupId, operation: 'addGroupMember' },
+                  groups.addMemberById(groupId, payload.memberId),
+                ),
+              ),
               Effect.tap(({ _group, _member }) =>
                 users.findById(_member.user_id).pipe(
                   Effect.flatMap(
@@ -539,7 +556,14 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                   ),
                 ),
               ),
-              Effect.tap(() => groups.removeMemberById(groupId, memberId)),
+              Effect.tap(({ _member }) =>
+                withGroupRoleSync(
+                  teamId,
+                  Effect.succeed([{ teamMemberId: memberId, discordUserId: _member.discord_id }]),
+                  { groupId, operation: 'removeGroupMember' },
+                  groups.removeMemberById(groupId, memberId),
+                ),
+              ),
               Effect.tap(({ _group, _member }) =>
                 users.findById(_member.user_id).pipe(
                   Effect.flatMap(
@@ -601,7 +625,14 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                   ),
                 ),
               ),
-              Effect.tap(() => roles.assignRoleToGroup(payload.roleId, groupId)),
+              Effect.tap(() =>
+                withGroupRoleSync(
+                  teamId,
+                  descendantTargets(groupId),
+                  { groupId, operation: 'assignGroupRole' },
+                  roles.assignRoleToGroup(payload.roleId, groupId),
+                ),
+              ),
               Effect.asVoid,
             ),
           )
@@ -627,7 +658,14 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                   ),
                 ),
               ),
-              Effect.tap(() => roles.unassignRoleFromGroup(roleId, groupId)),
+              Effect.tap(() =>
+                withGroupRoleSync(
+                  teamId,
+                  descendantTargets(groupId),
+                  { groupId, operation: 'unassignGroupRole' },
+                  roles.unassignRoleFromGroup(roleId, groupId),
+                ),
+              ),
               Effect.asVoid,
             ),
           )
@@ -675,7 +713,14 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                       ),
                 }),
               ),
-              Effect.bind('updated', () => groups.moveGroup(groupId, payload.parentId)),
+              Effect.bind('updated', () =>
+                withGroupRoleSync(
+                  teamId,
+                  descendantTargets(groupId),
+                  { groupId, operation: 'moveGroup' },
+                  groups.moveGroup(groupId, payload.parentId),
+                ),
+              ),
               Effect.bind('memberCount', () => groups.getMemberCount(groupId)),
               Effect.bind('provisioningIds', () => channelSync.hasUnprocessedForGroups([groupId])),
               Effect.map(({ updated, memberCount, provisioningIds }) =>

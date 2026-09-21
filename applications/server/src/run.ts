@@ -30,6 +30,7 @@ import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRep
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { PaymentReminderSyncEventsRepository } from '~/repositories/PaymentReminderSyncEventsRepository.js';
 import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
+import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RulesQuizSyncEventsRepository } from '~/repositories/RulesQuizSyncEventsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
@@ -101,6 +102,8 @@ const RepositoriesLive = Layer.mergeAll(
   NotificationsRepository.Default,
   GroupsRepository.Default,
   ChannelSyncEventsRepository.Default,
+  RoleSyncEventsRepository.Default,
+  TeamMembersRepository.Default,
 );
 
 const Cron = AgeCheckCron.asEffect().pipe(

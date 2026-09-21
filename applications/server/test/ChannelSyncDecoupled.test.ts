@@ -491,6 +491,12 @@ const MockGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
   getAncestorIds: () => Effect.succeed([]),
   getAncestors: () => Effect.succeed([]),
   getDescendantMemberIds: () => Effect.succeed([]),
+  // `fix/group-role-discord-sync`: `api/group.ts`'s `deleteGroup` (and the other group-shaped
+  // handlers) now resolve role-sync targets via this method. This file only asserts on
+  // `channel_sync_events`, so an empty target list is a safe, correct stub — it makes
+  // `withGroupRoleSync`'s snapshot/emit phases no-ops without needing a `TeamMembersRepository` /
+  // `RoleSyncEventsRepository` mock in this layer.
+  findDescendantMembersWithDiscordIdByGroupId: () => Effect.succeed([]),
 } as any);
 
 // ---------------------------------------------------------------------------

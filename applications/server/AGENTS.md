@@ -197,7 +197,7 @@ WITH RECURSIVE ancestors AS (
 Rules:
 
 1. **The guard is required even on the query that PREVENTS cycles.** `GroupsRepository.findAncestors` backs `getAncestorIds`, which is `moveGroup`'s cycle check (`src/api/group.ts`); unguarded, an already-corrupted chain would hang the one operation an operator needs to repair it.
-2. **Guarded today:** the ancestor walk in `src/repositories/effectiveRoles.ts`, `GroupsRepository.findAncestors`, and `GroupsRepository.findActiveAncestors`. **Not yet guarded:** the `descendant_groups` / `descendants` walks in `GroupsRepository.ts`, `EventRsvpsRepository.ts`, `PersonalEventChannelsRepository.ts`, `src/rpc/event/index.ts`, `src/rpc/guild/index.ts`. Add the guard to any of those the next time you touch one — do not leave a walk you edited unguarded.
+2. **Guarded today:** the ancestor walk in `src/repositories/effectiveRoles.ts`, `GroupsRepository.findAncestors`, `GroupsRepository.findActiveAncestors`, and `GroupsRepository.findDescendantMembersWithDiscordIdQuery`. **Not yet guarded:** the remaining `descendant_groups` / `descendants` walks in `GroupsRepository.ts`, `EventRsvpsRepository.ts`, `PersonalEventChannelsRepository.ts`, `src/rpc/event/index.ts`, `src/rpc/guild/index.ts`. Add the guard to any of those the next time you touch one — do not leave a walk you edited unguarded.
 
 ### Repository Pattern
 
