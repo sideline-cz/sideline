@@ -55,8 +55,10 @@ import { MAX_ROLE_SYNC_EMISSIONS_PER_MEMBER } from '~/utils/syncMemberDiscordRol
  *   Removals are reserved first (a role a member should have LOST is a live permissions problem;
  *   one they have not yet gained is an inconvenience), but **at least one assign slot per distinct
  *   `roleId` always survives** — otherwise a removal-heavy operation could permanently starve a
- *   brand-new role's mapping bootstrap, and `reconcileMemberDiscordRoles`'s own `managed` filter
- *   can never recover an unmapped role, so nothing else would ever retry it.
+ *   brand-new role's mapping bootstrap. `reconcileMemberDiscordRoles` now retries an unmapped
+ *   role too (bug 3da93506 removed its `managed` filter on assignment), but only on the next
+ *   `GUILD_CREATE` / member-add — keep this slot so a group operation is not silently deferred
+ *   until a reconnect.
  *
  * Both phases are best-effort end to end: the BEFORE phase (`targets` resolution +
  * `captureGroupRoleSnapshot`, wrapped together by `withGroupRoleSync`) and the AFTER phase
