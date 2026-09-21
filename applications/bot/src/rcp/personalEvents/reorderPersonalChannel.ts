@@ -9,8 +9,8 @@ import { Array as Arr, DateTime, Effect, Option, Order } from 'effect';
 import type { Locale } from '~/locale.js';
 import { ChannelReorderSemaphore } from '~/rcp/event/ChannelReorderSemaphore.js';
 import { longestKeepablePrefix } from '~/rcp/event/channelReorderPrefix.js';
-import { YES_EMBED_LIMIT } from '~/rest/events/buildEventEmbed.js';
 import { buildPersonalMessage } from '~/rest/events/buildPersonalEventMessage.js';
+import { YES_EMBED_LIMIT } from '~/rest/utils.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
 type MemberMessage = {

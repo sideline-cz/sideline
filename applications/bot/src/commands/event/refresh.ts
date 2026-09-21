@@ -22,8 +22,7 @@ const ephemeral = (content: string) =>
  * permissions) by `Guild/IdentifyEventsChannel`, which classifies the current
  * channel and returns the personal channel's owner plus the caller's admin status:
  *  - own personal channel → anyone may refresh;
- *  - another member's personal channel → Sideline admins (`team:manage`) only;
- *  - the team's global events channel → admins only.
+ *  - another member's personal channel → Sideline admins (`team:manage`) only.
  * The heavy refresh is forked so the interaction is acked within 3s. A personal
  * channel → MarkTeamPersonalEventsDirty (content re-render via reconcile) +
  * reorderPersonalChannel, acting with the channel OWNER's identity (so an admin

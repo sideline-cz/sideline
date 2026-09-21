@@ -769,22 +769,30 @@ One `event_sync_events` payload field still carries **different semantics depend
 | `event_started.discord_role_id` | MEMBER-group role (`resolveGroupRoleId(team_id, member_group_id)`) | OWNERS-group role (`resolveGroupRoleId(team_id, owner_group_id)`) | `src/services/EventStartCron.ts` | **none** — `handleStarted.ts` no longer posts anything, so this field (and `claimed_by_discord_id`, also still emitted for trainings via `event.claimed_by`) is computed and stored but currently unread. Left in place deliberately: `EventStartCron` is otherwise unchanged (its emit still drives the claim-message-deletion consumer), and re-deriving these on a future consumer is cheaper than re-adding the JOIN/resolution logic from scratch. |
 | `training_claim_request.owner_group_id` | n/a (only emitted for trainings) | populated in `constructEvent` from the outbox row's `member_group_id` column (`owner_group_id: r.member_group_id`) | `src/rpc/event/events.ts` (`constructEvent`) | `applications/bot/src/rcp/event/handleTrainingClaimRequest.ts` |
 
-### Two-surface event model: global shared channel + per-member personal channels
+### Single event surface: per-member personal channels
 
-Events render onto **two Discord surfaces** with two different server-side mechanisms. Keep them straight — they do not share a resolution path.
+Events render onto exactly **one** Discord surface, driven by one server-side mechanism.
 
 | Surface | Channel | Server mechanism | Renderer (bot) |
 |---------|---------|------------------|----------------|
-| **Global shared events channel** | ONE channel per team: `team_settings.discord_events_channel_id` | `resolveChannel(teamId)` + the `event_sync_events` outbox (`event_created`/`event_updated`/`event_cancelled`/`event_started`/…) | `buildEventEmbed` (one aggregate message per event, RSVP buttons shared) |
 | **Private per-member personal channels** | one hidden channel per team member inside `team_settings.discord_personal_events_category_id` (auto-overflow categories past 50) | the `events.personal_messages_dirty_at` reconcile marker, polled by the bot (no outbox) | `buildUpcomingEventEmbed` (per-member RSVP state) |
+
+**The global shared events channel was removed in #547 (`32858e3d`, Release A of remove-global-events-board).** `team_settings.discord_events_channel_id` is now a **settings-only column with no renderer**. `src/api/team-settings.ts` still reads it into the `discordEventsChannelId` response field and preserves it through the full-row upsert (`Option.match(payload.discordEventsChannelId, { onNone: () => s.discord_events_channel_id, ... })`) — that branch is explicitly transitional, kept only so the full-row write does not NULL the column, and Release B removes it with the column. The web settings form no longer surfaces the field: `applications/web/src/components/organisms/team-settings/settingsForm.ts` always sends `discordEventsChannelId: Option.none()`, which omits the key on the wire so the server keeps the stored value. Nothing posts to the channel and no server code resolves it into a Discord target. Do not build a new feature on it.
 
 #### Event Discord channel resolution (`src/services/EventChannelResolver.ts`)
 
-`resolveChannel(teamId)` was **simplified to a single team-level global channel**. It now reads ONLY `team_settings.discord_events_channel_id` and returns `Option<Discord.Snowflake>` (requires only `TeamSettingsRepository`). The old signature `resolveChannel(teamId, eventId)` and its 4-tier waterfall (per-event override → training-type default → team-settings per-event-type channel → owner-group fallback) are **GONE**, along with the `discord_target_channel_id` columns on `events` and `event_series` (dropped by migration `1790300009_drop_discord_target_channel_id.ts`).
+**There is no `resolveChannel` any more** — it was deleted with the global board in #547, together with its `discord_target_channel_id` columns on `events` and `event_series` (dropped by migration `1790300009_drop_discord_target_channel_id.ts`). `src/api/event.ts` and `src/services/EventHorizonCron.ts` no longer import from this file at all; a created/updated event resolves no events channel.
 
-- **Never reintroduce a per-event channel override or an `eventId` argument to `resolveChannel`.** A team has exactly one events channel.
-- `resolveReminderChannel` and `resolveOwnerGroupChannel` (same file) are **retained unchanged** — they still serve RSVP reminders, training claims, and roster/owner-group posts. Do not fold them into `resolveChannel`.
-- All event-creating call sites now call `resolveChannel(teamId)` with no event id: `src/api/event.ts` (create/update/cancel), `src/services/EventHorizonCron.ts` (series generation).
+`EventChannelResolver.ts` now exports exactly three functions, all **retained and unchanged**:
+
+| Export | Resolves | Consumers |
+|--------|----------|-----------|
+| `resolveOwnerGroupChannel(teamId, ownerGroupId)` | the owner group's mapped `discord_channel_id` | `resolveReminderChannel` |
+| `resolveReminderChannel(teamId, ownerGroupId, remindersChannelId)` | explicit reminders channel, falling back to the owner group's channel | `src/services/EventStartCron.ts`, `src/services/RsvpReminderCron.ts` |
+| `resolveGroupRoleId(teamId, memberGroupId)` | a member group's mapped `discord_role_id` | `src/services/EventStartCron.ts` |
+
+- **Never reintroduce `resolveChannel`, a team-level events channel resolver, or a per-event channel override.** There is no shared events channel to resolve to.
+- Do not fold these three into one another, and do not add an `eventId` argument to any of them.
 
 #### `events.personal_messages_dirty_at` reconcile marker
 
@@ -813,7 +821,7 @@ Three new tables back the personal-channel surface (migrations `1790300004`/`179
 | `personal_event_overflow_categories` | extra categories once the base category hits Discord's 50-channel cap | `AllocatePersonalOverflowCategory` reserves the next `(team_id, sequence)` `ON CONFLICT DO NOTHING`; `GetPersonalChannelTargetCategory` returns the base category or the last overflow category. |
 
 - **The reserve row is the idempotency token, and the lease prevents a crashed worker from wedging a member forever.** Provisioning is bot-driven and may run across replicas/ticks; the conditional `ON CONFLICT ... DO UPDATE` reserve is what guarantees exactly one channel per member. A bare `DO NOTHING` would let a worker that reserved a NULL row then crashed (before `SavePersonalChannelId`) block that member permanently, because every later reserve would see the stale NULL row and return `reserved=false`. The 15-minute lease on the `WHERE discord_channel_id IS NULL AND updated_at < now() - interval '15 minutes'` guard lets a later tick re-claim only such abandoned reservations, never a row another worker is actively provisioning. Never create a personal channel without first reserving, and never revert this to `DO NOTHING`.
-- **`payload_hash` suppresses no-op Discord edits across BOTH surfaces** — personal messages compare against the stored `personal_event_messages.payload_hash`; the global message compares against the live message content. Same hash → no `updateMessage`.
+- **`payload_hash` suppresses no-op Discord edits** — the bot compares the freshly rendered payload hash against the stored `personal_event_messages.payload_hash`. Same hash → no `updateMessage`.
 - The personal-events RPCs live in two groups: provisioning/category/channel reads on `Guild/*Personal*` (`packages/domain/src/rpc/guild/GuildRpcGroup.ts`, handlers in `src/rpc/guild/index.ts`) and message/dirty reads on `PersonalEvents/*` (`packages/domain/src/rpc/personalEvents/PersonalEventsRpcGroup.ts`, handlers in `src/rpc/personalEvents/index.ts` — wired into `SyncRpcsLive` per the three-edit RPC rule).
 
 ##### Group restriction (`team_settings.discord_personal_events_group_id`)
@@ -847,9 +855,9 @@ When a member's channel is freshly provisioned, the bot calls `Guild/MarkTeamPer
 
 The bot's `/event refresh` subcommand (`applications/bot/AGENTS.md` → "Slash Commands") classifies the channel it was run in via `Guild/IdentifyEventsChannel({ guild_id, channel_id, discord_user_id })` (handler in `src/rpc/guild/index.ts`). It returns `{ kind: 'global' | 'personal' | 'none', team_id: Option<TeamId>, team_member_id: Option<String>, owner_discord_id: Option<Snowflake>, is_admin: boolean }`:
 
-- **`global`** — the channel equals the team's `team_settings.discord_events_channel_id`. The bot re-renders + reorders the shared channel (admins only).
+- **`global`** — **DEAD literal; the handler never returns it.** The shared events board was removed in #547, so the handler classifies only by personal-channel ownership: it returns `personal` when `findPersonalChannelOwner` matches and `none` otherwise. The literal survives in `GuildRpcGroup.ts`'s `Schema.Literals(['global', 'personal', 'none'])` and in the handler's `identifyResult` return type for wire compatibility with an older bot. Do NOT re-add a `global` branch, and do NOT compare `channel_id` to `team_settings.discord_events_channel_id` — that column has no renderer (see "Single event surface" above). The bot maps a `global` result to "nothing to refresh".
 - **`personal`** — the channel is ANY team member's personal channel, resolved by CHANNEL ID alone via `findPersonalChannelOwner(teamId, channelId)`. `team_member_id` AND `owner_discord_id` are both `Some` (the channel's owner, NOT necessarily the caller). The server does NOT decide own-vs-other here — it only reports the owner; the bot compares `owner_discord_id` to the caller and gates accordingly (own channel → anyone; another member's → admins only). See `applications/bot/AGENTS.md` → "Slash Commands" rule 2.
-- **`none`** — no linked team, or the channel is neither surface. The bot replies "nothing to refresh".
+- **`none`** — no linked team, or the channel is not any member's personal channel. The bot replies "nothing to refresh".
 - **`is_admin`** — whether the caller holds Sideline's `team:manage` permission on the linked team. Computed by resolving the caller's membership via `members.findMembershipByDiscordAndTeam(discord_user_id, team.id)` then `membership.permissions.includes('team:manage')`; `false` when the guild is unlinked or the caller has no membership. `/event refresh` is a subcommand and so CANNOT use Discord `default_member_permissions` — the bot gates admin-only refresh entirely on this runtime flag.
 
 Rules:
@@ -877,17 +885,18 @@ Rules:
 4. **`emitEventRosterThreadDelete` must be emitted** in `unlinkEventRoster` before the `eventRosters.unlink` call (while the `owners_thread_id` is still resolvable from the DB row).
 5. **`was_member_before` is set once on first upsert and never updated.** Both the approved and pending upserts (`_upsertApproved`, `_upsertPendingInsert`) use `ON CONFLICT (event_id, team_member_id) DO UPDATE SET ...` but intentionally omit `was_member_before` from the update list. This protects members who were on the roster at request-time: even if they are later removed before the event, the flag stays `true` so an admin decline does not double-remove them. See `_upsertApproved` in `src/repositories/EventRosterRequestsRepository.ts` for the immutability comment.
 
-### Overloaded payload fields on event sync events (events-channel move)
+### Dead-but-present global-board code (removed in #547, awaiting Release B)
 
-`event_channel_moved` is emitted by `updateTeamSettings` (`src/api/team-settings.ts`) whenever `team_settings.discord_events_channel_id` changes value (compared via `Option.getOrNull(prev) !== Option.getOrNull(next)`), including first-set (`None`→`Some`) and clear (`Some`→`None`). The emit is best-effort — wrapped in `Effect.catchCause(... logWarning)` so a failed enqueue never fails the settings update. `EventSyncEventsRepository.emitEventChannelMoved(teamId, oldChannelId, newChannelId)` short-circuits (emits nothing) when the team has no linked guild, and overloads the generic outbox columns:
+#547 (`32858e3d`) removed the global events board from the bot. On the server the board's emitters and RPC handlers were **left in place but disconnected** — they compile, they are exported, and nothing calls them. Treat every row below as dead code; do not build on it, and do not "fix" it by re-adding a caller.
 
-| Payload field | Carries | Notes |
-|---------------|---------|-------|
-| `discord_target_channel_id` | `new_channel_id` (`Option<Snowflake>`) | The new events channel; `None` when the channel was cleared. |
-| `discord_role_id` | `old_channel_id` (`Option<Snowflake>`) | The previous events channel; `None` when the channel was first set. |
-| `event_id` | nil-UUID sentinel `00000000-0000-0000-0000-000000000000` | There is no single event — the move affects ALL upcoming events. `constructEvent` maps these back to `EventChannelMovedEvent.{new_channel_id, old_channel_id}`. |
+| Symbol | Where | Why it is dead |
+|--------|-------|----------------|
+| `emitEventCreated` / `emitEventUpdated` / `emitEventCancelled` | `src/repositories/EventSyncEventsRepository.ts` | No production caller — `src/api/event.ts` no longer calls them, so no `event_created` / `event_updated` / `event_cancelled` row is ever written. The bot decodes those three tags and no-ops them (`applications/bot/src/rcp/event/ProcessorService.ts`). They still appear in every `EventSyncEventsRepository` test mock because they are part of the service interface — a mock stub is NOT evidence of a live path. `test/integration/repositories/EventSyncEventsRepository.payloads.test.ts` does call them for real, but only to regression-test the repository's own payload storage. |
+| `emitEventChannelMoved` | `src/repositories/EventSyncEventsRepository.ts` | No production caller — `updateTeamSettings` (`src/api/team-settings.ts`) no longer emits on a `discord_events_channel_id` change. No `event_channel_moved` row is ever written, and the bot no-ops that tag too. Only `test/integration/repositories/RepointChannelEvents.test.ts` calls it, directly. |
+| `Event/RepointChannelEvents`, `Event/GetUnpostedUpcomingByChannel`, `Event/SaveDiscordMessageId`, `Event/GetDiscordMessageId` | `packages/domain/src/rpc/event/EventRpcGroup.ts`, handlers in `src/rpc/event/index.ts` | Still registered and callable, but **no bot caller remains** — they served the shared-channel post/edit/repoint flow. `Event/RepointChannelEvents` is still the reference implementation of the pre-update-capture CTE documented in "Atomic UPDATE that returns each row's PRE-update column values"; cite it as a SQL precedent, not as a live code path. |
+| `EventChannelMovedEvent` + its `constructEvent` branch | `packages/domain/src/rpc/event/EventRpcEvents.ts`, `src/rpc/event/events.ts` | Retained so a batch decode of pre-existing outbox rows cannot fail during rollout skew. Release B deletes the tag together with `team_settings.discord_events_channel_id`. |
 
-The bot's `handleChannelMoved` then repoints every active upcoming event via `Event/RepointChannelEvents` and reposts unposted events via `Event/GetUnpostedUpcomingByChannel` — see `applications/bot/AGENTS.md` → "Events-Channel Move" for the crash-idempotency contract. `Event/RepointChannelEvents` uses the pre-update-capture CTE documented in "Atomic UPDATE that returns each row's PRE-update column values"; its `old_channel_id = None` case (channel first set) matches events with `discord_channel_id IS NULL` instead of a specific old channel.
+`Event/GetEventEmbedInfo` is the one exception in this neighbourhood — it is **still live**, called by `applications/bot/src/interactions/rsvp.ts`.
 
 ### Roster request provenance invariant (do not break)
 

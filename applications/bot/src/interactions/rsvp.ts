@@ -198,6 +198,9 @@ export const postRsvpDiscordUpdates = (params: {
   );
 };
 
+// Reachable only from `rsvp:` buttons on global-events-board messages that predate #547 and
+// may still sit in guild channels — nothing in the bot mints that custom_id any more (the
+// personal-channel surface uses `upcoming-rsvp:`). Kept so those stale buttons still work.
 export const RsvpButton = Ix.messageComponent(
   Ix.idStartsWith('rsvp:'),
   Effect.Do.pipe(

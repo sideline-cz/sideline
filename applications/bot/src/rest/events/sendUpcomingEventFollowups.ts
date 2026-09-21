@@ -5,7 +5,7 @@ import * as DiscordTypes from 'dfx/types';
 import { Duration, Effect, Option } from 'effect';
 import type { Locale } from '~/locale.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
-import { YES_EMBED_LIMIT } from './buildEventEmbed.js';
+import { YES_EMBED_LIMIT } from '../utils.js';
 import { buildUpcomingEventEmbed } from './buildUpcomingEventEmbed.js';
 
 const STALE_DELAY = Duration.minutes(10);
