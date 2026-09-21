@@ -264,7 +264,7 @@ export const GuildsRpcLive = Effect.Do.pipe(
      * (`setupNewMember`'s group-add needs no emit — it matched the member BECAUSE they already
      * hold that Discord role.)
      *
-     * Ancestors come from `getActiveAncestors`, NOT `getAncestors`: an archived ancestor whose
+     * Ancestors come from `getActiveAncestors`, NOT `getAncestorsIncludingArchived`: an archived ancestor whose
      * `discord_channel_mappings` row `deleteGroup` already removed would otherwise make the
      * bot's self-healing `createRoleOnly` branch recreate a Discord role named after the deleted
      * group, on the hottest automatic path in the system.

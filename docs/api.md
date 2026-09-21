@@ -732,7 +732,7 @@ Deactivates a team member (removes them from active roster). Uses `deactivateMem
 
 #### `POST /teams/:teamId/members/:memberId/reactivate`
 
-Reactivates a previously deactivated team member. Also restores the member's Discord roster/group role and channel access for every roster and group they belong to.
+Reactivates a previously deactivated team member. Restores the member row and their event/attendance history, but — since deactivation hard-deletes all group and roster memberships (see `DELETE /teams/:teamId/members/:memberId` above) — there is no group or roster membership left to restore Discord role/channel access for. A captain must re-add the member to groups/rosters manually; each add emits the normal `member_added` channel-sync event for that group or roster.
 
 **Auth:** Bearer token (AuthMiddleware)
 **Required Permission:** `member:remove`
@@ -2605,7 +2605,7 @@ Automatic group rules define which group a member should belong to based on auto
 
 #### `GET /teams/:teamId/age-thresholds`
 
-Lists all age threshold rules for a team.
+Lists all age threshold rules for a team, excluding rules whose target group (`groupId`) is archived — the underlying query joins `groups` with `is_archived = false`. An archived group's rules still exist in the database (archiving a group does not delete them) but are hidden here and skipped by the `AgeCheckCron`.
 
 **Auth:** Bearer token (AuthMiddleware)
 **Required Permission:** `team:manage`

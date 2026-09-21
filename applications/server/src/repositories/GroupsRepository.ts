@@ -266,8 +266,11 @@ const make = Effect.gen(function* () {
    *      above, which is the more useful consistency — both are ancestor queries over the same
    *      shape, and 32 levels of subgroup nesting is already far beyond anything real.
    *
-   * `findAncestors` above deliberately does NOT filter and must stay that way — `getAncestorIds`
-   * backs `moveGroup`'s cycle check (see that query's comment), which has to see archived nodes.
+   * `findAncestors` above deliberately does NOT filter and must stay that way. It backs
+   * `getAncestorIds` (`moveGroup`'s cycle check, see that query's comment) and
+   * `getAncestorsIncludingArchived` (the full-revoke path in `deactivateMemberCascade.ts`) —
+   * archived-blind by design, for cycle checks and full-revoke paths only. Never use it to back
+   * a channel-sync `member_added` emit — use `getActiveAncestors` for that.
    *
    * The seed does not re-check the starting group itself; every caller has already resolved it
    * through a query that filters `is_archived = false`.
@@ -476,7 +479,8 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
-  const getAncestors = (groupId: GroupModel.GroupId) => findAncestors(groupId).pipe(catchSqlErrors);
+  const getAncestorsIncludingArchived = (groupId: GroupModel.GroupId) =>
+    findAncestors(groupId).pipe(catchSqlErrors);
 
   const getActiveAncestors = (groupId: GroupModel.GroupId, teamId: Team.TeamId) =>
     findActiveAncestors({ group_id: groupId, team_id: teamId }).pipe(catchSqlErrors);
@@ -545,7 +549,7 @@ const make = Effect.gen(function* () {
     getMemberCount,
     getChildren,
     getAncestorIds,
-    getAncestors,
+    getAncestorsIncludingArchived,
     getActiveAncestors,
     findActiveGroupsWithAncestorsForMember,
     getDescendantMemberIds,

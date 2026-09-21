@@ -499,8 +499,9 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                               payload.memberId,
                               user.discord_id,
                             ),
+                            // Archived-aware: see `rpc/guild/index.ts`'s `applyInviteGroup` (~:306, rationale ~:267-270).
                             groups
-                              .getAncestors(groupId)
+                              .getActiveAncestors(groupId, teamId)
                               .pipe(
                                 Effect.flatMap((ancestors) =>
                                   Effect.forEach(ancestors, (ancestor) =>
@@ -1041,7 +1042,7 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                 sql
                   .withTransaction(
                     Effect.Do.pipe(
-                      Effect.bind('ancestors', () => groups.getAncestors(groupId)),
+                      Effect.bind('ancestors', () => groups.getActiveAncestors(groupId, teamId)),
                       Effect.bind('groupMembers', () =>
                         groups.findMembersWithDiscordIdByGroupId(groupId),
                       ),

@@ -5,6 +5,14 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-21 — Fix: archiving a group now actually removes its Discord role
+
+Archiving a group didn't archive its subgroups, so an active subgroup could sit underneath an already-archived parent. This caused a few related leaks, all now fixed:
+
+- With **Cleanup on group delete** set to **Archive**, the group's Discord role is now deleted along with moving the channel to your archive category. Previously the role was left behind — no one could see the channel through it anymore, but every member who held it kept holding it. **Do nothing** mode is unaffected and still keeps the role, as intended.
+- The **Sync role members** button no longer re-grants a group's role to members of one of its archived parent groups.
+- Age threshold rules that still point at an archived group no longer fire on the daily evaluation and re-create a role for it.
+
 ## 2026-09-17 — Fix: "Test connection" on the Fio bank card now actually checks Fio
 
 The **Test connection** button on the Fio bank card previously only checked that the saved token could be decrypted on our end — it reported success even for a token that was expired, revoked, or never valid in the first place. It now makes one real check against Fio and reports what actually happened:

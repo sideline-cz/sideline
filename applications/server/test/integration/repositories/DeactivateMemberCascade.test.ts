@@ -175,7 +175,12 @@ const runCascade = (
         groups: {
           findGroupIdsByMember: groupsRepo.findGroupIdsByMember,
           findGroupById: groupsRepo.findGroupById,
-          getAncestors: groupsRepo.getAncestors,
+          // `fix/archived-ancestor-walk`: `GroupsRepository.getAncestors` is renamed to
+          // `getAncestorsIncludingArchived` (see that method's header) — this cascade
+          // deliberately stays on the archived-blind walk (it removes group/roster memberships
+          // on deactivation regardless of ancestor archive state), so only the NAME changes here,
+          // not the underlying query semantics.
+          getAncestorsIncludingArchived: groupsRepo.getAncestorsIncludingArchived,
           removeAllForMember: groupsRepo.removeAllForMember,
         },
         channelSync: {
