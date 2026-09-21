@@ -193,7 +193,20 @@ export const buildUpcomingEventEmbed = (params: {
     UI.button({
       style: maybeStyle,
       label: m.bot_btn_maybe({}, { locale }),
-      custom_id: `u-add-msg:${entry.team_id}:${entry.event_id}:coming_later`,
+      // ⚠ The `:v` marker is load-bearing. Once the member's response IS
+      // `coming_later`, row 2 below renders an edit-message button whose
+      // custom_id is `u-add-msg:{team}:{event}:coming_later` — byte-identical to
+      // this one without the marker. Discord rejects a message carrying two
+      // components with the same custom_id (50035), so the card became
+      // unrenderable the moment someone voted "Coming later": the interaction
+      // PATCH 400'd, every reconcile 400'd, and `reorderPersonalChannel` (which
+      // deletes before it recreates) made the card vanish outright. Because
+      // `coming_later` mandates a comment, that edit button ALWAYS renders, so
+      // the collision was guaranteed, not occasional.
+      // The marker is inert — `UpcomingAddMessageButton` matches on the
+      // `u-add-msg:` prefix and reads parts[1..3] only. Keep it SHORT: with two
+      // UUIDs this id is already 96 of Discord's 100-character budget.
+      custom_id: `u-add-msg:${entry.team_id}:${entry.event_id}:coming_later:v`,
     }),
   ]);
 

@@ -383,7 +383,7 @@ describe('buildUpcomingEventEmbed', () => {
       // coming_later always opens the required-comment modal instead of an
       // instant upcoming-rsvp:...:maybe submit — see the dedicated
       // "message action row" describe block below for full coverage.
-      expect(maybeBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later');
+      expect(maybeBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later:v');
     });
   });
 
@@ -461,7 +461,7 @@ describe('buildUpcomingEventEmbed', () => {
       const entry = makeEntry({ event_id: 'ev-42', team_id: 'tm-7' });
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
       const [, , thirdBtn] = components[0].components as ReadonlyArray<{ custom_id: string }>;
-      expect(thirdBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later');
+      expect(thirdBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later:v');
       expect(thirdBtn.custom_id).not.toBe('upcoming-rsvp:ev-42:tm-7:maybe');
     });
 
@@ -475,7 +475,7 @@ describe('buildUpcomingEventEmbed', () => {
       const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
       expect(components[0].components).toHaveLength(3);
       const [, , thirdBtn] = components[0].components as ReadonlyArray<{ custom_id: string }>;
-      expect(thirdBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later');
+      expect(thirdBtn.custom_id).toBe('u-add-msg:tm-7:ev-42:coming_later:v');
     });
 
     it('encodes team_id and event_id in message-button custom_ids', () => {
@@ -569,6 +569,40 @@ describe('buildUpcomingEventEmbed', () => {
       const clearBtn = secondRow.find((b) => b.custom_id.startsWith('u-clear-msg:'));
       expect(editBtn?.custom_id).toBe('u-add-msg:tm-7:ev-42:yes');
       expect(clearBtn?.custom_id).toBe('u-clear-msg:tm-7:ev-42:yes');
+    });
+
+    // -----------------------------------------------------------------------
+    // Regression: row 1's third button (`...:coming_later`) and row 2's edit
+    // button (`...:{my_response_actual}`) render the SAME string whenever the
+    // true response is coming_later — coming_later mandates a comment, so
+    // my_message is always Some and row 2's edit button ALWAYS renders
+    // alongside it. Discord rejects a message with two components sharing a
+    // custom_id (50035): the card became unrenderable the instant someone
+    // voted "Coming later". Guarded by a `:v` marker on row 1's id only.
+    // -----------------------------------------------------------------------
+
+    it("every custom_id across both action rows is unique, and stays within Discord's 100-char limit, when the true response is coming_later", () => {
+      // Realistic 36-char UUIDs: with two of them the id is already 96 of
+      // Discord's 100-character budget, so a longer marker would silently
+      // break the limit — the length assertion is meaningless with short ids.
+      const teamId = '11111111-2222-4333-8444-555555555555';
+      const eventId = '66666666-7777-4888-8999-aaaaaaaaaaaa';
+      const entry = makeEntry({
+        event_id: eventId,
+        team_id: teamId,
+        my_response: Option.some('maybe'),
+        my_response_actual: Option.some('coming_later'),
+        my_message: Option.some('Running late'),
+      });
+      const { components } = buildUpcomingEventEmbed({ ...baseParams, entry });
+      const customIds = components.flatMap((row) =>
+        (row.components as ReadonlyArray<{ custom_id: string }>).map((b) => b.custom_id),
+      );
+
+      expect(new Set(customIds).size).toBe(customIds.length);
+      for (const id of customIds) {
+        expect(id.length).toBeLessThanOrEqual(100);
+      }
     });
   });
 

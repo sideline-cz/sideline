@@ -53,6 +53,17 @@ export const isUnknownRoleError = (error: unknown): boolean => {
   return discordCode === 10011;
 };
 
+/** `true` specifically for Discord JSON error code 10008 (Unknown Message) — the message
+ * analogue of {@link isUnknownRoleError}, and deliberately **code-only** for the same
+ * reason: it drives a row REPLACEMENT, so it must not fire on a 404 that means something
+ * else. A bare HTTP-404 check would also match Unknown Channel (10003) and any other
+ * 404 on the route, and would discard a perfectly good `personal_event_messages` row.
+ * Narrower than {@link isDiscordNotFoundError}, which is about members/roles/users and
+ * exists to treat a role removal as an idempotent success. Discord always sends
+ * `{"code": 10008}` on a message-route 404, so nothing real is lost by requiring it. */
+export const isUnknownMessageError = (error: unknown): boolean =>
+  isRecord(error) && (numberProp(error.data, 'code') ?? numberProp(error, 'code')) === 10008;
+
 /** True for errors that are permanent (retrying will not help):
  * - Any non-429 4xx Discord HTTP error (permission denied, unknown resource, bad request, etc.)
  * - Discord JSON error codes 10xxx (Unknown resource) or 50013 (Missing Permissions)

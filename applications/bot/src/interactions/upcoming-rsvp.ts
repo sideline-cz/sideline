@@ -52,11 +52,14 @@ const renderUpcomingPagePayload = (params: {
 }) => {
   const entry = params.events.find((e) => e.event_id === params.eventId);
   if (entry === undefined) {
+    // Content-only: a Discord PATCH leaves absent fields untouched, so the card
+    // and its buttons survive. NEVER send `embeds: []` / `components: []` here —
+    // these handlers edit a PERSISTENT personal-channel message, not the throwaway
+    // ephemeral page this helper was originally written for, and clearing those
+    // two fields destroys a live card that nothing recreates (the reconcile loop
+    // is dirty-flag driven, so it will not necessarily come back).
     return Effect.succeed({
       content: m.bot_rsvp_event_not_found({}, { locale: params.locale }) as string,
-      embeds: [] as ReadonlyArray<Discord.RichEmbed>,
-      components: [] as ReadonlyArray<Discord.ActionRowComponentForMessageRequest>,
-      allowed_mentions: { parse: [] as [] },
     });
   }
   return SyncRpc.asEffect().pipe(
@@ -167,11 +170,9 @@ export const UpcomingRsvpButton = Ix.messageComponent(
           }),
         ),
         Effect.flatMap(() =>
-          rpc['Event/GetUpcomingEventsForUser']({
+          rpc['Guild/GetAllUpcomingEventsForUser']({
             guild_id: snowflakeGuildId,
             discord_user_id: discordUserId,
-            offset: 0,
-            limit: 10,
           }).pipe(
             Effect.flatMap((result) =>
               renderUpcomingPagePayload({
@@ -380,11 +381,9 @@ export const UpcomingClearMessageButton = Ix.messageComponent(
           }),
         ),
         Effect.flatMap(() =>
-          rpc['Event/GetUpcomingEventsForUser']({
+          rpc['Guild/GetAllUpcomingEventsForUser']({
             guild_id: snowflakeGuildId,
             discord_user_id: discordUserId,
-            offset: 0,
-            limit: 10,
           }).pipe(
             Effect.flatMap((result) =>
               renderUpcomingPagePayload({
@@ -546,11 +545,9 @@ export const UpcomingRsvpModal = Ix.modalSubmit(
           }),
         ),
         Effect.flatMap(() =>
-          rpc['Event/GetUpcomingEventsForUser']({
+          rpc['Guild/GetAllUpcomingEventsForUser']({
             guild_id: snowflakeGuildId,
             discord_user_id: discordUserId,
-            offset: 0,
-            limit: 10,
           }).pipe(
             Effect.flatMap((result) =>
               renderUpcomingPagePayload({

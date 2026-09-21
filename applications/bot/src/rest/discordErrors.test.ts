@@ -10,6 +10,7 @@ import {
   failAsDiscordError,
   isDiscordNotFoundError,
   isDiscordPermissionError,
+  isUnknownMessageError,
   toDiscordError,
 } from '~/rest/discordErrors.js';
 
@@ -82,6 +83,48 @@ describe('isDiscordNotFoundError', () => {
     expect(isDiscordNotFoundError(null)).toBe(false);
     expect(isDiscordNotFoundError(undefined)).toBe(false);
     expect(isDiscordNotFoundError(42)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isUnknownMessageError
+// ---------------------------------------------------------------------------
+
+describe('isUnknownMessageError', () => {
+  it('code 10008 (Unknown Message) → true', () => {
+    const error = { data: { code: 10008 } };
+    expect(isUnknownMessageError(error)).toBe(true);
+  });
+
+  it('HTTP 404 alone (no data.code) → false', () => {
+    // Deliberately code-only: a bare 404 says nothing about WHICH resource is
+    // missing, and this predicate drives a row replacement in handleReconcile.
+    const error = { response: { status: 404 } };
+    expect(isUnknownMessageError(error)).toBe(false);
+  });
+
+  it('code 10003 (Unknown Channel) with a 404 status → false', () => {
+    // The channel, not the message, is what's missing — must not fire, or the
+    // reconcile path would recreate a message in a channel that no longer exists.
+    const error = { response: { status: 404 }, data: { code: 10003 } };
+    expect(isUnknownMessageError(error)).toBe(false);
+  });
+
+  it('unrelated code 50013 (Missing Permissions), no 404 status → false', () => {
+    const error = { response: { status: 403 }, data: { code: 50013 } };
+    expect(isUnknownMessageError(error)).toBe(false);
+  });
+
+  it('unrelated code (10011 Unknown Role) with a non-404 status → false', () => {
+    // Not this classifier's job to fire on role errors — narrower than isDiscordNotFoundError.
+    const error = { response: { status: 400 }, data: { code: 10011 } };
+    expect(isUnknownMessageError(error)).toBe(false);
+  });
+
+  it('non-object input → false', () => {
+    expect(isUnknownMessageError(null)).toBe(false);
+    expect(isUnknownMessageError(undefined)).toBe(false);
+    expect(isUnknownMessageError('nope')).toBe(false);
   });
 });
 
