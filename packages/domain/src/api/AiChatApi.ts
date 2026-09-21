@@ -63,7 +63,9 @@ export const RefToken = Schema.String.pipe(
 export type RefToken = typeof RefToken.Type;
 
 /**
- * The typed view-model union `references` is built from. Discriminated on `kind`, precedent
+ * The five `EntityRef`/`SearchHit` variants' fields, hoisted out so both unions are built from
+ * the same records — `EntityRef` is a `SearchHit` plus the per-turn `ref` token, and there is no
+ * other way for the two to drift apart. `kind` is the discriminant, precedent
  * `TeamGenerationApi.GenerationWarning`, with `kind` in place of `_tag`. Each variant carries
  * exactly what the assistant's result card consumes, as typed data, and reuses the existing
  * per-entity list schema wherever one already exists — so an assistant card and the entity's
@@ -76,26 +78,51 @@ export type RefToken = typeof RefToken.Type;
  * URL path) — at parity with `PlayerCard.tsx` under the same `member:view` gate, not a new
  * exposure this surface introduces.
  */
+const eventFields = { kind: Schema.Literal('event'), event: EventApi.EventInfo } as const;
+const memberFields = {
+  kind: Schema.Literal('member'),
+  memberId: TeamMemberId,
+  displayName: Schema.String,
+  avatarUrl: Schema.OptionFromNullOr(Schema.String),
+  jerseyNumber: Schema.OptionFromNullOr(Schema.Number),
+  roleNames: Schema.Array(Schema.String),
+  effectiveRoles: Schema.Array(Roster.EffectiveRole),
+  active: Schema.Boolean,
+} as const;
+const groupFields = { kind: Schema.Literal('group'), group: GroupApi.GroupInfo } as const;
+const rosterFields = { kind: Schema.Literal('roster'), roster: Roster.RosterInfo } as const;
+const trainingTypeFields = {
+  kind: Schema.Literal('trainingType'),
+  trainingType: TrainingTypeApi.TrainingTypeInfo,
+} as const;
+
+/**
+ * Every variant of `EntityRef` minus the per-turn `ref` token — what a read tool emits before
+ * `ChatAgent` mints the turn's token, and what the command-palette search endpoint returns
+ * directly (that endpoint has no notion of a chat turn). A hit's identity is `"<kind>:<id>"`
+ * (`SearchApi.searchHitId`), not `ref` — `SearchHit` carries no `ref` field at all.
+ */
+export const SearchHit = Schema.Union([
+  Schema.Struct(eventFields),
+  Schema.Struct(memberFields),
+  Schema.Struct(groupFields),
+  Schema.Struct(rosterFields),
+  Schema.Struct(trainingTypeFields),
+]);
+export type SearchHit = Schema.Schema.Type<typeof SearchHit>;
+
+/**
+ * The typed view-model union `references` is built from — `SearchHit`'s field records plus the
+ * per-turn `ref` token. Spreading the field record first puts `ref` LAST in the encoded object
+ * (same keys and values as before this was split out of `SearchHit`, but NOT the same key
+ * order — see the domain test for why that distinction matters to the guard assertion).
+ */
 export const EntityRef = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal('event'), ref: RefToken, event: EventApi.EventInfo }),
-  Schema.Struct({
-    kind: Schema.Literal('member'),
-    ref: RefToken,
-    memberId: TeamMemberId,
-    displayName: Schema.String,
-    avatarUrl: Schema.OptionFromNullOr(Schema.String),
-    jerseyNumber: Schema.OptionFromNullOr(Schema.Number),
-    roleNames: Schema.Array(Schema.String),
-    effectiveRoles: Schema.Array(Roster.EffectiveRole),
-    active: Schema.Boolean,
-  }),
-  Schema.Struct({ kind: Schema.Literal('group'), ref: RefToken, group: GroupApi.GroupInfo }),
-  Schema.Struct({ kind: Schema.Literal('roster'), ref: RefToken, roster: Roster.RosterInfo }),
-  Schema.Struct({
-    kind: Schema.Literal('trainingType'),
-    ref: RefToken,
-    trainingType: TrainingTypeApi.TrainingTypeInfo,
-  }),
+  Schema.Struct({ ...eventFields, ref: RefToken }),
+  Schema.Struct({ ...memberFields, ref: RefToken }),
+  Schema.Struct({ ...groupFields, ref: RefToken }),
+  Schema.Struct({ ...rosterFields, ref: RefToken }),
+  Schema.Struct({ ...trainingTypeFields, ref: RefToken }),
 ]);
 export type EntityRef = Schema.Schema.Type<typeof EntityRef>;
 

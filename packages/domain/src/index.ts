@@ -148,6 +148,15 @@ export * as Roster from './api/Roster.js';
  */
 export * as RulesTrainerApi from './api/RulesTrainerApi.js';
 
+/**
+ * The command-palette search endpoint (`.work-plans/command-palette-search.md` §A). Calls the
+ * same five AI read-tool executors the in-app assistant uses (`applications/server/src/services/
+ * ai/readTools.ts`), so the permission gates are the same function calls, not a second copy.
+ * `SearchHit` is defined in `AiChatApi.ts` and re-exported here, per the shared-schema
+ * convention (`packages/domain/AGENTS.md` → "Shared Schemas Across API Contracts").
+ */
+export * as SearchApi from './api/SearchApi.js';
+
 export * as TeamApi from './api/TeamApi.js';
 
 export * as TeamChallengeApi from './api/TeamChallengeApi.js';

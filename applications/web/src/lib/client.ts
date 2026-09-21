@@ -28,6 +28,7 @@ import {
   RoleApi,
   Roster,
   RulesTrainerApi,
+  SearchApi,
   TeamApi,
   TeamChallengeApi,
   TeamGenerationApi,
@@ -87,7 +88,8 @@ class ClientApi extends HttpApi.make('api')
   .add(GlobalAdminApi.GlobalAdminApiGroup)
   .add(PlayerRatingApi.PlayerRatingApiGroup)
   .add(TeamGenerationApi.TeamGenerationApiGroup)
-  .add(RulesTrainerApi.RulesTrainerApiGroup) {}
+  .add(RulesTrainerApi.RulesTrainerApiGroup)
+  .add(SearchApi.SearchApiGroup) {}
 
 export const client = ClientConfig.asEffect().pipe(
   Effect.flatMap(({ baseUrl }) =>

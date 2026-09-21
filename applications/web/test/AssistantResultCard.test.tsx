@@ -19,6 +19,7 @@
 // the row's `<a>` (invalid HTML, breaks keyboard/AT nav). The member card instead renders up
 // to 2 bare `RoleBadge` `<span>`s plus a non-interactive `<Badge variant='secondary'>+{n}</Badge>`.
 
+import { type AiChatApi, EventApi, GroupApi, Roster, TrainingTypeApi } from '@sideline/domain';
 import { render, screen, within } from '@testing-library/react';
 import { DateTime, Option } from 'effect';
 import type React from 'react';
@@ -306,6 +307,124 @@ function getRow() {
   // 13.9/9 — the whole row is one focusable link. Asserting a single `link` role up front
   // means every other test can safely assume `screen.getByRole('link')` is THE row.
   return screen.getByRole('link');
+}
+
+// ---------------------------------------------------------------------------
+// F.7 — the widened `reference` prop (`AiChatApi.SearchHit`, no `ref` field) and `renderWrapper`.
+//
+// These fixtures are built directly as `AiChatApi.SearchHit` (no `as any`, no `ref` key at
+// all) — deliberately NOT reusing `make*Ref` above, whose `as any`-cast call sites would hide
+// a real type mismatch. Nested `Schema.Class` fields (`event`, `group`, `roster`,
+// `trainingType`) use real instances (`new EventApi.EventInfo({...})`, etc.) because
+// `Schema.Class` membership is nominal — a field-for-field look-alike plain object does not
+// satisfy the class type, only a real instance does.
+// ---------------------------------------------------------------------------
+
+function makeEventSearchHit(title = 'Widened Event'): AiChatApi.SearchHit {
+  return {
+    kind: 'event',
+    event: new EventApi.EventInfo({
+      eventId: 'event-widened' as any,
+      teamId: TEAM_ID as any,
+      title,
+      eventType: 'training',
+      trainingTypeName: Option.none<string>(),
+      description: Option.none<string>(),
+      imageUrl: Option.none<string>(),
+      startAt: DateTime.makeUnsafe('2026-05-12T18:00:00.000Z'),
+      endAt: Option.some(DateTime.makeUnsafe('2026-05-12T19:30:00.000Z')),
+      location: Option.some('Main hall'),
+      locationUrl: Option.none<string>(),
+      status: 'active',
+      allDay: false,
+      seriesId: Option.none() as any,
+      startDate: Option.none<string>(),
+      endDate: Option.none<string>(),
+    }),
+  };
+}
+
+function makeMemberSearchHit(displayName = 'Widened Member'): AiChatApi.SearchHit {
+  return {
+    kind: 'member',
+    memberId: 'member-widened' as any,
+    displayName,
+    avatarUrl: Option.none<string>(),
+    jerseyNumber: Option.none<number>(),
+    roleNames: [],
+    effectiveRoles: [],
+    active: true,
+  };
+}
+
+function makeGroupSearchHit(name = 'Widened Group'): AiChatApi.SearchHit {
+  return {
+    kind: 'group',
+    group: new GroupApi.GroupInfo({
+      groupId: 'group-widened' as any,
+      teamId: TEAM_ID as any,
+      parentId: Option.none(),
+      name,
+      emoji: Option.none<string>(),
+      color: Option.none<string>(),
+      memberCount: 12,
+      discordChannelProvisioning: false,
+    }),
+  };
+}
+
+function makeRosterSearchHit(name = 'Widened Roster'): AiChatApi.SearchHit {
+  return {
+    kind: 'roster',
+    roster: new Roster.RosterInfo({
+      rosterId: 'roster-widened' as any,
+      teamId: TEAM_ID as any,
+      name,
+      active: true,
+      memberCount: 18,
+      createdAt: '2024-01-01T00:00:00.000Z',
+      color: Option.none<string>(),
+      emoji: Option.none<string>(),
+      discordChannelId: Option.none(),
+      discordChannelName: Option.none<string>(),
+      discordChannelProvisioning: false,
+    }),
+  };
+}
+
+function makeTrainingTypeSearchHit(name = 'Widened Training'): AiChatApi.SearchHit {
+  return {
+    kind: 'trainingType',
+    trainingType: new TrainingTypeApi.TrainingTypeInfo({
+      trainingTypeId: 'tt-widened' as any,
+      teamId: TEAM_ID as any,
+      name,
+      ownerGroupName: Option.none<string>(),
+      memberGroupName: Option.none<string>(),
+    }),
+  };
+}
+
+// Deliberately typed (no `as any` on `reference`): this is what makes case 1 below a real
+// proof that the prop was widened to `SearchHit`, not merely a runtime coincidence (the
+// component never having read `.ref` in the first place would let a loosely-typed test pass
+// either way). `renderWrapper` is also passed through untyped-cast so a missing prop on
+// `AssistantResultCardProps` surfaces as a compile error, per this file's F.7 remit.
+function renderSearchHit(
+  hit: AiChatApi.SearchHit,
+  extra: {
+    colorMap?: typeof EMPTY_COLOR_MAP;
+    renderWrapper?: (children: React.ReactNode, className: string) => React.ReactElement;
+  } = {},
+) {
+  return render(
+    <AssistantResultCard
+      reference={hit}
+      teamId={TEAM_ID}
+      colorMap={extra.colorMap ?? EMPTY_COLOR_MAP}
+      renderWrapper={extra.renderWrapper}
+    />,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -669,6 +788,75 @@ describe('AssistantResultCard', () => {
       expect(typeof entityKindLabels.group).toBe('function');
       expect(typeof entityKindLabels.roster).toBe('function');
       expect(typeof entityKindLabels.trainingType).toBe('function');
+    });
+  });
+
+  // F.7/1 (design §4) — the widened prop. `EntityRef` is `SearchHit` plus `ref`, so `EntityRef`
+  // is assignable to `SearchHit`; these fixtures instead prove the OTHER direction matters: a
+  // `SearchHit` with no `ref` field at all still renders every kind's content, typechecking
+  // against the (post-widening) `reference: AiChatApi.SearchHit` prop with no cast.
+  describe('widened reference prop: AiChatApi.SearchHit (no `ref`) renders every kind (F.7/1)', () => {
+    it('event', () => {
+      renderSearchHit(makeEventSearchHit('Widened Event'));
+      expect(within(getRow()).getByText('Widened Event')).not.toBeNull();
+    });
+
+    it('member', () => {
+      renderSearchHit(makeMemberSearchHit('Widened Member'));
+      expect(getRow().textContent).toContain('Widened Member');
+    });
+
+    it('group', () => {
+      renderSearchHit(makeGroupSearchHit('Widened Group'));
+      expect(getRow().textContent).toContain('Widened Group');
+    });
+
+    it('roster', () => {
+      renderSearchHit(makeRosterSearchHit('Widened Roster'));
+      expect(getRow().textContent).toContain('Widened Roster');
+    });
+
+    it('trainingType', () => {
+      renderSearchHit(makeTrainingTypeSearchHit('Widened Training'));
+      expect(getRow().textContent).toContain('Widened Training');
+    });
+  });
+
+  // F.7/2, F.7/3 (design §4) — `renderWrapper` overrides the default per-kind `<Link>`; omitted,
+  // the default `<Link>` is byte-identical to today (the "chat surface cannot regress" guard).
+  describe('renderWrapper (F.7/2, F.7/3)', () => {
+    it('is used in place of the default <Link> when provided — no <a> anywhere in the row', () => {
+      renderSearchHit(makeEventSearchHit('Wrapped Event'), {
+        renderWrapper: (children, className) => (
+          <li data-testid='wrap' className={className}>
+            {children}
+          </li>
+        ),
+      });
+
+      expect(screen.queryByRole('link')).toBeNull();
+      const wrap = screen.getByTestId('wrap');
+      expect(within(wrap).getByText('Wrapped Event')).not.toBeNull();
+      expect(wrap.querySelector('a')).toBeNull();
+      // The EffectiveRolesList/PopoverTrigger hazard (13.9/6) applies to the palette row too —
+      // no nested-interactive control, wrapper or not.
+      expect(within(wrap).queryAllByRole('button')).toHaveLength(0);
+    });
+
+    it('omitted for the event branch: the default <Link> is unchanged', () => {
+      renderSearchHit(makeEventSearchHit('Default Event'));
+      const row = getRow();
+      expect(row.tagName).toBe('A');
+      expect(row.getAttribute('href')).toBe(`/teams/${TEAM_ID}/events/event-widened`);
+      expect(within(row).getByText('Default Event')).not.toBeNull();
+    });
+
+    it('omitted for the member branch: the default <Link> is unchanged', () => {
+      renderSearchHit(makeMemberSearchHit('Default Member'));
+      const row = getRow();
+      expect(row.tagName).toBe('A');
+      expect(row.getAttribute('href')).toBe(`/teams/${TEAM_ID}/members/member-widened`);
+      expect(within(row).getByText('Default Member')).not.toBeNull();
     });
   });
 });

@@ -114,6 +114,7 @@ Current shared schemas:
 | Schema | Defined in | Re-exported by |
 |--------|-----------|----------------|
 | `HexColor` | `src/api/GroupApi.ts` | `src/api/Roster.ts` |
+| `SearchHit` | `src/api/AiChatApi.ts` | `src/api/SearchApi.ts` |
 
 ### Two Closed Unions May Share A Literal Name Without Sharing Code
 

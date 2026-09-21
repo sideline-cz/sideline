@@ -2351,6 +2351,14 @@ Rules:
 4. **The kill switch and "no LLM configured" both short-circuit BEFORE the rate limiter.** Handler ordering in `src/api/ai-chat.ts` is fixed and directly tested: membership → `aiChatEnabled && llm.configured` → `ChatRateLimiter.check` → `ChatAgent.respond`. Neither condition alone may spend a caller's rate-limit budget.
 5. **`ChatRateLimiter` is per-replica and in-memory by design** (`src/services/ChatRateLimiter.ts`, 20 turns / 10 min and 120 / day per `Auth.UserId`). The real cost bound is per-request (`MAX_TOOL_ITERATIONS`, `max_tokens`). Document any limit change in `docs/deployment.md`'s `AI_CHAT_ENABLED` row too.
 
+### The Command-Palette Search Endpoint (`GET /teams/:teamId/search`, `src/api/search.ts`)
+
+`SearchApiLive` enforces every permission gate by **calling the same five `readTools.ts` list executors** the assistant uses (`listAllEvents`, `listMembers`, `listGroups`, `listRosters`, `listTrainingTypes`) — never by reimplementing `hasPermission`/`canSeeGroup` checks against a second query. A future change to a gate can only happen in one place because there is only one place.
+
+1. **Never pass `includeAllGroups` to `listAllEvents`.** Search has no opt-in surface (unlike `GET /events?all=1`), so a `team:manage` caller is group-filtered exactly like a plain member — deliberately narrower than the events page's default.
+2. **A missing per-kind gate (`group:manage`, `member:view`, `roster:view`) is never a 403 for the whole query.** `forbiddenResult` already returns empty `hits`, so the kind is simply absent from the response — the client cannot distinguish "gated" from "no matches", by design.
+3. **The caps (5 per kind, 25 total) are applied by `rankAndCap` AFTER ranking, never as a `limit` argument to the executors** — `applyLimit` slices in memory after the full team-wide query, so a `limit` would truncate the oldest-first event list before ranking ever saw it.
+
 ## Injectable Env-Derived Config Service (Testable Allowlist)
 
 When a handler needs to read an **env-derived, process-wide constant** (parsed once at module load) AND that value must be **overridable in tests**, wrap it in a tiny `ServiceMap.Service` whose `Default` layer reads the module-level constant. Tests then provide `Layer.succeed(Service, fake)` instead of stubbing `process.env` (which a `@t3-oss/env-core`-style module snapshots at import, making post-import `vi.stubEnv` a no-op).

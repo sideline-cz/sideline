@@ -233,8 +233,8 @@ function respond(overrides: Partial<AiChatApi.ChatResponse> = {}) {
   } as any);
 }
 
-function renderConversation() {
-  return render(<AssistantConversation teamId={TEAM_ID} />);
+function renderConversation(props: { pendingQuestion?: { text: string; id: number } } = {}) {
+  return render(<AssistantConversation teamId={TEAM_ID} pendingQuestion={props.pendingQuestion} />);
 }
 
 function getTextarea(): HTMLTextAreaElement {
@@ -590,6 +590,115 @@ describe('AssistantConversation', () => {
       const log = container.querySelector('[role="log"]');
       expect(log).not.toBeNull();
       expect(log?.getAttribute('tabindex')).not.toBe('0');
+    });
+  });
+
+  // F.8 (design §6.3, plan §13.10 hand-off addendum): a `pendingQuestion={ text, id }` prop
+  // auto-sends once per id, guarded by a ref set BEFORE the async call (not by the dependency
+  // array — `handleSend`'s identity changes with `turns`, so the effect legitimately re-runs on
+  // every turn; the ref, not the deps, is what makes it fire once).
+  describe('pendingQuestion auto-send (F.8)', () => {
+    it('sends the pending question exactly once on mount, as a real ChatMessage', async () => {
+      mockChat.mockReturnValueOnce(Effect.succeed(respond({ answer: 'Auto reply.' })));
+      renderConversation({ pendingQuestion: { text: 'hi', id: 1 } });
+
+      await waitFor(() => expect(mockChat).toHaveBeenCalledTimes(1));
+      const call = mockChat.mock.calls[0]?.[0];
+      const messages = call?.payload?.messages ?? call?.messages;
+      expect(messages[0]).toBeInstanceOf(AiChatApi.ChatMessage);
+      expect(messages.at(-1)?.content).toBe('hi');
+
+      await waitFor(() => expect(screen.getByText('Auto reply.')).not.toBeNull());
+      // Still exactly one call once the exchange has fully settled.
+      expect(mockChat).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not resend on a re-render with the same object, nor with a new equal-valued one', async () => {
+      mockChat.mockReturnValueOnce(Effect.succeed(respond({ answer: 'Auto reply.' })));
+      const pendingQuestion = { text: 'hi', id: 1 };
+      const { rerender } = renderConversation({ pendingQuestion });
+      await waitFor(() => expect(mockChat).toHaveBeenCalledTimes(1));
+
+      rerender(<AssistantConversation teamId={TEAM_ID} pendingQuestion={pendingQuestion} />);
+      rerender(<AssistantConversation teamId={TEAM_ID} pendingQuestion={{ text: 'hi', id: 1 }} />);
+
+      expect(mockChat).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not resend when an unrelated render changes handleSend identity (a manual second submit)', async () => {
+      mockChat.mockReturnValueOnce(Effect.succeed(respond({ answer: 'Auto reply.' })));
+      renderConversation({ pendingQuestion: { text: 'hi', id: 1 } });
+      await waitFor(() => expect(screen.getByText('Auto reply.')).not.toBeNull());
+
+      mockChat.mockReturnValueOnce(Effect.succeed(respond({ answer: 'Second reply.' })));
+      submitMessage('manual follow-up');
+
+      await waitFor(() => expect(screen.getByText('Second reply.')).not.toBeNull());
+      // One auto-send + one manual send — not a third from the auto-send effect re-firing.
+      expect(mockChat).toHaveBeenCalledTimes(2);
+    });
+
+    it('sends again for a new, higher id — even asking the identical text (repeat-the-question case)', async () => {
+      mockChat.mockReturnValueOnce(Effect.succeed(respond({ answer: 'First.' })));
+      const { rerender } = renderConversation({ pendingQuestion: { text: 'hi', id: 1 } });
+      await waitFor(() => expect(mockChat).toHaveBeenCalledTimes(1));
+
+      mockChat.mockReturnValueOnce(Effect.succeed(respond({ answer: 'Second.' })));
+      rerender(<AssistantConversation teamId={TEAM_ID} pendingQuestion={{ text: 'hi', id: 2 }} />);
+
+      await waitFor(() => expect(mockChat).toHaveBeenCalledTimes(2));
+      const secondCall = mockChat.mock.calls[1]?.[0];
+      const secondMessages = secondCall?.payload?.messages ?? secondCall?.messages;
+      expect(secondMessages.at(-1)?.content).toBe('hi');
+    });
+
+    it('does not send when pendingQuestion is undefined', async () => {
+      renderConversation({ pendingQuestion: undefined });
+      // Give any stray effect a tick to fire before asserting the negative.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockChat).not.toHaveBeenCalled();
+    });
+  });
+
+  // The blocker: `new AiChatApi.ChatMessage(...)` is a validating constructor — over 2000 chars
+  // throws `Expected a value with a length of at most 2000`, and `''` throws too (isMinLength(1)).
+  // `toChatMessages` at `AssistantConversation.tsx:191` runs BEFORE `setSubmitting(true)` and
+  // OUTSIDE the `try` at `:246`, so an unclamped auto-send throws synchronously after the
+  // optimistic user bubble is already committed: no error turn, no request, no toast — the page
+  // just sits there permanently. `pendingQuestion` bypasses the composer's own `maxLength`/disabled
+  // guard entirely (13.10/9 only protects manual typing), so this path must defend itself.
+  describe('pendingQuestion clamp (blocker fix)', () => {
+    it('clamps a 3000-character pending question to 2000 characters and still sends it', async () => {
+      mockChat.mockReturnValueOnce(Effect.succeed(respond({ answer: 'Clamped reply.' })));
+      const longText = 'x'.repeat(3000);
+      renderConversation({ pendingQuestion: { text: longText, id: 1 } });
+
+      await waitFor(() => expect(mockChat).toHaveBeenCalledTimes(1));
+      const call = mockChat.mock.calls[0]?.[0];
+      const messages = call?.payload?.messages ?? call?.messages;
+      const sent = messages.at(-1);
+      expect(sent).toBeInstanceOf(AiChatApi.ChatMessage);
+      expect(sent.content).toHaveLength(2000);
+      expect(sent.content).toBe('x'.repeat(2000));
+
+      // The reply actually lands — the page is not stuck showing only the user's own bubble,
+      // which is exactly the silent failure mode this test exists to rule out.
+      await waitFor(() => expect(screen.getByText('Clamped reply.')).not.toBeNull());
+    });
+
+    it('does not send an empty pending question, and does not throw', async () => {
+      renderConversation({ pendingQuestion: { text: '', id: 1 } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockChat).not.toHaveBeenCalled();
+      // No user bubble was committed either — the empty-state placeholder is still showing.
+      expect(screen.getByText(TR_MAP.assistant_empty_title)).not.toBeNull();
+    });
+
+    it('does not send a whitespace-only pending question, and does not throw', async () => {
+      renderConversation({ pendingQuestion: { text: '   ', id: 1 } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockChat).not.toHaveBeenCalled();
+      expect(screen.getByText(TR_MAP.assistant_empty_title)).not.toBeNull();
     });
   });
 });

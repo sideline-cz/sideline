@@ -37,6 +37,7 @@ import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.
 import { computeCurrentDatetime } from '~/services/ai/currentDatetime.js';
 import {
   buildListResult,
+  type EntityReadContext,
   forbiddenResult,
   notFoundResult,
   type ToolContext,
@@ -72,9 +73,7 @@ export const currentDatetime = (
   _args: CurrentDatetimeArgs,
   ctx: ToolContext,
 ): Effect.Effect<ToolExecutionResult> =>
-  computeCurrentDatetime(ctx.teamTimezone).pipe(
-    Effect.map((result) => ({ result, references: [] })),
-  );
+  computeCurrentDatetime(ctx.teamTimezone).pipe(Effect.map((result) => ({ result, hits: [] })));
 
 // ---------------------------------------------------------------------------
 // list_events — membership; group-visibility mirrors event.ts's list endpoint
@@ -95,14 +94,12 @@ export interface ListEventsArgs {
   readonly includeAllGroups?: boolean;
 }
 
-const toEventRef = (row: EventWithDetails, ref: string): AiChatApi.EntityRef => ({
+const toEventHit = (row: EventWithDetails): AiChatApi.SearchHit => ({
   kind: 'event',
-  ref,
   event: toEventInfo(row),
 });
 
-const toEventItem = (row: EventWithDetails, ref: string): Record<string, unknown> => ({
-  ref,
+const toEventItem = (row: EventWithDetails): Record<string, unknown> => ({
   title: row.title,
   status: row.status,
   startAt: DateTime.formatIso(row.start_at),
@@ -122,7 +119,7 @@ const filterEventRows = (
 };
 
 const listEventsResult = (rows: ReadonlyArray<EventWithDetails>): ToolExecutionResult =>
-  buildListResult(rows, toEventRef, toEventItem);
+  buildListResult(rows, toEventHit, toEventItem);
 
 /** Single-row `eventId` path: not found if the row does not exist, belongs to
  * another team, or is in a group this caller cannot see — a foreign id must
@@ -158,9 +155,9 @@ const listEventById = (
     ),
   );
 
-const listAllEvents = (
+export const listAllEvents = (
   args: ListEventsArgs,
-  ctx: ToolContext,
+  ctx: EntityReadContext,
 ): Effect.Effect<ToolExecutionResult, never, EventsRepository> =>
   Effect.Do.pipe(
     Effect.bind('events', () => EventsRepository.asEffect()),
@@ -200,20 +197,18 @@ interface TrainingTypeListRow {
   readonly member_group_name: Option.Option<string>;
 }
 
-const toTrainingTypeRef = (row: TrainingTypeListRow, ref: string): AiChatApi.EntityRef => ({
+const toTrainingTypeHit = (row: TrainingTypeListRow): AiChatApi.SearchHit => ({
   kind: 'trainingType',
-  ref,
   trainingType: toTrainingTypeInfo(row, row.owner_group_name, row.member_group_name),
 });
 
-const toTrainingTypeItem = (row: TrainingTypeListRow, ref: string): Record<string, unknown> => ({
-  ref,
+const toTrainingTypeItem = (row: TrainingTypeListRow): Record<string, unknown> => ({
   name: row.name,
 });
 
 export const listTrainingTypes = (
   args: ListTrainingTypesArgs,
-  ctx: ToolContext,
+  ctx: EntityReadContext,
 ): Effect.Effect<ToolExecutionResult, never, TrainingTypesRepository> =>
   Effect.Do.pipe(
     Effect.bind('trainingTypes', () => TrainingTypesRepository.asEffect()),
@@ -223,7 +218,7 @@ export const listTrainingTypes = (
         applyQueryFilter(list, args.query, (t) => t.name),
         args.limit,
       );
-      return buildListResult(filtered, toTrainingTypeRef, toTrainingTypeItem);
+      return buildListResult(filtered, toTrainingTypeHit, toTrainingTypeItem);
     }),
   );
 
@@ -248,9 +243,8 @@ interface GroupListRow {
   readonly member_count: number;
 }
 
-const toGroupRef = (row: GroupListRow, ref: string): AiChatApi.EntityRef => ({
+const toGroupHit = (row: GroupListRow): AiChatApi.SearchHit => ({
   kind: 'group',
-  ref,
   // Not wired to `ChannelSyncEventsRepository` (the plan's backing-call table
   // for `list_groups` lists only `GroupsRepository.findGroupsByTeamId`), so
   // provisioning is reported as `false` rather than pulling in an
@@ -258,8 +252,7 @@ const toGroupRef = (row: GroupListRow, ref: string): AiChatApi.EntityRef => ({
   group: toGroupInfo(row, row.member_count, false),
 });
 
-const toGroupItem = (row: GroupListRow, ref: string): Record<string, unknown> => ({
-  ref,
+const toGroupItem = (row: GroupListRow): Record<string, unknown> => ({
   name: row.name,
   emoji: Option.getOrNull(row.emoji),
   color: Option.getOrNull(row.color),
@@ -268,7 +261,7 @@ const toGroupItem = (row: GroupListRow, ref: string): Record<string, unknown> =>
 
 export const listGroups = (
   args: ListGroupsArgs,
-  ctx: ToolContext,
+  ctx: EntityReadContext,
 ): Effect.Effect<ToolExecutionResult, never, GroupsRepository> =>
   hasPermission(ctx.membership, 'group:manage')
     ? Effect.Do.pipe(
@@ -279,7 +272,7 @@ export const listGroups = (
             applyQueryFilter(list, args.query, (g) => g.name),
             args.limit,
           );
-          return buildListResult(filtered, toGroupRef, toGroupItem);
+          return buildListResult(filtered, toGroupHit, toGroupItem);
         }),
       )
     : Effect.succeed(forbiddenResult('group:manage'));
@@ -317,9 +310,8 @@ const avatarUrlOf = (entry: RosterEntry): Option.Option<string> =>
     (avatar) => `https://cdn.discordapp.com/avatars/${entry.discord_id}/${avatar}.png?size=32`,
   );
 
-const toMemberRef = (row: RosterEntry, ref: string): AiChatApi.EntityRef => ({
+const toMemberHit = (row: RosterEntry): AiChatApi.SearchHit => ({
   kind: 'member',
-  ref,
   memberId: row.member_id,
   displayName: displayNameOf(row),
   avatarUrl: avatarUrlOf(row),
@@ -329,8 +321,7 @@ const toMemberRef = (row: RosterEntry, ref: string): AiChatApi.EntityRef => ({
   active: row.active,
 });
 
-const toMemberItem = (row: RosterEntry, ref: string): Record<string, unknown> => ({
-  ref,
+const toMemberItem = (row: RosterEntry): Record<string, unknown> => ({
   displayName: displayNameOf(row),
   jerseyNumber: Option.getOrNull(row.jersey_number),
   roleNames: row.role_names,
@@ -339,7 +330,7 @@ const toMemberItem = (row: RosterEntry, ref: string): Record<string, unknown> =>
 
 export const listMembers = (
   args: ListMembersArgs,
-  ctx: ToolContext,
+  ctx: EntityReadContext,
 ): Effect.Effect<ToolExecutionResult, never, TeamMembersRepository> =>
   hasPermission(ctx.membership, 'member:view')
     ? Effect.Do.pipe(
@@ -351,7 +342,7 @@ export const listMembers = (
             applyQueryFilter(activeFiltered, args.query, displayNameOf),
             args.limit,
           );
-          return buildListResult(filtered, toMemberRef, toMemberItem);
+          return buildListResult(filtered, toMemberHit, toMemberItem);
         }),
       )
     : Effect.succeed(forbiddenResult('member:view'));
@@ -377,17 +368,15 @@ interface RosterListRow {
   readonly discord_channel_id: Option.Option<Discord.Snowflake>;
 }
 
-const toRosterRef = (row: RosterListRow, ref: string): AiChatApi.EntityRef => ({
+const toRosterHit = (row: RosterListRow): AiChatApi.SearchHit => ({
   kind: 'roster',
-  ref,
   // No live Discord channel-name resolution: the model-facing allow-list has
   // no use for it, and the plan's backing-call table for `list_rosters` lists
   // only `RostersRepository.findByTeamId`.
   roster: toRosterInfo(row, row.member_count, [], false),
 });
 
-const toRosterItem = (row: RosterListRow, ref: string): Record<string, unknown> => ({
-  ref,
+const toRosterItem = (row: RosterListRow): Record<string, unknown> => ({
   name: row.name,
   memberCount: row.member_count,
   active: row.active,
@@ -395,7 +384,7 @@ const toRosterItem = (row: RosterListRow, ref: string): Record<string, unknown> 
 
 export const listRosters = (
   args: ListRostersArgs,
-  ctx: ToolContext,
+  ctx: EntityReadContext,
 ): Effect.Effect<ToolExecutionResult, never, RostersRepository> =>
   hasPermission(ctx.membership, 'roster:view')
     ? Effect.Do.pipe(
@@ -406,7 +395,7 @@ export const listRosters = (
             applyQueryFilter(list, args.query, (r) => r.name),
             args.limit,
           );
-          return buildListResult(filtered, toRosterRef, toRosterItem);
+          return buildListResult(filtered, toRosterHit, toRosterItem);
         }),
       )
     : Effect.succeed(forbiddenResult('roster:view'));

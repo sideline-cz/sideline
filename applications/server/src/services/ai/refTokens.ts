@@ -3,14 +3,16 @@
  * `.work-plans/ai-app-interaction.md` §4.
  *
  * This is the ONLY place a reference token that ever ships (to the model or the client) is
- * minted. `toolTypes.ts#buildListResult` — the per-executor-call row builder — used to mint its own
- * token per row too, but that token was unconditionally discarded and replaced by this module's
- * `mintToken` before anything left `ChatAgent` (`remapCallReferences`, `ChatAgent.ts`), so it now
- * emits an inert placeholder instead (see `toolTypes.ts`'s comment). `ChatAgent` re-dedupes and
- * re-mints ACROSS THE WHOLE TURN (every tool call in every round) into a fresh `used` set per
- * turn — a token is only ever valid for the turn that minted it.
+ * minted. `toolTypes.ts#buildListResult` — the per-executor-call row builder — emits
+ * `AiChatApi.SearchHit` rows, which carry no `ref` field at all
+ * (`.work-plans/command-palette-search.md` §B); `ChatAgent` (`remapCallReferences`,
+ * `ChatAgent.ts`) mints this module's tokens and CONSTRUCTS `EntityRef` from each hit
+ * (`{ ...hit, ref: token }`) before anything leaves `ChatAgent`. It re-dedupes and re-mints
+ * ACROSS THE WHOLE TURN (every tool call in every round) into a fresh `used` set per turn — a
+ * token is only ever valid for the turn that minted it.
  */
 import type { AiChatApi } from '@sideline/domain';
+import { SearchApi } from '@sideline/domain';
 
 const REF_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
 const REF_TOKEN_LENGTH = 4;
@@ -42,26 +44,18 @@ export const mintToken = (used: Set<string>): string => {
 };
 
 /**
- * The stable dedup identity of an `EntityRef` — "kind:id" — used to decide
- * whether an entity seen again later in the same turn (a different tool call,
- * or the same call) should reuse the token minted on first sight rather than
- * mint a new one. NOT derived from `ref` itself (the token is per-turn and
- * regenerated every turn, so it can never be the dedup key).
+ * The stable dedup identity of a hit — "kind:id" — used to decide whether an
+ * entity seen again later in the same turn (a different tool call, or the
+ * same call) should reuse the token minted on first sight rather than mint a
+ * new one. Takes `AiChatApi.SearchHit` (what an executor actually emits, no
+ * `ref` field) — an `EntityRef` is always a valid argument too, since it is
+ * a `SearchHit` plus `ref`. NOT derived from `ref` itself (the token is
+ * per-turn and regenerated every turn, so it can never be the dedup key).
+ * Delegates to `SearchApi.searchHitId` — the single source of the
+ * `"<kind>:<id>"` format, so this and the command-palette identity can never
+ * drift apart.
  */
-export const entityKeyOf = (ref: AiChatApi.EntityRef): string => {
-  switch (ref.kind) {
-    case 'event':
-      return `event:${ref.event.eventId}`;
-    case 'member':
-      return `member:${ref.memberId}`;
-    case 'group':
-      return `group:${ref.group.groupId}`;
-    case 'roster':
-      return `roster:${ref.roster.rosterId}`;
-    case 'trainingType':
-      return `trainingType:${ref.trainingType.trainingTypeId}`;
-  }
-};
+export const entityKeyOf = (hit: AiChatApi.SearchHit): string => SearchApi.searchHitId(hit);
 
 /**
  * Rebuilds the `token -> position in references` map from scratch — the
