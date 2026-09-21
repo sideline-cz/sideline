@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, GroupModel, Team, TeamMember, User } from '@sideline/domain';
 import { Effect, Layer, Option } from 'effect';
+import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -93,6 +94,23 @@ const createGroup = (
 const addGroupMember = (groupId: GroupModel.GroupId, teamMemberId: TeamMember.TeamMemberId) =>
   GroupsRepository.asEffect().pipe(
     Effect.andThen((repo) => repo.addMemberById(groupId, teamMemberId)),
+  );
+
+/** Archives a group by id. */
+const archiveGroup = (groupId: GroupModel.GroupId) =>
+  GroupsRepository.asEffect().pipe(Effect.andThen((repo) => repo.archiveGroupById(groupId)));
+
+// Bypasses the API-layer cycle guard (`api/group.ts`'s `moveGroup` handler — NOT enforced by
+// `GroupsRepository.moveGroup` itself) to write a `parent_id` cycle (or a cross-team parent)
+// directly, exactly as a bug or a race between two API calls could.
+const wireParentDirectly = (groupId: GroupModel.GroupId, parentId: GroupModel.GroupId) =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen((sql) => sql`UPDATE groups SET parent_id = ${parentId} WHERE id = ${groupId}`),
+  );
+
+const getActiveAncestors = (groupId: GroupModel.GroupId, teamId: Team.TeamId) =>
+  GroupsRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.getActiveAncestors(groupId, teamId)),
   );
 
 // ---------------------------------------------------------------------------
@@ -691,6 +709,153 @@ describe('GroupsRepository.findGroupIdsByMember', () => {
       Effect.tap(({ groupIds }) =>
         Effect.sync(() => {
           expect(groupIds).toHaveLength(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// getActiveAncestors — T1 (TDD: fix/archived-ancestor-walk). Direct repository-level coverage
+// for the archived-aware ancestor walk backing `addGroupMember`/`syncRoleMembers`'s channel-sync
+// emit (`api/group.ts`) and `rpc/guild/index.ts`'s role reconcile. Chain shape throughout: A
+// (leaf) -> B (middle) -> C (top), i.e. A.parent_id = B.id, B.parent_id = C.id.
+// ---------------------------------------------------------------------------
+
+describe('GroupsRepository — getActiveAncestors', () => {
+  it.effect('all-active chain: A -> B -> C returns [B, C] (order-insensitive)', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('910700000000000001', 'active-chain-owner')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('910800000000000001' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('groupC', ({ team }) => createGroup(team.id, 'C (top)')),
+      Effect.bind('groupB', ({ team, groupC }) =>
+        createGroup(team.id, 'B (middle)', Option.some(groupC.id)),
+      ),
+      Effect.bind('groupA', ({ team, groupB }) =>
+        createGroup(team.id, 'A (leaf)', Option.some(groupB.id)),
+      ),
+      Effect.bind('result', ({ team, groupA }) => getActiveAncestors(groupA.id, team.id)),
+      Effect.tap(({ result, groupB, groupC }) =>
+        Effect.sync(() => {
+          const ids = result.map((r) => r.id).sort();
+          expect(ids).toEqual([groupB.id, groupC.id].sort());
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    'archived MIDDLE (B archived): returns [] — B is excluded by the final WHERE, C is unreachable through the severed recursive term',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userId', () => createUser('910700000000000002', 'archived-middle-owner')),
+        Effect.bind('team', ({ userId }) =>
+          createTeam('910800000000000002' as Discord.Snowflake, userId),
+        ),
+        Effect.bind('groupC', ({ team }) => createGroup(team.id, 'C (top)')),
+        Effect.bind('groupB', ({ team, groupC }) =>
+          createGroup(team.id, 'B (middle, archived)', Option.some(groupC.id)),
+        ),
+        Effect.tap(({ groupB }) => archiveGroup(groupB.id)),
+        Effect.bind('groupA', ({ team, groupB }) =>
+          createGroup(team.id, 'A (leaf)', Option.some(groupB.id)),
+        ),
+        Effect.bind('result', ({ team, groupA }) => getActiveAncestors(groupA.id, team.id)),
+        Effect.tap(({ result }) => Effect.sync(() => expect(result).toHaveLength(0))),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect('archived TOP (C archived): returns [B]', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('910700000000000003', 'archived-top-owner')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('910800000000000003' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('groupC', ({ team }) => createGroup(team.id, 'C (top, archived)')),
+      Effect.tap(({ groupC }) => archiveGroup(groupC.id)),
+      Effect.bind('groupB', ({ team, groupC }) =>
+        createGroup(team.id, 'B (middle)', Option.some(groupC.id)),
+      ),
+      Effect.bind('groupA', ({ team, groupB }) =>
+        createGroup(team.id, 'A (leaf)', Option.some(groupB.id)),
+      ),
+      Effect.bind('result', ({ team, groupA }) => getActiveAncestors(groupA.id, team.id)),
+      Effect.tap(({ result, groupB }) =>
+        Effect.sync(() => {
+          expect(result.map((r) => r.id)).toEqual([groupB.id]);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    "cross-team ancestor (A's parent wired to a group in a DIFFERENT team): returns []",
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('userId', () => createUser('910700000000000004', 'cross-team-owner')),
+        Effect.bind('otherUserId', () =>
+          createUser('910700000000000005', 'cross-team-other-owner'),
+        ),
+        Effect.bind('team', ({ userId }) =>
+          createTeam('910800000000000004' as Discord.Snowflake, userId),
+        ),
+        Effect.bind('otherTeam', ({ otherUserId }) =>
+          createTeam('910800000000000005' as Discord.Snowflake, otherUserId),
+        ),
+        Effect.bind('groupOtherTeam', ({ otherTeam }) =>
+          createGroup(otherTeam.id, 'Other Team Group'),
+        ),
+        Effect.bind('groupA', ({ team }) => createGroup(team.id, 'A (leaf)')),
+        // Bypasses `insertGroup`'s own-team parent, wiring A's parent directly to a group that
+        // belongs to a DIFFERENT team — exactly the cross-team corruption `getActiveAncestors`'s
+        // `AND anc_g.team_id = ${team_id}` guard exists to contain.
+        Effect.tap(({ groupA, groupOtherTeam }) =>
+          wireParentDirectly(groupA.id, groupOtherTeam.id),
+        ),
+        Effect.bind('result', ({ team, groupA }) => getActiveAncestors(groupA.id, team.id)),
+        Effect.tap(({ result }) => Effect.sync(() => expect(result).toHaveLength(0))),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect('parent_id cycle (C -> A) resolves via the depth < 32 guard instead of hanging', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('910700000000000006', 'cycle-owner')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('910800000000000006' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('groupC', ({ team }) => createGroup(team.id, 'C (top)')),
+      Effect.bind('groupB', ({ team, groupC }) =>
+        createGroup(team.id, 'B (middle)', Option.some(groupC.id)),
+      ),
+      Effect.bind('groupA', ({ team, groupB }) =>
+        createGroup(team.id, 'A (leaf)', Option.some(groupB.id)),
+      ),
+      // Close the loop: C's parent becomes A (A -> B -> C -> A), bypassing the API-layer cycle
+      // guard exactly as a bug or a race between two moveGroup calls could.
+      Effect.tap(({ groupC, groupA }) => wireParentDirectly(groupC.id, groupA.id)),
+      Effect.bind('result', ({ team, groupA }) =>
+        getActiveAncestors(groupA.id, team.id).pipe(Effect.timeout('5 seconds')),
+      ),
+      Effect.tap(({ result, groupA, groupB, groupC }) =>
+        Effect.sync(() => {
+          // Terminating at all (rather than the test timing out) is the cycle-guard proof.
+          // The recursive term is `UNION ALL` (no dedup inside the CTE, unlike
+          // `findActiveGroupsWithAncestorsForMemberQuery`'s `DISTINCT` sibling) and the final
+          // `SELECT` has no `DISTINCT` either, so a cycle produces one row per depth traversed
+          // (up to the `depth < 32` guard) — the same group id repeated multiple times. The
+          // guard-terminates-at-all assertion is the point here, not the exact row count;
+          // assert on the DISTINCT id set instead. Now that C's parent is A, A itself is part
+          // of the cycle and becomes reachable as one of its own ancestors too — a faithful
+          // (if unsettling) reflection of what a corrupted `parent_id` cycle actually produces.
+          const idSet = new Set(result.map((r) => r.id));
+          expect(idSet).toEqual(new Set([groupA.id, groupB.id, groupC.id]));
         }),
       ),
       Effect.provide(TestLayer),

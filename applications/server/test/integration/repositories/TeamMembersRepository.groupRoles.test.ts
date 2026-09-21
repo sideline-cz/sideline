@@ -466,11 +466,13 @@ describe('TeamMembersRepository — group-inherited roles', () => {
     10_000,
   );
 
-  // Coverage gap 2, other half: `GroupsRepository.findAncestors` (backing `getAncestors`
-  // / `getAncestorIds`, and `moveGroup`'s own cycle check) walks `groups.parent_id`
-  // independently of `effectiveRoles.ts` and was ALSO unguarded until this fix.
+  // Coverage gap 2, other half: `GroupsRepository.findAncestors` (backing
+  // `getAncestorsIncludingArchived` / `getAncestorIds`, and `moveGroup`'s own cycle check) walks
+  // `groups.parent_id` independently of `effectiveRoles.ts` and was ALSO unguarded until this
+  // fix. `fix/archived-ancestor-walk`: `getAncestors` was renamed to
+  // `getAncestorsIncludingArchived` — same archived-blind query, name only.
   it.effect(
-    'GroupsRepository.getAncestors terminates even when parent_id forms a cycle (cycle guard)',
+    'GroupsRepository.getAncestorsIncludingArchived terminates even when parent_id forms a cycle (cycle guard)',
     () =>
       seedBaseFixture.pipe(
         Effect.tap(({ muziGroupId, muziAGroupId }) =>
@@ -482,7 +484,7 @@ describe('TeamMembersRepository — group-inherited roles', () => {
         ),
         Effect.bind('result', ({ muziAGroupId }) =>
           GroupsRepository.asEffect().pipe(
-            Effect.andThen((repo) => repo.getAncestors(muziAGroupId)),
+            Effect.andThen((repo) => repo.getAncestorsIncludingArchived(muziAGroupId)),
             Effect.timeout('5 seconds'),
           ),
         ),

@@ -308,6 +308,41 @@ let groupMembersWithDiscord: GroupMemberEntry[] = [];
 let rosterByTeam: RosterMemberEntry[] = [];
 let groupAncestors: GroupModel.GroupId[] = [];
 
+// Shared by both `getAncestors` and `getActiveAncestors` mocks below — see the comment on
+// `getActiveAncestors` for why returning the identical rows is only faithful for
+// nothing-archived fixtures.
+const computeAncestorRows = () =>
+  groupAncestors.map((ancestorId) => {
+    if (ancestorId === TEST_ANCESTOR_GROUP_ID) {
+      return {
+        id: TEST_ANCESTOR_GROUP_ID,
+        team_id: TEST_TEAM_ID,
+        parent_id: Option.none<GroupModel.GroupId>(),
+        name: 'Ancestor Group',
+        emoji: Option.none<string>(),
+        color: Option.none<string>(),
+      };
+    }
+    if (ancestorId === TEST_ANCESTOR_2_GROUP_ID) {
+      return {
+        id: TEST_ANCESTOR_2_GROUP_ID,
+        team_id: TEST_TEAM_ID,
+        parent_id: Option.none<GroupModel.GroupId>(),
+        name: 'Ancestor 2 Group',
+        emoji: Option.none<string>(),
+        color: Option.none<string>(),
+      };
+    }
+    return {
+      id: ancestorId,
+      team_id: TEST_TEAM_ID,
+      parent_id: Option.none<GroupModel.GroupId>(),
+      name: 'Unknown Ancestor',
+      emoji: Option.none<string>(),
+      color: Option.none<string>(),
+    };
+  });
+
 const makeGroupsRepositoryLayer = () =>
   Layer.succeed(GroupsRepository, {
     _tag: 'api/GroupsRepository',
@@ -376,39 +411,16 @@ const makeGroupsRepositoryLayer = () =>
     getMemberCount: () => Effect.succeed(0),
     getChildren: () => Effect.succeed([]),
     getAncestorIds: () => Effect.succeed(groupAncestors),
-    getAncestors: () => {
-      const ancestorRows = groupAncestors.map((ancestorId) => {
-        if (ancestorId === TEST_ANCESTOR_GROUP_ID) {
-          return {
-            id: TEST_ANCESTOR_GROUP_ID,
-            team_id: TEST_TEAM_ID,
-            parent_id: Option.none<GroupModel.GroupId>(),
-            name: 'Ancestor Group',
-            emoji: Option.none<string>(),
-            color: Option.none<string>(),
-          };
-        }
-        if (ancestorId === TEST_ANCESTOR_2_GROUP_ID) {
-          return {
-            id: TEST_ANCESTOR_2_GROUP_ID,
-            team_id: TEST_TEAM_ID,
-            parent_id: Option.none<GroupModel.GroupId>(),
-            name: 'Ancestor 2 Group',
-            emoji: Option.none<string>(),
-            color: Option.none<string>(),
-          };
-        }
-        return {
-          id: ancestorId,
-          team_id: TEST_TEAM_ID,
-          parent_id: Option.none<GroupModel.GroupId>(),
-          name: 'Unknown Ancestor',
-          emoji: Option.none<string>(),
-          color: Option.none<string>(),
-        };
-      });
-      return Effect.succeed(ancestorRows);
-    },
+    getAncestors: () => Effect.succeed(computeAncestorRows()),
+    // `fix/archived-ancestor-walk`: `api/group.ts`'s `syncRoleMembers` now resolves ancestors via
+    // this archived-aware method instead of `getAncestors`. This mock does NOT model archived
+    // severing — it just returns the same fixed `groupAncestors` rows `getAncestors` above
+    // returns, ignoring the `teamId` argument — so it stays a faithful stand-in ONLY for fixtures
+    // where nothing is archived. The real archived-severing semantics (an archived middle
+    // ancestor cutting off everything above it) are covered by the real repository in
+    // `test/integration/repositories/GroupsRepository.test.ts` (T1) and by the real HTTP handler
+    // in `test/integration/api/groupRoleDiscordSync.test.ts` (T2) — not here.
+    getActiveAncestors: () => Effect.succeed(computeAncestorRows()),
     getDescendantMemberIds: () => Effect.succeed([]),
   } as any);
 

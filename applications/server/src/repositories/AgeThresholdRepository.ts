@@ -85,7 +85,7 @@ const make = Effect.gen(function* () {
       SELECT atr.id, atr.team_id, atr.group_id, g.name AS group_name,
              atr.min_age, atr.max_age, atr.gender, atr.required_group_id
       FROM age_threshold_rules atr
-      JOIN groups g ON g.id = atr.group_id
+      JOIN groups g ON g.id = atr.group_id AND g.is_archived = false
       WHERE atr.team_id = ${teamId}
       ORDER BY g.name ASC
     `,

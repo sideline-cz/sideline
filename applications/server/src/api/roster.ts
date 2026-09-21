@@ -1,13 +1,4 @@
-import {
-  Auth,
-  type Discord,
-  DisplayName,
-  type GroupModel,
-  Roster,
-  type RosterModel,
-  type Team,
-  type TeamMember,
-} from '@sideline/domain';
+import { Auth, type Discord, DisplayName, Roster, type RosterModel } from '@sideline/domain';
 import { LogicError, Options } from '@sideline/effect-lib';
 import { Array, DateTime, Effect, Match, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
@@ -143,137 +134,6 @@ export const toRosterInfo = (
     discordChannelName: resolveChannelName(r.discord_channel_id, allChannels),
     discordChannelProvisioning,
   });
-
-// Reconciles the member's Discord roster/group role & channel access with their active state.
-// Called on deactivate ('member_removed' — revoke access) and reactivate ('member_added' —
-// restore access). Mirrors the emit pattern used by addRosterMember/removeRosterMember and
-// addGroupMember/removeGroupMember, including ancestor groups for the group side.
-const emitDiscordCleanupForMember = (
-  deps: {
-    rosters: {
-      findRosterIdsByMember: (
-        memberId: TeamMember.TeamMemberId,
-      ) => Effect.Effect<readonly RosterModel.RosterId[], never>;
-      findRosterById: (
-        rosterId: RosterModel.RosterId,
-      ) => Effect.Effect<Option.Option<RosterModel.Roster>, never>;
-    };
-    groups: {
-      findGroupIdsByMember: (
-        memberId: TeamMember.TeamMemberId,
-      ) => Effect.Effect<readonly GroupModel.GroupId[], never>;
-      findGroupById: (
-        groupId: GroupModel.GroupId,
-      ) => Effect.Effect<Option.Option<{ readonly name: string }>, never>;
-      getAncestors: (
-        groupId: GroupModel.GroupId,
-      ) => Effect.Effect<
-        readonly { readonly id: GroupModel.GroupId; readonly name: string }[],
-        never
-      >;
-    };
-    channelSync: {
-      emitRosterMemberAdded: (
-        teamId: Team.TeamId,
-        rosterId: RosterModel.RosterId,
-        rosterName: string,
-        memberId: TeamMember.TeamMemberId,
-        discordUserId: Option.Option<Discord.Snowflake>,
-      ) => Effect.Effect<void, never>;
-      emitRosterMemberRemoved: (
-        teamId: Team.TeamId,
-        rosterId: RosterModel.RosterId,
-        rosterName: string,
-        memberId: TeamMember.TeamMemberId,
-        discordUserId: Option.Option<Discord.Snowflake>,
-      ) => Effect.Effect<void, never>;
-      emitMemberAdded: (
-        teamId: Team.TeamId,
-        groupId: GroupModel.GroupId,
-        groupName: string,
-        memberId: TeamMember.TeamMemberId,
-        discordUserId: Discord.Snowflake,
-      ) => Effect.Effect<void, never>;
-      emitMemberRemoved: (
-        teamId: Team.TeamId,
-        groupId: GroupModel.GroupId,
-        groupName: string,
-        memberId: TeamMember.TeamMemberId,
-        discordUserId: Discord.Snowflake,
-      ) => Effect.Effect<void, never>;
-    };
-  },
-  teamId: Team.TeamId,
-  memberId: TeamMember.TeamMemberId,
-  discordUserId: Discord.Snowflake,
-  eventKind: 'member_added' | 'member_removed',
-) => {
-  const { rosters, groups, channelSync } = deps;
-  const emitRoster =
-    eventKind === 'member_added'
-      ? channelSync.emitRosterMemberAdded
-      : channelSync.emitRosterMemberRemoved;
-  const emitGroup =
-    eventKind === 'member_added' ? channelSync.emitMemberAdded : channelSync.emitMemberRemoved;
-
-  return Effect.Do.pipe(
-    Effect.bind('rosterIds', () => rosters.findRosterIdsByMember(memberId)),
-    Effect.bind('groupIds', () => groups.findGroupIdsByMember(memberId)),
-    Effect.tap(({ rosterIds }) =>
-      Effect.forEach(
-        rosterIds,
-        (rosterId) =>
-          rosters.findRosterById(rosterId).pipe(
-            Effect.flatMap(
-              Option.match({
-                onNone: () => Effect.void,
-                onSome: (roster) =>
-                  emitRoster(teamId, rosterId, roster.name, memberId, Option.some(discordUserId)),
-              }),
-            ),
-          ),
-        { concurrency: 'unbounded' },
-      ),
-    ),
-    Effect.tap(({ groupIds }) =>
-      Effect.forEach(
-        groupIds,
-        (groupId) =>
-          groups.findGroupById(groupId).pipe(
-            Effect.flatMap(
-              Option.match({
-                onNone: () => Effect.void,
-                onSome: (group) =>
-                  Effect.all(
-                    [
-                      emitGroup(teamId, groupId, group.name, memberId, discordUserId),
-                      groups
-                        .getAncestors(groupId)
-                        .pipe(
-                          Effect.flatMap((ancestors) =>
-                            Effect.forEach(ancestors, (ancestor) =>
-                              emitGroup(
-                                teamId,
-                                ancestor.id,
-                                ancestor.name,
-                                memberId,
-                                discordUserId,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                    { concurrency: 'unbounded' },
-                  ),
-              }),
-            ),
-          ),
-        { concurrency: 'unbounded' },
-      ),
-    ),
-    Effect.asVoid,
-  );
-};
 
 export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
   Effect.Do.pipe(
@@ -510,7 +370,9 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
               // NOTE: after a cascade deactivation the member's group and roster memberships were
               // hard-deleted (see deactivateMemberAndCascade). Reactivation restores the member
               // row and their event/attendance history, but NOT prior group/roster memberships —
-              // a captain must re-add them manually. This blank-slate behavior is intentional.
+              // a captain must re-add them manually. This blank-slate behavior is intentional,
+              // and it means reactivation has no group/roster membership left to emit Discord
+              // channel-sync events for.
               Effect.bind('member', () =>
                 members.findRosterMemberByIds(teamId, memberId, { includeInactive: true }).pipe(
                   Effect.flatMap(
@@ -522,15 +384,6 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                 ),
               ),
               Effect.tap(() => members.reactivateMember(memberId)),
-              Effect.tap(({ member }) =>
-                emitDiscordCleanupForMember(
-                  { rosters, groups, channelSync },
-                  teamId,
-                  memberId,
-                  member.discord_id,
-                  'member_added',
-                ),
-              ),
               Effect.asVoid,
               Effect.catchTag(
                 'NoSuchElementError',

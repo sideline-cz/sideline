@@ -275,6 +275,52 @@ const runSeed = <A>(effect: Effect.Effect<A, unknown, SeedR>): Promise<A> =>
   effect.pipe(Effect.provide(SeedLayer), Effect.runPromise);
 
 // ---------------------------------------------------------------------------
+// T2 helpers — `channel_sync_events` assertions for addGroupMember / syncRoleMembers.
+// ---------------------------------------------------------------------------
+
+type ChannelSyncEventRow = {
+  event_type: string;
+  entity_type: string;
+  group_id: string | null;
+};
+
+const listChannelSyncEvents = (teamId: Team.TeamId): Promise<ReadonlyArray<ChannelSyncEventRow>> =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) => sql<ChannelSyncEventRow>`
+        SELECT event_type, entity_type, group_id
+        FROM channel_sync_events
+        WHERE team_id = ${teamId}
+        ORDER BY created_at ASC
+      `,
+    ),
+    Effect.provide(SeedLayer),
+    Effect.runPromise,
+  );
+
+const listMemberAddedGroupIds = async (teamId: Team.TeamId): Promise<ReadonlyArray<string>> => {
+  const events = await listChannelSyncEvents(teamId);
+  return events
+    .filter((e) => e.event_type === 'member_added' && e.entity_type === 'group')
+    .map((e) => e.group_id!);
+};
+
+const listMemberRemovedGroupIds = async (teamId: Team.TeamId): Promise<ReadonlyArray<string>> => {
+  const events = await listChannelSyncEvents(teamId);
+  return events
+    .filter((e) => e.event_type === 'member_removed' && e.entity_type === 'group')
+    .map((e) => e.group_id!);
+};
+
+// Seeds a `discord_channel_mappings` row (channel id + role id) for a group, so a missing
+// `member_added` emit for that group cannot be explained away as "the group was never
+// provisioned" — see this file's header trap note and T2's fixture description.
+const provisionGroupMapping = (teamId: Team.TeamId, groupId: GroupModel.GroupId) =>
+  DiscordChannelMappingRepository.asEffect().pipe(
+    Effect.andThen((repo) => repo.insert(teamId, groupId, nextDiscordId(), nextDiscordId())),
+  );
+
+// ---------------------------------------------------------------------------
 // 1 & 2: assignGroupRole — headline test + child-group inclusion
 // ---------------------------------------------------------------------------
 
@@ -811,5 +857,177 @@ describe('group.ts — an archived role attached to a group produces no assign',
 
     const events = await listEvents(fixture.team.id);
     expect(events.filter((e) => e.role_id === fixture.roleR)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T2 (TDD: fix/archived-ancestor-walk) — addGroupMember / syncRoleMembers must not emit
+// `member_added` (channel-sync) for an ARCHIVED ancestor. Chain: A (leaf, active) -> B
+// (archived) -> C (active), i.e. A.parent_id = B.id, B.parent_id = C.id. A single archived
+// row (`UPDATE groups SET is_archived = true`) leaves B's active descendant A and active
+// ancestor C untouched — the bug this PR fixes is that `addGroupMember`/`syncRoleMembers`
+// walk ancestors via the archived-BLIND `GroupsRepository.getAncestors`, so they still emit
+// `member_added` for B (a group the UI/bot must treat as deleted), which the bot's
+// `handleMemberAdded.ts` then turns into `createRoleOnly` — recreating a Discord role for a
+// deleted group.
+// ---------------------------------------------------------------------------
+
+describe('group.ts addGroupMember / syncRoleMembers — must not emit member_added for an archived ancestor', () => {
+  const archiveGroupDirect = (groupId: GroupModel.GroupId) =>
+    GroupsRepository.asEffect().pipe(Effect.andThen((repo) => repo.archiveGroupById(groupId)));
+
+  const seedArchivedMiddleChain = (archiveMiddle: boolean) =>
+    Effect.Do.pipe(
+      Effect.bind('team', () =>
+        createUser(nextDiscordId(), 'owner').pipe(
+          Effect.flatMap((ownerId) => createTeam(nextDiscordId(), ownerId)),
+        ),
+      ),
+      Effect.bind('actor', ({ team }) => seedActor(team.id)),
+      Effect.bind('groupC', ({ team }) => createGroup(team.id, 'C (top)')),
+      Effect.bind('groupB', ({ team, groupC }) =>
+        createGroup(team.id, 'B (middle)', Option.some(groupC)),
+      ),
+      Effect.bind('groupA', ({ team, groupB }) =>
+        createGroup(team.id, 'A (leaf)', Option.some(groupB)),
+      ),
+      // Every group in the chain is provisioned (channel + role mapping) — a missing emit
+      // cannot be explained away as "the group has no Discord channel/role yet".
+      Effect.tap(({ team, groupA }) => provisionGroupMapping(team.id, groupA)),
+      Effect.tap(({ team, groupB }) => provisionGroupMapping(team.id, groupB)),
+      Effect.tap(({ team, groupC }) => provisionGroupMapping(team.id, groupC)),
+      Effect.tap(({ groupB }) => (archiveMiddle ? archiveGroupDirect(groupB) : Effect.void)),
+      Effect.bind('member', ({ team }) => createMember(team.id, 'joining-member')),
+    );
+
+  it('addGroupMember on the leaf (A) with an archived middle ancestor (B) emits member_added ONLY for A', async () => {
+    const fixture = await runSeed(seedArchivedMiddleChain(true));
+
+    sessionsStore.set('actor-token', fixture.actor.actorUserId);
+
+    const response = await handler(
+      new Request(`http://localhost/teams/${fixture.team.id}/groups/${fixture.groupA}/members`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memberId: fixture.member.id }),
+      }),
+    );
+    expect(response.status).toBe(204);
+
+    const groupIds = await listMemberAddedGroupIds(fixture.team.id);
+    expect(groupIds).toStrictEqual([fixture.groupA]);
+  });
+
+  // POSITIVE CONTROL: identical fixture, B NOT archived — proves the assertion above fails for
+  // the right reason (an archived ancestor being severed), not because the fixture never
+  // reaches `channel_sync_events` at all (the `_emitIfGuildLinked` null-`guild_id` trap this
+  // file's header describes) or because `addGroupMember` never walks ancestors in this fixture
+  // shape.
+  it('POSITIVE CONTROL: same fixture with NOTHING archived emits member_added for A, B, AND C', async () => {
+    const fixture = await runSeed(seedArchivedMiddleChain(false));
+
+    sessionsStore.set('actor-token', fixture.actor.actorUserId);
+
+    const response = await handler(
+      new Request(`http://localhost/teams/${fixture.team.id}/groups/${fixture.groupA}/members`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memberId: fixture.member.id }),
+      }),
+    );
+    expect(response.status).toBe(204);
+
+    const groupIds = await listMemberAddedGroupIds(fixture.team.id);
+    expect(new Set(groupIds)).toStrictEqual(
+      new Set([fixture.groupA, fixture.groupB, fixture.groupC]),
+    );
+  });
+
+  it('syncRoleMembers on the leaf (A), member already a member of A, emits member_added ONLY for A when B is archived', async () => {
+    const fixture = await runSeed(seedArchivedMiddleChain(true));
+    await runSeed(
+      GroupsRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.addMemberById(fixture.groupA, fixture.member.id)),
+      ),
+    );
+
+    sessionsStore.set('actor-token', fixture.actor.actorUserId);
+
+    const response = await handler(
+      new Request(
+        `http://localhost/teams/${fixture.team.id}/groups/${fixture.groupA}/sync-role-members`,
+        { method: 'POST', headers: { Authorization: 'Bearer actor-token' } },
+      ),
+    );
+    expect(response.status).toBe(200);
+
+    const groupIds = await listMemberAddedGroupIds(fixture.team.id);
+    expect(groupIds).toStrictEqual([fixture.groupA]);
+  });
+
+  it('syncRoleMembers remove side is unaffected by the ancestor fix — a roster member NOT in A produces exactly one member_removed for A, none for B or C', async () => {
+    const fixture = await runSeed(seedArchivedMiddleChain(true));
+    // The roster ("extras" candidates) is every team member, and the actor (`seedActor`) and the
+    // fixture's own `member` are both on it — put BOTH in group A so neither counts as an
+    // "extra", leaving `extraMember` as the ONLY roster member not in A.
+    await runSeed(
+      GroupsRepository.asEffect().pipe(
+        Effect.andThen((repo) =>
+          Effect.all([
+            repo.addMemberById(fixture.groupA, fixture.member.id),
+            repo.addMemberById(fixture.groupA, fixture.actor.actorMemberId),
+          ]),
+        ),
+      ),
+    );
+    // `extraMember` is on the team roster but never added to group A — syncRoleMembers must
+    // treat them as an "extra" to remove from A specifically (`removeEntries` always uses the
+    // seed `groupId`, never the ancestor list — this guards against a future edit accidentally
+    // narrowing `removeEntries` to only active/unarchived ancestors too).
+    await runSeed(createMember(fixture.team.id, 'extra-not-in-a'));
+
+    sessionsStore.set('actor-token', fixture.actor.actorUserId);
+
+    const response = await handler(
+      new Request(
+        `http://localhost/teams/${fixture.team.id}/groups/${fixture.groupA}/sync-role-members`,
+        { method: 'POST', headers: { Authorization: 'Bearer actor-token' } },
+      ),
+    );
+    expect(response.status).toBe(200);
+
+    const removedGroupIds = await listMemberRemovedGroupIds(fixture.team.id);
+    expect(removedGroupIds).toStrictEqual([fixture.groupA]);
+    expect(removedGroupIds).not.toContain(fixture.groupB);
+    expect(removedGroupIds).not.toContain(fixture.groupC);
+  });
+
+  // POSITIVE CONTROL for the `syncRoleMembers` case above: identical fixture, B NOT archived —
+  // proves that assertion fails for the right reason (an archived ancestor being severed from
+  // the walk), not because `syncRoleMembers` never walks ancestors for this fixture shape at
+  // all. Deleting the archived-ancestor filter from `api/group.ts` entirely would still leave
+  // the `syncRoleMembers` case above green without this control.
+  it('POSITIVE CONTROL: syncRoleMembers on the leaf (A) with NOTHING archived emits member_added for A, B, AND C', async () => {
+    const fixture = await runSeed(seedArchivedMiddleChain(false));
+    await runSeed(
+      GroupsRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.addMemberById(fixture.groupA, fixture.member.id)),
+      ),
+    );
+
+    sessionsStore.set('actor-token', fixture.actor.actorUserId);
+
+    const response = await handler(
+      new Request(
+        `http://localhost/teams/${fixture.team.id}/groups/${fixture.groupA}/sync-role-members`,
+        { method: 'POST', headers: { Authorization: 'Bearer actor-token' } },
+      ),
+    );
+    expect(response.status).toBe(200);
+
+    const groupIds = await listMemberAddedGroupIds(fixture.team.id);
+    expect(new Set(groupIds)).toStrictEqual(
+      new Set([fixture.groupA, fixture.groupB, fixture.groupC]),
+    );
   });
 });

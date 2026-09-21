@@ -169,7 +169,7 @@ A **Discord channel** is separate and only created when you explicitly request i
 
 When a channel is created or linked, the bot automatically **backfills all current group members** onto the role — including members of any subgroups nested under this group. Members who already hold the role are unaffected.
 
-When you unlink a channel (via the **Disconnect** button), the channel is removed from Discord (or archived/left alone, depending on your cleanup mode setting), but the group's Discord **role is kept**. This means members retain their role assignment and it can be linked to a new channel later without losing the membership data.
+When you unlink a channel (via the **Disconnect** button), what happens to the channel and role in Discord depends on your team's [cleanup mode](#channel-cleanup-modes). Only **Do nothing** keeps the group's Discord role, so members retain their role assignment and it can be linked to a new channel later without losing the membership data — **Delete** and **Archive** both remove the role along with the channel.
 
 Deleting a group removes both the channel and the role.
 
@@ -246,7 +246,7 @@ When a **group is deleted** or a **roster is deactivated**, its linked Discord c
 
 - **Do nothing** — keep the channel (only the role and the group/roster link are removed).
 - **Delete** — delete the Discord channel and role.
-- **Archive** — move the channel to the archive category you configure, instead of deleting it.
+- **Archive** — move the channel to the archive category you configure (instead of deleting it), and delete the Discord role.
 
 Set **Cleanup on group delete** and **Cleanup on roster deactivate** independently — they don't have to match.
 

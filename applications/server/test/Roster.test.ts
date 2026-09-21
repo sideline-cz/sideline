@@ -615,7 +615,13 @@ const MockGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
   getMemberCount: () => Effect.succeed(0),
   getChildren: () => Effect.succeed([]),
   getAncestorIds: () => Effect.succeed([]),
-  getAncestors: (groupId: GroupModel.GroupId) =>
+  // `fix/archived-ancestor-walk`: `GroupsRepository.getAncestors` is renamed to
+  // `getAncestorsIncludingArchived` — this `GroupsRepository` mock is spread directly into
+  // `deactivateMemberAndCascade`'s deps by `roster.ts`'s `deactivateMember` handler (it stays
+  // on the archived-blind walk deliberately, see that method's header), so the mock key must
+  // track the real interface's name or the spread object is missing the method the cascade
+  // now calls.
+  getAncestorsIncludingArchived: (groupId: GroupModel.GroupId) =>
     Effect.succeed(
       (groupAncestorsStore.get(groupId) ?? []).flatMap((id) => {
         const group = groupsStore.get(id);
@@ -1381,7 +1387,16 @@ describe('Members API', () => {
       membersStore.delete(otherTeamMemberId);
     });
 
-    it('flips an inactive member back to active without self-404ing, and emits Discord member-added cleanup', async () => {
+    // `fix/archived-ancestor-walk`: `roster.ts`'s module-private `emitDiscordCleanupForMember`
+    // (and its only call site here, in `reactivateMember`) is deleted as dead code — the cascade
+    // in `deactivateMemberAndCascade` hard-deletes `group_members`/`roster_members` rows on
+    // deactivation, so both of `emitDiscordCleanupForMember`'s lookups (`findGroupIdsByMember`,
+    // `findRosterIdsByMember`) always saw empty lists in production; this test's own
+    // `groupMembersStore`/roster-membership mocks confirm that by never seeding a membership for
+    // `TEST_MEMBER_ID` before reactivating. Reactivation restores the member row only — it does
+    // NOT re-emit anything to Discord (see `reactivateMember`'s own "blank slate" comment above
+    // its handler).
+    it('flips an inactive member back to active without self-404ing, and emits no Discord cleanup (dead code removed)', async () => {
       // Deactivate the member first — reactivateMember must look this member up with
       // includeInactive: true, since the active-filtered lookup would otherwise 404 here.
       membersStore.set(TEST_MEMBER_ID, {
@@ -1401,6 +1416,8 @@ describe('Members API', () => {
       );
       expect(response.status).toBe(204);
       expect(membersStore.get(TEST_MEMBER_ID)?.active).toBe(true);
+      expect(channelSyncCalls.emitMemberAdded).toHaveLength(0);
+      expect(channelSyncCalls.emitRosterMemberAdded).toHaveLength(0);
 
       const getResponse = await handler(
         new Request(`http://localhost/teams/${TEST_TEAM_ID}/members/${TEST_MEMBER_ID}`, {

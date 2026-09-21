@@ -34,7 +34,7 @@ export type CascadeDeps = {
     readonly findGroupById: (
       groupId: GroupModel.GroupId,
     ) => Effect.Effect<Option.Option<{ readonly name: string }>, never>;
-    readonly getAncestors: (
+    readonly getAncestorsIncludingArchived: (
       groupId: GroupModel.GroupId,
     ) => Effect.Effect<
       readonly { readonly id: GroupModel.GroupId; readonly name: string }[],
@@ -160,8 +160,37 @@ export const deactivateMemberAndCascade = (
                                 memberId,
                                 discordUserId,
                               ),
+                              // Archived-blind on purpose. A full deactivation must revoke
+                              // everywhere — step 7 below hard-deletes every `group_members` row,
+                              // so over-revoking cannot be wrong. (Scope: this walk only runs for
+                              // seed groups that are themselves active — `findGroupById` above
+                              // filters `is_archived = false`, so a member whose DIRECT group is
+                              // archived already emits nothing here, for the group or its
+                              // ancestors. Pre-existing asymmetry, not something this walk can
+                              // fix.) Under
+                              // `team_settings.discord_channel_cleanup_on_group_delete` =
+                              // `archive` or `nothing`, the archived group's Discord role
+                              // SURVIVES (the bot deletes only the channel permission overwrite),
+                              // and `api/group.ts`'s `archive`-mode `onNone` branch (~:434) emits
+                              // nothing at all when `discord_archive_category_id` is unset —
+                              // leaving role, channel and mapping fully intact. Severing here
+                              // would leave a departed member holding those roles forever.
+                              // Emitting for a `delete`-cleaned group is harmless:
+                              // `handleMemberRemoved.ts` has no create-if-missing branch, so it
+                              // is one warning log. Root cause of the surviving role is
+                              // `applications/bot/src/rcp/channel/handleArchived.ts`'s
+                              // `handleGroupArchived`, which (unlike its sibling
+                              // `handleRosterArchived`) never calls `deleteRole` — being fixed in
+                              // this same change for `archive` mode; `nothing` mode keeps the
+                              // role by design.
+                              //
+                              // This deliberately diverges from the "role sync and channel sync
+                              // must never agree/disagree" invariant in `GroupsRepository.ts`
+                              // (~:254-257) — that invariant governs GRANTS, not revokes. Do not
+                              // "fix" this to `getActiveAncestors`; that would reintroduce the
+                              // leak this comment documents.
                               deps.groups
-                                .getAncestors(groupId)
+                                .getAncestorsIncludingArchived(groupId)
                                 .pipe(
                                   Effect.flatMap((ancestors) =>
                                     Effect.forEach(ancestors, (ancestor) =>

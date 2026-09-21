@@ -1,7 +1,7 @@
 import type { Discord, GroupModel, Team } from '@sideline/domain';
 import { DiscordREST } from 'dfx';
 import { Effect, type Option } from 'effect';
-import { isUnknownRoleError } from '~/rest/discordErrors.js';
+import { isDiscordNotFoundError, isUnknownRoleError } from '~/rest/discordErrors.js';
 import { retryPolicy } from '~/rest/utils.js';
 import { SyncRpc } from '~/services/SyncRpc.js';
 
@@ -10,7 +10,15 @@ export const deleteRole = (guildId: Discord.Snowflake, roleId: Option.Option<Dis
     Effect.bind('rest', () => DiscordREST.asEffect()),
     Effect.bind('roleId', () => Effect.fromOption(roleId)),
     Effect.tap(({ rest, roleId }) =>
-      rest.deleteGuildRole(guildId, roleId).pipe(Effect.retry(retryPolicy)),
+      rest.deleteGuildRole(guildId, roleId).pipe(
+        // A role already gone from Discord (a captain deleted it by hand, or this event is a
+        // redelivery) is the desired end state, not a failure. Caught INSIDE the retry so a
+        // permanent 404 resolves immediately instead of burning the whole backoff first.
+        // Without this, `deleteChannelAndRole` fails at the role step and never deletes the
+        // channel — the fallback path's one job.
+        Effect.catchIf(isDiscordNotFoundError, () => Effect.void),
+        Effect.retry(retryPolicy),
+      ),
     ),
     Effect.tap(({ roleId }) =>
       Effect.logInfo(`Deleted Discord role ${roleId} in guild ${guildId}`),
@@ -26,7 +34,15 @@ export const deleteChannelAndRole = (
   Effect.Do.pipe(
     Effect.bind('rest', () => DiscordREST.asEffect()),
     Effect.tap(() => deleteRole(guildId, discordRoleId)),
-    Effect.tap(({ rest }) => rest.deleteChannel(discordChannelId).pipe(Effect.retry(retryPolicy))),
+    Effect.tap(({ rest }) =>
+      rest.deleteChannel(discordChannelId).pipe(
+        // Already-deleted channel is the desired end state — same reasoning as `deleteRole`
+        // above. Without this a redelivered event burns the backoff and then fails, so the
+        // handler reports permanent failure for work that is in fact complete.
+        Effect.catchIf(isDiscordNotFoundError, () => Effect.void),
+        Effect.retry(retryPolicy),
+      ),
+    ),
     Effect.tap(() =>
       Effect.logInfo(`Deleted Discord channel ${discordChannelId} in guild ${guildId}`),
     ),

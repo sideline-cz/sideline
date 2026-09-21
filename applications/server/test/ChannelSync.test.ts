@@ -332,6 +332,11 @@ const MockGroupsRepositoryLayer = Layer.succeed(GroupsRepository, {
   getChildren: () => Effect.succeed([]),
   getAncestorIds: () => Effect.succeed([]),
   getAncestors: () => Effect.succeed([]),
+  // `fix/archived-ancestor-walk`: `api/group.ts`'s `addGroupMember` now walks ancestors via this
+  // archived-aware method instead of `getAncestors`. This file only asserts on
+  // `channel_sync_events` with no archived groups in its fixtures, so an empty ancestor list is a
+  // safe, correct stub.
+  getActiveAncestors: () => Effect.succeed([]),
   getDescendantMemberIds: () => Effect.succeed([]),
   findGroupIdsByMember: (memberId: TeamMember.TeamMemberId) =>
     Effect.succeed(
