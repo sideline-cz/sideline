@@ -75,6 +75,22 @@ export class BankSyncConfig extends Model.Class<BankSyncConfig>('BankSyncConfig'
   // Secret (AES-256-GCM, `v1.<iv>.<tag>.<ct>` base64url) — excluded from json variants.
   fio_token_encrypted: Model.Sensitive(Schema.OptionFromNullOr(Schema.String)),
   fio_token_created_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
+  // Server-derived, unlike `fio_token_created_at` (a calendar date the treasurer types, snapped
+  // to 12:00 UTC and settable into the future). Stamped with the DB's own `now()` by
+  // `BankSyncConfigRepository`'s upsert every time a new encrypted token is actually written,
+  // and only then — never accepted from a caller, which is why it is absent from that query's
+  // `Request` schema. The nearest thing we have to "when did Fio's clock start on this token".
+  //
+  // Read it as a FLOOR, never as proof, and never as an `activating` verdict on its own:
+  //   - `None` means no server-stamped token write — a pre-migration row, or a fixture that
+  //     inserts straight into the table. It does NOT mean "no token".
+  //   - A stale NON-null stamp is possible for one deploy window: an old image writes a token
+  //     without touching this column, so `ON CONFLICT` leaves the previous token's stamp in
+  //     place. (Errs safe — a fresh token reads as old.)
+  //   - Re-saving the SAME plaintext token re-stamps it. The ciphertext differs every time
+  //     (random IV), so SQL cannot tell a replacement from a re-paste — which means a treasurer
+  //     re-pasting a REVOKED token restarts this clock.
+  fio_token_saved_at: Schema.OptionFromNullOr(Schemas.DateTimeFromDate),
 
   // Backfill walk (the bounded loop writes the cursor after each chunk, §5).
   backfill_from: Schema.OptionFromNullOr(Schema.String), // DATE, as 'YYYY-MM-DD'
