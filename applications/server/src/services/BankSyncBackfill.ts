@@ -93,6 +93,7 @@ const step = (deps: WalkDeps, state: WalkState): Effect.Effect<BackfillOutcome> 
           'FioRateLimited',
           'FioResponseInvalid',
           'FioNotConfigured',
+          'FioUnreachable',
         ],
         () => Effect.succeed<BackfillOutcome>('failed'),
       ),

@@ -12,7 +12,14 @@ import { describe, expect, it } from '@effect/vitest';
 import type { Discord, Team, TeamMember, User } from '@sideline/domain';
 import { BankSyncApi } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option } from 'effect';
-import { HttpRouter, HttpServer } from 'effect/unstable/http';
+import {
+  HttpClient,
+  HttpClientError,
+  type HttpClientRequest,
+  HttpClientResponse,
+  HttpRouter,
+  HttpServer,
+} from 'effect/unstable/http';
 import { HttpApi, HttpApiBuilder } from 'effect/unstable/httpapi';
 import { SqlClient } from 'effect/unstable/sql';
 import { afterAll, beforeAll, beforeEach } from 'vitest';
@@ -68,6 +75,11 @@ const FioSecretCryptoTestLayer = Layer.effect(
   makeWithKey(Option.some(FIO_TEST_ENCRYPTION_KEY_B64)),
 );
 
+// B3 — a SECOND crypto layer whose key is genuinely absent, for T16 (`misconfigured`), kept
+// separate from the ciphertext-that-won't-decrypt case (T17, which uses the normal key-present
+// `FioSecretCryptoTestLayer` above plus a garbage blob).
+const FioSecretCryptoNoKeyLayer = Layer.effect(FioSecretCrypto, makeWithKey(Option.none()));
+
 const RealRepos = Layer.mergeAll(
   UsersRepository.Default,
   TeamsRepository.Default,
@@ -80,8 +92,83 @@ const RealRepos = Layer.mergeAll(
   FioSecretCryptoTestLayer,
 );
 
+const RealReposNoKey = Layer.mergeAll(
+  UsersRepository.Default,
+  TeamsRepository.Default,
+  TeamMembersRepository.Default,
+  RolesRepository.Default,
+  BankSyncConfigRepository.Default,
+  BankTransactionsRepository.Default,
+  FeesRepository.Default,
+  PaymentsRepository.Default,
+  FioSecretCryptoNoKeyLayer,
+);
+
+// ---------------------------------------------------------------------------
+// Mock Fio HttpClient — module-level mutable, swapped per test (plan §6.3 harness note): the
+// group is built ONCE in `beforeAll` (`HttpRouter.toWebHandler(TestLayer)`), so the responder
+// cannot be a per-test `Layer.succeed` closure — it has to be a variable the running handler's
+// already-built layer graph reads from at CALL time, not at layer-construction time.
+// ---------------------------------------------------------------------------
+
+let fioResponder: (
+  request: HttpClientRequest.HttpClientRequest,
+) => Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.HttpClientError>;
+let fioCalls: number;
+
+const MockFioHttpClientLayer = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make((request) => {
+    fioCalls += 1;
+    return fioResponder(request);
+  }),
+);
+
+const statusResponse = (
+  request: HttpClientRequest.HttpClientRequest,
+  status: number,
+): HttpClientResponse.HttpClientResponse =>
+  HttpClientResponse.fromWeb(request, new Response('', { status }));
+
+const jsonResponse = (
+  request: HttpClientRequest.HttpClientRequest,
+  status: number,
+  body: unknown,
+): HttpClientResponse.HttpClientResponse =>
+  HttpClientResponse.fromWeb(
+    request,
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }),
+  );
+
+/** A minimal, well-formed Fio statement — copied from `FioApiClient.test.ts` (`info.iban` is the
+ * value T8 asserts the endpoint echoes back as `accountIban`). */
+const validRawStatement = {
+  accountStatement: {
+    info: {
+      accountId: '2000145399',
+      bankId: '0800',
+      currency: 'CZK',
+      iban: 'CZ6508000000192000145399',
+      bic: 'GIBACZPX',
+      openingBalance: 1000.0,
+      closingBalance: 1000.0,
+      dateStart: '2024-01-01+0100',
+      dateEnd: '2024-01-14+0100',
+      yearList: null,
+      idList: null,
+      idFrom: null,
+      idTo: null,
+      idLastDownload: null,
+    },
+    transactionList: { transaction: [] },
+  },
+};
+
+const TEST_TOKEN = 'a'.repeat(64);
+
 const TestLayer = HttpApiBuilder.layer(SmallApi).pipe(
   Layer.provide(BankSyncApiLive),
+  Layer.provideMerge(MockFioHttpClientLayer),
   Layer.provideMerge(AuthMiddlewareLive),
   Layer.provideMerge(HttpServer.layerServices),
   Layer.provide(MockSessionsRepositoryLayer),
@@ -89,24 +176,43 @@ const TestLayer = HttpApiBuilder.layer(SmallApi).pipe(
   Layer.provideMerge(TestPgClient),
 );
 
+// T16's second harness — everything the same except the `FioSecretCrypto` layer has NO key.
+const TestLayerNoKey = HttpApiBuilder.layer(SmallApi).pipe(
+  Layer.provide(BankSyncApiLive),
+  Layer.provideMerge(MockFioHttpClientLayer),
+  Layer.provideMerge(AuthMiddlewareLive),
+  Layer.provideMerge(HttpServer.layerServices),
+  Layer.provide(MockSessionsRepositoryLayer),
+  Layer.provideMerge(RealReposNoKey),
+  Layer.provideMerge(TestPgClient),
+);
+
 const SeedLayer = RealRepos.pipe(Layer.provideMerge(TestPgClient));
 
 let handler: (request: Request) => Promise<Response>;
 let dispose: () => Promise<void>;
+let handlerNoKey: (request: Request) => Promise<Response>;
+let disposeNoKey: () => Promise<void>;
 
 beforeAll(() => {
   const app = HttpRouter.toWebHandler(TestLayer);
   handler = app.handler;
   dispose = app.dispose;
+  const appNoKey = HttpRouter.toWebHandler(TestLayerNoKey);
+  handlerNoKey = appNoKey.handler;
+  disposeNoKey = appNoKey.dispose;
 });
 
 afterAll(async () => {
   await dispose();
+  await disposeNoKey();
 });
 
 beforeEach(async () => {
   await cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runPromise);
   sessionsStore = new Map();
+  fioCalls = 0;
+  fioResponder = () => Effect.die(new Error('fioResponder: no responder set for this test'));
 });
 
 const HOST = 'http://localhost';
@@ -232,6 +338,41 @@ const validUpsertPayload = {
   registered_address: null,
   bank_name: null,
 };
+
+// ---------------------------------------------------------------------------
+// Shared helpers for the /bank-sync/test suite (T8-T26)
+// ---------------------------------------------------------------------------
+
+/** Distinct from the hardcoded guild ids the older describe blocks above use — a counter avoids
+ * ever having to hand-track the next free literal. */
+let guildIdCounter = 340_100_000_000_000_200n;
+const nextGuildId = (): string => (guildIdCounter++).toString();
+
+interface PostTestResult {
+  readonly status: number;
+  readonly text: string;
+  readonly body: unknown;
+}
+
+const postTestAgainst =
+  (h: (request: Request) => Promise<Response>) =>
+  async (teamId: Team.TeamId): Promise<PostTestResult> => {
+    const response = await h(
+      new Request(`${HOST}/teams/${teamId}/bank-sync/test`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer treasurer-token', 'Content-Type': 'application/json' },
+      }),
+    );
+    const text = await response.text();
+    return { status: response.status, text, body: text.length > 0 ? JSON.parse(text) : undefined };
+  };
+
+/** Runs the probe through the MAIN harness (key-present `FioSecretCrypto`, `MockFioHttpClientLayer`
+ * responding via the module-level `fioResponder`). */
+const postTest = (teamId: Team.TeamId) => postTestAgainst(handler)(teamId);
+
+/** T16 only — runs the probe through the second harness whose `FioSecretCrypto` has NO key. */
+const postTestNoKey = (teamId: Team.TeamId) => postTestAgainst(handlerNoKey)(teamId);
 
 // ---------------------------------------------------------------------------
 // 157 — non-member -> 403
@@ -650,6 +791,654 @@ describe('bank-sync API — manual /match guards (BLOCKER 1)', () => {
         SELECT count(*)::text AS count FROM payments WHERE bank_transaction_id = ${txId}
       `;
       expect(rows[0]?.count).toBe('0');
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T8-T14 — POST /bank-sync/test: the six-way status mapping table (plan §3.4/§6.3)
+// ---------------------------------------------------------------------------
+
+describe('bank-sync API — POST /bank-sync/test — status mapping (T8-T14)', () => {
+  it.effect(
+    "T8 — ok: a live token returns ok, Fio's IBAN, and the responder WAS invoked (M6 wiring guard)",
+    () =>
+      Effect.gen(function* () {
+        const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+        const token = yield* encryptFioTestToken(TEST_TOKEN);
+        yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+        fioResponder = (request) => Effect.succeed(jsonResponse(request, 200, validRawStatement));
+
+        const { status, body } = yield* Effect.promise(() => postTest(teamId));
+        expect(status).toBe(200);
+        expect(body).toEqual({
+          ok: true,
+          status: 'ok',
+          message: null,
+          accountIban: 'CZ6508000000192000145399',
+        });
+        expect(fioCalls).toBe(1);
+      }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('T9 — invalid: a dead token (HTTP 500) is NOT reported ok (the bug)', () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const token = yield* encryptFioTestToken(TEST_TOKEN);
+      yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+      fioResponder = (request) => Effect.succeed(statusResponse(request, 500));
+
+      const { body } = yield* Effect.promise(() => postTest(teamId));
+      expect(body).toEqual({ ok: false, status: 'invalid', message: null, accountIban: null });
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect("T10 — rate_limited: Fio's own 409, never invalid, exactly one request", () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const token = yield* encryptFioTestToken(TEST_TOKEN);
+      yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+      fioResponder = (request) => Effect.succeed(statusResponse(request, 409));
+
+      const { body } = yield* Effect.promise(() => postTest(teamId));
+      expect(body).toMatchObject({ status: 'rate_limited', ok: false });
+      // No 90s ladder here — `probeFio` builds its client with `retryRateLimited: false`.
+      expect(fioCalls).toBe(1);
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('T11 — history_locked: HTTP 422', () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const token = yield* encryptFioTestToken(TEST_TOKEN);
+      yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+      fioResponder = (request) => Effect.succeed(statusResponse(request, 422));
+
+      const { body } = yield* Effect.promise(() => postTest(teamId));
+      expect(body).toMatchObject({ status: 'history_locked', ok: false });
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('T12 — unreachable: a transport failure is NOT reported invalid', () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const token = yield* encryptFioTestToken(TEST_TOKEN);
+      yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+      fioResponder = (request) =>
+        Effect.fail(
+          new HttpClientError.HttpClientError({
+            reason: new HttpClientError.TransportError({
+              request,
+              cause: new Error('ECONNRESET'),
+            }),
+          }),
+        );
+
+      const { body } = yield* Effect.promise(() => postTest(teamId));
+      const parsed = body as { status: string };
+      expect(parsed.status).toBe('unreachable');
+      expect(parsed.status).not.toBe('invalid');
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('T13 — unreachable: HTTP 200 with an undecodable body', () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const token = yield* encryptFioTestToken(TEST_TOKEN);
+      yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+      fioResponder = (request) =>
+        Effect.succeed(jsonResponse(request, 200, { not: 'a statement' }));
+
+      const { body } = yield* Effect.promise(() => postTest(teamId));
+      expect(body).toMatchObject({ status: 'unreachable', ok: false });
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('T14 — unreachable: HTTP 404', () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const token = yield* encryptFioTestToken(TEST_TOKEN);
+      yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+      fioResponder = (request) => Effect.succeed(statusResponse(request, 404));
+
+      const { body } = yield* Effect.promise(() => postTest(teamId));
+      expect(body).toMatchObject({ status: 'unreachable', ok: false });
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  // T14b — the regression guard for the `FioServerError`/`FioUnreachable` split (coverage-gap
+  // review): a non-500 5xx (a Fio maintenance blip, a gateway timeout — nothing to do with the
+  // token) must NOT be reported `invalid`. Without this, re-collapsing
+  // `FioApiClient.ts`'s `decodeContained` back to `status !== 200 -> FioServerError` ships the
+  // "revoke your good token during a Fio outage" bug this whole fix exists to prevent, and only
+  // T9 (which always sends 500) would still be green.
+  it.effect('T14b — unreachable: HTTP 503 (a non-500 5xx status), NOT reported invalid', () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const token = yield* encryptFioTestToken(TEST_TOKEN);
+      yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+      fioResponder = (request) => Effect.succeed(statusResponse(request, 503));
+
+      const { body } = yield* Effect.promise(() => postTest(teamId));
+      expect(body).toMatchObject({ status: 'unreachable', ok: false });
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T15-T17 — no_token / misconfigured (key missing) / invalid (undecryptable ciphertext) (B3)
+// ---------------------------------------------------------------------------
+
+describe('bank-sync API — POST /bank-sync/test — no_token / misconfigured / invalid decrypt (T15-T17)', () => {
+  it.effect('T15 — no_token: a config with no stored token, responder never called', () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.none() });
+      fioResponder = () => Effect.die(new Error('must not be called — no token to probe'));
+
+      const { body } = yield* Effect.promise(() => postTest(teamId));
+      expect(body).toEqual({ ok: false, status: 'no_token', message: null, accountIban: null });
+      expect(fioCalls).toBe(0);
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect(
+    'T16 — misconfigured: the encryption key is genuinely missing (B3, split from T17)',
+    () =>
+      Effect.gen(function* () {
+        const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+        const token = yield* encryptFioTestToken(TEST_TOKEN);
+        yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+        fioResponder = () => Effect.die(new Error('must not be called — key is missing'));
+
+        const { body } = yield* Effect.promise(() => postTestNoKey(teamId));
+        expect(body).toMatchObject({ status: 'misconfigured', ok: false });
+        expect(fioCalls).toBe(0);
+      }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('T17 — invalid: a ciphertext the (present) key cannot decrypt (B3)', () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      yield* enableBankSync(teamId, treasurerId, {});
+      const sql = yield* SqlClient.SqlClient.asEffect();
+      yield* sql`UPDATE bank_sync_config SET fio_token_encrypted = 'v1.aaaa.bbbb.cccc' WHERE team_id = ${teamId}`;
+      fioResponder = () => Effect.die(new Error('must not be called — decrypt fails first'));
+
+      const { body } = yield* Effect.promise(() => postTest(teamId));
+      // NOT 'misconfigured' — that copy says "your token is fine", which is false here.
+      expect(body).toMatchObject({ status: 'invalid', ok: false });
+      expect(fioCalls).toBe(0);
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T18/T19 — B1 regression guard: a successful probe must not whitewash a failing 14-day poll
+// ---------------------------------------------------------------------------
+
+describe('bank-sync API — POST /bank-sync/test — B1 masking regression guard (T18/T19)', () => {
+  it.effect(
+    'T18 — a 200 on the 2-day probe window does not clear the D11 failing-poll bookkeeping',
+    () =>
+      Effect.gen(function* () {
+        const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+        const token = yield* encryptFioTestToken(TEST_TOKEN);
+        yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+        const sql = yield* SqlClient.SqlClient.asEffect();
+        yield* sql`
+          UPDATE bank_sync_config SET
+            last_error_code = 'too_many_movements',
+            consecutive_failure_count = 2,
+            last_error_at = now(),
+            next_attempt_at = now() + interval '2 hours',
+            coverage_warning = 'x'
+          WHERE team_id = ${teamId}
+        `;
+
+        fioResponder = (request) => Effect.succeed(jsonResponse(request, 200, validRawStatement));
+        const { body } = yield* Effect.promise(() => postTest(teamId));
+        expect(body).toMatchObject({ status: 'ok', ok: true });
+
+        const rows = yield* sql<{
+          last_error_code: string | null;
+          consecutive_failure_count: number;
+          last_success_at: Date | null;
+          coverage_warning: string | null;
+          next_attempt_at: Date | null;
+        }>`
+          SELECT last_error_code, consecutive_failure_count, last_success_at, coverage_warning,
+                 next_attempt_at
+          FROM bank_sync_config WHERE team_id = ${teamId}
+        `;
+        expect(rows[0]?.last_error_code).toBe('too_many_movements');
+        expect(rows[0]?.consecutive_failure_count).toBe(2);
+        expect(rows[0]?.coverage_warning).toBe('x');
+        // Never touched by `recordSuccess` (never called) or `clearPollBackoff` (only clears
+        // `next_attempt_at`) — still NULL, exactly as it was before the probe.
+        expect(rows[0]?.last_success_at).toBeNull();
+        expect(rows[0]?.next_attempt_at).toBeNull();
+
+        const configResponse = yield* Effect.promise(() =>
+          get(`/teams/${teamId}/bank-sync`, 'treasurer-token'),
+        );
+        const configBody = (yield* Effect.promise(() => configResponse.json())) as {
+          status: string;
+        };
+        // `last_error_code = 'too_many_movements'` is not `'fio_error'`, so `isFioError` is false
+        // and D11 lands the config at rank 5 regardless of `consecutive_failure_count` — the
+        // green test result above must not have changed that.
+        expect(configBody.status).toBe('sync_failing');
+      }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('T19 — success clears ONLY the poll backoff (next_attempt_at), nothing else', () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const token = yield* encryptFioTestToken(TEST_TOKEN);
+      yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+      const sql = yield* SqlClient.SqlClient.asEffect();
+      yield* sql`
+        UPDATE bank_sync_config SET
+          last_error_code = 'too_many_movements',
+          consecutive_failure_count = 2,
+          last_error_at = now(),
+          next_attempt_at = now() + interval '2 hours',
+          coverage_warning = 'x'
+        WHERE team_id = ${teamId}
+      `;
+      const beforeRows = yield* sql<
+        Record<string, unknown>
+      >`SELECT * FROM bank_sync_config WHERE team_id = ${teamId}`;
+
+      fioResponder = (request) => Effect.succeed(jsonResponse(request, 200, validRawStatement));
+      yield* Effect.promise(() => postTest(teamId));
+
+      const afterRows = yield* sql<
+        Record<string, unknown>
+      >`SELECT * FROM bank_sync_config WHERE team_id = ${teamId}`;
+      const before = beforeRows[0]!;
+      const after = afterRows[0]!;
+      // `updated_at` is excluded from the diff on purpose — EVERY write (including the
+      // `clearPollBackoff` UPDATE) bumps it, so it is not a "business field" for this
+      // assertion's purpose; the property under test is which of `next_attempt_at`,
+      // `last_error_code`, `consecutive_failure_count`, `coverage_warning`, `last_success_at`
+      // etc. actually moved.
+      const changedKeys = Object.keys(before)
+        .filter((key) => key !== 'updated_at')
+        .filter((key) => {
+          const b = before[key];
+          const a = after[key];
+          if (b instanceof Date && a instanceof Date) return b.getTime() !== a.getTime();
+          return b !== a;
+        });
+      expect(changedKeys).toEqual(['next_attempt_at']);
+      expect(before.next_attempt_at).not.toBeNull();
+      expect(after.next_attempt_at).toBeNull();
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T20 — a failing probe writes NOTHING (B4 — separate cleanDatabase per case via it.effect.each)
+// ---------------------------------------------------------------------------
+
+const T20_CASES: ReadonlyArray<{
+  readonly label: string;
+  readonly status: string;
+  readonly respond: (
+    request: HttpClientRequest.HttpClientRequest,
+  ) => Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.HttpClientError>;
+}> = [
+  {
+    label: 'HTTP 500',
+    status: 'invalid',
+    respond: (request) => Effect.succeed(statusResponse(request, 500)),
+  },
+  {
+    label: 'HTTP 409',
+    status: 'rate_limited',
+    respond: (request) => Effect.succeed(statusResponse(request, 409)),
+  },
+  {
+    label: 'HTTP 422',
+    status: 'history_locked',
+    respond: (request) => Effect.succeed(statusResponse(request, 422)),
+  },
+  {
+    label: 'HTTP 404',
+    status: 'unreachable',
+    respond: (request) => Effect.succeed(statusResponse(request, 404)),
+  },
+  {
+    label: 'transport failure',
+    status: 'unreachable',
+    respond: (request) =>
+      Effect.fail(
+        new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({ request, cause: new Error('ECONNRESET') }),
+        }),
+      ),
+  },
+];
+
+describe('bank-sync API — POST /bank-sync/test — a failing probe writes nothing (T20)', () => {
+  // Coverage-gap review: the original body only asserted the three DB columns were untouched,
+  // which would ALSO pass if the endpoint short-circuited before ever calling `fioResponder` (the
+  // exact B-2 failure mode). Asserting `fioCalls` and the returned `status` first proves the
+  // probe actually ran its course before the "nothing written" claim means anything.
+  it.effect.each(T20_CASES)(
+    '$label leaves consecutive_failure_count / next_attempt_at / last_error_code untouched',
+    ({ respond, status }) =>
+      Effect.gen(function* () {
+        const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+        const token = yield* encryptFioTestToken(TEST_TOKEN);
+        yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+        fioResponder = respond;
+
+        const sql = yield* SqlClient.SqlClient.asEffect();
+        const { body } = yield* Effect.promise(() => postTest(teamId));
+        expect(body).toMatchObject({ status });
+        expect(fioCalls).toBe(1);
+
+        const rows = yield* sql<{
+          consecutive_failure_count: number;
+          next_attempt_at: Date | null;
+          last_error_code: string | null;
+        }>`
+          SELECT consecutive_failure_count, next_attempt_at, last_error_code
+          FROM bank_sync_config WHERE team_id = ${teamId}
+        `;
+        expect(rows[0]?.consecutive_failure_count).toBe(0);
+        // `next_attempt_at IS NULL`, so `findPollableQuery` still considers this team eligible.
+        expect(rows[0]?.next_attempt_at).toBeNull();
+        expect(rows[0]?.last_error_code).toBeNull();
+      }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T21 — throttle pre-check: a second probe within 30s answers rate_limited INSTANTLY (M1)
+// ---------------------------------------------------------------------------
+
+describe('bank-sync API — POST /bank-sync/test — throttle pre-check (T21)', () => {
+  it.effect('a second probe on the same token within 30s answers rate_limited with no sleep', () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const token = yield* encryptFioTestToken(TEST_TOKEN);
+      yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+      fioResponder = (request) => Effect.succeed(jsonResponse(request, 200, validRawStatement));
+
+      const first = yield* Effect.promise(() => postTest(teamId));
+      expect(first.body).toMatchObject({ status: 'ok' });
+
+      const second = yield* Effect.promise(() => postTest(teamId));
+      expect(second.body).toMatchObject({ status: 'rate_limited', ok: false });
+
+      // The throttle budget check is ATOMIC with the reservation itself
+      // (`FioApiClient.ts`'s `maxThrottleWaitSeconds`-guarded UPSERT `WHERE` clause): the second
+      // call's reservation attempt finds the slot the first call took still busy well beyond the
+      // 2s precheck budget, so the guarded conflict UPDATE takes no action and returns zero rows
+      // — no slot is burned, and the second call never reaches Fio. Only the FIRST call ever hits
+      // Fio.
+      expect(fioCalls).toBe(1);
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T22 — token containment: no response field carries the token or the Fio host
+// ---------------------------------------------------------------------------
+
+// B-2 (BLOCKER, coverage-gap review) — the original version of this test ran all six cases inside
+// ONE `it.effect` sharing ONE `TEST_TOKEN`, so `cleanDatabase` ran once and every case shared the
+// SAME throttle fingerprint: case 1 reserved the 30s slot and actually called `fioResponder`,
+// cases 2-6 short-circuited to `rate_limited` WITHOUT ever invoking it, so their assertions
+// passed vacuously against a `rate_limited` body that never exercised the 500/409/422/404/
+// transport containment paths at all. Each case below now gets its OWN distinct 64-char token
+// (-> its own throttle fingerprint) and its own `cleanDatabase` via `it.effect.each` (the same
+// idiom T20/T26 already use correctly), and asserts `fioCalls === 1` so this test can never again
+// pass without actually exercising its path.
+const T22_CASES: ReadonlyArray<{
+  readonly label: string;
+  readonly token: string;
+  readonly respond: (
+    request: HttpClientRequest.HttpClientRequest,
+  ) => Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.HttpClientError>;
+}> = [
+  {
+    label: 'ok (200)',
+    token: 'c'.repeat(64),
+    respond: (request) => Effect.succeed(jsonResponse(request, 200, validRawStatement)),
+  },
+  {
+    label: 'HTTP 500',
+    token: 'd'.repeat(64),
+    respond: (request) => Effect.succeed(statusResponse(request, 500)),
+  },
+  {
+    label: 'HTTP 409',
+    token: 'e'.repeat(64),
+    respond: (request) => Effect.succeed(statusResponse(request, 409)),
+  },
+  {
+    label: 'HTTP 422',
+    token: 'f'.repeat(64),
+    respond: (request) => Effect.succeed(statusResponse(request, 422)),
+  },
+  {
+    label: 'HTTP 404',
+    token: 'g'.repeat(64),
+    respond: (request) => Effect.succeed(statusResponse(request, 404)),
+  },
+  {
+    label: 'transport failure',
+    token: 'h'.repeat(64),
+    respond: (request) =>
+      Effect.fail(
+        new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({
+            request,
+            cause: new Error('boom'),
+          }),
+        }),
+      ),
+  },
+];
+
+describe('bank-sync API — POST /bank-sync/test — token containment (T22)', () => {
+  it.effect.each(T22_CASES)(
+    '$label — no token or Fio host leaks into the response body, and the responder actually ran',
+    ({ token, respond }) =>
+      Effect.gen(function* () {
+        const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+        const encrypted = yield* encryptFioTestToken(token);
+        yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(encrypted) });
+        fioResponder = respond;
+
+        const { text } = yield* Effect.promise(() => postTest(teamId));
+        // Proves the responder for THIS case's status actually ran — the B-2 short-circuit
+        // failure mode (a stale throttle slot from a different case) would leave this at 0.
+        expect(fioCalls).toBe(1);
+        expect(text).not.toContain(token);
+        expect(text).not.toContain('fioapi.fio.cz');
+      }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T23 — the probe asks for exactly a two-day window ending today (UTC) (B6-safe capture)
+// ---------------------------------------------------------------------------
+
+/** `{ from, to }` the endpoint's `PROBE_WINDOW_BACK_DAYS` window ought to produce for a request
+ * issued "now" (UTC). Pulled into a helper because T23 below must call this TWICE — once before
+ * the request and once after — and accept either result. */
+const expectedProbeWindow = (): { readonly from: string; readonly to: string } => {
+  const now = new Date();
+  const to = now.toISOString().slice(0, 10);
+  const yesterday = new Date(now);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  return { from: yesterday.toISOString().slice(0, 10), to };
+};
+
+describe('bank-sync API — POST /bank-sync/test — probe window (T23)', () => {
+  it.effect(
+    'probes exactly [yesterday(UTC), today(UTC)] — captured redacted, never the raw URL',
+    () =>
+      Effect.gen(function* () {
+        const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+        const token = yield* encryptFioTestToken(TEST_TOKEN);
+        yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+
+        // Captured BEFORE the request too: computing the expected pair only AFTER issuing the
+        // request (as this test originally did) can straddle UTC midnight — a run landing there
+        // would compare a server-computed `D` against a locally-computed `D+1`. This repo has
+        // already shipped that exact flake class once (commit 2258ceef). Accept either the
+        // before- or after-request pair rather than picking one arbitrarily.
+        const before = expectedProbeWindow();
+
+        // B6 — redact AT CAPTURE TIME: only the date path segments are ever stored. The raw
+        // `request.url` (which embeds the 64-char token) never reaches a variable this test
+        // diffs, asserts on, or that vitest could print in a failure message.
+        let captured: { from?: string; to?: string } = {};
+        fioResponder = (request) => {
+          const seg = new URL(request.url).pathname.split('/');
+          captured = { from: seg[5], to: seg[6] };
+          return Effect.succeed(jsonResponse(request, 200, validRawStatement));
+        };
+
+        yield* Effect.promise(() => postTest(teamId));
+
+        const after = expectedProbeWindow();
+
+        expect([before.from, after.from]).toContain(captured.from);
+        expect([before.to, after.to]).toContain(captured.to);
+      }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T24/T25 — prologue unchanged: 403 without permission, 404 without a config row
+// ---------------------------------------------------------------------------
+
+describe('bank-sync API — POST /bank-sync/test — prologue (T24/T25)', () => {
+  it.effect('T24 — 403 for a member without finance:manage_fees', () =>
+    Effect.gen(function* () {
+      const { teamId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const response = yield* Effect.promise(() =>
+        post(`/teams/${teamId}/bank-sync/test`, 'captain-token'),
+      );
+      expect(response.status).toBe(403);
+      const text = yield* Effect.promise(() => response.text());
+      expect(text).toContain('BankSyncForbidden');
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('T25 — 404 when no bank_sync_config row exists', () =>
+    Effect.gen(function* () {
+      const { teamId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const response = yield* Effect.promise(() =>
+        post(`/teams/${teamId}/bank-sync/test`, 'treasurer-token'),
+      );
+      expect(response.status).toBe(404);
+      const text = yield* Effect.promise(() => response.text());
+      expect(text).toContain('BankSyncNotConfigured');
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T26 — contract invariant: ok === (status === 'ok'), across the T8/T9/T10/T15/T17 setups
+// ---------------------------------------------------------------------------
+
+const T26_CASES: ReadonlyArray<{
+  readonly label: string;
+  readonly seed: (
+    teamId: Team.TeamId,
+    treasurerId: User.UserId,
+  ) => Effect.Effect<unknown, unknown, SqlClient.SqlClient>;
+}> = [
+  {
+    label: 'ok (T8 setup)',
+    seed: (teamId, treasurerId) =>
+      encryptFioTestToken(TEST_TOKEN).pipe(
+        Effect.flatMap((token) =>
+          enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) }),
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            fioResponder = (request) =>
+              Effect.succeed(jsonResponse(request, 200, validRawStatement));
+          }),
+        ),
+      ),
+  },
+  {
+    label: 'invalid — dead token (T9 setup)',
+    seed: (teamId, treasurerId) =>
+      encryptFioTestToken(TEST_TOKEN).pipe(
+        Effect.flatMap((token) =>
+          enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) }),
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            fioResponder = (request) => Effect.succeed(statusResponse(request, 500));
+          }),
+        ),
+      ),
+  },
+  {
+    label: 'rate_limited (T10 setup)',
+    seed: (teamId, treasurerId) =>
+      encryptFioTestToken(TEST_TOKEN).pipe(
+        Effect.flatMap((token) =>
+          enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) }),
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            fioResponder = (request) => Effect.succeed(statusResponse(request, 409));
+          }),
+        ),
+      ),
+  },
+  {
+    label: 'no_token (T15 setup)',
+    seed: (teamId, treasurerId) =>
+      enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.none() }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            fioResponder = () => Effect.die(new Error('must not be called'));
+          }),
+        ),
+      ),
+  },
+  {
+    label: 'invalid — undecryptable ciphertext (T17 setup)',
+    seed: (teamId, treasurerId) =>
+      enableBankSync(teamId, treasurerId, {}).pipe(
+        Effect.flatMap(() => SqlClient.SqlClient.asEffect()),
+        Effect.flatMap(
+          (sql) =>
+            sql`UPDATE bank_sync_config SET fio_token_encrypted = 'v1.aaaa.bbbb.cccc' WHERE team_id = ${teamId}`,
+        ),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            fioResponder = () => Effect.die(new Error('must not be called'));
+          }),
+        ),
+        Effect.asVoid,
+      ),
+  },
+];
+
+describe('bank-sync API — POST /bank-sync/test — contract invariant ok === (status === ok) (T26)', () => {
+  it.effect.each(T26_CASES)('$label', ({ seed }) =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      yield* seed(teamId, treasurerId);
+      const { body } = yield* Effect.promise(() => postTest(teamId));
+      const parsed = body as { ok: boolean; status: string };
+      expect(parsed.ok).toBe(parsed.status === 'ok');
     }).pipe(Effect.provide(SeedLayer)),
   );
 });

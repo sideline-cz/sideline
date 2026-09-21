@@ -23,7 +23,10 @@
  * file's `RealRepos` layer provides, so no service outside that list may be added as an ambient
  * dependency of any handler (this is why `QrRenderer` and `BankStatementPdf` are plain functions,
  * not `ServiceMap.Service`s, and why `/rematch` constructs `BankTransactionMatcher.make()`
- * in-place rather than depending on `BankTransactionMatcher` as a layer).
+ * in-place rather than depending on `BankTransactionMatcher` as a layer). `HttpClient` is NOT part
+ * of this resolvable set: it is read via `Effect.serviceOption(HttpClient.HttpClient)`, which adds
+ * no layer requirement, so `/bank-sync/test` degrades to a stub Fio client (`misconfigured`)
+ * rather than failing construction when the test harness omits it.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -42,8 +45,8 @@ import {
   TeamMember,
 } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
-import { DateTime, Effect, Option, Redacted, Schema } from 'effect';
-import { HttpServerResponse } from 'effect/unstable/http';
+import { Cause, DateTime, Duration, Effect, Option, Redacted, Schema } from 'effect';
+import { HttpClient, HttpServerResponse } from 'effect/unstable/http';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { SqlClient } from 'effect/unstable/sql';
 import type { SqlError } from 'effect/unstable/sql/SqlError';
@@ -64,6 +67,10 @@ import {
   deriveBalanceBefore,
 } from '~/services/bankCoverage.js';
 import { computeBankSyncStatus } from '~/services/bankSyncStatus.js';
+import {
+  makeReal as makeRealFioApiClient,
+  makeStub as makeStubFioApiClient,
+} from '~/services/FioApiClient.js';
 import { FioSecretCrypto } from '~/services/FioSecretCrypto.js';
 import { renderQrPng } from '~/services/QrRenderer.js';
 import { buildCsvDocument, escapeCsvField, formatCsvAmount } from '~/utils/csv.js';
@@ -96,6 +103,36 @@ const addDaysToDateString = (dateStr: string, days: number): string => {
 };
 
 const todayIso = (): string => DateTime.formatIsoDateUtc(DateTime.nowUnsafe());
+
+/** Probe window OFFSET (not a width): `to` = UTC today, `from` = `to` minus this many days. UTC's
+ * calendar date is always <= Prague's (Fio is UTC+1/+2), so `to` is never in Fio's future. One day
+ * back keeps us far inside the 90-day history wall and makes `FioTooManyMovements` unreachable;
+ * NOT `from === to`, because a zero-length range is exactly the edge a bank API rejects with a
+ * 404. */
+const PROBE_WINDOW_BACK_DAYS = 1;
+
+/** Hard wall-clock bound. The throttle budget is checked ATOMICALLY with the reservation itself
+ * (`FioApiClient.ts`'s `maxThrottleWaitSeconds`), so the only remaining wait is one Fio round
+ * trip. Well under nginx's 60 s `/api/` default (`applications/proxy/nginx.conf:48`) AND under the
+ * integration suite's 30 s `testTimeout` (`applications/server/vitest.integration.config.ts:16`). */
+const PROBE_TIMEOUT_SECONDS = 15;
+
+/** Below this, waiting is cheaper than a round trip of user confusion. Above it we answer
+ * `rate_limited` immediately instead of sleeping — an honest verdict, not a fake timeout. Passed
+ * to `FioApiClient`'s `maxThrottleWaitSeconds`: a reservation needing a longer wait fails
+ * `FioRateLimited` WITHOUT burning a throttle slot. */
+const THROTTLE_PRECHECK_MAX_WAIT_SECONDS = 2;
+
+const testResult = (
+  status: BankSyncApi.BankSyncTestStatus,
+  accountIban: Option.Option<string> = Option.none(),
+): BankSyncApi.BankSyncTestResult =>
+  new BankSyncApi.BankSyncTestResult({
+    ok: status === 'ok',
+    status,
+    message: Option.none(), // deprecated — see the domain comment
+    accountIban,
+  });
 
 const EXPORT_MAX_DAYS = 730;
 
@@ -246,7 +283,20 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
     Effect.bind('txRepo', () => BankTransactionsRepository.asEffect()),
     Effect.bind('crypto', () => FioSecretCrypto.asEffect()),
     Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
-    Effect.map(({ members, configRepo, txRepo, crypto, sql }) => {
+    // `Effect.serviceOption` adds NO layer requirement, so the group's resolvable set is
+    // unchanged. `FetchHttpClient.layer` is provided below the whole `HttpRouter.serve` chain in
+    // `src/AppLive.ts`, so production construction sees `Some`.
+    Effect.bind('httpClientOpt', () => Effect.serviceOption(HttpClient.HttpClient)),
+    // M6 — `serviceOption` fails silently; without this, a wiring regression ships as a permanent
+    // `misconfigured`. Mirrors `FioApiClient.ts`.
+    Effect.tap(({ httpClientOpt }) =>
+      Option.isNone(httpClientOpt)
+        ? Effect.logWarning(
+            'BankSyncApiLive: no HttpClient in layer context — /bank-sync/test will report misconfigured',
+          )
+        : Effect.void,
+    ),
+    Effect.map(({ members, configRepo, txRepo, crypto, sql, httpClientOpt }) => {
       // -----------------------------------------------------------------
       // Shared read helpers
       // -----------------------------------------------------------------
@@ -597,6 +647,88 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
           }),
         );
       }
+
+      // -----------------------------------------------------------------
+      // `/bank-sync/test` — one real Fio `/periods` probe (see plan §3.4).
+      // -----------------------------------------------------------------
+
+      const probeFio = (
+        teamId: Team.TeamId,
+        token: Redacted.Redacted<string>,
+      ): Effect.Effect<BankSyncApi.BankSyncTestResult> => {
+        const to = todayIso();
+        const from = addDaysToDateString(to, -PROBE_WINDOW_BACK_DAYS);
+        // M1 — the throttle budget check is now ATOMIC with the reservation itself: FioApiClient
+        // guards the reservation UPSERT's conflict `WHERE` clause on `maxThrottleWaitSeconds`, so
+        // a caller that would need to wait longer than the budget fails `FioRateLimited` WITHOUT
+        // ever reserving a slot. A separate `readThrottleWait` pre-check raced the reservation
+        // (another caller could take the slot between the read and the reserve), which could burn
+        // the 15s timeout below on a spinner that never contacted Fio at all.
+        const client = Option.match(httpClientOpt, {
+          onNone: () => makeStubFioApiClient(),
+          onSome: (http) =>
+            makeRealFioApiClient(http, sql, {
+              retryRateLimited: false,
+              maxThrottleWaitSeconds: THROTTLE_PRECHECK_MAX_WAIT_SECONDS,
+            }),
+        });
+
+        return client.fetchPeriod({ token, from, to, teamId }).pipe(
+          // B1 — `clearPollBackoff`, NEVER `recordSuccess`. Logged: a user-triggered defeat of
+          // the anti-hammer exponential poll backoff should leave a record of who/when.
+          Effect.tap(() =>
+            configRepo
+              .clearPollBackoff(teamId)
+              .pipe(
+                Effect.tap(() =>
+                  Effect.logInfo('bank-sync/test: cleared poll backoff after a probe success').pipe(
+                    Effect.annotateLogs({ teamId }),
+                  ),
+                ),
+              ),
+          ),
+          Effect.map((statement) => testResult('ok', statement.info.iban)),
+          // Nothing here reads `e.message`, `e.cause` or any URL: the typed errors carry
+          // only `{ endpoint, teamId }` by construction (`FioApiClient.ts`). D10
+          // containment.
+          Effect.catchTag('FioServerError', () => Effect.succeed(testResult('invalid'))),
+          Effect.catchTag('FioRateLimited', () => Effect.succeed(testResult('rate_limited'))),
+          Effect.catchTag('FioHistoryLocked', () => Effect.succeed(testResult('history_locked'))),
+          Effect.catchTag('FioNotConfigured', () => Effect.succeed(testResult('misconfigured'))),
+          Effect.catchTag(
+            ['FioUnreachable', 'FioResponseInvalid', 'FioBadRequest', 'FioTooManyMovements'],
+            () => Effect.succeed(testResult('unreachable')),
+          ),
+          Effect.timeout(Duration.seconds(PROBE_TIMEOUT_SECONDS)),
+          Effect.catchTag('TimeoutError', () => Effect.succeed(testResult('unreachable'))),
+          // M2 — log every non-interrupt cause that reaches this terminal catch: it is either the
+          // `LogicError` DEFECT `catchSqlErrors` raises for a DB outage inside the throttle
+          // reservation / backoff clear (a defect that exists to page someone), a bug inside the
+          // block above, or a typed failure this file forgot to map. Safe to log the CAUSE
+          // verbatim here (not just a fixed message): every URL-bearing failure/defect
+          // `FioApiClient.ts`'s `executeContained`/`decodeContained` can produce is already
+          // converted to a typed error carrying only `{ endpoint, teamId }` before it can reach
+          // this point (see that file's D10 containment comments), so nothing tokenised can be
+          // riding in this cause.
+          Effect.tapCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.void
+              : Effect.logError('bank-sync/test: probe failed unexpectedly').pipe(
+                  Effect.annotateLogs({ teamId, cause: Cause.pretty(cause) }),
+                ),
+          ),
+          // M7 — `catchSqlErrors` (`repositories/catchSqlErrors.ts`) raises a `LogicError`
+          // DEFECT, not a typed failure, so a DB hiccup inside the reservation / backoff clear
+          // would otherwise escape the tag catches as an untyped 500 on the Test button. Same
+          // idiom as `FioApiClient.ts`. Error channel is `never` after this line.
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : Effect.succeed(testResult('unreachable')),
+          ),
+        );
+      };
+
       // -----------------------------------------------------------------
       // Handlers
       // -----------------------------------------------------------------
@@ -738,33 +870,24 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
               ),
               Effect.flatMap(({ config }) =>
                 Option.match(config.fio_token_encrypted, {
-                  onNone: () =>
-                    Effect.succeed(
-                      new BankSyncApi.BankSyncTestResult({
-                        ok: false,
-                        message: Option.some('Fio token není nastaven.'),
-                        accountIban: Option.none(),
-                      }),
-                    ),
+                  onNone: () => Effect.succeed(testResult('no_token')),
                   onSome: (tokenEncrypted) =>
                     crypto.decrypt(tokenEncrypted).pipe(
                       Effect.matchEffect({
-                        onFailure: () =>
-                          Effect.succeed(
-                            new BankSyncApi.BankSyncTestResult({
-                              ok: false,
-                              message: Option.some('Token se nepodařilo dešifrovat.'),
-                              accountIban: Option.none(),
-                            }),
-                          ),
-                        onSuccess: () =>
-                          Effect.succeed(
-                            new BankSyncApi.BankSyncTestResult({
-                              ok: true,
-                              message: Option.none(),
-                              accountIban: config.iban,
-                            }),
-                          ),
+                        // B3 — key missing is OUR fault; a ciphertext that won't decrypt is the
+                        // token's.
+                        onFailure: (error) =>
+                          error._tag === 'FioSecretKeyMissing'
+                            ? Effect.succeed(testResult('misconfigured'))
+                            : // M2 — the user-facing 'invalid' verdict here is correct, but a
+                              // `FIO_TOKEN_ENCRYPTION_KEY` rotation without re-encryption makes
+                              // EVERY team's ciphertext fail this way at once. Nothing sees that
+                              // fleet-wide pattern unless an operator gets a log to search for.
+                              Effect.logWarning('bank-sync/test: Fio token decrypt failed').pipe(
+                                Effect.annotateLogs({ teamId }),
+                                Effect.as(testResult('invalid')),
+                              ),
+                        onSuccess: (token) => probeFio(teamId, token),
                       }),
                     ),
                 }),

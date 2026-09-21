@@ -256,6 +256,24 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // B1 — a UI button must NEVER call `recordSuccess`. That would clear `last_error_code`, and
+  // `bankSyncStatus.ts:70` (`if (Option.isNone(input.lastErrorCode)) return 'ok'`) ranks the card
+  // `ok` off that alone. The probe's window is 2 days; the poller's is 14 (`BankSyncPoller.ts:39`,
+  // `computeWindow` :64-73), so a 200 on the probe is NOT evidence the import works. It would also
+  // reset `last_success_at`, the `silenceBaseline` for the D11 `invalid` rank (:73), letting
+  // repeated clicks suppress `invalid` forever; and it does not clear `coverage_warning`.
+  // This does 100% of the useful work — un-sticking the exponential poll backoff that
+  // `findPollableQuery` (:84-92) filters on — and touches nothing D11 reads.
+  const clearPollBackoffQuery = SqlSchema.void({
+    Request: Team.TeamId,
+    execute: (teamId) => sql`
+      UPDATE bank_sync_config SET next_attempt_at = NULL, updated_at = now()
+       WHERE team_id = ${teamId}
+    `,
+  });
+  const clearPollBackoff = (teamId: Team.TeamId) =>
+    clearPollBackoffQuery(teamId).pipe(catchSqlErrors);
+
   const upsertStatementPeriodQuery = SqlSchema.void({
     Request: Schema.Struct({
       team_id: Team.TeamId,
@@ -358,6 +376,16 @@ const make = Effect.gen(function* () {
   // independent of `FioApiClient`. Keep the two arithmetically identical — this one MUST carry the
   // same `Math.ceil` round-up-never-down fix as `FioApiClient.ts`'s copy, or wiring this one in
   // later would silently reintroduce a sub-30s throttle.
+  //
+  // `FioApiClient.ts`'s copy additionally carries a `maxWaitSeconds` budget guard on the conflict
+  // `WHERE` clause (`/bank-sync/test`'s atomic throttle pre-check). That guard is intentionally
+  // NOT mirrored here: this method has no caller that wants a "busy beyond budget" verdict (its
+  // only consumer is 102/102b, which assert the autocommit property alone, not the budget), and
+  // mirroring it would mean either threading a `FioRateLimited`-shaped failure through a
+  // repository that otherwise never fails with a Fio-domain error, or silently swallowing the
+  // "no row returned" case — both worse than the small, documented divergence here. If this
+  // method ever gains a real caller that needs the budget check, add the identical `WHERE`
+  // guard from `FioApiClient.ts` at that point, not before.
   const reserveThrottleSlot = (tokenFingerprint: string) =>
     sql<{ readonly wait_seconds: number | string }>`
       INSERT INTO fio_token_throttle (token_fingerprint, next_call_allowed_at)
@@ -444,6 +472,7 @@ const make = Effect.gen(function* () {
     recordSuccess,
     recordFailure,
     recordCoverageGap,
+    clearPollBackoff,
     upsertStatementPeriod,
     findStatementPeriods,
     updateBackfillProgress,

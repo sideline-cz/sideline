@@ -246,6 +246,12 @@ const runTeamCycle = (config: BankSyncConfig.BankSyncConfig, deps: TeamDeps): Ef
             Effect.catchTag('FioNotConfigured', () =>
               deps.configRepo.recordFailure(config.team_id, 'not_configured'),
             ),
+            // `'unreachable'` is deliberately NOT `'fio_error'`, so `isFioError`
+            // (`bankSyncStatus.ts`) stays false and the config lands at `sync_failing` rather than
+            // escalating to `invalid` — a transport blip is not evidence the token is dead.
+            Effect.catchTag('FioUnreachable', () =>
+              deps.configRepo.recordFailure(config.team_id, 'unreachable'),
+            ),
           ),
       }),
     ),
