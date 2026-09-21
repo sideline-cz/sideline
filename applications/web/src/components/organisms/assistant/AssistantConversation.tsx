@@ -40,6 +40,7 @@ import {
 import { Button } from '~/components/ui/button.js';
 import { Separator } from '~/components/ui/separator.js';
 import { useFormatDate } from '~/hooks/useFormatDate.js';
+import { toChatMessages } from '~/lib/assistant/chatMessages.js';
 import { degradedReasonLabels } from '~/lib/assistant/entityRoutes.js';
 import { buildHistory, type HistoryTurn } from '~/lib/assistant/history.js';
 import { parseAnswer } from '~/lib/assistant/parseAnswer.js';
@@ -187,7 +188,7 @@ export function AssistantConversation({ teamId }: AssistantConversationProps) {
           { id: finalEntryId, role: 'user', content: userContent },
         ]),
       );
-      const messages = built.messages.map(({ role, content }) => ({ role, content }));
+      const messages = toChatMessages(built.messages);
 
       setSubmitting(true);
 

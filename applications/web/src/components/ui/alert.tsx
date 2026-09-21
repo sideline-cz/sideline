@@ -9,8 +9,11 @@ const alertVariants = cva(
     variants: {
       variant: {
         default: "bg-card text-card-foreground",
+        // `--card` and `--background` are the same value in both themes, so `bg-card` here made
+        // the destructive variant visually identical to `default` — a tint and a matching border,
+        // mirroring how `warning` is built, is what makes it read as an error.
         destructive:
-          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 [&>svg]:text-current",
+          "bg-destructive/10 border-destructive/25 text-destructive *:data-[slot=alert-description]:text-destructive/90 [&>svg]:text-current",
         warning:
           "bg-warning text-warning-foreground border-warning-foreground/20 [&>svg]:text-current",
       },
