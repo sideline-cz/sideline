@@ -303,7 +303,7 @@ Named permission bundles defined per team. Built-in roles (Admin, Captain, Playe
 
 **Unique**: `idx_roles_team_name` on `(team_id, name)` (unique index)
 
-**Notes**: `is_archived` added in migration `1741000002`. Built-in roles cannot be deleted but can be archived.
+**Notes**: `is_archived` added in migration `1741000002`. Built-in roles cannot be deleted but can be archived. Custom roles are soft-deleted (`is_archived = true`, `member_roles`/`role_groups`/`role_permissions` rows untouched); the effective-roles derivation (see `role_groups` below) filters `is_archived` on every read, so an archived role stops granting permissions immediately.
 
 ---
 
@@ -396,7 +396,7 @@ Many-to-many junction granting a role to every member of a group.
 
 **Indexes**: `idx_role_groups_group` on `(group_id)`
 
-**Notes**: A team member's **effective roles** are `member_roles` (direct grants) UNION the roles reachable via `group_members` → a recursive walk up `groups.parent_id` (the member's group and all its ancestors) → `role_groups` — implemented once in `applications/server/src/repositories/effectiveRoles.ts` and used by every roster/member/RSVP-eligibility read (see that file's header and `applications/server/AGENTS.md`). Archiving a group (`groups.is_archived = true`) severs inheritance: the ancestor walk refuses to walk past an archived group, so an archived group in the middle of a chain also cuts off roles granted by groups further up. Removing a member's *direct* `member_roles` row does not revoke a role still held via a group (`source: 'both'` in `Roster.RosterPlayer.effectiveRoles`).
+**Notes**: A team member's **effective roles** are `member_roles` (direct grants) UNION the roles reachable via `group_members` → a recursive walk up `groups.parent_id` (the member's group and all its ancestors) → `role_groups` — implemented once in `applications/server/src/repositories/effectiveRoles.ts` and used by every roster/member/RSVP-eligibility read (see that file's header and `applications/server/AGENTS.md`). Archiving a group (`groups.is_archived = true`) severs inheritance: the ancestor walk refuses to walk past an archived group, so an archived group in the middle of a chain also cuts off roles granted by groups further up. Archiving a role (`roles.is_archived = true`) also stops it from granting anything: both the direct (`member_roles`) and group-inherited (`role_groups`) joins are filtered on `roles.is_archived = false`, so a soft-deleted role (`DELETE /teams/:teamId/roles/:roleId` — a `roles` UPDATE, not a row delete) immediately stops counting toward any member's permissions even though the `member_roles`/`role_groups` rows pointing at it are never removed. Removing a member's *direct* `member_roles` row does not revoke a role still held via a group (`source: 'both'` in `Roster.RosterPlayer.effectiveRoles`).
 
 ---
 

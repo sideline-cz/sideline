@@ -7,8 +7,9 @@
 //
 //   - `findEffectiveRolesForMembers(memberIds)` — one row per (member, role) across MANY members
 //     in a single query, built on the same `effectiveRolesFrom` fragment as
-//     `findEffectiveRoleIdsForMemberQuery`, but additionally joined to `roles` with
-//     `is_archived = false` (see the divergence test below).
+//     `findEffectiveRoleIdsForMemberQuery`. It originally bolted on its own `roles` join with
+//     `is_archived = false`; `fix/archived-roles-grant-permissions` moved that filter into the
+//     fragment, so the two queries no longer diverge and the local join is gone.
 //   - `findGrantedRolePairsForMembers(memberIds)` — the batched form of
 //     `member_role_grants` lookups, analogous to `findGrantedRoleIds` but for many members.
 //
@@ -171,7 +172,7 @@ describe('TeamMembersRepository.findEffectiveRolesForMembers', () => {
   );
 
   it.effect(
-    'excludes a role that is archived (divergence from findEffectiveRoleIdsForMember)',
+    'excludes a role that is archived (now via the shared fragment, not a local join)',
     () =>
       Effect.gen(function* () {
         const ownerId = yield* createUser(nextDiscordId(), 'batch-owner-3');
@@ -199,11 +200,12 @@ describe('TeamMembersRepository.findEffectiveRolesForMembers', () => {
     }).pipe(Effect.provide(TestLayer)),
   );
 
-  // Anti-divergence test: agrees with `findEffectiveRoleIdsForMember` member-by-member, EXCEPT
-  // for archived roles — `findEffectiveRoleIdsForMemberQuery` has no `roles.is_archived` join
-  // (`TeamMembersRepository.ts:233-245`), so the two legitimately diverge there. This fixture
-  // uses only non-archived roles so the comparison is exact.
-  it.effect('matches findEffectiveRoleIdsForMember per member, for non-archived roles', () =>
+  // Anti-divergence test: agrees with `findEffectiveRoleIdsForMember` member-by-member. This used
+  // to carry an archived-role exception, because only the batched query filtered
+  // `roles.is_archived`; both now inherit that filter from `effectiveRolesFrom`, so they agree on
+  // archived roles too (asserted in `archivedRoleGrantsNothing.test.ts`). This fixture keeps its
+  // non-archived shape and stays an exact comparison.
+  it.effect('matches findEffectiveRoleIdsForMember per member', () =>
     Effect.gen(function* () {
       const ownerId = yield* createUser(nextDiscordId(), 'batch-owner-4');
       const team = yield* createTeam(nextDiscordId(), ownerId);

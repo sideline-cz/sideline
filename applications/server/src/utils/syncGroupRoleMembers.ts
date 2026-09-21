@@ -18,11 +18,13 @@ import { MAX_ROLE_SYNC_EMISSIONS_PER_MEMBER } from '~/utils/syncMemberDiscordRol
  * `addGroupMember` / `removeGroupMember` pass `Effect.succeed([target])` as `withGroupRoleSync`'s
  * `targets` — a single already-known member, no descendant walk needed — rather than a bespoke
  * variant that reused the caller's already-loaded `RosterEntry.effective_roles` as the BEFORE
- * snapshot: that field is computed via `effectiveRolesAggLateral` (`effectiveRoles.ts`), which,
- * unlike `findEffectiveRolesForMembers` below, does NOT filter `is_archived` roles, so it disagreed
- * with the AFTER snapshot for an archived-but-still-held role. One extra
- * `findEffectiveRolesForMembers` round trip per `addGroupMember` call is worth not having two
- * definitions of "effective roles" feeding one diff.
+ * snapshot. Both sides now derive from the same `effectiveRolesFrom` fragment (which filters
+ * archived roles as of `fix/archived-roles-grant-permissions`, so the archived-but-still-held
+ * role that once made the two snapshots disagree no longer can), but the BEFORE snapshot still
+ * goes through `findEffectiveRolesForMembers` rather than the roster DTO: a display DTO is not a
+ * decision input (see "Authorization Decisions Must Read a Membership Query, Never a Roster DTO"
+ * in `applications/server/AGENTS.md`), and one extra round trip per `addGroupMember` call is worth
+ * not having two definitions of "effective roles" feeding one diff.
  *
  * The design:
  *

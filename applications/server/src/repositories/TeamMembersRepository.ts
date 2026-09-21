@@ -283,14 +283,13 @@ const make = Effect.gen(function* () {
   // `effectiveRolesFrom` fragment (see "Effective Roles Are Derived In Exactly One Place" in
   // `applications/server/AGENTS.md`) — never a second hand-rolled ancestor walk.
   //
-  // Additionally joins `roles r ON r.id = er.role_id AND r.is_archived = false` —
-  // `effectiveRolesFrom` itself does not filter archived roles, while `RolesRepository.findRoleById`
-  // does (`RolesRepository.ts`). `findEffectiveRoleIdsForMemberQuery` above and
-  // `syncMemberDiscordRoles.ts` / `reconcileMemberDiscordRoles.ts` both skip a role whose
-  // `findRoleById` returns `None`; this join reproduces that same behaviour in one statement
-  // instead of a per-role lookup, which is why this method legitimately diverges from
-  // `findEffectiveRoleIdsForMemberQuery` for an archived role (see this repository's integration
-  // test `TeamMembersRepository.batchEffectiveRoles.test.ts`).
+  // This used to bolt on its own `JOIN roles r ON r.id = er.role_id AND r.is_archived = false`,
+  // because `effectiveRolesFrom` did not filter archived roles and so disagreed with
+  // `RolesRepository.findRoleById`. The filter now lives in the fragment itself (decision 2 of
+  // `effectiveRoles.ts`'s header), so this query agrees with `findEffectiveRoleIdsForMemberQuery`
+  // above — and with every other splice site — for free. Do NOT re-add a per-caller archived-role
+  // join: that divergence is what made `syncGroupRoleMembers.ts`'s before/after diff disagree with
+  // itself for an archived-but-still-held role.
   const findEffectiveRolesForMembersQuery = SqlSchema.findAll({
     Request: Schema.Array(TeamMember.TeamMemberId),
     Result: BatchEffectiveRoleRow,
@@ -298,7 +297,6 @@ const make = Effect.gen(function* () {
       SELECT tm.id AS team_member_id, er.role_id AS role_id, er.name AS role_name
       FROM team_members tm
       JOIN LATERAL ${sql.unsafe(effectiveRolesFrom('tm'))} er ON true
-      JOIN roles r ON r.id = er.role_id AND r.is_archived = false
       WHERE tm.id IN ${sql.in(memberIds)}
     `,
   });

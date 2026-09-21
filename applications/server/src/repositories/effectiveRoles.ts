@@ -22,7 +22,7 @@
  * `'direct'`). The row source already dedupes to one row per `role_id` (`GROUP BY`), so
  * aggregates built on top of it never need their own `DISTINCT role_id` handling.
  *
- * Two decisions baked into the ancestor walk, both deliberate:
+ * Three decisions baked into this fragment, all deliberate:
  *
  * 1. **Archiving a group severs the chain, exactly like every other recursive group
  *    query in `GroupsRepository.ts`** (e.g. `countMembersForGroup`,
@@ -39,7 +39,28 @@
  *    `deleteGroup` only sets `is_archived` (it never deletes `group_members` /
  *    `role_groups`), so without either filter an "archived" group (or one of its
  *    ancestors) would keep granting.
- * 2. **Cycle guard.** `groups.parent_id` has no DB-level acyclicity constraint, so the
+ * 2. **Archiving a ROLE revokes it everywhere, via `AND r.is_archived = false` on BOTH
+ *    `JOIN roles r` clauses (direct and group-inherited).** `deleteRole` (`api/role.ts`)
+ *    only calls `RolesRepository.archiveRoleById` — `UPDATE roles SET is_archived =
+ *    true`, never a delete of `member_roles` / `role_groups` / `role_permissions` — so
+ *    without this filter an archived role kept granting its permissions to everyone
+ *    holding it. `deleteRole`'s `RoleInUse` guard (`getMemberCountForRole > 0`, backed by
+ *    `RolesRepository.countMembersForRole`, which splices THIS fragment and so already
+ *    counts group-inherited holders) only makes that state rare, not impossible — it is a
+ *    point-in-time count, and `archiveRoleById` deletes no `role_groups` row: a role
+ *    attached to a group that is EMPTY at delete time passes the guard and starts
+ *    granting again the moment someone joins that group. Rows predating the guard's own
+ *    group-inheritance fix, a holder reachable only through an archived group (excluded
+ *    from the count by construction), and an `assignRole` landing between the guard's
+ *    read and the archive (`deleteRole` spans the two with no transaction) reach it too.
+ *    The filter belongs HERE, on the one fragment every "which roles/permissions does
+ *    this member hold?" query splices, rather than as a
+ *    `JOIN roles ... AND r.is_archived = false` bolted onto
+ *    individual callers — `TeamMembersRepository.findEffectiveRolesForMembersQuery`
+ *    carried exactly such a bolt-on, making it the only EFFECTIVE-ROLES query that
+ *    revoked an archived role, so it disagreed with its own per-member sibling
+ *    `findEffectiveRoleIdsForMemberQuery` (see `syncGroupRoleMembers.ts`'s header).
+ * 3. **Cycle guard.** `groups.parent_id` has no DB-level acyclicity constraint, so the
  *    recursive walk carries a `depth` column and stops at `depth < 32` — a corrupted or
  *    maliciously-edited parent chain terminates the query instead of looping forever.
  *
@@ -78,7 +99,7 @@ export const effectiveRolesFrom = (tm: string): string => `
       SELECT r.id AS role_id, r.name, r.is_built_in, r.team_id,
              true AS via_direct, false AS via_group, NULL::text AS group_name
       FROM member_roles mr
-      JOIN roles r ON r.id = mr.role_id
+      JOIN roles r ON r.id = mr.role_id AND r.is_archived = false
       WHERE mr.team_member_id = ${tm}.id
       UNION ALL
       SELECT r.id AS role_id, r.name, r.is_built_in, r.team_id,
@@ -100,7 +121,7 @@ export const effectiveRolesFrom = (tm: string): string => `
       ) anc ON true
       JOIN groups g ON g.id = anc.id AND g.is_archived = false AND g.team_id = ${tm}.team_id
       JOIN role_groups rg ON rg.group_id = g.id
-      JOIN roles r ON r.id = rg.role_id
+      JOIN roles r ON r.id = rg.role_id AND r.is_archived = false
       WHERE gm.team_member_id = ${tm}.id
     ) combined
     GROUP BY combined.role_id, combined.name, combined.is_built_in, combined.team_id
