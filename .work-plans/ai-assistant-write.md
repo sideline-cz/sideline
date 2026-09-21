@@ -105,18 +105,41 @@ forever, with no error and no log line. Taking an id above a not-yet-shipped mig
 - Taking `1792000000` for PR B means `1791800000` can **never** run in any environment where PR B
   lands first — i.e. exactly the bug the two-release split exists to prevent, inverted.
 
+**The constraint, stated correctly:** because the migrator skips anything at or below the highest
+*applied* id, **any two pending migrations have an ordering dependency — whichever deploys first
+must hold the lower id.** Renumbering does not remove that dependency; it only chooses which
+migration is allowed to go first. The previous revision of this section missed that, and
+recommended a renumber (option b below) on the false premise that it "removes a release-ordering
+dependency". It does not: if PR B took `1791800000` and the conversion moved to `1791900000`, the
+conversion shipping first would silently skip PR B's migration — the identical trap, mirrored, at a
+cost of 16 documentation edits.
+
 **Options:**
 
 | | Option | Cost | Risk |
 |---|---|---|---|
-| a | Block PR B behind the series-time release. Ship `1791800000` first, then take `1791900000` here. | Schedule dependency; PR B waits. | None technical. |
-| b | **PR B takes `1791800000`; the reserved id for the pending conversion moves to `1791900000`.** | 16 prose references in 12 files (see below). Zero behaviour change. | Merge conflict if the series-time PR is already cut against `1791800000`. |
-| c | Ask the series-time migration's owner to pick. | A round trip. | None. |
+| a | **Leave `1791800000` reserved. PR B takes an id above it and must not deploy before the conversion.** | A release-ordering constraint PR B must respect. Zero doc churn. | PR B deploying first silently kills the conversion. |
+| b | PR B takes `1791800000`; the conversion moves to `1791900000`. | 16 prose references in 12 files (listed below). | Identical ordering trap, reversed — plus merge conflict if the series PR is already cut. |
+| c | PR B takes an id *between* `1791700000` and `1791800000` (e.g. `1791750000`) and deploys first. | Zero doc churn. | Inverts the constraint: the conversion may then not ship before PR B. |
 
-**My recommendation: (b), unless the series-time release is already cut.** The conversion
-migration is not in the tree, so "renumbering" it is a pure documentation edit, and (b) removes a
-release-ordering dependency from a feature branch that has none otherwise. Under (b), PR B must
-update every reference in the same commit:
+**Recommendation: (a).** `ai_action_proposals` is a standalone new table with no dependency on the
+series-time work, so PR B has no reason to claim a contested id. The conversion is the deferred half
+of a correctness fix that is already half-deployed — a recurring wall-clock time read as UTC is an
+hour wrong for half the year in every DST zone (`applications/server/AGENTS.md:1046`) — and it should
+not queue behind a multi-week feature.
+
+**Concretely: do not pick PR B's id now. Pick it at merge time**, as strictly greater than the
+highest id then in the tree. If the conversion has landed by then, that is `1791900000` or above and
+nothing further is needed. If it has not, PR B still takes an id above `1791800000` and the only
+requirement is that PR B's migration is not *deployed* to an environment before the conversion
+reaches it. That is a release-sequencing note for the deploy, not a code change — and it is the same
+rule PR A's plan already used ("take the next id at merge time, not branch time").
+
+**The one case that needs a human:** both merging inside the same deploy window. That warrants a
+heads-up to the conversion's owner, not a renumber.
+
+<details>
+<summary>The 16 references option (b) would have to update, kept for reference</summary>
 
 ```
 applications/server/AGENTS.md:1046, :1050, :1054, :1055
@@ -132,8 +155,10 @@ docs/deployment.md:369
 docs/database.md:552, :2028
 ```
 
-**Until this is decided, the migration filename below is written as `<RESERVED_ID>`.** Do not
-guess it. Resolve the decision, then do one find-and-replace.
+</details>
+
+**The migration filename below is written as `<RESERVED_ID>`.** Resolve it at merge time per the
+recommendation above, then do one find-and-replace.
 
 ---
 
