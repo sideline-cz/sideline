@@ -1266,6 +1266,16 @@ Rules:
 2. **Put the business gate where it can be classified and recorded**: the bot's `classifyInviteGeneratorError` (`applications/bot/src/rcp/inviteGenerator/errorClassifier.ts`) for conditions Discord reports, or an explicit `markFailed(...)` short-circuit before the Discord call for conditions the selected row already proves.
 3. **Turning a business filter into a failure path requires widening the `Result` schema in the same change.** `findPending` decodes into `PendingAcceptanceRow`, whose `welcome_channel_id` is a non-nullable `Discord.Snowflake`; dropping `AND t.welcome_channel_id IS NOT NULL` without first making that field `Schema.OptionFromNullOr(Discord.Snowflake)` turns a silent skip into a decode defect, which is worse.
 
+### A Candidate Query's Age Cutoff Must Measure From The Event's Effective End
+
+Any predicate that asks *"is this event over, and how long ago did it end"* MUST read the event's effective end — `COALESCE(e.end_at, e.start_at)` — never bare `e.start_at`. `end_at` is nullable, so the `COALESCE` is what makes the expression total; on a multi-day event the two columns are days apart, and a window bound written on `start_at` silently drops events whose end is still inside the window.
+
+`findAllDayEventsPastLastLocalDayStmt` (`src/repositories/EventsRepository.ts`) carried `AND e.start_at > (${nowParam}::timestamptz) - INTERVAL '7 days'` while the "is its last local day past?" predicate on the line above already used `COALESCE(e.end_at, e.start_at)`. An all-day event spanning more than 7 days therefore ended inside the retention window but started outside it, so the sweep never selected it and `missed_rsvp_counted_at` stayed armed (`NULL`) forever — no error, no log line. `findEndedTrainingsAt` in the same file uses `COALESCE(e.end_at, e.start_at)` on **both** its "has it ended" predicate and its 7-day bound; that is the shape to copy.
+
+The converse predicate is not symmetric: "has this event begun" stays `e.start_at <= NOW()` and must never be given a `COALESCE` — see rule 4 of "Idempotent Counter Increment Folded Into the `active`→`started` Status Flip".
+
+Regression coverage: case 10 of `test/integration/services/EventStartCron.deferred.test.ts` (an all-day event spanning 8 local days must still be swept).
+
 ## iCal Feed Generation (`src/api/ical.ts`)
 
 The `getICalFeed` endpoint builds a single `VCALENDAR` containing both user events and payment-due VEVENTs. Every interpolated user-supplied string MUST pass through `escapeICalText` defined at the top of `src/api/ical.ts`:
