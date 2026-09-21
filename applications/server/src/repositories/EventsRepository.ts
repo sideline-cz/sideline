@@ -360,7 +360,7 @@ const make = Effect.gen(function* () {
           AND e.missed_rsvp_counted_at IS NULL
           AND (COALESCE(e.end_at, e.start_at) AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date
               < ((${nowParam}::timestamptz) AT TIME ZONE COALESCE(ts.timezone, 'Europe/Prague'))::date
-          AND e.start_at > (${nowParam}::timestamptz) - INTERVAL '7 days'
+          AND COALESCE(e.end_at, e.start_at) > (${nowParam}::timestamptz) - INTERVAL '7 days'
       `,
     });
 
