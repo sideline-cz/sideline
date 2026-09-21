@@ -2163,7 +2163,7 @@ Submits or updates the authenticated user's RSVP for an event.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `response` | `RsvpResponse` | Yes | `"yes"`, `"no"`, `"maybe"`, or `"coming_later"` |
-| `message` | `string \| null` | Yes | Message to accompany the RSVP. Optional for `"yes"`/`"no"`/`"maybe"`; required (non-blank, after falling back to any existing stored message) for `"coming_later"` |
+| `message` | `string \| null` | Yes | Message to accompany the RSVP. `null` leaves any already-stored message untouched (an idempotent resubmit keeps it); a blank/whitespace-only string clears it. Optional for `"yes"`/`"no"`/`"maybe"`; required (non-blank, after falling back to any existing stored message) for `"coming_later"` — so a blank/whitespace clear is rejected with `EventRsvpMessageRequired` on that response |
 
 **Response:** `204 No Content`
 
