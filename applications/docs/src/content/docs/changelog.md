@@ -5,6 +5,10 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-22 — Fix: clearing your RSVP note on the web didn't stick
+
+If you'd added a note to your RSVP (for example your ETA on **Coming later**) and later cleared the text box and clicked **Save note** from the web app, your old note came right back — the web app never actually told the server to remove it. Clearing the note field and saving now removes it, as expected. This only affected the web app; clearing a note from Discord already worked. **Coming later** still requires a non-blank note, so it can't be cleared while that response is selected.
+
 ## 2026-09-22 — Fix: editing your RSVP message in Discord no longer starts blank
 
 Clicking **Edit message** on an RSVP now opens the modal pre-filled with the note you already saved, instead of an empty box you had to retype from scratch. If Sideline can't fetch your current note in time, the modal still opens — just blank, the same as before — rather than failing the click.

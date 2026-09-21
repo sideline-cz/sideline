@@ -37,6 +37,11 @@ export class EventRsvpDetail extends Schema.Class<EventRsvpDetail>('EventRsvpDet
 
 export const SubmitRsvpRequest = Schema.Struct({
   response: RsvpResponse,
+  // The note. `null` leaves whatever note is already stored untouched (so an idempotent
+  // re-submit of the same response keeps it); a blank string clears it. This surface has no
+  // separate `clearMessage` flag like the RPC one — blank *is* the clear signal, and a clear
+  // on a `coming_later` RSVP is rejected with `RsvpMessageRequired`. A line comment, not JSDoc:
+  // the barrel codegen hoists a file's first doc block onto its `export * as` re-export.
   message: Schema.OptionFromNullOr(Schema.String),
 });
 export type SubmitRsvpRequest = Schema.Schema.Type<typeof SubmitRsvpRequest>;

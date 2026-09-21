@@ -160,8 +160,17 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
             ),
           ),
         )
-        .handle('submitRsvp', ({ params: { teamId, eventId }, payload }) =>
-          Effect.Do.pipe(
+        .handle('submitRsvp', ({ params: { teamId, eventId }, payload }) => {
+          // This surface has no `clearMessage` flag (the bot's RPC one does), so the two intents
+          // ride on the message field itself: `null` means "leave the stored note alone" — the
+          // repository's `COALESCE(message, event_rsvps.message)` keeps it, which an idempotent
+          // button re-click relies on — while an explicitly blank string means "clear it". Without
+          // that distinction the clearing branch is unreachable over HTTP and the web UI can never
+          // remove a note. A blank clear on `coming_later` is still rejected by the guard below.
+          const clearMessage =
+            Option.isSome(payload.message) && payload.message.value.trim().length === 0;
+          const note = clearMessage ? Option.none() : payload.message;
+          return Effect.Do.pipe(
             Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
@@ -203,15 +212,15 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
             Effect.tap(({ priorRsvp }) =>
               isRsvpMessageRequiredAndMissing(
                 payload.response,
-                false,
-                payload.message,
+                clearMessage,
+                note,
                 Option.flatMap(priorRsvp, (r) => r.message),
               )
                 ? Effect.fail(messageRequired)
                 : Effect.void,
             ),
             Effect.bind('upsertResult', ({ membership }) =>
-              rsvps.upsertRsvp(eventId, membership.id, payload.response, payload.message).pipe(
+              rsvps.upsertRsvp(eventId, membership.id, payload.response, note, clearMessage).pipe(
                 Effect.catchTag(
                   'NoSuchElementError',
                   LogicError.withMessage(() => 'Failed upserting RSVP — no row returned'),
@@ -255,8 +264,8 @@ export const EventRsvpApiLive = HttpApiBuilder.group(Api, 'eventRsvp', (handlers
             ),
             Effect.tap(({ event }) => markPersonalMessagesDirtyBestEffort(events, event.id)),
             Effect.asVoid,
-          ),
-        )
+          );
+        })
         .handle('getNonResponders', ({ params: { teamId, eventId } }) =>
           Effect.Do.pipe(
             Effect.bind('currentUser', () => Auth.CurrentUserContext.asEffect()),

@@ -1314,6 +1314,64 @@ describe('Event RSVP API', () => {
       expect(response.status).toBe(204);
     });
 
+    // ------------------------------------------------------------
+    // Clearing a note. `null` keeps the stored note (COALESCE), an
+    // explicitly blank message wipes it — the only clearing signal
+    // this surface has, and the one the web UI's note field uses.
+    // ------------------------------------------------------------
+
+    const putRsvp = (body: { response: string; message: string | null }) =>
+      handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer user-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    const getMyMessage = async () => {
+      const response = await handler(
+        new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvps`, {
+          headers: { Authorization: 'Bearer user-token' },
+        }),
+      );
+      return (await response.json()).myMessage;
+    };
+
+    it('clears a stored note when the message is an explicitly empty string', async () => {
+      expect((await putRsvp({ response: 'yes', message: 'Bringing snacks!' })).status).toBe(204);
+      expect(await getMyMessage()).toBe('Bringing snacks!');
+
+      expect((await putRsvp({ response: 'yes', message: '' })).status).toBe(204);
+      expect(await getMyMessage()).toBeNull();
+    });
+
+    it('clears a stored note when the message is whitespace-only', async () => {
+      expect((await putRsvp({ response: 'yes', message: 'Bringing snacks!' })).status).toBe(204);
+
+      expect((await putRsvp({ response: 'yes', message: '   ' })).status).toBe(204);
+      expect(await getMyMessage()).toBeNull();
+    });
+
+    it('keeps a stored note when the message is null', async () => {
+      expect((await putRsvp({ response: 'yes', message: 'Bringing snacks!' })).status).toBe(204);
+
+      expect((await putRsvp({ response: 'no', message: null })).status).toBe(204);
+      expect(await getMyMessage()).toBe('Bringing snacks!');
+    });
+
+    it('refuses to clear the note of a coming_later RSVP → 400 EventRsvpMessageRequired', async () => {
+      expect((await putRsvp({ response: 'coming_later', message: 'On my way' })).status).toBe(204);
+
+      const response = await putRsvp({ response: 'coming_later', message: '' });
+      expect(response.status).toBe(400);
+      expect((await response.json())._tag).toBe('EventRsvpMessageRequired');
+      expect(await getMyMessage()).toBe('On my way');
+    });
+
     it('non-member cannot RSVP (403)', async () => {
       const response = await handler(
         new Request(`${BASE}/${TEST_EVENT_ACTIVE}/rsvp`, {
