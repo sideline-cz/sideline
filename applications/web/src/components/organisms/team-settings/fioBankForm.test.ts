@@ -50,6 +50,7 @@ import { describe, expect, it } from 'vitest';
 import {
   FIO_BANK_CODE,
   type FioBankFormValues,
+  fioAccountChanged,
   fioBankFormFrom,
   fioBankRequestFrom,
   fioTokenPayload,
@@ -335,5 +336,39 @@ describe('fioBankRequestFrom — encodes through the real API contract', () => {
 
   it('encodes when the stored token is left alone', async () => {
     expect(await encode(build(Option.none()))).toBe('ok');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fioAccountChanged — plan `.work-plans/iban-cross-check.md` §7 / §9.F
+//
+// The Test button probes the SAVED config, so an edited-but-unsaved account makes the
+// `account_mismatch` verdict a lie (fixing the field, pressing Test, and seeing the SAME
+// mismatch because the save never happened). `fioAccountChanged` is the dirty-account gate that
+// disables Test the same way `tokenChanged` already does.
+// ---------------------------------------------------------------------------
+
+describe('fioAccountChanged', () => {
+  it('is false for identical values', () => {
+    expect(fioAccountChanged(BASE, { ...BASE })).toBe(false);
+  });
+
+  it('is true when accountNumber differs', () => {
+    const values = { ...BASE, accountNumber: '2703474850' };
+    expect(fioAccountChanged(BASE, values)).toBe(true);
+  });
+
+  it('is true when accountPrefix differs, including the empty-prefix false-mismatch case ("" -> "19")', () => {
+    // This is the realistic false-mismatch surface the whole feature hinges on (plan §8): Fio
+    // never sends the prefix back, so a club that typed the account number with an empty prefix
+    // field gets a permanent mismatch until they fill it in and re-save.
+    const saved: FioBankFormValues = { ...BASE, accountPrefix: '' };
+    const values: FioBankFormValues = { ...BASE, accountPrefix: '19' };
+    expect(fioAccountChanged(saved, values)).toBe(true);
+  });
+
+  it('is false when only an unrelated field (recipientName) differs', () => {
+    const values = { ...BASE, recipientName: 'Different Club, z.s.' };
+    expect(fioAccountChanged(BASE, values)).toBe(false);
   });
 });

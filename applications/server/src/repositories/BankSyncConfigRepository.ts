@@ -222,13 +222,19 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  // `coverage_warning` is only ever WRITTEN by `recordCoverageGap` and `recordAccountMismatch` —
+  // nothing else clears it, so without this a stale gap/mismatch message (the mismatch text is an
+  // imperative in the present tense: "Ingestion halted; fix the account number or the token")
+  // would outlive whatever produced it and mislead the next investigation indefinitely. A real
+  // success is exactly the signal that the previously-reported condition, whatever it was, no
+  // longer holds.
   const recordSuccessQuery = SqlSchema.void({
     Request: Team.TeamId,
     execute: (teamId) => sql`
       UPDATE bank_sync_config
       SET last_synced_at = now(), last_success_at = now(),
           consecutive_failure_count = 0, last_error_code = NULL, last_error_at = NULL,
-          next_attempt_at = NULL, updated_at = now()
+          next_attempt_at = NULL, coverage_warning = NULL, updated_at = now()
       WHERE team_id = ${teamId}
     `,
   });
@@ -251,6 +257,29 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
       UPDATE bank_sync_config
       SET last_error_code = 'coverage_gap', last_error_at = now(), coverage_warning = ${input.warning},
+          updated_at = now()
+      WHERE team_id = ${input.team_id}
+    `,
+  });
+
+  // A mismatch is a Fio SUCCESS we refuse to ingest. `recordSuccess` is therefore wrong (it clears
+  // `last_error_code`, which alone ranks the card `ok` — a silently halted import), and plain
+  // `recordFailure` loses the human-readable reason support needs. One UPDATE, so the error code
+  // and the warning can never disagree. `consecutive_failure_count` is deliberately NOT
+  // touched: that counter grades the TOKEN (it feeds the D11 `invalid` escalation's
+  // `>= 3` gate in `bankSyncStatus.ts`), and a mismatch is not evidence about the token — bumping
+  // it would let a run of mismatched polls poison the very count that is supposed to require
+  // three REAL Fio failures before telling the treasurer their token is dead. Backoff is a flat
+  // 6 hours, not exponential: the condition is terminal until a human edits the config, so growing
+  // the delay buys nothing, and a successful `/bank-sync/test` afterwards clears it
+  // (`clearPollBackoff`) well before that anyway.
+  const recordAccountMismatchQuery = SqlSchema.void({
+    Request: Schema.Struct({ team_id: Team.TeamId, warning: Schema.String }),
+    execute: (input) => sql`
+      UPDATE bank_sync_config
+      SET last_synced_at = now(), last_error_code = 'account_mismatch', last_error_at = now(),
+          coverage_warning = ${input.warning},
+          next_attempt_at = now() + interval '6 hours',
           updated_at = now()
       WHERE team_id = ${input.team_id}
     `,
@@ -411,6 +440,9 @@ const make = Effect.gen(function* () {
   const recordCoverageGap = (teamId: Team.TeamId, warning: string) =>
     recordCoverageGapQuery({ team_id: teamId, warning }).pipe(catchSqlErrors);
 
+  const recordAccountMismatch = (teamId: Team.TeamId, warning: string) =>
+    recordAccountMismatchQuery({ team_id: teamId, warning }).pipe(catchSqlErrors);
+
   const upsertStatementPeriod = (input: {
     readonly teamId: Team.TeamId;
     readonly dateStart: string;
@@ -472,6 +504,7 @@ const make = Effect.gen(function* () {
     recordSuccess,
     recordFailure,
     recordCoverageGap,
+    recordAccountMismatch,
     clearPollBackoff,
     upsertStatementPeriod,
     findStatementPeriods,

@@ -30,11 +30,13 @@ import {
 } from '~/repositories/BankTransactionsRepository.js';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 import { make as makeMatcher } from '~/services/BankTransactionMatcher.js';
+import { configuredIbanOf, isAccountMismatch } from '~/services/bankSyncAccount.js';
 import {
   makeReal as makeRealFioApiClient,
   makeStub as makeStubFioApiClient,
 } from '~/services/FioApiClient.js';
 import { FioSecretCrypto } from '~/services/FioSecretCrypto.js';
+import type { FioDecodedStatement } from '~/services/fioColumns.js';
 
 const SYNC_WINDOW_DAYS = 14; // module constant, not a user-facing knob (B-cut-4)
 const FIO_HISTORY_WALL_DAYS = 89; // Fio's 90-day limit, one day of slack
@@ -129,47 +131,55 @@ const fetchAndIngest = (
     Effect.bind('statement', ({ client }) =>
       client.fetchPeriod({ token, from: window.from, to: window.to, teamId: config.team_id }),
     ),
-    Effect.tap(({ statement }) =>
-      deps.txRepo.upsertMany(
-        config.team_id,
-        statement.movements.map(
-          (m): FioMovementInsert => ({
-            fio_movement_id: m.fioMovementId,
-            fio_order_id: m.orderId,
-            booked_on: m.bookedOn,
-            amount_minor: m.amountMinor,
-            currency: m.currency,
-            variable_symbol: m.variableSymbol,
-            constant_symbol: m.constantSymbol,
-            specific_symbol: m.specificSymbol,
-            counterparty_account: m.counterpartyAccount,
-            counterparty_bank_code: m.counterpartyBankCode,
-            counterparty_name: m.counterpartyName,
-            counterparty_bank_name: m.counterpartyBankName,
-            counterparty_bic: m.counterpartyBic,
-            payer_reference: m.payerReference,
-            message_for_recipient: m.messageForRecipient,
-            user_identification: m.userIdentification,
-            tx_type: m.txType,
-            entered_by: m.enteredBy,
-            specification: m.specification,
-            comment: m.comment,
-            raw: m.raw,
+    // One computation, one source of truth for the whole cycle — gates both writes below.
+    Effect.let('mismatch', ({ statement }) => isAccountMismatch(config, statement.info.iban)),
+    Effect.tap(({ statement, mismatch }) =>
+      mismatch
+        ? Effect.void
+        : deps.txRepo.upsertMany(
+            config.team_id,
+            statement.movements.map(
+              (m): FioMovementInsert => ({
+                fio_movement_id: m.fioMovementId,
+                fio_order_id: m.orderId,
+                booked_on: m.bookedOn,
+                amount_minor: m.amountMinor,
+                currency: m.currency,
+                variable_symbol: m.variableSymbol,
+                constant_symbol: m.constantSymbol,
+                specific_symbol: m.specificSymbol,
+                counterparty_account: m.counterpartyAccount,
+                counterparty_bank_code: m.counterpartyBankCode,
+                counterparty_name: m.counterpartyName,
+                counterparty_bank_name: m.counterpartyBankName,
+                counterparty_bic: m.counterpartyBic,
+                payer_reference: m.payerReference,
+                message_for_recipient: m.messageForRecipient,
+                user_identification: m.userIdentification,
+                tx_type: m.txType,
+                entered_by: m.enteredBy,
+                specification: m.specification,
+                comment: m.comment,
+                raw: m.raw,
+              }),
+            ),
+          ),
+    ),
+    // A period row from a foreign account poisons `deriveBalanceBefore` and the D13 continuity
+    // check with balances no ingested movement can ever explain — gated the same as `upsertMany`.
+    Effect.tap(({ statement, mismatch }) =>
+      mismatch
+        ? Effect.void
+        : deps.configRepo.upsertStatementPeriod({
+            teamId: config.team_id,
+            dateStart: statement.info.dateStart,
+            dateEnd: statement.info.dateEnd,
+            openingBalanceMinor: statement.info.openingBalanceMinor,
+            closingBalanceMinor: statement.info.closingBalanceMinor,
+            currency: statement.info.currency,
           }),
-        ),
-      ),
     ),
-    Effect.tap(({ statement }) =>
-      deps.configRepo.upsertStatementPeriod({
-        teamId: config.team_id,
-        dateStart: statement.info.dateStart,
-        dateEnd: statement.info.dateEnd,
-        openingBalanceMinor: statement.info.openingBalanceMinor,
-        closingBalanceMinor: statement.info.closingBalanceMinor,
-        currency: statement.info.currency,
-      }),
-    ),
-    Effect.map(({ statement }) => statement),
+    Effect.map(({ statement, mismatch }) => ({ statement, mismatch })),
   );
 
 // Runs the (self-contained) matcher over every freshly-ingested, still-unmatched incoming row.
@@ -200,6 +210,15 @@ const matchIngested = (
   );
 };
 
+// D10 — the warning carries both IBANs (club banking identifiers, printed on every QR code — not
+// secrets); NEVER the token or a URL. Both `Option`s are `Some` whenever `isAccountMismatch` is
+// true; the `'?'` fallbacks exist only so this builder is total.
+const accountMismatchWarning = (
+  config: BankSyncConfig.BankSyncConfig,
+  statement: FioDecodedStatement,
+): string =>
+  `Fio's token reads ${Option.getOrElse(statement.info.iban, () => '?')} but this team is configured as ${Option.getOrElse(configuredIbanOf(config), () => '?')}. Ingestion halted; fix the account number or the token.`;
+
 const runTeamCycle = (config: BankSyncConfig.BankSyncConfig, deps: TeamDeps): Effect.Effect<void> =>
   resolveTokenAndWindow(config, deps).pipe(
     Effect.flatMap(
@@ -208,21 +227,37 @@ const runTeamCycle = (config: BankSyncConfig.BankSyncConfig, deps: TeamDeps): Ef
         onNone: () => Effect.void,
         onSome: ({ token, window }) =>
           fetchAndIngest(config, deps, token, window).pipe(
-            Effect.tap(() => deps.configRepo.recordSuccess(config.team_id)),
-            Effect.tap(() =>
-              window.coverageGap
-                ? deps.configRepo.recordCoverageGap(
-                    config.team_id,
-                    `Outage exceeds the ${String(FIO_HISTORY_WALL_DAYS)}-day Fio history wall — run a backfill.`,
+            Effect.flatMap(({ statement, mismatch }) =>
+              mismatch
+                ? Effect.logError(
+                    'BankSyncPoller: account mismatch — ingestion halted for this team',
+                  ).pipe(
+                    Effect.annotateLogs({ teamId: config.team_id }),
+                    Effect.andThen(
+                      deps.configRepo.recordAccountMismatch(
+                        config.team_id,
+                        accountMismatchWarning(config, statement),
+                      ),
+                    ),
                   )
-                : Effect.void,
-            ),
-            Effect.tap((statement) =>
-              matchIngested(
-                config,
-                deps,
-                statement.movements.map((m) => m.fioMovementId),
-              ),
+                : Effect.Do.pipe(
+                    Effect.tap(() => deps.configRepo.recordSuccess(config.team_id)),
+                    Effect.tap(() =>
+                      window.coverageGap
+                        ? deps.configRepo.recordCoverageGap(
+                            config.team_id,
+                            `Outage exceeds the ${String(FIO_HISTORY_WALL_DAYS)}-day Fio history wall — run a backfill.`,
+                          )
+                        : Effect.void,
+                    ),
+                    Effect.tap(() =>
+                      matchIngested(
+                        config,
+                        deps,
+                        statement.movements.map((m) => m.fioMovementId),
+                      ),
+                    ),
+                  ),
             ),
             Effect.asVoid,
             Effect.catchTag('FioServerError', () =>
@@ -267,8 +302,14 @@ const processTeam = (
     Effect.flatMap((leaseOpt) =>
       Option.match(leaseOpt, {
         onNone: () => Effect.void,
-        onSome: () =>
-          runTeamCycle(config, deps).pipe(
+        // `claimLeaseQuery`'s `RETURNING` is the config AS OF the claim, not the `findPollable()`
+        // snapshot passed into `processTeam` — with `concurrency: 2` and a 4-minute cycle timeout
+        // that snapshot can be minutes stale. Using the stale one here would mean a treasurer's
+        // config save (which resets `next_attempt_at`) landing mid-cycle gets overwritten by this
+        // cycle's `recordAccountMismatch`/`recordFailure` against the OLD account, making the fix
+        // look like it didn't take.
+        onSome: (fresh) =>
+          runTeamCycle(fresh, deps).pipe(
             Effect.timeout(Duration.minutes(TEAM_CYCLE_TIMEOUT_MINUTES)),
             Effect.catchTag('TimeoutError', () =>
               deps.configRepo.recordFailure(config.team_id, 'timeout'),

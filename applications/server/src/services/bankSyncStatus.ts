@@ -2,7 +2,7 @@
  * D11 (B11) — status inference: a transient failure is not an expired token. Pure, no DB, no
  * Effect — a total function over already-fetched `bank_sync_config` facts and `now`.
  *
- * Six-rank ladder, first match wins. `expiringSoon` is additive and computed independently of
+ * Seven-rank ladder, first match wins. `expiringSoon` is additive and computed independently of
  * the ladder — NEVER suppressed by any rank, because a token that is both expiring AND failing
  * must report both facts.
  */
@@ -65,6 +65,15 @@ const computeStatus = (input: BankSyncStatusInput): BankSyncConfig.BankSyncStatu
 
   // 2 — misconfigured.
   if (input.lastErrorIsKeyMissing) return 'misconfigured';
+
+  // 2.5 — account_mismatch: the poller halted ingestion because Fio's `info.iban` does not match
+  // the IBAN computed from the configured account. Outranks `invalid`: the token demonstrably
+  // works, it just reads the wrong account, and telling the treasurer to replace it is the wrong
+  // instruction. Terminal — no retry count and no elapsed time clears it, and a config edit does
+  // NOT clear it either: `upsertQuery` resets `consecutive_failure_count`/`next_attempt_at` but
+  // `last_error_code` survives the save. What actually clears the rank is the next successful
+  // poll's `recordSuccess`.
+  if (Option.contains(input.lastErrorCode, 'account_mismatch')) return 'account_mismatch';
 
   if (Option.isNone(input.lastErrorCode)) return 'ok';
 

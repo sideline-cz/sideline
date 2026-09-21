@@ -140,15 +140,22 @@ const jsonResponse = (
     new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }),
   );
 
-/** A minimal, well-formed Fio statement — copied from `FioApiClient.test.ts` (`info.iban` is the
- * value T8 asserts the endpoint echoes back as `accountIban`). */
+/**
+ * A minimal, well-formed Fio statement. Deliberately DIVERGES from `FioApiClient.test.ts` /
+ * `fioColumns.test.ts`'s `CZ65…` vector — this file runs the account cross-check
+ * (`services/bankSyncAccount.ts`), so `info` must agree with `enableBankSync`'s default account
+ * (`2703474850/2010` -> `CZ7120100000002703474850`, plan `.work-plans/iban-cross-check.md` §9.D),
+ * or every probe test in this file that expects `status: 'ok'` becomes a mismatch test instead.
+ * `FioApiClient.test.ts`/`fioColumns.test.ts` keep the `CZ65…` vector because no comparison runs
+ * there. `info.iban` is the value T8 asserts the endpoint echoes back as `accountIban`.
+ */
 const validRawStatement = {
   accountStatement: {
     info: {
-      accountId: '2000145399',
-      bankId: '0800',
+      accountId: '2703474850',
+      bankId: '2010',
       currency: 'CZK',
-      iban: 'CZ6508000000192000145399',
+      iban: 'CZ7120100000002703474850',
       bic: 'GIBACZPX',
       openingBalance: 1000.0,
       closingBalance: 1000.0,
@@ -815,9 +822,150 @@ describe('bank-sync API — POST /bank-sync/test — status mapping (T8-T14)', (
           ok: true,
           status: 'ok',
           message: null,
-          accountIban: 'CZ6508000000192000145399',
+          accountIban: 'CZ7120100000002703474850',
         });
         expect(fioCalls).toBe(1);
+      }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  // Plan `.work-plans/iban-cross-check.md` §9.D — T8b-T8f, the account cross-check.
+  it.effect("T8b — account_mismatch: Fio's own IBAN disagrees with the configured account", () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const token = yield* encryptFioTestToken(TEST_TOKEN);
+      yield* enableBankSync(teamId, treasurerId, {
+        fioTokenEncrypted: Option.some(token),
+        accountNumber: '1265098001',
+        bankCode: '5500',
+      });
+      fioResponder = (request) => Effect.succeed(jsonResponse(request, 200, validRawStatement));
+
+      const { body } = yield* Effect.promise(() => postTest(teamId));
+      expect(body).toEqual({
+        ok: false,
+        status: 'account_mismatch',
+        message: null,
+        accountIban: 'CZ7120100000002703474850',
+      });
+      expect(fioCalls).toBe(1);
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect(
+    'T8c — case/whitespace-insensitive: a spaced, lower-cased matching IBAN is still ok',
+    () =>
+      Effect.gen(function* () {
+        const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+        const token = yield* encryptFioTestToken(TEST_TOKEN);
+        yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+        fioResponder = (request) =>
+          Effect.succeed(
+            jsonResponse(request, 200, {
+              accountStatement: {
+                ...validRawStatement.accountStatement,
+                info: {
+                  ...validRawStatement.accountStatement.info,
+                  iban: 'cz71 2010 0000 0027 0347 4850',
+                },
+              },
+            }),
+          );
+
+        const { body } = yield* Effect.promise(() => postTest(teamId));
+        expect(body).toMatchObject({ status: 'ok', ok: true });
+      }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('T8d — no configured account -> ok (no comparison is possible)', () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const token = yield* encryptFioTestToken(TEST_TOKEN);
+      // Migration `1792000001:57` forbids `enabled = true` with a null account, so the config is
+      // seeded disabled first and the account fields are nulled afterwards.
+      yield* enableBankSync(teamId, treasurerId, {
+        enabled: false,
+        fioTokenEncrypted: Option.some(token),
+      });
+      const sql = yield* SqlClient.SqlClient.asEffect();
+      yield* sql`UPDATE bank_sync_config SET account_number = NULL, bank_code = NULL WHERE team_id = ${teamId}`;
+      fioResponder = (request) => Effect.succeed(jsonResponse(request, 200, validRawStatement));
+
+      const { body } = yield* Effect.promise(() => postTest(teamId));
+      expect(body).toEqual({
+        ok: true,
+        status: 'ok',
+        message: null,
+        accountIban: 'CZ7120100000002703474850',
+      });
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect('T8e — Fio sent no iban at all -> ok (the absent side is not an accusation)', () =>
+    Effect.gen(function* () {
+      const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+      const token = yield* encryptFioTestToken(TEST_TOKEN);
+      yield* enableBankSync(teamId, treasurerId, { fioTokenEncrypted: Option.some(token) });
+      fioResponder = (request) =>
+        Effect.succeed(
+          jsonResponse(request, 200, {
+            accountStatement: {
+              ...validRawStatement.accountStatement,
+              info: { ...validRawStatement.accountStatement.info, iban: null },
+            },
+          }),
+        );
+
+      const { body } = yield* Effect.promise(() => postTest(teamId));
+      expect(body).toEqual({ ok: true, status: 'ok', message: null, accountIban: null });
+    }).pipe(Effect.provide(SeedLayer)),
+  );
+
+  it.effect(
+    'T8f — a mismatch verdict writes NOTHING: the probe never un-gates clearPollBackoff',
+    () =>
+      Effect.gen(function* () {
+        const { teamId, treasurerId } = yield* Effect.promise(() => setup(nextGuildId()));
+        const token = yield* encryptFioTestToken(TEST_TOKEN);
+        yield* enableBankSync(teamId, treasurerId, {
+          fioTokenEncrypted: Option.some(token),
+          accountNumber: '1265098001',
+          bankCode: '5500',
+        });
+        const sql = yield* SqlClient.SqlClient.asEffect();
+        yield* sql`
+          UPDATE bank_sync_config SET
+            last_error_code = 'too_many_movements',
+            consecutive_failure_count = 2,
+            last_error_at = now(),
+            next_attempt_at = now() + interval '2 hours',
+            coverage_warning = 'x'
+          WHERE team_id = ${teamId}
+        `;
+        const beforeRows = yield* sql<
+          Record<string, unknown>
+        >`SELECT * FROM bank_sync_config WHERE team_id = ${teamId}`;
+
+        fioResponder = (request) => Effect.succeed(jsonResponse(request, 200, validRawStatement));
+        const { body } = yield* Effect.promise(() => postTest(teamId));
+        expect(body).toMatchObject({ status: 'account_mismatch' });
+
+        const afterRows = yield* sql<
+          Record<string, unknown>
+        >`SELECT * FROM bank_sync_config WHERE team_id = ${teamId}`;
+        const before = beforeRows[0]!;
+        const after = afterRows[0]!;
+        // Same diff idiom as T19 — `updated_at` excluded, everything else must be identical. In
+        // particular `next_attempt_at` is UNCHANGED at ~+2h: this is the test that fails if
+        // someone un-gates `clearPollBackoff` for an `account_mismatch` verdict.
+        const changedKeys = Object.keys(before)
+          .filter((key) => key !== 'updated_at')
+          .filter((key) => {
+            const b = before[key];
+            const a = after[key];
+            if (b instanceof Date && a instanceof Date) return b.getTime() !== a.getTime();
+            return b !== a;
+          });
+        expect(changedKeys).toEqual([]);
       }).pipe(Effect.provide(SeedLayer)),
   );
 
@@ -998,6 +1146,8 @@ describe('bank-sync API — POST /bank-sync/test — B1 masking regression guard
 
         fioResponder = (request) => Effect.succeed(jsonResponse(request, 200, validRawStatement));
         const { body } = yield* Effect.promise(() => postTest(teamId));
+        // Exposed by the account cross-check: this only stays 'ok' because `validRawStatement`'s
+        // `info` was fixed above to agree with `enableBankSync`'s default account.
         expect(body).toMatchObject({ status: 'ok', ok: true });
 
         const rows = yield* sql<{
@@ -1170,6 +1320,7 @@ describe('bank-sync API — POST /bank-sync/test — throttle pre-check (T21)', 
       fioResponder = (request) => Effect.succeed(jsonResponse(request, 200, validRawStatement));
 
       const first = yield* Effect.promise(() => postTest(teamId));
+      // Also exposed by the account cross-check — same reason as T18's note above.
       expect(first.body).toMatchObject({ status: 'ok' });
 
       const second = yield* Effect.promise(() => postTest(teamId));

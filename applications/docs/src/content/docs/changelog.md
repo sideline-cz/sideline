@@ -5,6 +5,15 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-21 — Fix: a Fio token for the wrong account no longer imports its payments
+
+If a Fio API token was accidentally generated for (or pasted from) a different bank account than the one saved on a team's bank connection card, Sideline used to import that other account's movements anyway and try to auto-match them against the club's fees — silently, once an hour.
+
+- **Test connection** now reports **"The token belongs to a different account"** when this happens, showing both the account Fio actually read and the one saved on the card, so you can see at a glance which is wrong.
+- The most common cause is a missing **account prefix** — Fio doesn't send the prefix back in its answer, so a club whose account has one but left the field blank on the card will always see this result. Double-check the prefix before assuming the token itself is bad.
+- The automatic hourly import now refuses to bring in anything for a team in this state — no movements, no matching — until the account is corrected and a successful import runs. The bank transactions page shows a banner explaining this while it's active.
+- See [Testing the connection](/guides/finances/#testing-the-connection) and the [FAQ](/faq/#what-does-the-token-belongs-to-a-different-account-mean-in-the-connection-test) for details.
+
 ## 2026-09-21 — Fix: archiving a group now actually removes its Discord role
 
 Archiving a group didn't archive its subgroups, so an active subgroup could sit underneath an already-archived parent. This caused a few related leaks, all now fixed:

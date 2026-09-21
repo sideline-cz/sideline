@@ -69,13 +69,18 @@ const RepoLayer = Layer.mergeAll(
 
 beforeEach(() => cleanDatabase.pipe(Effect.provide(TestPgClient), Effect.runPromise));
 
+// Plan `.work-plans/iban-cross-check.md` §9.C precondition fix: this fixture's `info` MUST agree
+// with `enableBankSync`'s default account (`2703474850/2010` -> `CZ7120100000002703474850`, NOT
+// the unrelated `CZ65…` vector `FioApiClient.test.ts`/`fioColumns.test.ts` use, where no
+// comparison ever runs) — with the account-mismatch guard live, every existing test below would
+// otherwise halt ingestion on a false mismatch.
 const validStatement = (transactions: ReadonlyArray<Record<string, unknown>> = []) => ({
   accountStatement: {
     info: {
-      accountId: '2000145399',
-      bankId: '0800',
+      accountId: '2703474850',
+      bankId: '2010',
       currency: 'CZK',
-      iban: 'CZ6508000000192000145399',
+      iban: 'CZ7120100000002703474850',
       bic: null,
       openingBalance: 0,
       closingBalance: 0,
@@ -670,6 +675,294 @@ describe('BankSyncPoller — FioUnreachable split (T6/T7)', () => {
           now: Date.now(),
         });
         expect(result.status).toBe('sync_failing');
+      }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Plan `.work-plans/iban-cross-check.md` §9.C — the account-mismatch guard halts ingestion
+// ---------------------------------------------------------------------------
+
+describe('BankSyncPoller — account mismatch halts ingestion (iban-cross-check §9.C)', () => {
+  it.effect(
+    'case 1 — a token that reads a different account ingests nothing and records account_mismatch',
+    () =>
+      Effect.gen(function* () {
+        const user = yield* createUser('treasurer-mismatch');
+        const team = yield* createTeam(nextDiscordId(), user.id, 'Team');
+        yield* setTeamTimezone(team.id, 'Europe/Prague');
+        const token = yield* encryptFioTestToken('test-token-mismatch');
+        yield* enableBankSync(team.id, user.id, {
+          fioTokenEncrypted: Option.some(token),
+          accountNumber: '1265098001',
+          bankCode: '5500',
+        });
+
+        const httpLayer = mockHttpLayer(() => ({
+          status: 200,
+          body: validStatement([
+            {
+              column0: { value: '2024-01-05+0100' },
+              column1: { value: 100 },
+              column22: { value: 1 },
+            },
+          ]),
+        }));
+
+        yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+
+        const sql = yield* SqlClient.SqlClient.asEffect();
+        const txCount = yield* sql<{ count: string }>`
+          SELECT count(*)::text AS count FROM bank_transactions WHERE team_id = ${team.id}
+        `;
+        expect(txCount[0]?.count).toBe('0');
+
+        const periodCount = yield* sql<{ count: string }>`
+          SELECT count(*)::text AS count FROM bank_statement_periods WHERE team_id = ${team.id}
+        `;
+        expect(periodCount[0]?.count).toBe('0');
+
+        const rows = yield* sql<{
+          last_error_code: string | null;
+          coverage_warning: string | null;
+          consecutive_failure_count: number;
+          next_attempt_at: Date | null;
+          last_success_at: Date | null;
+        }>`
+          SELECT last_error_code, coverage_warning, consecutive_failure_count, next_attempt_at,
+                 last_success_at
+          FROM bank_sync_config WHERE team_id = ${team.id}
+        `;
+        const row = rows[0]!;
+        expect(row.last_error_code).toBe('account_mismatch');
+        // Both IBANs, for support — never the token (D10).
+        expect(row.coverage_warning).toContain('CZ7120100000002703474850');
+        expect(row.coverage_warning).toContain('CZ5855000000001265098001');
+        expect(row.coverage_warning).not.toContain('test-token-mismatch');
+        // Deliberately untouched — a mismatch is not evidence about the token, so it must not
+        // feed the counter that gates the D11 `invalid` escalation (`bankSyncStatus.ts`'s
+        // `>= 3` check). See `recordAccountMismatchQuery`.
+        expect(row.consecutive_failure_count).toBe(0);
+        expect(row.next_attempt_at).not.toBeNull();
+        expect(row.last_success_at).toBeNull();
+      }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
+  );
+
+  it.effect(
+    'case 2 — a mismatched movement that would otherwise auto-match is never turned into a payment',
+    () =>
+      Effect.gen(function* () {
+        const u = yield* createUser('treasurer-mismatch-match');
+        const team = yield* createTeam(nextDiscordId(), u.id, 'Team');
+        yield* setTeamTimezone(team.id, 'Europe/Prague');
+        const token = yield* encryptFioTestToken('test-token-mismatch-match');
+        yield* enableBankSync(team.id, u.id, {
+          fioTokenEncrypted: Option.some(token),
+          accountNumber: '1265098001',
+          bankCode: '5500',
+        });
+
+        const memberUserId = yield* createUser('member-mismatch-match');
+        const member = yield* createTeamMember(team.id, memberUserId.id);
+        yield* setMemberVariableSymbol(member.id, '88888');
+        // outstandingMinor 1500 == 15.00 CZK, matching column1's raw Fio amount below.
+        const { assignment } = yield* createFeeAndAssignment(team.id, member.id, 1500);
+
+        const httpLayer = mockHttpLayer(() => ({
+          status: 200,
+          body: validStatement([
+            {
+              column0: { value: '2024-01-05+0100' },
+              column1: { value: 15 },
+              column5: { value: '88888' },
+              column22: { value: 43 },
+            },
+          ]),
+        }));
+
+        yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+
+        // No bank_transactions row is even created under a mismatch (case 1), so no payment can
+        // reference one — the ticket's actual harm is confirmed the same way BLOCKER 2 confirms a
+        // void sticks: the assignment itself was never credited.
+        const sql = yield* SqlClient.SqlClient.asEffect();
+        const assignmentRows = yield* sql<{ paid_minor: string }>`
+          SELECT paid_minor::text FROM fee_assignments WHERE id = ${assignment.id}
+        `;
+        expect(assignmentRows[0]?.paid_minor).toBe('0');
+
+        const payments = yield* sql<{ count: string }>`
+          SELECT count(*)::text AS count FROM payments
+          WHERE bank_transaction_id IS NOT NULL
+            AND bank_transaction_id IN (SELECT id FROM bank_transactions WHERE team_id = ${team.id})
+        `;
+        expect(payments[0]?.count).toBe('0');
+      }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
+  );
+
+  it.effect(
+    'case 3 — a matching configured account still ingests (the guard is not inverted)',
+    () =>
+      Effect.gen(function* () {
+        // Coverage note: test 116 above ("two cycles over the same window ingest no duplicates")
+        // already exercises ingestion against the default (matching) `enableBankSync` account
+        // post-fixture-fix; this case additionally pins `last_error_code IS NULL`, which 116 does
+        // not assert.
+        const { team } = yield* seedTeam('matching-account');
+        const httpLayer = mockHttpLayer(() => ({
+          status: 200,
+          body: validStatement([
+            {
+              column0: { value: '2024-01-05+0100' },
+              column1: { value: 100 },
+              column22: { value: 99 },
+            },
+          ]),
+        }));
+
+        yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+
+        const sql = yield* SqlClient.SqlClient.asEffect();
+        const txCount = yield* sql<{ count: string }>`
+          SELECT count(*)::text AS count FROM bank_transactions WHERE team_id = ${team.id}
+        `;
+        expect(txCount[0]?.count).toBe('1');
+
+        const rows = yield* sql<{ last_error_code: string | null }>`
+          SELECT last_error_code FROM bank_sync_config WHERE team_id = ${team.id}
+        `;
+        expect(rows[0]?.last_error_code).toBeNull();
+      }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
+  );
+
+  // Case 4 ("no configured account -> ingests") as literally specified by the plan cannot be
+  // constructed against the real schema: `findPollableQuery` filters `WHERE enabled = true`
+  // (`BankSyncConfigRepository.ts:84-92`), and the table's own CHECK constraint
+  // (`1792000001_create_bank_sync_config.ts`) forbids `enabled = true` with a NULL
+  // `account_number`/`bank_code` — so a row this guard's poller path would ever see can never
+  // have an absent configured account. That half of the "either side absent -> no verdict" rule
+  // is exhaustively covered at the unit level instead (`bankSyncAccount.test.ts` cases 4/5). This
+  // case exercises the REACHABLE mirror of the same rule from the poller's actual DB-backed path:
+  // Fio's own `info.iban` absent from a genuinely pollable, fully-configured row.
+  it.effect(
+    'case 4 — Fio sends no iban at all -> the absent side is not an accusation, ingestion proceeds',
+    () =>
+      Effect.gen(function* () {
+        const { team } = yield* seedTeam('no-fio-iban');
+        const httpLayer = mockHttpLayer(() => {
+          const statement = validStatement([
+            {
+              column0: { value: '2024-01-05+0100' },
+              column1: { value: 100 },
+              column22: { value: 77 },
+            },
+          ]);
+          return {
+            status: 200,
+            body: {
+              accountStatement: {
+                ...statement.accountStatement,
+                info: { ...statement.accountStatement.info, iban: null },
+              },
+            },
+          };
+        });
+
+        yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+
+        const sql = yield* SqlClient.SqlClient.asEffect();
+        const txCount = yield* sql<{ count: string }>`
+          SELECT count(*)::text AS count FROM bank_transactions WHERE team_id = ${team.id}
+        `;
+        expect(txCount[0]?.count).toBe('1');
+
+        const rows = yield* sql<{ last_error_code: string | null }>`
+          SELECT last_error_code FROM bank_sync_config WHERE team_id = ${team.id}
+        `;
+        expect(rows[0]?.last_error_code).toBeNull();
+      }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
+  );
+
+  // Pins the recovery path a treasurer actually takes: fix the account number, save, wait for the
+  // next hourly poll. Also pins the two staleness fixes above — a flat 6h backoff would still leave
+  // `next_attempt_at` in the future after a mismatch, so this goes through `configRepo.upsert`
+  // (which resets it, same as a real config save) rather than the raw-SQL `enableBankSync` fixture.
+  it.effect(
+    'case 5 — correcting the account clears the mismatch on the next poll (bank_transactions, last_error_code, coverage_warning)',
+    () =>
+      Effect.gen(function* () {
+        const user = yield* createUser('treasurer-mismatch-recovery');
+        const team = yield* createTeam(nextDiscordId(), user.id, 'Team');
+        yield* setTeamTimezone(team.id, 'Europe/Prague');
+        const token = yield* encryptFioTestToken('test-token-mismatch-recovery');
+        yield* enableBankSync(team.id, user.id, {
+          fioTokenEncrypted: Option.some(token),
+          accountNumber: '1265098001',
+          bankCode: '5500',
+        });
+
+        const httpLayer = mockHttpLayer(() => ({
+          status: 200,
+          body: validStatement([
+            {
+              column0: { value: '2024-01-05+0100' },
+              column1: { value: 100 },
+              column22: { value: 1 },
+            },
+          ]),
+        }));
+
+        // Poll #1 — still misconfigured: halts, records the mismatch.
+        yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+
+        const sql = yield* SqlClient.SqlClient.asEffect();
+        const afterMismatch = yield* sql<{ last_error_code: string | null }>`
+          SELECT last_error_code FROM bank_sync_config WHERE team_id = ${team.id}
+        `;
+        expect(afterMismatch[0]?.last_error_code).toBe('account_mismatch');
+
+        // The treasurer fixes the account, exactly the way the real save path does — via the
+        // repository's `upsert`, which resets `next_attempt_at` so the next poll is not blocked
+        // by the mismatch's backoff.
+        const configRepo = yield* BankSyncConfigRepository.asEffect();
+        yield* configRepo.upsert({
+          team_id: team.id,
+          enabled: true,
+          auto_match_enabled: true,
+          account_prefix: Option.none(),
+          account_number: Option.some('2703474850'),
+          bank_code: Option.some('2010'),
+          currency: 'CZK',
+          recipient_name: Option.some('Test Club, z.s.'),
+          registered_id: Option.none(),
+          registered_address: Option.none(),
+          bank_name: Option.none(),
+          fio_token_encrypted: Option.none(), // absent -> COALESCE keeps the stored token
+          fio_token_created_at: Option.none(),
+          configured_by_user_id: user.id,
+        });
+
+        // Same token as poll #1 -> `fio_token_throttle` would otherwise force a real ~30s wait
+        // before the second call (see `resetThrottle` above, used the same way by the
+        // "two cycles" idempotent-re-ingestion test).
+        yield* resetThrottle;
+
+        // Poll #2 — the corrected account now matches Fio's `info.iban`.
+        yield* bankSyncPollerEffect.pipe(Effect.provide(httpLayer), Effect.provide(RepoLayer));
+
+        const txCount = yield* sql<{ count: string }>`
+          SELECT count(*)::text AS count FROM bank_transactions WHERE team_id = ${team.id}
+        `;
+        expect(txCount[0]?.count).toBe('1');
+
+        const afterRecovery = yield* sql<{
+          last_error_code: string | null;
+          coverage_warning: string | null;
+        }>`
+          SELECT last_error_code, coverage_warning FROM bank_sync_config WHERE team_id = ${team.id}
+        `;
+        expect(afterRecovery[0]?.last_error_code).toBeNull();
+        expect(afterRecovery[0]?.coverage_warning).toBeNull();
       }).pipe(Effect.provide(RepoLayer), Effect.provide(TestPgClient)),
   );
 });

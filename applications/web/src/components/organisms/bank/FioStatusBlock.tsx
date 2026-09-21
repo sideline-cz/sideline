@@ -8,6 +8,7 @@ import {
   Landmark,
   RefreshCw,
   ServerCrash,
+  ShieldAlert,
 } from 'lucide-react';
 import React from 'react';
 import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert';
@@ -143,6 +144,21 @@ export function FioStatusBlock({
           <RefreshCw aria-hidden='true' />
           <AlertTitle>{tr('fio_status_syncFailingTitle')}</AlertTitle>
           <AlertDescription>{tr('fio_status_syncFailingBody', { time })}</AlertDescription>
+        </Alert>
+      );
+      break;
+    }
+    case 'account_mismatch': {
+      // No "Replace token" button here on purpose: the token works, only the account is wrong,
+      // and the fields to fix that are already in this same card — a button telling them to
+      // replace the token would give the exact wrong instruction this rank exists to avoid.
+      statusAlert = (
+        <Alert variant='destructive' data-bank-sync-status='account_mismatch'>
+          <ShieldAlert aria-hidden='true' />
+          <AlertTitle>{tr('fio_status_accountMismatchTitle')}</AlertTitle>
+          <AlertDescription>
+            <p>{tr('fio_status_accountMismatchBody')}</p>
+          </AlertDescription>
         </Alert>
       );
       break;

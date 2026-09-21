@@ -1,6 +1,14 @@
 import type { BankSyncConfig } from '@sideline/domain';
 import type { LucideIcon } from 'lucide-react';
-import { AlertTriangle, CheckCircle, Clock, Landmark, RefreshCw, ServerCrash } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  Landmark,
+  RefreshCw,
+  ServerCrash,
+  ShieldAlert,
+} from 'lucide-react';
 import { Badge } from '~/components/ui/badge';
 import { tr } from '~/lib/translations.js';
 
@@ -26,6 +34,11 @@ const STATUS_META: Record<
   activating: { Icon: Clock, labelKey: 'fio_status_activatingTitle', variant: 'default' },
   sync_failing: { Icon: RefreshCw, labelKey: 'fio_status_syncFailingTitle', variant: 'default' },
   invalid: { Icon: AlertTriangle, labelKey: 'fio_status_invalidTitle', variant: 'destructive' },
+  account_mismatch: {
+    Icon: ShieldAlert,
+    labelKey: 'fio_status_accountMismatchTitle',
+    variant: 'destructive',
+  },
   misconfigured: {
     Icon: ServerCrash,
     labelKey: 'fio_status_misconfiguredTitle',

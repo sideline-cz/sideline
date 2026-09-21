@@ -133,4 +133,12 @@ Yes. One Discord account can be in any number of teams. The dashboard aggregates
 
 ### My Fio bank connection stopped importing payments — what do I do?
 
-The most common cause is an expired token: Fio tokens last at most 180 days and only renew when someone signs in to Fio Internetbanking or Smartbanking. Open the bank connection card on your team's settings page — it explains exactly what's wrong (an expired/invalid token, a temporary Fio outage Sideline is already retrying, or a token still "activating" if you just created it) and what to do next. Click **Test the connection** on the card for an immediate answer instead of waiting for the next hourly check. See [Connecting a bank account](/guides/finances/#connecting-a-bank-account-fio) for the full setup and troubleshooting steps.
+The most common cause is an expired token: Fio tokens last at most 180 days and only renew when someone signs in to Fio Internetbanking or Smartbanking. Open the bank connection card on your team's settings page — it explains exactly what's wrong (an expired/invalid token, a temporary Fio outage Sideline is already retrying, a token still "activating" if you just created it, or the token reading a different account, see below) and what to do next. Click **Test the connection** on the card for an immediate answer instead of waiting for the next hourly check. See [Connecting a bank account](/guides/finances/#connecting-a-bank-account-fio) for the full setup and troubleshooting steps.
+
+### What does "the token belongs to a different account" mean in the connection test?
+
+Fio accepted the token, but the account it reads back doesn't match the account prefix/number saved on your bank connection card. Sideline deliberately stops importing in this state rather than pull in and auto-match someone else's payments against your club's fees.
+
+The most common cause is **not** a wrong token — it's a missing **account prefix**. Fio's answer to Sideline doesn't include the prefix at all, only the account number and bank code, so if your club's account is e.g. `19-2000145399/0800` and the prefix field on the bank connection card was left blank, the account Sideline computes will never match. Double-check the prefix first. If the prefix is correct and the mismatch persists, the token was most likely generated against the wrong Fio account — generate a fresh one against the correct account and paste it in.
+
+This banner does not clear on its own — even a passing **Test the connection** result — until the next automatic hourly import succeeds against the corrected account.

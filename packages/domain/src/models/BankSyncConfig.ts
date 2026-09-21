@@ -13,10 +13,21 @@ export type BankSyncProvider = typeof BankSyncProvider.Type;
  * deliberately NOT a member of this union — token expiry is additive
  * (`BankSyncConfigView.expiringSoon: boolean`), never a rank of this ladder, because a token
  * that is both expiring AND failing must report both facts, not just one.
+ *
+ * `'account_mismatch'` outranks `'invalid'`: the token demonstrably works, it is the *account*
+ * that is wrong, so telling the treasurer to replace the token is the wrong instruction. The
+ * poller sets it via `last_error_code = 'account_mismatch'` when it refuses to ingest a statement
+ * whose `info.iban` disagrees with the configured account, and it is terminal — no retry count and
+ * no elapsed time clear it. A config edit does NOT clear it either (the row's
+ * `consecutive_failure_count`/`next_attempt_at` reset on save, but `last_error_code` survives);
+ * what actually clears the rank is the next successful poll's `recordSuccess`. It shares a literal
+ * name with `BankSyncApi.BankSyncTestStatus`'s member and nothing else: that union is one probe's
+ * verdict, this one is the state of automatic importing.
  */
 export const BankSyncStatusCode = Schema.Literals([
   'not_connected',
   'misconfigured',
+  'account_mismatch',
   'invalid',
   'activating',
   'sync_failing',

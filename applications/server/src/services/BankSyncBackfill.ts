@@ -11,6 +11,7 @@
  * A 413 halves the chunk (60 -> 30 -> 15 -> 7 -> 3 -> 1) and retries the SAME window; a 1-day 413
  * is surfaced as `failed`, never silently swallowed.
  */
+import type { BankSyncConfig } from '@sideline/domain';
 import { Effect, Option, type Redacted } from 'effect';
 import { HttpClient } from 'effect/unstable/http';
 import { SqlClient } from 'effect/unstable/sql';
@@ -19,6 +20,7 @@ import {
   BankTransactionsRepository,
   type FioMovementInsert,
 } from '~/repositories/BankTransactionsRepository.js';
+import { isAccountMismatch } from '~/services/bankSyncAccount.js';
 import {
   makeReal as makeRealFioApiClient,
   makeStub as makeStubFioApiClient,
@@ -52,6 +54,7 @@ interface WalkDeps {
   readonly client:
     | ReturnType<typeof makeRealFioApiClient>
     | ReturnType<typeof makeStubFioApiClient>;
+  readonly config: BankSyncConfig.BankSyncConfig;
   readonly teamId: string;
   readonly from: string;
   readonly to: string;
@@ -106,6 +109,13 @@ const ingestChunk = (
   chunkFrom: string,
   statement: Effect.Success<ReturnType<WalkDeps['client']['fetchPeriod']>>,
 ): Effect.Effect<BackfillOutcome> => {
+  // Same guard the poller applies (`services/bankSyncAccount.ts`) — the Backfill button is
+  // reachable exactly when a team is halted for this reason, so without this check a treasurer
+  // could import up to 90 days of a foreign account plus the poisoned statement-period rows the
+  // poller guard exists to prevent. The first chunk's answer settles the whole walk; every later
+  // chunk is fetched with the same token against the same account.
+  if (isAccountMismatch(deps.config, statement.info.iban)) return Effect.succeed('failed');
+
   const nextCursor = addDaysToDateString(chunkFrom, -1);
   return deps.txRepo
     .upsertMany(
@@ -238,6 +248,7 @@ export const runBackfill = (
                           client: Option.isSome(httpClientOpt)
                             ? makeRealFioApiClient(httpClientOpt.value, sql)
                             : makeStubFioApiClient(),
+                          config: cfg,
                           teamId,
                           from,
                           to,

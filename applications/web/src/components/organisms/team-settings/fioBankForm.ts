@@ -113,6 +113,11 @@ export const validateFioBankForm = (
 export const hasFioBankErrors = (errors: FioBankErrors): boolean =>
   Object.values(errors).some((v) => v !== undefined);
 
+/** The Test button probes the SAVED config, so an edited-but-unsaved account makes the verdict a
+ * lie. Same reason `tokenChanged` already disables it. */
+export const fioAccountChanged = (saved: FioBankFormValues, values: FioBankFormValues): boolean =>
+  saved.accountPrefix !== values.accountPrefix || saved.accountNumber !== values.accountNumber;
+
 /** The IČO checksum (a different algorithm from the account number's) — non-blocking shape. */
 export const isValidRegisteredId = (value: string): boolean => {
   const trimmed = value.trim();

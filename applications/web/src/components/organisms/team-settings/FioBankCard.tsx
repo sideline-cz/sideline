@@ -19,6 +19,7 @@ import { FioStatusBlock } from '../bank/FioStatusBlock';
 import { FioTestResultAlert } from '../bank/FioTestResultAlert';
 import {
   FIO_BANK_CODE,
+  fioAccountChanged,
   fioBankFormFrom,
   fioBankRequestFrom,
   fioTokenPayload,
@@ -48,7 +49,8 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
 
   const [config, setConfig] = React.useState(initialConfig);
-  const form = useCardForm(fioBankFormFrom(config));
+  const savedValues = fioBankFormFrom(config);
+  const form = useCardForm(savedValues);
   const { setField } = form;
   const {
     enabled,
@@ -77,6 +79,7 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
 
   const tokenOptions = { fioTokenSet: config?.fioTokenSet ?? false, replacingToken, fioToken };
   const tokenChanged = Option.isSome(fioTokenPayload(tokenOptions));
+  const accountChanged = fioAccountChanged(savedValues, form.values);
   const hasChanges = form.isDirty || tokenChanged;
 
   const runValidation = (): boolean => {
@@ -226,7 +229,12 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
                 size='sm'
                 onClick={() => void handleRetryNow()}
                 disabled={
-                  saving || retrying || tokenChanged || config === null || !config.fioTokenSet
+                  saving ||
+                  retrying ||
+                  tokenChanged ||
+                  accountChanged ||
+                  config === null ||
+                  !config.fioTokenSet
                 }
                 aria-busy={retrying}
               >
@@ -239,11 +247,11 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
                   tr('fio_test_button')
                 )}
               </Button>
-              {/* The probe would otherwise read the stale, already-saved token — the same verdict
-                  the user is trying to escape by pasting a new one — so explain the dead end
-                  rather than leaving the button silently disabled. */}
-              {tokenChanged && (
-                <p className='text-xs text-muted-foreground'>{tr('fio_test_unsavedTokenHint')}</p>
+              {/* The probe would otherwise read the stale, already-saved token or account — the
+                  same verdict the user is trying to escape by editing it — so explain the dead
+                  end rather than leaving the button silently disabled. */}
+              {(tokenChanged || accountChanged) && (
+                <p className='text-xs text-muted-foreground'>{tr('fio_test_unsavedHint')}</p>
               )}
             </div>
             {/*
@@ -259,8 +267,12 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
               `e2e/tests/onboarding-settings.spec.ts` with a strict-mode violation.
             */}
             <div aria-live='polite' aria-atomic='true'>
-              {testResult && (
-                <FioTestResultAlert result={testResult} onReplaceToken={handleReplaceToken} />
+              {testResult && config && Option.isSome(config.computedIban) && (
+                <FioTestResultAlert
+                  result={testResult}
+                  configuredIban={config.computedIban.value}
+                  onReplaceToken={handleReplaceToken}
+                />
               )}
             </div>
 

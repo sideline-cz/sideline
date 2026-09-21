@@ -8,13 +8,14 @@ import {
   type LucideIcon,
   RefreshCw,
   ServerCrash,
+  ShieldAlert,
 } from 'lucide-react';
 import { tr } from '~/lib/translations.js';
 
 type TestStatus = BankSyncApi.BankSyncTestStatus;
 
 /**
- * The seven outcomes of ONE `/bank-sync/test` probe, keyed off the IMPORTED domain union
+ * The eight outcomes of ONE `/bank-sync/test` probe, keyed off the IMPORTED domain union
  * (`BankSyncApi.BankSyncTestStatus`) — never invented here. Per `applications/web/AGENTS.md`'s
  * "Closed-Union Copy Comes From An Explicit `Record`" rule, every entry calls `tr()` with a
  * literal string key: adding a status to the server union then fails the web build until its
@@ -39,6 +40,12 @@ export const TEST_RESULT_META: Record<
     variant: 'default',
     title: () => tr('fio_test_okTitle'),
     body: () => tr('fio_test_okBody'),
+  },
+  account_mismatch: {
+    Icon: ShieldAlert,
+    variant: 'destructive',
+    title: () => tr('fio_test_accountMismatchTitle'),
+    body: () => tr('fio_test_accountMismatchBody'),
   },
   invalid: {
     Icon: AlertTriangle,
