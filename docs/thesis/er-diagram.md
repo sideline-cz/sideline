@@ -1086,7 +1086,7 @@ erDiagram
 
 ### Bank Sync (Fio)
 
-Extends Finance with Fio bank-transaction ingestion, variable-symbol-based auto-matching, and grant-audit export. `bank_sync_config` (one row per team) holds the account identity and the encrypted Fio API token; `fio_token_throttle` is a cross-replica per-token rate limit keyed on a token fingerprint hash (no FK to any table). `bank_statement_periods` records the balances Fio itself reported for a range, used to detect coverage gaps and continuity violations before allowing a grant export. `bank_transactions` holds each ingested movement; `match_state` is trigger-maintained by `payments_finance_recompute`/`recompute_bank_match_state` (the same trigger that maintains `fee_assignments.paid_minor` — see the Finance diagram above), and a matched movement is realised as an ordinary `payments` row with `bank_transaction_id` set and `matched_by` recording `auto` or `manual`. `bank_token_expiry_events` and `bank_token_expiry_sent` are a second outbox pair for a T−14/T−7/T−1 Discord DM warning of an expiring token, populated daily by `BankTokenExpiryCron`.
+Extends Finance with Fio bank-transaction ingestion, variable-symbol-based auto-matching, and grant-audit export. `bank_sync_config` (one row per team) holds the account identity and the encrypted Fio API token — `fio_token_created_at` is the treasurer-declared date used for the 180-day expiry maths, while `fio_token_saved_at` is stamped server-side with `now()` whenever a new token is actually written and is not read anywhere yet; `fio_token_throttle` is a cross-replica per-token rate limit keyed on a token fingerprint hash (no FK to any table). `bank_statement_periods` records the balances Fio itself reported for a range, used to detect coverage gaps and continuity violations before allowing a grant export. `bank_transactions` holds each ingested movement; `match_state` is trigger-maintained by `payments_finance_recompute`/`recompute_bank_match_state` (the same trigger that maintains `fee_assignments.paid_minor` — see the Finance diagram above), and a matched movement is realised as an ordinary `payments` row with `bank_transaction_id` set and `matched_by` recording `auto` or `manual`. `bank_token_expiry_events` and `bank_token_expiry_sent` are a second outbox pair for a T−14/T−7/T−1 Discord DM warning of an expiring token, populated daily by `BankTokenExpiryCron`.
 
 ```mermaid
 erDiagram
@@ -1106,6 +1106,7 @@ erDiagram
         TEXT bank_name
         TEXT fio_token_encrypted
         TIMESTAMPTZ fio_token_created_at
+        TIMESTAMPTZ fio_token_saved_at
         DATE backfill_from
         DATE backfill_cursor
         TEXT backfill_status

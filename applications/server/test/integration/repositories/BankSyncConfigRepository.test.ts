@@ -30,7 +30,7 @@
 //   findStatementPeriods(teamId): Effect<ReadonlyArray<{...}>>
 
 import { describe, expect, it } from '@effect/vitest';
-import { Duration, Effect, Fiber, Layer, Option } from 'effect';
+import { DateTime, Duration, Effect, Fiber, Layer, Option } from 'effect';
 import * as TestClock from 'effect/testing/TestClock';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
@@ -512,6 +512,108 @@ describe('BankSyncConfigRepository — enabled-completeness CHECK (104)', () => 
         insertRaw(sql, team.id, user.id, { recipientName: null }),
       );
       expect(result._tag).toBe('Failure');
+    }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 105 — fio_token_saved_at is stamped only when a new token is actually written
+// ---------------------------------------------------------------------------
+
+describe('BankSyncConfigRepository — fio_token_saved_at stamping (105)', () => {
+  it.effect('an insert WITH a token stamps fio_token_saved_at to roughly now', () =>
+    Effect.gen(function* () {
+      const { user, team } = yield* setup;
+      const repo = yield* BankSyncConfigRepository.asEffect();
+      const sql = yield* SqlClient.SqlClient.asEffect();
+
+      yield* repo.upsert(fullUpsertInput(team.id, user.id) as never);
+
+      const found = yield* repo.findByTeam(team.id);
+      expect(Option.isSome(found)).toBe(true);
+      const cfg = Option.getOrThrow(found);
+      expect(Option.isSome(cfg.fio_token_saved_at)).toBe(true);
+
+      // Sanity check ONLY — not proof of server origin. The host and container clocks agree
+      // in any environment you'd run this suite in, so this window would pass just as well for
+      // a client-supplied value. Server origin is guaranteed structurally: the field is absent
+      // from `UpsertBankSyncConfigInput` / the upsert's `Request` schema, so nothing but the
+      // repository's own `now()` can ever populate it.
+      const dbNowRows = yield* sql<{ now: Date }>`SELECT now()`;
+      const dbNowMs = dbNowRows[0]?.now.getTime();
+      const savedAtMs = DateTime.toEpochMillis(Option.getOrThrow(cfg.fio_token_saved_at));
+      expect(Math.abs(savedAtMs - dbNowMs)).toBeLessThan(60_000);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('an insert with NO token leaves fio_token_saved_at as Option.none()', () =>
+    Effect.gen(function* () {
+      const { user, team } = yield* setup;
+      const repo = yield* BankSyncConfigRepository.asEffect();
+
+      // Fresh team, no prior row — the COALESCE-style preservation has nothing to keep, so this
+      // is the true "never written" case. The enabled-completeness CHECK (104) permits
+      // enabled: true without a token.
+      yield* repo.upsert({
+        ...fullUpsertInput(team.id, user.id),
+        fio_token_encrypted: Option.none(),
+      } as never);
+
+      const found = yield* repo.findByTeam(team.id);
+      expect(Option.isSome(found)).toBe(true);
+      const cfg = Option.getOrThrow(found);
+      expect(Option.isNone(cfg.fio_token_saved_at)).toBe(true);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('a tokenless re-upsert PRESERVES the existing fio_token_saved_at', () =>
+    Effect.gen(function* () {
+      const { user, team } = yield* setup;
+      const repo = yield* BankSyncConfigRepository.asEffect();
+      const sql = yield* SqlClient.SqlClient.asEffect();
+
+      yield* repo.upsert(fullUpsertInput(team.id, user.id) as never);
+
+      // Backdate rather than compare two live stamps: `DateTimeFromDate` decodes to millisecond
+      // precision while Postgres stores microseconds, so two upserts a millisecond apart can
+      // decode to the same millisecond and make a live-stamp comparison intermittently flaky.
+      yield* sql`UPDATE bank_sync_config SET fio_token_saved_at = '2020-01-01T00:00:00Z' WHERE team_id = ${team.id}`;
+
+      yield* repo.upsert({
+        ...fullUpsertInput(team.id, user.id),
+        fio_token_encrypted: Option.none(),
+      } as never);
+
+      const found = yield* repo.findByTeam(team.id);
+      const cfg = Option.getOrThrow(found);
+      expect(DateTime.toEpochMillis(Option.getOrThrow(cfg.fio_token_saved_at))).toBe(
+        Date.parse('2020-01-01T00:00:00.000Z'),
+      );
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('a replacement token ADVANCES fio_token_saved_at', () =>
+    Effect.gen(function* () {
+      const { user, team } = yield* setup;
+      const repo = yield* BankSyncConfigRepository.asEffect();
+      const sql = yield* SqlClient.SqlClient.asEffect();
+
+      yield* repo.upsert(fullUpsertInput(team.id, user.id) as never);
+
+      yield* sql`UPDATE bank_sync_config SET fio_token_saved_at = '2020-01-01T00:00:00Z' WHERE team_id = ${team.id}`;
+
+      yield* repo.upsert({
+        ...fullUpsertInput(team.id, user.id),
+        fio_token_encrypted: Option.some('v1.xxx.yyy.zzz'),
+      } as never);
+
+      const found = yield* repo.findByTeam(team.id);
+      const cfg = Option.getOrThrow(found);
+      // Strict `>`, not `>=`: `>=` would also pass if the implementation never re-stamped on
+      // replace, which is the exact bug this case exists to catch.
+      expect(DateTime.toEpochMillis(Option.getOrThrow(cfg.fio_token_saved_at))).toBeGreaterThan(
+        Date.parse('2020-01-01T00:00:00.000Z'),
+      );
     }).pipe(Effect.provide(TestLayer)),
   );
 });
