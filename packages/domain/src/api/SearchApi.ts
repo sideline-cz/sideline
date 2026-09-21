@@ -14,9 +14,8 @@ import { TeamId } from '~/models/Team.js';
 export { SearchHit } from '~/api/AiChatApi.js';
 
 /**
- * The one label per hit — used by the server for prefix ranking and by the palette where a
- * plain string is needed (cmdk `value` fallback, the live-region text), so the two can never
- * disagree about what "matches" means. Pure, no i18n.
+ * The one label per hit — used by `applications/server/src/api/search.ts#rankAndCap` for prefix
+ * ranking. Pure, no i18n.
  */
 export const searchHitLabel = (hit: SearchHit): string => {
   switch (hit.kind) {
@@ -35,7 +34,9 @@ export const searchHitLabel = (hit: SearchHit): string => {
 
 /**
  * Stable identity for a hit: `"<kind>:<id>"`. The palette's React key and cmdk item `value`.
- * `SearchHit` has no `ref`; this is the only identity there is.
+ * `SearchHit` has no `ref`; this is the only identity there is. Also the dedup key
+ * `applications/server/src/services/ai/refTokens.ts#entityKeyOf` delegates to — keep both call
+ * sites reading from here rather than re-deriving the format.
  */
 export const searchHitId = (hit: SearchHit): string => {
   switch (hit.kind) {

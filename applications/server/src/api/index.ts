@@ -30,6 +30,7 @@ import { PlayerRatingApiLive } from '~/api/player-rating.js';
 import { RoleApiLive } from '~/api/role.js';
 import { RosterApiLive } from '~/api/roster.js';
 import { RulesTrainerApiLive } from '~/api/rules-trainer.js';
+import { SearchApiLive } from '~/api/search.js';
 import { TeamApiLive } from '~/api/team.js';
 import { TeamChallengeApiLive } from '~/api/team-challenge.js';
 import { TeamGenerationApiLive } from '~/api/team-generation.js';
@@ -70,6 +71,7 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
     Layer.provide(RosterApiLive),
     Layer.provide(RoleApiLive),
     Layer.provide(RulesTrainerApiLive),
+    Layer.provide(SearchApiLive),
     Layer.provide(TeamApiLive),
     Layer.provide(TeamChallengeApiLive),
     Layer.provide(TeamSettingsApiLive),

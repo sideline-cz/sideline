@@ -349,9 +349,9 @@ interface RemapResult {
  * (plan §4, part 1; `.work-plans/command-palette-search.md` §B): an entity already seen this
  * turn (in an earlier call, or earlier in this same call's rows) reuses its first token; a
  * genuinely new entity gets a fresh one as long as the per-turn cap has not been reached; beyond
- * the cap the row is kept but loses its `ref` key. `hits` carry no `ref` of their own — this is
- * the only place a token that ever ships is minted, by CONSTRUCTING `EntityRef` from a `SearchHit`
- * (`{ ...hit, ref: token }`), not overwriting a placeholder field.
+ * the cap the row is kept unchanged (no `ref` to add). `hits` carry no `ref` of their own — this
+ * is the only place a token that ever ships is minted, by CONSTRUCTING `EntityRef` from a
+ * `SearchHit` (`{ ...hit, ref: token }`), not overwriting a placeholder field.
  */
 const remapCallReferences = (
   state: LoopState,
@@ -374,8 +374,7 @@ const remapCallReferences = (
       return { ...item, ref: existingToken };
     }
     if (capUsed >= MAX_REFERENCES) {
-      const { ref: _omitted, ...rest } = item;
-      return rest;
+      return item;
     }
     const token = mintToken(usedTokens);
     entityKeys.set(key, token);

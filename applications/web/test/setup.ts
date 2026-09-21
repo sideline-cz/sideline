@@ -1,6 +1,56 @@
+import { notifyManager } from '@tanstack/react-query';
 import { cleanup } from '@testing-library/react';
 import React from 'react';
 import { afterEach, beforeAll, vi } from 'vitest';
+
+// React Query's `notifyManager` defers every observer notification (fetch-start, success,
+// error) through `setTimeout(fn, 0)` (`@tanstack/query-core`'s `systemSetTimeoutZero`), late-
+// bound so it correctly picks up `vi.useFakeTimers()`'s patched `setTimeout` rather than a
+// frozen reference from module-load time. That's the good news; the bad news is it means a
+// query's fetch-start dispatch and its success/error dispatch are each a SEPARATE 0ms-scheduled
+// timer, and when a debounce timer set for exactly the same delay a test advances by (e.g. a
+// 250ms debounce advanced by exactly 250ms) fires AT that boundary, the newly-scheduled 0ms
+// notify timers it triggers land on that same boundary too — one `advanceTimersByTimeAsync`
+// call does not reliably re-enter for timers scheduled exactly at its own target time, so the
+// observer's re-render is silently deferred to "the next tick nobody asked for". A test that
+// debounces via fake timers then asserts on the settled UI in the same `act()` sees stale
+// (pre-fetch or mid-fetch) state — not a bug in the component, a scheduling gap between two
+// independent fake-timer consumers.
+//
+// Forcing the scheduler synchronous removes the timer hop entirely: every notification runs
+// inline, in the same synchronous flush `act()` already wraps. This is a test-only trade — it
+// throws away react-query's default micro-batching of rapid-fire notifications, which is a
+// performance nicety in the browser, never a correctness requirement, and every test in this
+// suite (fake timers or not) is strictly more reliable without that gap. Never set this outside
+// tests; production keeps the default (batched) scheduler.
+notifyManager.setScheduler((callback) => callback());
+
+// `@testing-library/dom`'s `waitFor` (and `@testing-library/react`'s `asyncWrapper`, which
+// drains one more `setTimeout(fn, 0)` after every `waitFor` to flush in-flight act() work) both
+// gate their fake-timer-aware code paths on `typeof jest !== 'undefined'`
+// (`dom-testing-library`'s `jestFakeTimersAreEnabled()`). That is a real global, not a feature
+// probe — Vitest is never `jest`, so under `vi.useFakeTimers()` both libraries silently fall
+// back to their REAL-timer paths: `waitFor` polls via a `setInterval`/`MutationObserver`, and
+// the post-`waitFor` drain schedules a bare `setTimeout(fn, 0)`. Both of those are registered on
+// the very `setTimeout` `vi.useFakeTimers()` just replaced, and since nothing in this codebase's
+// tests calls `vi.advanceTimersByTimeAsync` again after the assertion that made `waitFor`'s
+// condition already true, those timers never fire — the test hangs until Vitest's own real-
+// clock per-test timeout, even though the DOM already has exactly what the test wants.
+//
+// A minimal `jest.advanceTimersByTime` shim (the only member either library calls) makes both
+// libraries detect Vitest's fake timers as "jest fake timers" and delegate to them instead:
+// `waitFor` then re-checks its callback on every advance instead of parking on a dead real
+// timer, and the post-`waitFor` drain actually advances by 0ms instead of waiting forever.
+// `Object.defineProperty` (not a bare `globalThis.jest = ...` assignment) matches this file's
+// own `localStorage` polyfill below, and sidesteps typing `globalThis` for a global neither
+// library treats as anything but a duck-typed capability probe.
+if (!('jest' in globalThis)) {
+  Object.defineProperty(globalThis, 'jest', {
+    value: { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) },
+    writable: true,
+    configurable: true,
+  });
+}
 
 // Polyfill ResizeObserver for jsdom (used by DashboardCustomizer auto-fit logic)
 if (typeof globalThis.ResizeObserver === 'undefined') {

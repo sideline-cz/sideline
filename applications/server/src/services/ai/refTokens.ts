@@ -12,6 +12,7 @@
  * token is only ever valid for the turn that minted it.
  */
 import type { AiChatApi } from '@sideline/domain';
+import { SearchApi } from '@sideline/domain';
 
 const REF_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
 const REF_TOKEN_LENGTH = 4;
@@ -50,22 +51,11 @@ export const mintToken = (used: Set<string>): string => {
  * `ref` field) — an `EntityRef` is always a valid argument too, since it is
  * a `SearchHit` plus `ref`. NOT derived from `ref` itself (the token is
  * per-turn and regenerated every turn, so it can never be the dedup key).
- * Same string as `SearchApi.searchHitId` — see that function's doc comment.
+ * Delegates to `SearchApi.searchHitId` — the single source of the
+ * `"<kind>:<id>"` format, so this and the command-palette identity can never
+ * drift apart.
  */
-export const entityKeyOf = (hit: AiChatApi.SearchHit): string => {
-  switch (hit.kind) {
-    case 'event':
-      return `event:${hit.event.eventId}`;
-    case 'member':
-      return `member:${hit.memberId}`;
-    case 'group':
-      return `group:${hit.group.groupId}`;
-    case 'roster':
-      return `roster:${hit.roster.rosterId}`;
-    case 'trainingType':
-      return `trainingType:${hit.trainingType.trainingTypeId}`;
-  }
-};
+export const entityKeyOf = (hit: AiChatApi.SearchHit): string => SearchApi.searchHitId(hit);
 
 /**
  * Rebuilds the `token -> position in references` map from scratch — the

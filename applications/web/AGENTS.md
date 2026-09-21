@@ -29,6 +29,8 @@ components/
 
 An organism that must refetch loader data after a mutation takes an `onRefresh: () => void` prop and the **page** supplies `() => { router.invalidate(); }` — never `useRouter()`/`useNavigate()`/`useSearch()`/`useParams()`/`useRouteContext()` inside the organism. Reference: `components/organisms/team-settings/*` + `components/pages/TeamSettingsPage.tsx`. Six organisms predate this rule and still call `useRouter()` directly — `AdoptChannelDialog.tsx`, `ArchiveChannelDialog.tsx`, `BulkArchiveDialog.tsx`, `ChannelAccessSheet.tsx`, `CreateChannelDialog.tsx`, `RenameChannelDialog.tsx`. They are known debt, not precedent: convert each to `onRefresh` the next time it is edited. Importing the `<Link>` component (not a hook) into an organism stays allowed.
 
+`AuthenticatedLayout.tsx` is one exception to the `layouts/` row above: it owns `useNavigate()` and the command palette's five-branch per-kind navigation switch (`onSelectHit`/`onAskAssistant`). No page wraps every authenticated route the way `AuthenticatedLayout` does, so there is no page for an app-wide Cmd/Ctrl+K palette to hand navigation off to — this is the least-bad placement, not a precedent for other layout-level business logic.
+
 ## Shadcn Components
 
 Use the latest version of Shadcn to install new components:

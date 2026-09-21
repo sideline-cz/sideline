@@ -13,6 +13,7 @@ import type { AiChatApi } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import { Option } from 'effect';
 import { Calendar, Dumbbell, UserCog, UsersRound } from 'lucide-react';
+import type React from 'react';
 import { ColorDot } from '~/components/atoms/ColorDot.js';
 import { AssistantResultRow } from '~/components/molecules/assistant/AssistantResultRow.js';
 import { RoleBadge } from '~/components/molecules/RoleBadge.js';
@@ -29,12 +30,22 @@ import { sortEffectiveRoles } from '~/lib/roles/role-order.js';
 import { tr } from '~/lib/translations.js';
 
 interface AssistantResultCardProps {
-  reference: AiChatApi.EntityRef;
+  /** Widened from `EntityRef` to `SearchHit`: the card reads only the payload records, never
+   *  `.ref`, so chat (which passes an `EntityRef`) still satisfies this — `EntityRef` is
+   *  `SearchHit` plus `ref`. */
+  reference: AiChatApi.SearchHit;
   teamId: string;
   colorMap: TrainingTypeColorMap;
+  /** Overrides the default per-kind `<Link>` wrapper. The command palette passes a `CommandItem`. */
+  renderWrapper?: (children: React.ReactNode, className: string) => React.ReactElement;
 }
 
-export function AssistantResultCard({ reference, teamId, colorMap }: AssistantResultCardProps) {
+export function AssistantResultCard({
+  reference,
+  teamId,
+  colorMap,
+  renderWrapper,
+}: AssistantResultCardProps) {
   const isMobile = useIsMobile();
 
   switch (reference.kind) {
@@ -79,15 +90,18 @@ export function AssistantResultCard({ reference, teamId, colorMap }: AssistantRe
               {eventStatusLabels[event.status]()}
             </Badge>
           }
-          renderLink={(children, className) => (
-            <Link
-              to={ENTITY_ROUTE.event}
-              params={{ teamId, eventId: event.eventId }}
-              className={className}
-            >
-              {children}
-            </Link>
-          )}
+          renderLink={
+            renderWrapper ??
+            ((children, className) => (
+              <Link
+                to={ENTITY_ROUTE.event}
+                params={{ teamId, eventId: event.eventId }}
+                className={className}
+              >
+                {children}
+              </Link>
+            ))
+          }
         />
       );
     }
@@ -129,15 +143,18 @@ export function AssistantResultCard({ reference, teamId, colorMap }: AssistantRe
               <Badge variant='outline'>{tr('roster_inactive')}</Badge>
             ) : undefined
           }
-          renderLink={(children, className) => (
-            <Link
-              to={ENTITY_ROUTE.member}
-              params={{ teamId, memberId: reference.memberId }}
-              className={className}
-            >
-              {children}
-            </Link>
-          )}
+          renderLink={
+            renderWrapper ??
+            ((children, className) => (
+              <Link
+                to={ENTITY_ROUTE.member}
+                params={{ teamId, memberId: reference.memberId }}
+                className={className}
+              >
+                {children}
+              </Link>
+            ))
+          }
         />
       );
     }
@@ -154,15 +171,18 @@ export function AssistantResultCard({ reference, teamId, colorMap }: AssistantRe
           primary={primary}
           secondary={tr('group_memberCount', { count: group.memberCount })}
           trailing={<ColorDot color={Option.getOrUndefined(group.color)} />}
-          renderLink={(children, className) => (
-            <Link
-              to={ENTITY_ROUTE.group}
-              params={{ teamId, groupId: group.groupId }}
-              className={className}
-            >
-              {children}
-            </Link>
-          )}
+          renderLink={
+            renderWrapper ??
+            ((children, className) => (
+              <Link
+                to={ENTITY_ROUTE.group}
+                params={{ teamId, groupId: group.groupId }}
+                className={className}
+              >
+                {children}
+              </Link>
+            ))
+          }
         />
       );
     }
@@ -188,15 +208,18 @@ export function AssistantResultCard({ reference, teamId, colorMap }: AssistantRe
               </Badge>
             </>
           }
-          renderLink={(children, className) => (
-            <Link
-              to={ENTITY_ROUTE.roster}
-              params={{ teamId, rosterId: roster.rosterId }}
-              className={className}
-            >
-              {children}
-            </Link>
-          )}
+          renderLink={
+            renderWrapper ??
+            ((children, className) => (
+              <Link
+                to={ENTITY_ROUTE.roster}
+                params={{ teamId, rosterId: roster.rosterId }}
+                className={className}
+              >
+                {children}
+              </Link>
+            ))
+          }
         />
       );
     }
@@ -219,15 +242,18 @@ export function AssistantResultCard({ reference, teamId, colorMap }: AssistantRe
           }
           primary={trainingType.name}
           secondary={secondary}
-          renderLink={(children, className) => (
-            <Link
-              to={ENTITY_ROUTE.trainingType}
-              params={{ teamId, trainingTypeId: trainingType.trainingTypeId }}
-              className={className}
-            >
-              {children}
-            </Link>
-          )}
+          renderLink={
+            renderWrapper ??
+            ((children, className) => (
+              <Link
+                to={ENTITY_ROUTE.trainingType}
+                params={{ teamId, trainingTypeId: trainingType.trainingTypeId }}
+                className={className}
+              >
+                {children}
+              </Link>
+            ))
+          }
         />
       );
     }

@@ -136,9 +136,14 @@ function classifyTurnFailure(squashed: unknown): {
 
 interface AssistantConversationProps {
   teamId: string;
+  /** The command-palette hand-off (design §6.3 / plan §D). `{ text, id }`, not a bare `string` —
+   *  the route strips `?ask=` immediately, so asking the identical text twice in a row would be
+   *  swallowed by a value-equality guard; the monotonic `id` makes the second ask a genuinely
+   *  new event. */
+  pendingQuestion?: { text: string; id: number };
 }
 
-export function AssistantConversation({ teamId }: AssistantConversationProps) {
+export function AssistantConversation({ teamId, pendingQuestion }: AssistantConversationProps) {
   const run = useRun();
   const teamIdBranded = React.useMemo(() => Schema.decodeSync(Team.TeamId)(teamId), [teamId]);
 
@@ -268,6 +273,30 @@ export function AssistantConversation({ teamId }: AssistantConversationProps) {
     },
     [turns, nextId, runExchange],
   );
+
+  // The command-palette hand-off's auto-send, exactly once per id (design §6.3 / plan §D).
+  // `handleSend`'s identity changes on every `turns` update (it closes over `turns`), so this
+  // effect legitimately re-runs on every turn — the ref guard, not the dependency array, is
+  // what makes it fire once. Do not "fix" it by trimming deps; that is how the next person
+  // breaks it. The ref is assigned BEFORE `handleSend` so a re-entrant render (triggered by
+  // `handleSend`'s own optimistic `setTurns` call, which is what gives it a new identity in the
+  // first place) sees the guard already tripped.
+  //
+  // The clamp: `toChatMessages` -> `new AiChatApi.ChatMessage(...)` is a validating constructor
+  // that throws on `''` (isMinLength(1)) and on >2000 chars (isMaxLength(2000)), and that call
+  // happens before `setSubmitting(true)` and outside the `try` in `runExchange` above — an
+  // unclamped auto-send throws synchronously right after the optimistic user bubble lands on
+  // screen: no error turn, no request, no log, page dead. The route already slices `?ask=` to
+  // 2000 characters, but `pendingQuestion` is a prop, not re-validated at a trust boundary by
+  // the time it gets here, so this is the last line of defence before the throwing constructor.
+  const sentIdRef = React.useRef(0);
+  React.useEffect(() => {
+    if (pendingQuestion === undefined || sentIdRef.current >= pendingQuestion.id) return;
+    sentIdRef.current = pendingQuestion.id;
+    const text = pendingQuestion.text.trim().slice(0, 2000);
+    if (text.length === 0) return;
+    void handleSend(text);
+  }, [pendingQuestion, handleSend]);
 
   const handleRetry = React.useCallback(
     async (errorTurn: ErrorTurnData) => {

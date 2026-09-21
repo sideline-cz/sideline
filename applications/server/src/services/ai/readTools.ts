@@ -155,7 +155,7 @@ const listEventById = (
     ),
   );
 
-const listAllEvents = (
+export const listAllEvents = (
   args: ListEventsArgs,
   ctx: EntityReadContext,
 ): Effect.Effect<ToolExecutionResult, never, EventsRepository> =>

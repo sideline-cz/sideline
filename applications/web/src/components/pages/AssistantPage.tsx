@@ -14,9 +14,12 @@ import { tr } from '~/lib/translations.js';
 interface AssistantPageProps {
   teamId: string;
   enabled: boolean;
+  /** Set once per `?ask=` hand-off from the command palette (design §6.3 / plan §D). Silently
+   *  discarded when `enabled === false` — `AssistantConversation` never mounts. */
+  pendingQuestion?: { text: string; id: number };
 }
 
-export function AssistantPage({ teamId, enabled }: AssistantPageProps) {
+export function AssistantPage({ teamId, enabled, pendingQuestion }: AssistantPageProps) {
   return (
     <div className='flex flex-1 min-h-0 flex-col gap-4'>
       <div className='shrink-0'>
@@ -27,7 +30,7 @@ export function AssistantPage({ teamId, enabled }: AssistantPageProps) {
       </div>
 
       {enabled ? (
-        <AssistantConversation teamId={teamId} />
+        <AssistantConversation teamId={teamId} pendingQuestion={pendingQuestion} />
       ) : (
         <div className='flex flex-1 flex-col items-center justify-center gap-3 text-center'>
           <Sparkles className='size-8 text-muted-foreground' aria-hidden='true' />
