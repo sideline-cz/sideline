@@ -49,19 +49,26 @@ export type ReconcileMemberRolesResult = {
  * `Guild/RegisterMember` / `Guild/ReconcileMembers` payload) and enqueues only the delta onto
  * `role_sync_events` — the level-based replacement for rev 2's one-shot transition gate (CC-10).
  *
- * - **desired** = `findEffectiveRoleIdsForMember` (`member_roles` ∪ group-derived roles),
- *   intersected with `managed`'s keys.
+ * - **desired** = `findEffectiveRoleIdsForMember` (`member_roles` ∪ group-derived roles). NOT
+ *   intersected with `managed` — see `role_assigned` below.
  * - **managed** = `discord_role_mappings` for the team — the Discord roles Sideline owns.
  * - **actual** = the payload's `roles`, implicitly restricted to `managed`'s values below.
  * - **granted** = `TeamMembersRepository.findGrantedRoleIds` — the role ids THIS member was
  *   actually given by Sideline (`member_role_grants`, written from the bot's own success path;
  *   see that table's migration and `unassignCandidates` below).
- * - `role_assigned` for every managed+desired role missing from `actual`.
+ * - `role_assigned` for every desired role that is either unmapped, or mapped to a Discord role
+ *   missing from `actual`. **A desired role with no `discord_role_mappings` row IS emitted** —
+ *   the bot's `handleMemberAdded` resolves the mapping itself via `ensureMapping`
+ *   (adopt-or-create) before assigning, so an unmapped role is provisionable, not unknown.
+ *   Filtering assignment down to `managed` is what made a never-mapped Sideline role permanently
+ *   unprovisionable by this automatic path — only the manual `syncMemberDiscordRoles` button
+ *   (which emits from `desired` directly) could bootstrap one.
  * - `role_unassigned` for every managed role present in `actual`, not desired, AND granted (see
  *   `unassignCandidates` below).
- * - **A Discord role with no `discord_role_mappings` row is never considered** — both candidate
- *   lists are filtered from `managed`, never from `actual` directly, so an unmapped role a captain
- *   granted by hand can never be stripped (the anti-stripping guard, CC-8).
+ * - **A Discord role with no `discord_role_mappings` row is never REMOVED** —
+ *   `unassignCandidates` is filtered from `managed`, never from `actual` directly, so an unmapped
+ *   role a captain granted by hand can never be stripped (the anti-stripping guard, CC-8). This
+ *   guard is about removal only; adding a role the member should have is safe from any source.
  * - **`unassignCandidates` is restricted to roles `granted` records for THIS member (blocker,
  *   whole-series review of commit 46806427)** — not to non-`adopted` mappings. `adopted` is a
  *   MAPPING-level fact ("did Sideline create or adopt this Discord role at all") and cannot answer
@@ -75,9 +82,12 @@ export type ReconcileMemberRolesResult = {
  *   never in `unassignCandidates`, which is also the correct default for a member who predates
  *   `member_role_grants` and has no recorded provenance at all (no backfill exists; see the
  *   migration's doc comment).
- * - **In steady state (actual already matches desired) both candidate lists are empty and nothing
- *   is emitted.** This is the flood protection that replaces the transition gate, and it holds on
- *   every call, not just the first one after a migration.
+ * - **In steady state (every desired role is mapped, and actual already matches desired) both
+ *   candidate lists are empty and nothing is emitted.** A desired role still awaiting its mapping
+ *   re-emits on each pass until the bot's `ensureMapping` lands it — the same self-healing
+ *   re-emission a mapped-but-unassigned role already gets, bounded by the caps below. This
+ *   emptiness in steady state is the flood protection that replaces the transition gate, and it
+ *   holds on every call, not just the first one after a migration.
  * - Capped per member at `MAX_ROLE_SYNC_EMISSIONS_PER_MEMBER` (shared with the manual-sync
  *   button), then further capped against `guildBudget` when the caller passes one (the
  *   `Guild/ReconcileMembers` per-guild-per-pass cap). Events cut by either cap are reported via
@@ -108,11 +118,9 @@ const computeRoleDiff = (
     ),
     Effect.let('desiredRoleIds', ({ desired }) => new Set(desired.map((r) => r.role_id))),
     Effect.let('actualRoleIds', () => new Set(actualDiscordRoleIds)),
-    // Both candidate lists are filtered from `managed` — never from `actual` directly — so a
-    // Discord role with no `discord_role_mappings` row is never considered, added, or removed
-    // (the anti-stripping guard, CC-8).
-    Effect.let('assignCandidates', ({ managed, desiredRoleIds, actualRoleIds }) =>
-      managed.filter((m) => desiredRoleIds.has(m.role_id) && !actualRoleIds.has(m.discord_role_id)),
+    Effect.let(
+      'mappedDiscordRoleIds',
+      ({ managed }) => new Map(managed.map((m) => [m.role_id, m.discord_role_id] as const)),
     ),
     // Blocker (whole-series review of commit 46806427): a mapping is only an unassign candidate
     // if `grantedRoleIds` says SIDELINE ITSELF gave *this* member the role (`member_role_grants`,
@@ -132,15 +140,28 @@ const computeRoleDiff = (
           !desiredRoleIds.has(m.role_id),
       ),
     ),
+    // Built from `desired`, NOT from `managed` — a Sideline role with no `discord_role_mappings`
+    // row yet is still an assign candidate, because the bot's `handleMemberAdded` resolves the
+    // mapping itself via `ensureMapping` (adopt-or-create) before it assigns. Filtering these out
+    // is what left a never-mapped role permanently unprovisionable by this automatic path, while
+    // the manual `syncMemberDiscordRoles` button (which emits from `desired` directly) could
+    // bootstrap it. `desired` already carries `role_name` and already excludes archived roles
+    // (`effectiveRolesFrom`), so no `findRoleById` resolution is needed here — unlike
+    // `toUnassign` below, which starts from a mapping and must look the name up.
+    //
+    // This does NOT widen the anti-stripping guard (CC-8): that guard lives on
+    // `unassignCandidates`, which is still filtered from `managed` AND `grantedRoleIds`. Adding a
+    // role the member should have is safe from any source; removing one is not.
+    Effect.let('toAssign', ({ desired, actualRoleIds, mappedDiscordRoleIds }) =>
+      desired
+        .filter((r) => {
+          const discordRoleId = mappedDiscordRoleIds.get(r.role_id);
+          return discordRoleId === undefined || !actualRoleIds.has(discordRoleId);
+        })
+        .map((r) => ({ roleId: r.role_id, roleName: r.role_name })),
+    ),
     // Resolve role names; a mapping whose role can no longer be found (e.g. archived) is skipped
     // rather than emitted with a fabricated name — mirrors syncMemberDiscordRoles.ts.
-    Effect.bind('toAssign', ({ roles, assignCandidates }) =>
-      Effect.forEach(assignCandidates, (m) =>
-        roles
-          .findRoleById(m.role_id)
-          .pipe(Effect.map(Option.map((role) => ({ roleId: m.role_id, roleName: role.name })))),
-      ).pipe(Effect.map(Array.getSomes)),
-    ),
     Effect.bind('toUnassign', ({ roles, unassignCandidates }) =>
       Effect.forEach(unassignCandidates, (m) =>
         roles

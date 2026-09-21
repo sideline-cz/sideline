@@ -412,9 +412,11 @@ describe('Guild/RegisterMember — group-scoped invite reaches Discord (bug 3da9
         ),
         Effect.bind('role', ({ team }) => createRole(team.id, 'Club Member')),
         Effect.tap(({ role, grandparent }) => assignRoleToGroup(role.id, grandparent.id)),
-        // Present so a failure to sever would actually surface as a `role_assigned` row —
-        // without a managed mapping the diff would filter the (wrongly) desired role out for an
-        // unrelated reason and the assertion below would pass for the wrong reason too.
+        // Present so this stays a realistic fully-provisioned setup. It is no longer load-bearing
+        // for the assertion: since bug 3da93506 the diff emits `role_assigned` for a desired role
+        // even with no mapping, so a failure to sever would surface as a `role_sync_events` row
+        // either way. Kept rather than dropped — mapping the role is the normal state, and the
+        // test should sever under normal conditions.
         Effect.tap(({ team, role }) =>
           mapDiscordRole(team.id, role.id, '700000000000000003' as Discord.Snowflake),
         ),

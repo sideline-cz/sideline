@@ -63,6 +63,13 @@ const UNMANAGED_DISCORD_ROLE_ID = '500000000000000099' as Discord.Snowflake;
 const ADOPTED_ROLE_ID =
   '00000000-0000-0000-0000-000000000052' as import('@sideline/domain').Role.RoleId;
 const ADOPTED_DISCORD_ROLE_ID = '500000000000000003' as Discord.Snowflake;
+// bug 3da93506: a Sideline role with NO `discord_role_mappings` row at all — the inverse of
+// `UNMANAGED_DISCORD_ROLE_ID` (a DISCORD role Sideline does not manage). Deliberately absent from
+// `discordRoleMappings` AND from `MockRolesRepository`: the reconcile diff must be able to
+// bootstrap it from `desired` alone (the bot's `ensureMapping` adopts-or-creates the Discord role
+// when it handles the event), without a mapping row and without a `findRoleById` lookup.
+const UNMAPPED_ROLE_ID =
+  '00000000-0000-0000-0000-000000000054' as import('@sideline/domain').Role.RoleId;
 // A role linked to GROUP_ID (`role_groups`), exercised by the group-scoped-invite tests below —
 // U2 seeds `groupRoles` with it so the diff has something to assign once the group bind lands
 // before the role diff runs.
@@ -1961,6 +1968,66 @@ describe('Guild/ReconcileMembers — PR-8 level-based reconcile (CC-10)', () => 
       );
     },
   );
+
+  // bug 3da93506: `assignCandidates` used to be filtered from `managed` (existing
+  // `discord_role_mappings` rows), so a Sideline role that had never been mapped could never be
+  // provisioned by this automatic path at all — only by the manual "sync roles" button, which
+  // emits from `desired` directly. The bot's `handleMemberAdded` calls `ensureMapping`
+  // (adopt-or-create) before assigning, so an unmapped role is provisionable, not unknown.
+  itEffect.effect('emits role_assigned for a desired role that has no mapping yet', () => {
+    const discordId = '500000000000000007';
+    const memberId = 'member-reconcile-unmapped' as TeamMember.TeamMemberId;
+    seedActiveMember(discordId, memberId);
+    effectiveRoles.set(memberId, [{ role_id: UNMAPPED_ROLE_ID, role_name: 'Brand New' }]);
+    return callReconcileMembers(
+      [{ discord_id: discordId, username: 'unmapped-role-member', roles: [] }],
+      true,
+    ).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(roleAssignedEvents).toHaveLength(1);
+          expect(roleAssignedEvents[0]?.roleId).toBe(UNMAPPED_ROLE_ID);
+          // The name rides along from `desired` (`effectiveRolesFrom`), not from a
+          // `findRoleById` lookup — `UNMAPPED_ROLE_ID` is not in `MockRolesRepository` at all.
+          expect(roleAssignedEvents[0]?.roleName).toBe('Brand New');
+          // The anti-stripping guard (CC-8) is untouched: it lives on `unassignCandidates`,
+          // which is still filtered from `managed`.
+          expect(roleUnassignedEvents).toHaveLength(0);
+        }),
+      ),
+    );
+  });
+
+  // The other side of the same change: widening assignment to `desired` must not re-emit for a
+  // role the member already holds, or steady state would flood the queue every pass.
+  itEffect.effect('still emits nothing for a mapped role the member already holds', () => {
+    const discordId = '500000000000000008';
+    const memberId = 'member-reconcile-unmapped-steady' as TeamMember.TeamMemberId;
+    seedActiveMember(discordId, memberId);
+    effectiveRoles.set(memberId, [
+      { role_id: CAPTAIN_ROLE_ID, role_name: 'Captain' },
+      { role_id: UNMAPPED_ROLE_ID, role_name: 'Brand New' },
+    ]);
+    return callReconcileMembers(
+      [
+        {
+          discord_id: discordId,
+          username: 'unmapped-steady-member',
+          roles: [CAPTAIN_DISCORD_ROLE_ID],
+        },
+      ],
+      true,
+    ).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          // Only the still-unmapped role — the mapped-and-held Captain role is not re-emitted.
+          expect(roleAssignedEvents).toHaveLength(1);
+          expect(roleAssignedEvents[0]?.roleId).toBe(UNMAPPED_ROLE_ID);
+          expect(roleUnassignedEvents).toHaveLength(0);
+        }),
+      ),
+    );
+  });
 
   // Symmetric with the above: an adopted mapping is still eligible to be ADDED — only stripping
   // is forbidden.
