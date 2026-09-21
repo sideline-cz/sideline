@@ -9,6 +9,7 @@ import { DiscordREST } from 'dfx/DiscordREST';
 import { Array as Arr, Effect, Option, Schedule, Schema } from 'effect';
 import { guildLocale, type Locale } from '~/locale.js';
 import type { ChannelReorderSemaphore } from '~/rcp/event/ChannelReorderSemaphore.js';
+import { isUnknownMessageError } from '~/rest/discordErrors.js';
 import { buildPersonalMessage } from '~/rest/events/buildPersonalEventMessage.js';
 import { YES_EMBED_LIMIT } from '~/rest/utils.js';
 import { DfxGuild } from '~/schemas.js';
@@ -80,7 +81,12 @@ const reconcileMemberMessage = (params: {
         if (Option.isNone(stored)) {
           return Effect.succeed(Option.none<PersonalChannelMember>());
         }
-        return rest.deleteMessage(member.personal_channel_id, stored.value.discord_message_id).pipe(
+        return Effect.logInfo(
+          `Deleting personal event message ${stored.value.discord_message_id} for member ${member.team_member_id} — event ${event.event_id} left the member's upcoming window`,
+        ).pipe(
+          Effect.andThen(
+            rest.deleteMessage(member.personal_channel_id, stored.value.discord_message_id),
+          ),
           Effect.catch(() => Effect.void),
           Effect.andThen(
             rpc['PersonalEvents/DeletePersonalEventMessage']({
@@ -105,40 +111,9 @@ const reconcileMemberMessage = (params: {
         return Effect.succeed(Option.none<PersonalChannelMember>());
       }
 
-      if (Option.isSome(stored)) {
-        // Update existing message in place — ordering is unaffected. Editing the
-        // message (rather than creating) means an unanswered-event mention in
-        // editPayload registers + highlights but never pings.
-        const messageId = stored.value.discord_message_id;
-        return rest.updateMessage(member.personal_channel_id, messageId, render.editPayload).pipe(
-          Effect.tap(() =>
-            rpc['PersonalEvents/UpsertPersonalEventMessage']({
-              event_id: event.event_id,
-              team_member_id: member.team_member_id,
-              personal_channel_id: member.personal_channel_id,
-              discord_message_id: messageId,
-              payload_hash: hash,
-            }).pipe(
-              Effect.catchTag('RpcClientError', (e) =>
-                Effect.logWarning(
-                  `Failed to upsert personal event message for member ${member.team_member_id}`,
-                  e,
-                ),
-              ),
-            ),
-          ),
-          Effect.as(Option.none<PersonalChannelMember>()),
-          Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (e) =>
-            Effect.logWarning(
-              `Failed to update personal channel message for member ${member.team_member_id}`,
-              e,
-            ).pipe(Effect.as(Option.none<PersonalChannelMember>())),
-          ),
-        );
-      }
-
-      // No stored message — CREATE it (new member or new event). A create appends
-      // at the bottom, so the channel may need a reorder afterwards → return Some.
+      // CREATE the message (new member, new event, or a stored row whose Discord
+      // message has since been deleted). A create appends at the bottom, so the
+      // channel may need a reorder afterwards → return Some.
       // We always create mention-free, then add an unanswered-event mention via an
       // edit so it highlights the message without pinging the member.
       // Dedup safety: if the persist fails after retries, delete the just-created
@@ -167,40 +142,91 @@ const reconcileMemberMessage = (params: {
             ),
           ),
         );
-      return rest.createMessage(member.personal_channel_id, render.createPayload).pipe(
-        Effect.flatMap((msg) => {
-          const discordMessageId = DiscordSchemas.Snowflake.makeUnsafe(msg.id);
-          const logCreated = Effect.logInfo(
-            `Created personal event message ${discordMessageId} for member ${member.team_member_id} event ${event.event_id}`,
-          );
-          if (!render.needsMentionEdit) {
-            return persist(discordMessageId, hash).pipe(Effect.tap(() => logCreated));
-          }
-          // Add the mention via edit (no ping). On failure, persist '' so the next
-          // reconcile re-applies it; on success persist the final hash.
-          return rest
-            .updateMessage(member.personal_channel_id, discordMessageId, render.editPayload)
-            .pipe(
-              Effect.matchEffect({
-                onSuccess: () => persist(discordMessageId, hash),
-                onFailure: (e) =>
-                  Effect.logWarning(
-                    `Failed to apply mention edit for member ${member.team_member_id}`,
-                    e,
-                  ).pipe(Effect.andThen(persist(discordMessageId, ''))),
-              }),
-              Effect.tap(() => logCreated),
+      const createFlow = () =>
+        rest.createMessage(member.personal_channel_id, render.createPayload).pipe(
+          Effect.flatMap((msg) => {
+            const discordMessageId = DiscordSchemas.Snowflake.makeUnsafe(msg.id);
+            const logCreated = Effect.logInfo(
+              `Created personal event message ${discordMessageId} for member ${member.team_member_id} event ${event.event_id}`,
             );
-        }),
-        Effect.as(Option.some(member)),
-        Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (e) =>
-          Effect.logWarning(
-            `Failed to create personal channel message for member ${member.team_member_id}`,
-            e,
-          ).pipe(Effect.as(Option.none<PersonalChannelMember>())),
+            if (!render.needsMentionEdit) {
+              return persist(discordMessageId, hash).pipe(Effect.tap(() => logCreated));
+            }
+            // Add the mention via edit (no ping). On failure, persist '' so the next
+            // reconcile re-applies it; on success persist the final hash.
+            return rest
+              .updateMessage(member.personal_channel_id, discordMessageId, render.editPayload)
+              .pipe(
+                Effect.matchEffect({
+                  onSuccess: () => persist(discordMessageId, hash),
+                  onFailure: (e) =>
+                    Effect.logWarning(
+                      `Failed to apply mention edit for member ${member.team_member_id}`,
+                      e,
+                    ).pipe(Effect.andThen(persist(discordMessageId, ''))),
+                }),
+                Effect.tap(() => logCreated),
+              );
+          }),
+          Effect.as(Option.some(member)),
+          Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (e) =>
+            Effect.logWarning(
+              `Failed to create personal channel message for member ${member.team_member_id}`,
+              e,
+            ).pipe(Effect.as(Option.none<PersonalChannelMember>())),
+          ),
+          Effect.catchTag('RpcClientError', () =>
+            Effect.succeed(Option.none<PersonalChannelMember>()),
+          ),
+        );
+
+      if (Option.isNone(stored)) {
+        return createFlow();
+      }
+
+      // Update existing message in place — ordering is unaffected. Editing the
+      // message (rather than creating) means an unanswered-event mention in
+      // editPayload registers + highlights but never pings.
+      const messageId = stored.value.discord_message_id;
+      return rest.updateMessage(member.personal_channel_id, messageId, render.editPayload).pipe(
+        Effect.tap(() =>
+          rpc['PersonalEvents/UpsertPersonalEventMessage']({
+            event_id: event.event_id,
+            team_member_id: member.team_member_id,
+            personal_channel_id: member.personal_channel_id,
+            discord_message_id: messageId,
+            payload_hash: hash,
+          }).pipe(
+            Effect.catchTag('RpcClientError', (e) =>
+              Effect.logWarning(
+                `Failed to upsert personal event message for member ${member.team_member_id}`,
+                e,
+              ),
+            ),
+          ),
         ),
-        Effect.catchTag('RpcClientError', () =>
-          Effect.succeed(Option.none<PersonalChannelMember>()),
+        Effect.as(Option.none<PersonalChannelMember>()),
+        Effect.catchTag(['HttpClientError', 'RatelimitedResponse', 'ErrorResponse'], (e) =>
+          // The row points at a message Discord no longer has — someone deleted it
+          // by hand, or a reorder's delete-then-recreate raced us. Without this
+          // branch the row survives forever, every later pass re-PATCHes the same
+          // dead id, and the member's card is gone for good (it is never recreated,
+          // because `stored` keeps insisting it exists).
+          //
+          // Post a fresh message and let `persist`'s upsert (ON CONFLICT
+          // (event_id, team_member_id) DO UPDATE) repoint the row. Deliberately NOT
+          // deleting the row first: that would open a window where a create failure
+          // (rate limit, 5xx) leaves the member with no message AND no row, while
+          // the processor clears the dirty flag regardless — the "live event, zero
+          // cards, nothing left to retry" state seen in production.
+          isUnknownMessageError(e)
+            ? Effect.logWarning(
+                `Personal event message ${messageId} is gone from Discord (member ${member.team_member_id}, event ${event.event_id}) — recreating`,
+              ).pipe(Effect.andThen(createFlow()))
+            : Effect.logWarning(
+                `Failed to update personal channel message for member ${member.team_member_id}`,
+                e,
+              ).pipe(Effect.as(Option.none<PersonalChannelMember>())),
         ),
       );
     }),

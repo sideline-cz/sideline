@@ -774,3 +774,188 @@ describe('handleReconcile — PR 4: all-day started event stays visible → edit
     expect(updateMessageCalls).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression: an in-place updateMessage that 404s with code 10008 (message
+// deleted from Discord, e.g. by hand or by a racing reorder pass) must recreate
+// the message — NOT just log and leave the row pointing at a dead message id
+// forever (the production bug: every later pass re-PATCHes the same dead id,
+// and the card never comes back). The row is deliberately NOT explicitly
+// deleted first; `persist`'s ON CONFLICT upsert repoints it instead.
+// ---------------------------------------------------------------------------
+
+/** A stored row for member A whose `updateMessage` always fails with `error`, plus
+ * call/args tracking for `deleteMessage`, `createMessage`, and the two RPC calls
+ * the recreate path depends on. Entry is present (not vanished) with a stale
+ * stored hash, so the update branch — not the delete-on-vanish branch above — is
+ * the one exercised. */
+const makeUnknownMessageLayers = (error: unknown) => {
+  const deleteRpcCalls: unknown[] = [];
+  const createMessageCalls: Array<{ channelId: string }> = [];
+  const updateMessageCalls: Array<{ channelId: string; messageId: string }> = [];
+  const deleteMessageCalls: Array<{ channelId: string; messageId: string }> = [];
+
+  const rpcLayer = Layer.succeed(
+    SyncRpc,
+    new Proxy({} as any, {
+      get: (_target: unknown, method: string) => {
+        if (typeof method !== 'string' || method === 'then') return undefined;
+        return (args: any) => {
+          if (method === 'Guild/ListPersonalChannelsForEvent') {
+            return Effect.succeed([
+              {
+                team_member_id: MEMBER_A_ID as any,
+                discord_id: DISCORD_ID_A as any,
+                personal_channel_id: PERSONAL_CHANNEL_A as any,
+              },
+            ]);
+          }
+          if (method === 'Guild/GetAllUpcomingEventsForUser') {
+            return Effect.succeed({
+              events: [makeUpcomingEvent('yes')],
+              total: 1,
+              team_id: TEAM_ID,
+            });
+          }
+          if (method === 'PersonalEvents/GetPersonalEventMessage') {
+            return Effect.succeed(
+              Option.some({
+                discord_message_id: PERSONAL_MSG_A,
+                payload_hash: 'SENTINEL-WILL-NEVER-MATCH',
+              }),
+            );
+          }
+          if (method === 'PersonalEvents/DeletePersonalEventMessage') {
+            deleteRpcCalls.push(args);
+            return Effect.succeed(undefined);
+          }
+          if (method === 'PersonalEvents/UpsertPersonalEventMessage') {
+            return Effect.succeed(undefined);
+          }
+          if (method === 'Event/GetYesAttendeesForEmbed') {
+            return Effect.succeed([]);
+          }
+          return Effect.succeed(null);
+        };
+      },
+    }),
+  );
+
+  const restLayer = Layer.succeed(
+    DiscordREST,
+    new Proxy({} as any, {
+      get: (_target: unknown, prop: string) => {
+        if (prop === 'updateMessage') {
+          return (channelId: string, messageId: string) => {
+            updateMessageCalls.push({ channelId, messageId });
+            return Effect.fail(error);
+          };
+        }
+        if (prop === 'createMessage') {
+          // NOTE: must defer the push into an `Effect.sync` rather than pushing
+          // eagerly on the bare JS call. `reconcileMemberMessage` builds
+          // `createFlow = rest.createMessage(...).pipe(...)` unconditionally
+          // whenever the hash differs (even on the plain-update path, where that
+          // Effect value is constructed but never run) — a real `DiscordREST`
+          // call is a lazy Effect that does nothing until executed, so a mock
+          // that fires on construction produces false "createMessage was called"
+          // positives for branches that build but never run `createFlow`.
+          return (channelId: string) =>
+            Effect.sync(() => {
+              createMessageCalls.push({ channelId });
+              return { id: 'recreated-msg-id' };
+            });
+        }
+        if (prop === 'deleteMessage') {
+          return (channelId: string, messageId: string) => {
+            deleteMessageCalls.push({ channelId, messageId });
+            return Effect.succeed(undefined);
+          };
+        }
+        if (prop === 'getGuild') {
+          return () => Effect.succeed({ preferred_locale: 'en-US', system_channel_id: null });
+        }
+        return () => Effect.succeed({ id: 'mock-id' });
+      },
+    }),
+  );
+
+  return {
+    rpcLayer,
+    restLayer,
+    deleteRpcCalls,
+    createMessageCalls,
+    updateMessageCalls,
+    deleteMessageCalls,
+  };
+};
+
+describe('handleReconcile — updateMessage 404s on a stored row (message deleted out from under us)', () => {
+  it('code 10008 (Unknown Message): recreates the message without an explicit row delete', async () => {
+    const notFound = {
+      _tag: 'ErrorResponse',
+      response: { status: 404 },
+      data: { code: 10008 },
+    };
+    const { rpcLayer, restLayer, deleteRpcCalls, createMessageCalls, updateMessageCalls } =
+      makeUnknownMessageLayers(notFound);
+
+    await run(
+      reconcileEvent({
+        event_id: EVENT_ID as any,
+        team_id: TEAM_ID as any,
+        guild_id: GUILD_ID as any,
+      }),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    expect(updateMessageCalls).toHaveLength(1);
+    // The row is NOT explicitly deleted — deleting first would open a window
+    // where a failed create leaves no message AND no row. `persist`'s
+    // ON CONFLICT (event_id, team_member_id) DO UPDATE repoints it instead.
+    expect(deleteRpcCalls).toHaveLength(0);
+    // A fresh message is created in its place, so the card comes back instead
+    // of staying gone forever.
+    expect(createMessageCalls.map((c) => c.channelId)).toContain(PERSONAL_CHANNEL_A);
+  });
+
+  it('a plain HTTP 404 (no data.code) on updateMessage: does not match the narrowed predicate — log only, no recreate', async () => {
+    const notFound = { _tag: 'ErrorResponse', response: { status: 404 }, data: {} };
+    const { rpcLayer, restLayer, deleteRpcCalls, createMessageCalls, updateMessageCalls } =
+      makeUnknownMessageLayers(notFound);
+
+    await run(
+      reconcileEvent({
+        event_id: EVENT_ID as any,
+        team_id: TEAM_ID as any,
+        guild_id: GUILD_ID as any,
+      }),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    // isUnknownMessageError is code-10008-only now, so a bare 404 falls into
+    // the generic failure branch: log and leave the row alone.
+    expect(updateMessageCalls).toHaveLength(1);
+    expect(deleteRpcCalls).toHaveLength(0);
+    expect(createMessageCalls).toHaveLength(0);
+  });
+
+  it('a non-404 failure (e.g. 500): the row is left alone — no delete, no create', async () => {
+    const serverError = { _tag: 'ErrorResponse', response: { status: 500 }, data: {} };
+    const { rpcLayer, restLayer, deleteRpcCalls, createMessageCalls, updateMessageCalls } =
+      makeUnknownMessageLayers(serverError);
+
+    await run(
+      reconcileEvent({
+        event_id: EVENT_ID as any,
+        team_id: TEAM_ID as any,
+        guild_id: GUILD_ID as any,
+      }),
+      Layer.merge(rpcLayer, restLayer),
+    );
+
+    expect(updateMessageCalls).toHaveLength(1);
+    expect(deleteRpcCalls).toHaveLength(0);
+    expect(createMessageCalls).toHaveLength(0);
+  });
+});

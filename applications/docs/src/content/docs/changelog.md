@@ -5,6 +5,13 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-21 — Fix: your personal event card could disappear after voting "Coming later"
+
+Voting **Coming later** on an event could make that event's card vanish entirely from your personal events channel instead of just recording your response, because a hidden clash between two of the card's buttons — present only once your response was Coming later — made Discord reject the whole card.
+
+- Choosing **Coming later** no longer breaks the card. Your response, and everyone else's, keeps showing up normally.
+- A card that was already lost this way comes back on its own the next time that event changes — for example when anyone RSVPs to it. If an event has gone quiet and its card is still missing, ask a captain to run `/event refresh`.
+
 ## 2026-09-21 — Fix: a Fio token for the wrong account no longer imports its payments
 
 If a Fio API token was accidentally generated for (or pasted from) a different bank account than the one saved on a team's bank connection card, Sideline used to import that other account's movements anyway and try to auto-match them against the club's fees — silently, once an hour.
