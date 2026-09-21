@@ -1,4 +1,4 @@
-import { Discord, Event, EventRsvp, TeamMember } from '@sideline/domain';
+import { Discord, Event, EventRsvp, type Team, TeamMember } from '@sideline/domain';
 import { Effect, Layer, Option, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
@@ -94,6 +94,24 @@ const make = Effect.gen(function* () {
       FROM event_rsvps
       WHERE event_id = ${input.event_id}
         AND team_member_id = ${input.team_member_id}
+    `,
+  });
+
+  const findMessageByEventAndDiscordUser = SqlSchema.findOneOption({
+    Request: Schema.Struct({
+      event_id: Schema.String,
+      team_id: Schema.String,
+      discord_user_id: Schema.String,
+    }),
+    Result: Schema.Struct({ message: Schema.OptionFromNullOr(Schema.String) }),
+    execute: (input) => sql`
+      SELECT r.message
+      FROM event_rsvps r
+      JOIN team_members tm ON tm.id = r.team_member_id
+      JOIN users u ON u.id = tm.user_id
+      WHERE r.event_id = ${input.event_id}
+        AND tm.team_id = ${input.team_id}
+        AND u.discord_id = ${input.discord_user_id}
     `,
   });
 
@@ -309,6 +327,17 @@ const make = Effect.gen(function* () {
   ) =>
     findByEventAndMember({ event_id: eventId, team_member_id: teamMemberId }).pipe(catchSqlErrors);
 
+  const findRsvpMessageByEventAndDiscordUser = (
+    eventId: Event.EventId,
+    teamId: Team.TeamId,
+    discordUserId: Discord.Snowflake,
+  ) =>
+    findMessageByEventAndDiscordUser({
+      event_id: eventId,
+      team_id: teamId,
+      discord_user_id: discordUserId,
+    }).pipe(catchSqlErrors, Effect.map(Option.flatMap((row) => row.message)));
+
   const upsertRsvp = (
     eventId: Event.EventId,
     teamMemberId: TeamMember.TeamMemberId,
@@ -386,6 +415,7 @@ const make = Effect.gen(function* () {
   return {
     findRsvpsByEventId,
     findRsvpByEventAndMember,
+    findRsvpMessageByEventAndDiscordUser,
     upsertRsvp,
     countRsvpsByEventId,
     findRsvpAttendeesPage,

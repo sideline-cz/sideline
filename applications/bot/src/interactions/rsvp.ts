@@ -345,8 +345,15 @@ export const RsvpButton = Ix.messageComponent(
   ),
 );
 
-export const RsvpAddMessageButton = Ix.messageComponent(
-  Ix.idStartsWith('rsvp-add-msg:'),
+/**
+ * Shared "add / edit message" button handler for both the RSVP card
+ * (`rsvp-add-msg:`) and the upcoming-events card (`u-add-msg:`).
+ *
+ * The modal is prefilled with the member's stored note. A MODAL response
+ * cannot be deferred, so the prefill is ONE lean RPC and falls back to an
+ * empty modal on failure (AGENTS.md "A `MODAL` Response Cannot Be Deferred").
+ */
+export const rsvpAddMessageButtonEffect = (modalPrefix: string, spanName: string) =>
   Effect.Do.pipe(
     Effect.tap(() =>
       Metric.update(
@@ -356,40 +363,60 @@ export const RsvpAddMessageButton = Ix.messageComponent(
     ),
     Effect.bind('data', () => MessageComponentData.asEffect()),
     Effect.bind('interaction', () => Interaction.asEffect()),
-    Effect.map(({ data, interaction }) => {
+    Effect.bind('rpc', () => SyncRpc.asEffect()),
+    Effect.flatMap(({ data, interaction, rpc }) => {
       const parts = data.custom_id.split(':');
       const teamId = parts[1];
       const eventId = parts[2];
       const response = decodeRsvpResponse(parts[3]);
       const locale = userLocale(interaction);
       const required = response === 'coming_later';
-      return Ix.response({
-        type: Discord.InteractionCallbackTypes.MODAL,
-        data: {
-          custom_id: `rsvp-modal:${teamId}:${eventId}:${response}`,
-          title: m.bot_rsvp_modal_title(
-            { response: localizeRsvpResponse(response, locale) },
-            { locale },
-          ),
-          components: [
-            UI.row([
-              UI.textInput({
-                custom_id: 'rsvp_message',
-                label: required
-                  ? m.bot_rsvp_modal_label_required({}, { locale })
-                  : m.bot_rsvp_modal_label({}, { locale }),
-                style: Discord.TextInputStyleTypes.PARAGRAPH,
-                required,
-                ...(required ? { min_length: 1 } : {}),
-                max_length: 200,
-              }),
-            ]),
-          ],
-        },
-      });
+      const discordUserIdOption = interactionUserId(interaction);
+
+      const currentMessage = Option.isNone(discordUserIdOption)
+        ? Effect.succeed(Option.none<string>())
+        : rpc['Event/GetRsvpMessage']({
+            event_id: decodeEventId(eventId),
+            team_id: decodeTeamId(teamId),
+            discord_user_id: decodeSnowflake(discordUserIdOption.value),
+          }).pipe(Effect.catchTag('RpcClientError', () => Effect.succeed(Option.none<string>())));
+
+      return currentMessage.pipe(
+        Effect.map((message) =>
+          Ix.response({
+            type: Discord.InteractionCallbackTypes.MODAL,
+            data: {
+              custom_id: `${modalPrefix}:${teamId}:${eventId}:${response}`,
+              title: m.bot_rsvp_modal_title(
+                { response: localizeRsvpResponse(response, locale) },
+                { locale },
+              ),
+              components: [
+                UI.row([
+                  UI.textInput({
+                    custom_id: 'rsvp_message',
+                    label: required
+                      ? m.bot_rsvp_modal_label_required({}, { locale })
+                      : m.bot_rsvp_modal_label({}, { locale }),
+                    style: Discord.TextInputStyleTypes.PARAGRAPH,
+                    required,
+                    ...(required ? { min_length: 1 } : {}),
+                    max_length: 200,
+                    ...(Option.isSome(message) ? { value: message.value } : {}),
+                  }),
+                ]),
+              ],
+            },
+          }),
+        ),
+      );
     }),
-    Effect.withSpan('interaction/rsvp-add-message-button'),
-  ),
+    Effect.withSpan(spanName),
+  );
+
+export const RsvpAddMessageButton = Ix.messageComponent(
+  Ix.idStartsWith('rsvp-add-msg:'),
+  rsvpAddMessageButtonEffect('rsvp-modal', 'interaction/rsvp-add-message-button'),
 );
 
 export const RsvpClearMessageButton = Ix.messageComponent(

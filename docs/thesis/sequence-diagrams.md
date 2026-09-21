@@ -248,8 +248,14 @@ sequenceDiagram
         User->>Discord: Click "Add a message" / "Edit message" button
         Discord->>Bot: Interaction payload (MESSAGE_COMPONENT)
 
-        Note over Bot: Must respond within 3 seconds
-        Bot-->>Discord: MODAL response<br/>custom_id="rsvp-modal:{teamId}:{eventId}:{response}"<br/>Field: message (max 200 chars; required and non-empty when response = coming_later, optional otherwise)
+        Note over Bot: Must respond within 3 seconds<br/>MODAL responses cannot be deferred, so the prefill lookup<br/>below is synchronous and best-effort
+        Bot->>Server: RPC Event/GetRsvpMessage {event_id, team_id, discord_user_id}
+        alt RPC succeeds
+            Server-->>Bot: RPC success — stored message (or none)
+        else RpcClientError
+            Note over Bot: Falls back to no prefill (empty modal field)
+        end
+        Bot-->>Discord: MODAL response<br/>custom_id="rsvp-modal:{teamId}:{eventId}:{response}"<br/>Field: message (max 200 chars; required and non-empty when response = coming_later, optional otherwise; pre-filled with the stored message when one was found)
 
         User->>Discord: Fill message field, submit modal
         Discord->>Bot: Interaction payload (MODAL_SUBMIT)

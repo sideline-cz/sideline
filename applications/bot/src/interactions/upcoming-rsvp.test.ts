@@ -62,7 +62,17 @@ const makeComponentInteraction = (customId: string): DiscordTypes.APIInteraction
     },
   }) as unknown as DiscordTypes.APIInteraction;
 
-const runHandler = async (customId: string) => {
+// The button now prefills the modal from `Event/GetRsvpMessage`; `storedMessage`
+// stubs what the member currently has saved.
+const makePrefillRpcLayer = (storedMessage: Effect.Effect<Option.Option<string>, unknown>) =>
+  Layer.succeed(SyncRpc, {
+    'Event/GetRsvpMessage': () => storedMessage,
+  } as unknown as InstanceType<typeof SyncRpc>);
+
+const runHandler = async (
+  customId: string,
+  storedMessage: Effect.Effect<Option.Option<string>, unknown> = Effect.succeed(Option.none()),
+) => {
   const interaction = makeComponentInteraction(customId);
   // UpcomingAddMessageButton is the Ix.messageComponent(...) registration wrapper;
   // the handler Effect lives on its `.handle` property.
@@ -75,6 +85,7 @@ const runHandler = async (customId: string) => {
           interaction.data as DiscordTypes.APIMessageComponentInteractionData,
         ),
       ),
+      Effect.provide(makePrefillRpcLayer(storedMessage)),
     ) as Effect.Effect<unknown, never, never>,
   );
 };
@@ -131,6 +142,46 @@ describe('UpcomingAddMessageButton modal shape', () => {
     const input = typed.data.components[0]?.components[0];
     expect(input?.required).toBe(true);
     expect(input?.label).toBe('Add a reason (required)');
+  });
+  // ---------------------------------------------------------------------------
+  // Prefill — the modal must show the member's existing note so "Edit message"
+  // doesn't read as though the note was lost.
+  // ---------------------------------------------------------------------------
+
+  it("prefills the text input with the member's stored note", async () => {
+    const response = await runHandler(
+      `u-add-msg:${TEAM_ID}:${EVENT_ID}:yes`,
+      Effect.succeed(Option.some('running 10 min late')),
+    );
+    const typed = response as {
+      data: {
+        components: ReadonlyArray<{
+          components: ReadonlyArray<TextInputComponent & { value?: string }>;
+        }>;
+      };
+    };
+    expect(typed.data.components[0]?.components[0]?.value).toBe('running 10 min late');
+  });
+
+  it('omits `value` entirely when the member has no stored note', async () => {
+    const response = await runHandler(`u-add-msg:${TEAM_ID}:${EVENT_ID}:yes`);
+    const typed = response as {
+      data: { components: ReadonlyArray<{ components: ReadonlyArray<object> }> };
+    };
+    expect(typed.data.components[0]?.components[0]).not.toHaveProperty('value');
+  });
+
+  it('falls back to an empty modal when the prefill RPC fails', async () => {
+    const response = await runHandler(
+      `u-add-msg:${TEAM_ID}:${EVENT_ID}:yes`,
+      Effect.fail({ _tag: 'RpcClientError' }),
+    );
+    const typed = response as {
+      type: number;
+      data: { components: ReadonlyArray<{ components: ReadonlyArray<object> }> };
+    };
+    expect(typed.type).toBe(DiscordTypes.InteractionCallbackTypes.MODAL);
+    expect(typed.data.components[0]?.components[0]).not.toHaveProperty('value');
   });
 });
 

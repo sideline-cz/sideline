@@ -728,17 +728,18 @@ All interaction handlers are registered in `applications/bot/src/interactions/in
 
 ### RSVP Add/Edit Message Button — `rsvp-add-msg:{teamId}:{eventId}:{response}`
 
-Appears in the ephemeral confirmation after clicking an RSVP button. Opens a modal so the member can add or edit their personal message without changing their RSVP response.
+Appears in the ephemeral confirmation after clicking an RSVP button. Opens a modal so the member can add or edit their personal message without changing their RSVP response. Shares its handler (`rsvpAddMessageButtonEffect`) with the "Upcoming" card's equivalent `u-add-msg:` button (see "Upcoming RSVP Button" below).
 
 **Custom ID pattern:** `rsvp-add-msg:{teamId}:{eventId}:{response}`
 
 **Behavior:**
 
 1. Parses `teamId`, `eventId`, and `response` from the custom ID.
-2. Opens a modal with `custom_id` `rsvp-modal:{teamId}:{eventId}:{response}`.
-3. The modal has one optional multi-line text field (`custom_id: rsvp_message`, max 200 characters).
+2. Calls `Event/GetRsvpMessage` RPC with the invoking user's Discord ID to fetch their current stored message. Since a `MODAL` response cannot be deferred, this call happens synchronously before opening the modal; on `RpcClientError` (or if the invoking user's Discord ID can't be resolved) it falls back to no prefill rather than erroring.
+3. Opens a modal with `custom_id` `rsvp-modal:{teamId}:{eventId}:{response}`.
+4. The modal has one optional multi-line text field (`custom_id: rsvp_message`, max 200 characters), pre-filled with the fetched message when one exists.
 
-**Source file:** `applications/bot/src/interactions/rsvp.ts` (`RsvpAddMessageButton`)
+**Source file:** `applications/bot/src/interactions/rsvp.ts` (`rsvpAddMessageButtonEffect`, `RsvpAddMessageButton`)
 
 ---
 

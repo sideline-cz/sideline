@@ -598,6 +598,16 @@ export const EventsRpcLive = EventRpcGroup.EventRpcGroup.toLayer(
           ),
         ),
 
+      'Event/GetRsvpMessage': ({
+        event_id,
+        team_id,
+        discord_user_id,
+      }: {
+        readonly event_id: Event.EventId;
+        readonly team_id: Team.TeamId;
+        readonly discord_user_id: Discord.Snowflake;
+      }) => svc.rsvps.findRsvpMessageByEventAndDiscordUser(event_id, team_id, discord_user_id),
+
       'Event/GetRsvpCounts': ({ event_id }: { readonly event_id: Event.EventId }) =>
         getRsvpCounts(svc.rsvps, event_id, svc.events),
 
