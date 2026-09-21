@@ -114,6 +114,7 @@ Current shared schemas:
 | Schema | Defined in | Re-exported by |
 |--------|-----------|----------------|
 | `HexColor` | `src/api/GroupApi.ts` | `src/api/Roster.ts` |
+| `SearchHit` | `src/api/AiChatApi.ts` | `src/api/SearchApi.ts` |
 
 ### Input vs Output Types for Write-Back Nested Arrays
 

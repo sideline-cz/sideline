@@ -345,15 +345,17 @@ interface RemapResult {
 }
 
 /**
- * Re-mints/re-dedupes the executor's own per-call tokens into THIS TURN's
- * token space (plan §4, part 1): an entity already seen this turn (in an
- * earlier call, or earlier in this same call's rows) reuses its first token;
- * a genuinely new entity gets a fresh one as long as the per-turn cap has
- * not been reached; beyond the cap the row is kept but loses its `ref` key.
+ * Re-mints/re-dedupes the executor's own per-call rows into THIS TURN's token space
+ * (plan §4, part 1; `.work-plans/command-palette-search.md` §B): an entity already seen this
+ * turn (in an earlier call, or earlier in this same call's rows) reuses its first token; a
+ * genuinely new entity gets a fresh one as long as the per-turn cap has not been reached; beyond
+ * the cap the row is kept but loses its `ref` key. `hits` carry no `ref` of their own — this is
+ * the only place a token that ever ships is minted, by CONSTRUCTING `EntityRef` from a `SearchHit`
+ * (`{ ...hit, ref: token }`), not overwriting a placeholder field.
  */
 const remapCallReferences = (
   state: LoopState,
-  refs: ReadonlyArray<AiChatApi.EntityRef>,
+  hits: ReadonlyArray<AiChatApi.SearchHit>,
   items: ReadonlyArray<Record<string, unknown>>,
 ): RemapResult => {
   const usedTokens = new Set(state.tokens.keys());
@@ -362,11 +364,11 @@ const remapCallReferences = (
   const newRefs: Array<{ index: number; entityRef: AiChatApi.EntityRef }> = [];
 
   const remappedItems = items.map((item, index) => {
-    const entityRef = refs[index];
-    if (entityRef === undefined) {
+    const hit = hits[index];
+    if (hit === undefined) {
       return item;
     }
-    const key = entityKeyOf(entityRef);
+    const key = entityKeyOf(hit);
     const existingToken = entityKeys.get(key);
     if (existingToken !== undefined) {
       return { ...item, ref: existingToken };
@@ -378,7 +380,7 @@ const remapCallReferences = (
     const token = mintToken(usedTokens);
     entityKeys.set(key, token);
     capUsed += 1;
-    newRefs.push({ index, entityRef: { ...entityRef, ref: token } });
+    newRefs.push({ index, entityRef: { ...hit, ref: token } });
     return { ...item, ref: token };
   });
 
@@ -444,7 +446,7 @@ const processToolExecution = (state: LoopState, execResult: ToolExecutionResult)
 
   const { items: remappedItems, newRefs } = remapCallReferences(
     state,
-    execResult.references,
+    execResult.hits,
     result.items,
   );
   const { content, keptCount } = truncateForBudget(remappedItems);

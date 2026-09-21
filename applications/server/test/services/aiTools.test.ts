@@ -13,7 +13,9 @@
 //     Effect `Layer` — so a test can hand it a hand-rolled counting stub with no
 //     `Effect.provide` ceremony.
 //   - Each read tool is exported from readTools.ts as `(args, ctx) => Effect<ToolExecutionResult>`
-//     where `ToolExecutionResult = { result: unknown; references: ReadonlyArray<AiChatApi.EntityRef> }`.
+//     where `ToolExecutionResult = { result: unknown; hits: ReadonlyArray<AiChatApi.SearchHit> }`
+//     (`.work-plans/command-palette-search.md` §B — `SearchHit` is `EntityRef` minus the
+//     per-turn `ref` token; `ChatAgent` mints that token and constructs `EntityRef`).
 //     `args` is the ALREADY-DECODED, plain-optional args object (`Schema.optionalKey`
 //     fields are absent-or-present, never `Option`-wrapped) — decoding raw JSON tool-call
 //     arguments against each tool's `Schema` is the registry/ChatAgent's job (§13.4),
@@ -337,8 +339,8 @@ describe('list_events', () => {
       );
       const items = itemsOf(outcome.result);
       expect(items).toHaveLength(1);
-      expect(outcome.references).toHaveLength(1);
-      const [ref] = outcome.references;
+      expect(outcome.hits).toHaveLength(1);
+      const [ref] = outcome.hits;
       expect(ref?.kind).toBe('event');
       if (ref?.kind === 'event') {
         expect(ref.event.eventId).toBe(EVENT_A1);
@@ -357,7 +359,7 @@ describe('list_events', () => {
         });
         const outcome = yield* listEvents({}, ctx).pipe(Effect.provide(makeEventsLayer([row])));
         expect(itemsOf(outcome.result)).toHaveLength(0);
-        expect(outcome.references).toHaveLength(0);
+        expect(outcome.hits).toHaveLength(0);
       }),
   );
 
@@ -400,7 +402,7 @@ describe('list_events', () => {
         Effect.provide(makeEventsLayer([row])),
       );
       expect(itemsOf(outcome.result)).toHaveLength(1);
-      expect(outcome.references).toHaveLength(1);
+      expect(outcome.hits).toHaveLength(1);
     }),
   );
 
@@ -438,7 +440,7 @@ describe('list_events', () => {
 
         expect(calls).toBe(2);
         expect(itemsOf(outcome.result)).toHaveLength(5);
-        expect(outcome.references).toHaveLength(5);
+        expect(outcome.hits).toHaveLength(5);
       }),
   );
 
@@ -454,7 +456,7 @@ describe('list_events', () => {
         Effect.provide(makeEventsLayer([foreignRow])),
       );
       expect(outcome.result).toEqual({ error: 'not_found' });
-      expect(outcome.references).toHaveLength(0);
+      expect(outcome.hits).toHaveLength(0);
       const json = JSON.stringify(outcome.result);
       expect(json).not.toContain('Secret Team B Event');
       expect(json).not.toContain('forbidden');
@@ -476,7 +478,7 @@ describe('list_events', () => {
           Effect.provide(makeEventsLayer([row])),
         );
         expect(outcome.result).toEqual({ error: 'not_found' });
-        expect(outcome.references).toHaveLength(0);
+        expect(outcome.hits).toHaveLength(0);
       }),
   );
 
@@ -501,8 +503,8 @@ describe('list_events', () => {
           Effect.provide(makeEventsLayer([row])),
         );
         expect(outcome.result).not.toEqual({ error: 'not_found' });
-        expect(outcome.references).toHaveLength(1);
-        const [ref] = outcome.references;
+        expect(outcome.hits).toHaveLength(1);
+        const [ref] = outcome.hits;
         expect(ref?.kind).toBe('event');
         if (ref?.kind === 'event') {
           expect(ref.event.eventId).toBe(EVENT_A1);
@@ -532,8 +534,8 @@ describe('list_events', () => {
       ).pipe(Effect.provide(makeEventsLayer([row])));
       const items = itemsOf(outcome.result);
       expect(items).toHaveLength(1);
-      expect(outcome.references).toHaveLength(1);
-      const [ref] = outcome.references;
+      expect(outcome.hits).toHaveLength(1);
+      const [ref] = outcome.hits;
       expect(ref?.kind).toBe('event');
       if (ref?.kind === 'event') {
         expect(ref.event).toEqual(toEventInfo(row));
@@ -542,14 +544,15 @@ describe('list_events', () => {
   );
 
   it.effect(
-    // Per-row distinct-token MINTING is `ChatAgent`'s job, not the executor's
-    // (`toolTypes.ts#buildListResult` emits an inert placeholder — see that file's header comment
-    // and `refTokens.ts` — since every token minted here used to be unconditionally discarded
-    // and re-minted by `remapCallReferences`; distinctness/collision-avoidance across a turn is
-    // covered end-to-end by `ChatAgent.test.ts` 13/16/17/18). What THIS layer must still
-    // guarantee is row correspondence: `items[i].ref` pairs with `references[i].ref` by
-    // position, so `ChatAgent`'s index-based remap lines up rows and entities correctly.
-    'pairs each model-facing row with its EntityRef by position (ref field identical on both)',
+    // Per-row token MINTING is `ChatAgent`'s job, not the executor's — a `SearchHit` carries no
+    // `ref` at all (`.work-plans/command-palette-search.md` §B; `toolTypes.ts#buildListResult`'s
+    // header comment; `refTokens.ts`). `ChatAgent.remapCallReferences` (`ChatAgent.ts:364-383`)
+    // relies on a POSITIONAL invariant instead: `hits[i]` and `items[i]` must describe the SAME
+    // row, so it can stamp token `i` onto both by index. That is what this test pins — not `ref`
+    // equality (both used to be the SAME inert placeholder regardless of row, which made the old
+    // `item?.ref === reference.ref` assertion here pass even if `toHit`/`toItem` were fed
+    // different rows).
+    'pairs each model-facing row with its SearchHit by position (same title on both)',
     () =>
       Effect.gen(function* () {
         const rows = [
@@ -560,16 +563,16 @@ describe('list_events', () => {
         const ctx = buildCtx();
         const outcome = yield* listEvents({}, ctx).pipe(Effect.provide(makeEventsLayer(rows)));
 
-        expect(outcome.references).toHaveLength(3);
+        expect(outcome.hits).toHaveLength(3);
         const items = itemsOf(outcome.result);
         expect(items).toHaveLength(3);
         for (let i = 0; i < rows.length; i += 1) {
-          const reference = outcome.references[i];
+          const hit = outcome.hits[i];
           const item = items[i];
-          expect(reference?.kind).toBe('event');
-          if (reference?.kind === 'event') {
-            expect(reference.event).toEqual(toEventInfo(rows[i]));
-            expect(item?.ref).toBe(reference.ref);
+          expect(hit?.kind).toBe('event');
+          if (hit?.kind === 'event') {
+            expect(hit.event).toEqual(toEventInfo(rows[i]));
+            expect(item?.title).toBe(hit.event.title);
           }
         }
       }),
@@ -590,8 +593,8 @@ describe('list_training_types', () => {
         Effect.provide(makeTrainingTypesLayer([rowA, rowB])),
       );
       expect(itemsOf(outcome.result)).toHaveLength(1);
-      expect(outcome.references).toHaveLength(1);
-      expect(outcome.references[0]).toMatchObject({ kind: 'trainingType' });
+      expect(outcome.hits).toHaveLength(1);
+      expect(outcome.hits[0]).toMatchObject({ kind: 'trainingType' });
     }),
   );
 });
@@ -610,8 +613,8 @@ describe('list_groups', () => {
         Effect.provide(makeGroupsLayer([rowA, rowB])),
       );
       expect(itemsOf(outcome.result)).toHaveLength(1);
-      expect(outcome.references).toHaveLength(1);
-      expect(outcome.references[0]).toMatchObject({ kind: 'group' });
+      expect(outcome.hits).toHaveLength(1);
+      expect(outcome.hits[0]).toMatchObject({ kind: 'group' });
     }),
   );
 
@@ -620,7 +623,7 @@ describe('list_groups', () => {
       const ctx = buildCtx({ membership: buildMembership({ permissions: [] }) });
       const outcome = yield* listGroups({}, ctx).pipe(Effect.provide(makeGroupsLayer([])));
       expect(outcome.result).toEqual({ error: 'forbidden', permission: 'group:manage' });
-      expect(outcome.references).toHaveLength(0);
+      expect(outcome.hits).toHaveLength(0);
     }),
   );
 
@@ -640,7 +643,7 @@ describe('list_groups', () => {
         const outcome = yield* listGroups({}, ctx).pipe(Effect.provide(makeGroupsLayer([row])));
 
         expect(outcome.result).toEqual({ error: 'forbidden', permission: 'group:manage' });
-        expect(outcome.references).toHaveLength(0);
+        expect(outcome.hits).toHaveLength(0);
 
         const json = JSON.stringify(outcome.result);
         for (const leak of ['Alpha Squad', 'emoji', 'color', 'memberCount', '🦅', '#ff0000']) {
@@ -660,8 +663,8 @@ describe('list_rosters', () => {
         Effect.provide(makeRostersLayer([rowA, rowB])),
       );
       expect(itemsOf(outcome.result)).toHaveLength(1);
-      expect(outcome.references).toHaveLength(1);
-      expect(outcome.references[0]).toMatchObject({ kind: 'roster' });
+      expect(outcome.hits).toHaveLength(1);
+      expect(outcome.hits[0]).toMatchObject({ kind: 'roster' });
     }),
   );
 
@@ -670,7 +673,7 @@ describe('list_rosters', () => {
       const ctx = buildCtx({ membership: buildMembership({ permissions: [] }) });
       const outcome = yield* listRosters({}, ctx).pipe(Effect.provide(makeRostersLayer([])));
       expect(outcome.result).toEqual({ error: 'forbidden', permission: 'roster:view' });
-      expect(outcome.references).toHaveLength(0);
+      expect(outcome.hits).toHaveLength(0);
     }),
   );
 });
@@ -718,7 +721,7 @@ describe('list_members', () => {
       const outcome = yield* listMembers({}, ctx).pipe(
         Effect.provide(makeMembersLayer(new Map([[TEAM_A, [withAvatar]]]))),
       );
-      const [ref] = outcome.references;
+      const [ref] = outcome.hits;
       expect(ref?.kind).toBe('member');
       if (ref?.kind === 'member') {
         expect(Object.keys(ref)).not.toContain('discordId');
@@ -739,7 +742,7 @@ describe('list_members', () => {
       const outcome = yield* listMembers({}, ctx).pipe(
         Effect.provide(makeMembersLayer(new Map([[TEAM_A, [noAvatar]]]))),
       );
-      const [ref] = outcome.references;
+      const [ref] = outcome.hits;
       if (ref?.kind === 'member') {
         expect(Option.isNone(ref.avatarUrl)).toBe(true);
       }
@@ -751,7 +754,7 @@ describe('list_members', () => {
       const ctx = buildCtx({ membership: buildMembership({ permissions: [] }) });
       const outcome = yield* listMembers({}, ctx).pipe(Effect.provide(makeMembersLayer(new Map())));
       expect(outcome.result).toEqual({ error: 'forbidden', permission: 'member:view' });
-      expect(outcome.references).toHaveLength(0);
+      expect(outcome.hits).toHaveLength(0);
     }),
   );
 });
@@ -848,7 +851,7 @@ describe('current_datetime (tool wiring — see ai/currentDatetime.test.ts for t
       yield* TestClock.setTime(new Date('2026-01-15T12:00:00.000Z').getTime());
       const ctx = buildCtx({ teamTimezone: 'Europe/Prague' });
       const outcome = yield* currentDatetime({}, ctx);
-      expect(outcome.references).toHaveLength(0);
+      expect(outcome.hits).toHaveLength(0);
       const result = outcome.result as {
         teamTimezone: string;
         todayTeamLocal: string;

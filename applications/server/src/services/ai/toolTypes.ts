@@ -13,27 +13,39 @@ import type { MembershipWithRole } from '~/repositories/TeamMembersRepository.js
 // ---------------------------------------------------------------------------
 
 /**
- * No tool parameter may carry `teamId`. The team, the caller's permissions and
- * the team's timezone come from here, resolved BEFORE the model is ever
- * called — the model has no vocabulary in which to name another team.
+ * The team, the caller's permissions, and the memoized group-visibility check — everything a
+ * read tool needs that is NOT specific to the chat turn. Split out of `ToolContext` (below) so
+ * the command-palette search endpoint (`.work-plans/command-palette-search.md` §A), which has no
+ * chat turn and therefore no `teamTimezone`, can build one of these directly and call the same
+ * executors the assistant does, with no per-keystroke `TeamSettingsRepository` lookup.
  */
-export interface ToolContext {
+export interface EntityReadContext {
   readonly teamId: Team.TeamId;
   readonly membership: MembershipWithRole;
-  readonly teamTimezone: string;
   /** Memoized `checkGroupAccess` — see `makeCanSeeGroup` below. */
   readonly canSeeGroup: (groupId: Option.Option<GroupModel.GroupId>) => Effect.Effect<boolean>;
 }
 
 /**
+ * No tool parameter may carry `teamId`. The team, the caller's permissions and
+ * the team's timezone come from here, resolved BEFORE the model is ever
+ * called — the model has no vocabulary in which to name another team.
+ */
+export interface ToolContext extends EntityReadContext {
+  readonly teamTimezone: string;
+}
+
+/**
  * Every read executor's result. `E = never` — permission and not-found
  * outcomes are ENCODED as `result` (e.g. `{ error: 'forbidden', permission:
- * '<perm>' }` / `{ error: 'not_found' }`), never thrown. `references` is the
- * typed view-model slice this call minted, for `ChatAgent` to accumulate.
+ * '<perm>' }` / `{ error: 'not_found' }`), never thrown. `hits` is the
+ * typed view-model slice this call minted (plan §B: `AiChatApi.SearchHit`, not `EntityRef` —
+ * no `ref` token, since an executor has no notion of a chat turn), for `ChatAgent` to mint
+ * tokens for and accumulate, or for search to return directly.
  */
 export interface ToolExecutionResult {
   readonly result: unknown;
-  readonly references: ReadonlyArray<AiChatApi.EntityRef>;
+  readonly hits: ReadonlyArray<AiChatApi.SearchHit>;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,47 +88,39 @@ export const makeCanSeeGroup = (
 };
 
 // ---------------------------------------------------------------------------
-// Reference-token PLACEHOLDER (plan §4).
+// buildListResult
 //
 // Previously this module minted its own per-row, per-executor-call random token (4 chars from a
 // 32-character unambiguous alphabet), duplicating `refTokens.ts`'s alphabet/length/CSPRNG/
-// collision-avoidance loop verbatim. That token was never actually usable: `ChatAgent`
-// (`remapCallReferences`, `ChatAgent.ts`) re-dedupes and re-mints EVERY row into the turn's own
-// token space via `refTokens.ts#mintToken` before anything reaches the model or the client, so
-// every token minted here was unconditionally discarded — four wasted `crypto.getRandomValues`
-// calls per row for nothing (CONCERN 9). `buildListResult` now emits a fixed placeholder instead:
-// `remapCallReferences` correlates `items[i]` with `references[i]` by ARRAY POSITION, not by the
-// placeholder's value, so the value itself is inert — it only needs to exist so `toRef`/`toItem`
-// have something to put in the `ref` field before `ChatAgent` overwrites it. `ChatAgent` is the
-// ONLY place that mints a token that ever ships.
+// collision-avoidance loop verbatim, then a fixed placeholder token after that (CONCERN 9). Both
+// were needed only because `EntityRef` itself carried the per-turn `ref` field — now that
+// `AiChatApi.SearchHit` (what an executor actually emits) has no `ref` at all
+// (`.work-plans/command-palette-search.md` §B), there is no token to mint or placeholder here.
+// `ChatAgent` (`remapCallReferences`, `ChatAgent.ts`) is the ONLY place that ever mints a token
+// that ships — it now CONSTRUCTS `EntityRef` from a `SearchHit` (`{ ...hit, ref: token }`)
+// instead of overwriting a placeholder field.
 // ---------------------------------------------------------------------------
 
-/** Never reaches the model or the client — `ChatAgent` overwrites every row's `ref` before
- * either sees it. Kept 4 chars long purely so a bug that skips the remap step is obvious (a
- * clearly-fake token leaking through) rather than silently shipping `''`. */
-const PENDING_REF = '----';
-
 /**
- * Builds both the typed `EntityRef` (sent to the browser) and the narrow model-facing row (sent
- * to the LLM) for every row, from the same placeholder token — `ChatAgent` mints and substitutes
- * the token that actually ships (plan §4, part 1), keyed by array position.
+ * Builds both the typed `SearchHit` (sent to the browser, or to `ChatAgent` for it to mint a
+ * token onto) and the narrow model-facing row (sent to the LLM) for every row.
  *
  * Returns the executor's `ToolExecutionResult` directly: every list executor's tail was otherwise
- * the same two verbatim lines (unpack `{ references, items }`, rewrap as
- * `{ result: { items }, references }`), repeated once per tool.
+ * the same two verbatim lines (unpack `{ hits, items }`, rewrap as `{ result: { items }, hits }`),
+ * repeated once per tool.
  */
 export const buildListResult = <Row>(
   rows: ReadonlyArray<Row>,
-  toRef: (row: Row, token: string) => AiChatApi.EntityRef,
-  toItem: (row: Row, token: string) => Record<string, unknown>,
+  toHit: (row: Row) => AiChatApi.SearchHit,
+  toItem: (row: Row) => Record<string, unknown>,
 ): ToolExecutionResult => {
-  const references: Array<AiChatApi.EntityRef> = [];
+  const hits: Array<AiChatApi.SearchHit> = [];
   const items: Array<Record<string, unknown>> = [];
   for (const row of rows) {
-    references.push(toRef(row, PENDING_REF));
-    items.push(toItem(row, PENDING_REF));
+    hits.push(toHit(row));
+    items.push(toItem(row));
   }
-  return { result: { items }, references };
+  return { result: { items }, hits };
 };
 
 // ---------------------------------------------------------------------------
@@ -127,10 +131,10 @@ export const buildListResult = <Row>(
  * `forbidden`, which would confirm the row exists (plan §8 "Cross-team requests"). */
 export const notFoundResult: ToolExecutionResult = {
   result: { error: 'not_found' },
-  references: [],
+  hits: [],
 };
 
 export const forbiddenResult = (permission: Role.Permission): ToolExecutionResult => ({
   result: { error: 'forbidden', permission },
-  references: [],
+  hits: [],
 });
