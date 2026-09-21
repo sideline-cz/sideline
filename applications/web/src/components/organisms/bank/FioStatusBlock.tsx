@@ -109,9 +109,11 @@ export function FioStatusBlock({
       break;
     }
     case 'activating': {
-      const createdDate = toDate(config.tokenCreatedAt);
-      const remainingMs = createdDate
-        ? Math.max(0, createdDate.getTime() + FIVE_MINUTES_MS - Date.now())
+      // Same anchor the server's `activating` rank uses (`bankSyncStatus.ts` rule 4): the
+      // server-stamped save instant, never the treasurer-typed `tokenCreatedAt` calendar date.
+      const savedDate = toDate(config.tokenSavedAt);
+      const remainingMs = savedDate
+        ? Math.max(0, savedDate.getTime() + FIVE_MINUTES_MS - Date.now())
         : 0;
       statusAlert = (
         <Alert variant='default' data-bank-sync-status='activating'>
