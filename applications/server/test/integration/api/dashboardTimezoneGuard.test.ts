@@ -224,16 +224,18 @@ describe('dashboard survives an invalid stored team timezone (S3, plan §11.5(c)
       const guildId = '340000000000000001' as Discord.Snowflake;
       const { teamId } = yield* Effect.promise(() => setup(guildId));
 
-      // Bypasses the web's own IANA-id validation — exactly the "operator
-      // write" / "seed" / "migration" scenario the column's missing CHECK
-      // constraint leaves reachable in production.
+      // `UTC+3`, not outright garbage: `team_settings_timezone_check`
+      // (`1792000005`) now rejects a zone Postgres cannot resolve, but a POSIX
+      // offset resolves in SQL and still returns `None` from `makeZoned`. That
+      // is the residual gap the dashboard's fallback must keep covering — plus
+      // every row written before the constraint shipped.
       yield* TeamSettingsRepository.asEffect().pipe(
         Effect.andThen((repo) =>
           repo.upsert({
             teamId,
             eventHorizonDays: 14,
             minPlayersThreshold: 0,
-            timezone: 'Not/AZone',
+            timezone: 'UTC+3',
           }),
         ),
       );

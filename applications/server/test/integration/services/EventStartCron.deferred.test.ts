@@ -649,6 +649,46 @@ describe('EventStartCron — deferred missed-RSVP counter (all-day, past its las
         Effect.provide(TestLayer),
       ),
   );
+
+  it.effect(
+    'case 10: the 7-day lower bound is measured from `end_at` — an all-day event LONGER than 7 days is still swept',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('490000000000000013', 'cron-owner-7')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('491010101010101017' as Discord.Snowflake, ownerId),
+        ),
+        Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
+        Effect.bind('nonResponderId', () =>
+          createUser('490000000000000014', 'cron-nonresponder-7'),
+        ),
+        Effect.bind('nonResponderMember', ({ team, nonResponderId }) =>
+          addTeamMember(team.id, nonResponderId),
+        ),
+        Effect.tap(({ team, nonResponderMember }) =>
+          assignPlayerRole(team.id, (nonResponderMember as any).id),
+        ),
+        Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+        // Spans 8 local days: `start_at` is outside the 7-day window, `end_at` is inside it.
+        Effect.bind('start', () => localMidnight('Europe/Prague', -10)),
+        Effect.bind('end', () => localMidnight('Europe/Prague', -2)),
+        Effect.bind('event', ({ team, ownerMember, start, end }) =>
+          insertStartedAllDayEvent(team.id, (ownerMember as any).id, start, end),
+        ),
+        Effect.tap(() => runCron()),
+        Effect.bind('stamps', ({ event }) => getStamps(event.id)),
+        Effect.bind('missed', ({ nonResponderMember }) =>
+          getMissedRsvps((nonResponderMember as any).id),
+        ),
+        Effect.tap(({ stamps, missed }) =>
+          Effect.sync(() => {
+            expect(stamps.missed_rsvp_counted_at).not.toBeNull();
+            expect(missed).toBe(1);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
 });
 
 // ---------------------------------------------------------------------------
