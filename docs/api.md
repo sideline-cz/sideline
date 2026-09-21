@@ -1439,7 +1439,7 @@ Creates a new group.
 
 | Tag | Status | When |
 |---|---|---|
-| `GroupForbidden` | 403 | Missing `team:manage` permission |
+| `GroupForbidden` | 403 | Missing `team:manage` permission, or `parentId` refers to a group that doesn't exist or belongs to a different team |
 | `GroupNameAlreadyTaken` | 409 | A group with this name already exists |
 
 ---
@@ -1681,8 +1681,10 @@ Moves a group to a different parent (or to the top level).
 
 | Tag | Status | When |
 |---|---|---|
-| `GroupForbidden` | 403 | Missing `team:manage` permission |
+| `GroupForbidden` | 403 | Missing `team:manage` permission; `parentId` refers to a group that doesn't exist or belongs to a different team; `parentId` equals `groupId`; or the move would create a cycle (new parent is a descendant of the group) |
 | `GroupNotFound` | 404 | Group does not exist |
+
+The parent validation and the move run inside one transaction, serialized per team by a `pg_advisory_xact_lock`, so concurrent moves cannot race each other into jointly creating a cycle.
 
 ---
 

@@ -45,7 +45,7 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
-import { cleanDatabase, TestPgClient } from '../helpers.js';
+import { cleanDatabase, secondTestPgClient, TestPgClient } from '../helpers.js';
 
 const SmallApi = HttpApi.make('api').add(GroupApi.GroupApiGroup);
 
@@ -1029,5 +1029,243 @@ describe('group.ts addGroupMember / syncRoleMembers — must not emit member_add
     expect(new Set(groupIds)).toStrictEqual(
       new Set([fixture.groupA, fixture.groupB, fixture.groupC]),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8: moveGroup / createGroup — cycle and cross-team TOCTOU guards
+// (regression coverage for `fix/move-group-cycle-toctou`)
+//
+// These concurrency/guard tests live in THIS file rather than a new one because it already has
+// the exact harness they need standing up: the real HTTP `handler` (not a unit-level mock) wired
+// to real repositories via `TestLayer`/`SeedLayer`, `beforeAll`, `createUser`, `createTeam`,
+// `seedActor`, `createGroup`, `runSeed`, `sessionsStore`, and `MockSessionsRepositoryLayer`. A
+// new file would have to re-declare ~200 lines of that setup for no benefit — `moveGroup` and
+// `createGroup` are the exact two handlers this file is already built to drive.
+//
+// Fix contract under test (`api/group.ts`'s `moveGroup` + `createGroup`,
+// `repositories/GroupsRepository.ts`):
+//   1. `moveGroup` wraps its cycle check + `UPDATE` in `sql.withTransaction`, serialized per
+//      team by `SELECT pg_advisory_xact_lock(hashtext(teamId))` (preceded by
+//      `SET LOCAL lock_timeout = '5s'`).
+//   2. `moveGroup` rejects `parentId === groupId` with 403.
+//   3. `moveGroup` rejects a parent whose `team_id !== teamId` with 403.
+//   4. `moveGroup` keeps rejecting a parent that is a descendant of the moved group (403) —
+//      already-working behaviour, guarded here against regression.
+//   5. `createGroup` rejects a `parentId` belonging to another team with 403.
+// On current `main`, none of 2/3/5 are checked at all, and the cycle check in 4 has no lock
+// around it (see 4 below, which targets exactly that gap without ever writing a real cycle).
+
+const getParentId = (teamId: Team.TeamId, groupId: GroupModel.GroupId): Promise<string | null> =>
+  SqlClient.SqlClient.asEffect().pipe(
+    Effect.andThen(
+      (sql) =>
+        sql<{
+          parent_id: string | null;
+        }>`SELECT parent_id FROM groups WHERE id = ${groupId} AND team_id = ${teamId}`,
+    ),
+    Effect.map((rows) => rows[0]?.parent_id ?? null),
+    Effect.provide(SeedLayer),
+    Effect.runPromise,
+  );
+
+describe('group.ts moveGroup / createGroup — cycle and cross-team TOCTOU guards', () => {
+  it('rejects parentId === groupId (self-parent) with 403 and leaves parent_id untouched', async () => {
+    const fixture = await runSeed(
+      Effect.Do.pipe(
+        Effect.bind('team', () =>
+          createUser(nextDiscordId(), 'owner').pipe(
+            Effect.flatMap((ownerId) => createTeam(nextDiscordId(), ownerId)),
+          ),
+        ),
+        Effect.bind('actor', ({ team }) => seedActor(team.id)),
+        Effect.bind('groupAId', ({ team }) => createGroup(team.id, 'A')),
+      ),
+    );
+
+    sessionsStore.set('actor-token', fixture.actor.actorUserId);
+
+    // Deliberately checking the 403 FIRST: on current `main` this call returns 200 and writes
+    // `parent_id = id`, a real cycle — and `moveGroup`'s own follow-up `getMemberCount` call
+    // then runs an (at time of writing) unguarded recursive CTE over that cycle, which can hang
+    // the whole (serial) integration suite. If this assertion ever regresses, STOP — do not let
+    // the test proceed to inspect what happens next.
+    const response = await handler(
+      new Request(`http://localhost/teams/${fixture.team.id}/groups/${fixture.groupAId}/parent`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentId: fixture.groupAId }),
+      }),
+    );
+    expect(response.status).toBe(403);
+
+    const parentId = await getParentId(fixture.team.id, fixture.groupAId);
+    expect(parentId).toBeNull();
+  });
+
+  it('moveGroup rejects a parent belonging to a different team with 403 and leaves parent_id untouched', async () => {
+    const fixture = await runSeed(
+      Effect.Do.pipe(
+        Effect.bind('team1', () =>
+          createUser(nextDiscordId(), 'owner1').pipe(
+            Effect.flatMap((ownerId) => createTeam(nextDiscordId(), ownerId)),
+          ),
+        ),
+        Effect.bind('team2', () =>
+          createUser(nextDiscordId(), 'owner2').pipe(
+            Effect.flatMap((ownerId) => createTeam(nextDiscordId(), ownerId)),
+          ),
+        ),
+        Effect.bind('actor', ({ team1 }) => seedActor(team1.id)),
+        Effect.bind('team1GroupId', ({ team1 }) => createGroup(team1.id, 'Team1 Group')),
+        Effect.bind('team2GroupId', ({ team2 }) => createGroup(team2.id, 'Team2 Group')),
+      ),
+    );
+
+    sessionsStore.set('actor-token', fixture.actor.actorUserId);
+
+    const response = await handler(
+      new Request(
+        `http://localhost/teams/${fixture.team1.id}/groups/${fixture.team1GroupId}/parent`,
+        {
+          method: 'PATCH',
+          headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parentId: fixture.team2GroupId }),
+        },
+      ),
+    );
+    expect(response.status).toBe(403);
+
+    const parentId = await getParentId(fixture.team1.id, fixture.team1GroupId);
+    expect(parentId).toBeNull();
+  });
+
+  it('createGroup rejects a parentId belonging to a different team with 403', async () => {
+    const fixture = await runSeed(
+      Effect.Do.pipe(
+        Effect.bind('team1', () =>
+          createUser(nextDiscordId(), 'owner1').pipe(
+            Effect.flatMap((ownerId) => createTeam(nextDiscordId(), ownerId)),
+          ),
+        ),
+        Effect.bind('team2', () =>
+          createUser(nextDiscordId(), 'owner2').pipe(
+            Effect.flatMap((ownerId) => createTeam(nextDiscordId(), ownerId)),
+          ),
+        ),
+        Effect.bind('actor', ({ team1 }) => seedActor(team1.id)),
+        Effect.bind('team2GroupId', ({ team2 }) => createGroup(team2.id, 'Team2 Group')),
+      ),
+    );
+
+    sessionsStore.set('actor-token', fixture.actor.actorUserId);
+
+    const response = await handler(
+      new Request(`http://localhost/teams/${fixture.team1.id}/groups`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Cross Team Child',
+          parentId: fixture.team2GroupId,
+          emoji: null,
+          color: null,
+        }),
+      }),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it('moveGroup rejects moving a group under its own descendant with 403 (regression guard)', async () => {
+    const fixture = await runSeed(
+      Effect.Do.pipe(
+        Effect.bind('team', () =>
+          createUser(nextDiscordId(), 'owner').pipe(
+            Effect.flatMap((ownerId) => createTeam(nextDiscordId(), ownerId)),
+          ),
+        ),
+        Effect.bind('actor', ({ team }) => seedActor(team.id)),
+        Effect.bind('groupAId', ({ team }) => createGroup(team.id, 'A')),
+        Effect.bind('groupBId', ({ team, groupAId }) =>
+          createGroup(team.id, 'B', Option.some(groupAId)),
+        ),
+      ),
+    );
+
+    sessionsStore.set('actor-token', fixture.actor.actorUserId);
+
+    // A is root, B is a child of A. Moving A under B would create a cycle (A -> B -> A).
+    const response = await handler(
+      new Request(`http://localhost/teams/${fixture.team.id}/groups/${fixture.groupAId}/parent`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer actor-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentId: fixture.groupBId }),
+      }),
+    );
+    expect(response.status).toBe(403);
+
+    const parentId = await getParentId(fixture.team.id, fixture.groupAId);
+    expect(parentId).toBeNull();
+  });
+
+  it('a concurrent moveGroup blocks on the per-team advisory lock and resumes once it is released', async () => {
+    const fixture = await runSeed(
+      Effect.Do.pipe(
+        Effect.bind('team', () =>
+          createUser(nextDiscordId(), 'owner').pipe(
+            Effect.flatMap((ownerId) => createTeam(nextDiscordId(), ownerId)),
+          ),
+        ),
+        Effect.bind('actor', ({ team }) => seedActor(team.id)),
+        Effect.bind('groupAId', ({ team }) => createGroup(team.id, 'A')),
+        Effect.bind('groupBId', ({ team }) => createGroup(team.id, 'B')),
+      ),
+    );
+
+    sessionsStore.set('actor-token', fixture.actor.actorUserId);
+
+    await Effect.scoped(
+      Effect.Do.pipe(
+        Effect.bind('sql2', () => secondTestPgClient),
+        // Session-level lock, awaited (not fired-and-forgotten) — this guarantees the
+        // happens-before: the lock is DEFINITELY held on `sql2` before the PATCH request below
+        // is ever issued. No sleep-based ordering needed for this part.
+        Effect.tap(({ sql2 }) => sql2`SELECT pg_advisory_lock(hashtext(${fixture.team.id}))`),
+        Effect.let('responsePromise', () =>
+          handler(
+            new Request(
+              `http://localhost/teams/${fixture.team.id}/groups/${fixture.groupAId}/parent`,
+              {
+                method: 'PATCH',
+                headers: {
+                  Authorization: 'Bearer actor-token',
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ parentId: fixture.groupBId }),
+              },
+            ),
+          ),
+        ),
+        // On current `main` there is no per-team advisory lock at all, so the request above
+        // completes almost immediately — this race resolves to 'response', not 'timeout', and
+        // the assertion below fails. That failure IS the regression signal for this test. The
+        // window (400ms) is deliberately well under the fix's `lock_timeout = '5s'`, so once the
+        // lock IS taken by `moveGroup`, the blocked request is still waiting, not erroring out.
+        Effect.bind('winner', ({ responsePromise }) =>
+          Effect.promise(() =>
+            Promise.race([
+              responsePromise.then(() => 'response' as const),
+              new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 400)),
+            ]),
+          ),
+        ),
+        Effect.tap(({ winner }) => Effect.sync(() => expect(winner).toBe('timeout'))),
+        Effect.tap(({ sql2 }) => sql2`SELECT pg_advisory_unlock(hashtext(${fixture.team.id}))`),
+        Effect.bind('response', ({ responsePromise }) => Effect.promise(() => responsePromise)),
+        Effect.tap(({ response }) => Effect.sync(() => expect(response.status).toBe(200))),
+      ),
+    ).pipe(Effect.runPromise);
+
+    const parentId = await getParentId(fixture.team.id, fixture.groupAId);
+    expect(parentId).toBe(fixture.groupBId);
   });
 });

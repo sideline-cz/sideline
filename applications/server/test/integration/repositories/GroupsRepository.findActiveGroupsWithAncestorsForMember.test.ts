@@ -108,9 +108,10 @@ const addGroupMember = (groupId: GroupModel.GroupId, memberId: TeamMember.TeamMe
   GroupsRepository.asEffect().pipe(Effect.andThen((repo) => repo.addMemberById(groupId, memberId)));
 
 // Bypasses the API-layer cycle guard (`api/group.ts`'s `moveGroup` handler — NOT enforced by
-// `GroupsRepository.moveGroup` itself, see its call site's comment about two concurrent moves
-// jointly creating a cycle) to write a `parent_id` cycle directly, exactly as a bug or a race
-// between two API calls could.
+// `GroupsRepository.moveGroup` itself) to write a `parent_id` cycle directly. No API path
+// produces one any more — the guard runs in the same transaction as the `UPDATE` under a
+// per-team advisory lock — but rows predating that fix, or written by hand, still can be
+// cyclic, and every recursive walk must survive them.
 const wireParentDirectly = (groupId: GroupModel.GroupId, parentId: GroupModel.GroupId) =>
   SqlClient.SqlClient.asEffect().pipe(
     Effect.andThen((sql) => sql`UPDATE groups SET parent_id = ${parentId} WHERE id = ${groupId}`),
