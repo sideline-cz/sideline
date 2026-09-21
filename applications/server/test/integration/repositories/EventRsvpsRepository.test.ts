@@ -519,3 +519,103 @@ describe('EventRsvpsRepository — group-inherited Player role', () => {
       ),
   );
 });
+
+// ---------------------------------------------------------------------------
+// findRsvpMessageByEventAndDiscordUser — the lean read behind the "edit
+// message" modal prefill. It joins event_rsvps -> team_members -> users, so it
+// must stay scoped to the (event, team, discord user) triple.
+// ---------------------------------------------------------------------------
+
+describe('EventRsvpsRepository — findRsvpMessageByEventAndDiscordUser', () => {
+  it.effect("returns the member's stored note", () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('200000000000000101', 'user-note-1')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('231010101010101010' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.bind('event', ({ team, member }) => createEvent(team.id, member.id)),
+      Effect.tap(({ event, member }) =>
+        EventRsvpsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.upsertRsvp(event.id, member.id, 'yes', Option.some('running 10 min late')),
+          ),
+        ),
+      ),
+      Effect.bind('note', ({ event, team }) =>
+        EventRsvpsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.findRsvpMessageByEventAndDiscordUser(
+              event.id,
+              team.id,
+              '200000000000000101' as Discord.Snowflake,
+            ),
+          ),
+        ),
+      ),
+      Effect.tap(({ note }) =>
+        Effect.sync(() => {
+          expect(note).toEqual(Option.some('running 10 min late'));
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('returns None for a member who has no RSVP on the event', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('200000000000000102', 'user-note-2')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('231020202020202020' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.bind('event', ({ team, member }) => createEvent(team.id, member.id)),
+      Effect.bind('note', ({ event, team }) =>
+        EventRsvpsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.findRsvpMessageByEventAndDiscordUser(
+              event.id,
+              team.id,
+              '200000000000000102' as Discord.Snowflake,
+            ),
+          ),
+        ),
+      ),
+      Effect.tap(({ note }) =>
+        Effect.sync(() => {
+          expect(note).toEqual(Option.none());
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect('returns None when the RSVP exists but carries no note', () =>
+    Effect.Do.pipe(
+      Effect.bind('userId', () => createUser('200000000000000103', 'user-note-3')),
+      Effect.bind('team', ({ userId }) =>
+        createTeam('231030303030303030' as Discord.Snowflake, userId),
+      ),
+      Effect.bind('member', ({ team, userId }) => addTeamMember(team.id, userId)),
+      Effect.bind('event', ({ team, member }) => createEvent(team.id, member.id)),
+      Effect.tap(({ event, member }) => submitYesRsvp(event.id, member.id)),
+      Effect.bind('note', ({ event, team }) =>
+        EventRsvpsRepository.asEffect().pipe(
+          Effect.andThen((repo) =>
+            repo.findRsvpMessageByEventAndDiscordUser(
+              event.id,
+              team.id,
+              '200000000000000103' as Discord.Snowflake,
+            ),
+          ),
+        ),
+      ),
+      Effect.tap(({ note }) =>
+        Effect.sync(() => {
+          expect(note).toEqual(Option.none());
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+});

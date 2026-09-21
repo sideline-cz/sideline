@@ -7352,6 +7352,7 @@ Manages event embeds, RSVPs, and event sync outbox processing. As of the remove-
 | `Event/SaveDiscordMessageId` | `event_id`, `discord_channel_id`, `discord_message_id` | Stores the Discord message ID for an event embed |
 | `Event/GetDiscordMessageId` | `event_id` → `EventDiscordMessage \| null` | Retrieves the stored Discord message for an event |
 | `Event/SubmitRsvp` | `event_id`, `team_id`, `discord_user_id`, `response`, `message` → `SubmitRsvpResult` | Submits an RSVP from the bot; `response` accepts `"coming_later"` (requires a non-blank `message`, or `RsvpMessageRequired` is returned); result includes late-RSVP flag and optional notification channel |
+| `Event/GetRsvpMessage` | `event_id`, `team_id`, `discord_user_id` → `string \| null` | Lean read for the "Add/Edit message" modal prefill: returns the member's stored RSVP note, or `null` if none. Called synchronously before opening the modal (a `MODAL` response cannot be deferred), so the bot falls back to an empty modal on `RpcClientError` |
 | `Event/GetRsvpCounts` | `event_id` → `RsvpCountsResult` | Returns yes/no/maybe counts for an event; `maybeCount` includes both legacy `maybe` and `coming_later` responses |
 | `Event/GetEventEmbedInfo` | `event_id` → `EventEmbedInfo \| null` | Retrieves info needed to render the Discord embed |
 | `Event/GetChannelEvents` | `discord_channel_id` → `ChannelEventEntry[]` | Lists events posted in a Discord channel |
