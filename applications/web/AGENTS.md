@@ -540,6 +540,26 @@ Rules:
 3. **For values that are already validated by the form schema** (e.g. a `Team.TeamId` extracted from a typed route param), prefer a `const x: Team.TeamId = value` annotation over a cast — if the value is already typed as the brand at the source, no decode is needed.
 4. **`.make()` is the right tool only for compile-time-known literals** (e.g. enum values from a `Schema.Literals([...])` union). Do not use it on user input.
 
+### `Schema.Class` Payload Fields Must Be Real Instances
+
+`Schema.Class` is **nominal**, not structural: a plain object matching every field of the class still fails to encode. The server has the same rule for RPC/HTTP handler return values (`applications/server/AGENTS.md`, "An RPC Handler Must Map Rows Into The Domain Class — `Schema.Class` Is Nominal") — it is not server-scoped, and it has now shipped a production bug on this side too. `AssistantConversation` passed plain `{ role, content }` objects for `AiChatApi.ChatRequest`'s `messages` field and the assistant could not send a single message.
+
+```typescript
+// Correct — a real instance.
+new AiChatApi.ChatMessage({ role, content })
+
+// Wrong — structurally identical, fails with `Expected AiChatMessage`.
+{ role, content }
+```
+
+Rules:
+
+1. **Every value the client constructs for a `Schema.Class`-typed field MUST be built with `new <Class>({ ... })`.** This applies to request payloads above all, and to `Schema.Union` members whose variants are classes. Never hand a structurally-identical plain object to a schema-typed field.
+2. **The failure mode is why this is expensive, not the fix.** The encode throws **client-side, before the request is sent** — so there is no HTTP request, no server log line, and no network entry to inspect. Whatever generic error handler is in scope swallows it and the user sees a generic failure. From the outside it is indistinguishable from a broken backend, and diagnosing it costs disproportionately more than the one-line fix.
+3. **A mocked API client means the real encode never runs.** `pnpm check` passes, every component test passes, and the feature cannot work at all — that is exactly how this shipped. A green suite is not evidence here.
+4. **Wherever a payload is constructed, there MUST be a test that encodes it through the real schema, and that test MUST pin that a plain object fails.** `applications/web/src/lib/assistant/chatMessages.test.ts` is the worked example: it encodes `toChatMessages(...)` through `AiChatApi.ChatRequest` and asserts a bare `[{ role, content }]` is **rejected**. Without that negative case, deleting the mapping makes the test pass again.
+5. **Build the payload in a named helper in `src/lib/<feature>/`, not inline in the component** (`toChatMessages` in `src/lib/assistant/chatMessages.ts`). Inline construction is what the mocked component test cannot reach; a helper is directly testable against the real schema.
+
 ## Auth Store — `lib/auth.ts`
 
 Wraps browser `localStorage` via `@effect/platform-browser` `BrowserKeyValueStore`. All auth functions return Effects with `never` error and `never` requirements.
