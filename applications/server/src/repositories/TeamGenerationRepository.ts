@@ -90,10 +90,15 @@ const make = Effect.gen(function* () {
         COALESCE(pr.rating, ${Elo.DEFAULT_RATING}) AS rating,
         COALESCE(pr.games_played, 0) AS games_played,
         (
+          -- One role name for display only (the generator itself never reads it).
+          -- LIMIT 1 needs a total order or Postgres is free to return a different
+          -- role on every run: custom roles first, so a position role ("Handler")
+          -- wins over the built-ins every member carries ("Player", "Admin").
           SELECT r.name
           FROM member_roles mr
           JOIN roles r ON r.id = mr.role_id
           WHERE mr.team_member_id = tm.id
+          ORDER BY r.is_built_in ASC, r.name ASC, r.id ASC
           LIMIT 1
         ) AS role_name,
         tm.jersey_number,
