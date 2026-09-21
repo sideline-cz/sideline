@@ -31,7 +31,7 @@
 //   2. lastErrorIsKeyMissing                                              -> misconfigured
 //   2.5. lastErrorCode='account_mismatch'                                                          -> account_mismatch
 //   3. lastErrorCode='fio_error' AND failures>=3 AND (errorAt - (successAt ?? tokenCreatedAt)) > 6h -> invalid
-//   4. lastErrorCode='fio_error' AND tokenCreatedAt > now - 5min                                    -> activating
+//   4. lastErrorCode='fio_error' AND now - 5min < tokenCreatedAt <= now                              -> activating
 //   5. lastErrorCode is set but rules 2.5-4 did not fire                                            -> sync_failing
 //   6. otherwise                                                                                    -> ok
 // `expiringSoon` = tokenCreatedAt present AND tokenExpiresAt - now <= 14 days. Computed
@@ -293,6 +293,50 @@ describe('computeBankSyncStatus — activating boundary (67)', () => {
         lastErrorAt: Option.some(NOW),
         lastSuccessAt: Option.some(NOW - 1 * HOUR),
         tokenCreatedAt: Option.some(NOW - (5 * MIN + 1000)),
+      }),
+    );
+    expect(result.status).toBe('sync_failing');
+  });
+
+  // The window is two-sided. `fio_token_created_at` is a user-declared calendar date snapped to
+  // 12:00 UTC, so without an upper bound every moment before the anchor matched too.
+  it('a token created 1 s in the future -> sync_failing, not activating', () => {
+    const result = computeBankSyncStatus(
+      baseInput({
+        lastErrorCode: Option.some('fio_error'),
+        consecutiveFailureCount: 1,
+        lastErrorAt: Option.some(NOW),
+        lastSuccessAt: Option.some(NOW - 1 * HOUR),
+        tokenCreatedAt: Option.some(NOW + 1000),
+      }),
+    );
+    expect(result.status).toBe('sync_failing');
+  });
+
+  it("today's noon-anchored token read in the morning -> sync_failing, not activating", () => {
+    const morning = new Date('2026-06-15T08:00:00.000Z').getTime();
+    const result = computeBankSyncStatus(
+      baseInput({
+        now: morning,
+        lastErrorCode: Option.some('fio_error'),
+        consecutiveFailureCount: 1,
+        lastErrorAt: Option.some(morning),
+        lastSuccessAt: Option.some(morning - 1 * HOUR),
+        // 2026-06-15 as written by `dateOnlyToUtcNoon` — four hours from now, not five minutes ago.
+        tokenCreatedAt: Option.some(NOW),
+      }),
+    );
+    expect(result.status).toBe('sync_failing');
+  });
+
+  it('a token dated far in the future never reports activating', () => {
+    const result = computeBankSyncStatus(
+      baseInput({
+        lastErrorCode: Option.some('fio_error'),
+        consecutiveFailureCount: 1,
+        lastErrorAt: Option.some(NOW),
+        lastSuccessAt: Option.some(NOW - 1 * HOUR),
+        tokenCreatedAt: Option.some(NOW + 30 * DAY),
       }),
     );
     expect(result.status).toBe('sync_failing');
