@@ -69,6 +69,9 @@ export const formatNameWithMention = (entry: {
 /** Discord embed field values are capped at 1024 characters. */
 export const EMBED_FIELD_VALUE_LIMIT = 1024;
 
+/** Fetch cap for an event's RSVP-attendee list. */
+export const YES_EMBED_LIMIT = 20;
+
 /**
  * Joins entry strings with `, `, truncating with a localised "…and N more" suffix if the
  * joined result would exceed `limit` characters. Keeps the output safe for Discord embed

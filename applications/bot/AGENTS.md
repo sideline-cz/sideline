@@ -37,11 +37,7 @@ src/
 └── rcp/event/       — Event sync event handlers
     ├── ProcessorService.ts             — Match.tag dispatcher for event sync events
     ├── ChannelReorderSemaphore.ts      — Per-channel mutex registry (ServiceMap.Service) used to serialise concurrent reorders on the same channel
-    ├── reorderChannelMessages.ts       — Channel reorder algorithm (longest keepable prefix); exports MAX_CHANNEL_EVENTS = 10, plus `longestKeepablePrefix` and `compareSnowflakes` reused by the personal-channel reorder
-    ├── recoverDeletedMessages.ts       — Startup recovery: bulk listMessages + snowflake overrides → reorderChannelMessages
-    ├── handleCreated.ts                — event_created handler
-    ├── handleUpdated.ts                — event_updated handler
-    ├── handleCancelled.ts              — event_cancelled handler
+    ├── channelReorderPrefix.ts         — Pure prefix math for channel reorders; exports `longestKeepablePrefix` (consumed by the personal-channel reorder) plus an internal `compareSnowflakes` helper
     ├── handleStarted.ts                — event_started handler (best-effort deletes the owners-thread training claim message; posts nothing)
     ├── handleRsvpReminder.ts           — rsvp_reminder handler (DMs every non-responder; posts nothing to any channel)
     ├── handleTrainingClaimRequest.ts   — training_claim_request handler (posts claim embed into the persistent owners claim thread, saves message id back via Event/SaveClaimDiscordMessageId)
@@ -50,11 +46,13 @@ src/
     ├── handleEventRosterApprovalRequest.ts — event_roster_approval_request handler (resolves/creates owners thread, posts approval embed + Approve/Decline buttons, saves message id back via Event/SaveApprovalRequestMessageId)
     ├── handleEventRosterApprovalCancel.ts — event_roster_approval_cancel handler (deletes the approval thread message; swallows 10008)
     ├── handleEventRosterThreadDelete.ts — event_roster_thread_delete handler (deletes the entire owners approval thread; swallows 10003)
-    └── handleChannelMoved.ts             — event_channel_moved handler (repoints upcoming events old→new events channel; see "Events-Channel Move" below)
+    ├── handleCoachingStatus.ts         — coaching_status handler
+    └── handleTeamsGenerated.ts         — teams_generated handler (posts the balanced-team breakdown embed to event.discord_target_channel_id)
 └── rest/events/     — Embed builder functions
-    ├── buildEventEmbed.ts              — Main event embed (RSVP counts, "Going" field)
     ├── buildAttendeesEmbed.ts          — Paginated attendee list embed
-    ├── buildUpcomingEventEmbed.ts      — Per-user upcoming events embed (/event list + personal-channel messages)
+    ├── buildUpcomingEventEmbed.ts      — Per-user upcoming events embed; the ONLY event embed left (/event list + personal-channel messages)
+    ├── buildPersonalEventMessage.ts    — Wraps buildUpcomingEventEmbed into the personal-channel payload pair (`buildPersonalMessage` → createPayload/editPayload/needsMentionEdit/hash)
+    ├── buildGeneratedTeamsEmbed.ts     — Balanced-team breakdown embed rendered by handleTeamsGenerated
     ├── buildClaimMessage.ts            — Coach-claim embed + Claim/Release button row
     ├── buildRosterApprovalMessage.ts   — Roster-approval embed + Approve/Decline button row (status-colored; disabled row for decided/withdrawn states)
     └── sendUpcomingEventFollowups.ts   — Shared helper: sends one ephemeral follow-up message per event (max 10)
@@ -68,6 +66,7 @@ Follows the **AppLive + run.ts** pattern.
 |------|-------|------|
 | `src/rcp/<feature>/` | Sync-event processors (`ProcessorService.ts`, `handle*.ts`). | Folder is named `rcp`, NOT `rpc` — historical typo carried through every feature. Do NOT rename, split, or alias. New sync workers go under `src/rcp/<feature>/`. |
 | `src/rest/<feature>/` | Discord-REST-calling helpers and embed builders (`build<Name>Embed.ts`, send/edit helpers). | Embed builders MUST live here, NEVER under `src/rcp/`. The processor in `src/rcp/<feature>/` imports the embed builder from `src/rest/<feature>/`, never the reverse. |
+| `src/rest/utils.ts` | Bot-wide shared helpers (`retryPolicy`, `allow`/`deny`, `formatName`/`formatNamePlain`/`formatNameWithMention`, `joinEntriesWithLimit`) and shared numeric limits (`POLL_BATCH_SIZE = 50`, `EMBED_FIELD_VALUE_LIMIT = 1024`, `YES_EMBED_LIMIT = 20`). | A constant or helper consumed by more than one feature MUST live here, NEVER in a `build<Name>Embed.ts` or a `handle*.ts`. Import it; never re-declare the value at a call site. `YES_EMBED_LIMIT` moved here from the deleted `src/rest/events/buildEventEmbed.ts` for exactly this reason — its four consumers span `src/rest/events/`, `src/rcp/personalEvents/`, and `src/interactions/`. |
 | `test/rcp/<feature>/` | Tests for the matching processor. | Mirrors `src/rcp/<feature>/` 1:1. |
 
 ## Building Message Components
@@ -510,21 +509,18 @@ Access tiers and Discord permission overwrites:
 
 ### Event Sync (events → Discord messages)
 
-Events render onto **two distinct Discord surfaces** — keep them straight:
+Events render onto exactly **one persistent RSVP surface**: the **private per-member personal channels** — one hidden channel per team member inside the team's configured personal-events category, each carrying that member's own RSVP view (`buildUpcomingEventEmbed`, wrapped by `buildPersonalMessage`). That surface is driven by the **Personal Events Sync** poll loop off the `events.personal_messages_dirty_at` marker, NOT by the event-sync handlers in this section — see "Personal Events Sync" below. That is the only **reconciled** event surface. Event embeds also appear in an EPHEMERAL `/event` reply (`sendUpcomingEventFollowups` → `buildUpcomingEventEmbed`, plus `buildAttendeesEmbed` behind the attendees button), and in four places that DO persist but carry no RSVP state and are never hash-diffed or reconciled: `buildClaimMessage` (owners claim thread, edited by `handleTrainingClaimUpdate`, deleted by `handleStarted`), `buildRosterApprovalMessage` (owners approval thread), `buildGeneratedTeamsEmbed` → `event.discord_target_channel_id` (`handleTeamsGenerated.ts`), and the late-RSVP notice posted from `src/interactions/rsvp.ts`. "One surface" below always means the reconciled RSVP one.
 
-1. **Global shared events channel** — ONE channel per team (`team_settings.discord_events_channel_id`, resolved server-side by `resolveChannel`; see `applications/server/AGENTS.md`). The event-sync handlers below post/edit the aggregate embed here (`buildEventEmbed`), one message per event, RSVP buttons shared by everyone.
-2. **Private per-member personal channels** — one hidden channel per team member inside the team's configured personal-events category. Each carries that member's own RSVP view (`buildUpcomingEventEmbed`, per-member state). These are driven by the **Personal Events Sync** poll loop, NOT by the event-sync handlers — see "Personal Events Sync" below.
+**The global shared events board was removed in #547 (`32858e3d`).** No bot code posts to, edits, reorders, or reads `team_settings.discord_events_channel_id` any more; that column survives only as a settings field preserved by `applications/server/src/api/team-settings.ts` (transitional, dropped in Release B) and is no longer surfaced in the web settings form. Four outbox tags are therefore **decoded and no-op'd** by `src/rcp/event/ProcessorService.ts` — `event_created`, `event_updated`, `event_cancelled`, `event_channel_moved` each `Match.tag(..., () => Effect.void)` and are then marked processed. They stay in the `UnprocessedEventSyncEvent` union purely so a batch decode cannot fail on a pre-existing row during rollout skew. Do NOT delete those four `Match.tag` arms (the `Match.exhaustive` and batch decode both need them), and do NOT give them a handler.
 
-`event_sync_events` (this section) drives surface 1. Surface 2 is reconciled separately off the `events.personal_messages_dirty_at` marker.
-
-Syncs event lifecycle to Discord embed messages. When events are created/updated/cancelled/started, the server emits events to `event_sync_events`.
+The remaining handlers in this section sync the NON-board event side effects (claim threads, roster-approval threads, RSVP-reminder DMs, generated-team posts) from the `event_sync_events` outbox.
 
 | Component | File |
 |-----------|------|
 | Domain model | `packages/domain/src/rpc/event/EventRpcEvents.ts` |
 | Bot service | `src/rcp/event/ProcessorService.ts` |
 
-Event types: `event_created`, `event_updated`, `event_cancelled`, `event_started`, `rsvp_reminder`, `training_claim_request`, `training_claim_update`, `unclaimed_training_reminder`, `coaching_status`, `event_roster_approval_request`, `event_roster_approval_cancel`, `event_roster_thread_delete`, `teams_generated`, `event_channel_moved`
+Event types: `event_created`†, `event_updated`†, `event_cancelled`†, `event_started`, `rsvp_reminder`, `training_claim_request`, `training_claim_update`, `unclaimed_training_reminder`, `coaching_status`, `event_roster_approval_request`, `event_roster_approval_cancel`, `event_roster_thread_delete`, `teams_generated`, `event_channel_moved`† († = decoded then no-op'd, see above)
 
 The `teams_generated` handler (`src/rcp/event/handleTeamsGenerated.ts`) posts the balanced-team breakdown embed (built by `src/rest/events/buildGeneratedTeamsEmbed.ts`) to `event.discord_target_channel_id`; it no-ops with a warning when that channel id is `None`. Its `teams` payload is decoded from the `event_sync_events.teams_payload` JSONB column (see "JSONB payload column on an outbox event type" in `applications/server/AGENTS.md`) — the bot does not recompute the assignment, it only renders the server-computed result.
 
@@ -564,28 +560,9 @@ Three event-sync handlers drive the Discord side of the Event↔Roster Attendanc
 3. On `createMessage` failure with code 10003 / HTTP 404 (thread deleted), call `Event/ClearEventRosterThread`, recreate via the same race-safe path, and retry the post once.
 4. The candidate's `discord_id` is resolved server-side and arrives on the event as `candidate_discord_id` — the handler never looks it up itself.
 
-#### Events-Channel Move
+### Personal Events Sync (per-member private channels)
 
-`handleChannelMoved` (`src/rcp/event/handleChannelMoved.ts`) processes `event_channel_moved`, emitted once by the server when `updateTeamSettings` changes `team_settings.discord_events_channel_id` (old→new, either side `Option<Snowflake>`). It moves every ACTIVE upcoming event's shared-channel message from the old channel to the new one. The event carries `old_channel_id` and `new_channel_id` (both `Option<Snowflake>`); its `event_id` is a nil-UUID sentinel (there is no single event) and its overloaded columns are documented in `applications/server/AGENTS.md`.
-
-The handler is crash-idempotent by construction. Its ordered steps:
-
-1. Resolve the guild locale, falling back to `'en'` if `getGuild` fails.
-2. **Repoint = the commit point.** Call `Event/RepointChannelEvents` FIRST. That RPC atomically UPDATEs each upcoming event's `discord_channel_id` to the new channel AND clears `discord_message_id` to `NULL`, returning each event's PRE-update `old_message_id` (see `applications/server/AGENTS.md` → "Atomic UPDATE that returns each row's PRE-update column values"). After this commit, all subsequent posting is driven off durable DB state.
-3. If `old_channel_id` is `Some`, delete the returned `old_message_id`s from the old channel (`safeDeleteMessage`, `concurrency: 3`, swallows code 10008).
-4. If `new_channel_id` is `Some`, call `Event/GetUnpostedUpcomingByChannel({ discord_channel_id: newChannel })` (active + upcoming + `discord_message_id IS NULL` in that channel) and post each via `buildEventEmbed` + `createMessage`, saving the new id back with `Event/SaveDiscordMessageId` (`concurrency: 1`).
-5. `reorderChannelMessages(newChannel, locale)`, then `reorderChannelMessages(oldChannel, locale)` (each only if the corresponding id is `Some`).
-
-Rules that MUST be preserved:
-
-1. **Posting is driven off durable NULL-`discord_message_id` state, never off the repoint result.** Step 4 re-queries `Event/GetUnpostedUpcomingByChannel` rather than iterating the `moved` rows, so a crash between repoint and posting recovers on retry: already-posted events have a non-NULL id and are skipped, un-posted events are re-found. This is why step 2 must be the single commit point.
-2. **The handler posts ALL unposted events; the slot cap lives ONLY in `reorderChannelMessages`.** Do NOT apply `MAX_CHANNEL_EVENTS` in the posting loop — step 5's reorder trims the channel to the cap afterward. Posting all first then reordering keeps the newest-N selection in one place.
-3. **Each `Option` side is independent.** `old_channel_id = None` (channel first set) skips old-message deletion + old-channel reorder; `new_channel_id = None` (channel cleared) skips posting + new-channel reorder. Never assume both are `Some`.
-4. **An event that vanished/cancelled between repoint and post is skipped, not failed** — step 4 checks `Event/GetEventEmbedInfo`; a `None` logs and continues.
-
-### Personal Events Sync (per-member private channels + global refresh)
-
-This is surface 2 of the two-surface event model (see "Event Sync" above). It is **bot-driven and poll-based** — there is NO `personal_events_sync_events` outbox. The bot polls server reads keyed on `events.personal_messages_dirty_at` and reconciles both the per-member personal channels AND (re-)refreshes the global shared message.
+This is the ONLY persistent event surface (see "Event Sync" above). It is **bot-driven and poll-based** — there is NO `personal_events_sync_events` outbox. The bot polls server reads keyed on `events.personal_messages_dirty_at` and reconciles the per-member personal channels.
 
 | Component | File |
 |-----------|------|
@@ -617,17 +594,16 @@ This is surface 2 of the two-surface event model (see "Event Sync" above). It is
 
 **Pass 2 — Reconcile (event-driven, dirty-marker-gated).** `PersonalEvents/GetEventsNeedingReconcile({ limit: 20 })` returns `{ event_id, team_id, guild_id, dirty_at }` for events whose `personal_messages_dirty_at IS NOT NULL` (ORDER BY the marker ASC). For each event (serialised `{ concurrency: 1 }`): `reconcileEvent(event)` THEN `PersonalEvents/ClearPersonalMessagesDirty({ event_id, dirty_at })`.
 
-`reconcileEvent` does four things, all hash-diffed to suppress no-op Discord edits:
+`reconcileEvent` does three things, all hash-diffed to suppress no-op Discord edits:
 
 1. **Per-member personal messages.** `Guild/ListPersonalChannelsForEvent({ event_id })` → for each member, fetch their upcoming events, `buildPersonalMessage({ entry, yesAttendees, discordId, locale })` (from `src/rest/events/buildPersonalEventMessage.ts`), and compare its `hash` to the stored `payload_hash` from `PersonalEvents/GetPersonalEventMessage`. If equal, skip. Otherwise: on an existing message `rest.updateMessage(..., render.editPayload)`; on a new message `rest.createMessage(..., render.createPayload)` (mention-free) and then, when `render.needsMentionEdit`, a follow-up `rest.updateMessage(..., render.editPayload)` to add the mention (see "Ping-free mention"). Then `PersonalEvents/UpsertPersonalEventMessage` persists `(personal_channel_id, discord_message_id, payload_hash)` keyed `(event_id, team_member_id)`. On CREATE, if the upsert still fails after retries, **delete the just-created Discord message (compensating action) and re-fail** so the event stays dirty and is retried cleanly next tick — never leave an orphan message persisted with no row. If the mention edit fails, persist `payload_hash: ''` so the next tick re-applies it via the edit branch. `reconcileMemberMessage` returns `Some(member)` ONLY when it created a NEW message (so the channel may now be out of order); in-place edits, no-ops, and deletions return `None`.
-2. **Per-channel reorder (only for members that got a NEW message).** For each member returned `Some` in step 1, call `reorderPersonalChannel({ team_member_id, discord_id, guild_id, locale })`. Reorder is the SAME longest-keepable-prefix algorithm as the global channel — it reuses `longestKeepablePrefix` and `compareSnowflakes` exported from `src/rcp/event/reorderChannelMessages.ts` and the shared `ChannelReorderSemaphore.withChannelLock(channelId)`. Do NOT copy or re-implement the prefix math; import the exports. Personal channels sort latest-start-first (soonest event nearest the input box), opposite the global past/future divider layout, so the reorder uses its own `desiredOrder` comparator but the same prefix engine. A reorder is skipped when the member has ≤1 stored message (nothing to order).
-3. **Global shared message refresh — ONLY for `status === 'active'` events.** `Event/GetDiscordMessageId({ event_id })` → rebuild `buildEventEmbed` from `Event/GetEventEmbedInfo` + `Event/GetRsvpCounts` + `Event/GetYesAttendeesForEmbed`, hash-diff against the CURRENT message fetched via `rest.getMessage` (fall back to always-update if the fetch fails), and `rest.updateMessage` only on change. **Gate on `info.status`**: when `EventEmbedInfo.status !== 'active'` (started/cancelled), log-debug and skip this step entirely — the global message for started/cancelled events is OWNED by `handleStarted` / `handleCancelled`, which strip RSVP buttons and apply the started/cancelled styling. Refreshing it here would revert that styling and re-add RSVP buttons. Reconcile still refreshes the per-member personal messages (step 1) for non-active events; only the global shared message is off-limits.
-4. The dirty flag is cleared LAST, with a timestamp guard (see below).
+2. **Per-channel reorder (only for members that got a NEW message).** For each member returned `Some` in step 1, call `reorderPersonalChannel({ team_member_id, discord_id, guild_id, locale })`. It reuses `longestKeepablePrefix` from `src/rcp/event/channelReorderPrefix.ts` and the shared `ChannelReorderSemaphore.withChannelLock(channelId)`. Do NOT copy or re-implement the prefix math; import the exports. Personal channels sort latest-day-first (soonest event nearest the input box), so the reorder uses its own `desiredOrder` comparator but the same prefix engine — see "Channel Reorder Algorithm" below. A reorder is skipped when the member has ≤1 stored message (nothing to order).
+3. The dirty flag is cleared LAST, with a timestamp guard (see below).
 
 Rules:
 
 1. **The `dirty_at` timestamp guard prevents lost updates.** `ClearPersonalMessagesDirty` clears the marker ONLY when `personal_messages_dirty_at = ${dirty_at}` (the value observed at the start of the tick). If an RSVP/edit re-marked the event during reconcile, the marker now holds a newer timestamp, the conditional `UPDATE` matches nothing, and the event is reconciled again next tick. Never clear the marker unconditionally. The server side of this contract lives in `applications/server/AGENTS.md` → "`events.personal_messages_dirty_at` reconcile marker".
-2. **`payload_hash` is the no-op suppressor on BOTH surfaces.** `buildPersonalMessage`'s `hash` is the SHA-256 of the FINAL `{ content, embeds, components }` (i.e. of `editPayload`); compare it before any `rest.updateMessage`. Personal messages compare against the stored `personal_event_messages.payload_hash`; the global message compares against the live message content. Do not edit a Discord message whose hash is unchanged. The hash MUST include `content` — the unanswered-event mention lives there (see "Ping-free mention" below), so dropping it from the hash would miss the highlight toggling on/off.
+2. **`payload_hash` is the no-op suppressor.** `buildPersonalMessage`'s `hash` is the SHA-256 of the FINAL `{ content, embeds, components }` (i.e. of `editPayload`); compare it against the stored `personal_event_messages.payload_hash` before any `rest.updateMessage`. Do not edit a Discord message whose hash is unchanged. The hash MUST include `content` — the unanswered-event mention lives there (see "Ping-free mention" below), so dropping it from the hash would miss the highlight toggling on/off.
 3. **Reserve before create, always.** Never call `createPersonalEventChannel` without a successful `ReservePersonalChannel` first — the reserve row (nullable `discord_channel_id`) is what makes provisioning idempotent across replicas and ticks.
 4. **There is no outbox for personal events.** Do not add a `personal_events_sync_events` table or a `Match.exhaustive` dispatcher — the trigger is the `events.personal_messages_dirty_at` marker, polled by `GetEventsNeedingReconcile`.
 5. **Reorder only on create, never on every reconcile.** An in-place edit keeps the existing snowflake in place, so a reorder pass after every edit would be wasted Discord reads. Only `reconcileMemberMessage` returning `Some` (a fresh `createMessage`) can put the channel out of order, so reorder is gated on that signal.
@@ -722,29 +698,29 @@ A board message is shared — every viewer sees the identical component rows, so
 3. **Disable the shared button when there is nothing to act on** (e.g. `disabled: displayedCars.length === 0`) rather than letting the click fall through to a typed error.
 4. **Always reply ephemerally** (`ephemeralDeferred` + `replyWebhook`) to a shared-board per-user action — the outcome is user-specific and must not post to the shared channel; the board itself is updated via `rebuildBoard`.
 
-#### Channel Reorder Algorithm (`reorderChannelMessages`)
+#### Channel Reorder Algorithm (`reorderPersonalChannel` + `channelReorderPrefix`)
 
-`reorderChannelMessages(channelId, locale, snowflakeOverrides?)` is the single function responsible for laying out event messages (plus the optional past/future divider) inside a channel in chronological order. Every event handler that changes embed content or list ordering — `handleCreated`, `handleUpdated`, `handleCancelled`, `handleStarted`, `handleRsvpReminder` — calls into it. **Never re-implement reorder logic in a handler.**
+Reordering exists for exactly ONE surface: a member's personal events channel. It is split across two files and nothing else may reorder Discord messages:
+
+| File | Exports | Role |
+|------|---------|------|
+| `src/rcp/event/channelReorderPrefix.ts` | `longestKeepablePrefix(items)`, `compareSnowflakes(a, b)` | Pure math, zero Discord calls. `longestKeepablePrefix` takes `ReadonlyArray<{ snowflake: Option<Snowflake> }>` in DESIRED display order and returns the length `k` of the leading run that is already correctly ordered. |
+| `src/rcp/personalEvents/reorderPersonalChannel.ts` | `reorderPersonalChannel(params)` | The only caller. Performs the Discord work for one member's channel. |
+
+`reorderPersonalChannel({ team_member_id, discord_id, guild_id, locale })` is called from exactly two places: `reconcileEvent` step 2 (`src/rcp/personalEvents/handleReconcile.ts`) and the `/event refresh` personal branch (`src/commands/event/refresh.ts`). **Never re-implement reorder logic anywhere else, and never re-implement the prefix math — import `longestKeepablePrefix`.**
 
 **Constraints (must be preserved):**
 
-1. Discord assigns monotonically-increasing snowflake IDs to messages in posting order. The visible order in a channel is therefore the snowflake order. The bot does not reorder messages on Discord — it edits in place where the existing message ID already sits in the correct position, and recreates (delete-old + create-new, sequentially) for the suffix that does not.
-2. **Cap**: at most `MAX_CHANNEL_EVENTS` (= 10) event messages per channel. Older entries beyond the cap are deleted from Discord; their DB rows are left to the server.
-3. **Per-channel serialisation**: the entire body is wrapped in `ChannelReorderSemaphore.withChannelLock(channelId)(...)`. Two reorders for the same channelId never run concurrently; reorders for different channels do run concurrently.
-4. The reorder is internally chunked into:
-   - **kept prefix** — items whose stored snowflake is strictly increasing and whose snowflake is strictly less than every snowflake in the remaining suffix. These are edited in place.
-   - **recreate suffix** — everything from the first non-keepable item onward. Processed sequentially with `concurrency: 1` (delete old, then create new), so newly minted snowflakes are themselves monotonically increasing and end up at the end of the channel.
-5. **Forbidden pattern**: do not zip the items array with a sorted list of existing message IDs and edit each slot. That pattern (the pre-fix implementation) corrupts message IDs across rows when even one item is recreated. The longest-keepable-prefix algorithm in `reorderChannelMessages.ts` is the only correct approach — preserve it.
-
-**`EditOutcome` typed-return convention:**
-
-In-place edit helpers return `type EditOutcome = 'edited' | 'message_gone'`. They MUST NOT self-heal a missing message inline (e.g. by recreating it from inside the edit helper) — that would produce a new snowflake at an arbitrary position in the channel and re-introduce the corruption bug. Instead, on error code `10008` ("Unknown Message"), return `'message_gone'`. The caller (`processKeptPrefix` in `reorderChannelMessages.ts`) treats `'message_gone'` as the boundary at which the kept prefix ends and the recreate suffix begins, so the recreated message lands at the tail of the channel where its new snowflake is guaranteed to be the largest.
-
-When adding new edit-in-place helpers in this file, follow the same contract: return `EditOutcome`, never recreate inline, never swallow `10008` as success.
-
-**Snowflake overrides (`snowflakeOverrides`):**
-
-`snowflakeOverrides: ReadonlyMap<event_id, Option<Snowflake>>` lets a caller force an entry into the recreate suffix by passing `Option.none()` for that `event_id`. Currently used only by `recoverDeletedMessages` (startup recovery): it bulk-fetches `rest.listMessages(channelId, { limit: 100 })` and overrides any DB entry whose `discord_message_id` is absent from the live channel. The override carries a `deleteSnowflake` (the original DB-stored ID) so the recreate path still attempts to delete the stale message before creating its replacement.
+1. Discord assigns monotonically-increasing snowflake IDs in posting order, so the visible order in a channel IS the snowflake order. The bot cannot move a message; it keeps the already-correct leading prefix untouched and delete-then-recreates the suffix that is out of order.
+2. **Desired order is descending, and lives in the `desiredOrder` `Order.make` comparator in `reorderPersonalChannel.ts`.** Keys, in sequence: `local_date` DESC, `all_day` LAST within its day, `start_at` DESC, `event_id` DESC as the final tiebreaker. This is the canonical ascending event key reversed component-by-component, so the SOONEST event ends up at the bottom of the channel, nearest the input box. Do not reorder against a plain `start_at` sort.
+3. **There is no per-channel message cap — unbounded by design.** A personal channel holds one message per upcoming event the member can see; nothing trims it to N. The practical bound is `team_settings.event_horizon_days` (default 30), a team setting rather than a code invariant. Worst case — a prefix break at index 0 — deletes and recreates every stored message sequentially (`{ concurrency: 1 }`, ~3 REST calls each) under the channel lock. Add a cap only with measurement behind it, not pre-emptively.
+4. **Per-channel serialisation**: the Discord work is wrapped in `ChannelReorderSemaphore.withChannelLock(messages[0].personal_channel_id)(...)`. Two reorders for the same channel never run concurrently; different channels do run concurrently.
+5. **Recreate sequentially with `{ concurrency: 1 }`** (delete old, then create new, one message at a time) so the newly minted snowflakes are themselves monotonically increasing and land at the tail in order. Any concurrency > 1 here reintroduces out-of-order snowflakes.
+6. **Reorder fixes ORDER only; content refresh belongs to `reconcileEvent`.** The recreate path re-renders via `buildPersonalMessage` only because it has to produce a fresh message body, and it persists the new `(discord_message_id, payload_hash)` through `PersonalEvents/UpsertPersonalEventMessage`. Do not add hash-diff/refresh logic to the reorder.
+7. **A message whose event vanished between the two RPC reads is DELETED, not recreated.** When `Guild/GetAllUpcomingEventsForUser` no longer returns the `event_id`, delete the Discord message and its row via `PersonalEvents/DeletePersonalEventMessage`, then continue — never leave a message pointing at an event the member can no longer see.
+8. **Skip conditions**: `messages.length <= 1` (nothing to order) and `longestKeepablePrefix(items) === items.length` (already in order, `recreate.length === 0`) both return `Effect.void` without a single Discord call. Keep both — they are what stops every reconcile tick from churning Discord.
+9. **Forbidden pattern**: do not zip the desired-order array against a sorted list of existing message IDs and edit each slot. That pattern corrupts message IDs across rows as soon as one item is recreated. The longest-keepable-prefix approach is the only correct one — preserve it.
+10. **The whole function is failure-swallowing by design** (`Effect.catchCause` → `logWarning`, and `RpcClientError` → empty list). A reorder failure must never fail its caller's reconcile tick or leave the `/event refresh` interaction unacked.
 
 #### `ChannelReorderSemaphore` (per-channel lock registry)
 
@@ -886,8 +862,7 @@ Rules:
 2. **Subcommands cannot carry their own `default_member_permissions`** — the field is honored only on the top-level command, so a subcommand is visible to everyone under its parent and MUST gate at runtime. `/event refresh` is visible to all members; the handler gates **per surface** on the `Guild/IdentifyEventsChannel` result (which carries `is_admin: boolean` + `owner_discord_id: Option<Snowflake>`):
    - `kind === 'personal'` AND `owner_discord_id.value === caller` (their OWN channel) → allow regardless of `is_admin`.
    - `kind === 'personal'` AND a DIFFERENT owner → allow ONLY when `is_admin` (acts with the OWNER's identity: marks dirty + `reorderPersonalChannel` using `owner_discord_id`/`team_member_id` from the result, so the refresh renders the owner's events, not the admin's).
-   - `kind === 'global'` → allow ONLY when `is_admin`.
-   - otherwise reply the localized "forbidden" (`m.bot_refresh_events_forbidden`) or "nothing to refresh" (`m.bot_refresh_events_none`).
+   - anything else — `kind === 'none'`, a `personal` result missing any of `team_id` / `team_member_id` / `owner_discord_id`, or the `kind === 'global'` literal that the server no longer returns since the shared board was removed in #547 — falls through to the localized "nothing to refresh" (`m.bot_refresh_events_none`). A non-owner without `is_admin` gets "forbidden" (`m.bot_refresh_events_forbidden`).
 
    The own-vs-other decision lives in the BOT (compare `owner_discord_id` to the interaction user) — the server reports the owner and `is_admin` but never decides authorization (see `applications/server/AGENTS.md` → "Channel classification for `/event refresh`"). Do NOT collapse this back to a flat `!is_admin → forbidden` check (that would block a member from refreshing their own channel), and do NOT add `default_member_permissions` to a subcommand — it is silently ignored.
 3. **Option C is the ONLY case where a top-level command omits `default_member_permissions` deliberately.** Reach for it only when a Discord-native gate would hide the command from a valid Sideline admin. The authorization decision MUST live server-side in `Guild/CheckTeamAdmin` (returns `{ is_admin: boolean }`); the bot only branches on `is_admin` and never re-derives admin status from Discord role ids. Every `Guild/CheckTeamAdmin` deny path replies with a localized ephemeral message — never leave the deferred interaction unresolved. `/sudo` and its `sudo-leave:` button (`src/interactions/sudo.ts`) BOTH re-check `Guild/CheckTeamAdmin` before acting; a component interaction that mutates admin-only state MUST re-authorize the clicker, never trust that only admins can see the button.
@@ -1010,7 +985,7 @@ const displayText = formatName(attendeeEntry); // => "**Alice**"
 Never pass `formatName`'s output into a thread name, channel name, or any other field Discord treats as plain text.
 
 This pattern is used in:
-- `buildEventEmbed.ts` — "Going" field (bold name only via `formatName`, no mention, comma-separated)
+- `buildUpcomingEventEmbed.ts` — "Going" field (bold name only via `formatName`, no mention, comma-separated)
 - `buildAttendeesEmbed.ts` — attendee entries via `formatNameWithMention` (with optional message suffix)
 - `buildClaimMessage.ts` — Status field renders the claimer via `formatNameWithMention`; `claimedBy` is `Option<ClaimedByEntry>` where `ClaimedByEntry` is the canonical five-field identity-tuple
 
@@ -1040,10 +1015,10 @@ Two pagination models are used:
 
 #### Multi-item pages (attendees)
 
-1. Embed builder in `src/rest/events/` exports a `PAGE_SIZE` constant and a `build*Embed` function
-2. The builder returns `{ embeds, components }` where `components` contains Previous/Next buttons when `total > PAGE_SIZE`
-3. Button `custom_id` format: `{prefix}:{guildId}:{userId?}:{offset}` — offset-based pagination
-4. Previous button is disabled when `offset === 0`; Next button is disabled when `offset + PAGE_SIZE >= total`
+1. The page size is owned by the INTERACTION handler, not the builder — `ATTENDEES_LIMIT = 15` in `src/interactions/attendees.ts` is passed to both the RPC (`limit`) and `buildAttendeesEmbed({ ..., limit })`. The builder exports no page-size constant; never re-derive the limit inside the builder.
+2. The builder returns `{ embeds, components }` where `components` contains Previous/Next buttons only when `total > limit`
+3. Button `custom_id` format: `{prefix}:{teamId}:{eventId}:{offset}` (`attendees-page:…`) — offset-based pagination
+4. Previous button is disabled when `offset === 0`; Next button is disabled when `offset + limit >= total`
 5. The slash command handler sends an initial ephemeral "thinking" response, forks a background fiber, then updates the message
 6. The page button interaction handler responds with `DEFERRED_UPDATE_MESSAGE` and edits in place
 
@@ -1051,10 +1026,10 @@ Two pagination models are used:
 
 Used by `/event list`. Instead of pagination, the bot sends one ephemeral follow-up message per upcoming event (max 10). Each message shows one event with the invoking user's RSVP status. (The old `/event overview` command and `overview-show` button — `src/commands/event/overview.ts`, `src/interactions/overview-channel.ts`, `OverviewShowButton` — were REMOVED in the events-overview rework; the always-on private per-member channels of "Personal Events Sync" replace that on-demand snapshot. Do not reintroduce them.)
 
-1. `buildUpcomingEventEmbed` in `src/rest/events/buildUpcomingEventEmbed.ts` accepts `{ entry, locale }` and returns `{ embeds, components }` with two action rows (both always rendered):
+1. `buildUpcomingEventEmbed` in `src/rest/events/buildUpcomingEventEmbed.ts` accepts `{ entry, yesAttendees, locale }` and returns `{ embeds, components }` with two action rows (both always rendered):
    - **Row 1 — RSVP buttons** (Yes / No / Maybe): `custom_id` = `upcoming-rsvp:{event_id}:{team_id}:{response}`. The button matching the user's current response uses a highlighted style (Success/Danger/Primary); others use Secondary
    - **Row 2 — Attendees button + message buttons**: always starts with the Attendees button (`custom_id` = `attendees:{team_id}:{event_id}:0`, Secondary). When the user has responded, it is followed by the add-message button (`custom_id` = `u-add-msg:{team_id}:{event_id}:{response}`) — or, when the user already has a message, an edit-message button (`u-add-msg:…`) plus a clear-message button (`u-clear-msg:{team_id}:{event_id}:{response}`, Danger)
-2. `sendUpcomingEventFollowups` in `src/rest/events/sendUpcomingEventFollowups.ts` is the shared helper used by `/event list`. It calls `Event/GetUpcomingEventsForUser` (fetching up to 10 events), then sends one ephemeral follow-up message per event via `rest.createFollowupMessage`
+2. `sendUpcomingEventFollowups` in `src/rest/events/sendUpcomingEventFollowups.ts` is the shared helper used by `/event list`. The COMMAND (`src/commands/event/list.ts`) calls `Event/GetUpcomingEventsForUser({ offset: 0, limit: 10 })` and passes `{ events, total }` in — the helper never fetches the event list itself. The helper then sends one ephemeral follow-up per event via `rest.executeWebhook(applicationId, interactionToken, …)` at `{ concurrency: 1 }` (fetching each event's attendees with `Event/GetYesAttendeesForEmbed({ limit: YES_EMBED_LIMIT })`), appends the `bot_upcoming_more_events` note when `total > events.length`, and — in an `Effect.forkDetach`'d fiber — after `STALE_DELAY` (10 minutes) rewrites every message it posted to `bot_upcoming_stale` with `components: []` via `rest.updateWebhookMessage`
 3. `UpcomingRsvpButton` (`src/interactions/upcoming-rsvp.ts`) handles inline RSVP — submits the RSVP via `Event/SubmitRsvp`, triggers embed updates via `postRsvpDiscordUpdates`, then edits the current ephemeral message to reflect the new RSVP state
 
 #### Stateless ephemeral pagination (email detail / original)

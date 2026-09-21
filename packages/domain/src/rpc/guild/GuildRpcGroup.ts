@@ -321,11 +321,12 @@ export const GuildRpcGroup = RpcGroup.make(
   Rpc.make('MarkTeamPersonalEventsDirty', {
     payload: { team_id: TeamId },
   }),
-  // Classifies a channel for the `/event refresh` command: the team's global events
-  // channel, a member's personal events channel (with that member's identity), or
-  // neither — plus whether the caller is a team admin (holds the `team:manage`
-  // permission). The bot compares `owner_discord_id` to the caller to tell the
-  // caller's own personal channel apart from another member's (admin-only).
+  // Classifies a channel for the `/event refresh` command: a member's personal events
+  // channel (with that member's identity), or neither — plus whether the caller is a
+  // team admin (holds the `team:manage` permission). The `'global'` kind is a DEAD
+  // literal kept only for schema compatibility; the handler never returns it, as the
+  // shared events board was removed in #547. The bot compares `owner_discord_id` to the
+  // caller to tell the caller's own personal channel apart from another member's (admin-only).
   Rpc.make('IdentifyEventsChannel', {
     payload: {
       guild_id: Discord.Snowflake,
