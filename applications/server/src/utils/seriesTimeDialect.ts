@@ -24,7 +24,7 @@ import { resolveOccurrenceInstant } from '~/utils/seriesOccurrence.js';
  * `1791700000_add_series_times_team_local_flag.ts`), so in practice almost every row reaching
  * this function today takes the `FALSE` branch. The `TRUE` branch is nonetheless already
  * correct — both for a create that explicitly declares `timesAreTeamLocal: true`, and,
- * unchanged, once `1791800000` starts converting rows at Release N+1.
+ * unchanged, once `1792100000` starts converting rows at Release N+1.
  */
 export const resolveSeriesOccurrenceInstant = (
   dateStr: string,

@@ -29,11 +29,11 @@ import { SqlClient } from 'effect/unstable/sql';
  * (`1791700000`) ONLY adds the column, defaulted `FALSE` — a pure schema
  * no-op, safe for the previous image to run alongside, because nothing yet
  * reads or writes it as `TRUE`. The conversion itself is deferred to
- * `1791800000`, which ships in the NEXT release, once the server image that
+ * `1792100000`, which ships in the NEXT release, once the server image that
  * is about to become "the previous one" during that rollout already knows to
  * read this flag on every branch that resolves a series time to an instant
  * (`applications/server/src/utils/seriesTimeDialect.ts`). By the time
- * `1791800000` runs and starts marking rows `TRUE`, every server capable of
+ * `1792100000` runs and starts marking rows `TRUE`, every server capable of
  * being alive in the same deploy window already understands what `TRUE`
  * means.
  *
@@ -46,12 +46,12 @@ import { SqlClient } from 'effect/unstable/sql';
  * ## Release N CAN write `TRUE` on create
  *
  * This migration converts nothing, but that does NOT mean "every row is `FALSE` until
- * `1791800000`". On create there is no existing row to assert a dialect against, so
+ * `1792100000`". On create there is no existing row to assert a dialect against, so
  * `event-series.ts`'s create handler writes `payload.timesAreTeamLocal` explicitly — naming
  * this column for the first time this release (see
  * `EventSeriesRepository.insertEventSeries`) — and a payload declaring `true` therefore
  * produces a genuine `TRUE` row holding wall-clock times. Do not weaken that to a hardcoded
- * `FALSE` with a rejection on mismatch: the property `1791800000`'s Statement A guard
+ * `FALSE` with a rejection on mismatch: the property `1792100000`'s Statement A guard
  * actually needs is "every `FALSE` row is genuinely UTC-semantics", NOT "every row is
  * `FALSE`", and explicit create-time marking is what keeps the former true. `DEFAULT FALSE`
  * above remains correct and load-bearing for writers that omit the flag entirely

@@ -101,7 +101,9 @@ Effect.tap(
 ),
 ```
 
-References: `times_are_team_local` (`1791700000_add_series_times_team_local_flag.ts` adds the marker column and converts nothing; the guarded conversion `UPDATE` lands separately in `1791800000_series_time_is_team_local.ts` — see `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock"), `all_day_anchored` (`1791300000_add_all_day_anchored_flag.ts` + `1791400000_anchor_all_day_to_team_midnight.ts`).
+References: `times_are_team_local` (`1791700000_add_series_times_team_local_flag.ts` adds the marker column and converts nothing; the guarded conversion `UPDATE` lands separately in `1792100000_series_time_is_team_local.ts` — see `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock"), `all_day_anchored` (`1791300000_add_all_day_anchored_flag.ts` + `1791400000_anchor_all_day_to_team_midnight.ts`).
+
+> The reserved id above was originally `1791800000`. Production kept shipping migrations (through `1792000005`) while this one sat unwritten, so `1791800000` fell below the migrator's applied-id waterline: `Migrator.js` only checks `currentId <= latestMigrationId`, and a migration below that line is skipped silently — no error, no log line, forever. It was renumbered to `1792100000`, comfortably above every id merged so far. `scripts/check-migration-ids.mjs` now enforces this (new ids on a branch must exceed every id already on `origin/main`) so it cannot happen again unnoticed.
 
 ### Reading A Per-Team Setting Inside A Migration `UPDATE`
 
@@ -121,7 +123,7 @@ AT TIME ZONE COALESCE(
   'Europe/Prague')
 ```
 
-Reference: `1791800000_series_time_is_team_local.ts` (both statements) — that migration is NOT in the tree yet; it is the deferred half of the split described in `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock". No migration currently in `packages/migrations/src/before/` demonstrates the `pg_timezone_names` join inside `COALESCE`: `1791400000_anchor_all_day_to_team_midnight.ts` uses the `COALESCE` scalar subselect of rule 1 WITHOUT the rule-2 join, and `1792000005_team_settings_timezone_check.ts` uses `pg_timezone_names` only as a `NOT IN` sanitize filter — do not copy either as the complete pattern. The JS/Postgres disagreement for DST-ambiguous wall clocks is documented in `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock".
+Reference: `1792100000_series_time_is_team_local.ts` (both statements) — that migration is NOT in the tree yet; it is the deferred half of the split described in `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock". No migration currently in `packages/migrations/src/before/` demonstrates the `pg_timezone_names` join inside `COALESCE`: `1791400000_anchor_all_day_to_team_midnight.ts` uses the `COALESCE` scalar subselect of rule 1 WITHOUT the rule-2 join, and `1792000005_team_settings_timezone_check.ts` uses `pg_timezone_names` only as a `NOT IN` sanitize filter — do not copy either as the complete pattern. The JS/Postgres disagreement for DST-ambiguous wall clocks is documented in `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock".
 
 ### Partial Indexes for Hot Filters
 
