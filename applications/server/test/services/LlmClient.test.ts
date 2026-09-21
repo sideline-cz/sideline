@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest';
-import { Effect, Layer } from 'effect';
+import { Effect, Layer, Option } from 'effect';
 import { clampRating, LlmClient, LlmError } from '~/services/LlmClient.js';
 
 // ---------------------------------------------------------------------------
@@ -155,6 +155,9 @@ describe('LlmClient — provider error path', () => {
     _tag: 'api/LlmClient' as const,
     summarizeEmail: (_input: unknown) =>
       Effect.fail(new LlmError({ message: 'Simulated LLM provider failure' })),
+    configured: true,
+    chatWithTools: () =>
+      Effect.succeed({ content: Option.some('FAKE'), toolCalls: [], finishReason: 'stop' }),
   } as never);
 
   it.effect('fails with LlmError when provider returns an error', () =>

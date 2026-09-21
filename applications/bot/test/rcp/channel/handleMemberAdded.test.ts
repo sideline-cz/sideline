@@ -115,6 +115,7 @@ type RpcCallRecord = {
   GetMapping: unknown[];
   UpsertMapping: unknown[];
   UpsertMappingRoleOnly: unknown[];
+  ClearMappingRole: unknown[];
 };
 
 type ChannelMappingLike = {
@@ -130,6 +131,7 @@ const makeRpc = (
     GetMapping: [],
     UpsertMapping: [],
     UpsertMappingRoleOnly: [],
+    ClearMappingRole: [],
   };
 
   const defaults: Record<string, (...args: any[]) => Effect.Effect<any, any, any>> = {
@@ -143,6 +145,10 @@ const makeRpc = (
     },
     'Channel/UpsertMappingRoleOnly': (args: any) => {
       calls.UpsertMappingRoleOnly.push(args);
+      return Effect.void;
+    },
+    'Channel/ClearMappingRole': (args: any) => {
+      calls.ClearMappingRole.push(args);
       return Effect.void;
     },
     'Channel/MarkEventProcessed': () => Effect.void,
@@ -274,5 +280,68 @@ describe('handleMemberAdded — B4: never creates channels, only roles', () => {
     const addArgs = restCalls.addGuildMemberRole[0] as any[];
     // addGuildMemberRole(guildId, userId, roleId) — roleId must be ROLE_ID_Y
     expect(addArgs).toContain(ROLE_ID_Y);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fake ErrorResponse factory (matches isPermanentError/isUnknownRoleError checks)
+// Shape: { _tag: 'ErrorResponse', response: { status }, data: { code } }
+// ---------------------------------------------------------------------------
+
+const makeErrorResponse = (status: number, code?: number) =>
+  ({
+    _tag: 'ErrorResponse',
+    response: { status },
+    data: code !== undefined ? { code } : {},
+  }) as any;
+
+// ---------------------------------------------------------------------------
+// Tests — §3.4 / §5.5 (BT4, BT5): Discord-10011 stale-role healing at the
+// propagating call site.
+//
+// Unlike handleCreated's per-member pipe (which swallows via Exit.match),
+// handleMemberAdded.ts:66-70 has no Exit at all — the plain Effect.tapError sits
+// directly on the addGuildMemberRole pipe and MUST NOT swallow the failure: it
+// still has to propagate to ProcessorService's outer catch so the event is
+// retried/marked failed like any other channel-sync failure.
+// ---------------------------------------------------------------------------
+
+describe('handleMemberAdded — §3.4: Discord-10011 stale-role healing (BT4, BT5)', () => {
+  it('BT4: addGuildMemberRole fails with 10011 → one Channel/ClearMappingRole, and the handler still FAILS (tapError must not swallow)', async () => {
+    const mapping: ChannelMappingLike = {
+      discord_channel_id: Option.some(CHANNEL_ID_X),
+      discord_role_id: Option.some(ROLE_ID_Y),
+    };
+    const { calls: rpcCalls, layer: rpcLayer } = makeRpc(Option.some(mapping));
+    const { layer: restLayer } = makeRest({
+      addGuildMemberRole: () => Effect.fail(makeErrorResponse(404, 10011)),
+    });
+
+    await expect(runHandleMemberAdded(makeEvent(), rpcLayer, restLayer)).rejects.toBeDefined();
+
+    expect(rpcCalls.ClearMappingRole).toHaveLength(1);
+    expect(rpcCalls.ClearMappingRole[0]).toMatchObject({
+      team_id: TEAM_ID,
+      group_id: GROUP_ID,
+    });
+  });
+
+  it('BT5 (member-added site): 10011 is a permanent error → addGuildMemberRole is called exactly once, not retried', async () => {
+    const mapping: ChannelMappingLike = {
+      discord_channel_id: Option.some(CHANNEL_ID_X),
+      discord_role_id: Option.some(ROLE_ID_Y),
+    };
+    const { layer: rpcLayer } = makeRpc(Option.some(mapping));
+    let addRoleCallCount = 0;
+    const { layer: restLayer } = makeRest({
+      addGuildMemberRole: () => {
+        addRoleCallCount++;
+        return Effect.fail(makeErrorResponse(404, 10011));
+      },
+    });
+
+    await expect(runHandleMemberAdded(makeEvent(), rpcLayer, restLayer)).rejects.toBeDefined();
+
+    expect(addRoleCallCount).toBe(1);
   });
 });

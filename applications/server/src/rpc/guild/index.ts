@@ -36,6 +36,7 @@ import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { DEFAULT_PERSONAL_EVENTS_CHANNEL_FORMAT } from '~/utils/applyDiscordFormat.js';
 import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
+import { emitMemberGroupChannelRoles } from '~/utils/emitMemberGroupChannelRoles.js';
 import {
   MAX_ROLE_SYNC_EMISSIONS_PER_GUILD_RECONCILE,
   type ReconcileMemberRolesResult,
@@ -95,6 +96,23 @@ type WelcomeMeta = {
   readonly system_log_channel_id: Option.Option<Discord.Snowflake>;
   readonly welcome: Option.Option<WelcomeDetail>;
   readonly invite_code: Option.Option<string>;
+};
+
+/**
+ * The resolved invite context behind a `Guild/RegisterMember` call: the acceptance row's
+ * `team_invites → users → teams → groups` join, or `None` when no invite was identified for
+ * this join (no code on the payload and no recent acceptance, or a rejected cross-team match —
+ * see `resolveInviteContext`). Hoisted out of `resolveWelcomeMeta` (formerly `Ctx`) because both
+ * `applyInviteGroup` and `buildWelcomeMeta` now consume it independently, resolved once by
+ * `resolveInviteContext`.
+ */
+type InviteContext = {
+  readonly team_id: Team.TeamId;
+  readonly group_id: Option.Option<GroupModel.GroupId>;
+  readonly group_name: Option.Option<string>;
+  readonly inviter_username: string;
+  readonly inviter_discord_id: Option.Option<Discord.Snowflake>;
+  readonly team_name: string;
 };
 
 export const GuildsRpcLive = Effect.Do.pipe(
@@ -168,99 +186,37 @@ export const GuildsRpcLive = Effect.Do.pipe(
         ),
       );
 
-    const resolveWelcomeMeta = (
-      team: {
-        readonly id: Team.TeamId;
-        readonly welcome_channel_id: Option.Option<Discord.Snowflake>;
-        readonly system_log_channel_id: Option.Option<Discord.Snowflake>;
-        readonly welcome_message_template: Option.Option<string>;
-      },
-      newMember: { readonly id: TeamMember.TeamMemberId },
+    /**
+     * Resolves the (at most one) invite context behind this join: the Discord invite code the
+     * bot diffed off the guild's invite list, or — when that lookup misses — the most recent
+     * acceptance for this (discord_id, guild_id) pair (Discord auto-deletes `max_uses:1`
+     * invites on consumption, which breaks the diff the bot uses to identify the code).
+     *
+     * Structured as two phases so the cross-team guard's terminal behaviour is structural, not
+     * incidental:
+     *
+     * - Phase 1 resolves AT MOST ONE candidate acceptance. The recency fallback is consumed
+     *   here and nowhere else.
+     * - Phase 2 applies the cross-team guard ONCE, to that single candidate. A rejected
+     *   cross-team match returns `None` and does NOT retry the recency fallback — retrying would
+     *   let a stale or mismatched Discord code fall through to a coincidental same-team
+     *   acceptance and manufacture a welcome + group bind out of it. This mirrors the
+     *   pre-refactor behaviour, where the guard lived inside `buildWelcome` and only ran after a
+     *   branch had already been chosen. Do NOT restructure this into resolve -> guard ->
+     *   retry-on-None.
+     */
+    const resolveInviteContext = (
+      team: { readonly id: Team.TeamId },
       payload: RegisterMemberPayload,
-    ): Effect.Effect<WelcomeMeta> => {
-      const noWelcome: WelcomeMeta = {
-        system_log_channel_id: team.system_log_channel_id,
-        welcome: Option.none(),
-        invite_code: payload.invite_code,
-      };
-      type Ctx = {
-        readonly team_id: Team.TeamId;
-        readonly group_id: Option.Option<GroupModel.GroupId>;
-        readonly group_name: Option.Option<string>;
-        readonly inviter_username: string;
-        readonly inviter_discord_id: Option.Option<Discord.Snowflake>;
-        readonly team_name: string;
-      };
-      const buildWelcome = (ctx: Ctx): Effect.Effect<WelcomeMeta> => {
-        if (ctx.team_id !== team.id) {
-          return Effect.logError(
-            `RegisterMember: invite team_id ${ctx.team_id} !== team ${team.id}`,
-          ).pipe(Effect.as(noWelcome));
-        }
-        const renderedMessage = Option.map(team.welcome_message_template, (template) =>
-          sanitizeRendered(
-            applyTemplate(template, {
-              memberMention: `<@${payload.discord_id}>`,
-              memberName: Option.getOrElse(payload.display_name, () => payload.username),
-              inviterMention: Option.match(ctx.inviter_discord_id, {
-                onNone: () => '',
-                onSome: (id) => `<@${id}>`,
-              }),
-              inviterName: ctx.inviter_username,
-              groupName: Option.getOrElse(ctx.group_name, () => ''),
-              teamName: ctx.team_name,
-            }),
-          ),
-        );
-        const fetchGroupColor = Option.match(ctx.group_id, {
-          onNone: () => Effect.succeed(Option.none<number>()),
-          onSome: (groupId) =>
-            deps.groups
-              .findGroupById(groupId)
-              .pipe(
-                Effect.map(
-                  Option.flatMap((g) =>
-                    Option.fromNullishOr(sanitizeHexColor(Option.getOrNull(g.color))),
-                  ),
-                ),
-              ),
-        });
-        return Effect.Do.pipe(
-          Effect.tap(() =>
-            Option.match(ctx.group_id, {
-              onNone: () => Effect.void,
-              onSome: (groupId) => deps.groups.addMemberById(groupId, newMember.id),
-            }),
-          ),
-          Effect.bind('group_color_int', () => fetchGroupColor),
-          Effect.map(
-            ({ group_color_int }): WelcomeMeta => ({
-              system_log_channel_id: team.system_log_channel_id,
-              invite_code: payload.invite_code,
-              welcome: Option.some<WelcomeDetail>({
-                welcome_channel_id: team.welcome_channel_id,
-                welcome_message_rendered: renderedMessage,
-                group_name: ctx.group_name,
-                group_color_int,
-                inviter_discord_id: ctx.inviter_discord_id,
-              }),
-            }),
-          ),
-        );
-      };
+    ): Effect.Effect<Option.Option<InviteContext>> => {
       // Fallback used when the bot couldn't identify the consumed invite code
       // (Discord auto-deletes max_uses:1 invites on consumption, breaking diff matching).
-      const fallbackByUserAndGuild = deps.acceptances
-        .findRecentByUserAndGuildWithContext(payload.discord_id, payload.guild_id)
-        .pipe(
-          Effect.flatMap(
-            Option.match({
-              onNone: () => Effect.succeed(noWelcome),
-              onSome: buildWelcome,
-            }),
-          ),
-        );
-      return Option.match(payload.invite_code, {
+      const fallbackByUserAndGuild = deps.acceptances.findRecentByUserAndGuildWithContext(
+        payload.discord_id,
+        payload.guild_id,
+      );
+      // Phase 1 — resolve at most one candidate acceptance.
+      const candidate = Option.match(payload.invite_code, {
         onNone: () => fallbackByUserAndGuild,
         onSome: (code) =>
           deps.acceptances.findByDiscordCodeWithContext(code).pipe(
@@ -270,10 +226,170 @@ export const GuildsRpcLive = Effect.Do.pipe(
                   Effect.logWarning(
                     `RegisterMember: invite code ${code} not found or expired; trying recency fallback`,
                   ).pipe(Effect.andThen(fallbackByUserAndGuild)),
-                onSome: buildWelcome,
+                onSome: (ctx) => Effect.succeed(Option.some(ctx)),
               }),
             ),
           ),
+      });
+      // Phase 2 — the cross-team guard, applied once. Terminal by construction: phase 1 has
+      // already finished, so a rejected cross-team match cannot fall through to the recency
+      // fallback.
+      return candidate.pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.succeed(Option.none<InviteContext>()),
+            onSome: (ctx) =>
+              ctx.team_id !== team.id
+                ? Effect.logError(
+                    `RegisterMember: invite team_id ${ctx.team_id} !== team ${team.id}`,
+                  ).pipe(Effect.as(Option.none<InviteContext>()))
+                : Effect.succeed(Option.some(ctx)),
+          }),
+        ),
+      );
+    };
+
+    /**
+     * ORDER-CRITICAL. Applies the group binding an invite carries, in BOTH halves that every
+     * other group-add in this codebase applies (`api/group.ts` `addGroupMember`,
+     * `AgeCheckService.ts`): the `group_members` row AND the `member_added` channel-sync events
+     * that make the bot grant the group's own Discord role
+     * (`discord_channel_mappings.discord_role_id`, created by `createGroup`'s
+     * `emitChannelCreated`) for the group and every active ancestor. This handler was the only
+     * group-add that wrote the row and emitted nothing — and `reconcileMemberDiscordRoles`
+     * cannot cover for it, because it reads `discord_role_mappings`, a different table. A group
+     * with no explicitly linked Sideline role (i.e. no `role_groups` row — the state of every
+     * group at creation) contributes NOTHING to the role diff, so the channel emit is not a
+     * nicety here: it is the only thing that gets the majority of groups their Discord role.
+     * (`setupNewMember`'s group-add needs no emit — it matched the member BECAUSE they already
+     * hold that Discord role.)
+     *
+     * Ancestors come from `getActiveAncestors`, NOT `getAncestors`: an archived ancestor whose
+     * `discord_channel_mappings` row `deleteGroup` already removed would otherwise make the
+     * bot's self-healing `createRoleOnly` branch recreate a Discord role named after the deleted
+     * group, on the hottest automatic path in the system.
+     *
+     * Returns the group ids it emitted `member_added` for — the bound group PLUS its active
+     * ancestors. Only the first of those got an `addMemberById`; membership in an ancestor is
+     * implied by the subgroup tree, not stored. `registerMemberWithReconcile` destructures that
+     * value in the `reconcile` bind, which makes it a COMPILE ERROR in `Effect.Do` to run the
+     * role diff first: the diff reads `findEffectiveRoleIdsForMember` (`member_roles` UNION the
+     * group-inherited walk, `repositories/effectiveRoles.ts`) from the database at call time and
+     * would miss any group bound after it. That structural dependency, not a comment, is what
+     * keeps this ordering.
+     *
+     * `group_id` and `group_name` come from the same `LEFT JOIN groups g ON g.id = ti.group_id
+     * AND g.is_archived = false` in both acceptance queries, so they are strictly co-present —
+     * hence `Option.all`, not a `getOrElse('')` that could hand the bot an unnamed role to
+     * create. An archived group yields `None` on both and binds nothing.
+     *
+     * The insert is `ON CONFLICT DO NOTHING` (PK `(group_id, team_member_id)`), so it is a free
+     * no-op when `joinViaInvite` (Task 3) already wrote the row; the emit runs regardless,
+     * because the Discord side is not derivable from the insert's outcome.
+     */
+    const applyInviteGroup = (
+      team: { readonly id: Team.TeamId },
+      newMember: { readonly id: TeamMember.TeamMemberId },
+      payload: RegisterMemberPayload,
+      inviteContext: Option.Option<InviteContext>,
+    ): Effect.Effect<ReadonlyArray<GroupModel.GroupId>, never, ChannelSyncEventsRepository> =>
+      Option.match(
+        Option.flatMap(inviteContext, (ctx) =>
+          Option.all({ groupId: ctx.group_id, groupName: ctx.group_name }),
+        ),
+        {
+          onNone: () => Effect.succeed<ReadonlyArray<GroupModel.GroupId>>([]),
+          onSome: ({ groupId, groupName }) =>
+            Effect.Do.pipe(
+              Effect.bind('channelSync', () => ChannelSyncEventsRepository.asEffect()),
+              Effect.tap(() => deps.groups.addMemberById(groupId, newMember.id)),
+              Effect.bind('ancestors', () => deps.groups.getActiveAncestors(groupId, team.id)),
+              Effect.let('entries', ({ ancestors }) =>
+                [{ id: groupId, name: groupName }, ...ancestors].map((g) => ({
+                  groupId: g.id,
+                  groupName: g.name,
+                  teamMemberId: newMember.id,
+                  discordUserId: toSnowflake(payload.discord_id),
+                })),
+              ),
+              Effect.tap(({ channelSync, entries }) =>
+                channelSync.emitMembersAddedBatch({ teamId: team.id, entries }),
+              ),
+              Effect.map(({ entries }) => entries.map((e) => e.groupId)),
+            ),
+        },
+      );
+
+    /**
+     * Pure(ish) read of the welcome DTO: template render + `fetchGroupColor`. The group bind
+     * itself and the cross-team guard have both moved out — see `applyInviteGroup` and
+     * `resolveInviteContext`. Must still return `noWelcome` (with `system_log_channel_id` and
+     * `invite_code` populated) when `inviteContext` is `None`; `WelcomeMeta`'s shape is
+     * byte-identical to before this split.
+     */
+    const buildWelcomeMeta = (
+      team: {
+        readonly id: Team.TeamId;
+        readonly welcome_channel_id: Option.Option<Discord.Snowflake>;
+        readonly system_log_channel_id: Option.Option<Discord.Snowflake>;
+        readonly welcome_message_template: Option.Option<string>;
+      },
+      payload: RegisterMemberPayload,
+      inviteContext: Option.Option<InviteContext>,
+    ): Effect.Effect<WelcomeMeta> => {
+      const noWelcome: WelcomeMeta = {
+        system_log_channel_id: team.system_log_channel_id,
+        welcome: Option.none(),
+        invite_code: payload.invite_code,
+      };
+      return Option.match(inviteContext, {
+        onNone: () => Effect.succeed(noWelcome),
+        onSome: (ctx) => {
+          const renderedMessage = Option.map(team.welcome_message_template, (template) =>
+            sanitizeRendered(
+              applyTemplate(template, {
+                memberMention: `<@${payload.discord_id}>`,
+                memberName: Option.getOrElse(payload.display_name, () => payload.username),
+                inviterMention: Option.match(ctx.inviter_discord_id, {
+                  onNone: () => '',
+                  onSome: (id) => `<@${id}>`,
+                }),
+                inviterName: ctx.inviter_username,
+                groupName: Option.getOrElse(ctx.group_name, () => ''),
+                teamName: ctx.team_name,
+              }),
+            ),
+          );
+          const fetchGroupColor = Option.match(ctx.group_id, {
+            onNone: () => Effect.succeed(Option.none<number>()),
+            onSome: (groupId) =>
+              deps.groups
+                .findGroupById(groupId)
+                .pipe(
+                  Effect.map(
+                    Option.flatMap((g) =>
+                      Option.fromNullishOr(sanitizeHexColor(Option.getOrNull(g.color))),
+                    ),
+                  ),
+                ),
+          });
+          return Effect.Do.pipe(
+            Effect.bind('group_color_int', () => fetchGroupColor),
+            Effect.map(
+              ({ group_color_int }): WelcomeMeta => ({
+                system_log_channel_id: team.system_log_channel_id,
+                invite_code: payload.invite_code,
+                welcome: Option.some<WelcomeDetail>({
+                  welcome_channel_id: team.welcome_channel_id,
+                  welcome_message_rendered: renderedMessage,
+                  group_name: ctx.group_name,
+                  group_color_int,
+                  inviter_discord_id: ctx.inviter_discord_id,
+                }),
+              }),
+            ),
+          );
+        },
       });
     };
 
@@ -296,6 +412,18 @@ export const GuildsRpcLive = Effect.Do.pipe(
       newMember: { readonly id: TeamMember.TeamMemberId },
       payload: RegisterMemberPayload,
       options: RegisterMemberOptions,
+      // ORDER-CRITICAL, not decorative. To be precise about what enforces what: the thing that
+      // makes running the role diff before `applyInviteGroup` a COMPILE ERROR is the
+      // `{ newMember, boundGroupIds }` destructure at the `reconcile` bind in
+      // `registerMemberWithReconcile` — `Effect.Do` only exposes keys bound earlier, so hoisting
+      // `reconcile` above `boundGroupIds` stops type-checking. This parameter is what gives that
+      // destructure a reason to exist. It is ALSO now a real, functional argument in its own
+      // right (bug fix-group-channel-discord-join, PR 1): passed straight through to
+      // `emitMemberGroupChannelRoles` below as `alreadyEmittedGroupIds`, so a group-scoped
+      // invite's own `member_added` emit (from `applyInviteGroup`, bound above this call) is
+      // never double-emitted by this function's own group-channel-role diff. Do not "tidy this
+      // away" — it now has two independent reasons to exist, not one.
+      boundGroupIds: ReadonlyArray<GroupModel.GroupId>,
     ) =>
       Option.match(payload.source, {
         onNone: () =>
@@ -303,12 +431,56 @@ export const GuildsRpcLive = Effect.Do.pipe(
             `RegisterMember: no source on payload for discord_id ${payload.discord_id} in team ${team.id} ` +
               `(pre-PR-8 bot); skipping discord_joined_at + role diff`,
           ).pipe(Effect.as(Option.none<ReconcileMemberRolesResult>())),
-        onSome: () =>
+        onSome: (source) =>
           Effect.Do.pipe(
             Effect.tap(() =>
               (options.markDiscordJoined ?? true)
                 ? deps.members.markDiscordJoined(newMember.id)
                 : Effect.void,
+            ),
+            Effect.tap(() =>
+              Effect.logDebug(
+                `RegisterMember: diffing after ${boundGroupIds.length} invite-bound group binding(s)`,
+              ),
+            ),
+            // bug fix-group-channel-discord-join (PR 1) — `GUILD_MEMBER_ADD` only. A member
+            // already active on the team who is only now sighted joining Discord (the reported
+            // bug) or joining past the invite-acceptance recency window gets their group's own
+            // Discord channel role here, independent of any invite. Gated on `source ===
+            // 'member_add'` — NOT run for `Guild/ReconcileMembers` (`source: 'reconcile'`),
+            // which would otherwise re-emit a whole page of already-active members' entire group
+            // trees on every bot reconnect (the N+1 fan-out §2 of the implementation plan
+            // rejects). A member first observed by reconcile (e.g. joined while the bot was
+            // disconnected past the gateway resume window) is left uncovered by this path today —
+            // see `applications/server/AGENTS.md`'s group-channel-role-sync section for that
+            // accepted gap, its trigger condition, and today's manual remedy.
+            // Auxiliary heal, must stay non-fatal: every repository call inside
+            // `emitMemberGroupChannelRoles` pipes `catchSqlErrors` (`Effect.die(LogicError)`), so a
+            // transient failure here is a DEFECT, not a typed error — despite the `never` error
+            // channel. Left unguarded, that defect would short-circuit this whole `Effect.tap` and
+            // skip `reconcileMemberDiscordRoles` plus the welcome message below, breaking
+            // pre-existing behavior for the sake of an additive fix. Same convention as
+            // `reapplyGroupGrants`'s wrap in `rpc/channel/index.ts:220-221` / `:245-246` (see
+            // `applications/server/AGENTS.md`: "a grant-reapply error is observability noise, not a
+            // reason to reject the role mapping").
+            Effect.tap(() =>
+              source === 'member_add'
+                ? emitMemberGroupChannelRoles(
+                    team,
+                    newMember,
+                    toSnowflake(payload.discord_id),
+                    payload.roles,
+                    boundGroupIds,
+                  ).pipe(
+                    Effect.catchCause((cause) =>
+                      Effect.logWarning('emitMemberGroupChannelRoles failed (non-fatal)', cause),
+                    ),
+                  )
+                : Effect.logDebug(
+                    `RegisterMember: source '${source}' !== 'member_add' for discord_id ${payload.discord_id} ` +
+                      `in team ${team.id}; skipping group-channel-role emit here (reconcile does not ` +
+                      `re-derive it — see AGENTS.md's accepted gap and today's manual "Sync role members" remedy)`,
+                  ),
             ),
             Effect.flatMap(() =>
               reconcileMemberDiscordRoles(
@@ -373,13 +545,22 @@ export const GuildsRpcLive = Effect.Do.pipe(
                     ),
                   );
                 }),
+                // Resolve the invite behind this join ONCE — the group write below and the
+                // welcome DTO at the bottom of this chain consume the same context, and
+                // previously each re-derived it inside `resolveWelcomeMeta`.
+                Effect.bind('inviteContext', () => resolveInviteContext(team, payload)),
+                // ORDER-CRITICAL — see `applyInviteGroup`. Enforced by `reconcile`'s
+                // `boundGroupIds` destructure below, not by this comment.
+                Effect.bind('boundGroupIds', ({ newMember, inviteContext }) =>
+                  applyInviteGroup(team, newMember, payload, inviteContext),
+                ),
                 // Runs on every branch above — including "already active", which is exactly the
                 // reporter's case (a member registered via web who only later joins Discord).
-                Effect.bind('reconcile', ({ newMember }) =>
-                  observeGuildMembership(team, newMember, payload, options),
+                Effect.bind('reconcile', ({ newMember, boundGroupIds }) =>
+                  observeGuildMembership(team, newMember, payload, options, boundGroupIds),
                 ),
-                Effect.bind('welcomeMeta', ({ newMember }) =>
-                  resolveWelcomeMeta(team, newMember, payload),
+                Effect.bind('welcomeMeta', ({ inviteContext }) =>
+                  buildWelcomeMeta(team, payload, inviteContext),
                 ),
                 Effect.map(
                   ({ welcomeMeta, reconcile }): RegisterMemberOutcome => ({

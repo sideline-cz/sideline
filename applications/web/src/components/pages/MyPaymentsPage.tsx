@@ -1,6 +1,7 @@
 import { type DateTime, Option } from 'effect';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, QrCode } from 'lucide-react';
 import React from 'react';
+import { QrPaymentCode } from '~/components/atoms/QrPaymentCode.js';
 import { PaymentStatusBadge } from '~/components/molecules/PaymentStatusBadge.js';
 import { MyPaymentHistoryRow } from '~/components/organisms/MyPaymentHistoryRow.js';
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card';
@@ -8,6 +9,7 @@ import { formatLocalDate } from '~/lib/datetime';
 import { computeKpis } from '~/lib/finance/computeKpis.js';
 import { formatMoney } from '~/lib/finance/formatMoney.js';
 import { sortAssignments } from '~/lib/finance/sortAssignments.js';
+import { useQrObjectUrl } from '~/lib/finance/useQrObjectUrl.js';
 import { tr } from '~/lib/translations.js';
 
 // ---------------------------------------------------------------------------
@@ -109,9 +111,14 @@ export function MyPaymentsPage({ teamId, myStatus }: MyPaymentsPageProps) {
 
   // Per-row expanded state: assignmentId → boolean
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
+  const [qrExpanded, setQrExpanded] = React.useState<Record<string, boolean>>({});
 
   const toggleExpanded = (assignmentId: string) => {
     setExpanded((prev) => ({ ...prev, [assignmentId]: !prev[assignmentId] }));
+  };
+
+  const toggleQrExpanded = (assignmentId: string) => {
+    setQrExpanded((prev) => ({ ...prev, [assignmentId]: !prev[assignmentId] }));
   };
 
   // KPI values
@@ -219,6 +226,9 @@ export function MyPaymentsPage({ teamId, myStatus }: MyPaymentsPageProps) {
                               aria-label={tr('finance_column_paid')}
                             />
                             <th className='py-2 px-3 text-right'>{tr('finance_column_status')}</th>
+                            <th className='w-8 py-2 px-3'>
+                              <span className='sr-only'>{tr('my_payments_qr_toggle')}</span>
+                            </th>
                           </tr>
                         </thead>
                         <tbody>
@@ -226,6 +236,11 @@ export function MyPaymentsPage({ teamId, myStatus }: MyPaymentsPageProps) {
                             const a = assignment as FeeAssignmentView;
                             const hasPayments = a.paidMinor > 0;
                             const isExpanded = !!expanded[a.assignmentId];
+                            const isQrExpanded = !!qrExpanded[a.assignmentId];
+                            const isOutstanding =
+                              a.status === 'pending' ||
+                              a.status === 'partial' ||
+                              a.status === 'overdue';
                             return (
                               <React.Fragment key={a.assignmentId}>
                                 <tr className='border-b last:border-0'>
@@ -266,13 +281,40 @@ export function MyPaymentsPage({ teamId, myStatus }: MyPaymentsPageProps) {
                                       }
                                     />
                                   </td>
+                                  <td className='py-2 px-3'>
+                                    {isOutstanding && (
+                                      <button
+                                        type='button'
+                                        aria-label={tr('my_payments_qr_toggleAria')}
+                                        aria-expanded={isQrExpanded}
+                                        aria-controls={`payment-qr-${a.assignmentId}`}
+                                        onClick={() => toggleQrExpanded(a.assignmentId)}
+                                        className='flex items-center justify-center size-6 rounded hover:bg-muted transition-colors'
+                                      >
+                                        <QrCode className='size-4' aria-hidden='true' />
+                                      </button>
+                                    )}
+                                  </td>
                                 </tr>
                                 {isExpanded && (
                                   <tr id={`payment-history-${a.assignmentId}`}>
-                                    <td colSpan={5} className='bg-muted/30'>
+                                    <td colSpan={6} className='bg-muted/30'>
                                       <MyPaymentHistoryRow
                                         teamId={teamId}
                                         feeId={a.feeId}
+                                        currency={group.currency}
+                                      />
+                                    </td>
+                                  </tr>
+                                )}
+                                {isQrExpanded && (
+                                  <tr id={`payment-qr-${a.assignmentId}`}>
+                                    <td colSpan={6} className='bg-muted/30'>
+                                      <PaymentQrExpander
+                                        teamId={teamId}
+                                        feeId={a.feeId}
+                                        assignmentId={a.assignmentId}
+                                        amountMinor={Math.max(0, a.dueMinor - a.paidMinor)}
                                         currency={group.currency}
                                       />
                                     </td>
@@ -291,6 +333,49 @@ export function MyPaymentsPage({ teamId, myStatus }: MyPaymentsPageProps) {
           })}
         </>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// QR expander (design §6.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * `useQrObjectUrl` is the only correct way to render this — a plain `<img src=".../qr.png">`
+ * would 401, because the app authenticates with a Bearer token held in `localStorage`, which an
+ * image request never carries (design §9.2.1).
+ *
+ * Note on scope: the web's `qr.png` endpoint returns raw image bytes only (`Schema.Void`), with
+ * no sibling endpoint exposing the account/VS/message text the design's "can't scan it? enter it
+ * by hand" fallback block shows — that data currently only reaches the bot side, via
+ * `Finance/GetPaymentQr`. This expander therefore renders the QR image and the instruction line;
+ * the fallback text block is not built here for lack of a web data source.
+ */
+function PaymentQrExpander({
+  teamId,
+  feeId,
+  assignmentId,
+  amountMinor,
+  currency,
+}: {
+  readonly teamId: string;
+  readonly feeId: string;
+  readonly assignmentId: string;
+  readonly amountMinor: number;
+  readonly currency: string;
+}) {
+  const { url, state } = useQrObjectUrl(teamId, feeId, assignmentId);
+
+  return (
+    <div className='flex flex-col sm:flex-row items-start gap-4 p-4'>
+      <QrPaymentCode
+        url={url}
+        state={state}
+        alt={tr('my_payments_qr_alt', { amount: formatMoney(amountMinor, currency, 'en'), vs: '' })}
+        size={200}
+      />
+      <p className='text-sm text-muted-foreground'>{tr('my_payments_qr_instructions')}</p>
     </div>
   );
 }

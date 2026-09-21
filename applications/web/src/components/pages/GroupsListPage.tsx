@@ -3,9 +3,10 @@ import type { GroupApi } from '@sideline/domain';
 import { GroupModel, Team } from '@sideline/domain';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Effect, Option, Schema } from 'effect';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
+import { toast } from 'sonner';
 import { ColorDot } from '~/components/atoms/ColorDot.js';
 import { ColorPicker } from '~/components/atoms/ColorPicker.js';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
@@ -136,17 +137,50 @@ function GroupTreeNode({ node, teamId, depth, onCreateSubgroup }: GroupTreeNodeP
 interface GroupsListPageProps {
   teamId: string;
   groups: ReadonlyArray<GroupApi.GroupInfo>;
+  canManage: boolean;
 }
 
-export function GroupsListPage({ teamId, groups }: GroupsListPageProps) {
+export function GroupsListPage({ teamId, groups, canManage }: GroupsListPageProps) {
   const run = useRun();
   const router = useRouter();
   const teamIdBranded = Schema.decodeSync(Team.TeamId)(teamId);
   const [selectedParentId, setSelectedParentId] = React.useState<string>('__root__');
   const [createEmoji, setCreateEmoji] = React.useState('');
   const [createColor, setCreateColor] = React.useState<string | undefined>(undefined);
+  const [backfillingRoles, setBackfillingRoles] = React.useState(false);
 
   const tree = React.useMemo(() => buildTree(groups), [groups]);
+
+  const handleBackfillRoles = React.useCallback(async () => {
+    setBackfillingRoles(true);
+    try {
+      const result = await ApiClient.asEffect().pipe(
+        Effect.flatMap((api) =>
+          api.group.backfillGroupRoles({
+            params: { teamId: teamIdBranded },
+          }),
+        ),
+        Effect.mapError(() => ClientError.make(tr('group_backfillRolesFailed'))),
+        run({}),
+      );
+      if (Option.isSome(result)) {
+        if (result.value.processedCount === 0 && result.value.remainingCount === 0) {
+          toast.success(tr('group_backfillRolesNone'));
+        } else if (result.value.remainingCount === 0) {
+          toast.success(tr('group_backfillRolesQueued', { count: result.value.processedCount }));
+        } else {
+          toast.success(
+            tr('group_backfillRolesQueuedPartial', {
+              count: result.value.processedCount,
+              remaining: result.value.remainingCount,
+            }),
+          );
+        }
+      }
+    } finally {
+      setBackfillingRoles(false);
+    }
+  }, [teamIdBranded, run]);
 
   const form = useForm({
     resolver: standardSchemaResolver(Schema.toStandardSchemaV1(CreateGroupSchema)),
@@ -270,6 +304,22 @@ export function GroupsListPage({ teamId, groups }: GroupsListPageProps) {
           </Button>
         </form>
       </Form>
+
+      {canManage && (
+        <div className='mb-6'>
+          <Button variant='outline' onClick={handleBackfillRoles} disabled={backfillingRoles}>
+            {backfillingRoles ? (
+              <>
+                <Loader2 className='mr-2 size-4 animate-spin' />
+                {tr('group_backfillRolesBusy')}
+              </>
+            ) : (
+              tr('group_backfillRoles')
+            )}
+          </Button>
+          <p className='text-xs text-muted-foreground mt-1'>{tr('group_backfillRolesHelp')}</p>
+        </div>
+      )}
 
       {groups.length === 0 ? (
         <p className='text-muted-foreground'>{tr('group_noGroups')}</p>

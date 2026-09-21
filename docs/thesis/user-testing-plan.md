@@ -92,10 +92,10 @@ Each usability test session will follow this structure:
 | Welcome and consent signing | 5 minutes |
 | Background questionnaire | 5 minutes |
 | Pre-test briefing and think-aloud practice | 5 minutes |
-| Task execution (12 tasks) | 40–50 minutes |
+| Task execution (13 tasks) | 45–55 minutes |
 | Post-test SUS questionnaire | 5 minutes |
 | Debrief interview | 10 minutes |
-| **Total** | **~75 minutes** |
+| **Total** | **~80 minutes** |
 
 ### 3.3 Roles
 
@@ -411,6 +411,30 @@ The team name is updated successfully. The participant finds and reviews the not
 
 ---
 
+### Task M — Give a Teammate a Variable Symbol and Check Their Payment QR Code
+
+**Description:**
+Your team has just started accepting bank transfers for membership fees, and one teammate does not yet have a variable symbol (the number that identifies who a payment belongs to). You want to give them one, and then check that the payment reminder shows a scannable QR code.
+
+**Steps:**
+1. Navigate to the team's member list and find the teammate who is missing a variable symbol (they should be visibly flagged).
+2. Open that member's profile and assign them a variable symbol.
+3. Save the change and confirm it was accepted.
+4. Navigate to your own **My Payments** page and open a fee you still owe.
+5. Locate and view the payment QR code for that fee.
+
+**Expected Result:**
+The teammate's profile now shows a variable symbol. The participant can locate and open the QR code for an outstanding fee on their own My Payments page.
+
+**Success Criteria:**
+- Participant can identify which teammate is missing a variable symbol without being told directly.
+- Variable symbol is saved without error.
+- Participant successfully finds and opens the QR code display.
+
+**Notes for facilitator:** This task deliberately does not involve connecting a real Fio bank account (which would require live banking credentials the participant does not have) — it exercises only the parts of the bank-sync feature that a regular participant can complete in a lab session. Connecting the account itself, the historical-import "10-minute unlock window" flow, and reviewing the matching queue are treasurer-only workflows better suited to expert review or a treasurer-specific follow-up session than to this general usability pass.
+
+---
+
 ## 6. Data Collection Methods
 
 ### 6.1 Quantitative Measures
@@ -524,10 +548,10 @@ Each individual test session is structured as follows:
 | 0:00 – 0:05 | Welcome, introduce the purpose of the session, obtain signed consent |
 | 0:05 – 0:10 | Administer background questionnaire |
 | 0:10 – 0:15 | Explain think-aloud protocol; conduct practice task (e.g., "find the settings in a web browser") |
-| 0:15 – 1:05 | Task execution (Tasks A–L, approximately 3–5 minutes per task) |
-| 1:05 – 1:10 | Administer SUS questionnaire |
-| 1:10 – 1:20 | Debrief interview |
-| 1:20 – 1:25 | Thank participant, answer any questions about the platform, confirm data handling |
+| 0:15 – 1:10 | Task execution (Tasks A–M, approximately 3–5 minutes per task) |
+| 1:10 – 1:15 | Administer SUS questionnaire |
+| 1:15 – 1:25 | Debrief interview |
+| 1:25 – 1:30 | Thank participant, answer any questions about the platform, confirm data handling |
 
 ### 9.3 Pilot Test
 
@@ -558,7 +582,7 @@ Adjustments to the protocol based on pilot findings will be documented before th
 You are being invited to participate in a usability study conducted as part of a bachelor's thesis research project. The purpose of this study is to evaluate the ease of use of the Sideline platform, a sports team management application. Your participation will help identify areas for improvement in the design of the system.
 
 **What participation involves:**
-You will be asked to complete a series of tasks using the Sideline platform while thinking aloud. The session will last approximately 75 minutes. Your screen, mouse movements, and voice will be recorded for later analysis.
+You will be asked to complete a series of tasks using the Sideline platform while thinking aloud. The session will last approximately 80 minutes. Your screen, mouse movements, and voice will be recorded for later analysis.
 
 **Voluntary participation:**
 Your participation is entirely voluntary. You may withdraw at any time without penalty or consequence. You are not required to give a reason for withdrawing.
@@ -622,6 +646,7 @@ The following template is to be completed by the facilitator or observer during 
 | J — View activity leaderboard | Yes / No | Yes / No | | | Yes / No | | |
 | K — Subscribe to calendar via iCal | Yes / No | Yes / No | | | Yes / No | | |
 | L — Configure team settings | Yes / No | Yes / No | | | Yes / No | | |
+| M — Assign variable symbol and view payment QR | Yes / No | Yes / No | | | Yes / No | | |
 
 **Additional session notes:**
 

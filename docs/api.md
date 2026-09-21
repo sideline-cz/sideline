@@ -44,6 +44,8 @@ Sideline exposes a JSON REST API built with [`@effect/platform`](https://github.
    - [Player Rating](#33-player-rating)
    - [Team Generation](#34-team-generation)
    - [Rules Trainer](#35-rules-trainer)
+   - [AI Assistant](#36-ai-assistant)
+   - [Bank Sync](#37-bank-sync)
 4. [RPC API](#rpc-api)
 5. [Error Reference](#error-reference)
 
@@ -623,6 +625,7 @@ Lists all active members of a team with their profile and role information.
 | `birthDate` | `string \| null` | Yes | Birth date |
 | `gender` | `"male" \| "female" \| "other" \| null` | Yes | Gender |
 | `jerseyNumber` | `number \| null` | Yes | Jersey number |
+| `variableSymbol` | `string \| null` | Yes | Bank payment variable symbol (1–10 digits), unique per team on its leading-zero-stripped form. Used to auto-match incoming Fio bank transfers to this member's fee assignments (see [Bank Sync](#38-bank-sync)) and to build their payment QR codes. `null` means the member cannot yet be auto-matched. |
 | `username` | `string` | No | Discord username |
 | `avatar` | `string \| null` | Yes | Discord avatar hash |
 | `displayName` | `string` | No | Server-resolved display name. Precedence: profile name → Discord nickname → Discord display name → Discord username. Always non-empty. |
@@ -684,6 +687,7 @@ Updates a member's profile fields. All fields are optional.
 | `birthDate` | `string \| null` | No | Birth date ISO string (null clears) |
 | `gender` | `"male" \| "female" \| "other" \| null` | No | Gender (null clears) |
 | `jerseyNumber` | `number \| null` | No | Jersey number (null clears) |
+| `variableSymbol` | `string \| null` | No | Bank payment variable symbol, 1–10 digits (null clears). Must be unique within the team on its leading-zero-stripped form — `"007"` and `"7"` collide. |
 
 **Response:** `200 OK` — `RosterPlayer`
 
@@ -693,6 +697,7 @@ Updates a member's profile fields. All fields are optional.
 |---|---|---|
 | `Forbidden` | 403 | Missing `member:edit` permission |
 | `PlayerNotFound` | 404 | Member does not exist |
+| `VariableSymbolTaken` | 409 | `variableSymbol` (leading-zero-stripped) is already held by another active member of this team. The error carries `holderMemberId` and `holderName` so the client can name the conflicting member. |
 
 ---
 
@@ -1791,6 +1796,38 @@ Instructs the bot to create a Discord channel for the group and establish the ma
 |---|---|---|
 | `GroupForbidden` | 403 | Missing `team:manage` permission |
 | `GroupNotFound` | 404 | Group does not exist |
+
+---
+
+#### `POST /teams/:teamId/groups/backfill-role-members`
+
+Team-wide, on-demand tool that re-emits the idempotent `channel_created` event for every non-archived group in the team that already has a Discord role and whose event queue has fully drained, causing the bot to re-add any missing members — including members of descendant subgroups — onto the group's Discord role. Powers the "Sync group roles with Discord" button on the groups page. Add-only: it does not remove members who hold the role but are no longer expected.
+
+**Auth:** Bearer token (AuthMiddleware)
+**Required Permission:** `group:manage`
+
+**Path Parameters:**
+
+| Name | Type | Description |
+|---|---|---|
+| `teamId` | `TeamId` (string) | Team ID |
+
+**Request Body:** None
+
+**Response:** `200 OK` — `BackfillGroupRolesResult`
+
+| Field | Type | Description |
+|---|---|---|
+| `processedCount` | `number` | Number of groups whose sync event was emitted in this call (capped at 50 per call) |
+| `remainingCount` | `number` | Number of eligible groups not yet processed (non-zero when more than 50 groups qualify) |
+
+**Notes:** The backfill is batched — a maximum of 50 groups are processed per call. When `remainingCount > 0`, call the endpoint again to process the next batch. Only groups that already have both a Discord channel and a Discord role are eligible; groups with no role are skipped (this endpoint does not create missing roles — use `POST /teams/:teamId/groups/:groupId/create-channel` or the low-cadence backfill sweep for that). Groups that have an unprocessed channel sync event already queued are also excluded to avoid duplicate work. The sync runs asynchronously — the endpoint returns immediately after enqueuing.
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `Forbidden` | 403 | Missing `group:manage` permission or not a member of this team |
 
 ---
 
@@ -3199,7 +3236,7 @@ Returns information about an invite code. This endpoint does not require authent
 
 #### `POST /invite/:code/join`
 
-Joins a team using an invite code. The authenticated user becomes a new member of the team with default (Player) role.
+Joins a team using an invite code. The authenticated user becomes a new member of the team with default (Player) role. If the invite is group-scoped (`groupId` was set when the invite was created), the member is also added to that group immediately (`group_members`); the invite's `group_id` is authoritative for this write, independent of whatever group binding the Discord-join path (`Guild/RegisterMember`) later resolves from the accepted invite.
 
 **Auth:** Bearer token (AuthMiddleware)
 
@@ -6007,7 +6044,7 @@ Declines a pending attendance request. The member is not added to the roster. Sa
 **Source:** `packages/domain/src/api/GlobalAdminApi.ts`
 **Prefix:** `/auth`
 
-Provides the global-admin management surface. All three endpoints require the caller to be a global admin (`isGlobalAdmin = true`). The effective admin set is the union of `users.is_global_admin = true` rows and the `APP_GLOBAL_ADMIN_DISCORD_IDS` env allowlist; env-managed entries cannot be revoked via the API.
+Provides the global-admin management surface. All endpoints require the caller to be a global admin (`isGlobalAdmin = true`). The effective admin set is the union of `users.is_global_admin = true` rows and the `APP_GLOBAL_ADMIN_DISCORD_IDS` env allowlist; env-managed entries cannot be revoked via the API.
 
 ---
 
@@ -6086,6 +6123,35 @@ Revokes global-admin status from a user by their internal `UserId`. Clears `user
 | `GlobalAdminSelfRevokeError` | 409 | Caller attempted to revoke their own admin status |
 | `GlobalAdminEnvManaged` | 409 | Target user's Discord ID is in `APP_GLOBAL_ADMIN_DISCORD_IDS`; env-managed admins cannot be revoked via the API |
 | `GlobalAdminLastAdminError` | 409 | Revoking this user would leave zero effective global admins (DB + env combined) |
+
+---
+
+#### `POST /auth/global-admins/group-role-member-backfill`
+
+Operator tool: walks the install-base-wide group-role member backfill one page at a time. Each call processes up to one team's worth of eligible groups (`TEAMS_PER_INVOCATION = 1`) and re-emits the idempotent `channel_created` event for each, so this is the team-scoped `POST /teams/:teamId/groups/backfill-role-members` endpoint's install-base-wide, resumable counterpart — intended for scripted or CLI-driven use (see the `backfill-group-role-members` script under `applications/server`), not a single click. There is deliberately no all-teams-at-once mode: see `applications/server/AGENTS.md` → "Group-role member backfill" for the fan-out reasoning.
+
+**Auth:** Bearer token (AuthMiddleware) + `isGlobalAdmin`
+
+**Request Body:** `GroupRoleBackfillRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `after` | `TeamId \| null` | No | Cursor from a previous call's `nextAfter`. Omit (or `null`) to start from the beginning. |
+
+**Response:** `200 OK` — `GroupRoleBackfillResult`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `processedCount` | `number` | No | Number of groups whose sync event was emitted for the team(s) visited this page |
+| `remainingCount` | `number` | No | Number of eligible groups not yet processed for the team(s) visited this page |
+| `remainingTeams` | `number` | No | Teams still left to visit after this page |
+| `nextAfter` | `TeamId \| null` | Yes | Cursor for the next call; `null` exactly when `remainingTeams` is `0` — the walk is complete |
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `GlobalAdminForbidden` | 403 | Caller is not a global admin |
 
 ---
 
@@ -6759,6 +6825,461 @@ Ties are broken by `masteredCount`, then `teamMemberId`, giving a deterministic 
 
 ---
 
+### 36. AI Assistant
+
+**Source:** `packages/domain/src/api/AiChatApi.ts`
+**Prefix:** `/teams/:teamId/ai`
+
+A **read-only** conversational assistant, scoped to one team, that answers questions about the team's own events, training types, members, groups and rosters via LLM tool-calling over six team-scoped read tools (`current_datetime`, `list_events`, `list_training_types`, `list_groups`, `list_members`, `list_rosters`). It cannot create, edit, or delete anything — there is no write path. Backed by the same `LlmClient` used by email-forwarding summarization and the Player Rating AI features.
+
+**Every tool result is filtered through the calling user's own permissions** before it ever reaches the model: `list_groups` requires `group:manage`, `list_members` requires `member:view`, `list_rosters` requires `roster:view`, and `list_events` mirrors `GET /teams/:teamId/events`'s own group-visibility rules (a caller who cannot see a group's events cannot ask the assistant about them either, and a non-existent-or-invisible `eventId` reads back as "not found", never as a distinguishable 403). Members are returned as a bespoke allow-listed projection (display name, jersey number, roles, active status) — the assistant never sees or surfaces a member's Discord ID, username, birth date, gender, or raw permission grants.
+
+**Degradation, never 500.** Every failure path — the kill switch is off, no LLM is configured, the provider call fails, the tool-calling loop exhausts its step budget, or the model returns no usable content — resolves to `200 OK` with `generated: false` and a typed `degradedReason`. There is no error response for a degraded answer; `chat`'s only two declared errors are membership (`AiChatForbidden`) and rate limiting (`AiChatRateLimited`).
+
+**Rate limiting:** 20 chat turns / 10 minutes and 120 / day per user, enforced only when the assistant is enabled and configured (a disabled or unconfigured server never spends a caller's budget). See `docs/deployment.md`'s `AI_CHAT_ENABLED` row for the per-replica caveat.
+
+---
+
+#### `GET /teams/:teamId/ai/capabilities`
+
+Whether the assistant is available for this team right now, so the client can show the input box or a disabled state without spending a chat turn to find out.
+
+**Auth:** Bearer token (AuthMiddleware). Requires active team membership.
+
+**Params:** `teamId` — `TeamId`
+
+**Response:** `200 OK` — `Capabilities`
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | `boolean` | `true` only when `AI_CHAT_ENABLED` is on AND an LLM is configured (`LLM_API_URL` set) |
+
+**Errors:**
+
+| Error | Status | When |
+|---|---|---|
+| `AiChatForbidden` | 403 | The caller is not an active member of the team |
+
+---
+
+#### `POST /teams/:teamId/ai/chat`
+
+Submits the full visible conversation (client-side history, not server-persisted — there is no chat-history table) and returns the assistant's next turn.
+
+**Auth:** Bearer token (AuthMiddleware). Requires active team membership.
+
+**Params:** `teamId` — `TeamId`
+
+**Request Body:** `ChatRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `messages` | `ChatMessage[]` (1–20 items) | Yes | The conversation so far, oldest first. Only `role: 'user'` and `role: 'assistant'` are accepted — `tool`/`system` roles are rejected by the schema, not just ignored |
+
+`ChatMessage`:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `role` | `"user" \| "assistant"` | Yes | Who sent the message |
+| `content` | `string` (1–2000 chars) | Yes | Message text |
+
+**Response:** `200 OK` — `ChatResponse`
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `answer` | `string` | No | The assistant's prose reply. Empty when `generated` is `false` |
+| `generated` | `boolean` | No | `false` on every degraded path (see below); `answer`/`references` are only meaningful when `true` |
+| `degradedReason` | `DegradedReason` | Yes | Present exactly when `generated` is `false`; absent otherwise |
+| `references` | `EntityRef[]` | No | The entities the answer cites, as typed view-model cards (up to 20 per turn) |
+
+`DegradedReason` — closed union, one of:
+
+| Value | Meaning |
+|---|---|
+| `not_configured` | No LLM is configured on this server |
+| `disabled` | `AI_CHAT_ENABLED` is off for this server |
+| `provider_error` | The LLM call failed, or any unexpected error was caught |
+| `too_many_steps` | The tool-calling loop exhausted its iteration budget before producing an answer |
+| `empty_answer` | The model returned no usable content |
+
+`EntityRef` — a discriminated union on `kind`, reusing the same per-entity schema each entity's own list endpoint returns wherever one already exists, plus an opaque 4-character `ref` token that the answer text cites inline as `[[ref:xxxx]]` (a marker the client strips and renders as a navigable card; any token not present in `references` is stripped as plain text):
+
+| `kind` | Extra fields | Notes |
+|---|---|---|
+| `event` | `event: EventInfo` | Same shape as `GET /teams/:teamId/events` rows |
+| `member` | `memberId`, `displayName`, `avatarUrl`, `jerseyNumber`, `roleNames`, `effectiveRoles`, `active` | Bespoke allow-listed projection — **not** `Roster.RosterPlayer`; no Discord ID, username, birth date, gender, or permissions |
+| `group` | `group: GroupInfo` | Same shape as `GET /teams/:teamId/groups` rows |
+| `roster` | `roster: RosterInfo` | Same shape as the Roster group's list endpoint |
+| `trainingType` | `trainingType: TrainingTypeInfo` | Same shape as `GET /teams/:teamId/training-types` rows |
+
+**Errors:**
+
+| Error | Status | When |
+|---|---|---|
+| `AiChatForbidden` | 403 | The caller is not an active member of the team |
+| `AiChatRateLimited` | 429 | The caller has exhausted the 20/10min or 120/day budget; carries `retryAfterSeconds` (whole seconds until the violated window resets) |
+
+---
+
+### 37. Bank Sync
+
+**Source:** `packages/domain/src/api/BankSyncApi.ts`
+**Prefix:** `/teams/:teamId`
+
+Fio bank transaction ingestion, auto-matching, variable-symbol management, and grant-audit export. Extends the Finance subsystem ([23. Finance](#23-finance)) rather than replacing it — matched movements become ordinary `payments` rows with `method: 'bank_transfer'`, `bank_transaction_id` set, and `matched_by: 'auto' | 'manual'`.
+
+Two permission tiers, following the treasurer pattern:
+- `finance:manage_fees` — connect/edit the Fio account, test the connection, start a historical backfill.
+- `finance:record_payments` — view the bank-sync summary/queue, inspect a transaction, match/unmatch/ignore/unignore, bulk-resolve, trigger a manual rematch, and export. Named "ledger access" internally (`requireLedgerAccess`) because these endpoints expose the name, account number, and payment message of every payer, which is not roster-level information.
+- `member:edit` **or** `finance:manage_fees` — assign variable symbols (`suggestVariableSymbols` / `assignVariableSymbols`).
+- `getAssignmentQrPng` — any team member may fetch their own assignment's QR; a caller who is not the assignment's own member additionally needs `finance:record_payments`.
+
+**View types (response DTOs):**
+
+`BankSyncConfigView` — the team's Fio connection, never carrying the token itself.
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `teamId` | `TeamId` | No | Team ID |
+| `provider` | `'fio'` | No | Bank provider (only one supported) |
+| `enabled` | `boolean` | No | Whether polling/matching is active |
+| `autoMatchEnabled` | `boolean` | No | Whether the matcher may auto-create payments (when `false`, every match still lands in the queue for manual resolution) |
+| `accountPrefix` | `string \| null` | Yes | CZ bank account prefix (0–6 digits) |
+| `accountNumber` | `string \| null` | Yes | CZ bank account number (2–10 digits) |
+| `bankCode` | `string \| null` | Yes | 4-digit bank code (Fio is always `2010`) |
+| `computedIban` | `string \| null` | Yes | IBAN computed from `accountPrefix`/`accountNumber`/`bankCode` via `CzIban.buildCzIban` — never re-derived on the client |
+| `currency` | `string (3 chars)` | No | ISO 4217 currency code |
+| `recipientName` | `string \| null` | Yes | Printed on the QR and the PDF export header |
+| `registeredId` | `string \| null` | Yes | 8-digit IČO, printed on the PDF header |
+| `registeredAddress` | `string \| null` | Yes | Printed on the PDF header |
+| `bankName` | `string \| null` | Yes | Printed on the PDF header |
+| `fioTokenSet` | `boolean` | No | Whether an encrypted Fio API token is stored; the token itself is never returned |
+| `tokenCreatedAt` | `string \| null` (ISO 8601) | Yes | When the current token was saved (self-reported — Fio does not expose real token metadata) |
+| `tokenExpiresAt` | `string \| null` (ISO 8601) | Yes | `tokenCreatedAt + 180 days` |
+| `status` | `BankSyncStatusCode` | No | Six-rank status ladder computed server-side (see below); render as-is, never re-derive |
+| `expiringSoon` | `boolean` | No | `true` when `tokenExpiresAt` is within 14 days — additive, never suppressed by `status` (a token can be both expiring and failing) |
+| `backfillStatus` | `'running' \| 'complete' \| 'history_locked' \| 'budget' \| 'failed' \| null` | Yes | Progress of a detached historical-import fiber |
+| `backfillCursor` | `string \| null` | Yes | Date (`YYYY-MM-DD`) the backfill loop has walked back to |
+| `backfillRunId` | `string \| null` | Yes | ID of the current/last backfill run |
+| `lastSuccessAt` | `string \| null` (ISO 8601) | Yes | Last successful poll |
+| `lastAttemptAt` | `string \| null` (ISO 8601) | Yes | Last poll attempt, successful or not |
+| `lastAttemptFailed` | `boolean` | No | Whether the most recent attempt failed |
+| `coverageWarning` | `string \| null` | Yes | Set when a recorded statement period's balances don't reconcile against ingested movements |
+| `createdAt` / `updatedAt` | `string` (ISO 8601) | No | Row timestamps |
+
+`BankSyncStatusCode` values: `not_connected`, `misconfigured`, `invalid`, `activating`, `sync_failing`, `ok` (first-match-wins ladder — a transient Fio outage alone is never reported as `invalid`; that requires several consecutive failures over a multi-hour silence window). `misconfigured` means the server's `FIO_TOKEN_ENCRYPTION_KEY` is unset — the token is fine, nothing the treasurer can fix. `activating` covers the ~5 minutes Fio needs after a token is created before it accepts requests.
+
+`BankTransactionView` — a queue/list row.
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | `BankTransactionId` | No | Transaction ID |
+| `bookedOn` | `string` (`YYYY-MM-DD`) | No | Booking date |
+| `amountMinor` | `SignedAmountMinor` (integer, signed) | No | Signed amount; negative = outgoing |
+| `currency` | `string (3 chars)` | No | ISO 4217 currency code |
+| `direction` | `'incoming' \| 'outgoing'` | No | Derived from the sign of `amountMinor` |
+| `counterpartyName` / `counterpartyAccount` | `string \| null` | Yes | Payer identity as reported by Fio |
+| `variableSymbol` | `string \| null` | Yes | VS as reported by Fio (not normalised) |
+| `messageForRecipient` | `string \| null` | Yes | Free-text payment message |
+| `matchState` | `'unmatched' \| 'partially_matched' \| 'matched' \| 'ignored' \| 'not_applicable'` | No | Trigger-maintained (see [Database Schema § Bank Sync](database.md)) |
+| `matchReason` | one of nine literals, or `null` | Yes | Why auto-matching did not fully resolve this row; `null` once `matched` |
+| `resolutionKind` | `'other_income' \| 'not_relevant' \| null` | Yes | Only set when `matchState = 'ignored'` |
+| `duplicateOfTransactionId` | `BankTransactionId \| null` | Yes | Supporting hint on `no_open_assignment` — never its own `matchReason` |
+| `matchedMemberName` | `string \| null` | Yes | The member resolved from the VS, regardless of match outcome |
+| `ingestedAt` | `string` (ISO 8601) | No | When Sideline ingested this movement |
+
+`BankTransactionDetailView` extends the above with full counterparty/symbol fields (`counterpartyBankCode`, `counterpartyBankName`, `counterpartyBic`, `constantSymbol`, `specificSymbol`, `userIdentification`, `comment`, `ignoredReason`), `suggestedMemberNames` (accent-folded exact-name hints, never sufficient to auto-match), `resolvedMemberId`/`resolvedMemberName`, `candidateAssignments` (`BankTransactionCandidateAssignment[]` — open assignments the resolve dialog can allocate against), and `matchedPayments` (`BankTransactionMatchedPayment[]` — payments already linked to this transaction).
+
+`BankSyncSummaryView` — the queue's KPI header: `importedCount`, `pendingCount`, `matchedCount`, `ignoredCount`, `otherIncomeCount`, `autoMatchedLast30d`, `manuallyMatchedLast30d`, `membersWithoutVsCount`, `oldestPendingBookedOn`, `periodIncomeMinor`, `periodExpensesMinor`, `periodNetMinor`, `openingBalanceMinor`, `closingBalanceMinor`, `coverageGaps` (`BankSyncCoverageGap[]`), `periodContinuityViolations` (`BankSyncPeriodContinuityViolation[]`).
+
+---
+
+#### `GET /teams/:teamId/bank-sync`
+
+Returns the team's Fio connection settings and computed status.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:view`
+
+**Response:** `200 OK` — `BankSyncConfigView` (a default, all-unset view if the team never configured bank sync)
+
+**Errors:** `BankSyncForbidden` (403)
+
+---
+
+#### `PUT /teams/:teamId/bank-sync`
+
+Creates or updates the team's Fio connection settings.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:manage_fees`
+
+**Request Body:** `UpsertBankSyncConfigRequest`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | `boolean` | Yes | Turn polling/matching on or off |
+| `auto_match_enabled` | `boolean` | Yes | Whether the matcher may auto-create payments |
+| `account_prefix` | `string \| null` | No | CZ account prefix |
+| `account_number` | `string` | Yes | CZ account number |
+| `bank_code` | `string` | Yes | 4-digit bank code |
+| `currency` | `string (3 chars)` | Yes | ISO 4217 currency code |
+| `recipient_name` | `string \| null` | No | Printed on the QR / PDF header |
+| `registered_id` | `string \| null` | No | 8-digit IČO |
+| `registered_address` | `string \| null` | No | Printed on the PDF header |
+| `bank_name` | `string \| null` | No | Printed on the PDF header |
+| `fio_token` | `string` | No | Write-only Fio API token. Omitted → the stored token is kept. Provided → encrypted with AES-256-GCM (`FIO_TOKEN_ENCRYPTION_KEY`) before storage; the plaintext is never persisted. |
+| `fio_token_created_at` | `string` (ISO 8601) | No | Self-reported token creation date (Fio exposes no real metadata); defaults to now if a token is provided without this field |
+
+**Response:** `200 OK` — `BankSyncConfigView`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `BankSyncForbidden` | 403 | Missing `finance:manage_fees` permission |
+| `InvalidBankAccount` | 400 | `account_prefix`/`account_number`/`bank_code` do not form a valid CZ IBAN |
+
+**Side effect:** the first time `enabled` transitions from `false` to `true`, every existing `fee_assignments` row for the team is seeded into `payment_reminders_sent` under the `assigned` kind, so the new-fee QR reminder does not blast the whole club with a backlog on connect (see [23. Finance](#23-finance) and `PaymentReminderCron` in `deployment.md`).
+
+---
+
+#### `POST /teams/:teamId/bank-sync/test`
+
+Makes one live Fio API call to validate the stored token and account, without ingesting movements.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:manage_fees`
+
+**Response:** `200 OK` — `BankSyncTestResult` — `{ ok: boolean, message: string | null, accountIban: string | null }`. `accountIban` is Fio's own `info.iban`, for a cross-check display against the computed IBAN.
+
+**Errors:** `BankSyncForbidden` (403), `BankSyncNotConfigured` (404 — no config row exists yet)
+
+---
+
+#### `POST /teams/:teamId/bank-sync/backfill`
+
+Starts a detached historical-import run over `{ from, to }` (both `YYYY-MM-DD`). Fio only releases movements older than 90 days during a 10-minute unlock window the treasurer opens in Internetbanking; the run reports `history_locked` on `backfillStatus` if the window was not open.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:manage_fees`
+
+**Request Body:** `StartBackfillRequest` — `{ from: string, to: string }` (`YYYY-MM-DD`)
+
+**Response:** `202 Accepted` — `BankSyncBackfillStartedResult` — `{ backfillRunId: string }`
+
+**Errors:** `BankSyncForbidden` (403), `BankSyncNotConfigured` (404)
+
+---
+
+#### `GET /teams/:teamId/bank-sync/summary`
+
+Returns the matching queue's KPI header for an optional date range.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:view`
+
+**Query Parameters:** `from`, `to` (both optional, `YYYY-MM-DD`)
+
+**Response:** `200 OK` — `BankSyncSummaryView`
+
+**Errors:** `BankSyncForbidden` (403)
+
+---
+
+#### `GET /teams/:teamId/bank-transactions`
+
+Lists ingested bank movements, newest first.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Query Parameters (all optional):** `from`, `to` (`YYYY-MM-DD`), `state` (`BankTransactionMatchState`), `direction` (`'incoming' | 'outgoing'`), `reason` (`BankTransactionMatchReason`), `q` (free-text match against counterparty name)
+
+**Response:** `200 OK` — `BankTransactionView[]`
+
+**Errors:** `BankSyncForbidden` (403)
+
+---
+
+#### `GET /teams/:teamId/bank-transactions/:txId`
+
+Returns full detail for one transaction, including candidate assignments to match against and any payments already linked.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Response:** `200 OK` — `BankTransactionDetailView`
+
+**Errors:** `BankSyncForbidden` (403), `BankTransactionNotFound` (404)
+
+---
+
+#### `POST /teams/:teamId/bank-transactions/:txId/match`
+
+Manually assigns this transaction's amount to one or more open fee assignments, creating a `payments` row per allocation (`method: 'bank_transfer'`, `matched_by: 'manual'`).
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Request Body:** `MatchBankTransactionRequest` — `{ allocations: { assignmentId, amountMinor }[] }` (at least one). A single-element array is "assign to one member"; multiple elements is "split across several fees". Allocations are applied `ORDER BY id` under a row lock, never sorted client-side.
+
+**Response:** `200 OK` — `BankTransactionDetailView`
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `BankSyncForbidden` | 403 | Missing `finance:record_payments` |
+| `BankTransactionNotFound` | 404 | Transaction does not exist |
+| `BankTransactionAlreadyMatched` | 409 | Transaction is `matched` (or terminal) already |
+| `AssignmentNotFound` | 404 | An `assignmentId` does not exist |
+| `AllocationExceedsTransaction` | 409 | The allocations, added to what is already recorded, exceed the transaction's absolute amount |
+| `DuplicateAllocationAssignment` | 400 | The same `assignmentId` appears twice in `allocations` |
+
+---
+
+#### `POST /teams/:teamId/bank-transactions/:txId/unmatch`
+
+Voids every payment linked to this transaction and returns it to the queue. The payment history is preserved (voided, not deleted) with the caller's name, timestamp, and reason for the audit trail.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Request Body:** `UnmatchBankTransactionRequest` — `{ reason: string }` (min length 3)
+
+**Response:** `200 OK` — `BankTransactionDetailView`
+
+**Errors:** `BankSyncForbidden` (403), `BankTransactionNotFound` (404)
+
+**Note:** unmatching sets `auto_match_suppressed = true` on the transaction, so the poller/rematch does not immediately re-credit the same movement to the same member.
+
+---
+
+#### `POST /teams/:teamId/bank-transactions/:txId/ignore`
+
+Marks a transaction as resolved without a payment — either genuine other club income, or not relevant to the ledger (e.g. a duplicate).
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Request Body:** `IgnoreBankTransactionRequest` — `{ kind: 'other_income' | 'not_relevant', reason: string }` (reason non-empty)
+
+**Response:** `200 OK` — `BankTransactionDetailView`
+
+**Errors:** `BankSyncForbidden` (403), `BankTransactionNotFound` (404), `BankTransactionAlreadyMatched` (409)
+
+---
+
+#### `POST /teams/:teamId/bank-transactions/:txId/unignore`
+
+Reverses an `ignore`, returning the transaction to the matching queue.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Response:** `200 OK` — `BankTransactionDetailView`
+
+**Errors:** `BankSyncForbidden` (403), `BankTransactionNotFound` (404), `BankTransactionAlreadyMatched` (409)
+
+---
+
+#### `POST /teams/:teamId/bank-transactions/bulk`
+
+Ignores several transactions at once with the same kind and reason.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Request Body:** `BulkResolveBankTransactionsRequest` — `{ txIds: BankTransactionId[], kind, reason }` (`txIds` non-empty)
+
+**Response:** `200 OK` — `BulkResolveResult` — `{ resolvedCount: number, skippedCount: number }` (a row already `matched`/terminal is skipped, not an error)
+
+**Errors:** `BankSyncForbidden` (403)
+
+---
+
+#### `POST /teams/:teamId/bank-transactions/rematch`
+
+Re-runs the auto-match engine over every unmatched transaction from the last 180 days. Held behind a 60-second distributed lease — a double-clicked or concurrent call while one run is in flight fails fast rather than double-crediting.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Response:** `200 OK` — `RematchResult` — `{ consideredCount, matchedCount, queuedCount }`
+
+**Errors:** `BankSyncForbidden` (403), `BankSyncNotConfigured` (404), `BankSyncBusy` (409 — a poll or another rematch already holds the lease)
+
+---
+
+#### `GET /teams/:teamId/bank-transactions/export.csv`
+
+Streams a semicolon-delimited CSV of movements in `{ from, to }`, formatted for Czech Excel (comma decimal separator, CRLF line endings, UTF-8 BOM).
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Query Parameters:** `from`, `to` (optional, `YYYY-MM-DD`), `acknowledgeGaps` (`'true' | 'false'`, default `false`)
+
+**Response:** `200 OK` — `text/csv; charset=utf-8` attachment (`vypis-{teamId}.csv`). Columns: Datum, Protistrana, Účet protistrany, Variabilní symbol, Zpráva pro příjemce, Částka, Měna, Stav přiřazení, Přiřazeno k, Poznámka.
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `BankSyncForbidden` | 403 | Missing `finance:record_payments` |
+| `ExportCoverageIncomplete` | 409 | The range is not fully covered by ingested statement periods (or a period's balances don't reconcile), and `acknowledgeGaps` was not `true`. Carries `gaps` and `continuityViolations` so the client can show what's missing and let the treasurer either narrow the range, backfill, or export anyway with `acknowledgeGaps=true` (a warning header, `x-export-coverage-gaps`, is still attached to the acknowledged response). |
+
+**Caveat:** Excel can silently drop leading zeros from the `Variabilní symbol` and `Účet protistrany` columns on open. The PDF export below is the authoritative document for a grant audit.
+
+---
+
+#### `GET /teams/:teamId/bank-transactions/export.pdf`
+
+Renders a formal PDF statement of movements in `{ from, to }`, with the club's recipient name, IČO, registered address, and computed IBAN in the header.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `finance:record_payments`
+
+**Query Parameters:** `from`, `to` (optional, `YYYY-MM-DD`), `docLabel` (optional free-text label printed in the header, e.g. a grant contract number)
+
+**Response:** `200 OK` — `application/pdf` attachment (`vypis-{teamId}.pdf`)
+
+**Errors:** `BankSyncForbidden` (403)
+
+Unlike the CSV export, the PDF never fails on coverage gaps — it prints a visible warning banner listing the missing periods instead.
+
+---
+
+#### `GET /teams/:teamId/members/variable-symbols/suggest`
+
+Proposes a `{year}{seq3}` variable symbol for every active member who does not have one yet, without writing anything.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `member:edit` or `finance:manage_fees`
+
+**Response:** `200 OK` — `VariableSymbolSuggestion[]` — `{ memberId, memberName, suggestedVariableSymbol }`
+
+**Errors:** `Forbidden` (403)
+
+---
+
+#### `POST /teams/:teamId/members/variable-symbols/assign`
+
+Applies a batch of variable-symbol assignments (typically the output of `suggest`, after treasurer review).
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** `member:edit` or `finance:manage_fees`
+
+**Request Body:** `AssignVariableSymbolsRequest` — `{ assignments: { memberId, variableSymbol }[] }` (non-empty)
+
+**Response:** `200 OK` — `RosterPlayer[]` (the updated members)
+
+**Errors:** `Forbidden` (403), `VariableSymbolTaken` (409)
+
+---
+
+#### `GET /teams/:teamId/fees/:feeId/assignments/:assignmentId/qr.png`
+
+Renders a SPAYD payment QR code (PNG) for one fee assignment, sized to the assignment's outstanding balance.
+
+**Auth:** Bearer token (AuthMiddleware) · **Required Permission:** the caller is the assignment's own member, or holds `finance:record_payments` (the QR embeds a member's variable symbol, which is enough to deliberately mis-credit a payment to them)
+
+**Response:** `200 OK` — `image/png` bytes
+
+**Errors:**
+
+| Tag | Status | When |
+|---|---|---|
+| `BankSyncForbidden` | 403 | Caller is neither the assignment's own member nor holds `finance:record_payments` |
+| `BankSyncNotConfigured` | 404 | The team has no bank-sync configuration to build an IBAN from |
+| `AssignmentNotFound` | 404 | Assignment does not exist, or does not belong to `feeId`/`teamId` |
+
+---
+
 ## RPC API
 
 The RPC API is an internal HTTP endpoint used exclusively for communication between the Discord bot and the server. It is not intended for external consumption.
@@ -6790,8 +7311,8 @@ Handles Discord guild lifecycle events.
 | `Guild/UnregisterGuild` | `guild_id` | Unregisters a guild when the bot is removed |
 | `Guild/IsGuildRegistered` | `guild_id` | Checks whether a guild is registered; returns `boolean` |
 | `Guild/SyncGuildChannels` | `guild_id`, `channels[]` | Syncs the channel list for a guild |
-| `Guild/ReconcileMembers` | `guild_id`, `members[]` | Reconciles the server member list with the database |
-| `Guild/RegisterMember` | `guild_id`, `discord_id`, `username`, `avatar`, `roles[]` | Registers a new member who joined the server |
+| `Guild/ReconcileMembers` | `guild_id`, `members[]` | Reconciles the server member list with the database. Deliberately does not emit group-channel-role `member_added` events per member — that only happens on the `Guild/RegisterMember` path below (see `docs/discord-bot.md`'s `GUILD_MEMBER_ADD` section for why, and the accepted gap it leaves for members first observed here). |
+| `Guild/RegisterMember` | `guild_id`, `discord_id`, `username`, `avatar`, `roles[]` | Registers a new member who joined the server. When called from the `GUILD_MEMBER_ADD` gateway handler (payload `source: 'member_add'`), also grants Discord channel roles for every group the member already belongs to (plus active ancestors) whose role they don't already hold, independent of any invite — see `docs/discord-bot.md` for detail. |
 | `Guild/RemoveMember` | `guild_id`, `discord_id` | Deactivates a member who left the Discord guild (triggered by `GUILD_MEMBER_REMOVE`). Resolves the team by `guild_id` and the user by `discord_id`. No-op when the member is not found or is already inactive. Protected: the last active `team:manage` holder is never deactivated (logs a warning and skips). On success, runs `deactivateMemberAndCascade` in a per-team advisory-locked transaction: emits `member_removed` channel-sync events for all rosters and groups (including ancestor groups), deactivates the `team_members` row, and hard-deletes all group and roster memberships. |
 | `Guild/GetGuildsNeedingPersonalProvisioning` | `limit` → `Snowflake[]` | Returns guild IDs where `discord_personal_events_category_id` is set in team settings and at least one active member has no personal channel row or no Discord channel ID yet |
 | `Guild/GetPersonalEventsCategory` | `guild_id` → `Snowflake \| null` | Returns the team's configured personal-events category channel ID, or null if the feature is not enabled |
@@ -6965,7 +7486,7 @@ Drains the `weekly_summary_sync_events` outbox. Each Sunday at 20:00 local team 
 
 #### Finance
 
-Handles the `/finance status` slash command and the payment reminder delivery pipeline.
+Handles the `/finance status` slash command, the payment reminder delivery pipeline, the payment QR image the bot attaches to a reminder DM, and the Fio-token-expiry DM outbox.
 
 | Method | Payload / Returns | Description |
 |---|---|---|
@@ -6974,10 +7495,19 @@ Handles the `/finance status` slash command and the payment reminder delivery pi
 | `Finance/MarkPaymentReminderProcessed` | `id` | Sets `processed_at = now()` on the outbox row after the bot successfully dispatches the DM. |
 | `Finance/MarkPaymentReminderFailed` | `id`, `error` | Sets `processed_at = now()` and records the error string. Failed events are not retried (permanent failure semantics). |
 | `Finance/MarkReminderSent` | `assignment_id`, `kind` | Inserts a row into `payment_reminders_sent` (PK `(assignment_id, kind)`). Only called after the Discord DM was accepted. Subsequent calls for the same pair are no-ops (idempotent upsert). |
+| `Finance/GetPaymentQr` | `assignment_id` → `PaymentQrResult` | Renders the SPAYD QR for an assignment's outstanding balance: `{ spayd, png_base64, filename }`. Called by `handlePaymentReminderReady.ts` before sending a reminder DM. Errors: `FinanceQrUnavailable` (no bank-sync config, no computable IBAN, or an un-renderable SPAYD payload) — the reminder is still sent, just without a QR. |
+| `Finance/GetUnprocessedBankTokenExpiryEvents` | `limit` → `UnprocessedBankTokenExpiryEvent[]` | Polls `bank_token_expiry_events` for rows where `processed_at IS NULL`. |
+| `Finance/MarkBankTokenExpiryProcessed` | `id` | Sets `processed_at = now()` on the outbox row. |
+| `Finance/MarkBankTokenExpiryFailed` | `id`, `error` | Sets `processed_at = now()` and records the error string. |
+| `Finance/MarkBankTokenExpirySent` | `team_id`, `token_created_at`, `threshold_days` | Inserts a row into `bank_token_expiry_sent` (idempotent upsert on `(team_id, token_created_at, threshold_days)`), keyed on `token_created_at` so a replacement token re-arms all three thresholds. |
 
 `GetMyStatusResult` shape: `{ groups: FinanceStatusCurrencyGroup[] }`. Each group: `{ currency, total_outstanding_minor, assignments: FinanceStatusAssignment[] }`. Each assignment: `{ assignment_id, fee_name, status, due_minor, paid_minor, effective_due_at }`.
 
-`UnprocessedPaymentReminderEvent` fields: `id`, `team_id`, `guild_id`, `assignment_id`, `kind` (`"due_in_3d" | "due_today" | "overdue_3d" | "overdue_10d" | "overdue_21d"`), `fee_name`, `effective_due_at`, `currency`, `amount_minor`, `paid_minor`, `user_discord_id`.
+`UnprocessedPaymentReminderEvent` fields: `id`, `team_id`, `guild_id`, `assignment_id`, `kind` (`"assigned" | "due_in_3d" | "due_today" | "overdue_3d" | "overdue_10d" | "overdue_21d"`), `fee_name`, `effective_due_at` (nullable — the `assigned` kind fires immediately at assignment creation and has no due date to render), `currency`, `amount_minor`, `paid_minor`, `user_discord_id`. The `assigned` kind is emitted by the existing `PaymentReminderCron` (not a new cron), gated on the team having an enabled bank-sync config, and carries the QR alongside a neutral "here's your new fee" message rather than a nag.
+
+`UnprocessedBankTokenExpiryEvent` (currently one variant, `bank_token_expiring`) fields: `id`, `team_id`, `guild_id`, `user_discord_id`, `days_until_expiry`.
+
+The producer is `BankTokenExpiryCron` (server-side, daily at `0 4 * * *` UTC — see `deployment.md`): it scans `bank_sync_config` for enabled configs whose token is exactly 14, 7, or 1 calendar day(s) from `fio_token_created_at + 180d`, emits one `bank_token_expiry_events` row per `(team, threshold)` match (idempotent — skipped if a pending row for that team/threshold already exists), and immediately writes `bank_token_expiry_sent` itself (there is no bot-side "sent" ack for this family, unlike payment reminders — the outbox row is the delivery idempotency boundary, and `bank_token_expiry_sent` is a separate, longer-lived guard against re-emitting the same threshold for the same token generation).
 
 ---
 
@@ -7148,6 +7678,8 @@ The following table consolidates all error tags across all API groups.
 | `GlobalAdminLastAdminError` | 409 | Global Admin | Revoking would leave zero effective global admins |
 | `GlobalAdminSelfRevokeError` | 409 | Global Admin | Caller attempted to revoke their own admin status |
 | `GlobalAdminEnvManaged` | 409 | Global Admin | Target user's Discord ID is in the env allowlist and cannot be revoked via the API |
+| `AiChatForbidden` | 403 | AI Assistant | Not an active member of the team |
+| `AiChatRateLimited` | 429 | AI Assistant | Per-user chat rate limit exceeded (20/10min or 120/day); carries `retryAfterSeconds` |
 | `PlayerRatingForbidden` | 403 | Player Rating | Not a member of this team, or missing `member:edit` permission for write endpoints |
 | `PlayerRatingPlayerNotFound` | 404 | Player Rating | Member does not have a rating record in this team |
 | `PlayerRatingEventNotLoggable` | 409 | Player Rating | The event is not a training, is cancelled, or its `start_at` is more than 2 days in the past |
@@ -7160,3 +7692,13 @@ The following table consolidates all error tags across all API groups.
 | `TeamGenerationUnsupportedTeamCount` | 422 | Team Generation | Requested team count is outside the 2–20 range |
 | `TeamGenerationInsufficientPlayers` | 422 | Team Generation | Not enough RSVP-yes players to fill the requested number of teams |
 | `TeamGenerationDiscordPostFailed` | 502 | Team Generation | Bot-side Discord REST call failed |
+| `VariableSymbolTaken` | 409 | Roster, Bank Sync | The requested variable symbol (leading-zero-stripped) is already held by another active member of the team; carries `holderMemberId`/`holderName` |
+| `BankSyncForbidden` | 403 | Bank Sync | Missing `finance:view`/`finance:manage_fees`/`finance:record_payments` depending on the endpoint |
+| `BankSyncNotConfigured` | 404 | Bank Sync | No `bank_sync_config` row exists yet for this team |
+| `BankTransactionNotFound` | 404 | Bank Sync | Transaction does not exist, or belongs to a different team |
+| `BankTransactionAlreadyMatched` | 409 | Bank Sync | Transaction is already `matched` (or another terminal state) |
+| `AllocationExceedsTransaction` | 409 | Bank Sync | Requested allocations, plus what is already recorded, exceed the transaction's absolute amount |
+| `DuplicateAllocationAssignment` | 400 | Bank Sync | The same `assignmentId` appears more than once in one `match` request |
+| `BankSyncBusy` | 409 | Bank Sync | A poll or another `/rematch` already holds the distributed lease |
+| `InvalidBankAccount` | 400 | Bank Sync | `account_prefix`/`account_number`/`bank_code` do not form a valid CZ IBAN |
+| `ExportCoverageIncomplete` | 409 | Bank Sync | The CSV export range is not fully covered by ingested statement periods (or a period's balances don't reconcile), and `acknowledgeGaps` was not set; carries `gaps` and `continuityViolations` |

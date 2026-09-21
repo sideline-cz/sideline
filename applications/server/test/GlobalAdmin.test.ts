@@ -130,6 +130,7 @@ import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
+import { AiChatEnabledConfig } from '~/services/AiChatEnabledConfig.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementConfig.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
@@ -137,6 +138,9 @@ import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 // Shape: class GlobalAdminAllowlist extends ServiceMap.Service<...>()('api/GlobalAdminAllowlist')
 //        with .asEffect() → Effect<ReadonlySet<string>>
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
+import { LlmClient } from '~/services/LlmClient.js';
+import { MockChatAgentLayer, MockChatRateLimiterLayer } from './mocks/aiChatMocks.js';
+import { MockBankSyncLayers, MockGenericSqlClientLayer } from './mocks/bankSyncMocks.js';
 import { MockChannelManagementLayers } from './mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
@@ -734,6 +738,8 @@ const buildTestLayer = (
     Layer.provide(MockAchievementAdminLayers),
     Layer.provide(allowlistLayer),
   )
+    .pipe(Layer.provide(MockBankSyncLayers))
+    .pipe(Layer.provide(MockGenericSqlClientLayer))
     .pipe(Layer.provide(MockFinanceLayers))
     .pipe(Layer.provide(MockTranslationsLayers))
     .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
@@ -745,7 +751,11 @@ const buildTestLayer = (
     .pipe(Layer.provide(MockEmailLayers))
     .pipe(Layer.provide(MockEventRosterLayers))
     .pipe(Layer.provide(BotInfoStore.Default))
-    .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default));
+    .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
+    .pipe(Layer.provide(MockChatAgentLayer))
+    .pipe(Layer.provide(MockChatRateLimiterLayer))
+    .pipe(Layer.provide(AiChatEnabledConfig.Default))
+    .pipe(Layer.provide(LlmClient.Default));
 
 // ---------------------------------------------------------------------------
 // Helpers

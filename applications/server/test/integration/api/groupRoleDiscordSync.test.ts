@@ -1,20 +1,15 @@
-// TDD — regression tests for `fix/group-role-discord-sync`.
-//
-// `group.ts`'s `assignGroupRole`, `unassignGroupRole`, `addGroupMember`, `removeGroupMember`,
-// `moveGroup`, and `deleteGroup` write `role_groups` / `group_members` / `groups.parent_id` /
-// `groups.is_archived` but currently emit NO `role_sync_events` rows at all — so attaching a role
-// to a group (or moving/deleting a group, or adding/removing a member) grants or revokes nothing
-// in Discord until the bot happens to reconcile that member on its own. This file drives the real
-// HTTP handlers (`applications/server/src/api/group.ts`), backed by real repositories over a real
-// Postgres instance, and asserts directly on `role_sync_events` rows — modelled on
+// Regression tests: `group.ts`'s `assignGroupRole`, `unassignGroupRole`, `addGroupMember`,
+// `removeGroupMember`, `moveGroup`, and `deleteGroup` write `role_groups` / `group_members` /
+// `groups.parent_id` / `groups.is_archived` and must emit the matching `role_sync_events` rows —
+// without them, attaching a role to a group (or moving/deleting a group, or adding/removing a
+// member) granted or revoked nothing in Discord until the bot happened to reconcile that member on
+// its own. This file drives the real HTTP handlers (`applications/server/src/api/group.ts`),
+// backed by real repositories over a real Postgres instance, and asserts directly on
+// `role_sync_events` rows — modelled on
 // `test/integration/api/rosterDeactivateGroupManager.test.ts` and
 // `test/integration/api/groupAssignRoleCrossTeam.test.ts`.
 //
-// Every test below is expected to FAIL today: the six handlers call nothing that ever inserts
-// into `role_sync_events`, so every assertion of "N event rows" fails against an actual 0.
-//
-// Two spec items are intentionally NOT covered here (see `sync-plan.md`'s test spec, section 9,
-// integration items 13 and 14), with reasons:
+// Two spec items are intentionally NOT covered here, with reasons:
 //   - "unlinked team writes no rows": `teams.guild_id` has had a NOT NULL constraint since
 //     migration `1741200000_guild_linking.ts` — there is no way to seed a real team row with no
 //     guild_id in this schema. `test/integration/repositories/DiscordChannelMappingRepository.test.ts`

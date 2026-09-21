@@ -50,6 +50,10 @@ function MembersRoute() {
     [teamId, run],
   );
 
+  const handleMembersAssigned = React.useCallback((updated: ReadonlyArray<Roster.RosterPlayer>) => {
+    setPlayers((prev) => prev.map((p) => updated.find((u) => u.memberId === p.memberId) ?? p));
+  }, []);
+
   return (
     <TeamMembersPage
       teamId={teamIdRaw}
@@ -57,6 +61,7 @@ function MembersRoute() {
       canRemove={canRemove}
       players={players}
       onDeactivate={handleDeactivate}
+      onMembersAssigned={handleMembersAssigned}
     />
   );
 }

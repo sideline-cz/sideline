@@ -691,11 +691,15 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
           endTime: '20:00:00',
         });
         yield* markSeriesTimesAreTeamLocal(seriesId, true);
-        // 2026-12-01T17:00Z = 18:00 Prague (CET, winter, UTC+1) — matches the series' own
-        // wall-clock time, as a correctly-materialized occurrence would.
+        // 2099-12-01T17:00Z = 18:00 Prague (CET, winter, UTC+1) — matches the series' own
+        // wall-clock time, as a correctly-materialized occurrence would. A permanently-future
+        // sentinel year (matching the `2099-12-31` convention at `test/EventRsvp.test.ts:247`)
+        // is REQUIRED here: this is the POSITIVE case, gated on `e.start_at >= now()`
+        // (`src/api/team-settings.ts:380`) — a realistic near-future date rots into the past
+        // and the re-anchor UPDATE silently stops matching, flipping this assertion red.
         const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
-          startAtIso: '2026-12-01T17:00:00Z',
-          endAtIso: '2026-12-01T19:00:00Z',
+          startAtIso: '2099-12-01T17:00:00Z',
+          endAtIso: '2099-12-01T19:00:00Z',
         });
 
         expect(yield* readPersonalMessagesDirtyAt(eventId)).toBeNull();
@@ -706,9 +710,9 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
         expect(response.status).toBe(200);
 
         const after = yield* readStartAt(eventId);
-        // ((TIMESTAMPTZ '2026-12-01T17:00:00Z' AT TIME ZONE 'Europe/Prague')::date + TIME
+        // ((TIMESTAMPTZ '2099-12-01T17:00:00Z' AT TIME ZONE 'Europe/Prague')::date + TIME
         //  '18:00:00') AT TIME ZONE 'Asia/Tokyo' — verified directly against Postgres 17.
-        expect(after).toBe('2026-12-01T09:00:00.000Z');
+        expect(after).toBe('2099-12-01T09:00:00.000Z');
         expect(yield* readPersonalMessagesDirtyAt(eventId)).not.toBeNull();
       }).pipe(Effect.provide(SeedLayer)),
   );
@@ -731,8 +735,14 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
 
       const seriesId = yield* seedSeries(teamId, memberId, { startTime: '18:00:00' });
       yield* markSeriesTimesAreTeamLocal(seriesId, true);
+      // Sentinel year 2099, not a realistic near-future date: this is a NEGATIVE case proving
+      // `NOT e.series_modified` still blocks the re-anchor UPDATE. A rotted-into-the-past date
+      // would ALSO leave the row untouched, but for the wrong reason (`e.start_at >= now()`,
+      // `src/api/team-settings.ts:380`) — silently stopping this test from covering the
+      // `series_modified` guard at all. Matches the far-future convention at
+      // `test/EventRsvp.test.ts:247`.
       const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
-        startAtIso: '2026-12-01T17:00:00Z',
+        startAtIso: '2099-12-01T17:00:00Z',
         seriesModified: true,
       });
 
@@ -741,7 +751,7 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
       );
       expect(response.status).toBe(200);
 
-      expect(yield* readStartAt(eventId)).toBe('2026-12-01T17:00:00.000Z');
+      expect(yield* readStartAt(eventId)).toBe('2099-12-01T17:00:00.000Z');
     }).pipe(Effect.provide(SeedLayer)),
   );
 
@@ -763,8 +773,14 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
 
       const seriesId = yield* seedSeries(teamId, memberId, { startTime: '18:00:00' });
       yield* markSeriesTimesAreTeamLocal(seriesId, true);
+      // Sentinel year 2099, not a realistic near-future date: this is a NEGATIVE case proving
+      // `e.status = 'active'` still blocks the re-anchor UPDATE. A rotted-into-the-past date
+      // would ALSO leave the row untouched, but for the wrong reason (`e.start_at >= now()`,
+      // `src/api/team-settings.ts:380`) — silently stopping this test from covering the
+      // `status` guard at all. Matches the far-future convention at
+      // `test/EventRsvp.test.ts:247`.
       const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
-        startAtIso: '2026-12-01T17:00:00Z',
+        startAtIso: '2099-12-01T17:00:00Z',
         status: 'cancelled',
       });
 
@@ -773,7 +789,7 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
       );
       expect(response.status).toBe(200);
 
-      expect(yield* readStartAt(eventId)).toBe('2026-12-01T17:00:00.000Z');
+      expect(yield* readStartAt(eventId)).toBe('2099-12-01T17:00:00.000Z');
     }).pipe(Effect.provide(SeedLayer)),
   );
 
@@ -834,9 +850,15 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
         });
         // No `markSeriesTimesAreTeamLocal` call — `times_are_team_local` defaults FALSE
         // (Release N's DB column default; `insertEventSeries` never names the column itself).
+        // Sentinel year 2099, not a realistic near-future date: this is a NEGATIVE case proving
+        // `es.times_are_team_local` still blocks the re-anchor UPDATE. A rotted-into-the-past
+        // date would ALSO leave the row untouched, but for the wrong reason (`e.start_at >=
+        // now()`, `src/api/team-settings.ts:380`) — silently stopping this test from covering
+        // the `times_are_team_local` guard at all. Matches the far-future convention at
+        // `test/EventRsvp.test.ts:247`.
         const eventId = yield* seedSeriesEvent(teamId, memberId, seriesId, {
-          startAtIso: '2026-12-01T17:00:00Z',
-          endAtIso: '2026-12-01T19:00:00Z',
+          startAtIso: '2099-12-01T17:00:00Z',
+          endAtIso: '2099-12-01T19:00:00Z',
         });
 
         expect(yield* readPersonalMessagesDirtyAt(eventId)).toBeNull();
@@ -848,8 +870,8 @@ describe('team-settings timezone change re-anchors materialized SERIES events', 
 
         // NOT re-derived — a FALSE series' `start_time` is an absolute UTC time-of-day, so the
         // team's timezone is irrelevant to it. Contrast with the TRUE-dialect test above, which
-        // re-anchors this exact same fixture to 2026-12-01T09:00:00.000Z.
-        expect(yield* readStartAt(eventId)).toBe('2026-12-01T17:00:00.000Z');
+        // re-anchors this exact same fixture to 2099-12-01T09:00:00.000Z.
+        expect(yield* readStartAt(eventId)).toBe('2099-12-01T17:00:00.000Z');
         expect(yield* readPersonalMessagesDirtyAt(eventId)).toBeNull();
       }).pipe(Effect.provide(SeedLayer)),
   );

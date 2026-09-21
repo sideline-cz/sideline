@@ -17,7 +17,7 @@ Mermaid `flowchart` diagrams are used throughout this document because Mermaid d
 | **Treasurer** | A team member holding the built-in `Treasurer` role. Holds `finance:view`, `finance:manage_fees`, and `finance:record_payments`. Used to delegate finance authority without elevating the member to Captain or Admin. |
 | **Discord Bot** | The Sideline Discord bot application. Responds to slash commands (`/carpool`, `/complete`, `/event list`, `/event create`, `/event overview`, `/finance status`, `/info`, `/makanicko log`, `/makanicko leaderboard`, `/makanicko stats`, `/summarize`, `/sudo`) and reacts to button interactions on posted embeds (RSVP buttons, upcoming events pagination, carpool board buttons, email approval/reject buttons, Leave sudo button). Receives RPC calls from the server to synchronise Discord roles, channels, and email posts. |
 | **Global Admin** | A user who is a global admin by either having the `users.is_global_admin` database flag set to `true` or having their Discord ID listed in the `APP_GLOBAL_ADMIN_DISCORD_IDS` server environment variable (the two sources are ORed). The first user to register on a fresh database is automatically promoted via the DB flag. Not scoped to any team. Can read and write global translation overrides via `/api/translations`, allowing UI strings to be changed without a code deployment. Can also mint, list, and revoke team onboarding tokens, enabling new teams to be set up by a designated captain without requiring a pre-existing Sideline account. Can manage the global-admin roster via `GET/POST/DELETE /auth/global-admins` — granting or revoking `users.is_global_admin` for other users, subject to self-revoke, last-admin, and env-managed safeguards. A global admin with no team memberships is redirected to `/admin/onboarding-tokens` instead of `/no-team`. Additionally, global admins have **read-only access to every team** regardless of membership: all read endpoints for members, rosters, roles, finance, activity stats, and team info use a `requireReadAccess` helper that synthesises a read-only membership (with `roster:view`, `member:view`, `role:view`, `finance:view` permissions) when the caller is a global admin but not a real team member. Write endpoints still require actual membership. |
-| **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes (and incrementing the `missed_rsvps` counter for non-responding built-in Players in the event's member group), sending RSVP reminder notifications before events (targeting only Players whose `missed_rsvps` count is below the team's `max_missed_rsvps` threshold), auto-logging attendance from RSVP data, evaluating age-threshold rules to move members between groups, and queuing payment reminder DMs for members with upcoming or overdue fee assignments. |
+| **System (Cron/Background)** | Automated background processes running inside the API server. Responsible for generating recurring events from event series definitions, transitioning events to `started` status when their start time passes (and incrementing the `missed_rsvps` counter for non-responding built-in Players in the event's member group), sending RSVP reminder notifications before events (targeting only Players whose `missed_rsvps` count is below the team's `max_missed_rsvps` threshold), auto-logging attendance from RSVP data, evaluating age-threshold rules to move members between groups, and queuing payment reminder DMs for members with upcoming or overdue fee assignments. `BankSyncPoller` additionally runs hourly for every team with an enabled Fio connection: it pulls new bank movements, ingests them, and runs the auto-matcher inline (UC-38). `BankTokenExpiryCron` runs daily to warn treasurers by Discord DM before a connected Fio token expires (UC-36). |
 
 ---
 
@@ -171,6 +171,10 @@ flowchart LR
         UC_PAYMENT_ICAL["View Payment in iCal Feed"]
         UC_MANAGE_EXPENSES["Create / Update / Delete Expenses"]
         UC_VIEW_BALANCE["View Balance Summary"]
+        UC_CONNECT_BANK["Connect Fio Bank Account"]
+        UC_ASSIGN_VS["Assign Variable Symbols to Members"]
+        UC_RESOLVE_QUEUE["Resolve a Bank Transaction in the Matching Queue"]
+        UC_EXPORT_BANK["Export Bank Movements for Grant Audit"]
     end
 
     UA --> UC_LOGIN
@@ -232,6 +236,11 @@ flowchart LR
     TR --> UC_VOID_PAYMENT
     TR --> UC_MANAGE_EXPENSES
     TR --> UC_VIEW_BALANCE
+    TR --> UC_CONNECT_BANK
+    TR --> UC_ASSIGN_VS
+    TR --> UC_RESOLVE_QUEUE
+    TR --> UC_EXPORT_BANK
+    CP --> UC_ASSIGN_VS
 
     AD --> UC_VIEW_EVENTS
     AD --> UC_REMOVE_MEMBER
@@ -247,6 +256,10 @@ flowchart LR
     AD --> UC_VOID_PAYMENT
     AD --> UC_MANAGE_EXPENSES
     AD --> UC_VIEW_BALANCE
+    AD --> UC_CONNECT_BANK
+    AD --> UC_ASSIGN_VS
+    AD --> UC_RESOLVE_QUEUE
+    AD --> UC_EXPORT_BANK
     AD --> UC_CARPOOL_POST
     AD --> UC_CARPOOL_ADD_CAR
     AD --> UC_CARPOOL_ASSIGN_SEAT
@@ -454,6 +467,7 @@ flowchart LR
         UC_DELETE_MAPPING["Remove Channel Mapping\n(DELETE /teams/:teamId/groups/:groupId/channel-mapping)"]
         UC_CREATE_CHANNEL["Create Discord Channel for Group\n(POST /teams/:teamId/groups/:groupId/create-channel)"]
         UC_LIST_DC_CHANNELS["List Available Discord Channels\n(GET /teams/:teamId/discord-channels)"]
+        UC_BACKFILL_GROUP_ROLES["Backfill All Group Role Members\n(POST /teams/:teamId/groups/backfill-role-members)\nrequires: group:manage · batched (limit 50)"]
     end
 
     subgraph AGE["Age Threshold Rules"]
@@ -479,6 +493,7 @@ flowchart LR
     AD --> UC_DELETE_MAPPING
     AD --> UC_CREATE_CHANNEL
     AD --> UC_LIST_DC_CHANNELS
+    AD --> UC_BACKFILL_GROUP_ROLES
     AD --> UC_LIST_AGE
     AD --> UC_CREATE_AGE
     AD --> UC_UPDATE_AGE
@@ -905,7 +920,7 @@ The following structured descriptions cover the most significant use cases in th
 |---|---|
 | **Actor** | Treasurer; Admin |
 | **Precondition** | The actor holds `finance:record_payments`. A fee assignment exists for the member. |
-| **Main Flow** | 1. The actor calls `POST /teams/:teamId/fees/:feeId/assignments/:assignmentId/payments` with `amountMinor`, `method` (`cash` or `bank_transfer`), `paidAt`, and optional `note`. 2. The server inserts a `payments` row. 3. The database trigger `payments_recompute_paid_minor` immediately updates `fee_assignments.paid_minor`. 4. If `paid_minor >= amount_minor` the assignment status transitions to `paid`; otherwise to `partial`. |
+| **Main Flow** | 1. The actor calls `POST /teams/:teamId/fees/:feeId/assignments/:assignmentId/payments` with `amountMinor`, `method` (`cash` or `bank_transfer`), `paidAt`, and optional `note`. 2. The server inserts a `payments` row. 3. The database trigger `payments_finance_recompute` immediately updates `fee_assignments.paid_minor` (and, for a bank-matched payment, `bank_transactions.match_state` — see UC-38). 4. If `paid_minor >= amount_minor` the assignment status transitions to `paid`; otherwise to `partial`. |
 | **Postcondition** | The payment is recorded. The assignment's status reflects the new payment total. |
 | **Alternate Flow** | If a payment was recorded in error, the actor calls `DELETE /teams/:teamId/payments/:paymentId` with a `reason`. The payment is voided (not deleted) and the trigger recomputes `paid_minor`, potentially reverting the status from `paid` to `partial` or `pending`. |
 
@@ -953,10 +968,10 @@ The following structured descriptions cover the most significant use cases in th
 |---|---|
 | **Actor** | Any Discord user who is a Sideline team member with an unpaid or overdue fee assignment |
 | **Precondition** | The user has a Discord account linked to their Sideline profile. A fee assignment exists with a due date. The bot is connected and the server is running. |
-| **Main Flow** | 1. The server's `PaymentReminderCron` runs every minute. It queries `fee_assignments` (using `idx_fee_assignments_due_at`) for assignments whose due date places them at one of five cadence thresholds: T−3 days (`due_in_3d`), T+0 (`due_today`), T+3 (`overdue_3d`), T+10 (`overdue_10d`), or T+21 (`overdue_21d`). 2. For each candidate that does not already have an unprocessed outbox row of the same kind, the cron inserts a row into `payment_reminder_sync_events`. 3. The bot's Finance Sync worker polls `Finance/GetUnprocessedPaymentReminders` (5-second cadence). 4. For each event the bot opens a DM channel with the member via the Discord REST API and posts a rich embed showing the fee name, total amount, outstanding balance, and due date. The embed colour indicates urgency (blue = soon, yellow = due today, red = overdue). 5. On successful delivery the bot calls `Finance/MarkReminderSent` to insert a row into `payment_reminders_sent` (`PRIMARY KEY (assignment_id, kind)`), then calls `Finance/MarkPaymentReminderProcessed`. |
+| **Main Flow** | 1. The server's `PaymentReminderCron` runs every minute. It queries `fee_assignments` (using `idx_fee_assignments_due_at`) for assignments whose due date places them at one of five cadence thresholds: T−3 days (`due_in_3d`), T+0 (`due_today`), T+3 (`overdue_3d`), T+10 (`overdue_10d`), or T+21 (`overdue_21d`) — plus a sixth, date-independent kind, `assigned`, fired once immediately when a fee is assigned to a member of a team with an enabled Fio bank connection (see UC-36). 2. For each candidate that does not already have an unprocessed outbox row of the same kind, the cron inserts a row into `payment_reminder_sync_events`. 3. The bot's Finance Sync worker polls `Finance/GetUnprocessedPaymentReminders` (5-second cadence). 4. For each event the bot resolves the guild's locale, calls `Finance/GetPaymentQr` to render a SPAYD payment QR code for the assignment's outstanding balance (skipped gracefully if the team has no working bank connection or the member has no variable symbol), opens a DM channel with the member via the Discord REST API, and posts a rich embed showing the fee name, total amount, outstanding balance, due date, and — when a QR was built — the variable symbol and the QR image, plus a "Moje platby" link button. The embed colour indicates urgency (blue = soon/newly assigned, yellow = due today, red = overdue). 5. On successful delivery the bot calls `Finance/MarkReminderSent` to insert a row into `payment_reminders_sent` (`PRIMARY KEY (assignment_id, kind)`), then calls `Finance/MarkPaymentReminderProcessed`. |
 | **Postcondition** | The member receives a DM. The `payment_reminders_sent` row prevents a repeat DM for the same assignment and cadence, even if the cron fires again or the bot restarts. |
-| **Alternate Flow** | If the Discord DM API call fails (e.g. the user has DMs disabled from non-friends), the bot calls `Finance/MarkPaymentReminderFailed`. The outbox row is marked `processed_at = now()` (permanent failure — no retry). The member does not receive that cadence's reminder. |
-| **Notes** | Reminders are silenced automatically once the assignment is paid or waived: the cron's candidate query filters on `computed_status NOT IN ('paid', 'waived')`. |
+| **Alternate Flow** | If the Discord DM API call fails (e.g. the user has DMs disabled from non-friends), the bot calls `Finance/MarkPaymentReminderFailed`. The outbox row is marked `processed_at = now()` (permanent failure — no retry). The member does not receive that cadence's reminder. If the QR cannot be built for any reason, the reminder still sends as a text-only embed exactly as it did before the Fio feature. |
+| **Notes** | Reminders are silenced automatically once the assignment is paid or waived: the cron's candidate query filters on `computed_status NOT IN ('paid', 'waived')`. The QR's own text fields (the payment message, the transliterated recipient name) are rendered in uppercase, diacritic-free ASCII — a SPAYD convention, not a translation bug — while the surrounding embed copy keeps full Czech diacritics. |
 
 ---
 
@@ -1189,3 +1204,64 @@ The following structured descriptions cover the most significant use cases in th
 | **Main Flow** | 1. The user invokes `/complete gender:<male\|female\|other>`. 2. The bot opens a modal asking for **Name** (required), **Date of birth** (required, `YYYY-MM-DD`), and **Jersey number** (optional, 0–99). 3. The user submits the modal. The bot sends a deferred ephemeral response, then re-validates the gender (from the modal's custom ID), name (non-blank), birth date (`Auth.BirthDateString` — same rule as the web onboarding form), and jersey number (`TeamMember.JerseyNumber`) client-side before calling `Guild/CompleteMemberProfile` with the guild ID, Discord user ID, and the four values. 4. The server resolves the guild to a team and the caller to a membership, re-validates the same fields server-side, and — inside a single transaction — completes the profile via `UsersRepository.completeProfile` (`users.name`/`birth_date`/`gender`, `is_profile_complete = true`) and, if a jersey number was supplied, sets the caller's `team_members.jersey_number`. 5. The bot edits the deferred message with a confirmation echoing the saved values. |
 | **Postcondition** | The member's global profile is complete: `name`, `birth_date`, `gender`, and `is_profile_complete = true` on `users` (and optionally `jersey_number` on `team_members`) are saved — the same postcondition as completing web onboarding (UC-01), reached via a Discord-native path instead. |
 | **Alternate Flow** | If the guild is not linked to a team or the caller is not a member (`CompleteProfileGuildNotFound` / `CompleteProfileNotMember`), the bot replies that the user is not a member of this team. If either the bot-side or server-side re-validation rejects the input (`CompleteProfileInvalidInput`), or the RPC call fails outright, the bot replies with a generic "something went wrong" message; all replies are ephemeral. |
+
+### UC-35: Member Asks the In-App AI Assistant a Question
+
+| Field | Detail |
+|---|---|
+| **Actor** | Player, Captain, Admin, Treasurer (any active team member; no dedicated permission is required to open the assistant itself) |
+| **Precondition** | The Sideline server has `AI_CHAT_ENABLED=true` and a configured LLM (`LLM_API_URL` set) — otherwise `GET /teams/:teamId/ai/capabilities` reports `enabled: false` and the web app shows a disabled state instead of the composer. |
+| **Main Flow** | 1. The member opens **Assistant** from the team sidebar (`/teams/:teamId/assistant`). 2. They type a question about the team's own events, training types, members, groups, or rosters and submit it. 3. The client sends the full visible conversation (this session only — nothing is persisted server-side) to `POST /teams/:teamId/ai/chat`. 4. The server resolves the caller's membership and runs an LLM tool-calling loop (`ChatAgent`) over six read-only tools, each independently re-checking the caller's own permissions before returning data (`list_groups` requires `group:manage`, `list_members` requires `member:view`, `list_rosters` requires `roster:view`, `list_events` mirrors the event list endpoint's group-visibility rules). 5. The model composes a prose answer citing the entities it looked up; the server resolves those citations into typed `EntityRef` cards (event/member/group/roster/trainingType) and returns `{ answer, generated: true, references }`. 6. The client renders the prose plus navigable result cards; clicking a card links to that entity's own page. |
+| **Postcondition** | No data is created, changed, or deleted anywhere in the system — this is a strictly read-only flow. The conversation exists only in the browser tab; reloading the page clears it. |
+| **Alternate Flow** | If the assistant is disabled or unconfigured, every call short-circuits to `generated: false` with `degradedReason: 'disabled'`/`'not_configured'` before touching the LLM or the rate limiter. If the LLM call fails, the tool-calling loop exhausts its step budget, or the model returns nothing usable, the response is still `200 OK` with `generated: false` and a typed `degradedReason` (`provider_error`/`too_many_steps`/`empty_answer`) — there is no 500 path. A non-member gets `AiChatForbidden` (403). A caller who has exceeded 20 turns/10 minutes or 120/day gets `AiChatRateLimited` (429) with `retryAfterSeconds`. A question about data the caller lacks permission to see (e.g. a Player asking about groups) is answered as if that data does not exist — the assistant never reveals more than the caller could already see in the UI. |
+
+---
+
+### UC-36: Connect a Fio Bank Account (Treasurer/Admin)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Treasurer; Admin |
+| **Precondition** | The actor holds `finance:manage_fees`. The club has a Fio bank account and can generate an API token in Fio Internetbanking (Settings → API), choosing the **"Account monitoring"** (read-only) permission — never the order-submitting one, since a leaked read-only token cannot move money. |
+| **Main Flow** | 1. The actor opens **Team → Settings** and fills in the account prefix/number and the club's recipient name (plus optional IČO and registered address, printed on the grant-export PDF header). 2. The actor pastes the Fio API token and calls `PUT /teams/:teamId/bank-sync` with `enabled: true`. 3. The server validates the account fields form a valid CZ IBAN (`CzIban.buildCzIban`), encrypts the token with `FioSecretCrypto` (AES-256-GCM, key `FIO_TOKEN_ENCRYPTION_KEY`), and stores the config; the plaintext token is never persisted. 4. If this is the team's first time enabling bank sync, the server seeds `payment_reminders_sent` for every existing fee assignment so the new `assigned` reminder kind does not retroactively fire for the whole backlog. 5. The actor may click **Test connection** (`POST /teams/:teamId/bank-sync/test`) to make one live Fio call before relying on the hourly poller. 6. From this point, `BankSyncPoller` (hourly) ingests new movements for the team automatically. |
+| **Postcondition** | The team has a `bank_sync_config` row with `enabled = true`; movements begin appearing in the matching queue on the next poll. |
+| **Alternate Flow** | A freshly created Fio token needs about 5 minutes before Fio accepts calls with it — the connection reports status `activating` during that window and the server retries on its own. Historical movements older than 90 days require the treasurer to open a 10-minute unlock window in Internetbanking (the padlock icon on the API tab) before starting a backfill (`POST /teams/:teamId/bank-sync/backfill`); outside that window the backfill reports `history_locked`. If `account_number`/`bank_code` do not form a valid CZ IBAN, the server rejects the save with `InvalidBankAccount` (400). |
+| **Notes** | A Fio token expires at most 180 days after creation and only renews itself when someone signs into Fio Internetbanking or Smartbanking — a dormant treasurer's token can die silently. The settings page shows an `expiringSoon` banner starting 14 days before expiry (computed server-side by `bankSyncStatus.ts`). `BankTokenExpiryCron` (daily) additionally emits a Discord DM to the treasurer at exactly T−14, T−7, and T−1 days before expiry, delivered by the bot's Finance Sync worker. |
+
+---
+
+### UC-37: Assign Variable Symbols to Members (Treasurer/Admin/Captain)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Treasurer; Admin; Captain (any actor holding `member:edit` or `finance:manage_fees`) |
+| **Precondition** | The actor has the required permission. Auto-matching cannot resolve any payment for a member until that member has a variable symbol. |
+| **Main Flow (bulk)** | 1. The actor opens **Team → Members**, where a banner reports how many active members are missing a variable symbol. 2. The actor clicks **Assign variable symbols**; the web app calls `GET /teams/:teamId/members/variable-symbols/suggest`, which proposes a `{year}{seq3}` symbol per member without writing anything. 3. The actor reviews the proposed list and confirms; the web app calls `POST /teams/:teamId/members/variable-symbols/assign` with the accepted assignments, applied inside one transaction. |
+| **Main Flow (single)** | 1. The actor opens a member's profile and edits the **Variable symbol** field directly. 2. The web app calls `PATCH /teams/:teamId/members/:memberId` with the new value. |
+| **Postcondition** | The member's `team_members.variable_symbol` is set; incoming Fio payments carrying that symbol (leading zeros ignored) can now auto-match to the member's fee assignments, and the member's Discord payment reminders and My Payments page can render a QR code. |
+| **Alternate Flow** | If the symbol (leading-zero-stripped) is already held by another active member of the team, the server rejects the write with `VariableSymbolTaken` (409), naming the conflicting member (`holderMemberId`/`holderName`) so the actor can pick a different value. |
+
+---
+
+### UC-38: Resolve a Bank Transaction in the Matching Queue (Treasurer/Admin)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Treasurer; Admin |
+| **Precondition** | The actor holds `finance:record_payments`. The team has at least one bank movement whose `match_state` is `unmatched` or `partially_matched`. |
+| **Main Flow** | 1. `BankSyncPoller` (hourly) or a manual `POST /teams/:teamId/bank-transactions/rematch` ingests/considers a movement and runs the matcher: if exactly one open assignment matches the variable symbol and amount exactly, it auto-creates a `payments` row (`method: 'bank_transfer'`, `matched_by: 'auto'`) and the movement's `match_state` becomes `matched` via the `payments_finance_recompute` trigger; otherwise it is queued with a `match_reason` (one of nine literals — no VS, VS belongs to nobody, amount too low/high, ambiguous across several fees, no open fee, currency mismatch, etc.). 2. The actor opens **Team → Finances → Bank movements** (requires `finance:record_payments` — this page shows every payer's name, account number, and message, which is not roster-level information) and reviews the queue. 3. For an ambiguous or unmatched row, the actor opens it and either assigns it to one member's fee (optionally splitting across several fees), marks it as other club income, or marks it not relevant (e.g. a duplicate) via `POST /teams/:teamId/bank-transactions/:txId/match` or `/ignore`. |
+| **Postcondition** | The transaction reaches a terminal state (`matched` or `ignored`) and, for a match, a `payments` row now exists exactly as if it had been recorded by hand. |
+| **Alternate Flow** | The actor can undo a manual or automatic match via `POST /teams/:teamId/bank-transactions/:txId/unmatch` (requires a reason); the linked payment is voided (not deleted, for audit purposes) and the transaction returns to the queue with auto-matching suppressed for that movement until a human matches it again. Several rows can be bulk-marked as `other_income`/`not_relevant` in one call (`POST /teams/:teamId/bank-transactions/bulk`). |
+
+---
+
+### UC-39: Export Bank Movements for a Grant Audit (Treasurer/Admin)
+
+| Field | Detail |
+|---|---|
+| **Actor** | Treasurer; Admin |
+| **Precondition** | The actor holds `finance:record_payments`. The team has at least one ingested bank movement. |
+| **Main Flow** | 1. The actor opens the **Grant export** tab on the Bank movements page and chooses a date range and an optional document label (e.g. a grant contract number). 2. For a CSV export, the web app calls `GET /teams/:teamId/bank-transactions/export.csv`; the server checks the range against recorded `bank_statement_periods` for coverage gaps and balance-continuity violations before generating the file. 3. For a PDF export, `GET /teams/:teamId/bank-transactions/export.pdf` renders a formal statement with the club's recipient name, IČO, registered address, and computed IBAN in the header. |
+| **Postcondition** | The actor downloads a document listing every movement in the range with its match outcome, suitable as accounting evidence for a municipal grant audit. |
+| **Alternate Flow** | If the range is not fully covered by ingested statement periods (or a recorded period's balances don't reconcile), the CSV endpoint fails with `ExportCoverageIncomplete` (409, carrying the gaps) unless the actor passes `acknowledgeGaps=true`, in which case the file is still generated with a warning header. The PDF export never fails on a gap — it prints a visible warning banner instead. |
+| **Notes** | The CSV is formatted for Czech Excel (`;` delimiter, comma decimal separator) but Excel can silently drop leading zeros from the variable-symbol and account-number columns on open — the PDF is the authoritative document for the municipality; a treasurer who needs the raw CSV data intact can re-import it via Excel's Data → From Text/CSV wizard with the affected column set to Text. |

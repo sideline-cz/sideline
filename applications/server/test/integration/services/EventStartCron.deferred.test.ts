@@ -47,8 +47,48 @@ import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
-import { eventStartCronEffect } from '~/services/EventStartCron.js';
+import { makeEventStartCronEffect } from '~/services/EventStartCron.js';
 import { cleanDatabase, TestPgClient } from '../helpers.js';
+
+// ---------------------------------------------------------------------------
+// FIXED_NOW — one pinned instant, shared by every fixture AND the cron itself
+// (fix/event-start-cron-injectable-clock, Task 2). This is what closes the
+// gap Task 1 (`makeEventStartCronEffect(now)`) opened up but did not fix on
+// its own: fixtures and the cron used to sample the wall clock at two
+// different moments (`SELECT now()` in a fixture, then `new Date()` inside
+// the cron a moment later), and any date/time boundary landing between those
+// two samples made a case flaky. Deriving every timestamp below from this one
+// literal, and passing the SAME literal into `makeEventStartCronEffect`,
+// removes the gap entirely — there is only one instant in the whole test.
+//
+// 2025-10-15T10:00:00Z = 2025-10-15 12:00:00 Europe/Prague (CEST). Permanently
+// past, so none of this rots; far from Prague's 2025 DST fall-back (26 Oct),
+// except where Group B/I4-I6 and I10 deliberately probe it.
+const FIXED_NOW = new Date('2025-10-15T10:00:00.000Z');
+
+// What still reads the REAL Postgres clock, NOT `FIXED_NOW` — unchanged by
+// this refactor (plan §2, "deliberately unchanged — the flip path"):
+//   - `findEventsToStart` / the underlying `findStartable` (`start_at <= NOW()`)
+//   - `startEvent`'s `SET … = now()` arming stamps
+//   - `claimMissedRsvpCount` / `claimStartedPost`'s claim stamps
+//   - `markStalePersonalMessagesDirty`
+//
+// Mixing a 2025 `FIXED_NOW` with a real 2026+ database clock is sound ONLY
+// because `findStartable` has no lower bound on `start_at`
+// (`WHERE status = 'active' AND start_at <= NOW()`, `EventsRepository.ts`) —
+// every fixture below is force-set `status = 'started'` before the cron runs,
+// which routes it around `findStartable`/`findEventsToStart` entirely and
+// straight into the two deferred sweeps, both of which key off `FIXED_NOW`.
+// If a lower bound is ever added to `findStartable`, every case in this file
+// that force-sets `status = 'started'` is unaffected (it never goes through
+// `findStartable`), but do not assume that generalises to a hypothetical new
+// case that relies on the flip path itself with a 2025 fixture — that would
+// need a real, current `start_at`.
+//
+// Claim stamps (`missed_rsvp_counted_at`, `all_day_post_sent_at`) are written
+// by Postgres `now()`, i.e. the REAL current instant, not `FIXED_NOW` — so
+// every assertion on a stamp below checks only `.not.toBeNull()` /
+// `.toBeNull()`, never a stamp's value.
 
 const TestLayer = Layer.mergeAll(
   EventsRepository.Default,
@@ -132,6 +172,14 @@ const setTeamTimezone = (teamId: Team.TeamId, timezone: string) =>
     ),
   );
 
+// A bare `UPDATE team_settings … WHERE team_id = …` — it silently affects
+// ZERO rows unless `setTeamTimezone` already created the `team_settings` row
+// for this team. It does not fail or warn either way. A test that forgets to
+// call `setTeamTimezone` first does not get an error here; it silently falls
+// through to `COALESCE(ts.all_day_post_time, TIME '08:00')`'s 08:00 default,
+// which is exactly the trap case 8/8b exist to exercise (and exactly why every
+// OTHER boundary case must set this column explicitly rather than rely on the
+// default — see the FIXED_NOW header block).
 const setAllDayPostTime = (teamId: string, time: string) =>
   SqlClient.SqlClient.asEffect().pipe(
     Effect.andThen((sql) =>
@@ -165,6 +213,27 @@ const insertEvent = (
         createdBy: createdBy as any,
         allDay,
       }),
+    ),
+  );
+
+// Combines `insertEvent` with the "flip already happened" force-update used
+// by every case in this file — folds two `Effect.Do.pipe` steps into one,
+// which matters for I10 below: `Effect.Do.pipe`'s `.pipe` overloads top out
+// at 20 arguments, and I10's fixture-per-probe shape needs every step it can
+// get.
+const insertStartedAllDayEvent = (
+  teamId: Team.TeamId,
+  createdBy: string,
+  startAt: DateTime.Utc,
+  endAt?: DateTime.Utc,
+) =>
+  insertEvent(teamId, createdBy, true, startAt, endAt).pipe(
+    Effect.tap((event) =>
+      SqlClient.SqlClient.asEffect().pipe(
+        Effect.andThen((sql) =>
+          sql.unsafe(`UPDATE events SET status = 'started' WHERE id = '${event.id}'`),
+        ),
+      ),
     ),
   );
 
@@ -242,30 +311,33 @@ const assignPlayerRole = (teamId: string, memberId: string) =>
     ),
   );
 
-const runCron = () => eventStartCronEffect.pipe(Effect.provide(TestLayer));
+// `runCronAt` drives the fix directly: `makeEventStartCronEffect` takes the
+// instant as a parameter (Task 1), so a test can hand it the exact same
+// literal its fixtures are built from. No `Effect.provide(TestLayer)` here —
+// every one of the 20+ call sites below is inside an `Effect.tap` within a
+// `Effect.Do.pipe` chain that already ends in `Effect.provide(TestLayer)`;
+// providing it again here only rebuilt a second `TestPgClient` pool per run.
+const runCronAt = (now: Date) => makeEventStartCronEffect(now);
+const runCron = () => runCronAt(FIXED_NOW);
 
-/** Team-local `HH:MM` of `now() + minutesOffset` (may cross midnight — accepted
- * residual flake risk near the wrap, consistent with other relative-clock
- * fixtures in this codebase). Lets the "Dnes"-post timing tests set
- * `all_day_post_time` to a value that is deterministically before/after the
- * real current instant, without needing to control Postgres's own `now()`. */
-const localTimeOffsetHHMM = (tz: string, minutesOffset: number) =>
-  SqlClient.SqlClient.asEffect().pipe(
-    Effect.andThen((sql) =>
-      sql.unsafe<{ t: string }>(
-        `SELECT to_char((now() AT TIME ZONE '${tz}') + INTERVAL '${minutesOffset} minutes', 'HH24:MI') AS t`,
-      ),
-    ),
-    Effect.map((rows) => rows[0]?.t),
-  );
-
-// Team-local midnight of (today + dayOffset), asked of Postgres itself.
+// Team-local midnight of (FIXED_NOW's local day + dayOffset), derived from
+// `FIXED_NOW` (bound as an ISO string, cast in SQL — AGENTS.md) instead of
+// `SELECT now()`, so every fixture's start_at shares the same instant as the
+// cron itself.
+//
+// The local date -> instant direction (`<date> AT TIME ZONE tz`) is
+// ambiguous in general: a wall-clock value that falls inside a DST fold maps
+// to two distinct instants, and one inside a DST gap maps to none. This is
+// safe here only because Prague's transitions land at 02:00/03:00 local,
+// never at midnight — `(date)::timestamp AT TIME ZONE tz` at local midnight
+// is always unambiguous for this timezone.
 const localMidnight = (tz: string, dayOffset: number) =>
   SqlClient.SqlClient.asEffect().pipe(
-    Effect.andThen((sql) =>
-      sql.unsafe<{ instant: Date }>(
-        `SELECT (((now() AT TIME ZONE '${tz}')::date + ${dayOffset}) AT TIME ZONE '${tz}') AS instant`,
-      ),
+    Effect.andThen(
+      (sql) =>
+        sql<{ instant: Date }>`
+          SELECT ((((${FIXED_NOW.toISOString()})::timestamptz AT TIME ZONE ${tz})::date + (${dayOffset})::int)
+                   AT TIME ZONE ${tz}) AS instant`,
     ),
     Effect.map((rows) => DateTime.fromDateUnsafe(rows[0]?.instant)),
   );
@@ -290,13 +362,16 @@ describe('EventStartCron — arm-on-flip stamps both deferral columns atomically
         assignPlayerRole(team.id, (nonResponderMember as any).id),
       ),
       Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
-      // Due to start now (or in the past) so `findEventsToStart` picks it up.
+      // One minute before FIXED_NOW, so `findEventsToStart`'s real-DB-clock
+      // `start_at <= NOW()` still picks it up (`findStartable` has no lower
+      // bound — see the FIXED_NOW header block) regardless of when the suite
+      // actually runs.
       Effect.bind('event', ({ team, ownerMember }) =>
         insertEvent(
           team.id,
           (ownerMember as any).id,
           false,
-          DateTime.makeUnsafe(new Date(Date.now() - 60_000).toISOString()),
+          DateTime.makeUnsafe('2025-10-15T09:00:00Z'),
         ),
       ),
       Effect.tap(() => runCron()),
@@ -339,12 +414,11 @@ describe('EventStartCron — arm-on-flip stamps both deferral columns atomically
           assignPlayerRole(team.id, (nonResponderMember as any).id),
         ),
         Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
-        // Pin the post time into the FUTURE (local). This case asserts that the
-        // midnight flip ALONE sets neither stamp; with the default 08:00 the
-        // morning post legitimately fires whenever the suite runs after 08:00
-        // team-local, which made the assertion depend on the wall clock.
-        Effect.bind('futurePostTime', () => localTimeOffsetHHMM('Europe/Prague', 60)),
-        Effect.tap(({ team, futurePostTime }) => setAllDayPostTime(team.id, futurePostTime)),
+        // Pin the post time into the future relative to FIXED_NOW's local
+        // time-of-day (12:00). This case asserts that the midnight flip
+        // ALONE sets neither stamp; with the default 08:00 the morning post
+        // would have already passed.
+        Effect.tap(({ team }) => setAllDayPostTime(team.id, '23:00:00')),
         Effect.bind('start', () => localMidnight('Europe/Prague', 0)),
         Effect.bind('event', ({ team, ownerMember, start }) =>
           insertEvent(team.id, (ownerMember as any).id, true, start),
@@ -589,9 +663,8 @@ describe('EventStartCron — deferred "Dnes" started post (all-day, team-local m
         createTeam('491010101010101017' as Discord.Snowflake, ownerId),
       ),
       Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
-      // 30 minutes from now, local — deterministically still in the future.
-      Effect.bind('futureTime', () => localTimeOffsetHHMM('Europe/Prague', 30)),
-      Effect.tap(({ team, futureTime }) => setAllDayPostTime(team.id, futureTime)),
+      // Future relative to FIXED_NOW's local time-of-day (12:00).
+      Effect.tap(({ team }) => setAllDayPostTime(team.id, '23:00:00')),
       Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
       Effect.bind('start', () => localMidnight('Europe/Prague', 0)),
       Effect.bind('event', ({ team, ownerMember, start }) =>
@@ -624,9 +697,8 @@ describe('EventStartCron — deferred "Dnes" started post (all-day, team-local m
           createTeam('491010101010101022' as Discord.Snowflake, ownerId),
         ),
         Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
-        // 30 minutes ago, local — deterministically already passed today.
-        Effect.bind('pastTime', () => localTimeOffsetHHMM('Europe/Prague', -30)),
-        Effect.tap(({ team, pastTime }) => setAllDayPostTime(team.id, pastTime)),
+        // Past relative to FIXED_NOW's local time-of-day (12:00).
+        Effect.tap(({ team }) => setAllDayPostTime(team.id, '01:00:00')),
         Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
         Effect.bind('start', () => localMidnight('Europe/Prague', 0)),
         Effect.bind('event', ({ team, ownerMember, start }) =>
@@ -744,11 +816,11 @@ describe('EventStartCron — deferred "Dnes" started post (all-day, team-local m
         Effect.bind('team', ({ ownerId }) =>
           createTeam('491010101010101023' as Discord.Snowflake, ownerId),
         ),
-        // No team_settings row — but we can only assert the POSITIVE (emitted)
-        // case deterministically for a team whose local `now` is provably past
-        // 08:00. Reuse a WITH-settings row purely to read the current Prague
-        // local time-of-day, without giving the EVENT's own team a settings row.
-        Effect.bind('nowHHMM', () => localTimeOffsetHHMM('Europe/Prague', 0)),
+        // No team_settings row — the fallback timezone AND the fallback
+        // `all_day_post_time` (08:00) both apply. FIXED_NOW is 12:00 Prague,
+        // unconditionally past 08:00, so the assertion below no longer needs
+        // a wall-clock guard band (contrast with the pre-fix two-sided
+        // conditional this replaced).
         Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
         Effect.bind('start', () => localMidnight('Europe/Prague', 0)),
         Effect.bind('event', ({ team, ownerMember, start }) =>
@@ -763,14 +835,9 @@ describe('EventStartCron — deferred "Dnes" started post (all-day, team-local m
         ),
         Effect.tap(() => runCron()),
         Effect.bind('emitted', ({ event }) => countStartedSyncEvents(event.id)),
-        Effect.tap(({ emitted, nowHHMM }) =>
+        Effect.tap(({ emitted }) =>
           Effect.sync(() => {
-            // Only assert the positive case when we can prove 08:00 has passed —
-            // skip (rather than falsely fail) when the suite happens to run
-            // before 08:00 Prague time.
-            if (nowHHMM >= '08:00') {
-              expect(emitted).toBe(1);
-            }
+            expect(emitted).toBe(1);
           }),
         ),
         Effect.provide(TestLayer),
@@ -806,6 +873,415 @@ describe('EventStartCron — deferred "Dnes" started post (all-day, team-local m
         Effect.tap(({ emitted }) =>
           Effect.sync(() => {
             expect(emitted).toBe(0);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// fix/event-start-cron-injectable-clock — regression cases I1-I10 (plan §4)
+//
+// Framing: these are post-fix boundary pairs, NOT "red before the fix"
+// proofs. Before the fix the cron read the real wall clock, so a permanently
+// past 2025 fixture could never match — every case expecting >= 1 would have
+// been red for a trivial, uninformative reason (findAllDayEventsPastLastLocalDay
+// / findAllDayEventsNeedingStartedPost compared FIXED_NOW's fixture data
+// against `new Date()`, i.e. today), and every case expecting 0 would have
+// been green for the wrong reason. The honest pre/post differential lives in
+// `test/services/EventStartCron.test.ts`'s U1 (reference identity) and U2
+// (`Effect.suspend` re-samples per run) — see plan §3 Task 3.
+//
+// Every fixture here is force-set `status = 'started'` before the cron runs
+// (so `findEventsToStart`/`findStartable` never sees it, regardless of the
+// real DB clock — see the FIXED_NOW header block) and sets its relevant
+// boundary column explicitly (`all_day_post_time` for Groups A/B; Group C has
+// no such column, its predicate is date-only). `runCronAt(<probe>)` is always
+// called with a `new Date(...)` literal, never `FIXED_NOW` itself, so each
+// probe is independent of the other groups' fixtures.
+// ---------------------------------------------------------------------------
+
+// Group A — team-local-midnight boundary, "Dnes" post sweep.
+describe('EventStartCron — I1-I3: team-local-midnight boundary, "Dnes" post sweep', () => {
+  it.effect('I1: one second before team-local midnight → no post', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('490000000000000020', 'cron-owner-i1')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('491010101010101024' as Discord.Snowflake, ownerId),
+      ),
+      Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
+      // Explicit — never let this fall through to the 08:00 COALESCE default.
+      Effect.tap(({ team }) => setAllDayPostTime(team.id, '00:00:00')),
+      Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+      // Local date 10-26 (team-local midnight of 26 Oct).
+      Effect.bind('event', ({ team, ownerMember }) =>
+        insertEvent(
+          team.id,
+          (ownerMember as any).id,
+          true,
+          DateTime.makeUnsafe('2025-10-25T22:00:00Z'),
+        ),
+      ),
+      Effect.tap(({ event }) =>
+        SqlClient.SqlClient.asEffect().pipe(
+          Effect.andThen((sql) =>
+            sql.unsafe(`UPDATE events SET status = 'started' WHERE id = '${event.id}'`),
+          ),
+        ),
+      ),
+      Effect.tap(() => runCronAt(new Date('2025-10-25T21:59:59Z'))),
+      Effect.bind('emitted', ({ event }) => countStartedSyncEvents(event.id)),
+      Effect.tap(({ emitted }) =>
+        Effect.sync(() => {
+          expect(emitted).toBe(0);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    'I2/I3: exactly at team-local midnight → exactly one post, and a re-run at the same instant does not duplicate',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('490000000000000021', 'cron-owner-i2')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('491010101010101025' as Discord.Snowflake, ownerId),
+        ),
+        Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
+        Effect.tap(({ team }) => setAllDayPostTime(team.id, '00:00:00')),
+        Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+        Effect.bind('event', ({ team, ownerMember }) =>
+          insertEvent(
+            team.id,
+            (ownerMember as any).id,
+            true,
+            DateTime.makeUnsafe('2025-10-25T22:00:00Z'),
+          ),
+        ),
+        Effect.tap(({ event }) =>
+          SqlClient.SqlClient.asEffect().pipe(
+            Effect.andThen((sql) =>
+              sql.unsafe(`UPDATE events SET status = 'started' WHERE id = '${event.id}'`),
+            ),
+          ),
+        ),
+        Effect.tap(() => runCronAt(new Date('2025-10-25T22:00:00Z'))),
+        Effect.bind('emittedAfterFirst', ({ event }) => countStartedSyncEvents(event.id)),
+        Effect.bind('stampsAfterFirst', ({ event }) => getStamps(event.id)),
+        Effect.tap(({ emittedAfterFirst, stampsAfterFirst }) =>
+          Effect.sync(() => {
+            expect(emittedAfterFirst).toBe(1);
+            expect(stampsAfterFirst.all_day_post_sent_at).not.toBeNull();
+          }),
+        ),
+        // Re-run at the SAME probe instant — the claim (`claimStartedPost`)
+        // must prevent a duplicate post.
+        Effect.tap(() => runCronAt(new Date('2025-10-25T22:00:00Z'))),
+        Effect.bind('emittedAfterSecond', ({ event }) => countStartedSyncEvents(event.id)),
+        Effect.tap(({ emittedAfterSecond }) =>
+          Effect.sync(() => {
+            expect(emittedAfterSecond).toBe(1);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+});
+
+// Group B — DST fall-back fold, "Dnes" post sweep. Transition at 2025-10-26T01:00:00Z.
+describe('EventStartCron — I4-I6: DST fall-back fold, "Dnes" post sweep', () => {
+  it.effect('I4: 02:30 CEST, before the fold → posts once', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('490000000000000022', 'cron-owner-i4')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('491010101010101026' as Discord.Snowflake, ownerId),
+      ),
+      Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
+      Effect.tap(({ team }) => setAllDayPostTime(team.id, '02:20:00')),
+      Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+      Effect.bind('event', ({ team, ownerMember }) =>
+        insertEvent(
+          team.id,
+          (ownerMember as any).id,
+          true,
+          DateTime.makeUnsafe('2025-10-25T22:00:00Z'),
+        ),
+      ),
+      Effect.tap(({ event }) =>
+        SqlClient.SqlClient.asEffect().pipe(
+          Effect.andThen((sql) =>
+            sql.unsafe(`UPDATE events SET status = 'started' WHERE id = '${event.id}'`),
+          ),
+        ),
+      ),
+      // 2025-10-26T00:30:00Z = 2025-10-26 02:30 CEST, still before the fold.
+      Effect.tap(() => runCronAt(new Date('2025-10-26T00:30:00Z'))),
+      Effect.bind('emitted', ({ event }) => countStartedSyncEvents(event.id)),
+      Effect.tap(({ emitted }) =>
+        Effect.sync(() => {
+          expect(emitted).toBe(1);
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    'I5: 02:30 CET, the repeated hour → posts once, identically (fresh fixture; ::date is fold-insensitive)',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('490000000000000023', 'cron-owner-i5')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('491010101010101027' as Discord.Snowflake, ownerId),
+        ),
+        Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
+        Effect.tap(({ team }) => setAllDayPostTime(team.id, '02:20:00')),
+        Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+        Effect.bind('event', ({ team, ownerMember }) =>
+          insertEvent(
+            team.id,
+            (ownerMember as any).id,
+            true,
+            DateTime.makeUnsafe('2025-10-25T22:00:00Z'),
+          ),
+        ),
+        Effect.tap(({ event }) =>
+          SqlClient.SqlClient.asEffect().pipe(
+            Effect.andThen((sql) =>
+              sql.unsafe(`UPDATE events SET status = 'started' WHERE id = '${event.id}'`),
+            ),
+          ),
+        ),
+        // 2025-10-26T01:30:00Z = 2025-10-26 02:30 CET — the local wall clock
+        // ran BACKWARDS an hour relative to I4, yet the predicate still holds:
+        // `(now AT TZ)::date` is fold-insensitive (the fold sits inside one
+        // calendar day).
+        Effect.tap(() => runCronAt(new Date('2025-10-26T01:30:00Z'))),
+        Effect.bind('emitted', ({ event }) => countStartedSyncEvents(event.id)),
+        Effect.tap(({ emitted }) =>
+          Effect.sync(() => {
+            expect(emitted).toBe(1);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'I6: 01:30 CEST, before the post time → no post (the negative half of AGENTS.md rule 4)',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('490000000000000024', 'cron-owner-i6')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('491010101010101028' as Discord.Snowflake, ownerId),
+        ),
+        Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
+        Effect.tap(({ team }) => setAllDayPostTime(team.id, '02:20:00')),
+        Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+        Effect.bind('event', ({ team, ownerMember }) =>
+          insertEvent(
+            team.id,
+            (ownerMember as any).id,
+            true,
+            DateTime.makeUnsafe('2025-10-25T22:00:00Z'),
+          ),
+        ),
+        Effect.tap(({ event }) =>
+          SqlClient.SqlClient.asEffect().pipe(
+            Effect.andThen((sql) =>
+              sql.unsafe(`UPDATE events SET status = 'started' WHERE id = '${event.id}'`),
+            ),
+          ),
+        ),
+        // 2025-10-25T23:30:00Z = 2025-10-26 01:30 CEST — before 02:20.
+        Effect.tap(() => runCronAt(new Date('2025-10-25T23:30:00Z'))),
+        Effect.bind('emitted', ({ event }) => countStartedSyncEvents(event.id)),
+        Effect.tap(({ emitted }) =>
+          Effect.sync(() => {
+            expect(emitted).toBe(0);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+});
+
+// Group C — team-local-midnight boundary, missed-RSVP sweep.
+describe('EventStartCron — I7-I10: team-local-midnight boundary, missed-RSVP sweep', () => {
+  it.effect('I7: one second before team-local midnight → not yet swept', () =>
+    Effect.Do.pipe(
+      Effect.bind('ownerId', () => createUser('490000000000000025', 'cron-owner-i7')),
+      Effect.bind('team', ({ ownerId }) =>
+        createTeam('491010101010101029' as Discord.Snowflake, ownerId),
+      ),
+      Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
+      Effect.bind('nonResponderId', () => createUser('490000000000000026', 'cron-nonresponder-i7')),
+      Effect.bind('nonResponderMember', ({ team, nonResponderId }) =>
+        addTeamMember(team.id, nonResponderId),
+      ),
+      Effect.tap(({ team, nonResponderMember }) =>
+        assignPlayerRole(team.id, (nonResponderMember as any).id),
+      ),
+      Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+      // Local date 10-24 (team-local midnight of 24 Oct), no end_at.
+      Effect.bind('event', ({ team, ownerMember }) =>
+        insertEvent(
+          team.id,
+          (ownerMember as any).id,
+          true,
+          DateTime.makeUnsafe('2025-10-23T22:00:00Z'),
+        ),
+      ),
+      Effect.tap(({ event }) =>
+        SqlClient.SqlClient.asEffect().pipe(
+          Effect.andThen((sql) =>
+            sql.unsafe(`UPDATE events SET status = 'started' WHERE id = '${event.id}'`),
+          ),
+        ),
+      ),
+      Effect.tap(() => runCronAt(new Date('2025-10-24T21:59:59Z'))),
+      Effect.bind('missed', ({ nonResponderMember }) =>
+        getMissedRsvps((nonResponderMember as any).id),
+      ),
+      Effect.bind('stamps', ({ event }) => getStamps(event.id)),
+      Effect.tap(({ missed, stamps }) =>
+        Effect.sync(() => {
+          expect(missed).toBe(0);
+          expect(stamps.missed_rsvp_counted_at).toBeNull();
+        }),
+      ),
+      Effect.provide(TestLayer),
+    ),
+  );
+
+  it.effect(
+    'I8/I9: exactly at team-local midnight → swept once, and a re-run at the same instant does not double-count',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('490000000000000027', 'cron-owner-i8')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('491010101010101030' as Discord.Snowflake, ownerId),
+        ),
+        Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
+        Effect.bind('nonResponderId', () =>
+          createUser('490000000000000028', 'cron-nonresponder-i8'),
+        ),
+        Effect.bind('nonResponderMember', ({ team, nonResponderId }) =>
+          addTeamMember(team.id, nonResponderId),
+        ),
+        Effect.tap(({ team, nonResponderMember }) =>
+          assignPlayerRole(team.id, (nonResponderMember as any).id),
+        ),
+        Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+        Effect.bind('event', ({ team, ownerMember }) =>
+          insertEvent(
+            team.id,
+            (ownerMember as any).id,
+            true,
+            DateTime.makeUnsafe('2025-10-23T22:00:00Z'),
+          ),
+        ),
+        Effect.tap(({ event }) =>
+          SqlClient.SqlClient.asEffect().pipe(
+            Effect.andThen((sql) =>
+              sql.unsafe(`UPDATE events SET status = 'started' WHERE id = '${event.id}'`),
+            ),
+          ),
+        ),
+        Effect.tap(() => runCronAt(new Date('2025-10-24T22:00:00Z'))),
+        Effect.bind('missedAfterFirst', ({ nonResponderMember }) =>
+          getMissedRsvps((nonResponderMember as any).id),
+        ),
+        Effect.bind('stampsAfterFirst', ({ event }) => getStamps(event.id)),
+        Effect.tap(({ missedAfterFirst, stampsAfterFirst }) =>
+          Effect.sync(() => {
+            expect(missedAfterFirst).toBe(1);
+            expect(stampsAfterFirst.missed_rsvp_counted_at).not.toBeNull();
+          }),
+        ),
+        // Re-run at the SAME probe instant — the claim (`claimMissedRsvpCount`)
+        // must prevent a double-count.
+        Effect.tap(() => runCronAt(new Date('2025-10-24T22:00:00Z'))),
+        Effect.bind('missedAfterSecond', ({ nonResponderMember }) =>
+          getMissedRsvps((nonResponderMember as any).id),
+        ),
+        Effect.tap(({ missedAfterSecond }) =>
+          Effect.sync(() => {
+            expect(missedAfterSecond).toBe(1);
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+  );
+
+  it.effect(
+    'I10: the DST fold does not move the date boundary — swept identically on both sides of the fold (fresh fixture per probe)',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('490000000000000029', 'cron-owner-i10')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('491010101010101031' as Discord.Snowflake, ownerId),
+        ),
+        Effect.tap(({ team }) => setTeamTimezone(team.id, 'Europe/Prague')),
+        Effect.bind('nonResponderId', () =>
+          createUser('490000000000000030', 'cron-nonresponder-i10'),
+        ),
+        Effect.bind('nonResponderMember', ({ team, nonResponderId }) =>
+          addTeamMember(team.id, nonResponderId),
+        ),
+        Effect.tap(({ team, nonResponderMember }) =>
+          assignPlayerRole(team.id, (nonResponderMember as any).id),
+        ),
+        Effect.bind('ownerMember', ({ team, ownerId }) => addTeamMember(team.id, ownerId)),
+        // Fixture local date 10-25 (team-local midnight of 25 Oct) — one day
+        // later than I7-I9's fixture, so the local date has already advanced
+        // to 10-26 by both probes below (which straddle the fold).
+        Effect.bind('eventPreFold', ({ team, ownerMember }) =>
+          insertStartedAllDayEvent(
+            team.id,
+            (ownerMember as any).id,
+            DateTime.makeUnsafe('2025-10-24T22:00:00Z'),
+          ),
+        ),
+        // 2025-10-26T00:30:00Z = 2025-10-26 02:30 CEST, before the fold.
+        Effect.tap(() => runCronAt(new Date('2025-10-26T00:30:00Z'))),
+        Effect.bind('missedPreFold', ({ nonResponderMember }) =>
+          getMissedRsvps((nonResponderMember as any).id),
+        ),
+        Effect.tap(({ missedPreFold }) =>
+          Effect.sync(() => {
+            expect(missedPreFold).toBe(1);
+          }),
+        ),
+        // Fresh fixture for the post-fold probe — the first fixture is
+        // already claimed (idempotent), so a second member/event pair is
+        // needed to observe the sweep firing again on its own terms.
+        Effect.bind('nonResponderId2', () =>
+          createUser('490000000000000031', 'cron-nonresponder-i10b'),
+        ),
+        Effect.bind('nonResponderMember2', ({ team, nonResponderId2 }) =>
+          addTeamMember(team.id, nonResponderId2),
+        ),
+        Effect.tap(({ team, nonResponderMember2 }) =>
+          assignPlayerRole(team.id, (nonResponderMember2 as any).id),
+        ),
+        Effect.bind('eventPostFold', ({ team, ownerMember }) =>
+          insertStartedAllDayEvent(
+            team.id,
+            (ownerMember as any).id,
+            DateTime.makeUnsafe('2025-10-24T22:00:00Z'),
+          ),
+        ),
+        // 2025-10-26T01:30:00Z = 2025-10-26 02:30 CET, the repeated hour.
+        Effect.tap(() => runCronAt(new Date('2025-10-26T01:30:00Z'))),
+        Effect.bind('missedPostFold', ({ nonResponderMember2 }) =>
+          getMissedRsvps((nonResponderMember2 as any).id),
+        ),
+        Effect.tap(({ missedPostFold }) =>
+          Effect.sync(() => {
+            expect(missedPostFold).toBe(1);
           }),
         ),
         Effect.provide(TestLayer),

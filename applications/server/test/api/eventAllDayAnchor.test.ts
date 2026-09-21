@@ -406,6 +406,36 @@ const createPayload = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+/**
+ * Noon UTC of the same calendar day one year out — the wire value the web edit
+ * form would send for a date that is still comfortably in the future whenever
+ * the suite runs.
+ *
+ * Any case that PATCHes must build its fixture from this, never from a literal.
+ * `updateEvent` rejects a PATCH on an event that no longer accepts RSVPs
+ * (`notActive`, 400), and `eventAcceptsRsvp`'s all-day branch stops accepting
+ * at the end of the event's last TEAM-LOCAL day — so a hard-coded past date
+ * turns the case red on a date nobody picked. Case 9's `2026-09-16T12:00:00Z`
+ * did exactly that on 2026-09-17: all three PATCHes came back 400 and the
+ * assertion read `expected undefined to be '2026-09-15T22:00:00.000Z'`, which
+ * looks like an anchoring regression and is not one.
+ *
+ * Only the fact that it is in the FUTURE is guaranteed, never the instant it
+ * anchors to — a DST boundary or a leap day moves that. Do NOT use it in a
+ * case that asserts a literal `startAt`. Those keep fixed dates, and which
+ * date depends on whether the case reaches a gate: the PATCH cases (6, 8, 10,
+ * 11, 12) use 2030 to defer the expiry, while the create-only cases (1-5, 7,
+ * 13) keep their PAST 2026 literals on purpose — `createEvent` reads no clock,
+ * and each of those dates IS the assertion, selecting the UTC offset (Prague
+ * CEST/CET, New York EDT, the Santiago spring-forward night) the anchored
+ * value is checked against. Rolling those forward destroys the cases.
+ *
+ * Cases that PATCH should also assert the 200, so the next expiry fails loudly
+ * instead of surfacing as an `undefined` body field.
+ */
+const noonUtcOneYearFromNow = () =>
+  `${DateTime.formatIsoDateUtc(DateTime.add(DateTime.nowUnsafe(), { years: 1 }))}T12:00:00Z`;
+
 // ---------------------------------------------------------------------------
 // §7.10 cases 1–13
 // ---------------------------------------------------------------------------
@@ -506,29 +536,35 @@ describe('all-day anchor on write (PR 3, plan §12/§7.10)', () => {
 
   // Case 9 — the §12 step 4 blocker: partial-PATCH idempotence.
   //
-  // ⚠ Deliberately does NOT hard-code the create-time anchored literal
-  // (2026-09-15T22:00:00.000Z, which case 1 already pins) — that would couple
-  // this case to PR 3's create-path fix and make it red for the wrong reason.
-  // Idempotence must hold regardless of what `start_at` is: whatever value the
-  // event was stored with, a title-only PATCH must never move it. Under the
-  // REJECTED "merge then anchor" design this fails by -1/-2/-3 days on each
-  // call even once anchoring exists; today (pre-fix, no anchoring at all) it
-  // already passes trivially, which is exactly why this is a regression
-  // guard, not an acceptance test (plan §18 TDD box).
+  // ⚠ Deliberately does NOT hard-code the create-time anchored literal — that
+  // would couple this case to PR 3's create-path fix and make it red for the
+  // wrong reason. Idempotence must hold regardless of what `start_at` is:
+  // whatever value the event was stored with, a title-only PATCH must never
+  // move it. Under the REJECTED "merge then anchor" design this fails by
+  // -1/-2/-3 days on each call even once anchoring exists; today (pre-fix, no
+  // anchoring at all) it already passes trivially, which is exactly why this
+  // is a regression guard, not an acceptance test (plan §18 TDD box).
+  //
+  // The start instant comes from `noonUtcOneYearFromNow()` because this case
+  // PATCHes: a fixed past date makes the write path answer 400, not 200. See
+  // that helper's doc comment.
   it('9. PATCH { title } three times, no startAt/allDay → start_at stays byte-identical', async () => {
     const created = await post(
-      createPayload({ title: 'Tournament', startAt: '2026-09-16T12:00:00Z' }),
+      createPayload({ title: 'Tournament', startAt: noonUtcOneYearFromNow() }),
     ).then((r) => r.json());
     const original = created.startAt;
 
-    const r1 = await patch(created.eventId, { title: 'x' }).then((r) => r.json());
-    expect(r1.startAt).toBe(original);
+    const r1 = await patch(created.eventId, { title: 'x' });
+    expect(r1.status).toBe(200);
+    expect((await r1.json()).startAt).toBe(original);
 
-    const r2 = await patch(created.eventId, { title: 'y' }).then((r) => r.json());
-    expect(r2.startAt).toBe(original);
+    const r2 = await patch(created.eventId, { title: 'y' });
+    expect(r2.status).toBe(200);
+    expect((await r2.json()).startAt).toBe(original);
 
-    const r3 = await patch(created.eventId, { title: 'z' }).then((r) => r.json());
-    expect(r3.startAt).toBe(original);
+    const r3 = await patch(created.eventId, { title: 'z' });
+    expect(r3.status).toBe(200);
+    expect((await r3.json()).startAt).toBe(original);
   });
 
   // Case 10 — regression guard: the fix must not touch timed events

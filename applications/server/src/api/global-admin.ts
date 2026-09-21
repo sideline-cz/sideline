@@ -5,6 +5,7 @@ import { Api } from '~/api/api.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { requireGlobalAdmin } from '~/utils/requireGlobalAdmin.js';
+import { runGroupRoleBackfillPage } from '~/utils/runGroupRoleBackfillPage.js';
 
 const forbidden = new GlobalAdminApi.GlobalAdminForbidden();
 
@@ -169,6 +170,13 @@ export const GlobalAdminApiLive = HttpApiBuilder.group(Api, 'globalAdmin', (hand
                 : Effect.logInfo('global_admin.revoked', { userId, actorId: currentUser.id }),
             ),
             Effect.asVoid,
+          ),
+        )
+        .handle('backfillGroupRoleMembers', ({ payload: { after } }) =>
+          Effect.Do.pipe(
+            Effect.tap(() => requireGlobalAdmin(forbidden)),
+            Effect.flatMap(() => runGroupRoleBackfillPage(after)),
+            Effect.map((page) => new GlobalAdminApi.GroupRoleBackfillResult(page)),
           ),
         );
     }),

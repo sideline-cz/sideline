@@ -5,8 +5,10 @@ import { ActivityLogApiLive } from '~/api/activity-logs.js';
 import { ActivityStatsApiLive } from '~/api/activity-stats.js';
 import { ActivityTypeApiLive } from '~/api/activity-type.js';
 import { AgeThresholdApiLive } from '~/api/age-threshold.js';
+import { AiChatApiLive } from '~/api/ai-chat.js';
 import { Api } from '~/api/api.js';
 import { AuthApiLive } from '~/api/auth.js';
+import { BankSyncApiLive } from '~/api/bank-sync.js';
 import { ChannelApiLive } from '~/api/channel.js';
 import { DashboardApiLive } from '~/api/dashboard.js';
 import { DashboardLayoutApiLive } from '~/api/dashboard-layout.js';
@@ -61,6 +63,7 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
     Layer.provide(OnboardingApiLive),
   )
   .pipe(
+    Layer.provide(AiChatApiLive),
     Layer.provide(GlobalAdminApiLive),
     Layer.provide(PlayerRatingApiLive),
     Layer.provide(TeamGenerationApiLive),
@@ -76,6 +79,7 @@ export const ApiLive = HttpApiBuilder.layer(Api, { openapiPath: '/docs/openapi.j
     Layer.provide(WeeklySummaryApiLive),
     Layer.provide(DashboardLayoutApiLive),
     Layer.provide(EmailForwardingApiLive),
+    Layer.provide(BankSyncApiLive),
   );
 
 export { Redirect } from '~/api/redirect.js';

@@ -1,6 +1,6 @@
 import { Discord, Role, RoleApi, Team, TeamMember, User } from '@sideline/domain';
 import { LogicError, Schemas, SqlErrors } from '@sideline/effect-lib';
-import { Effect, Layer, Option, pipe, Schema, ServiceMap } from 'effect';
+import { Data, Effect, Layer, Option, pipe, Schema, ServiceMap } from 'effect';
 import { SqlClient, SqlSchema } from 'effect/unstable/sql';
 import { catchSqlErrors } from '~/repositories/catchSqlErrors.js';
 import {
@@ -14,6 +14,26 @@ export class MemberAlreadyExistsError extends Schema.TaggedErrorClass<MemberAlre
   'MemberAlreadyExistsError',
   {},
 ) {}
+
+/** D3 — the leading-zero-stripped variable symbol is already taken by another member of this
+ * team (`uq_team_members_team_variable_symbol`). Carries the current holder so `api/roster.ts`
+ * can map this into `Roster.VariableSymbolTaken` for the client. */
+export class VariableSymbolConflict extends Data.TaggedError('VariableSymbolConflict')<{
+  readonly holderMemberId: TeamMember.TeamMemberId;
+  readonly holderName: Option.Option<string>;
+}> {}
+
+const VARIABLE_SYMBOL_UNIQUE_CONSTRAINT = 'uq_team_members_team_variable_symbol';
+
+/** Internal-only marker caught immediately below and never observed by callers. */
+class VsConflictMarker extends Data.TaggedError('VsConflictMarker')<{}> {}
+
+/** Mirrors the partial unique index's own expression: `NULLIF(ltrim(vs, '0'), '')`. */
+const normalizeVariableSymbol = (vs: Option.Option<string>): Option.Option<string> =>
+  Option.flatMap(vs, (v) => {
+    const stripped = v.replace(/^0+/, '');
+    return stripped === '' ? Option.none() : Option.some(stripped);
+  });
 
 const MembershipQuery = Schema.Struct({
   team_id: Schema.String,
@@ -101,6 +121,12 @@ export class RosterEntry extends Schema.Class<RosterEntry>('RosterEntry')({
   birth_date: Schema.OptionFromNullOr(Schema.String),
   gender: Schema.OptionFromNullOr(User.Gender),
   jersey_number: Schema.OptionFromNullOr(Schema.Number),
+  // D3 / T2 — the member's Fio variable symbol. `withConstructorDefault` (not required), so
+  // hand-built `new RosterEntry({...})` fixtures elsewhere in this test suite that predate this
+  // field keep constructing without it (mirrors `effective_roles`'s own default above).
+  variable_symbol: Schema.OptionFromNullOr(Schema.String).pipe(
+    Schema.withConstructorDefault(() => Option.some(Option.none())),
+  ),
   username: Schema.String,
   avatar: Schema.OptionFromNullOr(Schema.String),
   discord_nickname: Schema.OptionFromNullOr(Schema.String),
@@ -330,6 +356,7 @@ const make = Effect.gen(function* () {
       SELECT tm.id as member_id, tm.user_id, u.discord_id,
              eff.role_names, eff.permissions, eff.effective_roles,
              u.name, u.birth_date::text AS birth_date, u.gender, tm.jersey_number,
+             tm.variable_symbol,
              u.username, u.avatar, u.discord_nickname, u.discord_display_name,
              to_char(tm.joined_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS joined_at,
              tm.active AS active
@@ -349,6 +376,7 @@ const make = Effect.gen(function* () {
       SELECT tm.id as member_id, tm.user_id, u.discord_id,
              eff.role_names, eff.permissions, eff.effective_roles,
              u.name, u.birth_date::text AS birth_date, u.gender, tm.jersey_number,
+             tm.variable_symbol,
              u.username, u.avatar, u.discord_nickname, u.discord_display_name,
              to_char(tm.joined_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS joined_at,
              tm.active AS active
@@ -388,6 +416,32 @@ const make = Effect.gen(function* () {
     execute: (input) => sql`
       UPDATE team_members SET jersey_number = ${input.jersey_number}
       WHERE id = ${input.member_id}
+    `,
+  });
+
+  const updateVariableSymbolQuery = SqlSchema.void({
+    Request: Schema.Struct({
+      member_id: TeamMember.TeamMemberId,
+      variable_symbol: Schema.OptionFromNullOr(Schema.String),
+    }),
+    execute: (input) => sql`
+      UPDATE team_members SET variable_symbol = ${input.variable_symbol}
+      WHERE id = ${input.member_id}
+    `,
+  });
+
+  const findByTeamAndVariableSymbolQuery = SqlSchema.findOneOption({
+    Request: Schema.Struct({ team_id: Team.TeamId, vs_norm: Schema.String }),
+    Result: Schema.Struct({
+      member_id: TeamMember.TeamMemberId,
+      name: Schema.OptionFromNullOr(Schema.String),
+    }),
+    execute: (input) => sql`
+      SELECT tm.id AS member_id, u.name
+      FROM team_members tm
+      JOIN users u ON u.id = tm.user_id
+      WHERE tm.team_id = ${input.team_id}
+        AND NULLIF(ltrim(tm.variable_symbol, '0'), '') = ${input.vs_norm}
     `,
   });
 
@@ -592,6 +646,62 @@ const make = Effect.gen(function* () {
       catchSqlErrors,
     );
 
+  const findByTeamAndVariableSymbol = (
+    teamId: Team.TeamId,
+    variableSymbol: Option.Option<string>,
+  ): Effect.Effect<
+    Option.Option<{
+      readonly member_id: TeamMember.TeamMemberId;
+      readonly name: Option.Option<string>;
+    }>
+  > => {
+    const vsNorm = normalizeVariableSymbol(variableSymbol);
+    return Option.match(vsNorm, {
+      onNone: () => Effect.succeed(Option.none()),
+      onSome: (norm) =>
+        findByTeamAndVariableSymbolQuery({ team_id: teamId, vs_norm: norm }).pipe(catchSqlErrors),
+    });
+  };
+
+  // D3 — mirrors `setJerseyNumber`, plus the 409 `VariableSymbolConflict` the unique partial
+  // index (`uq_team_members_team_variable_symbol`) can raise. Order matters: the unique-violation
+  // catch must run BEFORE `catchSqlErrors`, which would otherwise turn the raw `SqlError` into an
+  // untyped defect and mask the conflict.
+  const setVariableSymbol = (
+    memberId: TeamMember.TeamMemberId,
+    teamId: Team.TeamId,
+    variableSymbol: Option.Option<string>,
+  ) =>
+    updateVariableSymbolQuery({ member_id: memberId, variable_symbol: variableSymbol }).pipe(
+      SqlErrors.catchUniqueViolationOn(
+        VARIABLE_SYMBOL_UNIQUE_CONSTRAINT,
+        () => new VsConflictMarker(),
+      ),
+      catchSqlErrors,
+      Effect.catchTag('VsConflictMarker', () =>
+        findByTeamAndVariableSymbol(teamId, variableSymbol).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () =>
+                Effect.fail(
+                  new VariableSymbolConflict({
+                    holderMemberId: memberId,
+                    holderName: Option.none(),
+                  }),
+                ),
+              onSome: (holder) =>
+                Effect.fail(
+                  new VariableSymbolConflict({
+                    holderMemberId: holder.member_id,
+                    holderName: holder.name,
+                  }),
+                ),
+            }),
+          ),
+        ),
+      ),
+    );
+
   // Last-active-manager guard consulted by `deactivateMemberAndCascade` — built on
   // `effectiveRolesFrom` (see that file's header) rather than a second hand-rolled
   // ancestor walk, so it agrees with the roster on which members effectively hold
@@ -677,6 +787,8 @@ const make = Effect.gen(function* () {
     findDiscordJoinedAt,
     findLastRoleSync,
     setJerseyNumber,
+    setVariableSymbol,
+    findByTeamAndVariableSymbol,
     resetMissedRsvps,
     hasOtherActiveManager,
     // test helper

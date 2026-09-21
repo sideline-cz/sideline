@@ -353,6 +353,7 @@ Server-owned vs. bot-owned mapping writes:
 | Bot (`handleCreated` role-only / `handleMemberAdded` lazy role) | `Channel/UpsertMappingRoleOnly` | Sets only `discord_role_id`, leaves channel id untouched. |
 | Server (detach / archive) | `Channel/UpsertGroupChannel` cleared via `clearGroupChannel` repository method | Server clears `discord_channel_id`; the mapping row stays so the role survives. |
 | Bot (`handleDeleted` only) | `Channel/DeleteMapping` | Deletes the entire mapping row. Never call this from `handleArchived` or `handleDetached`. |
+| Bot (`handleCreated` member loop / `handleMemberAdded`, via `clearStaleRoleOnUnknownRole`) | `Channel/ClearMappingRole` | Clears `discord_role_id` to `NULL` only, on Unknown Role (10011); leaves `discord_channel_id` untouched. Server-gated on `discord_channel_id IS NOT NULL` so it can never leave a mapping both-NULL. Never call this outside the 10011 path. |
 | Bot (`handleRosterChannelCreated`) | `Channel/UpsertRosterMapping` THEN `Channel/UpdateRosterChannel` | Roster-flow parallel of the group family. Upsert both ids after channel + role are created, then link the new channel back onto the roster. Skip `Channel/UpdateRosterChannel` when the channel already existed in the mapping. See rule 8. |
 
 Rules:
@@ -394,9 +395,13 @@ Rules:
    ```
    Rules: (a) use the shared `isPermanentError` (`src/rcp/channel/ProcessorService.ts`) as the negated `while` predicate — never re-classify inline; (b) wrap each iteration in `Effect.exit` + `Exit.match` so a single member's permanent failure is logged-and-skipped, not propagated (one bad member must not fail the whole event and trigger a re-process that re-grants the others); (c) keep `concurrency: 1`. Do NOT use `Effect.catchIf` here — the `Effect.exit` isolation is required because the loop must continue past a permanent failure.
 
+   **`handleCreated`'s loop has since diverged from this shared shape** (`handleRosterChannelCreated` still matches it exactly as written above); the two additions are group-specific and were not backported to the roster loop:
+   - **10011 (Unknown Role) short-circuit.** A `Ref<boolean>` (`roleGone`) is checked before every iteration; the first member to hit `isUnknownRoleError` sets it via `Ref.set` and calls `clearStaleRoleOnUnknownRole` (`channelUtils.ts`) to clear the group's stale `discord_role_id` through the new `Channel/ClearMappingRole` RPC, then every remaining member is skipped as a guaranteed-failure no-op. Because the loop is `concurrency: 1`, only the first failing member can ever flip the `Ref`, so `Channel/ClearMappingRole` is called at most once per event — no extra guard is needed around the clear itself. Same self-healing remedy as the role-axis precedent `clearStaleMappingOnUnknownRole` (`~/rcp/role/handleAssigned.ts:93-95`) — stop retrying a dead Discord id and let the next sweep re-resolve it — but adapted to `discord_channel_mappings` being a shared channel+role row: the role axis's `discord_role_mappings` row holds nothing but the role, so it `Role/DeleteMapping`s the whole row; here `Channel/ClearMappingRole` clears only the `discord_role_id` column (never the row, and never `discord_channel_id`), so a still-valid channel link survives. See `applications/server/AGENTS.md` → "Group-role member backfill" for why the row itself must never be deleted here. `handleMemberAdded` (rule 2) reuses the same `clearStaleRoleOnUnknownRole` helper on its single `addGuildMemberRole` call, but has no `Ref`/short-circuit of its own — it grants to exactly one member per event, so there is no "remaining members" to skip.
+   - **All-permanent-failures `logError`.** A second `Ref<number>` counts members whose grant failed with a permanent error (e.g. 50013/403 — missing `Manage Roles` or role-hierarchy mis-ordering). If every attempted member failed permanently AND the loop was not short-circuited by the 10011 case above (which already logs its own distinct warning), one `Effect.logError` fires for the whole event instead of N scattered `logWarning`s — guarded on `members.length > 0` so an empty group never misfires on vacuous truth. `handleMemberAdded` and `handleRosterChannelCreated` have no equivalent — this is `handleCreated`-only.
+
 #### Channel Backfill (self-healing role provisioning)
 
-Group→Discord-role provisioning is event-driven, so a group created BEFORE its team's guild was linked (or while the bot was down) can end up role-less forever — no `channel_created` event was ever emitted. `ChannelBackfillService` (`src/rcp/channel/BackfillService.ts`, wired in `src/rcp/channel/index.ts`) is the safety net: on each `slowPollLoop` (5min) tick it calls `Channel/BackfillMissingGroupRoles({ team_id: None, limit: None })`. The server finds non-archived groups whose mapping has no `discord_role_id` AND no unprocessed/un-errored `channel_created`/`channel_updated` event, then re-emits a provisioning `channel_created` event for each (see `applications/server/AGENTS.md` → "Group-role backfill and grant reapply").
+Group→Discord-role provisioning is event-driven, so a group whose `channel_created` event was never processed (bot down, bot not in the guild, or the row was marked permanently failed via `Channel/MarkEventPermanentlyFailed`) can end up role-less forever. The server always emits that event for a group whose team exists (`teams.guild_id` is `NOT NULL`), so the gap is in PROCESSING, not in emission. `ChannelBackfillService` (`src/rcp/channel/BackfillService.ts`, wired in `src/rcp/channel/index.ts`) is the safety net: on each `slowPollLoop` (5min) tick it calls `Channel/BackfillMissingGroupRoles({ team_id: None, limit: None })`. The server finds non-archived groups whose mapping has no `discord_role_id` AND no unprocessed/un-errored `channel_created`/`channel_updated` event, then re-emits a provisioning `channel_created` event for each (see `applications/server/AGENTS.md` → "Group-role backfill and grant reapply").
 
 Rules:
 
@@ -636,10 +641,12 @@ Syncs `payment_reminder_sync_events` rows to per-user DM embeds. The server's `P
 | Component | File |
 |-----------|------|
 | Domain event | `packages/domain/src/rpc/finance/FinanceRpcEvents.ts` (`PaymentReminderReadyEvent`) |
-| Kind literal | `packages/domain/src/models/PaymentReminder.ts` (`PaymentReminderKind`) |
+| Kind literal | `packages/domain/src/models/PaymentReminder.ts` (`PaymentReminderKind` — incl. `assigned`, fired once at assignment creation, T10c) |
 | Bot service | `src/rcp/finance/ProcessorService.ts` (`FinanceSyncService.processTick`, exported via `src/rcp/finance/index.ts`) |
-| Ready handler | `src/rcp/finance/handlePaymentReminderReady.ts` — `createDm` → `createMessage` → `Finance/MarkReminderSent` |
+| Ready handler | `src/rcp/finance/handlePaymentReminderReady.ts` — `createDm` → `createMessage` (with the QR attached, when one could be built) → `Finance/MarkReminderSent` |
 | Embed builder | `src/rcp/finance/buildPaymentReminderEmbed.ts` — `Match.value(kind).pipe(Match.when(...), Match.exhaustive)` over `PaymentReminderKind` |
+| QR fetch | `Finance/GetPaymentQr` (payload `{ assignment_id }`, success `{ spayd, png_base64, filename }`, error `FinanceQrUnavailable`) — wrapped into a Discord `File` by `src/rcp/finance/paymentQrAttachment.ts`, mirroring `clipAttachment` (`src/rest/rules/clips.ts`) |
+| SPAYD fallback-block reader | `src/rcp/finance/parseSpaydField.ts` — reads the account/amount/VS/message back out of the rendered `spayd` string for the "can't scan it? enter it by hand" block; NOT a general SPAYD parser (see its doc comment) |
 
 Event types: `payment_reminder_ready`. Uses standard `pollLoop` (5s).
 
@@ -647,7 +654,24 @@ Rules:
 
 1. **`Finance/MarkReminderSent` must run AFTER `createMessage` succeeds and BEFORE `Finance/MarkPaymentReminderProcessed`.** If the Discord call fails, the handler falls through to `Finance/MarkPaymentReminderFailed` via `Effect.catch` in `ProcessorService.processEvent` — `payment_reminders_sent` is NOT written, so the next cron tick can re-emit after the outbox row is processed.
 2. **Never write to `payment_reminders_sent` from the bot directly.** The bot only calls the RPC; the server handler owns the `INSERT ... ON CONFLICT DO NOTHING`.
-3. **`buildPaymentReminderEmbed` must remain pure** — no Effect, no `DiscordREST` calls, no i18n side effects. The embed copy is currently English-only and lives inline; do not add `tr()` or `m.*` imports without first adding `bot_payment_reminder_*` keys per the "Translation Source — Compiled Paraglide Only" rules above.
+3. **`buildPaymentReminderEmbed` must remain pure** — no Effect, no `DiscordREST` calls. Copy lives in `bot_payment_reminder_*` i18n keys (both `en` and `cs`); never hardcode a new user-facing string inline.
+4. **Never fail a reminder because the QR could not be fetched.** `handlePaymentReminderReady` catches both `FinanceQrUnavailable` and `RpcClientError` from `Finance/GetPaymentQr` and degrades to the text-only embed (no image, no fallback block, no VS field) — see `buildPaymentReminderEmbed`'s `Option<PaymentReminderQr>` parameter.
+5. **The QR payload (`spayd`'s `MSG`) is uppercase ASCII with no diacritics by design** (`@sideline/domain`'s `Spayd.ts`) — the fallback code block renders it VERBATIM, never re-accented; only the surrounding embed prose is full Czech. This is not a bug.
+
+### Bank Token Expiry (T10b — treasurer DM at T−14 / T−7 / T−1)
+
+A SEPARATE outbox family from the payment reminders above — `bank_token_expiry_events`, its own read/ack RPCs (`Finance/GetUnprocessedBankTokenExpiryEvents` / `MarkBankTokenExpiryProcessed` / `MarkBankTokenExpiryFailed`), and its own `Match.tag` dispatcher — because `payment_reminder_sync_events` is FK'd to `fee_assignments` with several NOT NULL columns this event has no equivalent for. The intended producer is a server-side `BankTokenExpiryCron` emitting one row per `(team, threshold)` when a connected Fio token is within 14/7/1 days of its 180-day expiry.
+
+**The consumer side below is complete; the producer is NOT.** Nothing in `applications/server/src` inserts into `bank_token_expiry_events` — `BankTokenExpiryEventsRepository` has read/ack methods only and says so in its header. So this handler never fires in production today. Two consequences for anyone touching it: do not "fix" the dead path by inventing an emitter shape (`BankTokenExpiryCron` is the agreed one), and note that `Finance/MarkBankTokenExpirySent` plus the `bank_token_expiry_sent` table exist server-side with **no caller and no reader** — wire them up when the cron lands rather than assuming the dedupe already works.
+
+| Component | File |
+|-----------|------|
+| Domain event | `packages/domain/src/rpc/finance/FinanceRpcEvents.ts` (`BankTokenExpiringEvent`) |
+| Bot dispatch | `src/rcp/finance/ProcessorService.ts` — Pass 2 of `FinanceSyncService.processTick`, chained onto Pass 1 (payment reminders) via `Effect.andThen`, mirroring the personalEvents ProcessorService's provision/reconcile passes |
+| Handler | `src/rcp/finance/handleBankTokenExpiring.ts` — `createDm` → `createMessage`; no "sent" ack step (the outbox row itself is the idempotency boundary, unlike payment reminders' `MarkReminderSent`) |
+| Embed builder | `src/rcp/finance/buildBankTokenExpiringEmbed.ts` — amber at T−14, red at T−7/T−1, matching the settings-page `expiringSoon` banner's own T−7 colour switch |
+
+Event types: `bank_token_expiring`. Polled every tick alongside payment reminders (still 5s via `pollLoop`).
 
 ### Email Sync (email posts → Discord embeds)
 

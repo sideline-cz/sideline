@@ -2,14 +2,14 @@
 // Tests at the bottom also cover Change A (coach param / owners-role routing).
 // Those additions will FAIL to compile until the developer implements the server task.
 
-import { afterEach, beforeEach, describe, expect, it } from '@effect/vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from '@effect/vitest';
 import type { Discord, Event, GroupModel, Team, TeamMember } from '@sideline/domain';
 import { DateTime, Effect, Layer, Option } from 'effect';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { EventRsvpsRepository } from '~/repositories/EventRsvpsRepository.js';
 import { EventSyncEventsRepository } from '~/repositories/EventSyncEventsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
-import { eventStartCronEffect } from '~/services/EventStartCron.js';
+import { eventStartCronEffect, makeEventStartCronEffect } from '~/services/EventStartCron.js';
 
 // --- Test IDs ---
 const EVENT_ID_1 = '00000000-0000-0000-0000-000000000001' as Event.EventId;
@@ -77,6 +77,12 @@ let channelMappings: Map<
 // tracks the once-per-cron-cycle markStalePersonalMessagesDirty sweep.
 let dirtyMarked: Event.EventId[];
 let staleSweepCalls = 0;
+// Task 3 (fix/event-start-cron-injectable-clock): capture the `now` argument
+// each deferred-sweep finder is called with, so tests can assert that both
+// sweeps receive the SAME injected instant per cycle (see the
+// `makeEventStartCronEffect` describe block below).
+let capturedPastLastLocalDayNows: Date[];
+let capturedNeedingStartedPostNows: Date[];
 
 const resetStores = () => {
   eventsToStart = [];
@@ -86,6 +92,8 @@ const resetStores = () => {
   channelMappings = new Map();
   dirtyMarked = [];
   staleSweepCalls = 0;
+  capturedPastLastLocalDayNows = [];
+  capturedNeedingStartedPostNows = [];
 };
 
 // --- Mock layers ---
@@ -109,9 +117,15 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   // so these are empty-result stubs, not exercised behaviour (the deferred
   // claim-then-act behaviour itself is covered against a real Postgres in
   // `test/integration/services/EventStartCron.deferred.test.ts`).
-  findAllDayEventsPastLastLocalDay: () => Effect.succeed([]),
+  findAllDayEventsPastLastLocalDay: (now: Date) => {
+    capturedPastLastLocalDayNows.push(now);
+    return Effect.succeed([]);
+  },
   claimMissedRsvpCount: () => Effect.die(new Error('Not implemented')),
-  findAllDayEventsNeedingStartedPost: () => Effect.succeed([]),
+  findAllDayEventsNeedingStartedPost: (now: Date) => {
+    capturedNeedingStartedPostNows.push(now);
+    return Effect.succeed([]);
+  },
   claimStartedPost: () => Effect.die(new Error('Not implemented')),
   withTransaction: (effect: Effect.Effect<unknown, unknown, unknown>) => effect,
   // Stubs for unused methods
@@ -1564,5 +1578,77 @@ describe('eventStartCronEffect — PR 4: all-day events defer the increment and 
       Effect.provide(MockProvideLayer),
       Effect.asVoid,
     );
+  });
+});
+
+// Task 3 (fix/event-start-cron-injectable-clock): the injectable-instant
+// refactor. See `.work-plans/injectable-instant-event-start-cron.md` §3
+// Task 3. Exactly two tests, deliberately not more — see the plan for why a
+// "both sweeps agree under fake timers" test and a "flip path isn't swept
+// this cycle" test would each be worthless/tautological in this harness.
+describe('makeEventStartCronEffect — one injected instant per cycle', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.effect('passes its argument verbatim to both deferred sweeps, as ONE instant', () => {
+    const now = new Date('2025-10-15T10:00:00.000Z');
+
+    return makeEventStartCronEffect(now).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(capturedPastLastLocalDayNows).toHaveLength(1);
+          expect(capturedNeedingStartedPostNows).toHaveLength(1);
+          const [nowA] = capturedPastLastLocalDayNows;
+          const [nowB] = capturedNeedingStartedPostNows;
+          expect(nowA.toISOString()).toBe('2025-10-15T10:00:00.000Z');
+          expect(nowB.toISOString()).toBe('2025-10-15T10:00:00.000Z');
+          // The honest pre/post differential: `makeEventStartCronEffect`
+          // takes `now` as a parameter and passes the SAME object to both
+          // sweeps. Two independent `new Date()` calls (the pre-fix shape)
+          // would produce two distinct objects even at the identical
+          // millisecond, so `toBe` (reference identity) — NOT `toEqual` —
+          // is what makes this test mean anything. Do not weaken this to
+          // `toEqual`.
+          expect(nowA).toBe(nowB);
+        }),
+      ),
+      Effect.provide(MockProvideLayer),
+      Effect.asVoid,
+    );
+  });
+
+  it('each run re-samples: the instant is not frozen at module load', () => {
+    // Plain `it`, not `it.effect`: `vi.setSystemTime` fakes global `Date`
+    // (what `new Date()` inside `Effect.suspend` reads), not Effect's
+    // `Clock`/`TestClock`, which `it.effect` auto-provides starting at epoch
+    // 0 and which is irrelevant here. `toFake: ['Date']` leaves `setTimeout`
+    // real, so the Effect runtime driving `Effect.runPromise` below is
+    // unaffected — the same technique as `test/EventRsvp.test.ts:1500-1506`.
+    vi.useFakeTimers({ toFake: ['Date'] });
+
+    const T1 = new Date('2025-10-15T10:00:00.000Z');
+    const T2 = new Date('2025-11-20T08:30:00.000Z');
+
+    vi.setSystemTime(T1);
+    const run1 = Effect.runPromise(eventStartCronEffect.pipe(Effect.provide(MockProvideLayer)));
+
+    return run1.then(() => {
+      vi.setSystemTime(T2);
+      return Effect.runPromise(eventStartCronEffect.pipe(Effect.provide(MockProvideLayer))).then(
+        () => {
+          // Deterministically red against
+          // `export const eventStartCronEffect = makeEventStartCronEffect(new Date())`
+          // (no `Effect.suspend`), which would freeze both captures at the
+          // module-load instant instead of re-sampling per run.
+          expect(capturedPastLastLocalDayNows).toHaveLength(2);
+          expect(capturedNeedingStartedPostNows).toHaveLength(2);
+          expect(capturedPastLastLocalDayNows[0].getTime()).toBe(T1.getTime());
+          expect(capturedNeedingStartedPostNows[0].getTime()).toBe(T1.getTime());
+          expect(capturedPastLastLocalDayNows[1].getTime()).toBe(T2.getTime());
+          expect(capturedNeedingStartedPostNows[1].getTime()).toBe(T2.getTime());
+        },
+      );
+    });
   });
 });

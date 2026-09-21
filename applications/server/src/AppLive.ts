@@ -14,6 +14,9 @@ import { AchievementSyncEventsRepository } from '~/repositories/AchievementSyncE
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js';
+import { BankSyncConfigRepository } from '~/repositories/BankSyncConfigRepository.js';
+import { BankTokenExpiryEventsRepository } from '~/repositories/BankTokenExpiryEventsRepository.js';
+import { BankTransactionsRepository } from '~/repositories/BankTransactionsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { CarpoolsRepository } from '~/repositories/CarpoolsRepository.js';
 import { ChannelEventDividersRepository } from '~/repositories/ChannelEventDividersRepository.js';
@@ -82,12 +85,16 @@ import {
 import { AchievementEvaluator } from '~/services/AchievementEvaluator.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
+import { AiChatEnabledConfig } from '~/services/AiChatEnabledConfig.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
+import { ChatAgent } from '~/services/ChatAgent.js';
+import { ChatRateLimiter } from '~/services/ChatRateLimiter.js';
 import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementConfig.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { EmailApprovalService } from '~/services/EmailApprovalService.js';
 import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
+import { FioSecretCrypto } from '~/services/FioSecretCrypto.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { LlmClient } from '~/services/LlmClient.js';
 import { TranslationCache } from '~/services/TranslationCache.js';
@@ -108,7 +115,10 @@ const RpcLive = RpcServer.layer(ObservableSyncRpcs).pipe(
   Layer.provide(RpcSerialization.layerNdjson),
 );
 
-const Repositories = Layer.mergeAll(
+// Exported (only `SqlClient.SqlClient` required) so operator CLI scripts under
+// `src/scripts/` — e.g. `backfillGroupRoleMembersCli.ts` — can provide the full
+// repository surface without re-wiring it by hand.
+export const Repositories = Layer.mergeAll(
   UsersRepository.Default,
   SessionsRepository.Default,
   TeamsRepository.Default,
@@ -161,6 +171,9 @@ const Repositories = Layer.mergeAll(
   ExpensesRepository.Default,
   PaymentReminderSyncEventsRepository.Default,
   PaymentRemindersSentRepository.Default,
+  BankSyncConfigRepository.Default,
+  BankTransactionsRepository.Default,
+  BankTokenExpiryEventsRepository.Default,
   CarpoolsRepository.Default,
   PollsRepository.Default,
   RulesAttemptsRepository.Default,
@@ -201,6 +214,11 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   Layer.provide(BotInfoStore.Default),
   Layer.provide(GlobalAdminAllowlist.Default),
   Layer.provide(DiscordJoinEnforcementConfig.Default),
+  Layer.provide(AiChatEnabledConfig.Default),
+  Layer.provide(ChatRateLimiter.Default),
+  Layer.provide(
+    ChatAgent.Default.pipe(Layer.provide(Repositories), Layer.provide(LlmClient.Default)),
+  ),
   Layer.provide(TranslationCache.Default),
   Layer.provide(
     Layer.merge(Repositories, EmailApprovalService.Default.pipe(Layer.provide(Repositories))),
@@ -208,5 +226,6 @@ export const AppLive = HttpRouter.serve(AppLayer, { middleware: HttpLogger }).pi
   Layer.provide(DiscordOAuth.Default),
   Layer.provide(LlmClient.Default),
   Layer.provide(EmailSecretCrypto.Default),
+  Layer.provide(FioSecretCrypto.Default),
   Layer.provide(FetchHttpClient.layer),
 );

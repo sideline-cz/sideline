@@ -11,6 +11,15 @@ export * as ActivityTypeApi from './api/ActivityTypeApi.js';
 export * as AgeThresholdApi from './api/AgeThresholdApi.js';
 
 /**
+ * The read-only in-app AI assistant (plan §3): one capabilities endpoint and one chat
+ * endpoint, team-scoped. `EntityRef` is the typed view-model union every card in the answer
+ * is rendered from — the model never controls a fact the user can act on, only which
+ * server-held entity is shown and which sentence mentions it. `degradedReason` is a closed
+ * union resolved client-side through a label map, never a sentinel embedded in `answer`.
+ */
+export * as AiChatApi from './api/AiChatApi.js';
+
+/**
  * Tri-state, and `'unknown'` renders NOTHING (PR-9 / CC-15, designer §3.6) — never a boolean.
  * A hard gate on an unknown signal bounces the entire existing user base (the day-one state for
  * every member of every team, since the bot has to observe guild membership before anyone can be
@@ -24,6 +33,13 @@ export * as AgeThresholdApi from './api/AgeThresholdApi.js';
  * safely in a new browser as `'unknown'` — the safe, inert default.
  */
 export * as Auth from './api/Auth.js';
+
+/**
+ * Config view returned to web clients. Never carries the Fio token — `fioTokenSet` is the only
+ * signal of whether one is stored. `status` / `expiringSoon` are computed server-side (D11) and
+ * must be rendered as-is, never re-derived on the client.
+ */
+export * as BankSyncApi from './api/BankSyncApi.js';
 
 export * as ChannelApi from './api/ChannelApi.js';
 
@@ -187,11 +203,87 @@ export * as ActivityType from './models/ActivityType.js';
 
 export * as AgeThresholdRule from './models/AgeThresholdRule.js';
 
+/**
+ * D11 — computed server-side by the pure `bankSyncStatus` ladder (`applications/server`) and
+ * sent to the client as a literal; the web must never re-derive it. `'expiring_soon'` is
+ * deliberately NOT a member of this union — token expiry is additive
+ * (`BankSyncConfigView.expiringSoon: boolean`), never a rank of this ladder, because a token
+ * that is both expiring AND failing must report both facts, not just one.
+ */
+export * as BankSyncConfig from './models/BankSyncConfig.js';
+
+/**
+ * D15 — the single source of truth for the DB `CHECK`, the matching engine, and the web's
+ * closed `Record`. Exactly these nine literals; `possible_duplicate` is deliberately absent — it
+ * is a hint carried alongside `no_open_assignment` (step 2.5 of the matching engine), never a
+ * `match_reason` on its own.
+ */
+export * as BankTransaction from './models/BankTransaction.js';
+
 export * as Carpool from './models/Carpool.js';
 
 export * as ChannelSyncEvent from './models/ChannelSyncEvent.js';
 
 export * as CustomAchievement from './models/CustomAchievement.js';
+
+/**
+ * Czech IBAN construction and the Czech bank-account modulo-11 checksum.
+ *
+ * Pure algorithm module — see `packages/domain/AGENTS.md` ("Pure Algorithm Modules").
+ *
+ * ## IBAN construction (`buildCzIban`)
+ *
+ * ```
+ * BBAN  = bankCode(4, zero-padded) + prefix(6, zero-padded) + accountNumber(10, zero-padded)
+ * check = 98 - (BigInt(BBAN + "1235" + "00") % 97n)   // "CZ" -> C=12, Z=35
+ * IBAN  = "CZ" + String(check).padStart(2, "0") + BBAN   // length 24
+ * ```
+ *
+ * **Bank code FIRST, then prefix, then account** — prefix-first is the classic bug (see the
+ * paired test's "prefix-first regression" case). `BigInt` is mandatory: the rearranged numeric
+ * string is 26 digits and overflows `Number`'s safe integer range.
+ *
+ * Verified vectors (do NOT use the IBANs printed in Fio's own PDF or the `fiobank` npm
+ * package's fixtures as test vectors — they are anonymised data with un-recomputed check
+ * digits and fail mod-97):
+ *   - `19-2000145399/0800` → `CZ6508000000192000145399`
+ *   - `1265098001/5500` → `CZ5855000000001265098001`
+ *   - `76327632/0300` → `CZ7603000000000076327632`
+ *   - `2703474850/2010` → `CZ7120100000002703474850`
+ *   - `123456-2703474850/2010` → `CZ6920101234562703474850`
+ *
+ * ## Account modulo-11 checksum (`isValidCzAccountNumber`)
+ *
+ * Weights `[10, 5, 8, 4, 2, 1]` (prefix, zero-padded to 6 digits) and
+ * `[6, 3, 7, 9, 10, 5, 8, 4, 2, 1]` (account number, zero-padded to 10 digits) are paired
+ * left-to-right with the zero-padded digit string (the padding is on the left, so the last
+ * weight in each array always lands on the units digit) — each weighted sum must be
+ * `≡ 0 (mod 11)`, checked independently for the prefix and the account number.
+ */
+export * as CzIban from './models/CzIban.js';
+
+/**
+ * The Czech IČO (organisation identifier) checksum — a DIFFERENT algorithm from the bank-account
+ * modulo-11 checksum in `CzIban.ts` (different weights, different modulus handling).
+ *
+ * Pure algorithm module — see `packages/domain/AGENTS.md` ("Pure Algorithm Modules").
+ *
+ * ```
+ * digits d1..d8
+ * sum   = 8*d1 + 7*d2 + 6*d3 + 5*d4 + 4*d5 + 3*d6 + 2*d7
+ * r     = sum mod 11
+ * check = (11 - r) mod 10      -- must equal d8
+ * ```
+ *
+ * The check digit is written as that single expression, NOT a branch ladder
+ * (`if r = 0 then 1 elsif r = 1 then 0 ...`) — it is already correct for every edge case
+ * (`r=0 → 1`, `r=1 → 0`, `r=10 → 1`) precisely because it is expressed this way, and a
+ * hand-written ladder is exactly where those edge cases get typed wrong.
+ *
+ * Verified vectors: `61858374` (sum 183, r 7, c 4), `45244782` (sum 152, r 9, c 2),
+ * `45274649` (sum 156, r 2, c 9).
+ */
+export * as CzIco from './models/CzIco.js';
 
 export * as Discord from './models/Discord.js';
 
@@ -321,6 +413,45 @@ export * as RulesProgress from './models/RulesProgress.js';
 
 export * as Session from './models/Session.js';
 
+/**
+ * SPAYD (Short Payment Descriptor, v1.0) string builder for Czech payment QR codes.
+ *
+ * Pure algorithm module — see `packages/domain/AGENTS.md` ("Pure Algorithm Modules").
+ *
+ * Format: `SPD*1.0*KEY:value*KEY:value*` — only `ACC` is mandatory; keys are uppercase; there is
+ * no whitespace around values. Key emission order (this module's own convention, mirroring the
+ * SPAYD 1.0 spec's documented key list): `ACC, AM, CC, RN, DT, MSG, X-VS, X-SS, X-KS`.
+ *
+ * Guaranteed-supported keys: `ACC`, `AM`, `CC`, `DT`, `MSG`, `X-VS`, `X-SS`, `X-KS`. `RN` is NOT
+ * guaranteed by every reader — it is emitted for readability only; reconciliation is always done
+ * on `X-VS`.
+ *
+ * | Key | Limit |
+ * |---|---|
+ * | `ACC` | 46 (`IBAN` or `IBAN+BIC`) |
+ * | `AM` | 10 chars, max 2 dp, `.` separator, max `9999999.99`; both decimals always present |
+ * | `CC` | exactly 3 |
+ * | `DT` | exactly 8, `YYYYMMDD` |
+ * | `MSG` | 60 |
+ * | `X-VS` / `X-SS` / `X-KS` | 10 integer chars |
+ *
+ * Over-length values are silently truncated FROM THE LEFT by some readers, so limits are
+ * enforced here rather than trusted to the reader. `MSG` is budgeted and truncated by
+ * `toSpaydMessage` BEFORE `buildSpayd` is called — a fee name that does not fit must never turn
+ * into "no QR at all" (see `toSpaydMessage`'s doc comment). `buildSpayd` itself still rejects an
+ * over-length `MSG` — that path exists only to catch a future caller that skips the budget step.
+ * `X-VS` is always a hard reject over 10 chars: a truncated variable symbol is a mis-credited
+ * payment, which is strictly worse than no QR.
+ *
+ * Escaping is targeted percent-encoding: `%` → `%25` (must run first, it is the escape
+ * character itself) and `*` → `%2A` (the field separator). `:` is explicitly left unescaped.
+ * `CRC32` is deliberately never emitted — rarely produced, widely ignored by readers, and a
+ * mis-canonicalised one is worse than none.
+ *
+ * Amount formatting never round-trips through a float — see `formatAmountMajor`.
+ */
+export * as Spayd from './models/Spayd.js';
+
 export * as Team from './models/Team.js';
 
 export * as TeamChallenge from './models/TeamChallenge.js';
@@ -405,8 +536,20 @@ export * as EventRpcGroup from './rpc/event/EventRpcGroup.js';
  * failure — see `TeamSettingsApi.ts:79` for the same `withDecodingDefaultKey` precedent.
  */
 export * as EventRpcModels from './rpc/event/EventRpcModels.js';
+/**
+ * D11 / T10b — the T-14/T-7/T-1 Discord DM to the treasurer that a connected Fio token is about
+ * to expire (`token_created_at + 180d`). Emitted by `BankTokenExpiryCron` into its own outbox
+ * table (`bank_token_expiry_events`, migration `1792000004`) — `payment_reminder_sync_events`
+ * cannot be reused, it is FK'd to `fee_assignments` with several NOT NULL columns this event has
+ * no equivalent for.
+ */
 export * as FinanceRpcEvents from './rpc/finance/FinanceRpcEvents.js';
 export * as FinanceRpcGroup from './rpc/finance/FinanceRpcGroup.js';
+/**
+ * T10 — the payment QR delivered by the bot alongside a reminder DM. `spayd` is the raw SPAYD
+ * payload (for debugging / a text fallback); `png_base64` is the rendered QR image the bot
+ * attaches via `attachment://<filename>`.
+ */
 export * as FinanceRpcModels from './rpc/finance/FinanceRpcModels.js';
 export * as GuildRpcGroup from './rpc/guild/GuildRpcGroup.js';
 export * as GuildRpcModels from './rpc/guild/GuildRpcModels.js';

@@ -11,6 +11,9 @@ import { AppLive, HealthServerLive } from '~/index.js';
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js';
+import { BankSyncConfigRepository } from '~/repositories/BankSyncConfigRepository.js';
+import { BankTokenExpiryEventsRepository } from '~/repositories/BankTokenExpiryEventsRepository.js';
+import { BankTransactionsRepository } from '~/repositories/BankTransactionsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { DiscordChannelMappingRepository } from '~/repositories/DiscordChannelMappingRepository.js';
 import { EmailAttachmentsRepository } from '~/repositories/EmailAttachmentsRepository.js';
@@ -26,6 +29,7 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { InviteAcceptancesRepository } from '~/repositories/InviteAcceptancesRepository.js';
 import { NotificationsRepository } from '~/repositories/NotificationsRepository.js';
 import { PaymentReminderSyncEventsRepository } from '~/repositories/PaymentReminderSyncEventsRepository.js';
+import { PaymentsRepository } from '~/repositories/PaymentsRepository.js';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { RulesQuizSyncEventsRepository } from '~/repositories/RulesQuizSyncEventsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
@@ -37,12 +41,15 @@ import {
 } from '~/repositories/WeeklySummaryRepository.js';
 import { AgeCheckCron } from '~/services/AgeCheckCron.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
+import { BankSyncPoller } from '~/services/BankSyncPoller.js';
+import { BankTokenExpiryCron } from '~/services/BankTokenExpiryCron.js';
 import { CoachingStatusCron } from '~/services/CoachingStatusCron.js';
 import { EmailRetentionCron } from '~/services/EmailRetentionCron.js';
 import { EmailSecretCrypto } from '~/services/EmailSecretCrypto.js';
 import { EmailSummarizer } from '~/services/EmailSummarizer.js';
 import { EventHorizonCron } from '~/services/EventHorizonCron.js';
 import { EventStartCron } from '~/services/EventStartCron.js';
+import { FioSecretCrypto } from '~/services/FioSecretCrypto.js';
 import { ImapClient } from '~/services/ImapClient.js';
 import { ImapPoller } from '~/services/ImapPoller.js';
 import { InviteAcceptanceSweepCron } from '~/services/InviteAcceptanceSweepCron.js';
@@ -258,6 +265,33 @@ const ImapPollerCronEffect = ImapPoller.asEffect().pipe(
   Effect.provide(EmailSecretCrypto.Default),
 );
 
+const BankSyncPollerRepositoriesLive = Layer.mergeAll(
+  BankSyncConfigRepository.Default,
+  BankTransactionsRepository.Default,
+  // The poller runs the matcher inline after ingest, and the matcher writes payments through
+  // PaymentsRepository — so it must be provided here too, not just to the API layer.
+  PaymentsRepository.Default,
+  FioSecretCrypto.Default,
+);
+
+const BankSyncPollerCronEffect = BankSyncPoller.pipe(
+  Effect.provide(
+    BankSyncPollerRepositoriesLive.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
+  ),
+  Effect.provide(FetchHttpClient.layer),
+);
+
+const BankTokenExpiryRepositoriesLive = Layer.mergeAll(
+  BankSyncConfigRepository.Default,
+  BankTokenExpiryEventsRepository.Default,
+);
+
+const BankTokenExpiryCronEffect = BankTokenExpiryCron.asEffect().pipe(
+  Effect.provide(
+    BankTokenExpiryRepositoriesLive.pipe(Layer.provideMerge(PgClient.layerConfig(BasePg))),
+  ),
+);
+
 Effect.Do.pipe(
   Effect.tap(() => (env.DATABASE_MAIN !== env.DATABASE_NAME ? CreateDb : Effect.void)),
   Effect.tap(() => MigrateBefore),
@@ -281,6 +315,8 @@ Effect.Do.pipe(
         EmailSummarizerCronEffect,
         EmailRetentionCronEffect,
         ImapPollerCronEffect,
+        BankSyncPollerCronEffect,
+        BankTokenExpiryCronEffect,
       ],
       {
         // These are all long-running, never-completing supervised effects (HTTP

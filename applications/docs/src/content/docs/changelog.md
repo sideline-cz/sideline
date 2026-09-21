@@ -5,6 +5,44 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-16 — New: automatic bank-payment matching for Fio accounts
+
+Clubs banking with Fio banka can now connect their account so Sideline reads incoming payments automatically and matches them to member fees — no more reconciling a bank statement by hand.
+
+- **Connect your account** from **Team → Settings**, using a read-only ("Account monitoring") Fio API token. See the [Finances guide](/guides/finances/#connecting-a-bank-account-fio) for the full setup, including the historical-import window and what to do when your token is about to expire.
+- **Give members a variable symbol** — a short number Sideline uses to identify who a bank payment belongs to. A new banner on the Members page flags anyone missing one and offers to assign symbols to everyone at once.
+- **A new "Bank movements" page** lists everything imported from the bank. Anything that couldn't be matched automatically lands in a queue for a treasurer to resolve — assign it to a member, mark it as other club income, or mark it not relevant.
+- **Payment QR codes**: your Discord payment reminders and My Payments page can now show a scannable QR code for any outstanding fee, pre-filled with the club's account, the amount, and your variable symbol. You'll also get a DM as soon as a new fee is assigned to you, not just as it approaches its due date.
+- **CSV and PDF export** of bank movements for a grant report or an accountant, from the new page's Grant export tab.
+
+This feature is only available for Fio banka accounts today. Nothing changes for clubs that don't connect a bank account — fees, cash payments, and everything else continue to work exactly as before.
+
+## 2026-09-15 — New: "Sync group roles with Discord" button to heal existing members
+
+Captains can now click **Sync group roles with Discord** on the groups page to re-check every group's Discord role against its actual members — including members of subgroups — and re-add anyone who's missing it. This fixes the *existing* cohort left behind by the late/manual-join issue below: members who were already in a group before that fix shipped, and never got the group's Discord role, are not automatically corrected by it. If a group's Discord role was deleted directly in Discord, this also detects that and clears the stale link so it can be re-created. One click processes up to 50 groups; if your team has more, click again. This does not remove anyone from a role — it only adds people who are missing one.
+
+## 2026-09-15 — Fix: joining Discord late (or manually) now still gets you your group's role
+
+If you joined your team's Discord server manually, or more than about 15 minutes after accepting an invite, you could end up on the team and in the right group in Sideline, but never receive that group's Discord role — the only fix used to be a captain manually clicking "Sync role members" for that group. Now, the moment the bot sees you join, it checks every group you belong to (and their parent groups) and grants any Discord role you're missing. This needs an up-to-date bot to take effect on your server. It does not yet cover members who joined while the bot itself was offline for an extended period — a captain may still need to use "Sync role members" for those.
+
+## 2026-09-14 — New: AI assistant for asking about your team's data
+
+A new **Assistant** page lets you ask plain-language questions about your team's events, training types, members, groups, and rosters, and get an answer with clickable links to the exact things it's talking about.
+
+- Find it under **Assistant** in the team sidebar.
+- It's read-only — it can look things up but can't create, edit, or change anything.
+- It only ever shows you what you could already see elsewhere in the app; it never bypasses your permissions.
+- It's a deployment-wide setting rather than a per-team one — if it isn't enabled on your Sideline instance yet, the page explains that instead of showing the chat box.
+
+See the [AI assistant guide](/guides/ai-assistant/) for details.
+
+## 2026-09-14 — Fix: invites that add you to a group now actually do
+
+Two related bugs in group-scoped invite links (the kind captains create for a specific group, not just the team) are fixed:
+
+- **Joining through the invite link now gives you the group's Discord role right away.** Previously, a new member's Discord role for the group they were invited into could be missing entirely, or only show up after the bot next reconnected — and for most groups (any group without a role explicitly linked in Sideline's settings) it never showed up at all. This applies when you join the Discord server shortly after accepting; if you join much later, a captain may still need to use the group's "Sync role members" button. This needs an up-to-date bot to take effect on your server.
+- **Accepting the invite now puts you in the group even if you join Discord much later.** If you accepted an invite but didn't join the Discord server within about 15 minutes, you previously ended up on the team but not in the group it was meant to add you to.
+
 ## 2026-09-13 — Fix: group-granted roles now show up and count
 
 Roles assigned to a **group** (rather than to a member directly) were silently invisible everywhere except the group's own settings page — a member's profile and the roster didn't show them, and their permissions weren't applied. This is fixed:

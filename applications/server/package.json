@@ -15,14 +15,16 @@
     "directory": "dist"
   },
   "scripts": {
-    "build": "tsc -b tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+    "build": "tsc -b tsconfig.build.json && tsc-alias -p tsconfig.build.json && node scripts/copy-assets.mjs",
+    "postbuild": "node scripts/assert-dist.mjs",
     "dev": "tsx watch src/run.ts",
     "preview": "node build/esm/run.js",
     "check": "tsc -b tsconfig.json",
     "test": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "coverage": "vitest --coverage",
-    "erase-user": "tsx src/scripts/eraseUserCli.ts"
+    "erase-user": "tsx src/scripts/eraseUserCli.ts",
+    "backfill-group-role-members": "tsx src/scripts/backfillGroupRoleMembersCli.ts"
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-beta.40",
@@ -38,7 +40,9 @@
     "dfx": "1.0.11",
     "effect": "4.0.0-beta.40",
     "imapflow": "^1.7.2",
-    "mailparser": "^3.9.15"
+    "mailparser": "^3.9.15",
+    "pdfkit": "0.20.2",
+    "qrcode": "1.5.4"
   },
   "effect": {
     "generateExports": {
@@ -54,6 +58,9 @@
   },
   "devDependencies": {
     "@types/mailparser": "^3.4.5",
+    "@types/pdfkit": "^0.17.6",
+    "@types/qrcode": "^1.5.6",
+    "pdf-parse": "^2.4.5",
     "testcontainers": "^12.1.0"
   }
 }

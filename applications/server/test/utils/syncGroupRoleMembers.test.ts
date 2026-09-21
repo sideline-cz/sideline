@@ -1,18 +1,7 @@
-// TDD — unit tests for `~/utils/syncGroupRoleMembers.ts`, the shared before/after effective-role
+// Unit tests for `~/utils/syncGroupRoleMembers.ts`, the shared before/after effective-role
 // diff util that `api/group.ts`'s six group-shaped handlers (`assignGroupRole`,
-// `unassignGroupRole`, `addGroupMember`, `removeGroupMember`, `moveGroup`, `deleteGroup`) must go
+// `unassignGroupRole`, `addGroupMember`, `removeGroupMember`, `moveGroup`, `deleteGroup`) go
 // through instead of emitting nothing (the reported bug) or hand-rolling their own diff.
-//
-// THIS FILE AND THE MODULE IT IMPORTS DO NOT EXIST YET. Every test below is expected to fail at
-// module resolution (`Cannot find module '~/utils/syncGroupRoleMembers.js'`) until the util is
-// implemented — that failure mode IS the correct one for this stage of TDD.
-//
-// Spec: `sync-plan.md` section 3.5 (the util's contract) and section 9 (test spec items 1-15
-// under "Unit — test/utils/syncGroupRoleMembers.test.ts"), read together with the
-// "DECISIONS (post-critique)" section, which is authoritative where the two disagree (in
-// particular: cap = 200, named `MAX_ROLE_SYNC_EMISSIONS_PER_GROUP_OPERATION`; at least one assign
-// slot per distinct `roleId` must survive the cap even when removals would otherwise consume the
-// whole budget).
 //
 // Repositories are stubbed with `Layer.succeed` (no Postgres) — mirrors
 // `test/AgeCheckService.test.ts`'s mock-layer style and `test/rcp/role/handleAssigned.test.ts`'s
@@ -23,8 +12,6 @@ import type { Discord, GroupModel, Role, Team, TeamMember } from '@sideline/doma
 import { Effect, Layer } from 'effect';
 import { RoleSyncEventsRepository } from '~/repositories/RoleSyncEventsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
-// This import does not resolve today — that is the expected, correct TDD failure mode for this
-// entire file.
 import {
   captureGroupRoleSnapshot,
   emitGroupRoleChanges,

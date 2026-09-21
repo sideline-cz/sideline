@@ -54,6 +54,9 @@ export const ChannelRpcGroup = RpcGroup.make(
   Rpc.make('DeleteMapping', {
     payload: { team_id: Team.TeamId, group_id: GroupModel.GroupId },
   }),
+  Rpc.make('ClearMappingRole', {
+    payload: { team_id: Team.TeamId, group_id: GroupModel.GroupId },
+  }),
   // Roster mappings
   Rpc.make('GetRosterMapping', {
     payload: { team_id: Team.TeamId, roster_id: RosterModel.RosterId },

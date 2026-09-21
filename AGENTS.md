@@ -28,6 +28,22 @@ Each application follows an **AppLive + run.ts** pattern:
 
 The **migrations** package exports `MigratorLive` — a layer that only needs a `PgClient` and filesystem. Consumers provide their own `PgClient`, keeping the migration package decoupled from connection config.
 
+### Bank Sync (Fio) — Trigger-Owned Columns And One Lock Order
+
+The bank-sync subsystem ingests Fio movements (`applications/server/src/services/BankSyncPoller.ts`, hourly), matches them against `fee_assignments` (`services/BankTransactionMatcher.ts`), and exposes the queue, CSV and PDF at `src/api/bank-sync.ts`. Two invariants span the whole monorepo and are not visible from the call sites that violate them.
+
+**1. `payments_finance_recompute` (migration `packages/migrations/src/before/1792000002_create_bank_transactions.ts`) replaced `payments_recompute_paid_minor` and now owns two derived columns, not one.**
+
+| Column / value | Written by |
+|----------------|------------|
+| `fee_assignments.paid_minor` | the trigger only — never app code |
+| `bank_transactions.match_state` ∈ `unmatched` / `partially_matched` / `matched` | the trigger only, once the row exists. App code sets `match_state` at INSERT (`unmatched` for an incoming movement, `not_applicable` for an outgoing one) and never recomputes it afterwards. |
+| `bank_transactions.match_state` ∈ `ignored` / `not_applicable` | app code only — the treasurer's ignore/un-ignore — and every such UPDATE is guarded by `WHERE match_state IN (…)`. `recompute_bank_match_state` returns early on both states, so the trigger never overwrites a human decision; the un-ignore back to `unmatched` is the one app-side write of a trigger-owned value, and it is guarded by `WHERE match_state = 'ignored'`. |
+
+The trigger also stamps `bank_transactions.auto_match_suppressed = true` whenever a payment linked to a transaction transitions `voided_at IS NULL → NOT NULL`. That one rule is what stops the poller from silently re-creating, inside its next rolling window, a payment a treasurer deliberately reversed — including through the pre-existing `voidPayment` endpoint, which knows nothing about the bank tables. Do not move that stamp into an app-side void path; there is more than one.
+
+**2. Canonical lock order for every money write: `payments` (by `id ASC`) → `bank_transactions` → `fee_assignments` (by `id ASC`).** Both `BankTransactionMatcher.matchOne`/`unmatch` and `api/bank-sync.ts`'s manual match honour it. Violating it deadlocks (`40P01`) on a money operation, and Postgres reports it as an untyped `SqlError` — so the symptom is a failed payment, not a message naming a lock.
+
 ## Technology Stack
 
 - **TypeScript 5.6+** — Strict mode, NodeNext module resolution, ES2022 target
@@ -167,6 +183,44 @@ Typed errors automatically merge into unions. Handle specific errors with `Effec
 
 6. **`Effect.catchAllCause` does NOT exist** in the Effect 4 beta used by this repo. To handle a `Cause` (both typed failures and defects) — typically for "log everything, swallow, don't break the caller" — use `Effect.catchCause((cause) => Effect.logWarning('Context', cause))`. This is the correct pattern for **best-effort side effects** that must never fail their caller (e.g. firing achievement evaluation from an activity-log handler, emitting sync events alongside a primary write). Always log the `cause` before swallowing — never `Effect.catchCause(() => Effect.void)`.
 
+7. **Only `Effect.catchCause` EARNS an `E = never` signature — `Effect.catchTag` does not catch defects.** When a function's declared type is `Effect.Effect<A>` (no error channel) because its caller's contract forbids a 500, `catchTag`/`catch` on the known typed failures is not enough: a throwing `JSON.stringify`, a `RangeError` from `Intl`, or a synchronous throw inside a dependency still escapes as a defect. Wrap the whole body in `Effect.catchCause` and **re-raise an interruption-only cause** instead of degrading it, so a client disconnect stays cancelled:
+   ```typescript
+   Effect.catchCause((cause) =>
+     Cause.hasInterruptsOnly(cause)
+       ? Effect.failCause(cause)
+       : Effect.logError('Context').pipe(
+           Effect.annotateLogs({ cause: Cause.pretty(cause) }),
+           Effect.as(fallbackValue),
+         ),
+   )
+   ```
+   Reference: `ChatAgent.respond` (`applications/server/src/services/ChatAgent.ts`).
+
+8. **A callee's `E = never` is NOT a promise that it cannot abort your chain — `catchSqlErrors` dies, it does not fail.** Every repository method pipes `catchSqlErrors` (rule 4), which converts `SqlError`/`ParseError` into a DEFECT via `Effect.die`. A helper assembled from repository calls therefore declares `Effect.Effect<A, never, R>` and still aborts on a transient database failure. Reading `never` off its signature and splicing it unguarded into an existing chain (`Effect.tap`, `Effect.flatMap`) lets one failed query short-circuit **everything sequenced after it**. Any effect you add to an existing chain as an AUXILIARY step — a self-heal, a backfill emit, a best-effort notification — MUST be wrapped at the call site:
+   ```typescript
+   Effect.tap(() =>
+     auxiliaryHeal(...).pipe(
+       Effect.catchCause((cause) => Effect.logWarning('auxiliaryHeal failed (non-fatal)', cause)),
+     ),
+   )
+   ```
+   Never substitute the callee's `never` error channel for this wrap. References: `emitMemberGroupChannelRoles` at its call site in `applications/server/src/rpc/guild/index.ts` (unwrapped, it would have skipped `reconcileMemberDiscordRoles` and the welcome message), `reapplyGroupGrants` at both `applications/server/src/rpc/channel/index.ts` call sites.
+
+### Stateful Loops — `Effect.suspend` Self-Recursion
+
+**`Effect.iterate` and `Effect.loop` do not exist** in `effect@4.0.0-beta.40`, and **`Effect.whileLoop` returns `Effect<void>`** (`node_modules/effect/dist/Effect.d.ts:1249`) — it threads state only through a mutable closure variable, so it cannot carry an accumulator. Write a bounded loop that carries state as a self-recursive `Effect.suspend` over an explicit state record:
+
+```typescript
+const step = (state: LoopState): Effect.Effect<Result> =>
+  Effect.suspend(() =>
+    state.iteration >= MAX_ITERATIONS
+      ? Effect.succeed(fallback(state))
+      : doWork(state).pipe(Effect.flatMap((next) => step(next))),
+  );
+```
+
+`flatMap` trampolines, so this is stack-safe. Reference: `ChatAgent.ts`'s tool-calling loop (`applications/server/src/services/ChatAgent.ts`). Verify the combinator exists in `node_modules/effect/dist/Effect.d.ts` before reaching for it — this one has been rediscovered the hard way twice.
+
 ### Resource Management
 
 Use `Effect.acquireRelease` for automatic resource cleanup.
@@ -236,6 +290,18 @@ describe("MyService", () => {
 - **`ConfigProvider.fromMap`** — Mock configuration
 - **`Effect.provide`** — Supply test implementations
 
+### Date Fixtures On Now-Gated Paths Expire
+
+A date literal in a fixture that the code under test compares against the real clock has a silent expiry date: the test passes until that date arrives, then fails on every branch at once — and it fails naming whatever field went `undefined`, not the fixture. `applications/server/test/api/eventAllDayAnchor.test.ts` case 9 created an event at `'2026-09-16T12:00:00Z'` and then PATCHed it; on 2026-09-17 the PATCH gate (`eventAcceptsRsvp`) answered 400, the assertion read `expected undefined to be '2026-09-15T22:00:00.000Z'`, and `Check → Test` went red on `main`.
+
+Applies to server, bot and web tests alike:
+
+1. **Before writing a date literal into a fixture, check whether anything on the path under test reads the clock** — `DateTime.nowUnsafe()`, `new Date()`, `Date.now()`, or SQL `now()`. If it does, that literal has an expiry date.
+2. **A case that asserts only a relative property derives its date from the clock; a case that asserts a literal instant keeps a fixed date at least three years out** and must be rolled forward before it expires. A clock-derived date can never be pinned to a literal instant, because DST transitions and leap days move it between runs.
+3. **Assert the documented success status of every request whose response body a later assertion reads**, so the next expiry fails loudly instead of surfacing as an `undefined` field.
+
+Full rationale, the reference helper, and the list of event surfaces that consult `now`: `applications/server/AGENTS.md` → "A Date Fixture On A Now-Gated Path Has A Silent Expiry Date". The opposite trap — a fixture computed FROM `now` that wraps across a local-midnight or DST boundary — is covered in the same file under "A Cron's Test Fixtures And The Cron Must Share ONE Instant".
+
 ### Running Tests
 
 ```bash
@@ -263,10 +329,15 @@ applications/server/test/integration/
 ├── globalSetup.ts      — Starts PostgreSQL container, runs migrations, writes connection info to /tmp
 ├── setupFile.ts        — Reads connection info and sets process.env for each worker
 ├── helpers.ts          — TestPgClient layer and cleanDatabase effect
-└── repositories/       — Repository integration tests
-    ├── TeamsRepository.test.ts
-    └── UsersRepository.test.ts
+├── api/                — HTTP API handler integration tests
+├── gdpr/               — GDPR export/erasure integration tests
+├── migrations/         — Migration integration tests
+├── repositories/       — Repository integration tests
+├── rpc/                — RPC handler integration tests (wire the real `*RpcLive` against real repositories)
+└── services/           — Service integration tests
 ```
+
+Put a test here — not in `test/` — whenever the assertion depends on what the SQL actually does (recursive walks, `is_archived` severing, `ON CONFLICT`, `LATERAL` correlation). See `applications/server/AGENTS.md` → "Testing" rule 4.
 
 **Key helpers:**
 - `TestPgClient` — a `Layer` that creates PgClient from env vars set by setupFile
@@ -424,6 +495,58 @@ colliding files and the next free id. When adding a migration, take the next
 id from the highest that exists **at merge time**, not at branch time, and
 write it idempotently (`ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT
 EXISTS`) so a renumber stays safe for any database that already applied it.
+
+A `CREATE OR REPLACE FUNCTION` that **changes the argument count** does not
+replace the old function — Postgres treats a different arity as a distinct
+overload, so both survive and callers resolve unpredictably. When editing an
+unmerged migration to add a parameter, precede it with
+`DROP FUNCTION IF EXISTS <name>(<old arg types>)`.
+
+## A Backtick Inside a SQL Template Literal Ends the String
+
+Every `sql\`…\`` query in this repo is a JS template literal, so a backtick
+anywhere inside it — **including in a `--` comment** — terminates the string
+early. The rest of the query becomes JS, and the file explodes into syntax
+errors that point everywhere except the backtick.
+
+This has happened twice. Once it produced **223 type errors across the whole
+monorepo**, none of them in the offending file, presenting as "the repository's
+service type is `void`" in unrelated tests. Use single quotes when a SQL
+comment needs to quote an identifier:
+
+```ts
+// ✗ Bad — terminates the template literal
+sql`-- the \`assigned\` reminder fires outside the time gate`
+// ✓ Good
+sql`-- the 'assigned' reminder fires outside the time gate`
+```
+
+Nested backticks inside a `${}` interpolation hole are fine — the parser
+handles those correctly — but hoisting the value to a `const` above the query
+reads better and avoids provoking a false alarm during a grep.
+
+## `vi.stubGlobal('URL', …)` Breaks Vitest's Module Loader
+
+Replacing the global `URL` with a plain object (the usual way to spy on
+`createObjectURL` / `revokeObjectURL`) makes every **dynamic `import()` in that
+file** fail with `TypeError: URL is not a constructor`. Vite's module runner
+calls `new URL(...)` on the *global* to resolve a module's `file://` path, so
+the stub breaks the loader before the code under test ever runs. Reproduced
+with a zero-import module, so it is the stubbing pattern, not the subject.
+
+Spy on the real object instead — same assertions, no loader breakage:
+
+```ts
+// ✗ Bad — every `await import('./x.js')` in this file now throws
+vi.stubGlobal('URL', { ...URL, createObjectURL: mk, revokeObjectURL: rv });
+// ✓ Good
+vi.spyOn(URL, 'createObjectURL').mockImplementation(mk);
+vi.spyOn(URL, 'revokeObjectURL').mockImplementation(rv);
+```
+
+Type the mocks as `Mock<(obj: Blob | MediaSource) => string>` and
+`Mock<(url: string) => void>` so `mockImplementation` accepts them while the
+`toHaveBeenCalledWith` matchers still type-check.
 
 ## Common Tasks
 
@@ -743,6 +866,18 @@ The `docs/thesis/` directory contains Mermaid diagrams and documentation for the
 | `competitive-analysis.md` | Adding major new features that change Sideline's competitive positioning |
 
 ---
+
+**Last Updated**: 2026-09-17 (Event-start cron instant made injectable `fix/event-start-cron-injectable-clock`. `applications/server/src/services/EventStartCron.ts` now exports `makeEventStartCronEffect(now: Date)` — ONE instant threaded into BOTH deferred all-day sweeps (`findAllDayEventsPastLastLocalDay(now)`, `findAllDayEventsNeedingStartedPost(now)`), replacing two independent `new Date()` calls — with `eventStartCronEffect = Effect.suspend(() => makeEventStartCronEffect(new Date()))` as the production entry point; the `Effect.suspend` is load-bearing (without it the instant freezes at module load). The flip path (`findEventsToStart`, `startEvent`) deliberately keeps reading the Postgres clock, because `start_at <= NOW()` and the `SET … = now()` arming stamps must agree with EACH OTHER inside one statement. Test-determinism only, ZERO production behaviour change. server AGENTS.md → Testing: "Clock-Derived Time-Of-Day Fixtures Must Be Clamped Into The Local Day" rewritten as "A Cron's Test Fixtures And The Cron Must Share ONE Instant" — the deleted `localTimeOffsetClampedToDay` clamp is replaced by one pinned permanently-past literal (`FIXED_NOW = 2025-10-15T10:00:00.000Z` = 12:00 Europe/Prague) feeding both the cron and every fixture as a SQL bind parameter, never `SELECT now()`; the diagnosis is restated as two INSTANTS, not two clocks (true whatever the second sample's source), so the old "≥ 1 minute offsets / ≥ 5-second guard band" rule is gone; the one-sided-`if`-guard rule is KEPT VERBATIM (now trivially satisfiable — case 8b dropped its guard band); new rules forbid letting a boundary case fall through to a `COALESCE(<column>, <literal>)` default (a bare `UPDATE team_settings … WHERE team_id = …` affects ZERO rows when `setTeamTimezone` never created the row) and forbid `effect/testing/TestClock` in DB-backed integration tests (`SqlSchema`-ahead-of-`Effect.sleep` deadlock, reproduced at `test/integration/services/BankSyncPoller.test.ts:536-546` and `test/integration/services/FioApiClient.test.ts:312-326`; plus `@effect/vitest`'s `it.effect` auto-provides a `TestClock` at epoch 0, which is why injection beat `Clock`). Cron Jobs table: the `EventStartCron` row records the two deliberate clock sources. "Idempotent Counter Increment Folded Into the `active`→`started` Status Flip" gains rule 4: `findStartable` (`src/repositories/EventsRepository.ts:330-337`) has NO lower bound on `start_at`, the only reason a 2025 `FIXED_NOW` can coexist with a real current DB clock — adding one breaks every case in `test/integration/services/EventStartCron.deferred.test.ts`, which also gained regression groups I1-I10: team-local-midnight boundary and Prague DST fall-back fold, for both deferred sweeps.)
+
+**Last Updated**: 2026-09-17 (Expired date fixture in `eventAllDayAnchor.test.ts` case 9 `fix/event-anchor-test-expired-fixture`. root AGENTS.md → Testing: new "Date Fixtures On Now-Gated Paths Expire" — a date literal on a path that reads the clock (`DateTime.nowUnsafe()`, `new Date()`, `Date.now()`, SQL `now()`) has a silent expiry date and fails naming the wrong subsystem; relative-property cases derive the date from the clock, literal-instant cases keep a fixed date at least three years out and roll it forward; assert the documented success status of every request whose body a later assertion reads. server AGENTS.md → Testing: new sibling section "A Date Fixture On A Now-Gated Path Has A Silent Expiry Date", cross-referenced with the existing "Clock-Derived Time-Of-Day Fixtures Must Be Clamped Into The Local Day" — tabulates the six event surfaces that consult `now` (`updateEvent`, `cancelEvent`, `submitRsvp`, `Event/SubmitRsvp`, and the `canEdit`/`canCancel`/`canRsvp` flags on `getEvent`/`getRsvps`/`Event/GetRsvpCounts`), and records that `createEvent` reads NO clock — so the create-only cases 1–5, 7 and 13 keep their past 2026 literals on purpose and must NOT be rolled forward, while the 2030 literals in cases 6, 8, 10, 11 and 12 are deferred expiries that die on 2030-07-16 Europe/Prague.)
+
+**Last Updated**: 2026-09-16 (Fio bank transaction matching `feat/fio-transaction-matching`. New bank-sync subsystem: `bank_transactions` + `bank_sync_config` + `payments.bank_transaction_id`, an hourly `BankSyncPoller`, `BankTransactionMatcher`, CSV/PDF export, SPAYD QR. root AGENTS.md → Architecture: new "Bank Sync (Fio) — Trigger-Owned Columns And One Lock Order" — `payments_finance_recompute` (migration `1792000002`) REPLACED `payments_recompute_paid_minor` and now owns `fee_assignments.paid_minor` AND the payment-derived `bank_transactions.match_state` (app code may only set the human terminal states `ignored`/`not_applicable`, always guarded by `WHERE match_state IN (…)`), and stamps `auto_match_suppressed` on any active→voided payment transition, which is what stops the poller re-creating a deliberately reversed payment — including via the bank-unaware `voidPayment` endpoint; plus the canonical money-write lock order `payments` → `bank_transactions` → `fee_assignments`, each by `id ASC`, whose violation is a `40P01` surfacing as an untyped `SqlError`. root AGENTS.md also gained (authored separately): the `CREATE OR REPLACE FUNCTION` arity-overload trap under Migration IDs, "A Backtick Inside a SQL Template Literal Ends the String", and "`vi.stubGlobal('URL', …)` Breaks Vitest's Module Loader". server AGENTS.md: new "Fio API Client — The Token Is In The URL Path" (`HttpClient.TracerDisabledWhen` must be provided via `HttpClient.transform` on the client VALUE — the ref is read at execute time from the caller's fiber, so a construction-layer `Layer.provide` is silently ignored and the token lands in `url.full`; `TransportError` is nested inside `HttpClientError` so only `catchTag('HttpClientError')` + `catchCause` contains it, and the body decode must sit inside that boundary; the 30 s per-token throttle lives in SQL (`fio_token_throttle`) and returns a duration, never a timestamp, and must never run inside `sql.withTransaction`; a dead token returns a bodyless 500 with no 401/403, so 5xx is NEVER retried) and "PDF Fonts Must Be Vendored — pdfkit Corrupts Czech Silently" (WinAnsi renders `á é í ó ú ý š ž` but emits a malformed token for `č ď ě ň ř ť ů` and desynchronises the rest of the string with no exception, so a smoke test on the first set passes against a garbage document; vendored Noto Sans TTFs + `scripts/copy-assets.mjs` + `scripts/assert-dist.mjs`, because `tsc` does not copy `.ttf` and `node:25-slim` ships no fonts); plus rule 5 under "Consistent `FOR UPDATE` Lock Ordering" — locks a trigger takes on your behalf still count, so order the driving SELECT by the column the trigger will lock on (`unmatch` voids `ORDER BY fee_assignment_id ASC`, not by payment id). domain AGENTS.md → Pure Algorithm Modules: added `CzIban.ts` / `CzIco.ts` / `Spayd.ts` as reference implementations (imported by server, bot and web, which is why no second copy lives in `web/src/lib/finance/`) and rule 6 — checksum/wire-format modules must pin externally verified vectors and record their provenance, because vendor-published sample identifiers are routinely anonymised with un-recomputed check digits and fail their own checksum. web AGENTS.md: closed-union rule 5 — the icon/shape `Record`s keyed off a wire union are governed by the same exhaustiveness rule as the copy `Record` (`src/lib/finance/matchReasons.ts`, three parallel closed maps over the nine `BankTransaction.BankTransactionMatchReason` literals), and a carve-out in "Pure Helpers" rule 2 for closed-union lookup tables. bot AGENTS.md: the Bank Token Expiry section now describes a complete loop — `BankTokenExpiryCron` (daily, `0 4 * * *`) emits into `bank_token_expiry_events` at T-14/T-7/T-1 derived from `fio_token_created_at + 180 days`, writes `bank_token_expiry_sent` itself (the bot has no sent-ack for this family, unlike payment reminders), and an already-expired token stops firing because the day-difference equals a threshold exactly once as time moves forward.)
+
+**Last Updated**: 2026-09-15 (Group Discord channel role on late/manual join `fix/group-channel-discord-join`. root AGENTS.md → Effect-TS Patterns: new rule 8 — a callee's `E = never` is NOT a promise it cannot abort your chain, because `catchSqlErrors` DIES rather than fails; any auxiliary step spliced into an existing chain (self-heal, backfill emit, best-effort notification) MUST be wrapped in `Effect.catchCause` + `logWarning` at the call site. server AGENTS.md → "`Guild/RegisterMember` and Welcome Metadata" rule 6 (added by the implementer) gained three sub-rules: keep the `catchCause` wrap on `emitMemberGroupChannelRoles`; `MAX_GROUP_CHANNEL_EMISSIONS_PER_MEMBER = 25` is PERMANENTLY lossy (fires once on join, never re-derived) so `findActiveGroupsWithAncestorsForMember`'s `ORDER BY min(depth), name, id` must stay; `boundGroupIds` is now a functional `alreadyEmittedGroupIds` argument (duplicate-row suppression), which rule 2 previously called type-level-only. "Effective Roles Are Derived In Exactly One Place" rule 3: `findActiveGroupsWithAncestorsForMember` is now the FOURTH walk that must sever identically, and a new walk must ship an integration test ASSERTING set-equality with an existing walk, not just a header comment. Accuracy fixes: `teams.guild_id` is `NOT NULL` + `UNIQUE`, so `emitIfGuildLinked`'s `None` branch means the team ROW IS ABSENT, never "team exists but is unlinked" — the three backfill intros (server ×2, bot ×1) that blamed role-less groups/members on "created before the guild was linked" now blame unprocessed/permanently-failed events; and the roster backfill button invokes its endpoint ONCE per click (`RostersListPage.tsx:46-75`), it does not loop while `remainingCount > 0`.)
+
+**Last Updated**: 2026-09-14 (Read-only in-app AI assistant `feat/ai-app-interaction`. domain: new `AiChatApi` contract (`GET/POST /teams/:teamId/ai/*`). root AGENTS.md → Effect-TS Patterns: new "Stateful Loops — `Effect.suspend` Self-Recursion" (`Effect.iterate`/`Effect.loop` do not exist in `effect@4.0.0-beta.40`, and `Effect.whileLoop` returns `Effect<void>` and cannot carry an accumulator — `node_modules/effect/dist/Effect.d.ts:1249`); Error Handling rule 7 — only `Effect.catchCause` EARNS an `E = never` signature (`catchTag` does not catch defects), re-raise an interruption-only cause with `Effect.failCause`. server AGENTS.md: new "Read-Only AI Assistant: `LlmClient` Transport vs `ChatAgent` Loop" — `LlmClient` is the config-gated transport (`chatWithTools`, `configured`, no app imports), `ChatAgent` owns iteration/dispatch/budgets/tokens/degradation, `src/api/ai-chat.ts` owns authz/kill-switch/rate-limit — plus subsections on the `Effect.suspend` loop, deriving tool parameter JSON Schemas (`Schema.toJsonSchemaDocument(schema, { additionalProperties: false })`, `Schema.Number` banned, empty-`Struct` `anyOf` collapse), two-layer permission enforcement (`visibleTools` is UX, each executor re-check is the boundary; a tool's gate must match the equivalent HTTP endpoint's gate), opaque per-turn reference tokens (never positional), and config-gated degradation (200 + `generated: false` + closed `degradedReason`). server AGENTS.md fixes: "HttpApi Mock-Layer Cascade" now says `grep -rl ApiLive applications/server/test` (the previously documented `Layer.provide(ApiLive)` / `Layer.provideMerge(ApiLive)` greps return zero matches); "`Schema.Class` Is Nominal" gained rule 5 — `Schema.Union` member selection is nominal too, so union-typed test fixtures must construct the real class. domain AGENTS.md: new "Degradable Endpoints: 200 + `generated: false` + A Closed `Reason` Union" and "Model-Cited Entities Ship As A Typed `EntityRef` Union". web AGENTS.md fixes/additions: the Forms section mandated `effectTsResolver`, which has ZERO usages in this repo — corrected to `standardSchemaResolver(Schema.toStandardSchemaV1(...))`, the convention at all 22 real call sites; new "Closed-Union Copy Comes From An Explicit `Record`, Never A Computed Key" and "AI Assistant Client Rules — `src/lib/assistant/`".)
+
+**Last Updated**: 2026-09-14 (Group roles never reach Discord `fix/group-roles-never-reach-discord`. `applications/server/AGENTS.md` → "`Guild/RegisterMember` and Welcome Metadata": rewrote step 5 — the group bind now also emits `member_added` channel-sync events for the group and its active ancestors (via the new `applyInviteGroup`), not just a bare `group_members` insert, so the bot grants the group's own Discord role instead of relying on the reconcile diff (which reads `discord_role_mappings`, not `discord_channel_mappings`, so it could never cover a group's own auto-created role). Added five rules: every group-add must write `group_members` AND emit `member_added` for the group and its active ancestors (exactly two exceptions: `setupNewMember`'s mapping-derived add, and `joinViaInvite`'s bind, which targets a user not yet in the guild); every write that changes effective roles must be bound above `reconcile` (`boundGroupIds` destructure makes reordering a compile error); ancestor walks driving Discord writes must use `getActiveAncestors`, never the archived-blind `getAncestors`/`findAncestors` (still owed by `deactivateMemberCascade.ts:156`, `api/group.ts:490`); a liveness check on a group reached from `team_invites` must go through `groups.findGroupById`, not the invite row, since `findByCode` does not join `groups`; and `GuildsRpcLive`'s top-level `Effect.Do.pipe` is already at 19 of the `Pipeable` overloads' 20-argument ceiling, so a newly-needed repository must be resolved inline with `.asEffect()` inside the function that needs it rather than appended as a 20th/21st top-level bind. Also recorded: the role diff is bot-version-gated (`payload.source: None`, i.e. a pre-PR-8 bot, skips `observeGuildMembership` entirely) and nothing in `registerMemberWithReconcile` is transactional — the group insert, the `channel_sync_events` insert, the `role_sync_events` inserts, and `markDiscordJoined` are four independent commits. Also updated, outside that section: "Invite Endpoints" — the `joinViaInvite` row now states the group bind, plus three rules for it (`findGroupById` is the liveness check, never the invite row; emit nothing to Discord because the member is not in the guild yet; no third write in that `Effect.tap` chain without a transaction). Sync Event Pattern rule 4 gained an explicit scope: it covers writes that NARROW Discord state, and must NOT be read as licence to skip an emit because an idempotent `INSERT ... ON CONFLICT DO NOTHING` reported no change — the row existing does not mean the Discord grant happened. "Effective Roles Are Derived In Exactly One Place" rule 3's must-agree set gained `GroupsRepository.findActiveAncestors` (three walks now, not two) and a general rule: a query whose semantics must match another's must name that other query in its own header comment at BOTH sites (`effectiveRoles.ts` ↔ `findDescendantMembersWithDiscordIdQuery` still owe each other that comment). Depth-guard inventory gained `findActiveAncestors` to the guarded list. Testing gained rule 4: a mock for a repository method whose result is defined by production SQL must model ONLY the property under test and never re-implement the query, must comment what it does NOT model and which integration test covers the real semantics (reference: the deliberately flat `groupRoles` map in `test/rpc/RegisterMember.test.ts`); any assertion about a query's real semantics belongs in `test/integration/`. Root AGENTS.md: the integration-test tree listing was stale (claimed `repositories/` only) and now lists all six subdirectories including `rpc/`, with a pointer to that new Testing rule. No bot/domain/migrations changes — the bot's `handleMemberAdded` contract is unchanged; only the rate at which its self-healing `createRoleOnly` branch is reached went up, and the archived-ancestor hazard that creates is documented server-side at the emit site. No `.claude/` changes — the workflow did not change.)
 
 **Last Updated**: 2026-09-13 (Group-inherited role linking `fix/role-linking`. server AGENTS.md: new SQL-pattern section "Effective Roles Are Derived In Exactly One Place (`effectiveRoles.ts`)" — `member_roles` ∪ (`group_members` → recursive `groups.parent_id` ancestor walk → `role_groups`) now lives in one `sql.unsafe`-spliced fragment (`effectiveRolesFrom` / `effectiveRoleNamesAgg` / `effectivePermissionsAgg` / `effectiveRolesAggLateral`), following the `eventVisibility.ts` precedent; covers the `JOIN LATERAL ... ON true` requirement for a correlated derived table, the one-materialization lateral over N scalar subqueries, the deliberate "archiving a group severs inheritance" semantics (filter inside the RECURSIVE TERM, so it agrees with `findDescendantMembersWithDiscordIdByGroupId`), and the `string_agg(DISTINCT x ORDER BY y)` constraint. New section "Recursive `groups.parent_id` Walks Must Carry a `depth < 32` Guard" (no DB acyclicity constraint + TOCTOU `moveGroup` check = constructible cycle) listing which walks are guarded today. "Does member hold permission X" section rewritten to mandate the shared fragment instead of a hand-copied direct+group `EXISTS` pair. New section "Authorization Decisions Must Read a Membership Query, Never a Roster DTO" (the last-admin guard read `permissions` off a group-blind display DTO and silently skipped). Sync Event Pattern gained rules 4 and 5: never emit for a delete that changed nothing the bot mirrors (`unassignRole` re-checks effective roles post-delete), and a post-write re-check must `Effect.catchDefect` so it can't fail the committed write. "Cross-Tenant Resource Lookups" rule 6: payload-referenced ids need the same team check as path ids, with their own `<Resource>NotFound` tag (`GroupApi.RoleNotFound`). web AGENTS.md: new "Interactive Triggers: `Badge` Is a `<span>`, Tooltips Do Not Open On Touch" under Shadcn Components; new "Effective Roles In The UI — `src/lib/roles/`" (`resolveEffectiveRoles` + `sortEffectiveRoles`, inherited roles get a forward-to-group link instead of a remove control, assign-select filtered by `roleId`); `src/lib/` table row for `src/lib/roles/`; Pure-Helpers rule 2 now permits `getLocale()` solely for `Intl`/`localeCompare`; testing section notes the `window.matchMedia` polyfill in `test/setup.ts`.)
 

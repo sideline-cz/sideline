@@ -26,6 +26,13 @@
  *   3. countActiveRostersWithRole — roster-scoped count matching findActiveRostersWithRole
  *      population. Used for remainingCount arithmetic in the backfill response.
  *      Applies the same dedup guard (processed_at IS NULL only, no error IS NULL check).
+ *
+ *   4. clearGroupRole — the Discord-10011 stale-role healing primitive (bug 3db93506, PR 2,
+ *      plan §3.4/§5.4). Gated in SQL on `discord_channel_id IS NOT NULL` so it can never put a
+ *      mapping into the both-NULL state: a group with `discord_channel_id` set has its
+ *      `discord_role_id` cleared (channel left intact); a group with `discord_channel_id` NULL
+ *      (detached via `clearGroupChannel`, or role-only by design) is left UNCHANGED. Also
+ *      covers cross-team/cross-group isolation.
  */
 
 import { describe, expect, it } from '@effect/vitest';
@@ -1514,5 +1521,229 @@ describe('DiscordChannelMappingRepository.findExpectedRoleHolders', () => {
         // Exactly A and B (2 members) — DISTINCT union of rosterX ∪ rosterY, active only
         expect(new Set(returnedDiscordIds).size).toBe(2);
       }).pipe(Effect.provide(TestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// clearGroupRole
+//
+// Best-effort Discord-10011 (Unknown Role) healing primitive: clears a stale
+// `discord_role_id` while leaving `discord_channel_id` intact, so the group is
+// handed back to `findGroupsMissingRole`'s `onSome` branch (existing channel,
+// new role — `handleCreated.ts` branch 1) instead of `onNone` (which would
+// create a SECOND channel). Gated in SQL on `discord_channel_id IS NOT NULL`:
+// a group with no channel (detached via `clearGroupChannel`, or role-only by
+// design) must be left UNCHANGED, or a default-`true`
+// `create_discord_channel_on_group` would create a Discord channel for a group
+// somebody intentionally detached.
+// ---------------------------------------------------------------------------
+
+describe('DiscordChannelMappingRepository.clearGroupRole', () => {
+  it.effect(
+    'discord_channel_id set: clears discord_role_id, leaves discord_channel_id intact, and the group flips from findActiveGroupsWithRole to findGroupsMissingRole',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('980000000000000001', 'clear-role-user');
+        const team = yield* createTeam('980000000000000002' as Discord.Snowflake, userId);
+
+        const group = yield* createGroup(team.id, 'Provisioned Group');
+        const channelId = '980000000000000010' as Discord.Snowflake;
+        const roleId = '980000000000000011' as Discord.Snowflake;
+        yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.insert(team.id, group.id, channelId, roleId)),
+        );
+
+        // Precondition: fully provisioned group is selected by findActiveGroupsWithRole,
+        // NOT by findGroupsMissingRole.
+        const before = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findActiveGroupsWithRole(team.id, 100)),
+        );
+        expect(before.map((r) => r.group_id)).toContain(group.id);
+        const beforeMissing = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findGroupsMissingRole(Option.some(team.id), 100)),
+        );
+        expect(beforeMissing.map((r) => r.group_id)).not.toContain(group.id);
+
+        yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.clearGroupRole(team.id, group.id)),
+        );
+
+        const row = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findByGroupId(team.id, group.id)),
+        );
+        const mapping = Option.getOrThrow(row);
+        expect(
+          Option.isNone(mapping.discord_role_id),
+          'discord_role_id must be cleared to NULL',
+        ).toBe(true);
+        expect(
+          Option.getOrNull(mapping.discord_channel_id),
+          'discord_channel_id must remain intact',
+        ).toBe(channelId);
+
+        // Post-condition: the group flips sides — findGroupsMissingRole now returns it
+        // (via the onSome/existing-channel branch), findActiveGroupsWithRole no longer does.
+        const after = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findActiveGroupsWithRole(team.id, 100)),
+        );
+        expect(after.map((r) => r.group_id)).not.toContain(group.id);
+
+        const afterMissing = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findGroupsMissingRole(Option.some(team.id), 100)),
+        );
+        const missingRow = afterMissing.find((r) => r.group_id === group.id);
+        if (missingRow === undefined) {
+          throw new Error('group must now be returned by findGroupsMissingRole');
+        }
+        // And crucially it carries a channel id, so the bot takes the existing-channel
+        // branch (createRoleForChannel) rather than creating a second channel.
+        expect(Option.isSome(missingRow.discord_channel_id)).toBe(true);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'discord_channel_id NULL (detached via clearGroupChannel): row is UNCHANGED — the both-NULL gate',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('981000000000000001', 'detached-gate-user');
+        const team = yield* createTeam('981000000000000002' as Discord.Snowflake, userId);
+
+        const group = yield* createGroup(team.id, 'Detached Group');
+        const channelId = '981000000000000010' as Discord.Snowflake;
+        const roleId = '981000000000000011' as Discord.Snowflake;
+        yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.insert(team.id, group.id, channelId, roleId)),
+        );
+        // Captain detaches the channel: discord_channel_id -> NULL, discord_role_id
+        // stays Some. This is the state `clearGroupRole` must never touch.
+        yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.clearGroupChannel(team.id, group.id)),
+        );
+
+        const before = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findByGroupId(team.id, group.id)),
+        );
+        const beforeMapping = Option.getOrThrow(before);
+        expect(Option.isNone(beforeMapping.discord_channel_id)).toBe(true);
+        expect(Option.getOrNull(beforeMapping.discord_role_id)).toBe(roleId);
+
+        yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.clearGroupRole(team.id, group.id)),
+        );
+
+        const after = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findByGroupId(team.id, group.id)),
+        );
+        const afterMapping = Option.getOrThrow(after);
+        expect(
+          Option.getOrNull(afterMapping.discord_role_id),
+          'discord_role_id must be UNCHANGED — the gate must reject this UPDATE',
+        ).toBe(roleId);
+        expect(Option.isNone(afterMapping.discord_channel_id)).toBe(true);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect(
+    'discord_channel_id NULL (role-only by design via insertRoleOnly): row is UNCHANGED',
+    () =>
+      Effect.gen(function* () {
+        const userId = yield* createUser('982000000000000001', 'role-only-gate-user');
+        const team = yield* createTeam('982000000000000002' as Discord.Snowflake, userId);
+
+        const group = yield* createGroup(team.id, 'Role Only Group');
+        const roleId = '982000000000000011' as Discord.Snowflake;
+        yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.insertRoleOnly(team.id, group.id, roleId)),
+        );
+
+        yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.clearGroupRole(team.id, group.id)),
+        );
+
+        const after = yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findByGroupId(team.id, group.id)),
+        );
+        const afterMapping = Option.getOrThrow(after);
+        expect(
+          Option.getOrNull(afterMapping.discord_role_id),
+          'role-only mapping must be UNCHANGED — no discord_channel_id to gate on',
+        ).toBe(roleId);
+        expect(Option.isNone(afterMapping.discord_channel_id)).toBe(true);
+      }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('cross-group isolation: clearing group A never touches group B in the same team', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('983000000000000001', 'cross-group-user');
+      const team = yield* createTeam('983000000000000002' as Discord.Snowflake, userId);
+
+      const groupA = yield* createGroup(team.id, 'Group A');
+      const groupB = yield* createGroup(team.id, 'Group B');
+      const channelA = '983000000000000010' as Discord.Snowflake;
+      const roleA = '983000000000000011' as Discord.Snowflake;
+      const channelB = '983000000000000020' as Discord.Snowflake;
+      const roleB = '983000000000000021' as Discord.Snowflake;
+      yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.insert(team.id, groupA.id, channelA, roleA)),
+      );
+      yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.insert(team.id, groupB.id, channelB, roleB)),
+      );
+
+      yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.clearGroupRole(team.id, groupA.id)),
+      );
+
+      const rowA = Option.getOrThrow(
+        yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findByGroupId(team.id, groupA.id)),
+        ),
+      );
+      const rowB = Option.getOrThrow(
+        yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findByGroupId(team.id, groupB.id)),
+        ),
+      );
+
+      expect(Option.isNone(rowA.discord_role_id), 'group A role must be cleared').toBe(true);
+      expect(Option.getOrNull(rowB.discord_role_id), 'group B role must be untouched').toBe(roleB);
+      expect(Option.getOrNull(rowB.discord_channel_id)).toBe(channelB);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect('cross-team isolation: clearing a group in team A never touches team B', () =>
+    Effect.gen(function* () {
+      const userId = yield* createUser('984000000000000001', 'cross-team-clear-user');
+      const teamA = yield* createTeam('984000000000000002' as Discord.Snowflake, userId);
+      const teamB = yield* createTeam('984000000000000003' as Discord.Snowflake, userId);
+
+      // Same group id would never occur in practice (groups are UUIDs distinct per
+      // team), but to prove the WHERE clause is truly team-scoped and not just
+      // group-scoped, seed two DIFFERENT groups (one per team) and confirm B is
+      // untouched — the group-scoped case is covered above.
+      const groupA = yield* createGroup(teamA.id, 'Team A Group');
+      const groupB = yield* createGroup(teamB.id, 'Team B Group');
+      const channelA = '984000000000000010' as Discord.Snowflake;
+      const roleA = '984000000000000011' as Discord.Snowflake;
+      const channelB = '984000000000000020' as Discord.Snowflake;
+      const roleB = '984000000000000021' as Discord.Snowflake;
+      yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.insert(teamA.id, groupA.id, channelA, roleA)),
+      );
+      yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.insert(teamB.id, groupB.id, channelB, roleB)),
+      );
+
+      yield* DiscordChannelMappingRepository.asEffect().pipe(
+        Effect.andThen((repo) => repo.clearGroupRole(teamA.id, groupA.id)),
+      );
+
+      const rowB = Option.getOrThrow(
+        yield* DiscordChannelMappingRepository.asEffect().pipe(
+          Effect.andThen((repo) => repo.findByGroupId(teamB.id, groupB.id)),
+        ),
+      );
+      expect(Option.getOrNull(rowB.discord_role_id), 'team B group must be untouched').toBe(roleB);
+    }).pipe(Effect.provide(TestLayer)),
   );
 });

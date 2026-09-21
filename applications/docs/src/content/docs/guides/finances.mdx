@@ -12,6 +12,8 @@ Sideline's Finance module lets admins and members with the Treasurer role define
 - **Fee** — a named charge defined at the team level (e.g. "Spring 2026 membership", "Kit fee"). Each fee has a default amount, a currency, and an optional due date.
 - **Assignment** — the record that links a fee to a specific member. An assignment inherits the fee's amount and due date, but both can be overridden per member.
 - **Payment** — money received against an assignment. Payments are never deleted; they can be **voided** with a reason if recorded in error.
+- **Variable symbol** — a short number (1–10 digits) attached to a member, printed on their payment QR codes and matched against incoming bank transfers. See [Setting up variable symbols](#setting-up-variable-symbols) below.
+- **Bank movement** — one transaction read from the club's connected bank account. See [Connecting a bank account](#connecting-a-bank-account-fio) below.
 - **Status** — computed automatically from the assignment's amounts and due date:
 
   | Status | Meaning |
@@ -36,8 +38,13 @@ Finance permissions follow a treasurer-style split across four built-in roles. B
 | Record or void payments | Yes | No | Yes | No |
 | Create, edit, or delete expenses | Yes | No | Yes | No |
 | View own fee status (My Payments) | Yes | Yes | Yes | Yes |
+| Connect / edit the bank account (Fio) | Yes | No | Yes | No |
+| View and resolve bank movements | Yes | No | Yes | No |
+| Assign variable symbols to members | Yes | Yes | Yes | No |
 
 All team members can access their own My Payments page and check their own fee balance in Discord, regardless of role.
+
+Assigning variable symbols is the one bank-related action Captains can also do — it uses `member:edit` (which Captains hold by default) rather than a finance permission, since it is really a roster-profile field. Viewing and resolving the bank movements list itself is treasurer-only: that page shows the name, account number, and payment message of everyone who has paid the club, which is not roster-level information.
 
 <Aside type="note" title="Planned features">
 Several Finance features are planned for follow-up releases:
@@ -74,6 +81,154 @@ From this page you can:
 - Edit a fee's details or archive it when it is no longer needed.
 - Waive an individual assignment (e.g. hardship exemption).
 - Record a payment directly from the assignment list.
+
+## Connecting a bank account (Fio)
+
+If your club banks with **Fio banka**, Sideline can read your account's incoming payments automatically, match them to outstanding fees, and generate scannable payment QR codes for members — no more reconciling a bank statement against a spreadsheet by hand.
+
+<Aside type="note" title="Fio only, for now">
+  Automatic bank matching currently supports **Fio banka** accounts only. If your club banks elsewhere, you can still use everything else in this guide — fees, assignments, cash payments, expenses — you just won't get automatic matching or QR codes.
+</Aside>
+
+### Generating a read-only API token
+
+<Steps>
+
+1. Sign in to Fio Internetbanking at [ib.fio.cz](https://ib.fio.cz).
+2. Open **Settings → API**.
+3. Click **Create new token**.
+4. Choose the **"Sledování účtu"** ("Account monitoring") permission.
+5. Pick the club account and confirm.
+6. The token is shown only once — copy it immediately.
+
+</Steps>
+
+<Aside type="caution" title="Never choose the order-submitting permission">
+  Fio also offers a token permission that can submit payment orders. **Do not use it here.** The token is stored so Sideline can see incoming payments — with the read-only "Account monitoring" permission, even a leaked token cannot move a single crown out of the account. With the order-submitting permission, it could.
+</Aside>
+
+### Connecting the account
+
+<Steps>
+
+1. Go to **Team → Settings** and open the bank connection card.
+2. Enter the account prefix (if any) and account number. Fio's bank code (`2010`) is filled in automatically.
+3. Enter the club's recipient name — this is printed on payment QR codes and on the grant-export PDF.
+4. Paste the API token you generated above.
+5. Turn the connection **on** and save.
+
+</Steps>
+
+Optionally, expand **Details for documents** to add the club's IČO and registered address. These print on the PDF export's header for a municipal grant audit — the export still works without them, but a document for an authority should carry the club's identification.
+
+<Aside type="tip" title="Give it five minutes">
+  A freshly created Fio token needs about five minutes before Fio itself will accept requests with it. Sideline retries on its own during this window — you don't need to do anything, but don't be alarmed if the connection briefly shows "activating" right after you save.
+</Aside>
+
+Once connected, Sideline checks the account for new payments automatically, roughly once an hour.
+
+### Importing older movements
+
+By default, Fio only shares movements from the last 90 days. If you need older history — for example, to backfill a grant's reporting period — Fio requires you to explicitly unlock it first:
+
+<Steps>
+
+1. In Fio Internetbanking, open **Settings → API** and click the padlock icon next to your token.
+2. This opens a **10-minute window** during which Fio will release older history.
+3. Within those 10 minutes, go back to Sideline's bank connection card and start the import, choosing the date range you need.
+
+</Steps>
+
+If the window closes before you start the import, Sideline tells you the history wasn't released and lets you try again.
+
+### If your token expires
+
+Fio tokens last **at most 180 days**, and only renew themselves when someone actually signs in to Fio Internetbanking or Smartbanking. If nobody signs in for a long stretch, the token quietly stops working — and until someone notices, new payments stop being imported.
+
+To make sure that doesn't happen quietly, Sideline warns you twice, starting two weeks out:
+
+- **On the bank connection card**, a banner appears 14 days before your token's expiry and stays until you act.
+- **By Discord DM**, sent to whoever configured the connection, at 14 days, 7 days, and 1 day before expiry.
+
+Either way, you have two options: sign in to Fio Internetbanking or Smartbanking yourself (which renews the token with no action needed in Sideline), or generate a fresh token and paste it in following the steps above.
+
+## Setting up variable symbols
+
+A **variable symbol** is a short number (1–10 digits) that identifies who a bank payment belongs to — it's the standard way Czech and Slovak bank transfers carry this information, since the payer's name alone isn't reliable enough to match automatically. Sideline matches incoming Fio payments to a member's outstanding fees by this number, so **until a member has a variable symbol, none of their bank payments can be matched automatically** — this is the first thing to set up after connecting the account.
+
+### Assigning symbols in bulk
+
+The fastest way to get every existing member set up:
+
+<Steps>
+
+1. Go to **Team → Members**. If any active members are missing a variable symbol, a banner tells you how many.
+2. Click **Assign symbols automatically**.
+3. Sideline proposes a symbol for every member who doesn't have one yet — nobody who already has a symbol is touched. Review the list.
+4. Confirm to save all of them at once.
+
+</Steps>
+
+### Setting or changing one member's symbol
+
+Open the member's profile and edit the **Variable symbol** field directly, the same way you'd edit their jersey number. Symbols must be unique within the team — Sideline tells you which teammate already holds a symbol if you try to reuse one (leading zeros don't matter: `007` and `7` are treated as the same number).
+
+<Aside type="tip" title="Who can do this">
+  Assigning variable symbols only requires the ability to edit a member's profile (`member:edit`), which Captains hold by default — you don't need finance permissions just to give a teammate a variable symbol.
+</Aside>
+
+## The bank movements matching queue
+
+Go to **Team → Finances → Bank movements** (`/teams/:teamId/finances/bank`, requires `finance:record_payments`) to see every payment Sideline has read from the connected account and, for anything that couldn't be matched automatically, resolve it by hand.
+
+The page has three tabs:
+
+**To match** — the queue of payments that need attention. Each row shows why it landed here: no variable symbol at all, a variable symbol nobody on the team holds, several members sharing the same symbol, an amount lower or higher than the fee, the amount matching more than one open fee, no open fee to match against, or a currency mismatch. For each one, you can:
+- **Assign it** to a specific member's fee (or split it across several fees, if the amount covers more than one).
+- Mark it as **other club income** — a genuine payment that just isn't a membership fee (a sponsorship, a donation).
+- Mark it as **not relevant** — for example, a duplicate of a payment you've already matched (Sideline flags likely duplicates for you).
+
+**Matched** — everything that's been resolved, whether automatically or by hand, plus anything marked as other income or ignored. Filter by how it was resolved. Each row shows exactly which member, fee, and amount it was matched to, and when.
+
+**Grant export** — see [Exporting bank movements](#exporting-bank-movements-for-a-grant-audit) below.
+
+<Aside type="tip" title="Undoing a match">
+  If a payment was matched to the wrong member or fee, open it and cancel the assignment with a reason. The fee goes back to unpaid and the payment returns to the queue — nothing is deleted; the cancelled match stays in the history for the audit trail.
+</Aside>
+
+## Payment QR codes
+
+Once a member has a variable symbol and the club's bank account is connected, Sideline can generate a scannable **SPAYD payment QR code** for any outstanding fee — the same format Czech banking apps already recognise, pre-filled with the club's account, the amount owed, the member's variable symbol, and a payment message.
+
+**In Discord**, the payment reminder DM (see [Payment reminders](#payment-reminders) below) includes the QR code as an image attachment whenever one can be built, plus a plain-text fallback block for anyone who can't scan it.
+
+**On the My Payments page**, click the QR icon next to any outstanding fee to reveal the code inline.
+
+<Aside type="note" title="Why the QR text looks different from the rest of the message">
+  The text encoded *inside* the QR code (the payment message and the recipient name) is written in unaccented, uppercase letters — for example `PRISPEVEK PODZIM 2026 NOVAK` instead of "Příspěvek podzim 2026 Nováková". This is a requirement of the SPAYD payment-QR standard itself, not a Sideline bug or a translation error — the rest of the message around the QR code keeps full Czech diacritics as normal.
+</Aside>
+
+If a member has no variable symbol, or the club hasn't connected a bank account, Sideline simply skips the QR — the reminder still sends as a normal text message, and the affected member sees a note explaining who to contact (their treasurer) to get set up.
+
+## Exporting bank movements for a grant audit
+
+Go to the **Grant export** tab on the Bank movements page to download a record of the account's movements for a chosen period — useful evidence for a municipal grant report or for handing off to an accountant.
+
+<Steps>
+
+1. Choose a date range (or use the "last year" shortcut).
+2. Optionally, add a document label — for example, a grant contract number — which is printed in the file's header.
+3. Choose **CSV** or **PDF** and download.
+
+</Steps>
+
+<Aside type="caution" title="Use the PDF for anything official">
+  The CSV is formatted for Czech Excel (semicolon-separated, comma decimals) so it opens correctly with a double-click — but **Excel silently drops leading zeros from variable symbols and account numbers** when it opens the file (`0123456789` becomes `123456789`). For a municipal grant audit or any other official use, **download the PDF instead** — its figures are exactly as recorded.
+
+  If you specifically need the CSV data with the leading zeros intact, don't just double-click it: in Excel, use **Data → From Text/CSV**, and when the import wizard asks for each column's type, set the variable-symbol and account-number columns to **Text** before finishing the import.
+</Aside>
+
+If the selected period isn't fully covered by what Sideline has actually imported from the bank — for example, part of the range was never fetched, or Fio's own reported balances don't add up for some reason — the export tells you exactly which dates are missing before you download anything. You can narrow the range, import the missing period first, or export anyway with a visible warning stamped onto the document.
 
 ## Expense tracking
 
@@ -200,7 +355,7 @@ Below the KPI cards a row of chips lets you narrow the assignment list:
 
 ### Per-fee table
 
-Assignments are grouped by currency. Each group is displayed as a table with columns for **Fee name**, **Due date**, **Amount paid**, and **Status badge**. Click the chevron on any row that has recorded payments to expand an inline payment history showing the amount, method, date, and who recorded each payment.
+Assignments are grouped by currency. Each group is displayed as a table with columns for **Fee name**, **Due date**, **Amount paid**, and **Status badge**. Click the chevron on any row that has recorded payments to expand an inline payment history showing the amount, method, date, and who recorded each payment. On any outstanding fee, click the QR icon to reveal a scannable [payment QR code](#payment-qr-codes) for the remaining balance, if the club has connected a bank account.
 
 ### Outstanding / overdue alert banner
 
@@ -232,17 +387,18 @@ Each outstanding fee appears as a field showing the fee name, amount still owed,
 
 ## Payment reminders
 
-Sideline automatically sends you a Discord DM when a fee assignment reaches one of five reminder points relative to its due date:
+Sideline automatically sends you a Discord DM when a fee is assigned to you and again at each of five reminder points relative to its due date:
 
 | When | Reminder |
 |---|---|
+| As soon as a fee is assigned to you | A neutral "you've been assigned a new fee" message (blue embed) |
 | 3 days before due | "Heads up — payment due soon" (blue embed) |
 | On the due date | "Payment due today" (yellow embed) |
 | 3 days overdue | "Payment overdue" (red embed) |
 | 10 days overdue | "Payment overdue" (red embed) |
 | 21 days overdue | "Payment overdue" (red embed) |
 
-Each DM shows the fee name, total amount, how much is still outstanding, and the due date. Reminders stop automatically once the assignment is marked paid or waived.
+Each DM shows the fee name, total amount, how much is still outstanding, and the due date. If your club has a connected bank account and you have a variable symbol, the DM also includes your [payment QR code](#payment-qr-codes) and a "Moje platby" button linking straight to your My Payments page. Reminders stop automatically once the assignment is marked paid or waived.
 
 <Aside type="note" title="Reminders require Discord DMs">
 Reminders are sent as Discord direct messages. If you have DMs from server members disabled in your Discord privacy settings, you will not receive them. Check **User Settings → Privacy & Safety → Allow direct messages from server members** if you are not getting reminders you expect.
@@ -344,3 +500,4 @@ Archived fees cannot be modified. Create a new fee if you need to issue a revise
 
 - [API overview](/api/overview/) — authentication and base URL.
 - [Roles and permissions](/quick-start/admins/) — Treasurer is a built-in role on every team — assign it to anyone who needs finance authority without giving them Admin. Custom roles can also be granted the `finance:*` permissions individually if you want different splits.
+- [Manage your roster](/guides/manage-your-roster/) — jersey numbers and variable symbols are both set from the same member profile screen.

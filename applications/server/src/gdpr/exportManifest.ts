@@ -94,6 +94,39 @@ const authorship: ErasureDisposition = {
  */
 export const EXPORT_MANIFEST: ReadonlyArray<ExportedTable> = [
   // -- account-level (users) -------------------------------------------------
+  // D12 — `skip`, not `own(...)` with `redact`: the club's account number, IBAN, IČO and
+  // registered address are not data ABOUT the treasurer either, so NO column of
+  // `bank_sync_config` is ever exported — strictly stronger than redacting one column
+  // (`fio_token_encrypted`) and it keeps `NEVER_EXPORT_COLUMNS` at its exact five-element
+  // literal.
+  skip(
+    'bank_sync_config',
+    'users',
+    ['configured_by_user_id'],
+    "The club's banking configuration — account number, IBAN, IČO, registered address and the " +
+      'encrypted Fio token. None of it is personal data ABOUT this person; the only tie is who ' +
+      "last saved it. Exporting it would put the club's bank credentials into an individual's " +
+      'downloadable file.',
+    {
+      kind: 'keep',
+      reason:
+        "Team-level configuration; deleting it would break the team's finance sync. The " +
+        'reference is pseudonymised by scrubbing `users`.',
+    },
+  ),
+  skip(
+    'bank_transactions',
+    'users',
+    ['ignored_by_user_id'],
+    'Bank movements of the club, including names and account numbers of NON-MEMBERS who never ' +
+      "consented to appear in anyone's personal export. The only tie to this person is who " +
+      'clicked "ignore".',
+    {
+      kind: 'keep',
+      reason:
+        'Accounting evidence for a grant audit; the reference is pseudonymised by scrubbing `users`.',
+    },
+  ),
   own(
     'dashboard_layouts',
     'users',

@@ -50,10 +50,14 @@ import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.
 import { UsersRepository } from '~/repositories/UsersRepository.js';
 import { AchievementPreview } from '~/services/AchievementPreview.js';
 import { AgeCheckService } from '~/services/AgeCheckService.js';
+import { AiChatEnabledConfig } from '~/services/AiChatEnabledConfig.js';
 import { BotInfoStore } from '~/services/BotInfoStore.js';
 import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementConfig.js';
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
+import { LlmClient } from '~/services/LlmClient.js';
+import { MockChatAgentLayer, MockChatRateLimiterLayer } from './mocks/aiChatMocks.js';
+import { MockBankSyncLayers } from './mocks/bankSyncMocks.js';
 import { MockChannelManagementLayers } from './mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
 import { MockEmailLayers } from './mocks/emailMocks.js';
@@ -441,6 +445,8 @@ const MockTeamMembersRepositoryLayer = Layer.succeed(TeamMembersRepository, {
   assignRole: () => Effect.void,
   unassignRole: () => Effect.void,
   setJerseyNumber: () => Effect.void,
+  setVariableSymbol: () => Effect.void,
+  findByTeamAndVariableSymbol: () => Effect.succeed(Option.none()),
   findById: (id: TeamMember.TeamMemberId) => {
     const member = membersStore.get(id);
     return Effect.succeed(member ? Option.some({ active: member.active }) : Option.none());
@@ -983,6 +989,7 @@ const TestLayer = ApiLive.pipe(
   ),
   Layer.provide(MockAchievementAdminLayers),
 )
+  .pipe(Layer.provide(MockBankSyncLayers))
   .pipe(Layer.provide(MockFinanceLayers))
   .pipe(Layer.provide(MockTranslationsLayers))
   .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
@@ -995,6 +1002,10 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(MockEventRosterLayers))
   .pipe(Layer.provide(BotInfoStore.Default))
   .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
+  .pipe(Layer.provide(MockChatAgentLayer))
+  .pipe(Layer.provide(MockChatRateLimiterLayer))
+  .pipe(Layer.provide(AiChatEnabledConfig.Default))
+  .pipe(Layer.provide(LlmClient.Default))
   .pipe(
     Layer.provide(
       Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),
@@ -1093,6 +1104,7 @@ describe('Members API', () => {
             birthDate: null,
             gender: null,
             jerseyNumber: null,
+            variableSymbol: null,
           }),
         }),
       );
@@ -1114,6 +1126,7 @@ describe('Members API', () => {
             birthDate: null,
             gender: null,
             jerseyNumber: null,
+            variableSymbol: null,
           }),
         }),
       );
@@ -2185,6 +2198,7 @@ const buildRcTestLayer = (
     ),
     Layer.provide(MockAchievementAdminLayers),
   )
+    .pipe(Layer.provide(MockBankSyncLayers))
     .pipe(Layer.provide(MockFinanceLayers))
     .pipe(Layer.provide(MockTranslationsLayers))
     .pipe(Layer.provide(MockTeamOnboardingTokensRepositoryLayer))
@@ -2197,6 +2211,10 @@ const buildRcTestLayer = (
     .pipe(Layer.provide(MockEventRosterLayers))
     .pipe(Layer.provide(BotInfoStore.Default))
     .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
+    .pipe(Layer.provide(MockChatAgentLayer))
+    .pipe(Layer.provide(MockChatRateLimiterLayer))
+    .pipe(Layer.provide(AiChatEnabledConfig.Default))
+    .pipe(Layer.provide(LlmClient.Default))
     .pipe(
       Layer.provide(
         Layer.succeed(GlobalAdminAllowlist, { asEffect: Effect.succeed(new Set<string>()) } as any),

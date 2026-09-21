@@ -377,6 +377,10 @@ The stack comprises:
 
 Sideline provides first-class support for self-hosting via Docker Compose. All components — the Discord bot, the API server, the web frontend, and the PostgreSQL database — are containerised and published to GitHub Container Registry (`ghcr.io/maxa-ondrej/sideline`). An organisation that wishes to retain full control over its data can deploy Sideline on its own infrastructure at no licensing cost. This is a meaningful differentiator in markets with strict data residency requirements or within academic institutions that cannot use third-party SaaS platforms.
 
+### 5.9 Automatic Bank-Transfer Matching for Czech Clubs
+
+Unlike competitors, whose "payment collection" features process card payments through their own payment gateway (and take a transaction fee for it, per Spond's pricing model above), Sideline's finance module can instead reconcile bank transfers a club already receives directly into its own account. For clubs banking with Fio banka, Sideline ingests movements hourly via Fio's own read-only API, auto-matches incoming payments to outstanding fee assignments by variable symbol, and generates SPAYD-standard payment QR codes so members pay with the right identifying number attached. This is a narrower differentiator than the others above — it is specific to one Czech bank's API and to a payment convention (the variable symbol) unique to Czech and Slovak domestic bank transfers — but it directly serves Sideline's own reference deployment (a Czech grassroots club reconciling payments by hand today) at zero per-transaction cost, which none of the card-processing competitors can offer.
+
 ---
 
 ## 6. SWOT Analysis

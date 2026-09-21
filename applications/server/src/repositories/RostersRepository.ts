@@ -116,6 +116,7 @@ const make = Effect.gen(function* () {
       SELECT tm.id AS member_id, tm.user_id, u.discord_id,
              eff.role_names, eff.permissions, eff.effective_roles,
              u.name, u.birth_date::text AS birth_date, u.gender, tm.jersey_number,
+             tm.variable_symbol,
              u.username, u.avatar, u.discord_nickname, u.discord_display_name,
              to_char(tm.joined_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS joined_at,
              tm.active AS active

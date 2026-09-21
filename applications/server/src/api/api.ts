@@ -4,7 +4,9 @@ import {
   ActivityStatsApi,
   ActivityTypeApi,
   AgeThresholdApi,
+  AiChatApi,
   Auth,
+  BankSyncApi,
   ChannelApi,
   DashboardApi,
   DashboardLayoutApi,
@@ -44,6 +46,7 @@ export const Api = HttpApi.make('api')
     ActivityLogApi.ActivityLogApiGroup,
     ActivityStatsApi.ActivityStatsApiGroup,
     ActivityTypeApi.ActivityTypeApiGroup,
+    AiChatApi.AiChatApiGroup,
     LeaderboardApi.LeaderboardApiGroup,
     AgeThresholdApi.AgeThresholdApiGroup,
     Auth.AuthApiGroup,
@@ -77,5 +80,6 @@ export const Api = HttpApi.make('api')
     WeeklySummaryApi.WeeklySummaryApiGroup,
     DashboardLayoutApi.DashboardLayoutApiGroup,
     EmailForwardingApi.EmailForwardingApiGroup,
+    BankSyncApi.BankSyncApiGroup,
   )
   .prefix(env.API_PREFIX as '/${string}');

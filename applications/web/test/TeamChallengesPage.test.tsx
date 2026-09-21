@@ -26,7 +26,6 @@ vi.mock('~/lib/translations.js', () => ({
       challenges_emptySubtitle_captain: 'Pro kapitány: založte první výzvu.',
       challenges_emptySubtitle_member: 'Až kapitán vyhlásí výzvu, objeví se tady.',
       challenges_loadError: 'Nepodařilo se načíst výzvy.',
-      challenges_retry: 'Zkusit znovu',
       challenges_grid_memberColumn: 'Hráč',
       challenges_grid_completedAlt: 'Splněno',
       challenges_grid_missedAlt: 'Nesplněno',

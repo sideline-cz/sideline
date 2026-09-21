@@ -1,5 +1,5 @@
 import { Data, Effect, Layer, Option, pipe, Redacted, Schema, ServiceMap } from 'effect';
-import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http';
+import { HttpClient, HttpClientRequest } from 'effect/unstable/http';
 import { env } from '~/env.js';
 
 // ---------------------------------------------------------------------------
@@ -82,6 +82,50 @@ export interface SummarizeChannelResult {
 }
 
 // ---------------------------------------------------------------------------
+// chatWithTools — single-turn tool-calling primitive (plan §6)
+// ---------------------------------------------------------------------------
+
+export interface LlmToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly parameters: Record<string, unknown>; // DERIVED JSON Schema — see services/ai/jsonSchema.ts
+}
+
+export interface LlmToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly argumentsJson: string; // raw, un-parsed
+}
+
+export type LlmChatMessage =
+  | { readonly role: 'system' | 'user'; readonly content: string }
+  | {
+      readonly role: 'assistant';
+      readonly content: string;
+      readonly toolCalls: ReadonlyArray<LlmToolCall>;
+    }
+  | { readonly role: 'tool'; readonly toolCallId: string; readonly content: string };
+
+export interface ChatWithToolsInput {
+  readonly messages: ReadonlyArray<LlmChatMessage>;
+  readonly tools: ReadonlyArray<LlmToolDefinition>;
+  readonly maxTokens: number;
+}
+
+export interface ChatWithToolsResult {
+  readonly content: Option.Option<string>;
+  readonly toolCalls: ReadonlyArray<LlmToolCall>;
+  readonly finishReason: string;
+}
+
+/**
+ * Returned as `chatWithTools`'s content by `makeStub()`. `ChatAgent` recognises
+ * this sentinel and degrades with `degradedReason: 'not_configured'` instead of
+ * forwarding it to the user — it must never leave the server.
+ */
+export const STUB_UNAVAILABLE_MARKER = '__llm_client_stub_unavailable__';
+
+// ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
@@ -103,6 +147,11 @@ export interface LlmClientService {
   readonly summarizeChannel: (
     input: SummarizeChannelInput,
   ) => Effect.Effect<SummarizeChannelResult>;
+  /** `false` for `makeStub()`, `true` for `makeReal(...)` — the only honest source for "is an LLM configured". */
+  readonly configured: boolean;
+  readonly chatWithTools: (
+    input: ChatWithToolsInput,
+  ) => Effect.Effect<ChatWithToolsResult, LlmError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +342,15 @@ const makeStub = (): LlmClientService => ({
   estimateRatingFromDescription: (input) => Effect.succeed(deriveEstimateFallback(input)),
 
   summarizeChannel: (input) => Effect.succeed(deriveChannelSummaryFallback(input)),
+
+  configured: false,
+
+  chatWithTools: () =>
+    Effect.succeed({
+      content: Option.some(STUB_UNAVAILABLE_MARKER),
+      toolCalls: [],
+      finishReason: 'stop',
+    }),
 });
 
 // ---------------------------------------------------------------------------
@@ -303,7 +361,33 @@ const OpenAiResponseSchema = Schema.Struct({
   choices: Schema.Array(
     Schema.Struct({
       message: Schema.Struct({
-        content: Schema.OptionFromNullOr(Schema.String),
+        // A gateway that omits `content` entirely (rather than sending it as
+        // `null`) must still decode — OptionFromNullOr rejects a missing key.
+        content: Schema.OptionFromOptionalNullOr(Schema.String),
+      }),
+    }),
+  ),
+});
+
+// ---------------------------------------------------------------------------
+// Response schema for chatWithTools — kept SEPARATE from OpenAiResponseSchema
+// above (never merge tool-call fields into it; other methods depend on its
+// shape). Every field of an inbound provider response is optional+nullable.
+// ---------------------------------------------------------------------------
+
+const ToolCallSchema = Schema.Struct({
+  id: Schema.String,
+  type: Schema.String,
+  function: Schema.Struct({ name: Schema.String, arguments: Schema.String }),
+});
+
+const ChatCompletionResponse = Schema.Struct({
+  choices: Schema.Array(
+    Schema.Struct({
+      finish_reason: Schema.OptionFromOptionalNullOr(Schema.String),
+      message: Schema.Struct({
+        content: Schema.OptionFromOptionalNullOr(Schema.String),
+        tool_calls: Schema.OptionFromOptionalNullOr(Schema.Array(ToolCallSchema)),
       }),
     }),
   ),
@@ -313,15 +397,42 @@ const OpenAiResponseSchema = Schema.Struct({
 // Real OpenAI-compatible provider
 // ---------------------------------------------------------------------------
 
+/** Encode a single `LlmChatMessage` onto the OpenAI-compatible wire shape. */
+const encodeChatMessage = (message: LlmChatMessage): Record<string, unknown> => {
+  switch (message.role) {
+    case 'system':
+    case 'user':
+      return { role: message.role, content: message.content };
+    case 'assistant':
+      return message.toolCalls.length === 0
+        ? { role: 'assistant', content: message.content }
+        : {
+            role: 'assistant',
+            content: message.content,
+            tool_calls: message.toolCalls.map((call) => ({
+              id: call.id,
+              type: 'function',
+              function: { name: call.name, arguments: call.argumentsJson },
+            })),
+          };
+    case 'tool':
+      return { role: 'tool', tool_call_id: message.toolCallId, content: message.content };
+  }
+};
+
 export const makeReal = (
   apiUrl: string,
   apiKey: Redacted.Redacted<string>,
   model: string,
   httpClient: HttpClient.HttpClient,
 ): LlmClientService => {
-  // Perform a chat-completions request and return the first choice's trimmed,
-  // non-empty content — failing with LlmError on any transport/parse/empty issue.
-  const requestContent = (requestBody: unknown): Effect.Effect<string, LlmError> => {
+  // Perform a chat-completions request against the injected `httpClient` and
+  // return the decoded-JSON response body — failing with LlmError on any
+  // transport/JSON-parse issue. Every other method builds on this; none of
+  // them re-provides an HttpClient layer inline (that was the bug: makeReal
+  // used to hardcode `Effect.provide(FetchHttpClient.layer)`, which made it
+  // impossible to inject a mock HttpClient in tests).
+  const postChatCompletion = (requestBody: unknown): Effect.Effect<unknown, LlmError> => {
     const baseRequest = pipe(
       HttpClientRequest.post(`${apiUrl}/chat/completions`),
       HttpClientRequest.setHeader('Authorization', `Bearer ${Redacted.value(apiKey)}`),
@@ -329,8 +440,28 @@ export const makeReal = (
 
     return pipe(
       HttpClientRequest.bodyJson(baseRequest, requestBody),
-      Effect.flatMap((request) => HttpClient.execute(request)),
-      Effect.flatMap((response) => response.json),
+      Effect.flatMap((request) => httpClient.execute(request)),
+      Effect.flatMap((response) =>
+        response.json.pipe(
+          Effect.mapError(
+            (e) =>
+              new LlmError({ message: `LLM response JSON parse failed: ${String(e)}`, cause: e }),
+          ),
+        ),
+      ),
+      Effect.mapError((e) =>
+        e instanceof LlmError
+          ? e
+          : new LlmError({ message: `LLM request failed: ${String(e)}`, cause: e }),
+      ),
+    );
+  };
+
+  // Perform a chat-completions request and return the first choice's trimmed,
+  // non-empty content — failing with LlmError on any transport/parse/empty issue.
+  const requestContent = (requestBody: unknown): Effect.Effect<string, LlmError> =>
+    pipe(
+      postChatCompletion(requestBody),
       Effect.flatMap((raw) =>
         Schema.decodeUnknownEffect(OpenAiResponseSchema)(raw).pipe(
           Effect.mapError(
@@ -351,12 +482,58 @@ export const makeReal = (
               : Effect.succeed(text),
         });
       }),
-      Effect.mapError((e) =>
-        e instanceof LlmError
-          ? e
-          : new LlmError({ message: `LLM request failed: ${String(e)}`, cause: e }),
+    );
+
+  const chatWithTools = (
+    input: ChatWithToolsInput,
+  ): Effect.Effect<ChatWithToolsResult, LlmError> => {
+    const requestBody = {
+      model,
+      messages: input.messages.map(encodeChatMessage),
+      tools: input.tools.map((tool) => ({
+        type: 'function',
+        function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+      })),
+      tool_choice: 'auto',
+      max_tokens: input.maxTokens,
+      temperature: 0.2,
+      // `response_format` is intentionally absent — a json_object constraint
+      // conflicts with function calling on most OpenAI-compatible gateways.
+    };
+
+    return pipe(
+      postChatCompletion(requestBody),
+      Effect.flatMap((raw) =>
+        Schema.decodeUnknownEffect(ChatCompletionResponse)(raw).pipe(
+          Effect.mapError(
+            (e) =>
+              new LlmError({
+                message: `LLM tool-call response parse failed: ${String(e)}`,
+                cause: e,
+              }),
+          ),
+        ),
       ),
-      Effect.provide(FetchHttpClient.layer),
+      Effect.flatMap((parsed) => {
+        const choice = parsed.choices[0];
+        if (choice === undefined) {
+          return Effect.fail(new LlmError({ message: 'LLM returned no choices' }));
+        }
+        const toolCalls: ReadonlyArray<LlmToolCall> = Option.match(choice.message.tool_calls, {
+          onNone: () => [],
+          onSome: (calls) =>
+            calls.map((call) => ({
+              id: call.id,
+              name: call.function.name,
+              argumentsJson: call.function.arguments,
+            })),
+        });
+        return Effect.succeed<ChatWithToolsResult>({
+          content: choice.message.content,
+          toolCalls,
+          finishReason: Option.getOrElse(choice.finish_reason, () => 'stop'),
+        });
+      }),
     );
   };
 
@@ -625,6 +802,10 @@ export const makeReal = (
         }),
       );
     },
+
+    configured: true,
+
+    chatWithTools,
   };
 };
 

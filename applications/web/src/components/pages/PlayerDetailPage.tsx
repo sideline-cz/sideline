@@ -12,10 +12,11 @@ import type {
 } from '@sideline/domain';
 import { Link } from '@tanstack/react-router';
 import { Option, Schema } from 'effect';
-import { ExternalLink, Pencil, UserMinus, Users, X } from 'lucide-react';
+import { AlertTriangle, ExternalLink, Pencil, UserMinus, Users, X } from 'lucide-react';
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { SearchableSelect } from '~/components/atoms/SearchableSelect';
+import { DirtyFieldLabel } from '~/components/molecules/DirtyFieldLabel.js';
 import { RoleBadge } from '~/components/molecules/RoleBadge.js';
 import { SyncRolesButton } from '~/components/molecules/SyncRolesButton.js';
 import { AchievementsGridI18n } from '~/components/organisms/AchievementsGrid.js';
@@ -39,14 +40,7 @@ import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '~/components/ui/card';
 import { DatePicker } from '~/components/ui/date-picker';
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '~/components/ui/form';
+import { Form, FormControl, FormField, FormItem, FormMessage } from '~/components/ui/form';
 import { Input } from '~/components/ui/input';
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '~/components/ui/popover';
 import {
@@ -72,12 +66,17 @@ const isNonBlank = Schema.makeFilter<string>((value) =>
   value.trim().length > 0 ? true : tr('validation_required'),
 );
 
+const isVariableSymbolShape = Schema.makeFilter<string>((value) =>
+  /^[0-9]{1,10}$/.test(value) ? true : tr('validation_variableSymbol'),
+);
+
 const PlayerEditSchema = Schema.Struct({
   name: Schema.NullOr(
     Schema.String.pipe(Schema.check(isNonBlank), Schema.check(Schema.isMaxLength(80))).annotate({
       message: tr('validation_displayNameTooLong'),
     }),
   ),
+  variableSymbol: Schema.NullOr(Schema.String.pipe(Schema.check(isVariableSymbolShape))),
   birthDate: Schema.NullOr(Schema.String.pipe(Schema.check(isNotFutureDate))),
   gender: Schema.NullOr(Schema.Literals(['male', 'female', 'other'])),
   jerseyNumber: Schema.NullOr(
@@ -120,6 +119,10 @@ interface PlayerDetailPageProps {
   teamMemberId?: string;
   onRefresh?: () => void;
   onSave: (values: PlayerEditValues) => Promise<boolean>;
+  /** The server's 409 `VariableSymbolTaken` — the route resets it to `null` before every save
+   * attempt. Rendered as a field-level message (never a toast, since it names another member and
+   * a toast would vanish before that name was read). */
+  variableSymbolConflict?: { holderMemberId: string; holderName: string | null } | null;
   onAssignRole: (roleId: string) => Promise<void>;
   onUnassignRole: (roleId: string) => Promise<void>;
   onSyncDiscordRoles: () => Promise<RoleApi.SyncMemberRolesResult | undefined>;
@@ -169,6 +172,7 @@ export function PlayerDetailPage({
   teamMemberId,
   onRefresh,
   onSave,
+  variableSymbolConflict,
   onAssignRole,
   onUnassignRole,
   onSyncDiscordRoles,
@@ -201,6 +205,7 @@ export function PlayerDetailPage({
   const getDefaultValues = React.useCallback(
     () => ({
       name: Option.getOrNull(player.name),
+      variableSymbol: Option.getOrNull(player.variableSymbol),
       birthDate: Option.getOrNull(player.birthDate),
       gender: Option.getOrNull(player.gender),
       jerseyNumber: player.jerseyNumber.pipe(
@@ -320,6 +325,42 @@ export function PlayerDetailPage({
                         <FormControl>
                           <Input {...field} value={field.value ?? ''} />
                         </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    {...form.register('variableSymbol')}
+                    render={({ field }) => (
+                      <FormItem>
+                        <DirtyFieldLabel
+                          label={tr('members_vs_label')}
+                          dirty={Boolean(form.formState.dirtyFields.variableSymbol)}
+                        />
+                        <FormControl>
+                          <Input
+                            {...field}
+                            value={field.value ?? ''}
+                            onChange={(e) => {
+                              field.onChange(e);
+                            }}
+                            aria-invalid={
+                              variableSymbolConflict !== null &&
+                              variableSymbolConflict !== undefined
+                            }
+                            aria-describedby={
+                              variableSymbolConflict ? 'variable-symbol-conflict' : undefined
+                            }
+                          />
+                        </FormControl>
+                        <p className='text-xs text-muted-foreground'>{tr('members_vs_help')}</p>
+                        {variableSymbolConflict ? (
+                          <p id='variable-symbol-conflict' className='text-sm text-destructive'>
+                            {tr('members_vs_duplicate', {
+                              member: variableSymbolConflict.holderName ?? '—',
+                            })}
+                          </p>
+                        ) : null}
                         <FormMessage />
                       </FormItem>
                     )}
@@ -603,6 +644,17 @@ function ProfileReadOnlyView({
         <strong>{tr('profile_complete_displayName')}:</strong> {player.displayName}
       </p>
       <p>
+        <strong>{tr('members_vs_label')}:</strong>{' '}
+        {Option.isSome(player.variableSymbol) ? (
+          <span className='tabular-nums'>{player.variableSymbol.value}</span>
+        ) : (
+          <span className='inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300'>
+            <AlertTriangle className='size-3' aria-hidden='true' />
+            {tr('members_vs_missing')}
+          </span>
+        )}
+      </p>
+      <p>
         <strong>{tr('profile_complete_birthDate')}:</strong> {birthDateLabel}
       </p>
       <p>
@@ -694,20 +746,6 @@ function DangerZoneCard({
         )}
       </CardContent>
     </Card>
-  );
-}
-
-function DirtyFieldLabel({ label, dirty }: { label: string; dirty: boolean }) {
-  return (
-    <FormLabel className='flex items-center gap-1.5'>
-      {label}
-      {dirty ? (
-        <>
-          <span className='inline-block size-1.5 rounded-full bg-warning' aria-hidden='true' />
-          <span className='sr-only'>{tr('form_fieldChanged')}</span>
-        </>
-      ) : null}
-    </FormLabel>
   );
 }
 

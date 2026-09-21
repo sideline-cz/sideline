@@ -8,6 +8,7 @@ import {
   Dumbbell,
   Hash,
   Home,
+  Landmark,
   Languages,
   Link2,
   Receipt,
@@ -16,6 +17,7 @@ import {
   Settings,
   Shield,
   ShieldCheck,
+  Sparkles,
   Target,
   Trophy,
   UserCog,
@@ -124,6 +126,14 @@ function getTeamNavGroups(
           to: '/teams/$teamId/rules',
           params: { teamId },
         },
+        {
+          // No `requiredPermission` — every member may ask; the server decides what they may
+          // see (assistant design §1, same precedent as `rules` above).
+          title: tr('assistant_navTitle'),
+          icon: Sparkles,
+          to: '/teams/$teamId/assistant',
+          params: { teamId },
+        },
       ],
     },
     {
@@ -198,6 +208,16 @@ function getTeamNavGroups(
           to: '/teams/$teamId/finances/expenses',
           params: { teamId },
           requiredPermission: 'finance:view' satisfies Role.Permission,
+        },
+        {
+          // Gated on `finance:record_payments`, not `finance:view` — this page lists the
+          // name, account number and payment message of everyone who paid the club
+          // (design §3.2), which is not roster-level information.
+          title: tr('bank_navTitle'),
+          icon: Landmark,
+          to: '/teams/$teamId/finances/bank',
+          params: { teamId },
+          requiredPermission: 'finance:record_payments' satisfies Role.Permission,
         },
       ],
     },

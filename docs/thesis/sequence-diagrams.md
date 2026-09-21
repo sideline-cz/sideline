@@ -505,7 +505,7 @@ sequenceDiagram
 
 ## 9. Member Onboarding via Group-Targeted Invite
 
-A captain creates a group-targeted invite (e.g. for the "First Team" group) from the web app. The captain shares only the `/invite/{code}` web link. A new player clicks it, completes the Discord OAuth login, and clicks "Accept". The server creates an `invite_acceptances` row and returns an `acceptanceId`. The bot's invite generator picks up the pending row (~1 s), creates a single-use Discord invite for the welcome channel, and writes the code back. The web app polls `GET /invite/acceptances/:acceptanceId` and redirects the user to `https://discord.gg/{discord_code}` as soon as the URL is available. The user joins the Discord server; the bot detects `GUILD_MEMBER_ADD`, identifies the code via the invite diff, calls `Guild/RegisterMember` — which now resolves via `invite_acceptances.discord_code` — auto-adds the member to the group, renders the welcome message, and posts the welcome embed and system log.
+A captain creates a group-targeted invite (e.g. for the "First Team" group) from the web app. The captain shares only the `/invite/{code}` web link. A new player clicks it, completes the Discord OAuth login, and clicks "Accept" — `POST /invite/{code}/join` writes the `group_members` row immediately (the invite's `group_id` is authoritative here), before the user has even reached Discord. The server also creates an `invite_acceptances` row and returns an `acceptanceId`. The bot's invite generator picks up the pending row (~1 s), creates a single-use Discord invite for the welcome channel, and writes the code back. The web app polls `GET /invite/acceptances/:acceptanceId` and redirects the user to `https://discord.gg/{discord_code}` as soon as the URL is available. The user joins the Discord server; the bot detects `GUILD_MEMBER_ADD`, identifies the code via the invite diff, calls `Guild/RegisterMember` — which resolves via `invite_acceptances.discord_code`, re-binds the group (`ON CONFLICT DO NOTHING`, since the join step above already wrote it) and, unlike before, emits `member_added` channel-sync events for the group and every active ancestor, so the bot's Channel Sync Worker grants the group's own Discord role — then renders the welcome message, and posts the welcome embed and system log.
 
 ```mermaid
 sequenceDiagram
@@ -534,6 +534,8 @@ sequenceDiagram
     NewUser->>Server: POST /invite/{code}/join<br/>Authorization: Bearer <token>
     Server->>DB: INSERT invite_acceptances {team_invite_id, user_id}
     DB-->>Server: InviteAcceptance {id: acceptance_id}
+    Server->>DB: INSERT group_members {group_id: "first-team-id", team_member_id}<br/>ON CONFLICT DO NOTHING
+    DB-->>Server: OK
     Server-->>NewUser: 200 OK — JoinResult {teamId, roleNames:["Player"],<br/>isProfileComplete, requiresReauth: false,<br/>acceptanceId: some(acceptance_id)}
 
     loop Poll every ~1 s until discord_code appears
@@ -576,7 +578,11 @@ sequenceDiagram
     Server->>DB: SELECT ti.*, groups.*, users.* FROM invite_acceptances ia<br/>JOIN team_invites ti JOIN groups JOIN users<br/>WHERE ia.discord_code=? (findByDiscordCodeWithContext)
     DB-->>Server: {team_id, group_id, group_name, inviter_discord_id, inviter_username, team_name}
 
-    Server->>DB: INSERT group_members {group_id, team_member_id}
+    Server->>DB: INSERT group_members {group_id, team_member_id}<br/>ON CONFLICT DO NOTHING
+    DB-->>Server: OK
+    Server->>DB: SELECT active ancestors of group_id (getActiveAncestors)
+    DB-->>Server: [] (top-level group, no active ancestors)
+    Server->>DB: INSERT channel_sync_events<br/>{event_type: "member_added", entity_type: "group",<br/>group_id: "first-team-id", team_member_id, discord_user_id}<br/>(one row per bound group + active ancestor)
     DB-->>Server: OK
 
     Note over Server: applyTemplate(welcome_message_template, {<br/>  memberMention: "<@discord_id>",<br/>  memberName: "display_name",<br/>  inviterMention: "<@inviter_discord_id>",<br/>  inviterName: "inviter_username",<br/>  groupName: "First Team",<br/>  teamName: "FC Sideline"<br/>})
@@ -590,7 +596,11 @@ sequenceDiagram
         Bot->>REST: POST /channels/{welcome_channel_id}/messages<br/>content: "<@memberId>",<br/>embed: {description: rendered, color: 0x3498db,<br/>author: display_name, fields: [{Group: "First Team"}]}
         REST-->>Bot: 204 OK
     end
+
+    Note over Bot,REST: Asynchronously (Channel Sync Worker, ~5 s poll):<br/>Guild/RegisterMember's member_added event is picked up<br/>and the bot grants "First Team"'s Discord role via REST<br/>(group_member_added handler, see Discord Bot Reference)
 ```
+
+**Late or manual join.** This diagram assumes the invite code is still matched at `GUILD_MEMBER_ADD` time. If the new player instead joins the Discord server manually, or more than about 15 minutes after accepting the invite (past `invite_acceptances`' recency window), no invite context resolves and the steps above that bind the group and emit its `member_added` events do not run. `Guild/RegisterMember` closes that gap independently: for every `GUILD_MEMBER_ADD`-sourced call, it separately diffs the member's already-existing group memberships (and their active ancestors) against the Discord roles reported in the join payload, and emits `member_added` for whichever groups the member is missing the role for — regardless of whether an invite was matched this time. This does not run for members first observed via `Guild/ReconcileMembers` (e.g. a member who joined while the bot was disconnected past the gateway resume window); a captain's per-group "Sync role members" action remains the remedy for that cohort.
 
 ---
 

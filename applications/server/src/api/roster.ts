@@ -25,7 +25,10 @@ import { DiscordChannelsRepository } from '~/repositories/DiscordChannelsReposit
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import type { RosterEntry } from '~/repositories/TeamMembersRepository.js';
-import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
+import {
+  TeamMembersRepository,
+  type VariableSymbolConflict,
+} from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { UsersRepository } from '~/repositories/UsersRepository.js';
@@ -39,7 +42,7 @@ import { deactivateMemberAndCascade } from '~/utils/deactivateMemberCascade.js';
 import { hexColorToDiscordInt } from '~/utils/hexColorToDiscordInt.js';
 import { reconcileRosterRoleExtras } from '~/utils/reconcileRosterRoleExtras.js';
 
-const toEffectiveRoles = (entry: RosterEntry) =>
+export const toEffectiveRoles = (entry: RosterEntry) =>
   entry.effective_roles.map(
     (r) =>
       new Roster.EffectiveRole({
@@ -51,7 +54,9 @@ const toEffectiveRoles = (entry: RosterEntry) =>
       }),
   );
 
-const toRosterPlayer = (entry: RosterEntry) =>
+/** Exported so `api/bank-sync.ts`'s VS-assignment endpoints (`BankSyncApiGroup`) can return the
+ * same `Roster.RosterPlayer` shape without duplicating the effective-roles/display-name mapping. */
+export const toRosterPlayer = (entry: RosterEntry) =>
   new Roster.RosterPlayer({
     memberId: entry.member_id,
     userId: entry.user_id,
@@ -63,6 +68,7 @@ const toRosterPlayer = (entry: RosterEntry) =>
     birthDate: entry.birth_date,
     gender: entry.gender,
     jerseyNumber: entry.jersey_number,
+    variableSymbol: entry.variable_symbol,
     username: entry.username,
     avatar: entry.avatar,
     displayName: Option.getOrElse(
@@ -118,7 +124,7 @@ const resolveChannelName = (
     Option.fromNullishOr(allChannels.find((ch) => ch.channel_id === id)?.name),
   );
 
-const toRosterInfo = (
+export const toRosterInfo = (
   r: RosterModel.Roster,
   memberCount: number,
   allChannels: readonly ChannelLike[],
@@ -356,6 +362,18 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
               Effect.tap(({ entry }) =>
                 members.setJerseyNumber(entry.member_id, payload.jerseyNumber),
               ),
+              Effect.tap(({ entry }) =>
+                members.setVariableSymbol(entry.member_id, teamId, payload.variableSymbol).pipe(
+                  Effect.catchTag('VariableSymbolConflict', (e: VariableSymbolConflict) =>
+                    Effect.fail(
+                      new Roster.VariableSymbolTaken({
+                        holderMemberId: e.holderMemberId,
+                        holderName: e.holderName,
+                      }),
+                    ),
+                  ),
+                ),
+              ),
               Effect.map(
                 ({ entry, updated }) =>
                   new Roster.RosterPlayer({
@@ -369,6 +387,7 @@ export const RosterApiLive = HttpApiBuilder.group(Api, 'roster', (handlers) =>
                     birthDate: Option.map(updated.birth_date, DateTime.formatIsoDateUtc),
                     gender: updated.gender,
                     jerseyNumber: payload.jerseyNumber,
+                    variableSymbol: payload.variableSymbol,
                     username: entry.username,
                     avatar: entry.avatar,
                     displayName: Option.getOrElse(

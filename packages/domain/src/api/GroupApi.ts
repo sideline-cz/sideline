@@ -109,6 +109,13 @@ export class SyncRoleMembersResult extends Schema.Class<SyncRoleMembersResult>(
   skippedCount: Schema.Number,
 }) {}
 
+export class BackfillGroupRolesResult extends Schema.Class<BackfillGroupRolesResult>(
+  'BackfillGroupRolesResult',
+)({
+  processedCount: Schema.Number,
+  remainingCount: Schema.Number,
+}) {}
+
 export class GroupNotFound extends Schema.TaggedErrorClass<GroupNotFound>()('GroupNotFound', {}) {}
 
 export class Forbidden extends Schema.TaggedErrorClass<Forbidden>()('GroupForbidden', {}) {}
@@ -306,6 +313,13 @@ export class GroupApiGroup extends HttpApiGroup.make('group')
         GroupNotFound.pipe(HttpApiSchema.status(404)),
       ],
       params: { teamId: TeamId, groupId: GroupId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post('backfillGroupRoles', '/teams/:teamId/groups/backfill-role-members', {
+      success: BackfillGroupRolesResult,
+      error: [Forbidden.pipe(HttpApiSchema.status(403))],
+      params: { teamId: TeamId },
     }).middleware(AuthMiddleware),
   )
   .add(

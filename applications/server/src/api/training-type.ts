@@ -1,4 +1,4 @@
-import { Auth, TrainingTypeApi } from '@sideline/domain';
+import { Auth, type Team, type TrainingType, TrainingTypeApi } from '@sideline/domain';
 import { LogicError } from '@sideline/effect-lib';
 import { Array, Effect, Option } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
@@ -6,6 +6,31 @@ import { Api } from '~/api/api.js';
 import { hasPermission, requireMembership, requirePermission } from '~/api/permissions.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
+
+type TrainingTypeRowLike = {
+  readonly id: TrainingType.TrainingTypeId;
+  readonly team_id: Team.TeamId;
+  readonly name: string;
+};
+
+/**
+ * Pure row -> DTO map for `TrainingTypeApi.TrainingTypeInfo`. `ownerGroupName`
+ * and `memberGroupName` vary across call sites (the list/read path resolves
+ * the real group names, create/update pass `Option.none()`), so they are
+ * explicit parameters rather than baked into the row shape.
+ */
+export const toTrainingTypeInfo = (
+  row: TrainingTypeRowLike,
+  ownerGroupName: Option.Option<string>,
+  memberGroupName: Option.Option<string>,
+): TrainingTypeApi.TrainingTypeInfo =>
+  new TrainingTypeApi.TrainingTypeInfo({
+    trainingTypeId: row.id,
+    teamId: row.team_id,
+    name: row.name,
+    ownerGroupName,
+    memberGroupName,
+  });
 
 const forbidden = new TrainingTypeApi.Forbidden();
 
@@ -27,16 +52,8 @@ export const TrainingTypeApiLive = HttpApiBuilder.group(Api, 'trainingType', (ha
               ({ list, isAdmin }) =>
                 new TrainingTypeApi.TrainingTypeListResponse({
                   canAdmin: isAdmin,
-                  trainingTypes: Array.map(
-                    list,
-                    (t) =>
-                      new TrainingTypeApi.TrainingTypeInfo({
-                        trainingTypeId: t.id,
-                        teamId: t.team_id,
-                        name: t.name,
-                        ownerGroupName: t.owner_group_name,
-                        memberGroupName: t.member_group_name,
-                      }),
+                  trainingTypes: Array.map(list, (t) =>
+                    toTrainingTypeInfo(t, t.owner_group_name, t.member_group_name),
                   ),
                 }),
             ),
@@ -60,15 +77,8 @@ export const TrainingTypeApiLive = HttpApiBuilder.group(Api, 'trainingType', (ha
                 payload.discordChannelId,
               ),
             ),
-            Effect.map(
-              ({ trainingType }) =>
-                new TrainingTypeApi.TrainingTypeInfo({
-                  trainingTypeId: trainingType.id,
-                  teamId: trainingType.team_id,
-                  name: trainingType.name,
-                  ownerGroupName: Option.none(),
-                  memberGroupName: Option.none(),
-                }),
+            Effect.map(({ trainingType }) =>
+              toTrainingTypeInfo(trainingType, Option.none(), Option.none()),
             ),
             Effect.catchTag('TrainingTypeNameAlreadyTakenError', () =>
               Effect.fail(new TrainingTypeApi.TrainingTypeNameAlreadyTaken()),
@@ -157,16 +167,7 @@ export const TrainingTypeApiLive = HttpApiBuilder.group(Api, 'trainingType', (ha
                 }),
               ),
             ),
-            Effect.map(
-              ({ updated }) =>
-                new TrainingTypeApi.TrainingTypeInfo({
-                  trainingTypeId: updated.id,
-                  teamId: updated.team_id,
-                  name: updated.name,
-                  ownerGroupName: Option.none(),
-                  memberGroupName: Option.none(),
-                }),
-            ),
+            Effect.map(({ updated }) => toTrainingTypeInfo(updated, Option.none(), Option.none())),
             Effect.catchTag('TrainingTypeNameAlreadyTakenError', () =>
               Effect.fail(new TrainingTypeApi.TrainingTypeNameAlreadyTaken()),
             ),

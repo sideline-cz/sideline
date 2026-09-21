@@ -38,6 +38,10 @@ const makeLlmClientStub = (
       Effect.succeed({ suggestedRating: 1000, rationale: 'Default', generated: false }),
     ),
     summarizeChannel: summarizeChannelFn,
+    configured: true,
+    chatWithTools: vi.fn(() =>
+      Effect.succeed({ content: Option.some('Stub answer'), toolCalls: [], finishReason: 'stop' }),
+    ),
   } satisfies LlmClientService);
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import { Team } from '@sideline/domain';
 import { createFileRoute } from '@tanstack/react-router';
-import { Effect, Schema } from 'effect';
+import { Array, Effect, Option, Schema } from 'effect';
 import { GroupsListPage } from '~/components/pages/GroupsListPage';
 import { ApiClient, warnAndCatchAll } from '~/lib/runtime';
 
@@ -9,17 +9,23 @@ export const Route = createFileRoute('/(authenticated)/teams/$teamId/groups/')({
   component: GroupsRoute,
   loader: async ({ params, context }) => {
     const teamId = Schema.decodeSync(Team.TeamId)(params.teamId);
-    return ApiClient.asEffect().pipe(
+    const team = Array.findFirst(context.teams, (t) => t.teamId === params.teamId);
+    const canManage = team.pipe(
+      Option.map((t) => t.permissions.includes('group:manage')),
+      Option.getOrElse(() => false),
+    );
+    const groups = await ApiClient.asEffect().pipe(
       Effect.flatMap((api) => api.group.listGroups({ params: { teamId } })),
       warnAndCatchAll,
       context.run,
     );
+    return { groups, canManage };
   },
 });
 
 function GroupsRoute() {
   const { teamId: teamIdRaw } = Route.useParams();
-  const groups = Route.useLoaderData();
+  const { groups, canManage } = Route.useLoaderData();
 
-  return <GroupsListPage teamId={teamIdRaw} groups={groups} />;
+  return <GroupsListPage teamId={teamIdRaw} groups={groups} canManage={canManage} />;
 }

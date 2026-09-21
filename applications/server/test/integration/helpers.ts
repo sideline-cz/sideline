@@ -1,5 +1,6 @@
 import { PgClient } from '@effect/sql-pg';
 import { Config, Effect } from 'effect';
+import * as Reactivity from 'effect/unstable/reactivity/Reactivity';
 import { SqlClient } from 'effect/unstable/sql';
 
 const TestPgClientConfig = {
@@ -11,6 +12,43 @@ const TestPgClientConfig = {
 };
 
 export const TestPgClient = PgClient.layerConfig(TestPgClientConfig);
+
+/**
+ * A SECOND, independent Postgres CONNECTION (not a `Layer`) against the same test database.
+ *
+ * Plan `.work-plans/fio-transaction-matching.md` §7.2 tests 125, 139, 140: the concurrency and
+ * lock-ordering tests for the bank-sync poller and matcher must be deterministic, not races that
+ * merely happen to pass. That requires two genuinely separate Postgres sessions — `FOR UPDATE`
+ * locks are session-scoped, so two fibers sharing ONE `SqlClient` share one session and can never
+ * observe a real row-lock wait between them.
+ *
+ * This is deliberately an `Effect` yielding a raw `SqlClient.SqlClient`-shaped VALUE, scoped to
+ * the caller (`Effect.scoped`), rather than a second `Layer` bound to the same
+ * `SqlClient.SqlClient` tag — two layers can't both occupy that tag in one `ServiceMap`. Use it
+ * directly for raw queries, e.g.:
+ *
+ * ```ts
+ * Effect.scoped(
+ *   Effect.gen(function* () {
+ *     const sql2 = yield* secondTestPgClient;
+ *     yield* sql2`SELECT 1`;
+ *   }),
+ * );
+ * ```
+ *
+ * Pre-provided with its own `Reactivity.layer` (the one `TestPgClient`'s own layer construction
+ * provides internally and does not expose to callers), so no caller needs to think about it.
+ */
+export const secondTestPgClient = Effect.gen(function* () {
+  const options = {
+    host: yield* TestPgClientConfig.host,
+    port: yield* TestPgClientConfig.port,
+    database: yield* TestPgClientConfig.database,
+    username: yield* TestPgClientConfig.username,
+    password: yield* TestPgClientConfig.password,
+  };
+  return yield* PgClient.make(options);
+}).pipe(Effect.provide(Reactivity.layer));
 
 /**
  * Empties every public table that actually holds rows, in a single `TRUNCATE`.

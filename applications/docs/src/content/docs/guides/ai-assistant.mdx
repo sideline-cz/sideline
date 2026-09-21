@@ -1,0 +1,50 @@
+---
+title: AI assistant
+description: Ask the in-app assistant questions about your team's events, members, groups, rosters and training types.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+The AI assistant is a chat panel that answers questions about your team's own data — in plain language, with links to the exact events, members, groups, rosters, and training types it's talking about.
+
+<Aside type="caution" title="Read-only">
+The assistant can only look things up and answer questions. It cannot create, edit, cancel, or delete anything — for example, it can tell you when your next training is, but it can't create one for you. Use the normal event, roster, or group pages for that.
+</Aside>
+
+## Where to find it
+
+Go to **Assistant** in your team's sidebar (`/teams/{teamId}/assistant`). The assistant is a deployment-wide setting, not a per-team one — if it hasn't been enabled on your Sideline instance, this page shows a short explanation instead of the chat box.
+
+## What you can ask
+
+The assistant can answer questions about:
+
+- **Events** — "What's our next event?", "Which events are cancelled this month?"
+- **Training types** — "Show me our training types"
+- **Members** — "How many active members do we have?"
+- **Groups**
+- **Rosters**
+
+<Steps>
+
+1. Type your question in the box at the bottom of the page and press Enter (or tap **Send** on mobile).
+2. The assistant thinks for a moment, then replies with a short written answer.
+3. Anything the answer refers to — an event, a member, a group, a roster, a training type — appears underneath as a card you can click to open that page.
+
+</Steps>
+
+Ask a follow-up question the same way — the assistant remembers the conversation on the page, so you can say "and what about next week?" without repeating yourself.
+
+<Aside>
+The conversation only lives in your browser tab for as long as the page is open. It isn't saved anywhere, and reloading the page (or clicking **New chat**) clears it for good.
+</Aside>
+
+## It only shows you what you can already see
+
+The assistant answers using your own account's permissions — exactly the same permissions that control what you see elsewhere in the app. It never shows you a member's personal contact details, or lets you see rosters or groups you don't already have access to. If you ask about something outside your permissions, the assistant answers as if that data doesn't exist, the same way the rest of the app would.
+
+## When the assistant can't answer
+
+Sometimes the assistant can't give you a full answer. It always tells you why, in plain language — for example, if it's temporarily unavailable, if your question needed more steps than it could work through, or if it just didn't come back with anything useful. In every case, try rephrasing your question or asking something more specific.
+
+If you've asked a lot of questions in a short time, it asks you to wait a moment before trying again — this keeps the assistant responsive for everyone on your team.

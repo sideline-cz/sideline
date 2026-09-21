@@ -24,7 +24,7 @@ import { MAX_ROLE_SYNC_EMISSIONS_PER_MEMBER } from '~/utils/syncMemberDiscordRol
  * `findEffectiveRolesForMembers` round trip per `addGroupMember` call is worth not having two
  * definitions of "effective roles" feeding one diff.
  *
- * The design (see `sync-plan.md` for the full rationale — this is the summary):
+ * The design:
  *
  * 1. **Snapshot BEFORE the write** (`captureGroupRoleSnapshot`) — the affected members' effective
  *    roles, read via the shared `effectiveRolesFrom` fragment (`TeamMembersRepository
@@ -64,7 +64,7 @@ import { MAX_ROLE_SYNC_EMISSIONS_PER_MEMBER } from '~/utils/syncMemberDiscordRol
  * committed (or hasn't even run yet, for the BEFORE phase) — and degrade to a no-op (an empty
  * snapshot / an empty result) rather than propagate.
  *
- * Known, accepted gaps (see `sync-plan.md` §5/§9 for the full discussion — not fixed here):
+ * Known, accepted gaps (not fixed here):
  * - **No transaction** spans the write and the emission — the AFTER snapshot must observe the
  *   write's committed effect, and repository emissions are best-effort by convention.
  * - **Concurrent-writer interleaving**: two overlapping group operations can each attribute the

@@ -197,3 +197,30 @@ describe('validateEmailForwarding', () => {
     expect(errors.imapSecret).toBe('team_email_forwarding_imap_secret_required');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression: "no error" is `undefined`, never `null`
+// ---------------------------------------------------------------------------
+
+/**
+ * `EmailForwardingErrors`' fields are optional, so a field with no error is `undefined`.
+ * `EmailForwardingCard` rendered `aria-invalid={errors.imapHost !== null}` — and
+ * `undefined !== null` is `true`, so host, port, username and secret were marked invalid
+ * (red) permanently, with no message, because the message only renders on a truthy value.
+ *
+ * Pinning the absent-error representation here is what makes the card's `!== undefined`
+ * comparison correct; a future change to `null` would break the card silently again.
+ */
+describe('validateEmailForwarding — absent errors are undefined, not null', () => {
+  it('a fully valid IMAP config leaves every field undefined', () => {
+    const errors = validateEmailForwarding(EDITED, {
+      imapSecretSet: true,
+      replacingSecret: false,
+      imapSecret: '',
+    });
+    for (const field of ['imapHost', 'imapPort', 'imapUsername', 'imapSecret'] as const) {
+      expect(errors[field]).toBeUndefined();
+      expect(errors[field]).not.toBeNull();
+    }
+  });
+});

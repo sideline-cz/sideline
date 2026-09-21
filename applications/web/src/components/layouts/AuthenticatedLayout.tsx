@@ -51,6 +51,8 @@ function useBreadcrumbs(): ReadonlyArray<BreadcrumbEntry> {
           crumbs.push({ label: tr('makanicko_title'), to: pathname });
         } else if (routeId.includes('/notifications')) {
           crumbs.push({ label: tr('notification_title'), to: pathname });
+        } else if (routeId.includes('/assistant')) {
+          crumbs.push({ label: tr('assistant_navTitle'), to: pathname });
         } else if (routeId.includes('/members')) {
           if (!crumbs.some((c) => c.to.endsWith('/members'))) {
             crumbs.push({ label: tr('team_members'), to: `/teams/${teamId}/members` });
@@ -85,6 +87,8 @@ function useBreadcrumbs(): ReadonlyArray<BreadcrumbEntry> {
           crumbs.push({ label: tr('team_ageThresholds'), to: pathname });
         } else if (routeId.includes('/finances/expenses')) {
           crumbs.push({ label: tr('expenses_navTitle'), to: pathname });
+        } else if (routeId.includes('/finances/bank') || routeId.includes('/finances_/bank')) {
+          crumbs.push({ label: tr('bank_navTitle'), to: pathname });
         }
       } else if (routeId === '/(authenticated)/teams/$teamId/') {
         const teamId = (match.params as Record<string, string>).teamId;

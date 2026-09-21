@@ -364,7 +364,7 @@ export function EmailForwardingCard({
                             setField('imapHost', e.target.value);
                             setErrors((prev) => ({ ...prev, imapHost: undefined }));
                           }}
-                          aria-invalid={errors.imapHost !== null}
+                          aria-invalid={errors.imapHost !== undefined}
                           aria-describedby={errors.imapHost ? 'imap-host-error' : undefined}
                         />
                         {errors.imapHost && (
@@ -391,7 +391,7 @@ export function EmailForwardingCard({
                             setErrors((prev) => ({ ...prev, imapPort: undefined }));
                           }}
                           className='max-w-32'
-                          aria-invalid={errors.imapPort !== null}
+                          aria-invalid={errors.imapPort !== undefined}
                           aria-describedby={errors.imapPort ? 'imap-port-error' : undefined}
                         />
                         {errors.imapPort && (
@@ -434,7 +434,7 @@ export function EmailForwardingCard({
                           setField('imapUsername', e.target.value);
                           setErrors((prev) => ({ ...prev, imapUsername: undefined }));
                         }}
-                        aria-invalid={errors.imapUsername !== null}
+                        aria-invalid={errors.imapUsername !== undefined}
                         aria-describedby={errors.imapUsername ? 'imap-username-error' : undefined}
                       />
                       {errors.imapUsername && (
@@ -483,7 +483,7 @@ export function EmailForwardingCard({
                                 setImapSecret(e.target.value);
                                 setErrors((prev) => ({ ...prev, imapSecret: undefined }));
                               }}
-                              aria-invalid={errors.imapSecret !== null}
+                              aria-invalid={errors.imapSecret !== undefined}
                               aria-describedby={errors.imapSecret ? 'imap-secret-error' : undefined}
                             />
                             {/* State C: cancel button */}

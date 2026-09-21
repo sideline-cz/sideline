@@ -1,4 +1,5 @@
 import type {
+  BankSyncApi,
   EmailForwardingApi,
   GroupApi,
   TeamApi,
@@ -8,6 +9,7 @@ import type {
 import { Link, useRouter } from '@tanstack/react-router';
 import React from 'react';
 import { EmailForwardingCard } from '~/components/organisms/team-settings/EmailForwardingCard';
+import { FioBankCard } from '~/components/organisms/team-settings/FioBankCard';
 import { GenerationWeightsCard } from '~/components/organisms/team-settings/GenerationWeightsCard';
 import { OnboardingCard } from '~/components/organisms/team-settings/OnboardingCard';
 import { TeamProfileCard } from '~/components/organisms/team-settings/TeamProfileCard';
@@ -25,6 +27,8 @@ interface TeamSettingsPageProps {
   teamInfo: TeamApi.TeamInfo;
   emailForwardingConfig: EmailForwardingApi.EmailForwardingConfigView | null;
   initialGenerationConfig: TeamGenerationApi.GenerationConfigResponse | null;
+  bankSyncConfig: BankSyncApi.BankSyncConfigView | null;
+  canManageBankSync: boolean;
 }
 
 /**
@@ -44,6 +48,8 @@ export function TeamSettingsPage({
   teamInfo,
   emailForwardingConfig,
   initialGenerationConfig,
+  bankSyncConfig,
+  canManageBankSync,
 }: TeamSettingsPageProps) {
   const router = useRouter();
   const onRefresh = React.useCallback(() => {
@@ -83,6 +89,10 @@ export function TeamSettingsPage({
           initialConfig={emailForwardingConfig}
           onRefresh={onRefresh}
         />
+
+        {canManageBankSync && (
+          <FioBankCard teamId={teamId} initialConfig={bankSyncConfig} onRefresh={onRefresh} />
+        )}
 
         <OnboardingCard
           teamInfo={teamInfo}
