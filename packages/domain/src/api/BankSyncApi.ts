@@ -65,6 +65,10 @@ export class BankSyncConfigView extends Schema.Class<BankSyncConfigView>('BankSy
 
   fioTokenSet: Schema.Boolean,
   tokenCreatedAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
+  // Server-stamped instant the token was actually stored, unlike the user-declared
+  // `tokenCreatedAt`. The `activating` rank keys off this, and so must the UI countdown.
+  // `None` on pre-migration rows.
+  tokenSavedAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
   /** `tokenCreatedAt + 180d`; the T-14 DM and the `expiringSoon` banner both key off this. */
   tokenExpiresAt: Schema.OptionFromNullOr(Schemas.DateTimeFromIsoString),
 
