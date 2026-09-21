@@ -5,6 +5,10 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-21 — Fix: a deleted role could keep granting its permissions
+
+Deleting a custom role is normally blocked while anyone still holds it, but that check only looks at who holds the role right then. A role attached to a group that happens to be empty at the moment of deletion passes the check — and then starts granting its permissions again as soon as someone joins that group, because deleting a role doesn't remove the grant linking it to the group, it only hides the role itself. Roles deleted before the check learned to count group members could do the same. A deleted role now stops granting its permissions immediately and permanently, however it was held.
+
 ## 2026-09-21 — Fix: your personal event card could disappear after voting "Coming later"
 
 Voting **Coming later** on an event could make that event's card vanish entirely from your personal events channel instead of just recording your response, because a hidden clash between two of the card's buttons — present only once your response was Coming later — made Discord reject the whole card.
