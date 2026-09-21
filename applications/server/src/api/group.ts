@@ -1,6 +1,6 @@
 import { Auth, DisplayName, GroupApi, type GroupModel, type Team } from '@sideline/domain';
 import { LogicError, Options } from '@sideline/effect-lib';
-import { Array, Effect, Match, Option, pipe, Result } from 'effect';
+import { Array, Effect, Match, Option, pipe, Result, type ServiceMap } from 'effect';
 import { HttpApiBuilder } from 'effect/unstable/httpapi';
 import { SqlClient } from 'effect/unstable/sql';
 import { Api } from '~/api/api.js';
@@ -57,6 +57,46 @@ export const toGroupInfo = (
   });
 
 const forbidden = new GroupApi.Forbidden();
+
+/**
+ * Every `groups.parent_id` edge must stay inside one team, and BOTH writers of that column
+ * (`createGroup`'s insert and `moveGroup`'s update) go through this.
+ *
+ * It is not a cosmetic tenancy check. `moveGroup` serializes its cycle check on a per-team
+ * advisory lock keyed by `hashtext(teamId)`, so a parent belonging to ANOTHER team would sit
+ * under a different lock key and two concurrent moves could still jointly close a cycle spanning
+ * the two trees — the exact race the lock exists to stop. Guarding only `moveGroup` would not be
+ * enough either: a cross-team edge planted at creation time is one a later, perfectly ordinary
+ * same-team move can extend into that cycle.
+ *
+ * A group's `team_id` is immutable (no writer updates it — `updateGroupById`, `archiveGroup` and
+ * `moveGroupParent` are the only `UPDATE groups` statements), so the verdict cannot go stale
+ * between this read and the write it guards.
+ *
+ * Fails `Forbidden`, not `GroupNotFound`, for both "no such parent" and "parent is another
+ * team's" — deliberately, and not the `assignGroupRole` shape (which answers `RoleNotFound` for
+ * its payload-referenced role). `createGroup` does not declare `GroupNotFound` at all
+ * (`GroupApi.ts`), so reusing it would be an API contract change; and `moveGroup` already spends
+ * `GroupNotFound` on the PATH group, where a second meaning would be ambiguous. Neither verdict
+ * leaks more than the other: both are the same answer for missing and for cross-team.
+ */
+const requireSameTeamParent = (
+  groups: ServiceMap.Service.Shape<typeof GroupsRepository>,
+  teamId: Team.TeamId,
+  parentId: Option.Option<GroupModel.GroupId>,
+) =>
+  Option.match(parentId, {
+    onNone: () => Effect.void,
+    onSome: (pid) =>
+      groups.findGroupById(pid).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.fail(forbidden),
+            onSome: (parent) => (parent.team_id === teamId ? Effect.void : Effect.fail(forbidden)),
+          }),
+        ),
+      ),
+  });
 
 export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
   Effect.Do.pipe(
@@ -147,6 +187,7 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
               Effect.tap(({ membership }) =>
                 requirePermission(membership, 'group:manage', forbidden),
               ),
+              Effect.tap(() => requireSameTeamParent(groups, teamId, payload.parentId)),
               Effect.bind('group', () =>
                 groups.insertGroup(
                   teamId,
@@ -692,34 +733,67 @@ export const GroupApiLive = HttpApiBuilder.group(Api, 'group', (handlers) =>
                   ),
                 ),
               ),
-              // Validate no circular refs if moving to a new parent.
-              // KNOWN GAP (out of scope for fix/role-linking, filed separately): this
-              // check-then-act has no transaction/row lock around it, so two concurrent
-              // `moveGroup` calls can each pass this guard against the pre-move tree and
-              // still jointly create a cycle once both `UPDATE`s land. `getAncestorIds`
-              // itself is depth-guarded (see `GroupsRepository.ts`) so a resulting cycle
-              // won't hang future reads, but the cycle would still exist.
-              Effect.tap(() =>
-                Option.match(payload.parentId, {
-                  onNone: () => Effect.void,
-                  onSome: (pid) =>
-                    groups
-                      .getAncestorIds(pid)
-                      .pipe(
-                        Effect.flatMap((ancestors) =>
-                          pipe(ancestors, Array.contains(groupId))
-                            ? Effect.fail(forbidden)
-                            : Effect.void,
-                        ),
-                      ),
-                }),
-              ),
-              Effect.bind('updated', () =>
+              Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
+              // The parent validation and the `UPDATE` are ONE transaction, serialized per team
+              // by `pg_advisory_xact_lock(hashtext(teamId))` (AGENTS.md -> "Per-Team Advisory
+              // Lock Guarding an Invariant Check"). Validating outside a transaction was the
+              // reported bug: two concurrent moves each passed against the pre-move tree and
+              // jointly closed a cycle once both `UPDATE`s landed. A `WHERE NOT EXISTS (...)`
+              // predicate on the `UPDATE` alone would NOT fix it — under READ COMMITTED the two
+              // statements touch different rows, so they never block each other and both see a
+              // pre-move snapshot.
+              //
+              // `SET LOCAL lock_timeout` bounds the wait. node-pg cannot cancel an in-flight
+              // query, so a fiber interrupted while parked on the lock would still pin one of the
+              // pool's connections until the lock was granted, and no `statement_timeout` is
+              // configured anywhere in this repo. Hitting the timeout surfaces as a `SqlError` ->
+              // defect -> 500, which is the honest answer. The other four holders of this same key
+              // (`deactivateMemberCascade`, `reconcileRosterRoleExtras`, `backfillGroupRoleMembers`,
+              // `backfillRosterRoleMembers`) set no timeout — and that is NOT evidence they are all
+              // background sweeps that can safely block forever: `deactivateMemberAndCascade` is
+              // reached from the interactive `deactivateMember` endpoint (`api/roster.ts`), a
+              // pre-existing gap this change does not close.
+              //
+              // `withGroupRoleSync` is deliberately NOT transactional (see its header), so the
+              // transaction goes INSIDE it as the write it wraps, never around it. That leaves
+              // its BEFORE snapshot outside the lock and so computable against a stale tree —
+              // a pre-existing, documented trade-off we are keeping: pulling the snapshot inside
+              // would hold a team-wide lock across its two 10s timeouts.
+              Effect.bind('updated', ({ sql }) =>
                 withGroupRoleSync(
                   teamId,
                   descendantTargets(groupId),
                   { groupId, operation: 'moveGroup' },
-                  groups.moveGroup(groupId, payload.parentId),
+                  sql
+                    .withTransaction(
+                      Effect.Do.pipe(
+                        Effect.tap(() => sql`SET LOCAL lock_timeout = '5s'`),
+                        Effect.tap(() => sql`SELECT pg_advisory_xact_lock(hashtext(${teamId}))`),
+                        Effect.tap(() => requireSameTeamParent(groups, teamId, payload.parentId)),
+                        Effect.tap(() =>
+                          Option.match(payload.parentId, {
+                            onNone: () => Effect.void,
+                            onSome: (pid) =>
+                              // `getAncestorIds` seeds from the group's `parent_id`, so it never
+                              // reports the group itself — `parentId === groupId` is a one-request
+                              // cycle it cannot see, and has to be rejected separately.
+                              pid === groupId
+                                ? Effect.fail(forbidden)
+                                : groups
+                                    .getAncestorIds(pid)
+                                    .pipe(
+                                      Effect.flatMap((ancestors) =>
+                                        pipe(ancestors, Array.contains(groupId))
+                                          ? Effect.fail(forbidden)
+                                          : Effect.void,
+                                      ),
+                                    ),
+                          }),
+                        ),
+                        Effect.flatMap(() => groups.moveGroup(groupId, payload.parentId)),
+                      ),
+                    )
+                    .pipe(catchSqlErrors),
                 ),
               ),
               Effect.bind('memberCount', () => groups.getMemberCount(groupId)),

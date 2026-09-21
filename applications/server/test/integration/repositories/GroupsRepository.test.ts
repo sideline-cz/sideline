@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@effect/vitest';
 import type { Discord, GroupModel, Team, TeamMember, User } from '@sideline/domain';
-import { Effect, Layer, Option } from 'effect';
+import { Effect, Exit, Layer, Option } from 'effect';
 import { SqlClient } from 'effect/unstable/sql';
 import { beforeEach } from 'vitest';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
@@ -102,7 +102,9 @@ const archiveGroup = (groupId: GroupModel.GroupId) =>
 
 // Bypasses the API-layer cycle guard (`api/group.ts`'s `moveGroup` handler — NOT enforced by
 // `GroupsRepository.moveGroup` itself) to write a `parent_id` cycle (or a cross-team parent)
-// directly, exactly as a bug or a race between two API calls could.
+// directly. No API path produces one any more — the guard runs in the same transaction as the
+// `UPDATE` under a per-team advisory lock — but rows predating that fix, or written by hand,
+// still can be cyclic, and every recursive walk must survive them.
 const wireParentDirectly = (groupId: GroupModel.GroupId, parentId: GroupModel.GroupId) =>
   SqlClient.SqlClient.asEffect().pipe(
     Effect.andThen((sql) => sql`UPDATE groups SET parent_id = ${parentId} WHERE id = ${groupId}`),
@@ -427,6 +429,70 @@ describe('GroupsRepository — getMemberCount', () => {
         ),
         Effect.provide(TestLayer),
       ),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// `depth < 32` cycle guard (regression coverage for `fix/move-group-cycle-toctou`).
+//
+// `wireParentDirectly` (above) bypasses the API-layer cycle guard the same way a bug — or a
+// race between two concurrent `moveGroup` calls, which is exactly what this branch's sibling
+// fix in `api/group.ts` closes — could produce a real `parent_id` cycle in the `groups` table.
+// `getMemberCount`'s recursive CTE walks DOWN from a group (`g.parent_id = d.id`) with no
+// `depth` guard on `main`; against a 2-node mutual cycle (A.parent_id = B, B.parent_id = A) it
+// never terminates on its own. `SET LOCAL statement_timeout` bounds the blast radius to a couple
+// of seconds regardless of whether the guard exists, so this test cannot itself wedge the
+// (serial) integration suite the way directly calling the unguarded query without a timeout
+// could. The `it.effect` timeout below is set comfortably above the Postgres-side timeout so the
+// assertion — not a runner-level kill — is what fails on `main`.
+describe('GroupsRepository — getMemberCount depth guard on a pre-existing parent_id cycle', () => {
+  it.effect(
+    'terminates instead of hanging against a 2-node parent_id cycle written directly, bypassing the API guard',
+    () =>
+      Effect.Do.pipe(
+        Effect.bind('ownerId', () => createUser('100000000000000010', 'owner10')),
+        Effect.bind('team', ({ ownerId }) =>
+          createTeam('101010101010101010' as Discord.Snowflake, ownerId),
+        ),
+        Effect.bind('groupA', ({ team }) => createGroup(team.id, 'Group A')),
+        Effect.bind('groupB', ({ team, groupA }) =>
+          createGroup(team.id, 'Group B', Option.some(groupA.id)),
+        ),
+        // groupB.parent_id is already groupA (from creation above). Wiring groupA.parent_id ->
+        // groupB closes a 2-node cycle: A -> B -> A.
+        Effect.tap(({ groupA, groupB }) => wireParentDirectly(groupA.id, groupB.id)),
+        Effect.bind('outcome', ({ groupA }) =>
+          Effect.Do.pipe(
+            Effect.bind('sql', () => SqlClient.SqlClient.asEffect()),
+            Effect.bind('repo', () => GroupsRepository.asEffect()),
+            Effect.flatMap(({ sql, repo }) =>
+              sql
+                .withTransaction(
+                  Effect.Do.pipe(
+                    Effect.tap(() => sql`SET LOCAL statement_timeout = '1500'`),
+                    Effect.flatMap(() => repo.getMemberCount(groupA.id)),
+                  ),
+                )
+                .pipe(Effect.exit),
+            ),
+          ),
+        ),
+        Effect.tap(({ outcome }) =>
+          Effect.sync(() => {
+            // On `main` (no `depth < 32` guard): the recursive CTE never terminates on its own,
+            // Postgres kills it via `statement_timeout`, and the query error surfaces as a
+            // `LogicError` DEFECT (see `catchSqlErrors`) — `outcome` is an `Exit.Failure`, and
+            // this assertion is what's expected to fail right now.
+            expect(Exit.isSuccess(outcome)).toBe(true);
+            if (Exit.isSuccess(outcome)) {
+              // Neither group has any members — the guard just needs to make the walk stop.
+              expect(outcome.value).toBe(0);
+            }
+          }),
+        ),
+        Effect.provide(TestLayer),
+      ),
+    8000,
   );
 });
 
@@ -838,7 +904,7 @@ describe('GroupsRepository — getActiveAncestors', () => {
         createGroup(team.id, 'A (leaf)', Option.some(groupB.id)),
       ),
       // Close the loop: C's parent becomes A (A -> B -> C -> A), bypassing the API-layer cycle
-      // guard exactly as a bug or a race between two moveGroup calls could.
+      // guard the way legacy data or a hand-written UPDATE still can.
       Effect.tap(({ groupC, groupA }) => wireParentDirectly(groupC.id, groupA.id)),
       Effect.bind('result', ({ team, groupA }) =>
         getActiveAncestors(groupA.id, team.id).pipe(Effect.timeout('5 seconds')),

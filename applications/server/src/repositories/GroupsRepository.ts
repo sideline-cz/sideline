@@ -208,9 +208,9 @@ const make = Effect.gen(function* () {
     Result: Schema.Struct({ count: Schema.Number }),
     execute: (groupId) => sql`
             WITH RECURSIVE descendants AS (
-              SELECT g.id, g.team_id FROM groups g WHERE g.id = ${groupId} AND g.is_archived = false
+              SELECT g.id, g.team_id, 0 AS depth FROM groups g WHERE g.id = ${groupId} AND g.is_archived = false
               UNION ALL
-              SELECT g.id, g.team_id FROM groups g JOIN descendants d ON g.parent_id = d.id WHERE g.is_archived = false AND g.team_id = d.team_id
+              SELECT g.id, g.team_id, d.depth + 1 FROM groups g JOIN descendants d ON g.parent_id = d.id WHERE g.is_archived = false AND g.team_id = d.team_id AND d.depth < 32
             )
             SELECT COUNT(DISTINCT gm.team_member_id)::int AS count
             FROM descendants d
@@ -228,9 +228,11 @@ const make = Effect.gen(function* () {
   // Cycle guard: `groups.parent_id` has no DB-level acyclicity constraint (see
   // `effectiveRoles.ts`'s header for the same decision made there), and this walk is
   // ALSO `moveGroup`'s own cycle check (`api/group.ts`'s `getAncestorIds` call) — the one
-  // thing that's supposed to stop a cycle from being created in the first place. Without
-  // the `depth < 32` guard, a corrupted parent chain would hang this query forever,
-  // which would also make `moveGroup` unusable to fix it.
+  // thing that stops a cycle from being created in the first place. That check is now
+  // atomic (transaction + per-team advisory lock, see its call site), so no API path
+  // builds a cycle any more; rows predating that fix, or written by direct SQL, still can
+  // be cyclic. Without the `depth < 32` guard, such a chain would hang this query forever,
+  // which would also make `moveGroup` unusable to repair it.
   const findAncestors = SqlSchema.findAll({
     Request: GroupModel.GroupId,
     Result: GroupRow,
@@ -373,9 +375,9 @@ const make = Effect.gen(function* () {
     Result: DescendantMemberRow,
     execute: (groupId) => sql`
             WITH RECURSIVE descendants AS (
-              SELECT g.id, g.team_id FROM groups g WHERE g.id = ${groupId}
+              SELECT g.id, g.team_id, 0 AS depth FROM groups g WHERE g.id = ${groupId}
               UNION ALL
-              SELECT g.id, g.team_id FROM groups g JOIN descendants d ON g.parent_id = d.id WHERE g.is_archived = false AND g.team_id = d.team_id
+              SELECT g.id, g.team_id, d.depth + 1 FROM groups g JOIN descendants d ON g.parent_id = d.id WHERE g.is_archived = false AND g.team_id = d.team_id AND d.depth < 32
             )
             SELECT DISTINCT gm.team_member_id
             FROM descendants d
