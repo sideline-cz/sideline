@@ -101,9 +101,16 @@ export class BankSyncConfigView extends Schema.Class<BankSyncConfigView>('BankSy
  * return a bodyless 500. Our only timestamp, `fio_token_created_at`, is a user-declared calendar
  * date snapped to 12:00 UTC and settable into the future — asserting `'activating'` off it would
  * tell a treasurer with a genuinely dead token to "wait", which is the worst possible failure.
+ *
+ * `'account_mismatch'` is a SUCCESSFUL Fio call whose `info.iban` does not match the IBAN computed
+ * from the team's configured account (`services/bankSyncAccount.ts`). `ok` is `false` because the
+ * hourly poller refuses to ingest anything under that condition — the verdict is not cosmetic. It
+ * shares a literal name with `BankSyncConfig.BankSyncStatusCode`'s rank and nothing else: no
+ * import, no derivation, no mapping function. This union stays one attempt's verdict.
  */
 export const BankSyncTestStatus = Schema.Literals([
   'ok',
+  'account_mismatch',
   'invalid',
   'rate_limited',
   'history_locked',
@@ -123,7 +130,9 @@ export class BankSyncTestResult extends Schema.Class<BankSyncTestResult>('BankSy
    * `status` (`packages/domain/AGENTS.md` degradable-endpoint rule 2). Removal ticket filed. */
   message: Schema.OptionFromNullOr(Schema.String),
   /** Fio's own `info.iban` from the probe's decoded statement (`services/fioColumns.ts:294`).
-   * `Some` only when `status === 'ok'` and Fio supplied it. Displayed, never compared. */
+   * `Some` when `status` is `'ok'` or `'account_mismatch'` and Fio supplied it. Compared
+   * server-side against the IBAN computed from the configured account (`CzIban.buildCzIban`);
+   * the `account_mismatch` verdict IS that comparison. */
   accountIban: Schema.OptionFromNullOr(Schema.String),
 }) {}
 

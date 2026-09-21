@@ -17,22 +17,25 @@
 //   }
 //
 //   export interface BankSyncStatusResult {
-//     readonly status: BankSyncConfig.BankSyncStatusCode;   // the six-rank ladder
+//     readonly status: BankSyncConfig.BankSyncStatusCode;   // the seven-rank ladder
 //     readonly expiringSoon: boolean;                        // additive, never suppressed by status
 //     readonly tokenExpiresAt: Option.Option<number>;        // tokenCreatedAt + 180d
 //   }
 //
 //   export const computeBankSyncStatus: (input: BankSyncStatusInput) => BankSyncStatusResult
 //
-// Ladder (six ranks, first match wins):
+// Ladder (seven ranks, first match wins) — plan `.work-plans/iban-cross-check.md` §3 inserts rule
+// 2.5 (`account_mismatch`) between `misconfigured` and the `invalid`/`activating`/`sync_failing`
+// group, because the token demonstrably works and telling the treasurer to replace it is wrong:
 //   1. !hasToken                                                          -> not_connected
 //   2. lastErrorIsKeyMissing                                              -> misconfigured
+//   2.5. lastErrorCode='account_mismatch'                                                          -> account_mismatch
 //   3. lastErrorCode='fio_error' AND failures>=3 AND (errorAt - (successAt ?? tokenCreatedAt)) > 6h -> invalid
 //   4. lastErrorCode='fio_error' AND tokenCreatedAt > now - 5min                                    -> activating
-//   5. lastErrorCode is set but rules 3-4 did not fire                                              -> sync_failing
+//   5. lastErrorCode is set but rules 2.5-4 did not fire                                            -> sync_failing
 //   6. otherwise                                                                                    -> ok
 // `expiringSoon` = tokenCreatedAt present AND tokenExpiresAt - now <= 14 days. Computed
-// independently of the six ranks above — NEVER suppressed by them.
+// independently of the seven ranks above — NEVER suppressed by them.
 
 import { Option } from 'effect';
 import { describe, expect, it } from 'vitest';
@@ -57,10 +60,10 @@ const baseInput = (overrides: Partial<BankSyncStatusInput> = {}): BankSyncStatus
 });
 
 // ---------------------------------------------------------------------------
-// 60 — the full six-rank ladder
+// 60 — the full seven-rank ladder
 // ---------------------------------------------------------------------------
 
-describe('computeBankSyncStatus — the six-rank ladder (60)', () => {
+describe('computeBankSyncStatus — the seven-rank ladder (60)', () => {
   it('not_connected when there is no token, regardless of every other field (65)', () => {
     const result = computeBankSyncStatus(
       baseInput({
@@ -126,6 +129,48 @@ describe('computeBankSyncStatus — the six-rank ladder (60)', () => {
   it('ok when nothing is wrong', () => {
     const result = computeBankSyncStatus(baseInput());
     expect(result.status).toBe('ok');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rule 2.5 — account_mismatch: outranks invalid, loses to misconfigured (plan §3 / §9.B)
+// ---------------------------------------------------------------------------
+
+describe('computeBankSyncStatus — rule 2.5 account_mismatch', () => {
+  it("lastErrorCode: Some('account_mismatch') -> 'account_mismatch'", () => {
+    const result = computeBankSyncStatus(
+      baseInput({
+        lastErrorCode: Option.some('account_mismatch'),
+        consecutiveFailureCount: 1,
+        lastErrorAt: Option.some(NOW),
+      }),
+    );
+    expect(result.status).toBe('account_mismatch');
+  });
+
+  it('account_mismatch beats the invalid gate: 5 failures and 7h of silence still report account_mismatch, not invalid', () => {
+    const result = computeBankSyncStatus(
+      baseInput({
+        lastErrorCode: Option.some('account_mismatch'),
+        consecutiveFailureCount: 5,
+        lastErrorAt: Option.some(NOW),
+        lastSuccessAt: Option.some(NOW - 7 * HOUR),
+      }),
+    );
+    expect(result.status).toBe('account_mismatch');
+  });
+
+  it('rule 2 (lastErrorIsKeyMissing) still wins over account_mismatch — misconfigured, not account_mismatch', () => {
+    const result = computeBankSyncStatus(
+      baseInput({
+        lastErrorIsKeyMissing: true,
+        lastErrorCode: Option.some('account_mismatch'),
+        consecutiveFailureCount: 5,
+        lastErrorAt: Option.some(NOW),
+        lastSuccessAt: Option.some(NOW - 7 * HOUR),
+      }),
+    );
+    expect(result.status).toBe('misconfigured');
   });
 });
 

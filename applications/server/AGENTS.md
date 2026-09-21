@@ -1391,6 +1391,22 @@ The token travels as `Redacted.Redacted<string>` from `FioSecretCrypto.decrypt` 
    `FioUnreachable` is also what `executeContained` raises for a DNS/connect/TLS/socket failure or a non-interrupt defect, because a `502`/`503`/`504` maintenance or gateway blip, a `429` from a WAF, and a status Fio has not documented yet are all transport noise rather than a verdict on the token. Collapsing `FioServerError` and `FioUnreachable` back into one branch makes `POST /teams/:teamId/bank-sync/test` tell a treasurer to revoke a working token during a Fio outage. The same split is why `BankSyncPoller` records `FioUnreachable` as error code `'unreachable'`, never `'fio_error'`: `bankSyncStatus.ts`'s `isFioError` is an exact `code === 'fio_error'` test, so an `'unreachable'` run lands the config at `sync_failing` and can never escalate to `invalid`.
 5. **A bind parameter whose only uses are `IS NULL` and interval arithmetic needs an explicit `::int` cast, or every call fails at Parse time.** `makeReal`'s throttle-reservation UPSERT binds `maxWaitSeconds` solely inside `${maxWaitSeconds}::int IS NULL OR … <= now() + (${maxWaitSeconds}::int * interval '1 second')`. Postgres cannot infer a parameter type from either context, so without both casts **every** call — not an edge case — fails `could not determine data type of parameter $N`, which `catchSqlErrors` wraps into a `LogicError` **defect**, not a typed failure. Observed for real: 48 tests across the poller, the backfill and `/bank-sync/test` broke at once. See also "Postgres Type Conventions".
 
+## Every `fetchPeriod` Caller Cross-Checks The Account (`src/services/bankSyncAccount.ts`)
+
+`isAccountMismatch(config, statement.info.iban)` is the ONE definition of "this token reads someone else's account", and **every** consumer of a decoded Fio statement must run it before it writes anything derived from that statement. The reasoning — and the "either side absent ⇒ no verdict" rule that must never drift — is root `AGENTS.md` → "Bank Sync (Fio)" invariant 4; do not restate it, follow it.
+
+| Caller | Call site | What the mismatch branch does |
+|--------|-----------|-------------------------------|
+| Read-only probe | `src/api/bank-sync.ts` (`probeFio`) | Returns `testResult('account_mismatch', statement.info.iban)` and skips `clearPollBackoff` — **zero** writes. |
+| Hourly poller | `src/services/BankSyncPoller.ts` (`fetchAndIngest`, one `Effect.let('mismatch', …)` gating both writes) | Skips `upsertMany` AND `upsertStatementPeriod`, skips `matchIngested`, calls `recordAccountMismatch`. |
+| Backfill button | `src/services/BankSyncBackfill.ts` (`ingestChunk`, first statement of the walk) | Returns the existing `'failed'` outcome before `upsertMany`. |
+
+Rules:
+
+1. **A new `client.fetchPeriod(...)` call site is incomplete until it decides this explicitly.** `grep -rn "fetchPeriod" applications/server/src` returns the full list; every hit outside `src/services/FioApiClient.ts` must either call `isAccountMismatch` or carry a comment on the call naming why it is exempt. Nothing in the type system enforces this.
+2. **The comparison stays in `src/services/bankSyncAccount.ts`, not in `packages/domain`'s `CzIban`.** `CzIban.buildCzIban` normalises a string; this module decides a verdict from a `BankSyncConfig` ROW plus one wire field, and the rule that must not drift ("either side absent ⇒ no verdict") is a property of that pair. Keep it pure — no `Effect`, no DB, same shape as `src/services/bankSyncStatus.ts` — so both callers and `test/bankSyncAccount.test.ts` exercise the identical function.
+3. **A `record*` repository method that writes `last_error_code` must set only the columns its condition is evidence FOR.** `consecutive_failure_count` grades the TOKEN — it is the input to `bankSyncStatus.ts`'s `>= 3` gate that promotes a config to `invalid` — so `recordAccountMismatch` deliberately does not touch it (a working token against the wrong account is not evidence the token is dying; incrementing would make the next genuinely dead token report `invalid` on its FIRST Fio 500). Its backoff is a flat `now() + interval '6 hours'`, not `recordFailure`'s exponential ladder, because only a human edit clears the condition. Before adding the next `record<Condition>` method, check each column of `recordFailure` against the new condition instead of copying the statement.
+
 ## PDF Fonts Must Be Vendored — pdfkit Corrupts Czech Silently
 
 `pdfkit`'s base-14 fonts route text through WinAnsi with **no validation and no fallback**. WinAnsi maps `á é í ó ú ý š ž` but has no code point for `č ď ě ň ř ť ů`: pdfkit emits a malformed token and **desynchronises the rest of the string**, throwing nothing and warning nothing. A smoke test written with only the first set passes against a garbage document — that, not the missing glyphs, is what makes this expensive to find.
@@ -1412,6 +1428,7 @@ Rules:
 1. **The claim's `WHERE status = '<from>'` is the lock.** Never `SELECT` candidate ids and then update them in a second statement — two ticks would both claim the same row.
 2. **Every state transition that has a precondition repeats it in the `WHERE`** (`AND status = '<expected>'`) and returns `Option`/affected-rows so the caller can detect "already handled" without a prior read.
 3. **The `attempts`-counted retry uses `CASE WHEN`** in the same UPDATE (`status = CASE WHEN attempts + 1 >= ${max} THEN 'failed' ELSE '<from>' END`) so a transient failure returns the row to the pollable state and a capped failure terminates it — see `incrementAttemptsAndMaybeFail`. This is the in-table analogue of the `attempts`-counted outbox pattern documented above.
+4. **The work runs against the row the claim `RETURNING`ed, never against the pre-claim snapshot the candidate query produced.** The same rule governs a *lease* claim, which is structurally identical (`BankSyncConfigRepository.claimPollLease` — `UPDATE bank_sync_config SET poll_leased_until = … WHERE poll_leased_until IS NULL OR poll_leased_until < now() RETURNING <all columns>`, typed `Option<BankSyncConfig.BankSyncConfig>`). `BankSyncPoller.processTeam` takes the candidate row from `findPollable()` only to know *which* team to claim, then binds the claim's returned row (`onSome: (fresh) => runTeamCycle(fresh, deps)`) and uses that for the whole cycle. With `concurrency: 2` and a 4-minute per-team timeout the candidate snapshot can be minutes old, and a treasurer's config save landing in that window is exactly the edit the cycle must see: running against the stale row makes the cycle's `recordFailure`/`recordAccountMismatch` re-stamp an error derived from the OLD account, so the user's fix looks like it did not take. Pass the pre-claim row on ONLY where it is the row's identity that is used (`config.team_id` in the `TimeoutError` arm), never its mutable columns.
 
 ### Two-Tier Email Summaries + Member-Facing Read RPC
 
@@ -2191,6 +2208,25 @@ Rules:
 4. **`createEvent` (POST) reads no clock, so create-only cases keep past literals — do NOT roll them forward.** Cases 1–5, 7 and 13 of `eventAllDayAnchor.test.ts` deliberately create at `2026-07-15` (Prague CEST, New York EDT), `2026-01-15` (Prague CET) and `2026-09-06` (the Santiago spring-forward night, where local midnight does not exist); each of those dates IS the assertion — it selects the UTC offset the anchored `start_at` is checked against. Changing them to future dates destroys the cases.
 5. **Assert the endpoint's documented success status on every request whose body a later assertion reads** — 201 for `createEvent`, 200 for `updateEvent`, 204 for `cancelEvent`. Without `expect(response.status).toBe(200)` a gate rejection reaches the assertion as `undefined` in an unrelated field, and the failure names the wrong subsystem.
 6. **Pure functions and repository decode tests are exempt; read ENDPOINTS are not.** Embed builders, date-math helpers and repository decode tests never consult `now`, so a fixed literal there is deterministic and preferred. An HTTP or RPC read that returns `canEdit`, `canCancel` or `canRsvp` does consult `now` — a case asserting any of those three is `true` needs a future fixture exactly like a write case does.
+
+### A New Guard That COMPARES Two Fixture Values Rewrites Every Existing Case
+
+Two fixture values that production never compared can be chosen independently. The moment a guard compares them, every existing case in that file silently becomes a case about the guard — and it keeps returning HTTP 200 / completing without error, so the failures name ingestion, matching or the endpoint, never the fixture.
+
+The live instance is the Fio account cross-check. `test/integration/bankSyncFixtures.ts`'s `enableBankSync` creates account `2703474850` / bank `2010`, which is IBAN `CZ7120100000002703474850`; both Fio statement fixtures must now agree with it in `info.iban` (and in `info.accountId`/`info.bankId`, which are read by other assertions):
+
+| Fixture | File | Required `info.iban` |
+|---------|------|----------------------|
+| `validRawStatement` | `test/integration/api/bankSync.test.ts:152` | `CZ7120100000002703474850` |
+| `validStatement` | `test/integration/services/BankSyncPoller.test.ts:77` | `CZ7120100000002703474850` |
+
+Both previously carried the unrelated `CZ6508000000192000145399` vector. With `isAccountMismatch` live that turns **every** probe and poll case in those two files into a mismatch case: ingestion is skipped, the probe answers `account_mismatch` instead of `ok`, and the row carries `last_error_code = 'account_mismatch'`.
+
+Rules:
+
+1. **When a change makes production compare two values that fixtures set independently, align every fixture in the same commit and say so in a comment above the fixture** — both files carry that comment today. A test that must exercise the mismatch overrides the fixture locally; it never redefines the shared default.
+2. **`CZ6508000000192000145399` stays in `test/fioColumns.test.ts`, `test/integration/services/FioApiClient.test.ts`, `test/bankSyncAccount.test.ts`, `packages/domain/test/CzIban.test.ts` and the bot's SPAYD fixtures.** No cross-check runs on any of those paths, and it is a checksum-verified vector (`packages/domain/AGENTS.md` → Pure Algorithm Modules rule 6). Do not "unify" the two vectors.
+3. **Assert the guard from both sides in the file that owns it.** `bankSync.test.ts` T8f asserts the probe's changed-column set is EMPTY on a mismatch and T19 asserts it is exactly `['next_attempt_at']` on a green probe; the pair is what distinguishes "gated correctly" from "writes nothing ever".
 
 ## Config-Gated External Service Provider (Real vs Deterministic Stub)
 

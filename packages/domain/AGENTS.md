@@ -115,6 +115,18 @@ Current shared schemas:
 |--------|-----------|----------------|
 | `HexColor` | `src/api/GroupApi.ts` | `src/api/Roster.ts` |
 
+### Two Closed Unions May Share A Literal Name Without Sharing Code
+
+The inverse of the rule above. Two closed unions that answer **different questions** stay two independent `Schema.Literals` declarations even when they need the same machine literal — no re-export, no derivation of one from the other, and no mapping function between them.
+
+Reference: `BankSyncApi.BankSyncTestStatus` and `BankSyncConfig.BankSyncStatusCode` both contain `'account_mismatch'` and share nothing else. The first is the verdict of ONE `POST /teams/:teamId/bank-sync/test` attempt; the second is the persisted state of automatic importing (`bank_sync_config.last_error_code`, ranked by `applications/server/src/services/bankSyncStatus.ts`). Their member sets overlap only partially — `rate_limited`, `history_locked` and `no_token` are attempt-only; `activating`, `sync_failing` and `not_connected` are state-only.
+
+Rules:
+
+1. **Re-export (the table above) only when both contracts constrain the SAME value.** Two unions that merely agree on a spelling are not that case; merging them forces every consumer of one to handle literals that are unreachable on its surface.
+2. **The doc comment on each union names its counterpart and says what is NOT shared.** Both `src/api/BankSyncApi.ts` and `src/models/BankSyncConfig.ts` carry that sentence ("It shares a literal name with … and nothing else: no import, no derivation, no mapping function"). A future reader finding the same literal twice must be able to tell deliberate from duplicated without reading the server.
+3. **Adding a literal to one is never automatically a change to the other.** Each union has its own exhaustive web `Record` (`src/lib/finance/bankTestStatus.ts`'s `TEST_RESULT_META` vs `src/components/molecules/FioStatusBadge.tsx`'s `STATUS_META`) and each must be extended on its own; see `applications/web/AGENTS.md` → "Closed-Union Copy Comes From An Explicit `Record`", rule 6, for the sites the compiler does not cover.
+
 ### Input vs Output Types for Write-Back Nested Arrays
 
 When a response `Detail` type carries a nested array of records that the client edits and submits back in a request payload, and the response needs to augment each record with a **server-computed field** (a flag/value the client reads but must never send), define **two distinct schema classes** — never add the computed field to the type the request payload accepts.

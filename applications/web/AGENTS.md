@@ -944,6 +944,24 @@ Rules:
 3. **The wire literals and the key names are allowed to differ** — the wire union is `snake_case` (`not_configured`) while the i18n keys are `camelCase` (`assistant_degraded_notConfigured`). A template literal would therefore miss **every** branch, not just one. Reference: `src/lib/assistant/entityRoutes.ts`.
 4. **Declare the map as `Record<Union, () => string>`**, not `Partial<Record<…>>` — adding a literal to the domain union must then fail the web build until the copy exists.
 5. **The same rule governs the non-copy maps keyed off that union** — icon, colour, shape. `src/lib/finance/matchReasons.ts` renders the nine `BankTransaction.BankTransactionMatchReason` literals through three parallel closed `Record`s (`matchReasonLabels`, `matchReasonIcons`, `matchReasonDashed`), all keyed off the **imported domain union**, never a locally re-declared copy. A tenth literal added to the engine then fails the web build three times instead of shipping a raw key and a missing icon to the treasurer's screen. This is why the union lives in `packages/domain` rather than being mirrored here: a local mirror makes every `Record` exhaustive against the wrong list.
+6. **The `Record`s are the only sites the compiler protects. Every hand-rolled `===`/`||` gate and every `switch` with a `default` arm accepts a new literal silently — grep for them by hand.** When a closed wire union gains a member, the exhaustive `Record`s fail the build as designed; the three shapes below compile unchanged and render **nothing** for the new literal. `BankSyncConfig.BankSyncStatusCode` gaining `'account_mismatch'` broke the build in `src/lib/finance/bankTestStatus.ts` (`TEST_RESULT_META`) and `src/components/molecules/FioStatusBadge.tsx` (`STATUS_META`) — and in none of these:
+
+   | Site | Shape | What the new literal did there, with no compile error |
+   |------|-------|------------------------------------------------------|
+   | `src/components/pages/BankTransactionsPage.tsx:77` | `config?.status === 'invalid' \|\| config?.status === 'sync_failing'` | Fell out of the alert gate, so the one page a treasurer actually opens showed **no banner at all** while imports were halted — the silent halt simply moved one route over. Fixed by hand (`accountMismatch` added to the gate and to the variant/title ternaries). |
+   | `src/components/organisms/bank/FioStatusBlock.tsx:90` + `:201` | `switch (config.status)` with `default: statusAlert = null` | The `default` arm turned what would be an exhaustiveness error into a silent no-render. Fixed by hand (explicit `case 'account_mismatch'`). |
+   | `src/components/organisms/team-settings/FioBankCard.tsx:73` | `config === null \|\| config.status === 'not_connected' \|\| config.status === 'invalid'` (the `helpOpen` initial state) | Still excluded, deliberately — the card's own `FioStatusBlock` alert carries the instruction, so the help panel stays collapsed. This is what "decide each hit explicitly" looks like when the answer is "leave it out". |
+
+   Adding a literal to a closed wire union is therefore a **grep step, not a build step**. Run both greps below, seeded with literals the union already has, and decide each hit explicitly — add the new literal to the gate, or leave it out and record the omission (a one-line comment on the gate, or a row in the table above):
+
+   ```bash
+   # every hand-rolled gate on that union (seed with two EXISTING literals, not the new one)
+   grep -rn "'not_connected'\|'sync_failing'" applications/web/src
+   # every switch over the field, then read each one's default arm
+   grep -rn "switch (.*\.status)" applications/web/src
+   ```
+
+   Prefer an explicit `case` per literal (`FioStatusBlock` now has one for all six ranks that reach the `switch`; `not_connected` returns earlier, so its `default: statusAlert = null` is unreachable and exists only to satisfy definite assignment). A `default:`/`else` arm that actually swallows literals is acceptable only when a comment on that arm names them. Either way the `default` is why the compiler will never flag the NEXT added literal — hence the grep.
 
 ### Locale Persistence
 

@@ -66,6 +66,7 @@ import {
   coverageGaps,
   deriveBalanceBefore,
 } from '~/services/bankCoverage.js';
+import { configuredIbanOf, isAccountMismatch } from '~/services/bankSyncAccount.js';
 import { computeBankSyncStatus } from '~/services/bankSyncStatus.js';
 import {
   makeReal as makeRealFioApiClient,
@@ -189,15 +190,7 @@ const extractDuplicateHint = (
 // ---------------------------------------------------------------------------
 
 const toConfigView = (config: BankSyncConfig.BankSyncConfig): BankSyncApi.BankSyncConfigView => {
-  const computedIban = Option.flatMap(config.account_number, (accountNumber) =>
-    Option.flatMap(config.bank_code, (bankCode) =>
-      CzIban.buildCzIban({
-        prefix: Option.getOrUndefined(config.account_prefix),
-        accountNumber,
-        bankCode,
-      }),
-    ),
-  );
+  const computedIban = configuredIbanOf(config);
 
   const statusResult = computeBankSyncStatus({
     hasToken: Option.isSome(config.fio_token_encrypted),
@@ -655,6 +648,7 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
       const probeFio = (
         teamId: Team.TeamId,
         token: Redacted.Redacted<string>,
+        config: BankSyncConfig.BankSyncConfig,
       ): Effect.Effect<BankSyncApi.BankSyncTestResult> => {
         const to = todayIso();
         const from = addDaysToDateString(to, -PROBE_WINDOW_BACK_DAYS);
@@ -676,18 +670,31 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
         return client.fetchPeriod({ token, from, to, teamId }).pipe(
           // B1 — `clearPollBackoff`, NEVER `recordSuccess`. Logged: a user-triggered defeat of
           // the anti-hammer exponential poll backoff should leave a record of who/when.
-          Effect.tap(() =>
-            configRepo
-              .clearPollBackoff(teamId)
-              .pipe(
-                Effect.tap(() =>
-                  Effect.logInfo('bank-sync/test: cleared poll backoff after a probe success').pipe(
-                    Effect.annotateLogs({ teamId }),
+          // Gated on `!isAccountMismatch`: on a MISMATCH the backoff is the poller's deliberate
+          // state (it halted ingestion and set it), so clearing it here would send the poller
+          // straight back to a config it is going to refuse again in an hour — and would erase
+          // the evidence. Cleared only when the probe is genuinely green, which is also the
+          // remedy loop: fix the account number, press Test, get `ok`, backoff cleared, next
+          // hourly poll ingests.
+          Effect.tap((statement) =>
+            isAccountMismatch(config, statement.info.iban)
+              ? Effect.void
+              : configRepo
+                  .clearPollBackoff(teamId)
+                  .pipe(
+                    Effect.tap(() =>
+                      Effect.logInfo(
+                        'bank-sync/test: cleared poll backoff after a probe success',
+                      ).pipe(Effect.annotateLogs({ teamId })),
+                    ),
                   ),
-                ),
-              ),
           ),
-          Effect.map((statement) => testResult('ok', statement.info.iban)),
+          Effect.map((statement) =>
+            testResult(
+              isAccountMismatch(config, statement.info.iban) ? 'account_mismatch' : 'ok',
+              statement.info.iban,
+            ),
+          ),
           // Nothing here reads `e.message`, `e.cause` or any URL: the typed errors carry
           // only `{ endpoint, teamId }` by construction (`FioApiClient.ts`). D10
           // containment.
@@ -887,7 +894,7 @@ export const BankSyncApiLive = HttpApiBuilder.group(Api, 'bankSync', (handlers) 
                                 Effect.annotateLogs({ teamId }),
                                 Effect.as(testResult('invalid')),
                               ),
-                        onSuccess: (token) => probeFio(teamId, token),
+                        onSuccess: (token) => probeFio(teamId, token, config),
                       }),
                     ),
                 }),

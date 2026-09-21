@@ -132,12 +132,13 @@ Once connected, Sideline checks the account for new payments automatically, roug
 Click **Test the connection** on the bank connection card at any time to check the saved token against Fio directly, instead of waiting for the next automatic check. The result tells you exactly what happened:
 
 - **Fio accepted the token** — the token itself is good. Note that this checks the token only; the connection status shown above the button reflects the automatic hourly import, which is a separate, longer-running check and can still show a problem even right after a successful test.
+- **The token belongs to a different account** — Fio accepted the token, but the account it reads doesn't match the account prefix/number saved on this card. Sideline stops importing rather than pull in someone else's payments, so this isn't cosmetic: the hourly import stays halted until you fix it. The result shows both IBANs side by side so you can see which is which. Fio doesn't send the account **prefix** back in its answer, so the most common cause is a missing prefix on this card — double-check it before assuming the token itself is wrong.
 - **Fio rejected the token** — it's expired, revoked, or was never valid. Generate a fresh one following the steps above; a **Replace token** shortcut is offered right there.
 - **Too many requests** — Fio limits how often the same token can be checked. Wait about 30 seconds and try again.
 - **The history is locked** or **couldn't reach Fio** — neither of these means the token is bad; try again in a moment.
 
 <Aside type="note" title="Test what you just pasted, not what's saved">
-  The test always checks the **saved** token. If you've pasted a new one but haven't clicked **Save Changes** yet, save first — otherwise the button is disabled with a hint explaining why.
+  The test always checks the **saved** account and token. If you've changed the account fields or pasted a new token but haven't clicked **Save Changes** yet, save first — otherwise the button is disabled with a hint explaining why.
 </Aside>
 
 ### Importing older movements

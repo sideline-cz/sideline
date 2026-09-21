@@ -75,6 +75,7 @@ export function BankTransactionsPage({
   const notConnected = config === null || config.status === 'not_connected';
   const expiringSoon = config?.expiringSoon === true;
   const tokenInvalid = config?.status === 'invalid' || config?.status === 'sync_failing';
+  const accountMismatch = config?.status === 'account_mismatch';
   const missingVsCount = summary?.membersWithoutVsCount ?? 0;
   const oldestPendingDays =
     summary && Option.isSome(summary.oldestPendingBookedOn)
@@ -98,15 +99,18 @@ export function BankTransactionsPage({
         </div>
       </div>
 
-      {(expiringSoon || tokenInvalid) && (
-        <Alert variant={tokenInvalid ? 'destructive' : 'warning'}>
+      {(expiringSoon || tokenInvalid || accountMismatch) && (
+        <Alert variant={tokenInvalid || accountMismatch ? 'destructive' : 'warning'}>
           <AlertTriangle aria-hidden='true' />
           <AlertTitle>
-            {tokenInvalid
-              ? tr('fio_status_invalidTitle')
-              : tr('fio_status_expiringTitle', { days: 0 })}
+            {accountMismatch
+              ? tr('fio_status_accountMismatchTitle')
+              : tokenInvalid
+                ? tr('fio_status_invalidTitle')
+                : tr('fio_status_expiringTitle', { days: 0 })}
           </AlertTitle>
-          <AlertDescription>
+          <AlertDescription className='flex flex-col gap-2'>
+            {accountMismatch && <p>{tr('fio_status_accountMismatchBody')}</p>}
             <Link to='/teams/$teamId/settings' params={{ teamId }} className='underline'>
               {tr('bank_export_openSettings')}
             </Link>
