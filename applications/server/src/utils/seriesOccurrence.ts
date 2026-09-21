@@ -9,7 +9,7 @@ const FALLBACK_ZONE = 'Europe/Prague';
  *
  * Called for a `times_are_team_local = TRUE` series row: `event_series.start_time`/`end_time`
  * are `HH:MM[:SS]` wall-clock in the team's `team_settings.timezone` (not UTC — see the
- * conversion migration `1791800000_series_time_is_team_local.ts` and `EventSeries.ts`'s field
+ * conversion migration `1792100000_series_time_is_team_local.ts` and `EventSeries.ts`'s field
  * docs; a `FALSE` row instead goes through `seriesTimeDialect.resolveSeriesOccurrenceInstant`'s
  * legacy UTC branch, which does not call this function). A recurring "Tuesday 18:00" is a wall
  * clock: no single UTC time-of-day equals 18:00 local all year, so the naive

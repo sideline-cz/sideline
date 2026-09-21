@@ -8,7 +8,7 @@
 // `1791700000_add_series_times_team_local_flag.ts`, which does nothing but
 // `ALTER TABLE event_series ADD COLUMN IF NOT EXISTS times_are_team_local
 // BOOLEAN NOT NULL DEFAULT FALSE` — lifted verbatim from `1791600000`. The
-// conversion (Statements A and B) is deferred to `1791800000` at Release N+1
+// conversion (Statements A and B) is deferred to `1792100000` at Release N+1
 // and is NOT exercised here.
 //
 // `1791700000_add_series_times_team_local_flag.ts` does not exist yet, and
@@ -219,7 +219,7 @@ describe('migration 1791700000 — adds event_series.times_are_team_local, conve
   it.effect(
     "2. does NOT touch times — a '17:00' start_time seeded BEFORE the migration runs is still " +
       "exactly '17:00:00' afterward. This is the test that catches someone folding the " +
-      'conversion (deferred to 1791800000) back into this release early.',
+      'conversion (deferred to 1792100000) back into this release early.',
     () =>
       Effect.Do.pipe(
         Effect.bind('setup', () => setupTeam('960200000000000002')),
@@ -239,7 +239,7 @@ describe('migration 1791700000 — adds event_series.times_are_team_local, conve
         Effect.tap(({ row }) =>
           Effect.sync(() => {
             // NOT '18:00:00' — that would be Statement A's conversion, which
-            // belongs to 1791800000 (Release N+1), not this migration.
+            // belongs to 1792100000 (Release N+1), not this migration.
             expect(row.start_time).toBe('17:00:00');
             expect(row.end_time).toBe('19:00:00');
             expect(row.times_are_team_local).toBe(false);

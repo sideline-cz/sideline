@@ -1851,7 +1851,7 @@ describe('Event Series API', () => {
 
     it(
       'N.d.2b — the stored times_are_team_local marker always equals exactly what the ' +
-        "create payload declared, for BOTH values — the property `1791800000`'s Statement A " +
+        "create payload declared, for BOTH values — the property `1792100000`'s Statement A " +
         'guard needs once Release N can write TRUE as well as FALSE (Fix 1)',
       async () => {
         const responses = await Promise.all(

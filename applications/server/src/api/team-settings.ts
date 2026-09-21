@@ -342,7 +342,7 @@ export const TeamSettingsApiLive = HttpApiBuilder.group(Api, 'teamSettings', (ha
                         // otherwise already-materialized events keep the old instant while the
                         // series regenerates new ones in the new zone, splitting the team's
                         // calendar in two. Structurally the same recomputation as the
-                        // conversion migration's Statement B (`1791800000`, Release N+1), run
+                        // conversion migration's Statement B (`1792100000`, Release N+1), run
                         // here instead of waiting for an operator to re-run a migration for
                         // every timezone edit.
                         //
