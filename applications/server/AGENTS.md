@@ -71,6 +71,27 @@ sql`INSERT INTO t (a, b) VALUES ${sql.join(',', false)(rows.map((r) => sql`(${r.
 
 Unit tests that mock the repository/emitter cannot catch this — the bug only surfaces against a real database. Cover multi-row inserts in DB-backed integration tests with at least 2 rows. Examples: `applications/server/src/repositories/ChannelSyncEventsRepository.ts`, `applications/server/src/repositories/EmailAttachmentsRepository.ts`.
 
+### A `LIMIT 1` that picks one row MUST carry a total `ORDER BY`
+
+A `SELECT ... LIMIT 1` with no `ORDER BY` returns an ARBITRARY row: whenever more than one row can match, Postgres is free to hand back a different one on the next run (plan change, vacuum, index-only scan). Every such `LIMIT 1` MUST carry an `ORDER BY` whose LAST key is unique (`id`), making the order total and the value stable across runs.
+
+```sql
+-- One role name for display; a member holds several roles. Custom position roles
+-- rank before the built-ins every member carries; ties break by name, then by id.
+SELECT r.name FROM member_roles mr JOIN roles r ON r.id = mr.role_id
+WHERE mr.team_member_id = tm.id
+ORDER BY r.is_built_in ASC, r.name ASC, r.id ASC
+LIMIT 1
+```
+
+Rules:
+
+1. **The final `ORDER BY` key MUST be unique** — `ORDER BY r.name` alone still ties on two roles sharing a name.
+2. **A `LIMIT 1` whose `WHERE` is a unique-key equality (`WHERE id = ${id}`) needs no `ORDER BY`** — at most one row can match, so the rule does not apply.
+3. **Cover it with an integration test that inserts 2+ candidate rows and asserts the exact value chosen** — a one-candidate fixture passes with or without the `ORDER BY`.
+
+Reference: `TeamGenerationRepository.findYesMembersForEvent` (`role_name`), integration coverage in `applications/server/test/integration/repositories/TeamGenerationRepository.roleName.test.ts`.
+
 ### Capping a per-group child list while keeping the true count uncapped
 
 When a query returns a parent with a bounded list of children per group (e.g. a poll option with at most N voters) but a downstream consumer still needs the **true** total per group, compute the total in a separate aggregate and cap the child rows with a `ROW_NUMBER()` window — never `LIMIT` the whole result set or slice the rows in application code. The cap and the count are two independent columns on the result.
