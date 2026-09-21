@@ -250,8 +250,15 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
               Permanently mounted live region: most screen-reader/browser pairs only announce
               mutations made *inside* an already-present `aria-live` region, so this `div` must
               exist before `testResult` ever changes, not spring into being alongside it.
+
+              `aria-live` + `aria-atomic` deliberately, NOT `role='status'` — the two announce
+              identically (a `status` role IS a polite atomic live region), but the role also
+              registers this div in the accessibility tree as a `status` element. The team
+              settings page already has one (`molecules/SyncRolesButton.tsx`), and a second makes
+              `page.getByRole('status')` ambiguous — which broke two E2E specs in
+              `e2e/tests/onboarding-settings.spec.ts` with a strict-mode violation.
             */}
-            <div role='status' aria-live='polite'>
+            <div aria-live='polite' aria-atomic='true'>
               {testResult && (
                 <FioTestResultAlert result={testResult} onReplaceToken={handleReplaceToken} />
               )}

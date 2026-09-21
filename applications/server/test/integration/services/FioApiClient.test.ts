@@ -526,34 +526,47 @@ describe('FioApiClient — token containment (82)', () => {
 // ---------------------------------------------------------------------------
 
 describe('FioApiClient — per-token throttle (83)', () => {
-  it.effect('two calls with the SAME token are at least 30s apart', () =>
-    Effect.gen(function* () {
-      let calls = 0;
-      const client = yield* buildRealClient(
-        makeMockHttpClientLayer((request) => {
-          calls += 1;
-          return Effect.succeed(jsonResponse(request, 200, validRawStatement));
-        }),
-      );
-      yield* client.fetchPeriod(fetchInput({ token: TEST_TOKEN }));
-      expect(calls).toBe(1);
-      const startMillis = yield* Clock.currentTimeMillis;
-      const fiber = yield* Effect.forkChild(client.fetchPeriod(fetchInput({ token: TEST_TOKEN })));
+  it.effect('two calls with the SAME token are throttled a full window apart', () =>
+    // Same `TestClock`/repeated-real-I/O interaction the "409 forever" test above documents, and
+    // the same remedy. The old shape forked the second `fetchPeriod` and drove virtual time at it
+    // in a bounded loop, which RACES its real SQL reservation: `TestClock.adjust` runs
+    // immediately, so when the DB round trip is the slower of the two the loop exhausts all 60
+    // adjusts BEFORE the fiber reaches its `Effect.sleep`. That sleep is then scheduled relative
+    // to an already-advanced virtual clock, nothing further advances it, and `Fiber.join` blocks
+    // until vitest's 30s `testTimeout` — which is what CI hit (run 35233779089, `Test timed out
+    // in 30000ms`), and what made it pass locally often enough to look like load flake.
+    //
+    // `TestClock.withLive` opts into the real clock so the throttle's sleep resolves on its own,
+    // with `throttleSeconds` dialled down to 2 (a test-only knob; production is 30) so the SAME
+    // property — a second call on the SAME token waits out the configured window, and the window
+    // is honoured rather than merely reserved — costs ~2s instead of 30s. The sibling
+    // DIFFERENT-token test below needs no such change: a fresh fingerprint reserves a zero wait,
+    // so it never depends on virtual time advancing at all.
+    TestClock.withLive(
+      Effect.gen(function* () {
+        const throttleSeconds = 2;
+        let calls = 0;
+        const client = yield* buildRealClient(
+          makeMockHttpClientLayer((request) => {
+            calls += 1;
+            return Effect.succeed(jsonResponse(request, 200, validRawStatement));
+          }),
+          { throttleSeconds },
+        );
 
-      // Drive virtual time forward one second at a time until the second HTTP call actually
-      // fires, recording how much virtual time had to pass first.
-      let elapsedAtSecondCall = -1;
-      for (let i = 0; i < 60 && calls < 2; i += 1) {
-        yield* TestClock.adjust('1 second');
-        if (calls === 2 && elapsedAtSecondCall === -1) {
-          const now = yield* Clock.currentTimeMillis;
-          elapsedAtSecondCall = now - startMillis;
-        }
-      }
-      yield* Fiber.join(fiber);
-      expect(calls).toBe(2);
-      expect(elapsedAtSecondCall).toBeGreaterThanOrEqual(29_000);
-    }).pipe(Effect.provide(TestPgClient)),
+        yield* client.fetchPeriod(fetchInput({ token: TEST_TOKEN }));
+        expect(calls).toBe(1);
+
+        const startMillis = yield* Clock.currentTimeMillis;
+        yield* client.fetchPeriod(fetchInput({ token: TEST_TOKEN }));
+        const elapsedMillis = (yield* Clock.currentTimeMillis) - startMillis;
+
+        expect(calls).toBe(2);
+        // Allow a small scheduling tolerance below the nominal window; the point is that the
+        // caller genuinely slept out the reservation rather than firing straight through it.
+        expect(elapsedMillis).toBeGreaterThanOrEqual(throttleSeconds * 1000 - 250);
+      }),
+    ).pipe(Effect.provide(TestPgClient)),
   );
 
   it.effect('two calls with DIFFERENT tokens are not delayed relative to each other', () =>
