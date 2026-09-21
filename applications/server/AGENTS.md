@@ -1144,6 +1144,23 @@ America/New_York, asked 2026-02-01 18:00 -> got 2026-03-01 18:00
 
 It fails silently and only west of UTC. A test table of `Europe/Prague` / `UTC` / `Pacific/Auckland` passes anyway — **every test of a zoned-instant builder must include at least one negative-offset zone** (`America/New_York`, `America/Los_Angeles`) and at least one non-whole-hour zone (`Asia/Kathmandu` at UTC+5:45, `Australia/Lord_Howe` with a 30-minute DST step). Reference: `src/utils/seriesOccurrence.ts` and `test/utils/seriesOccurrence.test.ts`.
 
+## A Noon-Anchored Date-Only Column Is Not An Instant
+
+Several `timestamptz` columns hold a **user-declared calendar date**, not an observed instant. The web writes them through `dateOnlyToUtcNoon` (`applications/web/src/lib/datetime.ts`), which snaps a `YYYY-MM-DD` string to `T12:00:00Z` so the UTC calendar date survives every practical offset:
+
+| Column | Written from |
+|--------|--------------|
+| `bank_sync_config.fio_token_created_at` | `components/organisms/team-settings/FioBankCard.tsx` |
+| `payments.paid_at` | `components/organisms/RecordPaymentDialog.tsx` |
+| `fees.due_at` / `fee_assignments.due_at` | `components/organisms/FeeFormDialog.tsx` |
+| `expenses.spent_at` | `components/organisms/ExpenseFormDialog.tsx` |
+
+Rules:
+
+1. **Any comparison of one of these columns against a window shorter than 24 h MUST be two-sided.** A one-sided `col > now - Δ` is also true for every moment *before* the noon anchor, so it matches continuously from 00:00 UTC on the declared day through `12:00 UTC + Δ` — and never stops matching for a date the user set in the future. Write `col <= now && col > now - Δ`. Reference: `src/services/bankSyncStatus.ts` rule 4 (`activating`), whose window is `now - 5min < tokenCreatedAt <= now`; the same predicate one-sided reported `activating` for ~12 h a day and forever on a future-dated token.
+2. **Never read one of these values as evidence that the thing happened at that instant.** The user typed a date; nothing observed it. A future-dated value is reachable from the UI unless that specific call site clamps its picker (`applications/web/AGENTS.md` → "Date Inputs — `DatePicker`", rule 4), and a clamp added today does not sanitise rows already written — server-side predicates must stay correct for a future-dated row regardless.
+3. **A test for such a comparison MUST pin an explicit `now` and assert BOTH sides of the window**: one fixture past the upper bound (a value in the future) and one before the lower bound. A suite that only moves the fixture backwards passes against a one-sided predicate. Reference: `test/bankSyncStatus.test.ts` → `computeBankSyncStatus — activating boundary (67)`.
+
 ## Cron Jobs
 
 Cron jobs are long-running Effects that repeat on a schedule. Each cron is defined in `src/services/` and wired as a concurrent fiber in `run.ts`.

@@ -436,11 +436,14 @@ export function FioBankCard({ teamId, initialConfig, onRefresh }: FioBankCardPro
                   <p className='text-xs text-muted-foreground mb-1'>
                     {tr('fio_tokenCreatedAt_help')}
                   </p>
+                  {/* Clamped to today: a future creation date would push `tokenExpiresAt` out
+                      and is never a fact the treasurer can honestly report. */}
                   <DatePicker
                     value={tokenCreatedAt}
                     onChange={setTokenCreatedAt}
                     fromYear={currentYear - 1}
                     toYear={currentYear}
+                    toDate={new Date()}
                   />
                 </div>
 

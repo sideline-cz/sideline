@@ -14,6 +14,8 @@ interface DatePickerProps {
   disabled?: boolean;
   fromYear?: number;
   toYear?: number;
+  /** Upper bound at DAY granularity — later days are unselectable and unreachable. */
+  toDate?: Date;
   defaultMonth?: Date;
 }
 
@@ -25,6 +27,7 @@ function DatePicker({
   disabled,
   fromYear,
   toYear,
+  toDate,
   defaultMonth: defaultMonthProp,
 }: DatePickerProps) {
   const dateFnsLocale = useDateFnsLocale();
@@ -54,7 +57,8 @@ function DatePicker({
             }}
             captionLayout={fromYear || toYear ? 'dropdown' : 'label'}
             startMonth={fromYear ? new Date(fromYear, 0) : undefined}
-            endMonth={toYear ? new Date(toYear, 11) : undefined}
+            endMonth={toDate ?? (toYear ? new Date(toYear, 11) : undefined)}
+            disabled={toDate ? { after: toDate } : undefined}
             defaultMonth={selected ?? defaultMonthProp}
             autoFocus
           />

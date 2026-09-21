@@ -91,11 +91,16 @@ const computeStatus = (input: BankSyncStatusInput): BankSyncConfig.BankSyncStatu
     if (silenceMs > INVALID_SILENCE_MS) return 'invalid';
   }
 
-  // 4 — activating.
+  // 4 — activating. The window is TWO-sided. `fio_token_created_at` is a user-declared calendar
+  // date snapped to 12:00 UTC (`applications/web/src/lib/datetime.ts`), never a real instant, so
+  // the old one-sided `createdAt > now - 5min` also matched every moment BEFORE the anchor: a
+  // token dated today reported `activating` from 00:00 straight through 12:05 UTC, and a token
+  // dated in the future reported it until that date passed. A token cannot be activating before
+  // it exists — `createdAt <= now` is the missing half.
   if (isFioError(input)) {
     const activating = Option.match(input.tokenCreatedAt, {
       onNone: () => false,
-      onSome: (createdAt) => createdAt > input.now - ACTIVATING_WINDOW_MS,
+      onSome: (createdAt) => createdAt <= input.now && createdAt > input.now - ACTIVATING_WINDOW_MS,
     });
     if (activating) return 'activating';
   }
