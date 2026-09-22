@@ -2684,6 +2684,8 @@
   "teamSettings_rosterCategoryHelp": "Discord category where new roster channels are created. Reactivated roster channels are created here too. Leave as None to use Discord's default placement.",
   "teamSettings_rosterChannelSettings": "Roster channels",
   "teamSettings_rsvpReminderDaysBefore": "Days before event",
+  "teamSettings_rsvpReminderDaysBeforeOverrides": "Per event type",
+  "teamSettings_rsvpReminderDaysBeforeOverrides_help": "Leave blank to use the value above. Set a number to remind that many days before events of that type.",
   "teamSettings_rsvpReminderHelp": "Sends a reminder this many days before the event, at the configured time in the team's timezone. Set days to 0 to remind on the event day itself.",
   "teamSettings_rsvpReminderTime": "Reminder time",
   "teamSettings_rsvpRemindersEnabled": "Enable RSVP reminders",

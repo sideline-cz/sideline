@@ -4,8 +4,13 @@ import { SearchableSelect } from '~/components/atoms/SearchableSelect';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
 import { Input } from '~/components/ui/input';
 import { Separator } from '~/components/ui/separator';
+import { eventTypeLabels } from '~/lib/event-labels.js';
 import { tr } from '~/lib/translations.js';
-import type { SettingsFormValues } from './settingsForm';
+import {
+  REMINDER_OVERRIDE_EVENT_TYPES,
+  reminderOverrideField,
+  type SettingsFormValues,
+} from './settingsForm';
 import { NONE_VALUE, textChannelOptions } from './shared';
 import type { CardForm } from './useCardForm';
 
@@ -122,6 +127,41 @@ export function RemindersCard({ form: { values, setField }, discordChannels }: R
               disabled={!values.rsvpRemindersEnabled}
               className='max-w-32'
             />
+          </div>
+          {/* Per-event-type lead times. Blank falls back to the team-wide value above, which is
+              why these carry no `min`-driven default — an empty box is a meaningful state. */}
+          <div>
+            <span className='text-sm font-medium mb-1 block'>
+              {tr('teamSettings_rsvpReminderDaysBeforeOverrides')}
+            </span>
+            <p className='text-xs text-muted-foreground mb-2'>
+              {tr('teamSettings_rsvpReminderDaysBeforeOverrides_help')}
+            </p>
+            <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>
+              {REMINDER_OVERRIDE_EVENT_TYPES.map((eventType) => {
+                const field = reminderOverrideField(eventType);
+                return (
+                  <div key={eventType}>
+                    <label
+                      htmlFor={`reminder-days-${eventType}`}
+                      className='text-xs text-muted-foreground mb-1 block'
+                    >
+                      {eventTypeLabels[eventType]()}
+                    </label>
+                    <Input
+                      id={`reminder-days-${eventType}`}
+                      type='number'
+                      min={0}
+                      max={14}
+                      value={values[field]}
+                      placeholder={values.rsvpReminderDaysBefore}
+                      onChange={(e) => setField(field, e.target.value)}
+                      disabled={!values.rsvpRemindersEnabled}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           </div>
           <div>
             <label htmlFor='max-missed-rsvps' className='text-sm font-medium mb-1 block'>

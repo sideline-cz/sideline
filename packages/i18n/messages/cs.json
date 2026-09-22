@@ -2684,6 +2684,8 @@
   "teamSettings_rosterCategoryHelp": "Discord kategorie, do které se vytvářejí kanály nových soupisek. Kanály znovu aktivovaných soupisek se vytvoří zde také. Ponechte None pro výchozí umístění v Discordu.",
   "teamSettings_rosterChannelSettings": "Soupiskové kanály",
   "teamSettings_rsvpReminderDaysBefore": "Dny před událostí",
+  "teamSettings_rsvpReminderDaysBeforeOverrides": "Podle typu události",
+  "teamSettings_rsvpReminderDaysBeforeOverrides_help": "Nechte prázdné pro použití hodnoty výše. Zadejte číslo pro připomenutí tolik dní před událostmi daného typu.",
   "teamSettings_rsvpReminderHelp": "Pošle připomínku tolik dní před událostí v nastavený čas v časovém pásmu týmu. Nastavte 0 dní pro připomínku v den události.",
   "teamSettings_rsvpReminderTime": "Čas připomínky",
   "teamSettings_rsvpRemindersEnabled": "Povolit připomínky RSVP",
