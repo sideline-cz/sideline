@@ -14,6 +14,7 @@ import { AchievementSyncEventsRepository } from '~/repositories/AchievementSyncE
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js';
+import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
 import { BankSyncConfigRepository } from '~/repositories/BankSyncConfigRepository.js';
 import { BankTokenExpiryEventsRepository } from '~/repositories/BankTokenExpiryEventsRepository.js';
 import { BankTransactionsRepository } from '~/repositories/BankTransactionsRepository.js';
@@ -196,6 +197,7 @@ export const Repositories = Layer.mergeAll(
   PersonalEventMessagesRepository.Default,
   PersonalEventOverflowCategoriesRepository.Default,
   SudoSessionsRepository.Default,
+  AiActionProposalsRepository.Default,
 );
 
 const AppLayer = Layer.mergeAll(

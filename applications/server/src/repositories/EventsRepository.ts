@@ -75,7 +75,7 @@ export class EventWithDetails extends Schema.Class<EventWithDetails>('EventWithD
   timezone: Schema.String,
 }) {}
 
-class EventRow extends Schema.Class<EventRow>('EventRow')({
+export class EventRow extends Schema.Class<EventRow>('EventRow')({
   id: Event.EventId,
   team_id: Team.TeamId,
   training_type_id: Schema.OptionFromNullOr(TrainingType.TrainingTypeId),

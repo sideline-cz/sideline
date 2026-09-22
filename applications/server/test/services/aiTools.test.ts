@@ -77,9 +77,10 @@ import type {
   TrainingType,
   User,
 } from '@sideline/domain';
-import { DateTime, Effect, Layer, Option, type ServiceMap } from 'effect';
+import { DateTime, Effect, Layer, Option, Schema, type ServiceMap } from 'effect';
 import * as TestClock from 'effect/testing/TestClock';
 import { toEventInfo } from '~/api/event.js';
+import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
 import { EventsRepository, EventWithDetails } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
@@ -89,6 +90,7 @@ import {
   TeamMembersRepository,
 } from '~/repositories/TeamMembersRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
+import { ProposeCreateEventArgs } from '~/services/ai/actions.js';
 import { toToolParameters } from '~/services/ai/jsonSchema.js';
 import {
   currentDatetime,
@@ -100,6 +102,7 @@ import {
 } from '~/services/ai/readTools.js';
 import { ALL_TOOLS, visibleTools } from '~/services/ai/registry.js';
 import { makeCanSeeGroup, type ToolContext } from '~/services/ai/toolTypes.js';
+import { proposeAction } from '~/services/ai/writeTools.js';
 
 // ---------------------------------------------------------------------------
 // Test ids
@@ -239,6 +242,12 @@ const makeGroupsLayer = (rows: ReadonlyArray<GroupRow>) =>
   Layer.succeed(GroupsRepository, {
     findGroupsByTeamId: (teamId: Team.TeamId) =>
       Effect.succeed(rows.filter((r) => r.team_id === teamId)),
+    // `create_event.propose` (`services/ai/actions.ts`) validates every referenced group id
+    // in-team via this method — NOT `findGroupsByTeamId` (a different call for a different tool).
+    // Reads from the SAME `rows` array so a test can seed both list_groups AND propose fixtures
+    // from one call site.
+    findGroupById: (id: GroupModel.GroupId) =>
+      Effect.succeed(Option.fromNullishOr(rows.find((r) => r.id === id))),
   } as never);
 
 interface TrainingTypeRow {
@@ -247,6 +256,10 @@ interface TrainingTypeRow {
   readonly name: string;
   readonly owner_group_name: Option.Option<string>;
   readonly member_group_name: Option.Option<string>;
+  // Only consulted by `create_event.propose`'s inheritance resolution (`resolveEventGroups`) —
+  // the plain `list_training_types` tool never reads these.
+  readonly owner_group_id?: Option.Option<GroupModel.GroupId>;
+  readonly member_group_id?: Option.Option<GroupModel.GroupId>;
 }
 
 const buildTrainingTypeRow = (overrides: Partial<TrainingTypeRow> = {}): TrainingTypeRow => ({
@@ -255,12 +268,18 @@ const buildTrainingTypeRow = (overrides: Partial<TrainingTypeRow> = {}): Trainin
   name: overrides.name ?? 'Fitness',
   owner_group_name: overrides.owner_group_name ?? Option.none(),
   member_group_name: overrides.member_group_name ?? Option.none(),
+  owner_group_id: overrides.owner_group_id ?? Option.none(),
+  member_group_id: overrides.member_group_id ?? Option.none(),
 });
 
 const makeTrainingTypesLayer = (rows: ReadonlyArray<TrainingTypeRow>) =>
   Layer.succeed(TrainingTypesRepository, {
     findTrainingTypesByTeamId: (teamId: Team.TeamId) =>
       Effect.succeed(rows.filter((r) => r.team_id === teamId)),
+    // See `makeGroupsLayer`'s comment above — same reasoning, `create_event.propose` uses this
+    // method, `list_training_types` uses `findTrainingTypesByTeamId`.
+    findTrainingTypeById: (id: TrainingType.TrainingTypeId) =>
+      Effect.succeed(Option.fromNullishOr(rows.find((r) => r.id === id))),
   } as never);
 
 interface RosterRow {
@@ -786,12 +805,17 @@ describe('visibleTools', () => {
         expect(playerNames).not.toContain('list_members');
         expect(playerNames).not.toContain('list_rosters');
         expect(playerNames).not.toContain('list_groups');
+        expect(playerNames).not.toContain('propose_create_event');
         expect([...playerNames].sort()).toEqual([
           'current_datetime',
           'list_events',
           'list_training_types',
         ]);
 
+        // Neither fixture holds `event:create` — `propose_create_event` is built FROM the
+        // registry (`registry.ts`) with permission `ACTION_REGISTRY.create_event.permission`,
+        // gated independently of `team:manage`/`group:manage`.
+        expect(adminNames).not.toContain('propose_create_event');
         expect([...adminNames].sort()).toEqual([
           'current_datetime',
           'list_events',
@@ -802,12 +826,26 @@ describe('visibleTools', () => {
         ]);
       }),
   );
+
+  it.effect('includes propose_create_event only for a caller holding event:create', () =>
+    Effect.sync(() => {
+      const creator = buildCtx({
+        membership: buildMembership({ permissions: ['event:create'] }),
+      });
+      const names = visibleTools(creator).map((t) => t.name);
+      expect(names).toContain('propose_create_event');
+    }),
+  );
 });
 
 describe('ALL_TOOLS — registry / JSON Schema invariants (parameterized, §13.3/10)', () => {
   it.effect('every tool has a well-formed, unique, flat, additionalProperties:false schema', () =>
     Effect.sync(() => {
-      expect(ALL_TOOLS.length).toBe(6);
+      // 6 read tools + 1 `propose_<action>` per `ACTION_REGISTRY` entry (currently just
+      // `propose_create_event`) — built FROM the registry (`registry.ts`), so this count moves
+      // in lockstep with `AiActionName.literals`.
+      expect(ALL_TOOLS.length).toBe(7);
+      expect(ALL_TOOLS.map((t) => t.name)).toContain('propose_create_event');
       const seenNames = new Set<string>();
       for (const tool of ALL_TOOLS) {
         expect((tool.parameters as Record<string, unknown>).additionalProperties).toBe(false);
@@ -866,5 +904,205 @@ describe('current_datetime (tool wiring — see ai/currentDatetime.test.ts for t
       expect(result.todayTeamLocal).toBe('2026-01-15');
       expect(result.utcOffsetMinutes).toBe(60);
     }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// propose_create_event — `writeTools.ts#proposeAction` + `actions.ts#proposeCreateEvent`.
+// plan §16 / §3.
+// ---------------------------------------------------------------------------
+
+const makeProposalsLayer = () => {
+  const inserted: Array<{
+    readonly team_id: Team.TeamId;
+    readonly user_id: unknown;
+    readonly action: string;
+    readonly payload_json: string;
+  }> = [];
+  let seq = 0;
+  const layer = Layer.succeed(AiActionProposalsRepository, {
+    insert: (params: (typeof inserted)[number]) => {
+      seq += 1;
+      inserted.push(params);
+      return Effect.succeed({
+        id: `00000000-0000-1000-8000-${String(seq).padStart(12, '0')}` as never,
+        expires_at: DateTime.add(DateTime.nowUnsafe(), { minutes: 15 }),
+      });
+    },
+    lockForConfirm: () => Effect.die(new Error('unused in aiTools.test.ts')),
+    claim: () => Effect.die(new Error('unused in aiTools.test.ts')),
+    deleteForUser: () => Effect.die(new Error('unused in aiTools.test.ts')),
+  } as never);
+  return { layer, inserted };
+};
+
+const CREATOR_CTX_OVERRIDES = { permissions: ['event:create' as Role.Permission] };
+
+const minimalCreateEventArgs = (overrides: Record<string, unknown> = {}) => ({
+  title: 'AI Practice',
+  eventType: 'training',
+  startAt: '2026-06-01T10:00:00.000Z',
+  ...overrides,
+});
+
+const runPropose = (
+  rawArgs: unknown,
+  ctx: ToolContext,
+  fixtures: {
+    readonly groups?: ReadonlyArray<GroupRow>;
+    readonly trainingTypes?: ReadonlyArray<TrainingTypeRow>;
+    readonly proposals?: ReturnType<typeof makeProposalsLayer>;
+  } = {},
+) => {
+  const proposals = fixtures.proposals ?? makeProposalsLayer();
+  return proposeAction('create_event', rawArgs, ctx).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        makeGroupsLayer(fixtures.groups ?? []),
+        makeTrainingTypesLayer(fixtures.trainingTypes ?? []),
+        proposals.layer,
+      ),
+    ),
+  );
+};
+
+describe('propose_create_event (writeTools.ts#proposeAction)', () => {
+  it.effect(
+    'caller without event:create -> {error:"forbidden",permission:"event:create"}, no row inserted',
+    () =>
+      Effect.gen(function* () {
+        const proposals = makeProposalsLayer();
+        const outcome = yield* runPropose(minimalCreateEventArgs(), buildCtx(), { proposals });
+        expect(outcome.result).toEqual({ error: 'forbidden', permission: 'event:create' });
+        expect(outcome.hits).toEqual([]);
+        expect(proposals.inserted).toHaveLength(0);
+      }),
+  );
+
+  it.effect('ownerGroupId from another team -> invalid_arguments, no insert', () =>
+    Effect.gen(function* () {
+      const foreignGroup = buildGroupRow({ id: GROUP_A1, team_id: TEAM_B });
+      const proposals = makeProposalsLayer();
+      const ctx = buildCtx({ membership: buildMembership(CREATOR_CTX_OVERRIDES) });
+      const outcome = yield* runPropose(minimalCreateEventArgs({ ownerGroupId: GROUP_A1 }), ctx, {
+        groups: [foreignGroup],
+        proposals,
+      });
+      expect(outcome.result).toEqual({
+        error: 'invalid_arguments',
+        detail: 'ownerGroupId: no such group in this team',
+      });
+      expect(proposals.inserted).toHaveLength(0);
+    }),
+  );
+
+  it.effect(
+    'memberGroupId from another team -> invalid_arguments, no insert (separately from ownerGroupId)',
+    () =>
+      Effect.gen(function* () {
+        const foreignGroup = buildGroupRow({ id: GROUP_A2, team_id: TEAM_B });
+        const proposals = makeProposalsLayer();
+        const ctx = buildCtx({ membership: buildMembership(CREATOR_CTX_OVERRIDES) });
+        const outcome = yield* runPropose(
+          minimalCreateEventArgs({ memberGroupId: GROUP_A2 }),
+          ctx,
+          { groups: [foreignGroup], proposals },
+        );
+        expect(outcome.result).toEqual({
+          error: 'invalid_arguments',
+          detail: 'memberGroupId: no such group in this team',
+        });
+        expect(proposals.inserted).toHaveLength(0);
+      }),
+  );
+
+  it.effect(
+    'a group id that does not exist at all gets the BYTE-EQUAL message to the cross-team case — never distinguished',
+    () =>
+      Effect.gen(function* () {
+        const foreignGroup = buildGroupRow({ id: GROUP_A1, team_id: TEAM_B });
+        const ctx = buildCtx({ membership: buildMembership(CREATOR_CTX_OVERRIDES) });
+
+        const crossTeam = yield* runPropose(
+          minimalCreateEventArgs({ ownerGroupId: GROUP_A1 }),
+          ctx,
+          {
+            groups: [foreignGroup],
+          },
+        );
+        const nonexistent = yield* runPropose(
+          minimalCreateEventArgs({ ownerGroupId: GROUP_A1 }),
+          ctx,
+          { groups: [] },
+        );
+        expect(nonexistent.result).toEqual(crossTeam.result);
+      }),
+  );
+
+  it.effect('trainingTypeId from another team -> invalid_arguments, no insert', () =>
+    Effect.gen(function* () {
+      const foreignTT = buildTrainingTypeRow({ id: TT_A1, team_id: TEAM_B });
+      const proposals = makeProposalsLayer();
+      const ctx = buildCtx({ membership: buildMembership(CREATOR_CTX_OVERRIDES) });
+      const outcome = yield* runPropose(minimalCreateEventArgs({ trainingTypeId: TT_A1 }), ctx, {
+        trainingTypes: [foreignTT],
+        proposals,
+      });
+      expect(outcome.result).toEqual({
+        error: 'invalid_arguments',
+        detail: 'trainingTypeId: no such training type in this team',
+      });
+      expect(proposals.inserted).toHaveLength(0);
+    }),
+  );
+
+  it.effect(
+    'happy path: exactly one insert, the stored JSON round-trips through ProposeCreateEventArgs, the model-facing result carries no payload fields, hits is empty',
+    () =>
+      Effect.gen(function* () {
+        const proposals = makeProposalsLayer();
+        const ctx = buildCtx({ membership: buildMembership(CREATOR_CTX_OVERRIDES) });
+        const outcome = yield* runPropose(minimalCreateEventArgs(), ctx, { proposals });
+
+        expect(proposals.inserted).toHaveLength(1);
+        const stored = proposals.inserted[0];
+        expect(stored?.action).toBe('create_event');
+        const reparsed = JSON.parse(stored?.payload_json ?? '{}') as unknown;
+        const decoded = Schema.decodeUnknownSync(ProposeCreateEventArgs)(reparsed);
+        expect(decoded.title).toBe('AI Practice');
+
+        expect(outcome.hits).toEqual([]);
+        const result = outcome.result as Record<string, unknown>;
+        expect(Object.keys(result).sort()).toEqual(['proposalId', 'status']);
+        expect(result.status).toBe('proposed');
+        expect(typeof result.proposalId).toBe('string');
+      }),
+  );
+
+  it.effect(
+    'no groups supplied but a training type that has them: the returned summary shows the INHERITED group names',
+    () =>
+      Effect.gen(function* () {
+        const ownerGroup = buildGroupRow({ id: GROUP_A1, team_id: TEAM_A, name: 'Owner Squad' });
+        const memberGroup = buildGroupRow({ id: GROUP_A2, team_id: TEAM_A, name: 'Member Squad' });
+        const tt = buildTrainingTypeRow({
+          id: TT_A1,
+          team_id: TEAM_A,
+          owner_group_id: Option.some(GROUP_A1),
+          member_group_id: Option.some(GROUP_A2),
+        });
+        const ctx = buildCtx({ membership: buildMembership(CREATOR_CTX_OVERRIDES) });
+        const outcome = yield* runPropose(minimalCreateEventArgs({ trainingTypeId: TT_A1 }), ctx, {
+          groups: [ownerGroup, memberGroup],
+          trainingTypes: [tt],
+        });
+
+        expect(outcome.proposal).toBeDefined();
+        const summary = outcome.proposal?.summary ?? [];
+        const ownerField = summary.find((f) => f.key === 'ownerGroup');
+        const memberField = summary.find((f) => f.key === 'memberGroup');
+        expect(ownerField?.value).toEqual({ type: 'text', value: 'Owner Squad' });
+        expect(memberField?.value).toEqual({ type: 'text', value: 'Member Squad' });
+      }),
   );
 });

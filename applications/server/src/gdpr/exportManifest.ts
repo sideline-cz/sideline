@@ -94,6 +94,17 @@ const authorship: ErasureDisposition = {
  */
 export const EXPORT_MANIFEST: ReadonlyArray<ExportedTable> = [
   // -- account-level (users) -------------------------------------------------
+  skip(
+    'ai_action_proposals',
+    'users',
+    ['user_id'],
+    'A change the assistant proposed and the person has not confirmed — an intention, not a ' +
+      'record. The row is single-use and expires fifteen minutes after it is written, so by the ' +
+      'time any export runs it is either consumed or dead. What the person actually created is ' +
+      'exported as the `events` row it became; exporting the draft as well would present ' +
+      'abandoned and expired suggestions as "your data".',
+    drop("Exists only to serve this person, and nobody else's records reference it."),
+  ),
   // D12 — `skip`, not `own(...)` with `redact`: the club's account number, IBAN, IČO and
   // registered address are not data ABOUT the treasurer either, so NO column of
   // `bank_sync_config` is ever exported — strictly stronger than redacting one column

@@ -10,10 +10,10 @@ import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamSettingsRepository } from '~/repositories/TeamSettingsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
-import { emitTrainingClaimRequestIfApplicable } from '~/services/TrainingClaimEmitter.js';
+import { createEventForMember } from '~/services/EventCreation.js';
 import { eventAcceptsRsvp } from '~/utils/allDayRsvpWindow.js';
 
-const markPersonalMessagesDirtyBestEffort = (
+export const markPersonalMessagesDirtyBestEffort = (
   events: ServiceMap.Service.Shape<typeof EventsRepository>,
   eventId: Event.EventId,
 ) =>
@@ -90,7 +90,7 @@ const resolveZoned = (dt: DateTime.Utc, timezone: string): DateTime.Zoned =>
  * 00:00 in `timezone`. Recipe precedent: `WeeklySummary.ts:92-121`
  * (`weekRangeFor`).
  */
-const anchorAllDay = (dt: DateTime.Utc, timezone: string): DateTime.Utc => {
+export const anchorAllDay = (dt: DateTime.Utc, timezone: string): DateTime.Utc => {
   const { year, month, day } = DateTime.toPartsUtc(dt);
   const midnight = DateTime.setParts(resolveZoned(dt, timezone), {
     year,
@@ -228,101 +228,9 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
             Effect.bind('membership', ({ currentUser }) =>
               requireMembership(members, teamId, currentUser.id, forbidden),
             ),
-            Effect.tap(({ membership }) =>
-              requirePermission(membership, 'event:create', forbidden),
+            Effect.bind('event', ({ membership }) =>
+              createEventForMember({ teamId, membership, payload }),
             ),
-            Effect.bind('teamZone', () =>
-              teamSettings.findByTeamId(teamId).pipe(
-                Effect.map(
-                  Option.match({
-                    onNone: () => 'Europe/Prague',
-                    onSome: (s) => s.timezone,
-                  }),
-                ),
-              ),
-            ),
-            Effect.let('isAdmin', ({ membership }) => hasPermission(membership, 'team:manage')),
-            Effect.tap(({ membership, isAdmin }) =>
-              checkCoachScoping(events, membership.id, payload.trainingTypeId, isAdmin, forbidden),
-            ),
-            Effect.tap(({ membership, isAdmin }) =>
-              checkTrainingTypeOwnerGroup(
-                trainingTypes,
-                groups,
-                membership.id,
-                payload.trainingTypeId,
-                isAdmin,
-                forbidden,
-                teamId,
-              ),
-            ),
-            // Inherit groups from training type if not provided
-            Effect.bind('resolvedGroups', () => {
-              const hasOwner = Option.isSome(payload.ownerGroupId);
-              const hasMember = Option.isSome(payload.memberGroupId);
-              if (hasOwner || hasMember || Option.isNone(payload.trainingTypeId)) {
-                return Effect.succeed({
-                  ownerGroupId: payload.ownerGroupId,
-                  memberGroupId: payload.memberGroupId,
-                });
-              }
-              return trainingTypes.findTrainingTypeById(payload.trainingTypeId.value).pipe(
-                Effect.map(
-                  Option.match({
-                    onNone: () => ({
-                      ownerGroupId: payload.ownerGroupId,
-                      memberGroupId: payload.memberGroupId,
-                    }),
-                    onSome: (tt) => ({
-                      ownerGroupId: tt.owner_group_id,
-                      memberGroupId: tt.member_group_id,
-                    }),
-                  }),
-                ),
-              );
-            }),
-            Effect.bind('event', ({ membership, resolvedGroups, teamZone }) =>
-              events.insertEvent({
-                teamId,
-                trainingTypeId: payload.trainingTypeId,
-                // Legacy path: an old web build sends `eventType` only. `eventTypeId` alone
-                // (no kind) falls back to `'other'` here — harmless whenever the id is valid
-                // for this team, since the trigger overwrites `event_type` from the row's own
-                // `kind` regardless of what we send (see AGENTS.md ownership statement); it
-                // only matters for a foreign/invalid id, which the trigger discards anyway.
-                eventType: Option.getOrElse(payload.eventType, () => 'other'),
-                eventTypeId: payload.eventTypeId,
-                title: payload.title,
-                description: payload.description,
-                imageUrl: payload.imageUrl,
-                startAt: payload.allDay ? anchorAllDay(payload.startAt, teamZone) : payload.startAt,
-                endAt: payload.allDay
-                  ? Option.map(payload.endAt, (v) => anchorAllDay(v, teamZone))
-                  : payload.endAt,
-                location: payload.location,
-                locationUrl: payload.locationUrl,
-                createdBy: membership.id,
-                ownerGroupId: resolvedGroups.ownerGroupId,
-                memberGroupId: resolvedGroups.memberGroupId,
-                allDay: payload.allDay,
-              }),
-            ),
-            Effect.tap(({ event }) =>
-              emitTrainingClaimRequestIfApplicable({
-                teamId,
-                eventId: event.id,
-                eventType: event.event_type,
-                ownerGroupId: event.owner_group_id,
-                title: event.title,
-                description: event.description,
-                startAt: event.start_at,
-                endAt: event.end_at,
-                location: event.location,
-                locationUrl: event.location_url,
-                allDay: event.all_day,
-              }),
-            ),
-            Effect.tap(({ event }) => markPersonalMessagesDirtyBestEffort(events, event.id)),
             Effect.map(
               ({ event }) =>
                 new EventApi.EventInfo({
@@ -349,10 +257,6 @@ export const EventApiLive = HttpApiBuilder.group(Api, 'event', (handlers) =>
                   startDate: Option.some(event.start_date),
                   endDate: Option.some(event.end_date),
                 }),
-            ),
-            Effect.catchTag(
-              'NoSuchElementError',
-              LogicError.withMessage(() => 'Failed creating event — no row returned'),
             ),
           ),
         )

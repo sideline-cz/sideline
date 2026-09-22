@@ -28,12 +28,16 @@ export interface SystemPromptInput {
   readonly teamName: string;
   readonly teamTimezone: string;
   readonly todayTeamLocal: string; // YYYY-MM-DD, in `teamTimezone`
+  /** Whether the caller holds `event:create` — gates the one write tool, `propose_create_event`.
+   *  `false` keeps the READ-ONLY paragraph byte-identical to before the AI write path shipped. */
+  readonly canPropose: boolean;
 }
 
 export const buildSystemPrompt = ({
   teamName,
   teamTimezone,
   todayTeamLocal,
+  canPropose,
 }: SystemPromptInput): string =>
   [
     'You are the in-app assistant for a sports team on Sideline. You help members find ' +
@@ -46,9 +50,17 @@ export const buildSystemPrompt = ({
     `The team's timezone is ${teamTimezone}. Today, in that timezone, is ${todayTeamLocal}. Use the ` +
       '`current_datetime` tool whenever you need the exact current time, or to resolve a relative ' +
       'date ("today", "this week", "next training") precisely — never guess or compute it yourself.',
-    'This assistant is READ-ONLY: you cannot create, edit, cancel or delete anything, and no tool ' +
-      'here performs a write. If the user asks you to change something, say plainly that you cannot ' +
-      'do that yet and that they should use the app to make the change.',
+    canPropose
+      ? 'You can propose ONE change per reply, with `propose_create_event`. Calling it does NOT ' +
+        'create anything — it shows the user a card they must confirm, and nothing exists until ' +
+        'they do. Say so plainly; never state or imply that the event has been created. You may ' +
+        'propose only ONE event per reply: if the user asks for several, propose the first, then ' +
+        'tell them you will do the next one after they confirm this one. Every other change (edit, ' +
+        'cancel, delete, or anything besides creating an event) is still something you cannot do — ' +
+        'say plainly that they should use the app for it.'
+      : 'This assistant is READ-ONLY: you cannot create, edit, cancel or delete anything, and no ' +
+        'tool here performs a write. If the user asks you to change something, say plainly that ' +
+        'you cannot do that yet and that they should use the app to make the change.',
     'NEVER invent an id, a name, a date, a count or any other fact about the team — every fact you ' +
       'state must come from a tool result. If you do not have the information, call the appropriate ' +
       'tool; if no tool can answer the question, say so.',

@@ -72,7 +72,11 @@ import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementC
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { LlmClient } from '~/services/LlmClient.js';
-import { MockChatAgentLayer, MockChatRateLimiterLayer } from './mocks/aiChatMocks.js';
+import {
+  MockAiActionProposalsRepositoryLayer,
+  MockChatAgentLayer,
+  MockChatRateLimiterLayer,
+} from './mocks/aiChatMocks.js';
 import { MockBankSyncLayers } from './mocks/bankSyncMocks.js';
 import { MockChannelManagementLayers } from './mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from './mocks/dashboardLayoutMocks.js';
@@ -783,6 +787,7 @@ const buildTestLayer = (
     .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
     .pipe(Layer.provide(MockChatAgentLayer))
     .pipe(Layer.provide(MockChatRateLimiterLayer))
+    .pipe(Layer.provide(MockAiActionProposalsRepositoryLayer))
     .pipe(Layer.provide(AiChatEnabledConfig.Default))
     .pipe(Layer.provide(LlmClient.Default))
     .pipe(

@@ -26,6 +26,7 @@ import {
   turnErrorMessages,
 } from '~/components/molecules/assistant/AssistantTurnError.js';
 import { AssistantComposer } from '~/components/organisms/assistant/AssistantComposer.js';
+import { AssistantProposalCard } from '~/components/organisms/assistant/AssistantProposalCard.js';
 import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert.js';
 import {
   AlertDialog,
@@ -60,6 +61,7 @@ interface AssistantTurnData {
   readonly content: string;
   readonly references: ReadonlyArray<AiChatApi.EntityRef>;
   readonly degradedReason: Option.Option<AiChatApi.DegradedReason>;
+  readonly proposal: Option.Option<AiChatApi.Proposal>;
   readonly at: Date;
 }
 
@@ -209,6 +211,7 @@ export function AssistantConversation({ teamId, pendingQuestion }: AssistantConv
               content: response.answer,
               references: response.references,
               degradedReason: response.degradedReason,
+              proposal: response.proposal,
               at: new Date(),
             },
             isRetry,
@@ -448,6 +451,9 @@ function AssistantTurnView({ turn, teamId }: AssistantTurnViewProps) {
         <AssistantAnswer text={turn.content} references={turn.references} teamId={teamId} />
       )}
       {uncited.length > 0 && <AssistantResultList references={uncited} teamId={teamId} />}
+      {Option.isSome(turn.proposal) && (
+        <AssistantProposalCard proposal={turn.proposal.value} teamId={teamId} />
+      )}
     </li>
   );
 }
