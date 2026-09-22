@@ -99,12 +99,14 @@ import type { Event, GroupModel, Role, Team, TeamMember, TrainingType } from '@s
 import { AiChatApi } from '@sideline/domain';
 import { Cause, DateTime, Effect, Exit, Fiber, Layer, Option } from 'effect';
 import * as TestClock from 'effect/testing/TestClock';
+import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
 import { EventsRepository, EventWithDetails } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { MembershipWithRole, TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
+import { buildSystemPrompt } from '~/services/ai/systemPrompt.js';
 import type { ToolContext } from '~/services/ai/toolTypes.js';
 import { ChatAgent } from '~/services/ChatAgent.js';
 import {
@@ -266,6 +268,41 @@ const makeTeamsLayer = () =>
     findById: () => Effect.succeed(Option.some({ name: 'Testing FC' } as never)),
   } as never);
 
+/**
+ * Deterministic-id `AiActionProposalsRepository` mock for the `propose_create_event` dispatch
+ * (`dispatchProposeCall`, `ChatAgent.ts`) — records every `insert` call so a test can assert
+ * "the executor ran once" independently of the model-facing `proposal` it got back. Ids are
+ * hand-built to satisfy `AiActionProposalId`'s `Schema.isUUID()` brand (version nibble `1`,
+ * variant nibble `8`) rather than pulled from `crypto.randomUUID()`, so a failing assertion
+ * prints a stable, greppable id.
+ */
+interface InsertedProposal {
+  readonly team_id: Team.TeamId;
+  readonly user_id: unknown;
+  readonly action: string;
+  readonly payload_json: string;
+}
+
+const makeProposalId = (n: number) =>
+  `00000000-0000-1000-8000-${String(n).padStart(12, '0')}` as never;
+
+const makeProposalsLayer = () => {
+  const inserted: Array<InsertedProposal> = [];
+  const layer = Layer.succeed(AiActionProposalsRepository, {
+    insert: (params: InsertedProposal) => {
+      inserted.push(params);
+      return Effect.succeed({
+        id: makeProposalId(inserted.length),
+        expires_at: DateTime.add(DateTime.nowUnsafe(), { minutes: 15 }),
+      });
+    },
+    lockForConfirm: () => Effect.die(new Error('unused in ChatAgent.test.ts')),
+    claim: () => Effect.die(new Error('unused in ChatAgent.test.ts')),
+    deleteForUser: () => Effect.die(new Error('unused in ChatAgent.test.ts')),
+  } as never);
+  return { layer, inserted };
+};
+
 // ---------------------------------------------------------------------------
 // ToolContext builder
 // ---------------------------------------------------------------------------
@@ -389,6 +426,9 @@ const makeScriptedLlm = (script: ReadonlyArray<ScriptEntry>, configured = true):
 interface Fixtures {
   readonly events?: ReadonlyArray<EventWithDetails>;
   readonly trainingTypes?: ReadonlyArray<TrainingTypeRow>;
+  /** Shared with the caller so a propose test can inspect `inserted` after the run — defaults
+   *  to a fresh, unobserved mock when omitted. */
+  readonly proposalsLayer?: Layer.Layer<AiActionProposalsRepository>;
 }
 
 const buildLayer = (llmLayer: Layer.Layer<LlmClient>, fixtures: Fixtures = {}) => {
@@ -398,6 +438,7 @@ const buildLayer = (llmLayer: Layer.Layer<LlmClient>, fixtures: Fixtures = {}) =
   const rostersLayer = makeRostersLayer();
   const membersLayer = makeMembersLayer();
   const teamsLayer = makeTeamsLayer();
+  const proposalsLayer = fixtures.proposalsLayer ?? makeProposalsLayer().layer;
 
   return Layer.mergeAll(
     ChatAgent.Default.pipe(
@@ -408,6 +449,7 @@ const buildLayer = (llmLayer: Layer.Layer<LlmClient>, fixtures: Fixtures = {}) =
       Layer.provide(rostersLayer),
       Layer.provide(membersLayer),
       Layer.provide(teamsLayer),
+      Layer.provide(proposalsLayer),
     ),
     eventsLayer,
     groupsLayer,
@@ -415,6 +457,7 @@ const buildLayer = (llmLayer: Layer.Layer<LlmClient>, fixtures: Fixtures = {}) =
     rostersLayer,
     membersLayer,
     teamsLayer,
+    proposalsLayer,
   );
 };
 
@@ -616,6 +659,8 @@ describe('ChatAgent.respond — degradation: iteration cap and empty answer', ()
         expect(outcome.success.answer).toBe('');
         expect(outcome.success.references.length).toBeGreaterThan(0);
         expect(scripted.calls).toHaveLength(MAX_TOOL_ITERATIONS);
+        // A degraded turn never ships a card (plan §16) — regardless of which cap tripped.
+        expect(Option.isNone(outcome.success.proposal)).toBe(true);
       }),
   );
 
@@ -632,6 +677,7 @@ describe('ChatAgent.respond — degradation: iteration cap and empty answer', ()
         expect(outcome.success.degradedReason.value).toBe('empty_answer');
       }
       expect(outcome.success.answer).toBe('');
+      expect(Option.isNone(outcome.success.proposal)).toBe(true);
     }),
   );
 
@@ -648,6 +694,7 @@ describe('ChatAgent.respond — degradation: iteration cap and empty answer', ()
         expect(outcome.success.degradedReason.value).toBe('empty_answer');
       }
       expect(outcome.success.answer).toBe('');
+      expect(Option.isNone(outcome.success.proposal)).toBe(true);
     }),
   );
 });
@@ -782,6 +829,7 @@ describe('ChatAgent.respond — E = never is earned, not asserted', () => {
       expect(outcome.success.references).toEqual([]);
       // the sentinel bug this contract exists to prevent: never a raw i18n key
       expect(outcome.success.answer).not.toContain('assistant_');
+      expect(Option.isNone(outcome.success.proposal)).toBe(true);
     }),
   );
 
@@ -827,6 +875,7 @@ describe('ChatAgent.respond — E = never is earned, not asserted', () => {
           textResult('unreachable'),
         ]);
 
+        const proposalsLayer = makeProposalsLayer().layer;
         const layer = Layer.mergeAll(
           ChatAgent.Default.pipe(
             Layer.provide(scripted.layer),
@@ -836,6 +885,7 @@ describe('ChatAgent.respond — E = never is earned, not asserted', () => {
             Layer.provide(makeRostersLayer()),
             Layer.provide(makeMembersLayer()),
             Layer.provide(makeTeamsLayer()),
+            Layer.provide(proposalsLayer),
           ),
           throwingEventsLayer,
           makeGroupsLayer(),
@@ -843,6 +893,7 @@ describe('ChatAgent.respond — E = never is earned, not asserted', () => {
           makeRostersLayer(),
           makeMembersLayer(),
           makeTeamsLayer(),
+          proposalsLayer,
         );
 
         const outcome = yield* ChatAgent.asEffect().pipe(
@@ -910,6 +961,7 @@ describe('ChatAgent.respond — stub LlmClient (not configured)', () => {
       }
       expect(outcome.success.answer).toBe('');
       expect(outcome.success.references).toEqual([]);
+      expect(Option.isNone(outcome.success.proposal)).toBe(true);
     }),
   );
 });
@@ -1341,6 +1393,227 @@ describe('ChatAgent.respond — reference-token security (plan §4)', () => {
         // (b) the stale token does NOT resolve against turn 2's (empty) token map
         expect(outcome2.success.answer).not.toContain('[[ref:');
         expect(outcome2.success.references).toEqual([]);
+      }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// propose_create_event dispatch — plan §16 / §5's `dispatchProposeCall` branch.
+// ---------------------------------------------------------------------------
+
+// `capToTotalBudget`'s ceiling — pinned locally per this file's own convention (see header
+// comment). Only used in the "budget already (near-)exhausted" test below.
+const TOTAL_TOOL_CHAR_BUDGET = 20000;
+
+const proposeCallJson = (overrides: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    title: 'Practice',
+    eventType: 'training',
+    startAt: '2026-06-01T10:00:00.000Z',
+    ...overrides,
+  });
+
+const creatorCtx = (overrides: Partial<ToolContext> = {}) =>
+  buildCtx({
+    membership: buildMembership({ permissions: [...ADMIN_PERMISSIONS, 'event:create'] }),
+    ...overrides,
+  });
+
+describe('ChatAgent.respond — propose_create_event dispatch', () => {
+  it.effect(
+    'one propose_create_event call -> proposal is Some, and the tool message content is BARE ({"status":"proposed","proposalId":…}), never wrapped in untrusted_data',
+    () =>
+      Effect.gen(function* () {
+        const call: LlmToolCall = {
+          id: 'p1',
+          name: 'propose_create_event',
+          argumentsJson: proposeCallJson(),
+        };
+        const scripted = makeScriptedLlm([
+          toolCallResult(Option.some('Let me propose that.'), [call]),
+          textResult('I have proposed the event — please confirm the card to create it.'),
+        ]);
+
+        const outcome = yield* runRespond(
+          creatorCtx(),
+          [userMsg('Create a practice')],
+          scripted.layer,
+        );
+
+        expect(outcome._tag).toBe('Success');
+        if (outcome._tag !== 'Success') return;
+        expect(Option.isSome(outcome.success.proposal)).toBe(true);
+
+        const toolMsgs = toolMessages(scripted.calls[1]?.messages ?? []);
+        expect(toolMsgs).toHaveLength(1);
+        const parsed = JSON.parse(toolMsgs[0]?.content ?? '{}') as Record<string, unknown>;
+        expect(parsed.status).toBe('proposed');
+        expect(typeof parsed.proposalId).toBe('string');
+        expect(parsed).not.toHaveProperty('untrusted_data');
+      }),
+  );
+
+  it.effect(
+    'two propose_* calls in one turn -> the second is refused with proposal_already_pending, the executor ran exactly once, proposal is the FIRST — and the model can correctly tell the user the second was not created',
+    () =>
+      Effect.gen(function* () {
+        const call1: LlmToolCall = {
+          id: 'p1',
+          name: 'propose_create_event',
+          argumentsJson: proposeCallJson({ title: 'Event A' }),
+        };
+        const call2: LlmToolCall = {
+          id: 'p2',
+          name: 'propose_create_event',
+          argumentsJson: proposeCallJson({ title: 'Event B' }),
+        };
+        const proposals = makeProposalsLayer();
+        const scripted = makeScriptedLlm([
+          toolCallResult(Option.none(), [call1, call2]),
+          dynamicText((input) => {
+            const msgs = toolMessages(input.messages);
+            const secondContent = msgs[1]?.content ?? '';
+            // blocker 8's whole point: the error must be legible enough that a real model
+            // correctly reports the second event was NOT created, rather than claiming both were.
+            return secondContent.includes('proposal_already_pending')
+              ? 'I proposed Event A. Event B was not created yet — confirm Event A first and I will propose it next.'
+              : 'Both events have been created.'; // would only happen if the error were opaque
+          }),
+        ]);
+
+        const outcome = yield* ChatAgent.asEffect().pipe(
+          Effect.flatMap((agent) => agent.respond(creatorCtx(), [userMsg('Create two events')])),
+          Effect.result,
+          Effect.provide(buildLayer(scripted.layer, { proposalsLayer: proposals.layer })),
+        );
+
+        expect(outcome._tag).toBe('Success');
+        if (outcome._tag !== 'Success') return;
+
+        expect(proposals.inserted).toHaveLength(1);
+        expect(proposals.inserted[0]?.payload_json).toContain('Event A');
+        expect(Option.isSome(outcome.success.proposal)).toBe(true);
+
+        const toolMsgs = toolMessages(scripted.calls[1]?.messages ?? []);
+        expect(toolMsgs).toHaveLength(2);
+        const secondParsed = JSON.parse(toolMsgs[1]?.content ?? '{}') as Record<string, unknown>;
+        expect(secondParsed.error).toBe('proposal_already_pending');
+
+        expect(outcome.success.answer).toContain('not created');
+      }),
+  );
+
+  it.effect(
+    'a propose call issued once the tool-char budget is already (near-)exhausted still yields proposal: Some — capToTotalBudget never runs for propose_* (it is checked before dispatchProposeCall, which bypasses it entirely)',
+    () =>
+      Effect.gen(function* () {
+        const longTitle = 'X'.repeat(400);
+        const events = Array.from({ length: 5000 }, (_, i) =>
+          buildEvent({ id: eventIdN(i), title: `${longTitle}-${String(i)}` }),
+        );
+        const bigCall = (id: string): LlmToolCall => ({
+          id,
+          name: 'list_events',
+          argumentsJson: JSON.stringify({}),
+        });
+        const proposeCall: LlmToolCall = {
+          id: 'p1',
+          name: 'propose_create_event',
+          argumentsJson: proposeCallJson(),
+        };
+        // Three maxed-out (TOOL_RESULT_CHAR_BUDGET-capped) `list_events` calls push
+        // `toolCharsUsed` to ~18000 of the 20000 total — the highest a regular call can push it
+        // without itself being replaced by a tiny `budget_exceeded` error (a 4th full call would
+        // push the running total past `TOTAL_TOOL_CHAR_BUDGET` and get capped instead of
+        // committed) — then the propose call runs while the budget is all but spent.
+        const scripted = makeScriptedLlm([
+          toolCallResult(Option.none(), [bigCall('e1'), bigCall('e2'), bigCall('e3'), proposeCall]),
+          textResult('Proposed.'),
+        ]);
+
+        const outcome = yield* runRespond(
+          creatorCtx(),
+          [userMsg('list events then propose one')],
+          scripted.layer,
+          { events },
+        );
+
+        expect(outcome._tag).toBe('Success');
+        if (outcome._tag !== 'Success') return;
+        expect(Option.isSome(outcome.success.proposal)).toBe(true);
+
+        const toolMsgs = toolMessages(scripted.calls[1]?.messages ?? []);
+        expect(toolMsgs).toHaveLength(4);
+        // Sanity: the three `list_events` calls really did spend most of the budget.
+        const spent = toolMsgs.slice(0, 3).reduce((sum, m) => sum + m.content.length, 0);
+        expect(spent).toBeGreaterThan(TOTAL_TOOL_CHAR_BUDGET * 0.8);
+        // The propose call's own tiny envelope was never budget-checked or wrapped.
+        const proposeMsg = JSON.parse(toolMsgs[3]?.content ?? '{}') as Record<string, unknown>;
+        expect(proposeMsg.status).toBe('proposed');
+      }),
+  );
+
+  it.effect(
+    'commitOutcome stores the proposal on the newReferences.length === 0 early-return branch WITHOUT clobbering references already accumulated this turn',
+    () =>
+      Effect.gen(function* () {
+        const events = [buildEvent({ id: EVENT_A1, title: 'Existing Event' })];
+        const listCall: LlmToolCall = { id: 'l1', name: 'list_events', argumentsJson: '{}' };
+        const proposeCall: LlmToolCall = {
+          id: 'p1',
+          name: 'propose_create_event',
+          argumentsJson: proposeCallJson(),
+        };
+        const scripted = makeScriptedLlm([
+          toolCallResult(Option.none(), [listCall, proposeCall]),
+          textResult('Done.'),
+        ]);
+
+        const outcome = yield* runRespond(
+          creatorCtx(),
+          [userMsg('list then propose')],
+          scripted.layer,
+          { events },
+        );
+
+        expect(outcome._tag).toBe('Success');
+        if (outcome._tag !== 'Success') return;
+        // The reference minted by `list_events` survives the propose call's early-return commit.
+        expect(outcome.success.references).toHaveLength(1);
+        expect(Option.isSome(outcome.success.proposal)).toBe(true);
+      }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// buildSystemPrompt — canPropose gating (plan §16, `systemPrompt.ts`).
+// ---------------------------------------------------------------------------
+
+describe('buildSystemPrompt — canPropose gating', () => {
+  const baseInput = {
+    teamName: 'Testing FC',
+    teamTimezone: 'Europe/Prague',
+    todayTeamLocal: '2026-06-01',
+  };
+
+  it.effect(
+    'canPropose: false keeps the READ-ONLY paragraph and omits the one-proposal sentence',
+    () =>
+      Effect.sync(() => {
+        const prompt = buildSystemPrompt({ ...baseInput, canPropose: false });
+        expect(prompt).toContain('READ-ONLY');
+        expect(prompt).not.toContain('propose_create_event');
+      }),
+  );
+
+  it.effect(
+    'canPropose: true adds the one-proposal-per-reply sentence and drops the READ-ONLY paragraph',
+    () =>
+      Effect.sync(() => {
+        const prompt = buildSystemPrompt({ ...baseInput, canPropose: true });
+        expect(prompt).toContain('propose_create_event');
+        expect(prompt).toMatch(/one|ONE/);
+        expect(prompt).not.toContain('READ-ONLY');
       }),
   );
 });

@@ -213,6 +213,8 @@ export * as ActivityType from './models/ActivityType.js';
 
 export * as AgeThresholdRule from './models/AgeThresholdRule.js';
 
+export * as AiActionProposal from './models/AiActionProposal.js';
+
 /**
  * D11 — computed server-side by the pure `bankSyncStatus` ladder (`applications/server`) and
  * sent to the client as a literal; the web must never re-derive it. `'expiring_soon'` is

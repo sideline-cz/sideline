@@ -46,6 +46,9 @@ export interface ToolContext extends EntityReadContext {
 export interface ToolExecutionResult {
   readonly result: unknown;
   readonly hits: ReadonlyArray<AiChatApi.SearchHit>;
+  /** Set only by `writeTools.ts`'s `proposeAction` — a pending action the client must confirm or
+   *  reject. Optional so the six read executors and `buildListResult` are untouched. */
+  readonly proposal?: AiChatApi.Proposal | undefined;
 }
 
 // ---------------------------------------------------------------------------

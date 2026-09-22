@@ -25,6 +25,7 @@
 import { Event, type Role } from '@sideline/domain';
 import { Option, Schema } from 'effect';
 import { hasPermission } from '~/api/permissions.js';
+import { ACTION_REGISTRY } from '~/services/ai/actions.js';
 import { toToolParameters } from '~/services/ai/jsonSchema.js';
 import type { ToolContext } from '~/services/ai/toolTypes.js';
 import type { LlmToolDefinition } from '~/services/LlmClient.js';
@@ -153,6 +154,11 @@ export const ALL_TOOLS: ReadonlyArray<ToolDefinition> = [
       'matched against the name, and/or cap the number of rows returned with `limit` (1-50).',
     ListRostersSchema,
     Option.some('roster:view'),
+  ),
+  // Built FROM the action registry (`services/ai/actions.ts`) so a `propose_<action>` tool
+  // cannot drift from its entry — adding an action there is enough to offer it here too.
+  ...Object.entries(ACTION_REGISTRY).map(([name, def]) =>
+    define(`propose_${name}`, def.description, def.argsSchema, Option.some(def.permission)),
   ),
 ];
 

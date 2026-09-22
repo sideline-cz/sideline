@@ -56,7 +56,16 @@
 //      asserting this convention directly elsewhere in the suite, so this is inferred from the
 //      schema definitions, not copied from a passing precedent.
 
-import type { Auth, Discord, Event, Role, Team, TeamMember } from '@sideline/domain';
+import type {
+  AiActionProposal,
+  Auth,
+  Discord,
+  Event,
+  GroupModel,
+  Role,
+  Team,
+  TeamMember,
+} from '@sideline/domain';
 import { AiChatApi, EventApi } from '@sideline/domain';
 import { OAuth2Tokens } from 'arctic';
 import { DateTime, Effect, Layer, Option, Schema } from 'effect';
@@ -69,6 +78,7 @@ import { AchievementSettingsRepository } from '~/repositories/AchievementSetting
 import { ActivityLogsRepository } from '~/repositories/ActivityLogsRepository.js';
 import { ActivityTypesRepository } from '~/repositories/ActivityTypesRepository.js';
 import { AgeThresholdRepository } from '~/repositories/AgeThresholdRepository.js';
+import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
 import { BotGuildsRepository } from '~/repositories/BotGuildsRepository.js';
 import { ChannelSyncEventsRepository } from '~/repositories/ChannelSyncEventsRepository.js';
 import { CustomAchievementsRepository } from '~/repositories/CustomAchievementsRepository.js';
@@ -126,9 +136,17 @@ import { MockTranslationsLayers } from '../mocks/translationMocks.js';
 const TEST_USER_ID = '00000000-0000-0000-0000-000000000001' as Auth.UserId;
 const TEST_ADMIN_ID = '00000000-0000-0000-0000-000000000002' as Auth.UserId;
 const NON_MEMBER_USER_ID = '00000000-0000-0000-0000-000000000003' as Auth.UserId;
+// A member who holds `event:create` but nothing else (in particular, not `team:manage` — so
+// `isAdmin` is false and `checkCoachScoping`/`checkTrainingTypeOwnerGroup` actually run) — used
+// by the "confirm's registry action fails with EventApi.Forbidden" test (§7).
+const TEST_CREATOR_ID = '00000000-0000-0000-0000-000000000004' as Auth.UserId;
 const TEST_TEAM_ID = '00000000-0000-0000-0000-000000000010' as Team.TeamId;
+// A second, unrelated team — proposal rows scoped to it must never be reachable via
+// `TEST_TEAM_ID`'s confirm/reject URLs (the "other team" 404 case, §7).
+const OTHER_TEAM_ID = '00000000-0000-0000-0000-000000000011' as Team.TeamId;
 const TEST_MEMBER_ID = '00000000-0000-0000-0000-000000000020' as TeamMember.TeamMemberId;
 const TEST_ADMIN_MEMBER_ID = '00000000-0000-0000-0000-000000000021' as TeamMember.TeamMemberId;
+const TEST_CREATOR_MEMBER_ID = '00000000-0000-0000-0000-000000000022' as TeamMember.TeamMemberId;
 
 const PLAYER_PERMISSIONS: readonly Role.Permission[] = ['roster:view', 'member:view'];
 const ADMIN_PERMISSIONS: readonly Role.Permission[] = [
@@ -136,7 +154,12 @@ const ADMIN_PERMISSIONS: readonly Role.Permission[] = [
   'roster:view',
   'member:view',
   'group:manage',
+  // Admin also proposes/confirms events in the happy-path AI write test — `isAdmin` (via
+  // `team:manage`) bypasses `checkCoachScoping`/`checkTrainingTypeOwnerGroup` there, matching
+  // `Event.test.ts`'s own "admin bypass" precedent for the plain HTTP path.
+  'event:create',
 ];
+const CREATOR_ONLY_PERMISSIONS: readonly Role.Permission[] = ['event:create'];
 
 // --- User fixtures (trimmed to what AuthMiddlewareLive needs) ---
 const testUser = {
@@ -171,6 +194,15 @@ const testNonMember = {
   username: 'outsideruser',
 };
 
+const testCreator = {
+  ...testUser,
+  id: TEST_CREATOR_ID,
+  discord_id: '55555',
+  username: 'creatoruser',
+  is_profile_complete: true,
+  name: Option.some('Creator User'),
+};
+
 const testTeam = {
   id: TEST_TEAM_ID,
   name: 'Test Team',
@@ -185,11 +217,13 @@ const usersMap = new Map<Auth.UserId, UserLike>();
 usersMap.set(TEST_USER_ID, testUser);
 usersMap.set(TEST_ADMIN_ID, testAdmin as unknown as UserLike);
 usersMap.set(NON_MEMBER_USER_ID, testNonMember as unknown as UserLike);
+usersMap.set(TEST_CREATOR_ID, testCreator as unknown as UserLike);
 
 const sessionsStore = new Map<string, Auth.UserId>();
 sessionsStore.set('user-token', TEST_USER_ID);
 sessionsStore.set('admin-token', TEST_ADMIN_ID);
 sessionsStore.set('non-member-token', NON_MEMBER_USER_ID);
+sessionsStore.set('creator-token', TEST_CREATOR_ID);
 
 // NON_MEMBER_USER_ID deliberately has NO entry below — that is the whole point of the
 // non-member/403 test cases.
@@ -211,6 +245,16 @@ membersStore.set(TEST_ADMIN_MEMBER_ID, {
   active: true,
   role_names: ['Admin'],
   permissions: ADMIN_PERMISSIONS,
+  is_profile_complete: true,
+  require_complete_profile: Option.none(),
+});
+membersStore.set(TEST_CREATOR_MEMBER_ID, {
+  id: TEST_CREATOR_MEMBER_ID,
+  team_id: TEST_TEAM_ID,
+  user_id: TEST_CREATOR_ID,
+  active: true,
+  role_names: ['Coach'],
+  permissions: CREATOR_ONLY_PERMISSIONS,
   is_profile_complete: true,
   require_complete_profile: Option.none(),
 });
@@ -472,8 +516,20 @@ const MockEventSyncEventsRepositoryLayer = Layer.succeed(EventSyncEventsReposito
   markFailed: () => Effect.void,
 } as never);
 
+// `findByGroupId` calls are recorded so the AI write path's confirm test can assert
+// `emitEventCreatedSideEffects` actually received the RAW row's `owner_group_id` (blocker 2's
+// regression guard, §7) — `emitTrainingClaimRequestIfApplicable` calls this exactly when
+// `ownerGroupId` is `Some(...)`, regardless of whether a Discord channel is mapped.
+const discordChannelMappingCalls: Array<{
+  readonly teamId: Team.TeamId;
+  readonly groupId: GroupModel.GroupId;
+}> = [];
+
 const MockDiscordChannelMappingRepositoryLayer = Layer.succeed(DiscordChannelMappingRepository, {
-  findByGroupId: () => Effect.succeed(Option.none()),
+  findByGroupId: (teamId: Team.TeamId, groupId: GroupModel.GroupId) => {
+    discordChannelMappingCalls.push({ teamId, groupId });
+    return Effect.succeed(Option.none());
+  },
   insert: () => Effect.void,
   insertWithoutRole: () => Effect.void,
   deleteByGroupId: () => Effect.void,
@@ -501,6 +557,18 @@ const MockDiscordRolesRepositoryLayer = Layer.succeed(
   new Proxy({} as never, { get: () => () => Effect.void }),
 );
 
+// `insertEvent`/`getScopedTrainingTypeIds`/`markEventPersonalMessagesDirty` are scriptable
+// (default: die / empty) so the AI-write confirm tests (below) can script a specific outcome per
+// test without rebuilding the whole `CommonLayers` composition — mirrors the `state.*` scripting
+// pattern this file already uses for `ChatAgent`/`ChatRateLimiter`. Reset in `resetState`.
+const eventsRepoScript: {
+  insertEvent: (args: unknown) => Effect.Effect<unknown>;
+  getScopedTrainingTypeIds: () => Effect.Effect<ReadonlyArray<{ training_type_id: unknown }>>;
+} = {
+  insertEvent: () => Effect.die(new Error('Not implemented')),
+  getScopedTrainingTypeIds: () => Effect.succeed([]),
+};
+
 const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   _tag: 'api/EventsRepository',
   findByTeamId: () => Effect.succeed([]),
@@ -508,14 +576,104 @@ const MockEventsRepositoryLayer = Layer.succeed(EventsRepository, {
   findByIdWithDetails: () => Effect.succeed(Option.none()),
   findEventByIdWithDetails: () => Effect.succeed(Option.none()),
   insert: () => Effect.die(new Error('Not implemented')),
-  insertEvent: () => Effect.die(new Error('Not implemented')),
+  insertEvent: (args: unknown) => eventsRepoScript.insertEvent(args),
   update: () => Effect.die(new Error('Not implemented')),
   updateEvent: () => Effect.die(new Error('Not implemented')),
   cancel: () => Effect.void,
   cancelEvent: () => Effect.void,
+  markEventPersonalMessagesDirty: () => Effect.void,
   findScopedTrainingTypeIds: () => Effect.succeed([]),
-  getScopedTrainingTypeIds: () => Effect.succeed([]),
+  getScopedTrainingTypeIds: () => eventsRepoScript.getScopedTrainingTypeIds(),
 } as never);
+
+// ---------------------------------------------------------------------------
+// `AiActionProposalsRepository` — a real, stateful in-memory store (not a noop) so the
+// confirm/reject tests below can seed a row directly (bypassing the propose flow — this file's
+// `ChatAgent` is fully scripted and never actually calls `proposeAction`) and observe the
+// handler's own claim-then-act sequence. Every method is spy-tracked so a test can assert e.g.
+// "claim was never invoked" (§16 property 4 / the permission-lost-between-propose-and-confirm
+// case). Shared by every `TestApp` variant in this file — a real repository is a single
+// data store regardless of which `AI_CHAT_ENABLED`/`LlmClient.configured` combination is hit.
+// ---------------------------------------------------------------------------
+
+interface ProposalStoreRow {
+  team_id: Team.TeamId;
+  user_id: Auth.UserId;
+  action: AiActionProposal.AiActionName;
+  payload: string;
+  consumed: boolean;
+  expired: boolean;
+}
+
+const proposalsStore = new Map<string, ProposalStoreRow>();
+const lockForConfirmCalls: Array<{ id: string; team_id: string; user_id: string }> = [];
+const claimCalls: Array<{ id: string; team_id: string; user_id: string }> = [];
+const deleteForUserCalls: Array<{ id: string; team_id: string; user_id: string }> = [];
+
+const scopedMatch = (row: ProposalStoreRow, teamId: Team.TeamId, userId: Auth.UserId): boolean =>
+  row.team_id === teamId && row.user_id === userId;
+
+const MockAiActionProposalsRepositoryLayer = Layer.succeed(AiActionProposalsRepository, {
+  lockForConfirm: (params: { id: string; team_id: Team.TeamId; user_id: Auth.UserId }) => {
+    lockForConfirmCalls.push(params as never);
+    const row = proposalsStore.get(params.id);
+    if (row === undefined || !scopedMatch(row, params.team_id, params.user_id)) {
+      return Effect.succeed(Option.none());
+    }
+    return Effect.succeed(
+      Option.some({
+        action: row.action,
+        payload: row.payload,
+        consumed: row.consumed,
+        expired: row.expired,
+      }),
+    );
+  },
+  claim: (params: { id: string; team_id: Team.TeamId; user_id: Auth.UserId }) => {
+    claimCalls.push(params as never);
+    const row = proposalsStore.get(params.id);
+    if (
+      row === undefined ||
+      !scopedMatch(row, params.team_id, params.user_id) ||
+      row.consumed ||
+      row.expired
+    ) {
+      return Effect.succeed(Option.none());
+    }
+    row.consumed = true;
+    return Effect.succeed(Option.some({ id: params.id }));
+  },
+  insert: () => Effect.die(new Error('Not implemented — ChatAgent is scripted in this file')),
+  deleteForUser: (params: { id: string; team_id: Team.TeamId; user_id: Auth.UserId }) => {
+    deleteForUserCalls.push(params as never);
+    const row = proposalsStore.get(params.id);
+    if (row === undefined || !scopedMatch(row, params.team_id, params.user_id)) {
+      return Effect.succeed(Option.none());
+    }
+    proposalsStore.delete(params.id);
+    return Effect.succeed(Option.some({ id: params.id }));
+  },
+} as never);
+
+let nextProposalIdSeq = 0;
+/** Mints a valid-UUID `AiActionProposalId` (`Schema.isUUID()` requires version nibble 1-8, variant
+ *  nibble 8/9/a/b) and seeds the row directly into `proposalsStore` — this file's `ChatAgent` is
+ *  fully scripted, so a test cannot reach `propose_create_event` to create a real one. */
+const seedProposal = (
+  overrides: Partial<ProposalStoreRow> = {},
+): AiActionProposal.AiActionProposalId => {
+  nextProposalIdSeq += 1;
+  const id = `00000000-0000-1000-8000-${String(nextProposalIdSeq).padStart(12, '0')}`;
+  proposalsStore.set(id, {
+    team_id: overrides.team_id ?? TEST_TEAM_ID,
+    user_id: overrides.user_id ?? TEST_USER_ID,
+    action: overrides.action ?? ('create_event' as AiActionProposal.AiActionName),
+    payload: overrides.payload ?? '{}',
+    consumed: overrides.consumed ?? false,
+    expired: overrides.expired ?? false,
+  });
+  return id as AiActionProposal.AiActionProposalId;
+};
 
 const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
   _tag: 'api/EventSeriesRepository',
@@ -701,6 +859,7 @@ const CommonLayers = ApiLive.pipe(
   .pipe(Layer.provide(MockChannelManagementLayers))
   .pipe(Layer.provide(MockEmailLayers))
   .pipe(Layer.provide(MockEventRosterLayers))
+  .pipe(Layer.provide(MockAiActionProposalsRepositoryLayer))
   .pipe(Layer.provide(BotInfoStore.Default))
   .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
   .pipe(
@@ -718,6 +877,7 @@ interface ScriptedChatAgentResult {
   readonly generated: boolean;
   readonly degradedReason: Option.Option<AiChatApi.DegradedReason>;
   readonly references: ReadonlyArray<AiChatApi.EntityRef>;
+  readonly proposal: Option.Option<AiChatApi.Proposal>;
 }
 
 const successResult: ScriptedChatAgentResult = {
@@ -725,6 +885,7 @@ const successResult: ScriptedChatAgentResult = {
   generated: false,
   degradedReason: Option.some('provider_error'),
   references: [],
+  proposal: Option.none(),
 };
 
 /** Call counters / scripted results per variant, reset in `beforeEach`. */
@@ -747,6 +908,14 @@ const resetState = () => {
   state.rateLimited.agentCalls = 0;
   state.rateLimited.rateLimiterCalls = 0;
   state.rateLimited.retryAfterSeconds = 37;
+
+  proposalsStore.clear();
+  lockForConfirmCalls.length = 0;
+  claimCalls.length = 0;
+  deleteForUserCalls.length = 0;
+  discordChannelMappingCalls.length = 0;
+  eventsRepoScript.insertEvent = () => Effect.die(new Error('Not implemented'));
+  eventsRepoScript.getScopedTrainingTypeIds = () => Effect.succeed([]);
 };
 
 // --- Variant: AI_CHAT_ENABLED=true, LlmClient.configured=true, never rate-limited ---
@@ -884,6 +1053,54 @@ const authHeaders = (token: string) => ({
 
 const validChatBody = () =>
   JSON.stringify({ messages: [{ role: 'user', content: 'What events are coming up?' }] });
+
+// ---------------------------------------------------------------------------
+// Proposal confirm/reject fixtures — §7/§16.
+// ---------------------------------------------------------------------------
+
+const GROUP_A1 = '00000000-0000-0000-0000-0000000ga001' as GroupModel.GroupId;
+const TT_A1_ID = '00000000-0000-0000-0000-0000000ta001';
+// A syntactically valid UUID (satisfies `AiActionProposalId`'s `Schema.isUUID()` brand) never
+// seeded into `proposalsStore` — the "absent" 404 case.
+const NONEXISTENT_PROPOSAL_ID = '00000000-0000-1000-8000-999999999999';
+
+const confirmUrl = (proposalId: string) =>
+  `http://localhost/teams/${TEST_TEAM_ID}/ai/proposals/${proposalId}/confirm`;
+const rejectUrl = (proposalId: string) =>
+  `http://localhost/teams/${TEST_TEAM_ID}/ai/proposals/${proposalId}/reject`;
+
+const createEventPayload = (overrides: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    title: 'AI Practice',
+    eventType: 'training',
+    startAt: '2026-06-01T10:00:00.000Z',
+    ...overrides,
+  });
+
+const buildFakeInsertedRow = (overrides: Record<string, unknown> = {}) => ({
+  id: '00000000-0000-0000-0000-0000000ea099' as Event.EventId,
+  team_id: TEST_TEAM_ID,
+  training_type_id: Option.none(),
+  event_type: 'training',
+  event_type_id: Option.none(),
+  title: 'AI Practice',
+  description: Option.none(),
+  image_url: Option.none(),
+  start_at: DateTime.makeUnsafe('2026-06-01T10:00:00.000Z'),
+  end_at: Option.none(),
+  location: Option.none(),
+  location_url: Option.none(),
+  status: 'active',
+  created_by: TEST_ADMIN_MEMBER_ID,
+  series_id: Option.none(),
+  series_modified: false,
+  owner_group_id: Option.some(GROUP_A1),
+  member_group_id: Option.none(),
+  all_day: false,
+  start_date: '2026-06-01',
+  end_date: '2026-06-01',
+  ...overrides,
+});
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -1069,6 +1286,7 @@ describe('AI Chat API', () => {
         generated: true,
         degradedReason: Option.none(),
         references: [eventRef, memberRef],
+        proposal: Option.none(),
       };
 
       const response = await enabledApp.handler(
@@ -1110,6 +1328,7 @@ describe('AI Chat API', () => {
         generated: true,
         degradedReason: Option.none(),
         references: [],
+        proposal: Option.none(),
       };
       const response = await enabledApp.handler(
         new Request(CHAT_URL, {
@@ -1152,6 +1371,7 @@ describe('AI Chat API', () => {
         generated: false,
         degradedReason: Option.some('not_configured'),
         references: [],
+        proposal: Option.none(),
       };
       const response = await notConfiguredApp.handler(
         new Request(CHAT_URL, {
@@ -1186,6 +1406,7 @@ describe('AI Chat API', () => {
           generated: false,
           degradedReason: reason,
           references: [],
+          proposal: null,
         };
         expect(() => Schema.decodeUnknownSync(AiChatApi.ChatResponse)(body)).not.toThrow();
       }
@@ -1195,6 +1416,7 @@ describe('AI Chat API', () => {
         generated: false,
         degradedReason: 'something_else',
         references: [],
+        proposal: null,
       };
       expect(() => Schema.decodeUnknownSync(AiChatApi.ChatResponse)(invalidBody)).toThrow();
     });
@@ -1215,6 +1437,7 @@ describe('AI Chat API', () => {
         generated: false,
         degradedReason: Option.some('not_configured'),
         references: [],
+        proposal: Option.none(),
       };
       const notConfiguredResponse = await notConfiguredApp.handler(
         new Request(CHAT_URL, {
@@ -1231,6 +1454,7 @@ describe('AI Chat API', () => {
         generated: false,
         degradedReason: Option.some('provider_error'),
         references: [],
+        proposal: Option.none(),
       };
       const providerErrorResponse = await enabledApp.handler(
         new Request(CHAT_URL, {
@@ -1271,6 +1495,235 @@ describe('AI Chat API', () => {
       expect(response.status).toBe(403);
       const body = await response.json();
       expect(body._tag).toBe('AiChatForbidden');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Proposal confirm/reject — §5 (the transaction), §16 (the taxonomy), §7 (this file's spec).
+  // -------------------------------------------------------------------------
+
+  describe('confirmProposal', () => {
+    it('returns 403 AiChatForbidden for a non-member, and the proposals repository is never consulted', async () => {
+      const id = seedProposal({ user_id: NON_MEMBER_USER_ID });
+      const response = await enabledApp.handler(
+        new Request(confirmUrl(id), { method: 'POST', headers: authHeaders('non-member-token') }),
+      );
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body._tag).toBe('AiChatForbidden');
+      expect(lockForConfirmCalls).toHaveLength(0);
+    });
+
+    it('AI_CHAT_ENABLED off: 403, and lockForConfirm is never called (a confirmable tail must die immediately)', async () => {
+      const id = seedProposal();
+      const response = await disabledApp.handler(
+        new Request(confirmUrl(id), { method: 'POST', headers: authHeaders('user-token') }),
+      );
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body._tag).toBe('AiChatForbidden');
+      expect(lockForConfirmCalls).toHaveLength(0);
+    });
+
+    it('absent / other-team / other-user all return the BYTE-EQUAL 404 body — never distinguishable', async () => {
+      const otherTeamId = seedProposal({ team_id: OTHER_TEAM_ID, user_id: TEST_USER_ID });
+      const otherUserId = seedProposal({ team_id: TEST_TEAM_ID, user_id: TEST_ADMIN_ID });
+
+      const absent = await enabledApp.handler(
+        new Request(confirmUrl(NONEXISTENT_PROPOSAL_ID), {
+          method: 'POST',
+          headers: authHeaders('user-token'),
+        }),
+      );
+      const otherTeam = await enabledApp.handler(
+        new Request(confirmUrl(otherTeamId), {
+          method: 'POST',
+          headers: authHeaders('user-token'),
+        }),
+      );
+      const otherUser = await enabledApp.handler(
+        new Request(confirmUrl(otherUserId), {
+          method: 'POST',
+          headers: authHeaders('user-token'),
+        }),
+      );
+
+      expect(absent.status).toBe(404);
+      expect(otherTeam.status).toBe(404);
+      expect(otherUser.status).toBe(404);
+
+      const [absentBody, otherTeamBody, otherUserBody] = await Promise.all([
+        absent.json(),
+        otherTeam.json(),
+        otherUser.json(),
+      ]);
+      expect(otherTeamBody).toEqual(absentBody);
+      expect(otherUserBody).toEqual(absentBody);
+      expect(absentBody).toEqual({ _tag: 'AiProposalNotFound' });
+    });
+
+    it('an already-consumed proposal returns 409 AiProposalAlreadyUsed', async () => {
+      const id = seedProposal({ consumed: true });
+      const response = await enabledApp.handler(
+        new Request(confirmUrl(id), { method: 'POST', headers: authHeaders('user-token') }),
+      );
+      expect(response.status).toBe(409);
+      const body = await response.json();
+      expect(body._tag).toBe('AiProposalAlreadyUsed');
+    });
+
+    it('an expired proposal returns 410 AiProposalExpired', async () => {
+      const id = seedProposal({ expired: true });
+      const response = await enabledApp.handler(
+        new Request(confirmUrl(id), { method: 'POST', headers: authHeaders('user-token') }),
+      );
+      expect(response.status).toBe(410);
+      const body = await response.json();
+      expect(body._tag).toBe('AiProposalExpired');
+    });
+
+    it('permission lost between propose and confirm: 403 AiProposalActionForbidden, and claim is NEVER invoked (§16 property 4 — the row stays claimable)', async () => {
+      // `user-token` (TEST_USER_ID) holds only PLAYER_PERMISSIONS — no `event:create` — so by
+      // the time this confirm runs, the caller has (or always had) lost the permission the
+      // registry entry requires.
+      const id = seedProposal({ user_id: TEST_USER_ID, action: 'create_event' as never });
+      const response = await enabledApp.handler(
+        new Request(confirmUrl(id), { method: 'POST', headers: authHeaders('user-token') }),
+      );
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body._tag).toBe('AiProposalActionForbidden');
+      expect(lockForConfirmCalls).toHaveLength(1);
+      expect(claimCalls).toHaveLength(0);
+    });
+
+    it('happy path: 201 with a BARE EventInfo body, claim called exactly once, and emitEventCreatedSideEffects sees the raw owner_group_id (blocker 2)', async () => {
+      const fakeRow = buildFakeInsertedRow();
+      eventsRepoScript.insertEvent = () => Effect.succeed(fakeRow);
+      const id = seedProposal({
+        user_id: TEST_ADMIN_ID,
+        payload: createEventPayload({ ownerGroupId: GROUP_A1 }),
+      });
+
+      const response = await enabledApp.handler(
+        new Request(confirmUrl(id), { method: 'POST', headers: authHeaders('admin-token') }),
+      );
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      // Bare `EventApi.EventInfo` — no `created`/`event` wrapper key.
+      expect(Object.keys(body)).not.toContain('created');
+      expect(Object.keys(body)).not.toContain('event');
+      expect(body.eventId).toBe(fakeRow.id);
+      expect(body.title).toBe(fakeRow.title);
+      expect(body.startAt).toBe('2026-06-01T10:00:00.000Z');
+
+      expect(claimCalls).toHaveLength(1);
+      // blocker 2's regression guard: `emitEventCreatedSideEffects` must have been driven from
+      // the RAW row (which carries `owner_group_id`), not the view model (which does not).
+      expect(discordChannelMappingCalls).toHaveLength(1);
+      expect(discordChannelMappingCalls[0]?.groupId).toBe(GROUP_A1);
+    });
+
+    it("confirm accepts NO payload: a forged body is ignored, the created event's title is the STORED one", async () => {
+      const fakeRow = buildFakeInsertedRow({ title: 'Stored Title' });
+      eventsRepoScript.insertEvent = () => Effect.succeed(fakeRow);
+      const id = seedProposal({
+        user_id: TEST_ADMIN_ID,
+        payload: createEventPayload({ title: 'Stored Title' }),
+      });
+
+      const response = await enabledApp.handler(
+        new Request(confirmUrl(id), {
+          method: 'POST',
+          headers: authHeaders('admin-token'),
+          body: JSON.stringify({ title: 'hacked' }),
+        }),
+      );
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(body.title).toBe('Stored Title');
+    });
+
+    it("the registry action's own Forbidden (e.g. coach scoping) becomes 403 AiProposalActionForbidden", async () => {
+      // TEST_CREATOR holds `event:create` but not `team:manage` — `isAdmin` is false, so
+      // `checkCoachScoping` actually runs. A non-empty scoped-ids list that does not contain the
+      // payload's `trainingTypeId` fails it.
+      eventsRepoScript.getScopedTrainingTypeIds = () =>
+        Effect.succeed([{ training_type_id: 'some-other-training-type-id' }]);
+      const id = seedProposal({
+        user_id: TEST_CREATOR_ID,
+        payload: createEventPayload({ trainingTypeId: TT_A1_ID }),
+      });
+
+      const response = await enabledApp.handler(
+        new Request(confirmUrl(id), { method: 'POST', headers: authHeaders('creator-token') }),
+      );
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body._tag).toBe('AiProposalActionForbidden');
+    });
+
+    it('consults neither ChatRateLimiter nor ChatAgent', async () => {
+      const fakeRow = buildFakeInsertedRow();
+      eventsRepoScript.insertEvent = () => Effect.succeed(fakeRow);
+      const id = seedProposal({ user_id: TEST_ADMIN_ID });
+
+      await enabledApp.handler(
+        new Request(confirmUrl(id), { method: 'POST', headers: authHeaders('admin-token') }),
+      );
+      expect(state.enabled.agentCalls).toBe(0);
+      expect(state.enabled.rateLimiterCalls).toBe(0);
+    });
+  });
+
+  describe('rejectProposal', () => {
+    it('deletes the proposal scoped by (id, team_id, user_id) and returns 204', async () => {
+      const id = seedProposal({ user_id: TEST_USER_ID });
+      const response = await enabledApp.handler(
+        new Request(rejectUrl(id), { method: 'POST', headers: authHeaders('user-token') }),
+      );
+      expect(response.status).toBe(204);
+      expect(deleteForUserCalls).toHaveLength(1);
+      expect(deleteForUserCalls[0]).toEqual({
+        id,
+        team_id: TEST_TEAM_ID,
+        user_id: TEST_USER_ID,
+      });
+      // Actually gone — a second reject of the same id is now the "unknown" case.
+      const second = await enabledApp.handler(
+        new Request(rejectUrl(id), { method: 'POST', headers: authHeaders('user-token') }),
+      );
+      expect(second.status).toBe(404);
+    });
+
+    it('an unknown proposal id returns 404 AiProposalNotFound', async () => {
+      const response = await enabledApp.handler(
+        new Request(rejectUrl(NONEXISTENT_PROPOSAL_ID), {
+          method: 'POST',
+          headers: authHeaders('user-token'),
+        }),
+      );
+      expect(response.status).toBe(404);
+      const body = await response.json();
+      expect(body._tag).toBe('AiProposalNotFound');
+    });
+
+    it('a non-member gets 403 AiChatForbidden', async () => {
+      const id = seedProposal();
+      const response = await enabledApp.handler(
+        new Request(rejectUrl(id), { method: 'POST', headers: authHeaders('non-member-token') }),
+      );
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body._tag).toBe('AiChatForbidden');
+    });
+
+    it('still works with the kill switch OFF — discarding must always work', async () => {
+      const id = seedProposal({ user_id: TEST_USER_ID });
+      const response = await disabledApp.handler(
+        new Request(rejectUrl(id), { method: 'POST', headers: authHeaders('user-token') }),
+      );
+      expect(response.status).toBe(204);
     });
   });
 });

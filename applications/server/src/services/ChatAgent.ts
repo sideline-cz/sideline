@@ -18,14 +18,17 @@
  * construction, exactly like `deps.llm`) so that the returned `respond`
  * effect can have `R = never`.
  */
-import type { AiChatApi } from '@sideline/domain';
+import type { AiActionProposal, AiChatApi } from '@sideline/domain';
 import { Array as Arr, Cause, Effect, Layer, Option, Schema, ServiceMap } from 'effect';
+import { hasPermission } from '~/api/permissions.js';
+import { AiActionProposalsRepository } from '~/repositories/AiActionProposalsRepository.js';
 import { EventsRepository } from '~/repositories/EventsRepository.js';
 import { GroupsRepository } from '~/repositories/GroupsRepository.js';
 import { RostersRepository } from '~/repositories/RostersRepository.js';
 import { TeamMembersRepository } from '~/repositories/TeamMembersRepository.js';
 import { TeamsRepository } from '~/repositories/TeamsRepository.js';
 import { TrainingTypesRepository } from '~/repositories/TrainingTypesRepository.js';
+import { ACTION_REGISTRY } from '~/services/ai/actions.js';
 import { computeCurrentDatetime } from '~/services/ai/currentDatetime.js';
 import {
   currentDatetime,
@@ -48,6 +51,7 @@ import {
 } from '~/services/ai/registry.js';
 import { buildSystemPrompt } from '~/services/ai/systemPrompt.js';
 import type { ToolContext, ToolExecutionResult } from '~/services/ai/toolTypes.js';
+import { proposeAction } from '~/services/ai/writeTools.js';
 import {
   type ChatWithToolsResult,
   type LlmChatMessage,
@@ -87,6 +91,9 @@ export interface ChatAgentResult {
   readonly generated: boolean;
   readonly degradedReason: Option.Option<AiChatApi.DegradedReason>;
   readonly references: ReadonlyArray<AiChatApi.EntityRef>;
+  /** A pending write the client renders as a confirmation card — `None` on every degraded turn
+   *  (a turn with no answer text ships no card, plan §16). */
+  readonly proposal: Option.Option<AiChatApi.Proposal>;
 }
 
 export interface ChatAgentService {
@@ -162,6 +169,7 @@ interface AgentDeps {
   readonly rosters: ServiceMap.Service.Shape<typeof RostersRepository>;
   readonly members: ServiceMap.Service.Shape<typeof TeamMembersRepository>;
   readonly teams: ServiceMap.Service.Shape<typeof TeamsRepository>;
+  readonly proposals: ServiceMap.Service.Shape<typeof AiActionProposalsRepository>;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +186,9 @@ interface LoopState {
   readonly iteration: number;
   readonly toolCallsUsed: number;
   readonly toolCharsUsed: number;
+  /** At most one pending proposal per turn (blocker 8) — set once a `propose_*` call succeeds,
+   *  never cleared within the turn. */
+  readonly proposal: Option.Option<AiChatApi.Proposal>;
 }
 
 const fallback = (
@@ -188,6 +199,9 @@ const fallback = (
   generated: false,
   degradedReason: Option.some(reason),
   references,
+  // A degraded turn never ships a card — the answer text explaining it is missing, so the user
+  // would have no context for what the card is proposing.
+  proposal: Option.none(),
 });
 
 /**
@@ -223,6 +237,7 @@ const finish = (res: ChatWithToolsResult, state: LoopState): ChatAgentResult => 
         generated: true,
         degradedReason: Option.none(),
         references: state.references,
+        proposal: state.proposal,
       };
 };
 
@@ -251,6 +266,7 @@ const logIfTruncated = (res: ChatWithToolsResult): Effect.Effect<void> =>
 interface CallOutcome {
   readonly content: string;
   readonly newReferences: ReadonlyArray<AiChatApi.EntityRef>;
+  readonly proposal?: AiChatApi.Proposal | undefined;
 }
 
 const bareError = (body: Record<string, unknown>): CallOutcome => ({
@@ -461,6 +477,64 @@ const capToTotalBudget = (state: LoopState, outcome: CallOutcome): CallOutcome =
     ? bareError({ error: 'budget_exceeded' })
     : outcome;
 
+const isKnownAction = (action: string): action is AiActionProposal.AiActionName =>
+  action in ACTION_REGISTRY;
+
+/**
+ * The `propose_*` dispatch — kept OUT of `executeTool`'s switch on purpose (a `case
+ * 'propose_create_event':` there would stop the registry's compile-error property at
+ * `executeTool`, since its `default:` silently answers `unrecognized tool` for any action added
+ * to `ACTION_REGISTRY` later without a matching `case`). Dispatches generically off
+ * `tool.name.slice('propose_'.length)` against `ACTION_REGISTRY` instead.
+ *
+ * Deliberately bypasses BOTH `processToolExecution` (its non-`items` arm would wrap the result
+ * as `{"untrusted_data":…}` — wrong: a server-minted proposal id is not untrusted data) and
+ * `capToTotalBudget` (which replaces the whole `CallOutcome`, dropping `proposal` — the row would
+ * be written with no card ever reaching the client). The envelope here is a few dozen bytes and
+ * minted by us, so exempting it from the char budget costs nothing.
+ */
+const dispatchProposeCall = (
+  deps: AgentDeps,
+  ctx: ToolContext,
+  state: LoopState,
+  toolName: string,
+  parsedArgs: unknown,
+): Effect.Effect<CallOutcome> => {
+  if (Option.isSome(state.proposal)) {
+    // Blocker 8: at most one proposal per reply. The model is told this in the system prompt;
+    // this is the enforcement.
+    return Effect.succeed(
+      bareError({
+        error: 'proposal_already_pending',
+        detail:
+          'Only one change may be proposed per reply. Tell the user you will do the next one ' +
+          'after they confirm this one.',
+      }),
+    );
+  }
+
+  const action = toolName.slice('propose_'.length);
+  if (!isKnownAction(action)) {
+    // Unreachable in practice: `ALL_TOOLS` (registry.ts) only ever offers a `propose_<name>`
+    // entry built FROM `ACTION_REGISTRY`, so `tool` was already resolved from that same catalogue
+    // by the caller. Encoded rather than thrown, matching every other outcome in this function.
+    return Effect.succeed(bareError({ error: 'unknown_tool' }));
+  }
+
+  return proposeAction(action, parsedArgs, ctx).pipe(
+    Effect.provideService(GroupsRepository, deps.groups),
+    Effect.provideService(TrainingTypesRepository, deps.trainingTypes),
+    Effect.provideService(AiActionProposalsRepository, deps.proposals),
+    Effect.map(
+      (outcome): CallOutcome => ({
+        content: JSON.stringify(outcome.result), // BARE, not untrusted_data
+        newReferences: [],
+        proposal: outcome.proposal,
+      }),
+    ),
+  );
+};
+
 const dispatchOneCall = (
   deps: AgentDeps,
   ctx: ToolContext,
@@ -479,6 +553,10 @@ const dispatchOneCall = (
     return Effect.succeed(bareError({ error: 'invalid_arguments' }));
   }
 
+  if (tool.name.startsWith('propose_')) {
+    return dispatchProposeCall(deps, ctx, state, tool.name, parsedArgs);
+  }
+
   return executeTool(deps, ctx, tool.name, parsedArgs).pipe(
     Effect.map((outcome) => {
       if (outcome._tag === 'invalidArguments') {
@@ -490,8 +568,16 @@ const dispatchOneCall = (
 };
 
 const commitOutcome = (state: LoopState, outcome: CallOutcome): LoopState => {
+  // A propose outcome always has `newReferences.length === 0` (it mints no `EntityRef`) and
+  // takes THIS branch — the `references`-accumulating branch below never runs for it. Both
+  // branches must carry `proposal` forward, or a propose outcome's card would be silently
+  // dropped from `LoopState` the moment it took this early return.
   if (outcome.newReferences.length === 0) {
-    return { ...state, toolCharsUsed: state.toolCharsUsed + outcome.content.length };
+    return {
+      ...state,
+      toolCharsUsed: state.toolCharsUsed + outcome.content.length,
+      proposal: outcome.proposal !== undefined ? Option.some(outcome.proposal) : state.proposal,
+    };
   }
   const references = [...state.references, ...outcome.newReferences];
   const entityKeys = new Map(state.entityKeys);
@@ -504,6 +590,7 @@ const commitOutcome = (state: LoopState, outcome: CallOutcome): LoopState => {
     entityKeys,
     tokens: buildTokenMap(references),
     toolCharsUsed: state.toolCharsUsed + outcome.content.length,
+    proposal: outcome.proposal !== undefined ? Option.some(outcome.proposal) : state.proposal,
   };
 };
 
@@ -673,6 +760,7 @@ const respond = (
         teamName,
         teamTimezone: ctx.teamTimezone,
         todayTeamLocal: nowInfo.todayTeamLocal,
+        canPropose: hasPermission(ctx.membership, 'event:create'),
       }),
     ),
     Effect.let(
@@ -685,6 +773,7 @@ const respond = (
         iteration: 0,
         toolCallsUsed: 0,
         toolCharsUsed: 0,
+        proposal: Option.none(),
       }),
     ),
     Effect.flatMap(({ initialState }) =>
@@ -716,6 +805,7 @@ const make: Effect.Effect<
   | RostersRepository
   | TeamMembersRepository
   | TeamsRepository
+  | AiActionProposalsRepository
 > = Effect.Do.pipe(
   Effect.bind('llm', () => LlmClient.asEffect()),
   Effect.bind('events', () => EventsRepository.asEffect()),
@@ -724,6 +814,7 @@ const make: Effect.Effect<
   Effect.bind('rosters', () => RostersRepository.asEffect()),
   Effect.bind('members', () => TeamMembersRepository.asEffect()),
   Effect.bind('teams', () => TeamsRepository.asEffect()),
+  Effect.bind('proposals', () => AiActionProposalsRepository.asEffect()),
   Effect.map(
     (deps): ChatAgentService => ({
       respond: (ctx, history) => respond(deps, ctx, history),

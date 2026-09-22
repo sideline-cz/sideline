@@ -97,6 +97,37 @@ const TR_MAP: Record<string, string> = {
   event_type_other: 'Other',
   validation_required: 'Required field',
   members_ratingDescCounter: 'counter copy',
+  // `AssistantProposalCard` (plan §6.1) — the 19 new keys, plus its reused `event_*` field
+  // labels (`event_title`, `event_eventType`, `event_trainingType`, `event_ownerGroup`,
+  // `event_memberGroup`, `event_location`, `event_description` are already covered by the
+  // `event_type_*` / `event_allDayLabel` / `event_status_*` entries above and by these two
+  // additional field-label entries).
+  event_title: 'Title label',
+  event_eventType: 'Event type label',
+  event_trainingType: 'Training type label',
+  event_ownerGroup: 'Owner group label',
+  event_memberGroup: 'Member group label',
+  event_location: 'Location label',
+  event_description: 'Description label',
+  assistant_proposal_createEvent_title: 'Create this event?',
+  assistant_proposal_createEvent_description: 'Nothing is created until you confirm.',
+  assistant_proposal_createEvent_confirm: 'Create event',
+  assistant_proposal_createEvent_confirmed: 'Event created.',
+  assistant_proposal_reject: 'Discard',
+  assistant_proposal_rejected: 'Discarded. Nothing was created.',
+  assistant_proposal_working: 'Working…',
+  assistant_proposal_expiresAt: 'Expires at some time',
+  assistant_proposal_fieldNotSet: 'Not set',
+  assistant_proposal_field_start: 'Starts label',
+  assistant_proposal_field_end: 'Ends label',
+  assistant_proposal_label: 'Suggested action',
+  assistant_proposal_failedTitle: "I couldn't do that",
+  assistant_proposal_expiredTitle: 'This suggestion expired',
+  assistant_proposal_errorNotFound: 'Error copy: not found',
+  assistant_proposal_errorAlreadyUsed: 'Error copy: already used',
+  assistant_proposal_errorExpired: 'Error copy: expired',
+  assistant_proposal_errorForbidden: 'Error copy: forbidden',
+  assistant_proposal_errorGeneric: 'Error copy: generic',
 };
 
 vi.mock('~/lib/translations.js', () => ({
@@ -129,9 +160,14 @@ vi.mock('~/components/ui/avatar', () => ({
   ),
 }));
 
+const { mockInvalidate } = vi.hoisted(() => ({ mockInvalidate: vi.fn() }));
+
 // Self-contained (no captured outer variables — safe under vi.mock's hoisting): interpolates
 // `params` into `to`'s `$param` placeholders so `<a href>` reflects the real resolved route.
+// `useRouter` is needed here too — `AssistantProposalCard` (rendered whenever a turn carries a
+// proposal) calls it directly, per plan §6.1.
 vi.mock('@tanstack/react-router', () => ({
+  useRouter: () => ({ invalidate: mockInvalidate }),
   Link: ({
     to,
     params,
@@ -152,7 +188,15 @@ vi.mock('@tanstack/react-router', () => ({
 // `mockChat` stands in for the generated client's `api.aiChat.chat(...)` — the one call this
 // organism makes (design §2.9, Pattern A: the organism builds and runs its own Effect via
 // `ApiClient.asEffect()` + `useRun()`, exactly like `RatingFromDescription.tsx`).
-const { mockChat } = vi.hoisted(() => ({ mockChat: vi.fn() }));
+// `mockConfirmProposal`/`mockRejectProposal` back `AssistantProposalCard`'s own calls — never
+// exercised by clicking here (this file only asserts placement/wiring, not the card's own
+// behaviour, which is `AssistantProposalCard.test.tsx`'s job), but required so the mocked
+// `ApiClient.asEffect()` result has the same shape the real client does.
+const { mockChat, mockConfirmProposal, mockRejectProposal } = vi.hoisted(() => ({
+  mockChat: vi.fn(),
+  mockConfirmProposal: vi.fn(),
+  mockRejectProposal: vi.fn(),
+}));
 
 // A single, STABLE `run` reference that really executes the piped Effect via `Effect.option`
 // (mirrors `runPromiseClient`'s shape minus the toast side effects) — so whatever
@@ -163,7 +207,16 @@ const mockRun = () => (effect: Effect.Effect<unknown, unknown>) =>
   Effect.runPromise(Effect.option(effect));
 
 vi.mock('~/lib/runtime', () => ({
-  ApiClient: { asEffect: () => Effect.succeed({ aiChat: { chat: mockChat } }) },
+  ApiClient: {
+    asEffect: () =>
+      Effect.succeed({
+        aiChat: {
+          chat: mockChat,
+          confirmProposal: mockConfirmProposal,
+          rejectProposal: mockRejectProposal,
+        },
+      }),
+  },
   ClientError: { make: (message: string) => ({ _tag: 'ClientError', message }) },
   SilentClientError: class SilentClientError {
     readonly _tag = 'SilentClientError';
@@ -232,8 +285,39 @@ function respond(overrides: Partial<AiChatApi.ChatResponse> = {}) {
     generated: true,
     degradedReason: Option.none(),
     references: [],
+    proposal: Option.none(),
     ...overrides,
   } as any);
+}
+
+const PROPOSAL_ID = '11111111-1111-4111-8111-111111111111';
+
+// Mirrors `AssistantProposalCard.test.tsx`'s fixture — all nine `ProposalFieldKey`s, a mix of
+// `type`s so the card (rendered inside a turn here) has something real to show. This file only
+// asserts placement/wiring (§7's last two bullets); the card's own rendering rules are that
+// sibling file's job.
+function makeProposal() {
+  const summary = [
+    { key: 'title', value: { type: 'text', value: 'Thursday Practice' } },
+    { key: 'eventType', value: { type: 'eventType', value: 'training' } },
+    {
+      key: 'start',
+      value: { type: 'instant', value: DateTime.makeUnsafe('2026-07-04T18:00:00.000Z') },
+    },
+    { key: 'end', value: { type: 'date', value: '2026-07-05' } },
+    { key: 'trainingType', value: { type: 'text', value: 'U12 Skills' } },
+    { key: 'ownerGroup', value: { type: 'text', value: 'Coaches' } },
+    { key: 'memberGroup', value: { type: 'none' } },
+    { key: 'location', value: { type: 'text', value: 'Main Hall' } },
+    { key: 'description', value: { type: 'text', value: 'Bring water bottles.' } },
+  ].map((f) => new AiChatApi.ProposalField(f as any));
+
+  return new AiChatApi.Proposal({
+    id: PROPOSAL_ID as any,
+    action: 'create_event',
+    summary,
+    expiresAt: DateTime.makeUnsafe('2026-09-22T16:00:00.000Z'),
+  });
 }
 
 function renderConversation(props: { pendingQuestion?: { text: string; id: number } } = {}) {
@@ -702,6 +786,55 @@ describe('AssistantConversation', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(mockChat).not.toHaveBeenCalled();
       expect(screen.getByText(TR_MAP.assistant_empty_title)).not.toBeNull();
+    });
+  });
+
+  // Plan §6.2 / §7 (last two bullets): `AssistantTurnData` gains a `proposal`, and
+  // `AssistantTurnView` renders `AssistantProposalCard` last in the `<li>`, after
+  // `AssistantResultList`.
+  describe('proposal card placement (plan §6.2)', () => {
+    it('renders the proposal card after AssistantResultList and last in the turn <li>', async () => {
+      const ref = makeEventRef({ title: 'Some Uncited Event' });
+      mockChat.mockReturnValueOnce(
+        Effect.succeed(
+          respond({
+            answer: 'Here you go.',
+            references: [ref as any],
+            proposal: Option.some(makeProposal()) as any,
+          }),
+        ),
+      );
+      const { container } = renderConversation();
+      submitMessage('create the event');
+
+      await waitFor(() => {
+        expect(screen.getByText(TR_MAP.assistant_proposal_createEvent_title)).not.toBeNull();
+      });
+      // The result list rendered too (proves it isn't being displaced, only reordered after).
+      expect(screen.getByText('Some Uncited Event')).not.toBeNull();
+
+      const li = container.querySelector('li.flex.flex-col.gap-3');
+      expect(li).not.toBeNull();
+      const children = Array.from(li?.children ?? []);
+      const cardIndex = children.findIndex((el) => el.tagName === 'SECTION');
+      const resultListIndex = children.findIndex((el) => el.querySelector('ul') !== null);
+
+      expect(cardIndex).toBeGreaterThan(-1);
+      expect(resultListIndex).toBeGreaterThan(-1);
+      expect(cardIndex).toBeGreaterThan(resultListIndex);
+      // Last in the <li>.
+      expect(cardIndex).toBe(children.length - 1);
+    });
+
+    it('renders no proposal card when the turn carries none', async () => {
+      mockChat.mockReturnValueOnce(Effect.succeed(respond({ answer: 'No proposal here.' })));
+      const { container } = renderConversation();
+      submitMessage('just a question');
+
+      await waitFor(() => {
+        expect(screen.getByText('No proposal here.')).not.toBeNull();
+      });
+      expect(container.querySelector('section')).toBeNull();
     });
   });
 });

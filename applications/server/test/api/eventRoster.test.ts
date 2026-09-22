@@ -64,7 +64,11 @@ import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { EventRosterProvisioningService } from '~/services/EventRosterProvisioningService.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { LlmClient } from '~/services/LlmClient.js';
-import { MockChatAgentLayer, MockChatRateLimiterLayer } from '../mocks/aiChatMocks.js';
+import {
+  MockAiActionProposalsRepositoryLayer,
+  MockChatAgentLayer,
+  MockChatRateLimiterLayer,
+} from '../mocks/aiChatMocks.js';
 import { MockBankSyncLayers, MockGenericSqlClientLayer } from '../mocks/bankSyncMocks.js';
 import { MockChannelManagementLayers } from '../mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from '../mocks/dashboardLayoutMocks.js';
@@ -939,6 +943,7 @@ const TestLayer = ApiLive.pipe(
   .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
   .pipe(Layer.provide(MockChatAgentLayer))
   .pipe(Layer.provide(MockChatRateLimiterLayer))
+  .pipe(Layer.provide(MockAiActionProposalsRepositoryLayer))
   .pipe(Layer.provide(AiChatEnabledConfig.Default))
   .pipe(Layer.provide(LlmClient.Default))
   .pipe(
@@ -1464,6 +1469,7 @@ describe('Event Roster API — web approve/decline (real service, B1 regression)
     .pipe(Layer.provide(DiscordJoinEnforcementConfig.Default))
     .pipe(Layer.provide(MockChatAgentLayer))
     .pipe(Layer.provide(MockChatRateLimiterLayer))
+    .pipe(Layer.provide(MockAiActionProposalsRepositoryLayer))
     .pipe(Layer.provide(AiChatEnabledConfig.Default))
     .pipe(Layer.provide(LlmClient.Default))
     .pipe(

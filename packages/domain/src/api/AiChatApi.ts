@@ -5,6 +5,7 @@
  * server-held entity is shown and which sentence mentions it. `degradedReason` is a closed
  * union resolved client-side through a label map, never a sentinel embedded in `answer`.
  */
+import * as Schemas from '@sideline/effect-lib/Schemas';
 import { Schema } from 'effect';
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from 'effect/unstable/httpapi';
 import { AuthMiddleware } from '~/api/Auth.js';
@@ -12,6 +13,8 @@ import * as EventApi from '~/api/EventApi.js';
 import * as GroupApi from '~/api/GroupApi.js';
 import * as Roster from '~/api/Roster.js';
 import * as TrainingTypeApi from '~/api/TrainingTypeApi.js';
+import { AiActionName, AiActionProposalId } from '~/models/AiActionProposal.js';
+import { EventType } from '~/models/Event.js';
 import { TeamId } from '~/models/Team.js';
 import { TeamMemberId } from '~/models/TeamMember.js';
 
@@ -126,11 +129,68 @@ export const EntityRef = Schema.Union([
 ]);
 export type EntityRef = Schema.Schema.Type<typeof EntityRef>;
 
+/**
+ * The write path (plan §4-§5): the model never writes directly. `chat` may return a `Proposal`
+ * — a closed, typed summary of one pending action — which the client renders as a confirmation
+ * card and the user must explicitly confirm or reject via `confirmProposal`/`rejectProposal`.
+ * `confirmProposal` takes NO payload: the action's data lives entirely server-side, keyed by
+ * `proposalId`, so there is nothing on the wire for a client to tamper with before confirming.
+ * Do not add a `payload:` to `confirmProposal` "for symmetry" — that absence is the point.
+ */
+export const ProposalFieldKey = Schema.Literals([
+  'title',
+  'eventType',
+  'start',
+  'end',
+  'trainingType',
+  'ownerGroup',
+  'memberGroup',
+  'location',
+  'description',
+]);
+export type ProposalFieldKey = typeof ProposalFieldKey.Type;
+
+/**
+ * `type`, not `_tag` — these are view-model variants, matching `EntityRef.kind` above
+ * (`packages/domain/AGENTS.md` -> "Model-Cited Entities" rule 3 reserves `_tag` for tagged
+ * errors). Uniform `value` key; `none` carries nothing. There is no `allDay` boolean anywhere:
+ * all-day is carried by `start`/`end` arriving as `date` instead of `instant`, so a card saying
+ * "All day: yes" next to a time is structurally impossible. `date` crosses as a bare
+ * `YYYY-MM-DD` string, never a `DateTime` — the client must never parse it into a `Date` (that
+ * would re-introduce a client-side off-by-one-day around the reader's timezone).
+ */
+export const ProposalFieldValue = Schema.Union([
+  Schema.Struct({ type: Schema.Literal('text'), value: Schema.String }),
+  Schema.Struct({ type: Schema.Literal('instant'), value: Schemas.DateTimeFromIsoString }),
+  Schema.Struct({ type: Schema.Literal('date'), value: Schema.String }), // team-local YYYY-MM-DD
+  Schema.Struct({ type: Schema.Literal('eventType'), value: EventType }),
+  Schema.Struct({ type: Schema.Literal('none') }),
+]);
+export type ProposalFieldValue = Schema.Schema.Type<typeof ProposalFieldValue>;
+
+export class ProposalField extends Schema.Class<ProposalField>('AiProposalField')({
+  key: ProposalFieldKey,
+  value: ProposalFieldValue,
+}) {}
+
+/**
+ * A pending action awaiting user confirmation. `summary` is always all nine
+ * `ProposalFieldKey`s (a field the action left unset still appears, as `{ type: 'none' }`) so
+ * the card renders a fixed layout, never a jagged one driven by what the model happened to fill.
+ */
+export class Proposal extends Schema.Class<Proposal>('AiProposal')({
+  id: AiActionProposalId,
+  action: AiActionName,
+  summary: Schema.Array(ProposalField),
+  expiresAt: Schemas.DateTimeFromIsoString,
+}) {}
+
 export class ChatResponse extends Schema.Class<ChatResponse>('AiChatResponse')({
   answer: Schema.String,
   generated: Schema.Boolean,
   degradedReason: Schema.OptionFromNullOr(DegradedReason),
   references: Schema.Array(EntityRef),
+  proposal: Schema.OptionFromNullOr(Proposal),
 }) {}
 
 export class AiChatForbidden extends Schema.TaggedErrorClass<AiChatForbidden>()(
@@ -141,6 +201,28 @@ export class AiChatForbidden extends Schema.TaggedErrorClass<AiChatForbidden>()(
 export class AiChatRateLimited extends Schema.TaggedErrorClass<AiChatRateLimited>()(
   'AiChatRateLimited',
   { retryAfterSeconds: Schema.Int },
+) {}
+
+// --- Proposal confirm/reject errors ---
+
+export class AiProposalNotFound extends Schema.TaggedErrorClass<AiProposalNotFound>()(
+  'AiProposalNotFound',
+  {},
+) {}
+
+export class AiProposalAlreadyUsed extends Schema.TaggedErrorClass<AiProposalAlreadyUsed>()(
+  'AiProposalAlreadyUsed',
+  {},
+) {}
+
+export class AiProposalExpired extends Schema.TaggedErrorClass<AiProposalExpired>()(
+  'AiProposalExpired',
+  {},
+) {}
+
+export class AiProposalActionForbidden extends Schema.TaggedErrorClass<AiProposalActionForbidden>()(
+  'AiProposalActionForbidden',
+  {},
 ) {}
 
 export class AiChatApiGroup extends HttpApiGroup.make('aiChat')
@@ -160,5 +242,31 @@ export class AiChatApiGroup extends HttpApiGroup.make('aiChat')
       ],
       payload: ChatRequest,
       params: { teamId: TeamId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    // Deliberately no `payload:` — see the doc comment above `ProposalFieldKey`. The action's
+    // data was already persisted server-side by the `propose` tool call; confirming only needs
+    // to know WHICH pending proposal to execute, and that's the path param.
+    HttpApiEndpoint.post('confirmProposal', '/teams/:teamId/ai/proposals/:proposalId/confirm', {
+      success: EventApi.EventInfo.pipe(HttpApiSchema.status(201)),
+      error: [
+        AiChatForbidden.pipe(HttpApiSchema.status(403)),
+        AiProposalNotFound.pipe(HttpApiSchema.status(404)),
+        AiProposalAlreadyUsed.pipe(HttpApiSchema.status(409)),
+        AiProposalExpired.pipe(HttpApiSchema.status(410)),
+        AiProposalActionForbidden.pipe(HttpApiSchema.status(403)),
+      ],
+      params: { teamId: TeamId, proposalId: AiActionProposalId },
+    }).middleware(AuthMiddleware),
+  )
+  .add(
+    HttpApiEndpoint.post('rejectProposal', '/teams/:teamId/ai/proposals/:proposalId/reject', {
+      success: Schema.Void.pipe(HttpApiSchema.status(204)),
+      error: [
+        AiChatForbidden.pipe(HttpApiSchema.status(403)),
+        AiProposalNotFound.pipe(HttpApiSchema.status(404)),
+      ],
+      params: { teamId: TeamId, proposalId: AiActionProposalId },
     }).middleware(AuthMiddleware),
   ) {}

@@ -115,7 +115,11 @@ import { DiscordJoinEnforcementConfig } from '~/services/DiscordJoinEnforcementC
 import { DiscordOAuth } from '~/services/DiscordOAuth.js';
 import { GlobalAdminAllowlist } from '~/services/GlobalAdminAllowlist.js';
 import { LlmClient } from '~/services/LlmClient.js';
-import { MockChatAgentLayer, MockChatRateLimiterLayer } from '../mocks/aiChatMocks.js';
+import {
+  MockAiActionProposalsRepositoryLayer,
+  MockChatAgentLayer,
+  MockChatRateLimiterLayer,
+} from '../mocks/aiChatMocks.js';
 import { MockBankSyncLayers, MockGenericSqlClientLayer } from '../mocks/bankSyncMocks.js';
 import { MockChannelManagementLayers } from '../mocks/channelMocks.js';
 import { MockDashboardLayoutsRepositoryLayer } from '../mocks/dashboardLayoutMocks.js';
@@ -812,6 +816,7 @@ const MockAchievementAdminLayers = Layer.mergeAll(
 const MockAiChatLayers = Layer.mergeAll(
   MockChatAgentLayer,
   MockChatRateLimiterLayer,
+  MockAiActionProposalsRepositoryLayer,
   LlmClient.Default,
   AiChatEnabledConfig.Default,
 );
