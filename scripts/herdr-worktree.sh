@@ -122,7 +122,10 @@ if [[ "$DO_AGENT" -eq 1 ]]; then
   info "Launching Claude agent in herdr…"
 
   # Build the `claude` command line, safely quoting the optional prompt.
-  CLAUDE_CMD="claude"
+  # Agents launched here run /work autonomously with no human at the keyboard,
+  # so permission prompts would just stall them. Override with CLAUDE_CMD=claude.
+  CLAUDE_BASE="${CLAUDE_CMD:-claude --dangerously-skip-permissions}"
+  CLAUDE_CMD="$CLAUDE_BASE"
   [[ -n "$PROMPT" ]] && CLAUDE_CMD+=" $(printf '%q' "$PROMPT")"
 
   # `herdr worktree create` opens the worktree's workspace with a main shell
@@ -151,7 +154,7 @@ if [[ "$DO_AGENT" -eq 1 ]]; then
   if [[ "$agent_launched" -eq 0 ]]; then
     start_args=(agent start "$BRANCH" --cwd "$WT" --focus)
     [[ -n "$WS_ID" ]] && start_args+=(--workspace "$WS_ID")
-    claude_args=(claude)
+    claude_args=(${CLAUDE_BASE})
     [[ -n "$PROMPT" ]] && claude_args+=("$PROMPT")
     if herdr "${start_args[@]}" -- "${claude_args[@]}"; then
       info "Agent '$BRANCH' started and focused${WS_ID:+ in workspace $WS_ID}${PROMPT:+ running: $PROMPT}."
