@@ -15,10 +15,22 @@ The exact timing is configurable per team from **Team settings → Notifications
 
 | Setting | What it controls |
 |---|---|
-| **Days before** | How many days before the event start the reminder fires. Set to `0` to disable reminders entirely. |
+| **Enable RSVP reminders** | The on/off switch for the whole feature. Turn it off and no reminders are sent for the team. |
+| **Days before event** | How many days before the event start the reminder fires. `0` means the morning of the event itself, not "off" — use **Enable RSVP reminders** to turn reminders off. |
+| **Per event type** | Optional per-event-type lead times that override **Days before event**. Leave a box blank and that type uses the team-wide value. |
 | **Time of day** | The local time (in the team's timezone) at which the reminder fires. Must be 23:54 or earlier. |
 | **Timezone** | An IANA timezone name (e.g. `Europe/Prague`, `America/New_York`) used to evaluate the reminder time. |
 | **Reminders channel** | Not used to post reminders — reminders are DM-only (see below). It only resolves the deep-link fallback included in a reminder DM when the member has no personal events channel to link to. |
+
+### Different lead times per event type
+
+A tournament usually deserves more notice than a regular training. Under **Days before event** there is a **Per event type** box for each of the six event types (training, match, tournament, meeting, social, other).
+
+- Leave a box **blank** and that type uses the team-wide **Days before event** value — this is the default, so a team that ignores this section behaves exactly as before.
+- Type a number and events of that type use it instead. For example, **Days before event** `1` with **Tournament** set to `3` reminds one day before trainings and three days before tournaments.
+- `0` is a real value here too, meaning the day of the event — it is not the same as blank.
+
+The timing is still per team: every member of the team gets the same lead time for a given event type.
 
 ## Where reminders go
 
@@ -33,7 +45,7 @@ The bot sends a direct message to each remaining non-responder who has a linked 
 
 ## Disabling reminders
 
-Per-team: from **Team settings → Notifications**, set **Days before** to `0`.
+Per-team: from **Team settings → Notifications**, turn off **Enable RSVP reminders**.
 
 <Aside type="tip" title="Reminder hygiene">
   Reminders are effective when they're rare enough to matter. One well-timed reminder the day before is more effective than multiple noisy pings. Trust the defaults.
@@ -41,7 +53,7 @@ Per-team: from **Team settings → Notifications**, set **Days before** to `0`.
 
 ## Per-user preferences
 
-The timing (days before, time of day) is still team-wide, but you control your own reminder DM from your Sideline profile: open your **profile page** on the web app and find the **My events in Discord** card for the team (shown for every team you're connected to via Discord). Turn off **Remind me by DM** and the bot stops sending you the reminder entirely — there's no other channel it falls back to, so if you rely on the reminder, leave this on.
+The timing (days before, time of day, and any per-event-type lead times) is still team-wide, but you control your own reminder DM from your Sideline profile: open your **profile page** on the web app and find the **My events in Discord** card for the team (shown for every team you're connected to via Discord). Turn off **Remind me by DM** and the bot stops sending you the reminder entirely — there's no other channel it falls back to, so if you rely on the reminder, leave this on.
 
 The same card has two more toggles that affect how events look in Discord:
 

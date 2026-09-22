@@ -5,6 +5,17 @@ description: User-facing changes to Sideline.
 
 This page lists user-visible changes to Sideline. For developer-level release notes, see the GitHub repository.
 
+## 2026-09-22 — New: different reminder lead times per event type
+
+**Team settings → Notifications** now lets a team set how many days before an event the RSVP reminder fires **per event type**, instead of one number for everything. A tournament can get three days' notice while a training keeps one.
+
+- Under **Days before event** there's now a **Per event type** box for each of the six event types (training, match, tournament, meeting, social, other). Leave a box blank and that type keeps using the team-wide **Days before event** value.
+- Nothing changes for a team that ignores the new section — every event type falls back to the existing value, exactly as before.
+- The timing is still per team: everyone on the team gets the same lead time for a given event type.
+- Documentation fix, not a behaviour change: this guide used to say that setting **Days before** to `0` disables reminders. It never did — `0` means "remind on the day of the event". The actual off switch is the **Enable RSVP reminders** checkbox.
+- See [Notifications](/guides/notifications/#different-lead-times-per-event-type) for details.
+- API integrators: `TeamSettingsInfo` gains `rsvpReminderDaysBeforeOverrides`, a partial map of event type → days (0-14). It decodes as `{}` if absent. `UpdateTeamSettingsRequest` accepts the same field; omitting it leaves the stored map untouched, and sending `{}` clears every override.
+
 ## 2026-09-22 — "Not sure" now needs a note too
 
 Update to the entry below: **Not sure** no longer submits instantly. Like **Coming later**, it now opens a required note field (web) or a pop-up (Discord) asking what your answer depends on, and won't save until you fill it in.
