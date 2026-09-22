@@ -101,11 +101,11 @@ Effect.tap(
 ),
 ```
 
-References: `times_are_team_local` (`1791700000_add_series_times_team_local_flag.ts` adds the marker column and converts nothing; the guarded conversion `UPDATE` lands separately in `1792100000_series_time_is_team_local.ts` — see `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock"), `all_day_anchored` (`1791300000_add_all_day_anchored_flag.ts` + `1791400000_anchor_all_day_to_team_midnight.ts`).
+References: `times_are_team_local` (`1791700000_add_series_times_team_local_flag.ts` adds the marker column and converts nothing; the guarded conversion `UPDATE` landed separately in `1792100000_series_time_is_team_local.ts` — see `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock"), `all_day_anchored` (`1791300000_add_all_day_anchored_flag.ts` + `1791400000_anchor_all_day_to_team_midnight.ts`).
 
 > The reserved id above was originally `1791800000`. Production kept shipping migrations (through `1792000005`) while this one sat unwritten, so `1791800000` fell below the migrator's applied-id waterline: `Migrator.js` only checks `currentId <= latestMigrationId`, and a migration below that line is skipped silently — no error, no log line, forever. It was renumbered to `1792100000`, comfortably above every id merged so far. `scripts/check-migration-ids.mjs` now enforces this (new ids on a branch must exceed every id already on `origin/main`) so it cannot happen again unnoticed.
 
-> **Do not follow the script's suggested id while a reserved id is unwritten.** On failure `scripts/check-migration-ids.mjs` prints `next safe id: <highest id on origin/main> + 100000`, which today resolves to `1792100005` — above the reserved `1792100000`. Merging any id above the reservation drops it below the applied waterline and orphans it silently, the exact failure it was renumbered to escape. Until `1792100000_series_time_is_team_local.ts` lands, pick an id strictly between the highest id on `origin/main` and `1792100000` — `1792050000_add_fio_token_saved_at.ts` is the reference.
+> **Use `node scripts/check-migration-ids.mjs`'s suggested id.** On failure it prints `next safe id: <highest id on origin/main> + 100000`. `1792100000_series_time_is_team_local.ts` has landed, so there is no live reservation to protect anymore — the earlier caveat here only applied while that id sat unwritten below the waterline described above.
 
 ### Reading A Per-Team Setting Inside A Migration `UPDATE`
 
@@ -125,7 +125,41 @@ AT TIME ZONE COALESCE(
   'Europe/Prague')
 ```
 
-Reference: `1792100000_series_time_is_team_local.ts` (both statements) — that migration is NOT in the tree yet; it is the deferred half of the split described in `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock". No migration currently in `packages/migrations/src/before/` demonstrates the `pg_timezone_names` join inside `COALESCE`: `1791400000_anchor_all_day_to_team_midnight.ts` uses the `COALESCE` scalar subselect of rule 1 WITHOUT the rule-2 join, and `1792000005_team_settings_timezone_check.ts` uses `pg_timezone_names` only as a `NOT IN` sanitize filter — do not copy either as the complete pattern. The JS/Postgres disagreement for DST-ambiguous wall clocks is documented in `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock".
+Reference: `1792100000_series_time_is_team_local.ts` (both statements) — it is the deferred half of the split described in `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock", and it is now **the** reference implementation of the `pg_timezone_names`-inside-`COALESCE` pattern. `1791400000_anchor_all_day_to_team_midnight.ts` uses the `COALESCE` scalar subselect of rule 1 WITHOUT the rule-2 join, and `1792000005_team_settings_timezone_check.ts` uses `pg_timezone_names` only as a `NOT IN` sanitize filter — both are only partial patterns; do not copy either as the complete one. The JS/Postgres disagreement for DST-ambiguous wall clocks is documented in `applications/server/AGENTS.md` → "Series Times Are Team-Local Wall Clock".
+
+### A Bulk `UPDATE` That Changes A Uniquely-Indexed Value Must Drop And Recreate That Index
+
+Postgres checks a non-deferrable `UNIQUE` index **per row, as each row is written** — not at statement end. A single `UPDATE` that rewrites the indexed value for two or more rows sharing a key group therefore aborts with `duplicate key value violates unique constraint` as soon as one row lands on another row's still-live value, **even when the final state contains no duplicate at all**. Which rows collide is decided by the plan's row order (heap order under a sequential scan), so the same statement passes on a small dev database and fails in production. Verified on `postgres:17`: over rows `(1,1),(2,2)` with a unique index on `pos`, `UPDATE w SET pos = v.new_pos FROM (VALUES (2,1),(1,0)) v(id,new_pos) WHERE w.id = v.id` fails, while the identical final state reached in the opposite row order succeeds.
+
+Bracket the `UPDATE` with these four statements, in exactly this order:
+
+```typescript
+Effect.tap(() => sql`SET LOCAL lock_timeout = '5s'`),
+Effect.tap(() => sql`DROP INDEX IF EXISTS idx_events_series_date`),
+Effect.tap(() => sql`UPDATE events e SET start_at = /* ...rewrite of the indexed value... */`),
+Effect.tap(
+  () => sql`
+    CREATE UNIQUE INDEX idx_events_series_date
+      ON events(series_id, ((start_at AT TIME ZONE 'UTC')::date)) WHERE series_id IS NOT NULL
+  `,
+),
+```
+
+Rules:
+
+1. **`SET LOCAL lock_timeout` comes FIRST, before any DDL in a `MigrateBefore` migration.** `MigrateBefore` runs inside server boot (`applications/server/src/run.ts`) during a blue-green window in which the PREVIOUS container is still serving and querying the table. Without a timeout, one long-running query over there makes boot block indefinitely on the `ACCESS EXCLUSIVE` lock AND queues every subsequent query on that table behind the pending lock request. `SET LOCAL` is correct because the migrator wraps the whole pending set in one transaction; `'5s'` is the value in use. Same idiom and reasoning as `applications/server/src/api/group.ts` (`applications/server/AGENTS.md` → "Per-Team Advisory Lock Guarding an Invariant Check", rule 2).
+2. **Copy the `CREATE UNIQUE INDEX` definition verbatim from the migration that created the index** (here `1741800000_event_datetime_columns.ts`), including the partial `WHERE`. A recreated index that differs from the original is silent schema drift.
+3. **Use `DROP INDEX IF EXISTS`, and an unconditional `CREATE UNIQUE INDEX`.** The unconditional create converges the schema either way, so `IF EXISTS` on the drop costs nothing and stops a merely-absent index from becoming a boot failure.
+4. **Never `CREATE INDEX CONCURRENTLY` in a migration.** It cannot run inside a transaction, and the migrator runs the whole pending set in one.
+5. **Dropping the index does not weaken the invariant — it strengthens the failure mode.** A genuine final-state duplicate now fails at index-build time and rolls the whole transaction back, instead of aborting partway through a per-row check.
+6. **Do not work around the collision by splitting the `UPDATE` into per-row statements** (the same collision, N times over) **or by making the index deferrable** — `DEFERRABLE` exists only on a `UNIQUE` *constraint*, and a partial unique index cannot be a constraint at all.
+
+Testing rules (both are mandatory; each catches a deletion the other misses):
+
+1. **Force the worst-case access path in the collision test:** `SET LOCAL enable_indexscan = off` and `SET LOCAL enable_bitmapscan = off`, issued inside the SAME `sql.withTransaction` as the migration run so the settings and the `UPDATE` share one connection. With only a handful of rows the planner satisfies the join through the very index under test, and that index scan visits rows in ascending key order — sidestepping the collision entirely, so the test passes even with the drop/recreate bracket deleted.
+2. **Assert the index was recreated by reading `pg_indexes.indexdef` back and comparing it to a pinned literal** of the original definition. Without that assertion, deleting the trailing `CREATE UNIQUE INDEX` leaves every other case green while production silently loses the index.
+
+Reference: `1792100000_series_time_is_team_local.ts`; coverage in `applications/server/test/integration/migrations/seriesTimeIsTeamLocal.test.ts` (case `B15`, unique-index collision).
 
 ### Partial Indexes for Hot Filters
 

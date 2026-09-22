@@ -207,7 +207,7 @@ export function TrainingTypeDetailPage({
             memberGroupId: Option.none(),
             // `startTime`/`endTime` above are the team-local wall clock, sent verbatim, so this
             // payload's dialect is genuinely team-local. Release N
-            // (`.work-plans/timezone-migration-deploy-window.md`) does not tag or release
+            // (`.work-plans/series-time-conversion.md`) does not tag or release
             // `@sideline/web` — the deployed `v0.37.2` bundle predates this field and sends no
             // key at all, which the server decodes to `false`, so this line changes nothing
             // that ships in Release N.

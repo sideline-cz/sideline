@@ -362,7 +362,7 @@ export function EventDetailPage({
             ),
             // `startTime`/`endTime` above are converted to the team's wall clock before being
             // sent, so this payload's dialect is genuinely team-local. Release N
-            // (`.work-plans/timezone-migration-deploy-window.md`) does not tag or release
+            // (`.work-plans/series-time-conversion.md`) does not tag or release
             // `@sideline/web` — the deployed `v0.37.2` bundle predates this field entirely and
             // sends no key at all, decoding server-side to `false`, so this change has no
             // effect on what ships in Release N.

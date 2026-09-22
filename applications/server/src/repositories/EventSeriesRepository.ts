@@ -21,9 +21,10 @@ class EventSeriesRow extends Schema.Class<EventSeriesRow>('EventSeriesRow')({
   status: EventSeries.EventSeriesStatus,
   owner_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
   member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
-  // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2): the row's storage
-  // dialect, read back from `RETURNING` rather than assumed from the DB column default — the
-  // site that keeps working unchanged once the default flips at N+1.
+  // (`.work-plans/series-time-conversion.md`): the row's storage dialect, read back from
+  // `RETURNING` rather than assumed from the DB column default. The default was never flipped
+  // — `1792100000` shipped without that statement — so reading it back is what keeps this
+  // correct for a writer that declares `TRUE` against a column still defaulting `FALSE`.
   times_are_team_local: Schema.Boolean,
 }) {}
 
@@ -49,7 +50,7 @@ class EventSeriesWithDetails extends Schema.Class<EventSeriesWithDetails>('Event
     owner_group_name: Schema.OptionFromNullOr(Schema.String),
     member_group_id: Schema.OptionFromNullOr(GroupModel.GroupId),
     member_group_name: Schema.OptionFromNullOr(Schema.String),
-    // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2): the row's storage
+    // Release N (`.work-plans/series-time-conversion.md` §N.2): the row's storage
     // dialect — `TRUE` = wall clock in the team's timezone, `FALSE` = UTC time-of-day.
     times_are_team_local: Schema.Boolean,
   },
@@ -81,7 +82,7 @@ class EventSeriesForGeneration extends Schema.Class<EventSeriesForGeneration>(
   // everywhere else. Reuses the `team_settings` join already required for
   // `event_horizon_days`, so this is not a second join.
   team_timezone: Schema.String,
-  // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2): the row's storage
+  // Release N (`.work-plans/series-time-conversion.md` §N.2): the row's storage
   // dialect — determines which branch of `seriesTimeDialect.resolveSeriesOccurrenceInstant`
   // `EventHorizonCron` takes for this series.
   times_are_team_local: Schema.Boolean,
@@ -103,7 +104,7 @@ const EventSeriesInsertInput = Schema.Struct({
   created_by: Schema.String,
   owner_group_id: Schema.OptionFromNullOr(Schema.String),
   member_group_id: Schema.OptionFromNullOr(Schema.String),
-  // Release N (`.work-plans/timezone-migration-deploy-window.md`): on create there is no
+  // Release N (`.work-plans/series-time-conversion.md`): on create there is no
   // existing row to assert a dialect against, so the payload's declared dialect BECOMES the new
   // row's dialect — named explicitly here rather than left to the column's `DEFAULT FALSE`,
   // which only exists for writers that predate this column entirely (a still-running `v0.49.3`

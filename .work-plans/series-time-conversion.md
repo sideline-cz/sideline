@@ -414,7 +414,7 @@ dialect. So:
   `status = 'active'`, `start_at >= now()`) remain identical between the two sites and must stay so.
 
 **Transaction-level ordering.** `Migrator.js` wraps the whole pending-migration set in one
-`sql.withTransaction(run)` and takes `LOCK TABLE effect_sql_migrations IN ACCESS EXCLUSIVE MODE`
+`sql.withTransaction(run)` and takes `LOCK TABLE migrations_before IN ACCESS EXCLUSIVE MODE`
 first. So A, B and C commit atomically, and two containers booting concurrently serialize (the
 loser re-reads the applied id and skips). Statement C's DDL is transactional in Postgres too.
 
@@ -490,7 +490,7 @@ pre-flight query rather than assuming**.
 
 **C9 — Partial run.** The entire pending-migration set runs inside one
 `sql.withTransaction(run)` (`node_modules/effect/dist/unstable/sql/Migrator.js`), and the
-`INSERT` into `effect_sql_migrations` is inside that same transaction. So an interruption — SIGKILL,
+`INSERT` into `migrations_before` is inside that same transaction. So an interruption — SIGKILL,
 OOM, connection drop, deploy timeout — rolls back **everything**, including the recorded migration
 id and Statement C's DDL. There is no half-converted state reachable via the migrator. Test
 X1 proves this.
@@ -503,7 +503,7 @@ one genuinely sharp edge of the restricted design, and it is the price of B7/B8 
 
 **C10 — Lock footprint.** The transaction holds row locks on every converted `event_series` row and
 every re-anchored `events` row until boot completes, plus `ACCESS EXCLUSIVE` on
-`effect_sql_migrations`. At Sideline's scale (see §G for the counts) this is milliseconds. Confirm
+`migrations_before`. At Sideline's scale (see §G for the counts) this is milliseconds. Confirm
 with the §G pre-flight counts before running against production; if `to_convert` is unexpectedly
 large (>100k), reconsider batching.
 
@@ -543,7 +543,7 @@ If the running production image is **older** than Release N (does not contain
 `src/utils/seriesTimeDialect.ts`), it treats every `start_time` as UTC and will misread every
 converted row, and Statement C will mislabel every series it creates. **Check both, not just one:**
 
-1. `SELECT max(migration_id) FROM effect_sql_migrations;` on production — must be ≥ `1791700000`.
+1. `SELECT max(migration_id) FROM migrations_before;` on production — must be ≥ `1791700000`.
 2. The currently-promoted digest (`majnet deploy progress`, or `apps/server/production.yaml`) must
    resolve to a build at or after `8546e266` (#652). Step 1 alone is insufficient: a
    `majnet deploy rollback` reverts the digest but not the recorded migration, so the DB can be
@@ -785,7 +785,7 @@ WHERE ts.team_id IS NULL
    OR NOT EXISTS (SELECT 1 FROM pg_timezone_names n WHERE n.name = ts.timezone);
 
 -- 5. §D.1 precondition.
-SELECT max(migration_id) AS applied_waterline FROM effect_sql_migrations;  -- must be >= 1791700000
+SELECT max(migration_id) AS applied_waterline FROM migrations_before;  -- must be >= 1791700000
 ```
 
 **Abort criteria**, in order of severity:
@@ -794,10 +794,22 @@ SELECT max(migration_id) AS applied_waterline FROM effect_sql_migrations;  -- mu
    Hand-resolve before merging (see the blocker note under Statement B).
 2. **Query 5 below `1791700000` — unconditional blocker.** Release N has not reached this
    environment.
-3. Query 1's `already_true > 0` is **expected and fine**, not an abort: every series created since
+3. **Query 4 returns a team that owns any `event_series` row — blocker until hand-resolved.**
+   Originally informational; promoted to an abort criterion by review. The reason is that this
+   fallback is *not* like the cron's. A case-variant or abbreviated zone (`america/new_york`,
+   `EST`) passes `team_settings_timezone_check`, passes `DateTime.makeZoned`, and is resolved
+   **correctly to New York** by every other consumer — the migration's case-sensitive
+   `n.name = ts.timezone` join is the only site that falls back, so such a team's series would be
+   converted with `Europe/Prague`: a six-hour error, written once, forward-only, and not
+   self-healing the way a cron-path fallback is. Normalise the team's `timezone` to its exact
+   `pg_timezone_names` spelling BEFORE deploying. A team that hits the fallback but owns zero
+   series is harmless — check ownership, not just the row count. (Do **not** "fix" this by
+   relaxing the join to `lower(...)` or `ILIKE`: the case-sensitive `=` is deliberate and test A6
+   pins it, because silent normalisation is how a genuinely unrecognised zone stops being caught.)
+4. Query 1's `already_true > 0` is **expected and fine**, not an abort: every series created since
    `@sideline/web@v0.38.0` is a genuine `TRUE` row, and the recommended Statement B excludes them.
    It *would* be a blocker with the withdrawn Statement B, which is one more reason not to use it.
-4. Query 3's `crosses_day = true` rows are not an abort but **must be eyeballed by a human** —
+5. Query 3's `crosses_day = true` rows are not an abort but **must be eyeballed by a human** —
    those occurrences move furthest, and the anchor caveat above means a captain who edited from a
    different timezone may land somewhere unintended.
 

@@ -65,7 +65,7 @@ const makeActiveSeries = (
     description: Option.Option<string>;
     created_by: TeamMember.TeamMemberId;
     team_timezone: string;
-    // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2): defaults `true`
+    // Release N (`.work-plans/series-time-conversion.md` §N.2): defaults `true`
     // so every PRE-EXISTING test in this file (written when `EventHorizonCron` called
     // `resolveOccurrenceInstant` unconditionally, i.e. always team-local) keeps its
     // original meaning unchanged. Only the new `false`-row case below overrides this.
@@ -369,7 +369,7 @@ describe('eventHorizonCronEffect', () => {
     },
   );
 
-  // --- Release N regression (`.work-plans/timezone-migration-deploy-window.md` §N.2/§N.c) ---
+  // --- Release N regression (`.work-plans/series-time-conversion.md` §N.2/§N.c) ---
   //
   // A `times_are_team_local = false` series is Release N's "every row is FALSE, every branch
   // takes the UTC path, no data is rewritten" invariant in action: its `start_time` is a UTC

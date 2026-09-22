@@ -247,7 +247,7 @@ type SeriesRecord = {
   owner_group_name: Option.Option<string>;
   member_group_id: Option.Option<string>;
   member_group_name: Option.Option<string>;
-  // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2/§N.c):
+  // Release N (`.work-plans/series-time-conversion.md` §N.2/§N.c):
   // `TRUE` = wall clock in the team's timezone; `FALSE` = UTC time-of-day.
   times_are_team_local: boolean;
 };
@@ -808,7 +808,7 @@ const MockEventSeriesRepositoryLayer = Layer.succeed(EventSeriesRepository, {
       owner_group_name: Option.none(),
       member_group_id: input.memberGroupId ?? Option.none(),
       member_group_name: Option.none(),
-      // Fix 1 (`.work-plans/timezone-migration-deploy-window.md`, superseding an earlier
+      // Fix 1 (`.work-plans/series-time-conversion.md`, superseding an earlier
       // draft of §N.1/§N.2): the real `insertEventSeries` now names this column explicitly,
       // writing `payload.timesAreTeamLocal` straight through — there is no existing row on
       // create to assert a dialect against, so the payload's declaration BECOMES the new
@@ -1702,7 +1702,7 @@ describe('Event Series API', () => {
     });
   });
 
-  // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.2 item 4, §N.c):
+  // Release N (`.work-plans/series-time-conversion.md` §N.2 item 4, §N.c):
   // `updateEventSeries` must pass `seriesSqlZone(teamZone, existing.times_are_team_local)` to
   // `updateFutureUnmodifiedInSeries`, NOT the team zone unconditionally — a FALSE series stores
   // an absolute UTC time-of-day, so its materialized occurrences must be re-derived in UTC, same
@@ -1761,7 +1761,7 @@ describe('Event Series API', () => {
     });
   });
 
-  // Release N (`.work-plans/timezone-migration-deploy-window.md` §N.3, "Test Specification →
+  // Release N (`.work-plans/series-time-conversion.md` §N.3, "Test Specification →
   // Release N" §N.d): the payload dialect flag `timesAreTeamLocal` at the API boundary.
   //
   // CREATE and UPDATE are deliberately NOT symmetric here. Create has no existing row to assert

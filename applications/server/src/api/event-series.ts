@@ -138,8 +138,9 @@ export const EventSeriesApiLive = HttpApiBuilder.group(Api, 'eventSeries', (hand
                 Array.map(dates, (date) => {
                   const dateStr = DateTime.formatIsoDateUtc(date);
                   // `inserted.times_are_team_local` is read back from the `RETURNING` clause,
-                  // not assumed from the DB default — the site that stays correct unchanged
-                  // once that default flips at Release N+1.
+                  // not assumed from the DB default. That default was never flipped
+                  // (`1792100000` shipped without the statement that would have), so reading
+                  // it back is the only thing that keeps this correct.
                   const startAt = resolveSeriesOccurrenceInstant(
                     dateStr,
                     inserted.start_time,
